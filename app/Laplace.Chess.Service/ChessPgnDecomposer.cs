@@ -33,6 +33,11 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
     private const int GamesPerBatch = 64;
 
+    // NOTE: NO game-level skip. Dedup is STRUCTURAL — a position/move composes deterministically + losslessly
+    // to a content id (g2g3·f1g2 = the fianchetto, the same way [c,a,t] = "cat"), so it is RECORDED ONCE and
+    // WITNESSED every time it's played; the witness count IS the run-length. Skipping a repeated game would
+    // suppress a real witness (and discard that play's provenance). Repetition is the signal, not waste.
+
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -69,8 +74,18 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 var (whiteName, blackName) = ParseNames(gameText);
                 var whitePlayer = EmitPlayer(builder, whiteName);
                 var blackPlayer = EmitPlayer(builder, blackName);
+
+                // The conventional GAME tier: one Chess_Game node carrying the full metadata, content-addressed
+                // by (players + date + moves) so the same game across DBs is recorded once + witnessed each time.
+                string date = PgnGames.TagStr(gameText, "Date");
+                var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
+                EmitGame(builder, gameId, gameText, result.Value, whitePlayer, blackPlayer, whiteElo, blackElo);
+
+                // Recover the per-move clocks the grammar strips → think-time evidence weight (no-op when absent).
+                var clocks = PgnClocks.SecondsRemaining(gameText, moves.Count);
+                double medianDrop = PgnClocks.MedianDrop(clocks);
                 AppendGame(builder, modality, moves, result.Value,
-                           whiteElo, blackElo, whitePlayer, blackPlayer);
+                           whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId);
 
                 if (++inBatch >= GamesPerBatch)
                 {
@@ -121,29 +136,89 @@ public sealed class ChessPgnDecomposer : IDecomposer
     /// observation count: weighted by the OPPONENT (defender) Elo — the anti-trap — and boosted for the
     /// side that delivered a CONFIRMED mate (terminal <c>#</c>) vs a bare result (resignation/time, the
     /// opponent's judgment). Aborts on an unresolved move (malformed/illegal token).</summary>
+    /// <summary>Emit the Chess_Game node + its full conventional metadata: white/black player, event, date,
+    /// ECO, time control + class, termination, result, and per-game HAS_RATING (the rating tied to THIS game
+    /// via contextId). Each value is a content entity so identical metadata across games converges.</summary>
+    private static void EmitGame(
+        SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
+        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
+    {
+        var src = ChessVocabulary.PgnSourceId;
+        b.AddEntity(gameId, EntityTier.Vocabulary, ChessVocabulary.GameType, src);
+
+        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
+        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));
+
+        Meta(b, gameId, "HAS_EVENT",       PgnGames.TagStr(gameText, "Event"), src);
+        Meta(b, gameId, "ON_DATE",         PgnGames.TagStr(gameText, "Date"), src);
+        Meta(b, gameId, "HAS_ECO",         PgnGames.TagStr(gameText, "ECO"), src);
+        Meta(b, gameId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src);
+        Meta(b, gameId, "HAS_RESULT",      result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src);
+
+        string tc = PgnGames.TagStr(gameText, "TimeControl");
+        Meta(b, gameId, "HAS_TIME_CONTROL", tc, src);
+        Meta(b, gameId, "HAS_TC_CLASS",     TcClass(tc), src);
+
+        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, gameId, src);
+        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, gameId, src);
+    }
+
+    /// <summary>Game → metadata-value content edge (skips empty/"?"/"-" placeholders).</summary>
+    private static void Meta(SubstrateChangeBuilder b, Hash128 game, string rel, string value, Hash128 src)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value == "?" || value == "-" || value == "????.??.??") return;
+        if (ContentEmitter.Emit(b, value, src) is { } vid)
+            b.AddAttestation(NativeAttestation.Categorical(game, rel, vid, src, null, PgnWitnessWeight));
+    }
+
+    /// <summary>Player HAS_RATING (rating value), contextId = the game it applied to (ratings are per-game).</summary>
+    private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, Hash128 game, Hash128 src)
+    {
+        if (ContentEmitter.Emit(b, elo.ToString(), src) is { } rid)
+            b.AddAttestation(NativeAttestation.Categorical(player, "HAS_RATING", rid, src, game, PgnWitnessWeight));
+    }
+
+    /// <summary>Classify a PGN <c>TimeControl</c> tag into bullet/blitz/rapid/classical by base seconds
+    /// (the move-evidence axis: a blitz move is weaker testimony than a classical one). "" when unknown.</summary>
+    internal static string TcClass(string tc)
+    {
+        if (string.IsNullOrWhiteSpace(tc) || tc == "-") return "";
+        if (tc.Contains('/')) return "classical";                  // "40/7200" tournament form
+        int plus = tc.IndexOf('+');
+        string baseStr = plus >= 0 ? tc[..plus] : tc;
+        if (!int.TryParse(baseStr, out int baseSec)) return "";
+        return baseSec < 180 ? "bullet" : baseSec < 600 ? "blitz" : baseSec < 1500 ? "rapid" : "classical";
+    }
+
     private static void AppendGame(
         SubstrateChangeBuilder b, ChessModality m, List<string> sans, GameOutcome result,
-        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
+        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
+        double[] clocks, double medianDrop, Hash128 gameId)
     {
         bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0; // '#' = proven checkmate
         int? winner = result.IsDraw ? null : result.Winner;
 
         var state = m.Initial();
-        foreach (var san in sans)
+        for (int ply = 0; ply < sans.Count; ply++)
         {
-            var mv = San.Resolve(state.Board, m.LegalActions(state), san);
+            var mv = San.Resolve(state.Board, m.LegalActions(state), sans[ply]);
             if (mv is null) return; // malformed/illegal token → skip the rest of this game
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
             // OUTCOME weight = DEFENDER Elo (anti-trap: a result against a strong defender is stronger
-            // evidence). MOVE-CHOICE weight = the MOVER's Elo ("Magnus's e4 here outweighs a 1200's").
+            // evidence). MOVE-CHOICE weight = the MOVER's Elo ("Magnus's e4 here outweighs a 1200's"),
+            // FURTHER scaled by think-time: a move played after a real think is stronger testimony of
+            // intent than a pre-move/scramble (ThinkFactor∈[0.5,1.5]; 1.0 when the game has no clocks).
             long games = EloGames(mover == 0 ? blackElo : whiteElo);
             if (mate && winner == mover) games += games / 2; // +50% for the confirmed-mating side
+            double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
+            long moveChoiceGames = Math.Max(1, (long)Math.Round(EloGames(mover == 0 ? whiteElo : blackElo) * tf));
             ChessGraph.AppendMoveEdge(
                 b, m.StateKey(state), m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
                 sourceId: ChessVocabulary.PgnSourceId,
                 moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
-                moveChoiceGames: EloGames(mover == 0 ? whiteElo : blackElo));
+                moveChoiceGames: moveChoiceGames,
+                contextId: gameId);
             state = next;
         }
     }

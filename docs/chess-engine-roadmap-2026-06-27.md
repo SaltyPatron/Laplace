@@ -7,6 +7,33 @@ Everything shaken out across the "make the chess side sing" build. Status legend
 
 ---
 
+## SESSION DELIVERY (2026-06-28) — measured, all tests green (Modality.Chess 89/89, Chess.Service 19/19)
+
+The corpus contributes **~+30 Elo over the ~2105 classical floor (→ ~2135)**, best via a LIGHT learned-PST leaf
+blend; it's ONE signal (the fold and the leaf-blend don't stack). Delivered + measured:
+- **P1 substructure-fold** root prior **+24±23/500g** (flipped the −17 raw-edge null) — `chess substrate-test --mode fold`.
+- **P2 overlay-ablation ladder** — Material +759 / PST +307 carry; the 4 positional overlays ~noise — `chess ladder`.
+- **P9 data-driven eval** — flat-replace −325 → blend@2 −26 → **blend@1 +31±29 BEATS PeSTO**; `chess learned-pst`
+  shows the substrate learned knight-rim/pawn-advance principles. `Evaluation`/`Search` take optional learned PST.
+- **P5 game-review** `chess review` — ACPL + comeback-based "crazy win" (winner was losing yet won).
+- **P4 tactics** `chess tactics` — EPD solve-rate (built-in mate suite 4/4). [EPD tree-sitter grammar for substrate
+  INGEST still TODO — native codegen.]
+- **P8 loop closure** — `San.ToSan` + `ChessPgnWriter` + `--pgn-out`; PROVEN roundtrip (our games → SAN PGN →
+  `pgn` grammar → substrate, 8 games re-ingested clean). The flywheel.
+- **P3 web** — `/chess/bestmove` → the 2105 α-β search (fold-biased), built + STAGED to `out\endpoint`;
+  GO-LIVE = `scripts\win\deploy-api.cmd` once the laplace-api app pool is stopped (preserves web.config + native DLLs).
+- **P10 openings** — the ChessGraph rethread LANDED (sourceId + null mover + moveChoiceGames); ran
+  `ingest openings` under `ChessOpenings` source + **opening-NAME/ECO capture** (position ↔ "Najdorf"/B90).
+  Substrate now 34,650,228 consensus relations.
+Shared infra (no dup/hardcode): `OpeningSeed` (FENs from ingested ECO TSV), `PgnGames`, `SubstrateStateValuer`.
+
+**Remaining (need a decision or are separate heavy/native builds):** P6 corpus DLs (which: Lumbra/TWIC/Lichess
+Elite — multi-GB), P7 books + ImageDecomposer (OCR/diagram→FEN infra), P10 remainder (eval→Glicko attestations +
+full PGN-tier `Chess_Game`/`HAS_RATING`/`[%clk]`/`[%eval]` — the `[%clk]` needs grammar work), EPD ingest grammar,
+P11 (re-key fork, content-addressed position cache, Syzygy, Stockfish distillation).
+
+---
+
 ## 0. Validated state (the floor we're building on)
 
 - **Classical engine ≈ 2105 Elo ±31** — pure C#, no DB/native in the hot loop. PeSTO tapered eval with

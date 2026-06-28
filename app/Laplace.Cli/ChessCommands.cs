@@ -26,6 +26,7 @@ internal static class ChessCommands
             "review"   => await ReviewAsync(args[1..]),
             "learned-pst" => await LearnedPstAsync(args[1..]),
             "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
+            "tactics"  => await TacticsAsync(args[1..]),
             _          => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
@@ -44,7 +45,8 @@ internal static class ChessCommands
         + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over ingested games)\n"
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
         + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
-        + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)";
+        + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)\n"
+        + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)";
 
     /// <summary>The real test: pit a search whose root is biased by the substrate against the identical
     /// pure-classical search, and measure the Elo difference — how much the game graph adds to the
@@ -94,8 +96,17 @@ internal static class ChessCommands
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
         Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, "
             + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, db={Redact(ChessEngineService.ResolveConnString())}");
+        string pgnOut = ArgStr(args, "--pgn-out", "");
+        var sink = string.IsNullOrEmpty(pgnOut)
+            ? null
+            : new System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>();
         var r = MatchRunner.Play(guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
-                                 openingFens: book);
+                                 openingFens: book, pgnSink: sink);
+        if (sink is not null)
+        {
+            ChessPgnWriter.WriteFile(pgnOut, sink, white: "Laplace-guided", black: "Laplace-pure", @event: "substrate-test");
+            Console.WriteLine($"  wrote {sink.Count} games -> {pgnOut}   (loop closure: laplace ingest chess \"{pgnOut}\")");
+        }
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
         Console.WriteLine(r.EloDiff > 5
@@ -177,6 +188,25 @@ internal static class ChessCommands
         'P' => "Pawn", 'N' => "Knight", 'B' => "Bishop", 'R' => "Rook", 'Q' => "Queen", 'K' => "King", _ => p.ToString(),
     };
 
+    /// <summary>Tactics solve-rate over an EPD suite (the second correctness bar). No file ⇒ the built-in
+    /// mate suite (smoke test). Pure search, no DB.</summary>
+    private static Task<int> TacticsAsync(string[] args)
+    {
+        int depth = ArgInt(args, "--depth", 6);
+        string? file = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
+        IEnumerable<string> lines = file is not null && System.IO.File.Exists(file)
+            ? System.IO.File.ReadLines(file)
+            : ChessTactics.Builtin;
+        string label = file is not null && System.IO.File.Exists(file) ? file : "built-in mate suite";
+
+        Console.WriteLine($"tactics: {label}, depth {depth}");
+        var (solved, total, results) = ChessTactics.Run(lines, depth);
+        foreach (var r in results)
+            Console.WriteLine($"  [{(r.Solved ? "OK " : "MISS")}] {r.Id,-28} engine {r.Engine,-6} expected {r.Expected}");
+        Console.WriteLine($"solved {solved}/{total} ({(total > 0 ? 100.0 * solved / total : 0):F0}%)");
+        return Task.FromResult(0);
+    }
+
     /// <summary>The data-driven-eval test: an engine whose leaf PST is the substrate-LEARNED table plays an
     /// otherwise-identical engine using hand-tuned PeSTO. Same material/structure terms; ONLY the PST differs,
     /// at EVERY node. Honest measurement of whether the corpus's learned piece-square values can stand in for
@@ -253,15 +283,31 @@ internal static class ChessCommands
     private static async Task<int> SelfPlayAsync(string[] args)
     {
         int games = ArgInt(args, "--games", 200);
-        double temp = ArgDouble(args, "--temp", 120d);
-        int maxPlies = ArgInt(args, "--max-plies", 400);
-        double weight = ArgDouble(args, "--weight", 0.5d);
+        int maxPlies = ArgInt(args, "--max-plies", 200);
         int reportEvery = ArgInt(args, "--report-every", 25);
+        bool weak = HasFlag(args, "--weak");
 
-        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(), weight);
-        Console.WriteLine($"chess selfplay: {games} games, temp={temp}, weight={weight}, maxPlies={maxPlies}");
-        await svc.RunSelfPlayAsync(games, temp, maxPlies, reportEvery, st =>
-            Console.WriteLine($"  [{st.Games}] W={st.White} B={st.Black} D={st.Draws} (adj {st.Adjudicated}); last {st.LastOutcome}"));
+        Action<ChessTrainStatus> report = st =>
+            Console.WriteLine($"  [{st.Games}] W={st.White} B={st.Black} D={st.Draws} (adj {st.Adjudicated}); last {st.LastOutcome}");
+
+        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(),
+            ArgDouble(args, "--weight", 0.5d));
+
+        if (weak)
+        {
+            double temp = ArgDouble(args, "--temp", 120d);
+            Console.WriteLine($"chess selfplay [WEAK: depth-1 substrate]: {games} games, temp={temp}, maxPlies={maxPlies}");
+            await svc.RunSelfPlayAsync(games, temp, ArgInt(args, "--max-plies", 400), reportEvery, report);
+        }
+        else
+        {
+            // The unified engine plays itself — the LEARNER IS THE PLAYER (α-β + PeSTO⊕learned-PST + fold).
+            int depth = ArgInt(args, "--depth", 4);
+            int openingPlies = ArgInt(args, "--opening-plies", 6);
+            Console.WriteLine($"chess selfplay [STRONG: unified α-β engine, depth {depth}, opening {openingPlies}]: "
+                + $"{games} games, maxPlies {maxPlies} — checkmates up-weight, flags credit as draws");
+            await svc.RunStrongSelfPlayAsync(games, depth, maxPlies, openingPlies, reportEvery, report);
+        }
 
         var opening = await svc.ScoreAsync(svc.NewGameFen());
         Console.WriteLine("opening eff_mu: " + string.Join("  ",

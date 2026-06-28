@@ -89,7 +89,19 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         IReadOnlyList<string> stateSurfaces, CancellationToken ct = default)
         => _valuer.ValueStatesAsync(stateSurfaces, ct);
 
-    public async Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default)
+    // A CHECKMATE is earned chess testimony — its moves get more observation weight; a ply-cap ADJUDICATION
+    // (the self-play analog of flagging) is NOT a win, so its moves are credited as a neutral draw, never as a
+    // win. So self-play learns from decisive play, not from games that merely timed/ran out.
+    private const long CheckmateGames = 3;
+
+    /// <summary>ITurnLearner entry — adjudication state unknown, so treat conservatively as a real game.</summary>
+    public Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default)
+        => LearnGameAsync(edges, adjudicated: false, ct);
+
+    /// <summary>Learn a finished self-play game, weighting by HOW it ended: a real checkmate up-weights the
+    /// winner's moves (earned win); an adjudicated/flagged game credits every move as a draw (no real result).</summary>
+    public async Task LearnGameAsync(
+        IReadOnlyList<RecordedEdge> edges, bool adjudicated, CancellationToken ct = default)
     {
         if (edges.Count == 0) return;
 
@@ -100,9 +112,18 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         // the self-play source (low trust: high-temp exploration, not authoritative play).
         ChessVocabulary.EmitPlayer(b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId);
 
+        // Decisive checkmate (someone actually won, not a cutoff) ⇒ up-weight; flagged/adjudicated ⇒ draw-only.
+        bool hasWin = false;
+        foreach (var e in edges) if (e.MoverOutcome == PlyOutcome.Win) { hasWin = true; break; }
+        bool checkmate = !adjudicated && hasWin;
+        long games = checkmate ? CheckmateGames : 1;
+
         foreach (var e in edges)
-            ChessGraph.AppendMoveEdge(b, e.SubjectKey, e.ObjectKey, e.MoverOutcome, games: 1, _witnessWeight,
+        {
+            var moverOutcome = adjudicated ? PlyOutcome.Draw : e.MoverOutcome;  // flagging ≠ winning
+            ChessGraph.AppendMoveEdge(b, e.SubjectKey, e.ObjectKey, moverOutcome, games, _witnessWeight,
                 sourceId: ChessVocabulary.SourceId, moverPlayerId: ChessVocabulary.LaplacePlayerId);
+        }
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);

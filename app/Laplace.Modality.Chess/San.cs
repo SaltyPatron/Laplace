@@ -62,6 +62,57 @@ public static class San
         });
     }
 
+    /// <summary>Generate the SAN token for <paramref name="m"/> in position <paramref name="b"/> — the
+    /// inverse of <see cref="Resolve"/>, with proper disambiguation (file/rank/both) and the trailing
+    /// <c>+</c>/<c>#</c> check/mate glyph. Lets our in-process games (self-play, matches) be written as
+    /// standard PGN and fed back through the <c>pgn</c> grammar — the ingest flywheel.</summary>
+    public static string ToSan(Board b, ChessMove m)
+    {
+        if ((m.Flags & MoveFlags.CastleKing) != 0)  return WithCheckGlyph(b, m, "O-O");
+        if ((m.Flags & MoveFlags.CastleQueen) != 0) return WithCheckGlyph(b, m, "O-O-O");
+
+        var legal = MoveGen.Legal(b);
+        Piece moving = b.Squares[m.From];
+        Piece type = Board.TypeOf(moving);                 // white-typed (WPawn..WKing)
+        bool isPawn = type == Piece.WPawn;
+        bool isCapture = b.Squares[m.To] != Piece.Empty || (m.Flags & MoveFlags.EnPassant) != 0;
+        string dest = Board.SquareToAlgebraic(m.To);
+        var sb = new System.Text.StringBuilder(8);
+
+        if (isPawn)
+        {
+            if (isCapture) sb.Append((char)('a' + Board.FileOf(m.From))).Append('x');
+            sb.Append(dest);
+            if (m.IsPromotion) sb.Append('=').Append(char.ToUpperInvariant(Board.PieceToChar(Board.TypeOf(m.Promotion))));
+        }
+        else
+        {
+            sb.Append(char.ToUpperInvariant(Board.PieceToChar(type)));
+            // Disambiguate against other same-type pieces that can also reach the destination.
+            var rivals = legal.Where(x => x.To == m.To && x.From != m.From
+                                          && Board.TypeOf(b.Squares[x.From]) == type).ToList();
+            if (rivals.Count > 0)
+            {
+                bool fileUnique = rivals.All(x => Board.FileOf(x.From) != Board.FileOf(m.From));
+                bool rankUnique = rivals.All(x => Board.RankOf(x.From) != Board.RankOf(m.From));
+                if (fileUnique)      sb.Append((char)('a' + Board.FileOf(m.From)));
+                else if (rankUnique) sb.Append((char)('1' + Board.RankOf(m.From)));
+                else                 sb.Append((char)('a' + Board.FileOf(m.From))).Append((char)('1' + Board.RankOf(m.From)));
+            }
+            if (isCapture) sb.Append('x');
+            sb.Append(dest);
+        }
+        return WithCheckGlyph(b, m, sb.ToString());
+    }
+
+    private static string WithCheckGlyph(Board b, ChessMove m, string san)
+    {
+        var nb = b.Clone();
+        MoveApply.Make(nb, m);
+        if (!MoveGen.InCheck(nb, nb.WhiteToMove)) return san;     // not check
+        return MoveGen.Legal(nb).Count == 0 ? san + "#" : san + "+";
+    }
+
     private static ChessMove? Single(IReadOnlyList<ChessMove> legal, Func<ChessMove, bool> pred)
     {
         ChessMove? hit = null;

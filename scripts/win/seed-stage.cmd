@@ -38,7 +38,7 @@ exit /b 0
 :stage_knowledge
 rem CILI (the ILI interlingual index) MUST be first: wordnet/omw bind their synsets to the ILI
 rem concepts it creates, so the language-agnostic hub has to exist before the synset sources run.
-for %%s in (cili wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
+for %%s in (cili wordnet omw verbnet propbank semlink atomic2020 mapnet wordframenet framenet ud conceptnet wiktionary) do (
   call "%SCRIPTS%seed-step.cmd" %%s || exit /b 1
 )
 exit /b 0

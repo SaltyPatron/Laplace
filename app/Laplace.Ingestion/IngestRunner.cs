@@ -394,9 +394,13 @@ public sealed class IngestRunner
         // consensus accumulate AND the COPY/apply now run on N cores instead of one. Within a lane it
         // stays serial, so the same id is never applied twice at once. (Pair with LAPLACE_APPLY_PARTITIONS=1
         // so the writer does not re-partition an already-partitioned lane sub-change.)
-        int lanes = Math.Max(1,
-            int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_COMMIT_LANES"), out var cl) && cl > 0
-                ? cl : CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 12));
+        int lanes;
+        if (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_COMMIT_LANES"), out var cl) && cl > 0)
+            lanes = cl;
+        else if (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_WORKERS"), out var iw) && iw > 0)
+            lanes = iw;
+        else
+            lanes = Math.Max(1, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 12));
 
         if (lanes == 1)
         {
@@ -499,6 +503,16 @@ public sealed class IngestRunner
     // each lane's partition handles are disposed by the writer when applied. Lanes with no rows are null.
     private static SubstrateChange[] PartitionChange(SubstrateChange c, int n)
     {
+        string unit = c.Metadata.SourceContentUnitName;
+        if (unit.StartsWith("period-boundary/", StringComparison.Ordinal)
+            || unit.StartsWith("layer-complete/", StringComparison.Ordinal))
+        {
+            var pass = new SubstrateChange[n];
+            pass[0] = c;
+            for (int k = 1; k < n; k++) pass[k] = null!;
+            return pass;
+        }
+
         var result = new SubstrateChange[n];
         var ents = new List<EntityRow>[n];
         var phys = new List<PhysicalityRow>[n];
@@ -551,6 +565,7 @@ public sealed class IngestRunner
                 Attestations = atts[k].ToImmutableArray(),
                 IntentStages = stageParts[k].ToImmutableArray(),
                 TestimonyWalks = walks != null ? walks[k].ToImmutableArray() : c.TestimonyWalks,
+                Metadata = isRepresentative ? c.Metadata : c.Metadata with { InputUnitsConsumed = 0 },
                 CountsAsUnit = isRepresentative,
             };
         }
@@ -776,9 +791,9 @@ public sealed class IngestRunner
         if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
 
         long consumed = intent.Metadata.InputUnitsConsumed;
-        if (consumed > 0)
+        if (consumed > 0 && intent.CountsAsUnit)
             Interlocked.Add(ref c._inputUnitsDone, consumed);
-        else
+        else if (consumed == 0)
             c._currentFile = unit;
     }
 

@@ -164,11 +164,37 @@ public sealed class ChessEngineService : IAsyncDisposable
             chosen.Rated, status != "ongoing", status);
     }
 
-    // The strong move path: the ~2105-Elo alpha-beta Search (PeSTO eval + quiescence + TT), optionally
-    // biased at the root by the substructure-fold substrate prior (+24±23 Elo over the classical floor).
-    // This is what the web/UI should call — BestMoveAsync's depth-1 ModalityEngine is the substrate-scoring
-    // path (analysis / self-play), not competitive play.
+    // ---- THE unified engine: one move-selection pipeline used by BOTH competitive play (web/UCI) and the
+    // learner (strong self-play), so the engine that plays is the engine that learns. It is the ~2105-Elo
+    // alpha-beta Search with: PeSTO leaf eval BLENDED with the substrate-LEARNED PST (the +31 config), plus
+    // the substructure-fold substrate prior at the root (+24). The old depth-1 ModalityEngine path
+    // (BestMoveAsync / ScoreMovesAsync) stays only for /chess/legal analysis. ----
     private SubstructureFoldBias? _foldBias;
+    private bool _learnedTried;
+    private int[][]? _lpMg, _lpEg;   // PeSTO + learned-PST leaf tables (null = pure PeSTO until the substrate has data)
+
+    /// <summary>The fold root-bias (live substrate read, cached instance).</summary>
+    private SubstructureFoldBias FoldBias() => _foldBias ??= new SubstructureFoldBias(_ds!);
+
+    /// <summary>The PeSTO+learned-PST leaf tables (scale 1 — the measured-best blend), built from the substrate
+    /// once and cached. Falls back to pure PeSTO (null) when the substrate is empty or the read fails, so it
+    /// can never break move selection. <paramref name="refresh"/> rebuilds it (self-play, as learning advances).</summary>
+    private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
+    {
+        if (refresh) _learnedTried = false;
+        if (_learnedTried) return (_lpMg, _lpEg);
+        _learnedTried = true;
+        try { var (lm, le) = LearnedPst.BuildTables(_ds!, 1.0); (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le); }
+        catch { _lpMg = null; _lpEg = null; }
+        return (_lpMg, _lpEg);
+    }
+
+    /// <summary>Build the full unified engine: alpha-beta + PeSTO⊕learned-PST leaf + (optional) fold root prior.</summary>
+    private Search BuildEngine(bool substrate, int ttBits = 20)
+    {
+        var (mg, eg) = LearnedPstBlend();
+        return new Search(EvalTerm.All, substrate ? FoldBias() : null, ttBits, mg, eg);
+    }
 
     public async Task<ChessBestMove> BestMoveSearchAsync(
         string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
@@ -178,9 +204,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds!)) : null;
-        var search = new Search(EvalTerm.All, bias);
-        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = BuildEngine(substrate).Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
 
@@ -189,6 +213,57 @@ public sealed class ChessEngineService : IAsyncDisposable
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         // EffMu carries the search score in centipawns (side-to-move relative); Rated = substrate prior used.
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate, status != "ongoing", status);
+    }
+
+    /// <summary>
+    /// STRONG self-play — the unified engine plays itself (alpha-beta + PeSTO⊕learned-PST + fold prior),
+    /// records each ply, and learns the finished game weighted by HOW it ended (checkmate &gt; flag). This
+    /// replaces the depth-1 ModalityEngine self-play so the LEARNER IS THE PLAYER: every training game is a
+    /// real ~2105-strength game, not a depth-1 sketch. Opening plies are randomized for diversity; the
+    /// learned-PST blend is refreshed every report interval as the substrate improves.
+    /// </summary>
+    public async Task RunStrongSelfPlayAsync(
+        int games, int depth, int maxPlies, int openingPlies, int reportEvery,
+        Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var rng = new Random();
+        for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
+        {
+            // Fresh Search per game (its TT/killers are stateful); refresh the learned blend periodically.
+            bool refresh = (g - 1) % Math.Max(1, reportEvery) == 0;
+            var (mg, eg) = LearnedPstBlend(refresh);
+            var search = new Search(EvalTerm.All, FoldBias(), ttBits: 18, mgPst: mg, egPst: eg);
+
+            var state = _modality!.Initial();
+            var subjectKeys = new List<string>(); var objectKeys = new List<string>(); var movers = new List<int>();
+            int plies = 0; bool adjudicated = false;
+            var terminal = _modality.Terminal(state);
+            while (terminal is null)
+            {
+                if (plies >= maxPlies) { adjudicated = true; break; }
+                var legal = _modality.LegalActions(state);
+                ChessMove mv = plies < openingPlies
+                    ? legal[rng.Next(legal.Count)]                                   // random opening for diversity
+                    : search.Think(state.Board, new Search.Limits(MaxDepth: depth)).BestMove ?? legal[rng.Next(legal.Count)];
+                int mover = _modality.SideToMove(state);
+                var next = _modality.Apply(state, mv);
+                subjectKeys.Add(_modality.StateKey(state));
+                objectKeys.Add(_modality.StateKey(next));
+                movers.Add(mover);
+                state = next; plies++;
+                terminal = _modality.Terminal(state);
+            }
+
+            var outcome = terminal ?? GameOutcome.Draw;
+            var edges = new RecordedEdge[subjectKeys.Count];
+            for (int i = 0; i < edges.Length; i++)
+                edges[i] = new RecordedEdge(subjectKeys[i], objectKeys[i], null, outcome.ForMover(movers[i]));
+            await _host!.LearnGameAsync(edges, adjudicated, ct);
+
+            RecordGame(new PlayedGame<ChessMove>(edges, outcome, plies, adjudicated));
+            if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games)) onReport(Status());
+        }
     }
 
     public async Task<ChessApplyResult> ApplyMoveAsync(string fen, string uci, CancellationToken ct = default)
@@ -250,7 +325,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
             var played = await engine.PlayGameAsync(_modality!.Initial(), temperature, rng, maxPlies, ct);
-            await _host!.LearnGameAsync(played.Edges, ct);
+            await _host!.LearnGameAsync(played.Edges, played.Adjudicated, ct);
             RecordGame(played);
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games))
                 onReport(Status());
@@ -267,7 +342,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             try
             {
                 var g = await engine.PlayGameAsync(_modality!.Initial(), _trainTemp, rng, _trainMaxPlies, ct);
-                await _host!.LearnGameAsync(g.Edges, ct);
+                await _host!.LearnGameAsync(g.Edges, g.Adjudicated, ct);
                 RecordGame(g);
                 played++;
             }

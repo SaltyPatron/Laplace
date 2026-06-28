@@ -60,6 +60,32 @@ public static class ChessVocabulary
     public static readonly Hash128 PlayedByType  = EntityTypeRegistry.Id("PLAYED_BY");   // position/move PLAYED_BY player
     public static readonly Hash128 HasRatingType = EntityTypeRegistry.Id("HAS_RATING");  // player HAS_RATING (per game)
 
+    // --- Opening identity: a book position carries its NAME ("Najdorf") + ECO code ("B90") — the
+    // differentiated value of the opening book ("the pros know the names"). Emitted on the final position
+    // of each named line; the name/eco are content entities so identical names across lines converge.
+    public static readonly Hash128 OpeningNameType = EntityTypeRegistry.Id("OPENING_NAME"); // position OPENING_NAME name
+    public static readonly Hash128 EcoCodeType     = EntityTypeRegistry.Id("HAS_ECO");      // position/game HAS_ECO eco
+
+    // --- The conventional GAME tier: every PGN game is a first-class Chess_Game node carrying its full
+    // metadata, so the corpus isn't just loose positions — a move's witnesses trace back to the game,
+    // players, event, date, time control, and termination they came from (contextId on each attestation).
+    public static readonly Hash128 GameType            = EntityTypeRegistry.Id("Chess_Game");
+    public static readonly Hash128 HasWhiteType        = EntityTypeRegistry.Id("HAS_WHITE");        // game → white player
+    public static readonly Hash128 HasBlackType        = EntityTypeRegistry.Id("HAS_BLACK");        // game → black player
+    public static readonly Hash128 HasEventType        = EntityTypeRegistry.Id("HAS_EVENT");        // game → event
+    public static readonly Hash128 OnDateType          = EntityTypeRegistry.Id("ON_DATE");          // game → date
+    public static readonly Hash128 HasTimeControlType  = EntityTypeRegistry.Id("HAS_TIME_CONTROL"); // game → "600+5"
+    public static readonly Hash128 HasTcClassType      = EntityTypeRegistry.Id("HAS_TC_CLASS");     // game → bullet|blitz|rapid|classical
+    public static readonly Hash128 HasTerminationType  = EntityTypeRegistry.Id("HAS_TERMINATION");  // game → "Normal|Time forfeit|…"
+    public static readonly Hash128 HasResultType       = EntityTypeRegistry.Id("HAS_RESULT");       // game → "1-0|0-1|1/2-1/2"
+    public static readonly Hash128 GameMoveType        = EntityTypeRegistry.Id("GAME_AT");          // game → position (a ply of this game)
+
+    /// <summary>Content-addressed id of a game from its identity (players + date + full move sequence) — the
+    /// same real game across overlapping databases composes to the SAME node (recorded once, witnessed each
+    /// time), the structural dedup; distinct games stay distinct.</summary>
+    public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
+        => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
+
     /// <summary>Player entity id from the raw PGN name (alias-merge is a later canonicalization pass).</summary>
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{name.Trim()}");
 
@@ -110,6 +136,18 @@ public static class ChessVocabulary
         boot.AddRelationType("OUTCOME");
         boot.AddRelationType("PLAYED_BY");
         boot.AddRelationType("HAS_RATING");
+        boot.AddRelationType("OPENING_NAME");
+        boot.AddRelationType("HAS_ECO");
+        boot.AddType("Chess_Game");
+        boot.AddRelationType("HAS_WHITE");
+        boot.AddRelationType("HAS_BLACK");
+        boot.AddRelationType("HAS_EVENT");
+        boot.AddRelationType("ON_DATE");
+        boot.AddRelationType("HAS_TIME_CONTROL");
+        boot.AddRelationType("HAS_TC_CLASS");
+        boot.AddRelationType("HAS_TERMINATION");
+        boot.AddRelationType("HAS_RESULT");
+        boot.AddRelationType("GAME_AT");
         await writer.ApplyAsync(boot.Build(), ct);
         return boot.CanonicalNames;
     }

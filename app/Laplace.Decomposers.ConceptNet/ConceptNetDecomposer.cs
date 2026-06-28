@@ -37,7 +37,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         ["SimilarTo"] = "SIMILAR_TO",
         ["EtymologicallyRelatedTo"]   = "ETYMOLOGICALLY_RELATED_TO",
         ["EtymologicallyDerivedFrom"] = "ETYMOLOGICALLY_DERIVED_FROM",
-        ["CausesDesire"] = "CAUSES_DESIRE", ["MadeOf"] = "MADE_OF",
+        ["CausesDesire"] = "CAUSES_DESIRE", ["MadeOf"] = "MADE_UP_OF",
         ["ReceivesAction"] = "RECEIVES_ACTION", ["InstanceOf"] = "IS_INSTANCE_OF",
         ["NotDesires"] = "NOT_DESIRES",     ["NotUsedFor"] = "NOT_USED_FOR",
         ["NotCapableOf"] = "NOT_CAPABLE_OF", ["NotHasProperty"] = "NOT_HAS_PROPERTY",

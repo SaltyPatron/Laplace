@@ -28,10 +28,10 @@ namespace Laplace.Chess.Service;
 /// </summary>
 public sealed class ChessOpeningsDecomposer : IDecomposer
 {
-    public Hash128 SourceId     => ChessVocabulary.SourceId;
+    public Hash128 SourceId     => ChessVocabulary.OpeningsSourceId;
     public string  SourceName   => "ChessOpenings";
     public int     LayerOrder   => 20;
-    public Hash128 TrustClassId => ChessVocabulary.SourceId;
+    public Hash128 TrustClassId => ChessVocabulary.OpeningsTrustClass;
 
     private const int    LinesPerBatch       = 256;
     private const double OpeningWitnessWeight = 0.7;   // match the game-PGN path → constant φ per relation
@@ -43,7 +43,8 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => _canonicalNames = await ChessVocabulary.BootstrapAsync(context.Writer, ct);
+        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessVocabulary.OpeningsSourceId, SourceName, ChessVocabulary.OpeningsTrustClass, ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context, DecomposerOptions options,
@@ -63,7 +64,7 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
 
                 var sans = ExtractSans(row.Movetext);
                 if (sans.Count == 0) continue;
-                AppendLine(builder, modality, sans);   // a malformed token aborts that line only
+                AppendLine(builder, modality, sans, row.Eco, row.Name);   // a malformed token aborts that line only
 
                 if (++inBatch >= LinesPerBatch)
                 {
@@ -80,24 +81,42 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
         // Deferred-content skip ON: opening prefixes are shared massively (every line through 1.e4 e5
         // collapses to the same nodes), so the probe stages repeated content once.
-        => new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/openings").EnableDeferredContent(ctx.Reader);
+        => new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "chess/openings").EnableDeferredContent(ctx.Reader);
 
-    /// <summary>Replay one opening line's mainline, emitting a Draw-scored (book) MOVE edge per ply.
-    /// Aborts the line on an unresolved token (malformed/illegal SAN); the prefix already emitted stands.</summary>
-    private static void AppendLine(SubstrateChangeBuilder b, ChessModality m, List<string> sans)
+    /// <summary>Replay one opening line's mainline, emitting a Draw-scored (book) MOVE edge per ply, then
+    /// tag the FINAL position with the line's NAME + ECO code (the identifying value — "what opening is
+    /// this?"). Aborts the line on an unresolved token (malformed/illegal SAN); the prefix already emitted
+    /// stands.</summary>
+    private static void AppendLine(SubstrateChangeBuilder b, ChessModality m, List<string> sans, string eco, string name)
     {
         long games = OpeningGames;
         var state = m.Initial();
+        bool any = false;
         foreach (var san in sans)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), san);
             if (mv is null) return;
-            int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
+            // Openings are anonymous book theory: dedicated ChessOpenings source, NO named mover (null) —
+            // book lines have no player, so no false PLAYED_BY attribution. Draw-scored = recognized book.
             ChessGraph.AppendMoveEdge(
-                b, m.StateKey(state), m.StateKey(next), PlyOutcome.Draw, games, OpeningWitnessWeight);
+                b, m.StateKey(state), m.StateKey(next), PlyOutcome.Draw, games, OpeningWitnessWeight,
+                sourceId: ChessVocabulary.OpeningsSourceId, moverPlayerId: null);
             state = next;
+            any = true;
         }
+        if (!any) return;
+
+        // Name/ECO capture: the final position IS the named line. The name + eco are content entities
+        // (identical names across lines converge to one node), linked from the position. This is what lets
+        // the substrate answer "this position is the Najdorf (B90)".
+        var finalId = ChessCompose.PositionId(m.StateKey(state));
+        if (!string.IsNullOrWhiteSpace(name) && ContentEmitter.Emit(b, name, ChessVocabulary.OpeningsSourceId) is { } nameId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                finalId, "OPENING_NAME", nameId, ChessVocabulary.OpeningsSourceId, null, SourceTrust.AcademicCurated));
+        if (!string.IsNullOrWhiteSpace(eco) && ContentEmitter.Emit(b, eco, ChessVocabulary.OpeningsSourceId) is { } ecoId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                finalId, "HAS_ECO", ecoId, ChessVocabulary.OpeningsSourceId, null, SourceTrust.AcademicCurated));
     }
 
     /// <summary>Parse one TSV row's movetext into its ordered mainline SAN tokens via the <c>pgn</c>
