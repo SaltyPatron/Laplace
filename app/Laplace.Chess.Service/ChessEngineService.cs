@@ -54,10 +54,19 @@ public sealed class ChessEngineService : IAsyncDisposable
         _log = log ?? NullLogger.Instance;
     }
 
-    public static string ResolveConnString() =>
-        Environment.GetEnvironmentVariable("LAPLACE_CHESS_DB")
-        ?? Environment.GetEnvironmentVariable("LAPLACE_DB")
-        ?? "Host=localhost;Username=postgres;Password=postgres;Database=laplace_chess_demo";
+    public static string ResolveConnString()
+    {
+        var s = Environment.GetEnvironmentVariable("LAPLACE_CHESS_DB")
+            ?? Environment.GetEnvironmentVariable("LAPLACE_DB")
+            ?? throw new InvalidOperationException(
+                "Chess requires LAPLACE_CHESS_DB or LAPLACE_DB (Npgsql connection string).");
+        // register_canonicals() inserts into unqualified canonical_names (lives in laplace schema).
+        if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
+            s += ";Include Error Detail=true";
+        if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
+            s += ";Search Path=laplace,public";
+        return s;
+    }
 
     public string NewGameFen() => ChessModality.StartFen;
 
