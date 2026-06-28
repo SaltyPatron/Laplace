@@ -74,9 +74,10 @@ public static class MatchRunner
 
     // Returns 0 = White win, 1 = Black win, 2 = draw (terminal or adjudicated at the ply cap).
     private static int PlayOne(
-        ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies)
+        ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies,
+        ChessState? start = null)
     {
-        var s = m.Initial();
+        var s = start ?? m.Initial();
         for (int ply = 0; ; ply++)
         {
             if (m.Terminal(s) is { } t) return t.IsDraw ? 2 : (t.Winner ?? 2);
@@ -117,11 +118,17 @@ public static class MatchRunner
 
     /// <summary>Parallel match: each game builds FRESH players from the factories (no shared mutable state)
     /// and runs on the thread pool, up to <paramref name="concurrency"/> at once. Deterministic in the final
-    /// tally — each game's seed is fixed — so results reproduce regardless of scheduling.</summary>
+    /// tally — each game's seed is fixed — so results reproduce regardless of scheduling.
+    /// <para>When <paramref name="openingFens"/> is non-empty each game STARTS from a book position
+    /// (rotated by game index, each played once from both colours), instead of <paramref name="openingPlies"/>
+    /// random plies — the fair test of corpus knowledge, since the engines begin where the substrate HAS
+    /// data. The book FEN replaces the random opening; the ply cap still adjudicates a draw.</para></summary>
     public static MatchResult Play(
         Func<MoveChooser> makeA, Func<MoveChooser> makeB, int games,
-        int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4)
+        int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,
+        IReadOnlyList<string>? openingFens = null)
     {
+        bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0;
         Parallel.For(0, games, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, concurrency) }, g =>
         {
@@ -130,7 +137,11 @@ public static class MatchRunner
             var a = makeA();
             var b = makeB();
             bool aWhite = (g % 2 == 0);
-            int outcome = PlayOne(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng, openingPlies);
+            // Pair consecutive games on the same book line (g/2), so both engines play each opening from
+            // both sides — removes opening colour bias from the measured Elo.
+            var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
+            int outcome = PlayOne(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
+                                  book ? 0 : openingPlies, start);
             if (outcome == 2) Interlocked.Increment(ref draws);
             else if ((outcome == 0) == aWhite) Interlocked.Increment(ref aWins);
             else Interlocked.Increment(ref bWins);

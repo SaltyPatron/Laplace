@@ -174,7 +174,8 @@ public sealed class ModelTokenEdgeETL
         var U = new float[(long)n * kmax];
         var S = new float[kmax];
         var Vt = new float[(long)kmax * d];
-        int rc = RunSvd(Af, n, d, kmax, U, S, Vt, out int rank);
+        var Ac = CenteredCopyF(Af, n, d);   // anisotropy denoise: strip the common-mode before SVD (Af untouched)
+        int rc = RunSvd(Ac, n, d, kmax, U, S, Vt, out int rank);
         if (rc != 0) { _log.LogWarning("phase=edges: tensor_svd_truncate rc={Rc}; skipping similarity", rc); yield break; }
         if (rank < 2) { _log.LogWarning("phase=edges: SVD rank {R}<2; skipping similarity", rank); yield break; }
 
@@ -231,6 +232,8 @@ public sealed class ModelTokenEdgeETL
             long erow = (long)i * d, urow = (long)rowOfToken[i] * d;
             for (int t = 0; t < d; t++) { Ed[erow + t] = Af[erow + t]; Ud[erow + t] = Ufull[urow + t]; }
         }
+        CenterColumns(Ed, n, d);   // anisotropy denoise on both sides before cosine
+        CenterColumns(Ud, n, d);
         NormRows(Ed, n, d);
         NormRows(Ud, n, d);
 
@@ -517,6 +520,26 @@ public sealed class ModelTokenEdgeETL
             fixed (float* pp = pts) fixed (float* pw = w) fixed (double* po = outp)
                 return DynInterop.ProjectEmbedding(pp, (nuint)n, (nuint)d, pw, (nuint)r, po);
         }
+    }
+
+    // Anisotropy denoise: subtract the per-dimension mean (the dominant common-mode that inflates
+    // nearly every cosine in a generative LM's embedding into a dense haze). This is principled
+    // denoising — orthogonal-after-centering = genuinely unrelated — not an arbitrary floor.
+    private static void CenterColumns(double[] m, long n, int d)
+    {
+        var mean = new double[d];
+        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) mean[j] += m[i * d + j];
+        for (int j = 0; j < d; j++) mean[j] /= n;
+        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) m[i * d + j] -= mean[j];
+    }
+    private static float[] CenteredCopyF(float[] a, long n, int d)
+    {
+        var mean = new double[d];
+        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) mean[j] += a[i * d + j];
+        for (int j = 0; j < d; j++) mean[j] /= n;
+        var c = new float[n * d];
+        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) c[i * d + j] = (float)(a[i * d + j] - mean[j]);
+        return c;
     }
 
     private static int RunFfnTile(double[] emb, int n, int d, double[]? gate, double[] up, double[] down,

@@ -69,6 +69,31 @@ set(LAPLACE_CORE_SOURCES
     src/etl_anchor.c
 )
 
+# ── Attestation-law codegen ─────────────────────────────────────────────────────────────────────
+# relation_law/pos_law (.c/.h) + the seed SQL are GENERATED from engine/manifest/*.toml by
+# scripts/codegen-attestation-law.py and are NOT committed. This rule regenerates them for any build
+# path (build-engine, raw cmake, rebuild-all). Edit the generator or the TOML, never these outputs.
+# relation_law.c / pos_law.c appear in LAPLACE_CORE_SOURCES, so the target depends on this command.
+find_program(LAPLACE_CODEGEN_PYTHON NAMES python python3 REQUIRED)
+set(LAPLACE_CODEGEN_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/codegen-attestation-law.py)
+set(LAPLACE_CODEGEN_OUTPUTS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/relation_law.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/pos_law.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/relation_law.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/pos_law.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_relation_types.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_pos.sql.in
+)
+add_custom_command(
+    OUTPUT  ${LAPLACE_CODEGEN_OUTPUTS}
+    COMMAND ${LAPLACE_CODEGEN_PYTHON} ${LAPLACE_CODEGEN_SCRIPT}
+    DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/relation_types.toml
+            ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/pos_tags.toml
+    COMMENT "Codegen attestation law (relation_law/pos_law + seed SQL) from manifest TOML"
+    VERBATIM
+)
+
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 
 if(WIN32)

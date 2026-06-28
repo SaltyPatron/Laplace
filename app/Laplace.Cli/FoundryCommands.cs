@@ -433,14 +433,14 @@ internal static class FoundryCommands
                 "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
 
-        // Build-a-bear recipe? Route to the descriptor-driven, per-head synthesis path
+        // Mold-A-Model recipe? Route to the descriptor-driven, per-head synthesis path
         // (each head = its own operator). Otherwise fall through to the HF/Llama foundry path.
         string recipeText = await File.ReadAllTextAsync(recipePath);
         if (recipeText.Contains("\"laplace.recipe\"", StringComparison.Ordinal))
         {
-            var babDesc = RecipeDescriptor.Parse(recipeText);
-            string babDir = Path.GetDirectoryName(recipePath) ?? ".";
-            return await SynthesizeBuildABearAsync(babDesc, babDir, outputPath);
+            var moldDesc = RecipeDescriptor.Parse(recipeText);
+            string moldDir = Path.GetDirectoryName(recipePath) ?? ".";
+            return await SynthesizeMoldAModelAsync(moldDesc, moldDir, outputPath);
         }
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
@@ -954,20 +954,20 @@ internal static class FoundryCommands
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
     }
 
-    // Build-a-bear synthesis: the recipe's per-head operator array drives the model. Each head is a
+    // Mold-A-Model synthesis: the recipe's per-head operator array drives the model. Each head is a
     // DISTINCT operator (relation type / metric / trajectory) filling its OWN rows — not the 4-band
     // mash tiled across heads. C#-first per-head proof; the fill relocates to native arch_template.cpp
     // once ablation validates the design. Spine constraints: dense, MHA, uniform heads/layer.
-    private static async Task<int> SynthesizeBuildABearAsync(
+    private static async Task<int> SynthesizeMoldAModelAsync(
         RecipeDescriptor desc, string modelDir, string outputPath)
     {
-        Console.WriteLine($"synthesize build-a-bear: {desc.Name} ({desc.Structure}) → {outputPath}");
+        Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
 
         if (desc.HiddenSizeAuto)
-            return Fail("hidden_size 'auto' (spectral rank) not yet wired for build-a-bear — set an integer for the spine");
+            return Fail("hidden_size 'auto' (spectral rank) not yet wired for Mold-A-Model — set an integer for the spine");
         if (desc.Structure != "dense")
-            return Fail($"build-a-bear spine supports 'dense' (got '{desc.Structure}'); MoE is Milestone B");
+            return Fail($"Mold-A-Model spine supports 'dense' (got '{desc.Structure}'); MoE is Milestone B");
 
         int dModel = desc.HiddenSizeOr(0);
         int nLayers = desc.NumLayers;
@@ -976,11 +976,11 @@ internal static class FoundryCommands
         int nKv = desc.Layers[0].KvHeads;
         foreach (var L in desc.Layers)
             if (L.Heads.Count != nHeads || L.KvHeads != nKv)
-                return Fail("build-a-bear spine requires uniform heads/kv per layer (variable-per-layer is Milestone B)");
+                return Fail("Mold-A-Model spine requires uniform heads/kv per layer (variable-per-layer is Milestone B)");
         if (dModel <= 0 || dModel % nHeads != 0)
             return Fail($"hidden_size {dModel} must be a positive multiple of heads/layer {nHeads}");
         if (nKv != nHeads)
-            return Fail($"build-a-bear spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
+            return Fail($"Mold-A-Model spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
         int headDim = dModel / nHeads;
 
         // Resolve the vocab. Substrate-native by default — the recipe's vocab spec drives a
@@ -1309,10 +1309,10 @@ internal static class FoundryCommands
                     case "mlp.gate_proj.weight": if (OpResidScale(layer.Ffn.Key) > 0) FoundryExport.FillGate(vals, tr, tc, gateCol); break;
                     case "mlp.up_proj.weight":   { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillRowsRight(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s * upGain); } break;
                     case "mlp.down_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillCols(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s); } break;
-                    default: SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'");
+                    default: SynthInterop.GgufWriterFree(gguf); return Fail($"Mold-A-Model: undefined tensor '{name}'");
                 }
             }
-            else { SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'"); }
+            else { SynthInterop.GgufWriterFree(gguf); return Fail($"Mold-A-Model: undefined tensor '{name}'"); }
 
             byte[] tensorBytes = FoundryExport.ToF32Bytes(vals);
             nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
@@ -1329,12 +1329,12 @@ internal static class FoundryCommands
         SynthInterop.RecipeFree(recipeHandle);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
         long fsz = new FileInfo(outputPath).Length;
-        Console.WriteLine($"build-a-bear complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
+        Console.WriteLine($"Mold-A-Model complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
             + $"({fsz / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s — {opKeys.Count} distinct operators, per-head (no tiling)");
         return 0;
     }
 
-    // Minimal HF config (dense Llama tensor layout) synthesized from the build-a-bear dims, so the
+    // Minimal HF config (dense Llama tensor layout) synthesized from the Mold-A-Model dims, so the
     // native arch template + GGUF metadata can be reused. The operator-per-head logic comes from the
     // descriptor, not this config — this only carries shapes.
     private static byte[] BuildHfConfigJson(int hidden, int layers, int heads, int kv, int interm, int vocab)

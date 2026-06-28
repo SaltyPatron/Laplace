@@ -27,40 +27,66 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test>\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
         + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"
-        + "  substrate-test [--games N] [--depth D] [--cp-per-point X] [--cap C]   (guided-vs-pure: the 34.5M-game graph's Elo lift)";
+        + "  substrate-test [--mode fold|edge|off] [--games N] [--depth D] [--cp-per-point X] [--cap C] [--openings]\n"
+        + "      guided-vs-pure: the corpus's Elo lift over the classical floor.\n"
+        + "      --mode fold = substructure-fold (generalizes, the honest transfer test; DEFAULT);\n"
+        + "             edge = raw MOVE-edge eff_mu (popularity; the first null result); off = sanity (pure vs pure)\n"
+        + "      --openings = seed games from the standard opening suite (where the corpus HAS data)";
 
-    /// <summary>The real test: pit a search whose root is biased by the substrate's learned MOVE eff_mu
-    /// against the identical pure-classical search, and measure the Elo difference — i.e. how much the
-    /// 34.5M-relation game graph adds to the classical floor. Both play the SAME depth; only the root
-    /// prior differs.</summary>
+    /// <summary>The real test: pit a search whose root is biased by the substrate against the identical
+    /// pure-classical search, and measure the Elo difference — how much the game graph adds to the
+    /// classical floor. Both play the SAME depth; only the root prior differs. <c>--mode fold</c> uses the
+    /// substructure-fold (generalizes to novel positions); <c>edge</c> uses raw MOVE eff_mu (popularity);
+    /// <c>off</c> is a pure-vs-pure sanity check (should be ≈0). <c>--openings</c> seeds from book lines.</summary>
     private static async Task<int> SubstrateTestAsync(string[] args)
     {
-        int games = ArgInt(args, "--games", 30);
+        string mode = ArgStr(args, "--mode", "fold").ToLowerInvariant();
+        int games = ArgInt(args, "--games", 200);
         int depth = ArgInt(args, "--depth", 4);
         int maxPlies = ArgInt(args, "--max-plies", 160);
         double cpPerPoint = ArgDouble(args, "--cp-per-point", 8.0);
         int cap = ArgInt(args, "--cap", 150);
         int concurrency = ArgInt(args, "--concurrency", 16); // 14900KS: 8P+16E — tune vs other load
+        bool seedOpenings = HasFlag(args, "--openings");
 
         await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
-        var bias = new SubstrateRootBias(ds, cpPerPoint, cap);
+        IRootBias? bias = mode switch
+        {
+            "fold" => new SubstructureFoldBias(ds, cpPerPoint, cap),
+            "edge" => new SubstrateRootBias(ds, cpPerPoint, cap),
+            "off"  => null,
+            _      => throw new ArgumentException($"unknown --mode '{mode}' (expected fold|edge|off)"),
+        };
         var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias);
         var pure   = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null);
+        // Seed from the ALREADY-INGESTED Lichess ECO openings (openings/*.tsv), not a hardcoded list.
+        string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
+        var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
 
-        Console.WriteLine($"substrate-test: guided (substrate root prior, {cpPerPoint}cp/pt, cap {cap}) vs pure classical");
-        Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, db={Redact(ChessEngineService.ResolveConnString())}");
-        var r = MatchRunner.Play(guided, pure, games, maxPlies, seed: 99, concurrency: concurrency);
+        string desc = mode switch
+        {
+            "fold" => $"substructure-fold prior ({cpPerPoint}cp/pt, cap {cap})",
+            "edge" => $"raw MOVE-edge prior ({cpPerPoint}cp/pt, cap {cap})",
+            _      => "NO prior (sanity)",
+        };
+        Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
+        Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, "
+            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, db={Redact(ChessEngineService.ResolveConnString())}");
+        var r = MatchRunner.Play(guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
+                                 openingFens: book);
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
         Console.WriteLine(r.EloDiff > 5
-            ? "  => the 34.5M-game substrate measurably raises the classical floor."
-            : "  => no clear lift at this depth/scale — try more games, deeper, or a larger --cp-per-point.");
+            ? "  => the substrate measurably raises the classical floor at this mode/scale."
+            : "  => no clear lift at this mode/scale — try --openings, more games, deeper, or a larger --cp-per-point.");
         return 0;
     }
+
+    private static bool HasFlag(string[] a, string flag) => Array.IndexOf(a, flag) >= 0;
 
     private static string Redact(string conn) =>
         System.Text.RegularExpressions.Regex.Replace(conn, "(?i)password=[^;]*", "password=***");

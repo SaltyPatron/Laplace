@@ -44,6 +44,17 @@ public static class ChessCompose
     public const byte SubstructureTier = 1;
     public const byte PositionTier      = 2;
 
+    /// <summary>
+    /// The serialization gate for the native merkle+centroid primitive. <see cref="Position"/> /
+    /// <see cref="PositionId"/> drive native buffers that are NOT thread-safe (AccessViolation under
+    /// parallel — the "native heap race"); every concurrent caller (the self-play valuer, the search
+    /// root-biases) must <c>lock (ChessCompose.Gate)</c> around its compose calls so they serialize
+    /// against EACH OTHER, not just within one class. The alpha-beta search itself is pure C# and stays
+    /// fully parallel; only the brief root compose is serialized. A C# lock is reentrant, so guarding a
+    /// loop of compose calls under one lock is safe.
+    /// </summary>
+    public static readonly object Gate = new();
+
     // token -> composed substructure node (bounded base recurs → computed once, looked up forever).
     private static readonly ConcurrentDictionary<string, ChessNode> TokenMemo = new(StringComparer.Ordinal);
 

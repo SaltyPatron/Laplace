@@ -357,7 +357,7 @@ internal static class IngestCommands
     {
         if (string.IsNullOrEmpty(cli.Path))
             return Fail("usage: laplace ingest recipe <recipe.json>\n"
-                        + "  Deposits a build-a-bear recipe (the simulated UI POST) as a content-addressed\n"
+                        + "  Deposits a Mold-A-Model recipe (the simulated UI POST) as a content-addressed\n"
                         + "  Model_Recipe entity, fetchable by export via laplace.model_recipes() / --recipe-from.");
         if (!File.Exists(cli.Path))
             return Fail($"ingest recipe: file not found: {cli.Path}");
