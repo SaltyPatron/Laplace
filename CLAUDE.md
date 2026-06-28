@@ -46,10 +46,25 @@ Runs `dotnet run --project Laplace.Cli ... -c Release --no-build -- ingest <step
 Release build). Granular dependency order: unicode, iso639, cili, wordnet, verbnet, propbank, framenet,
 mapnet, wordframenet, semlink, ud, document, chess (chess = `ingest chess D:\Data\Ingest\Games\Chess`).
 
+## Chess engine, gauntlet & substrate fusion
+Full backlog + priorities: **`docs\chess-engine-roadmap-2026-06-27.md`** (read this for the chess side).
+- **Layers:** `Laplace.Modality.Chess` = pure rules + the **classical engine** (`Evaluation` PeSTO/toggleable
+  `EvalTerm` overlays, `Search` α-β/quiescence/TT/time-mgmt, `MatchRunner`, `IRootBias`); `Laplace.Chess.Uci` →
+  **`laplace-uci.exe`** (UCI, no DB, fast startup); `Laplace.Chess.Service` = substrate bridge (`SubstrateRootBias`,
+  `ChessGraph`, decomposers). The engine is **~2105 Elo** (beat balanced Stockfish `UCI_Elo=2000` +105±31/500g).
+- **CLI:** `laplace chess <move|selfplay|fetch|substrate-test>`; `laplace ingest <chess|openings> <path>`.
+  `substrate-test` = guided(substrate root prior) vs pure classical, parallel (`--concurrency`, 8P+16E box).
+- **Gauntlet (our own, not a dependency):** `scripts\win\build-cutechess.cmd` builds `external\cutechess`
+  (submodule) → `build-cutechess\cutechess-cli.exe` (Qt6.8.3 fetched prebuilt via aqtinstall → `D:\Qt`). Run vs
+  `D:\stockfish\...avx2.exe`. cutechess needs `D:\Qt\6.8.3\msvc2022_64\bin` on PATH + a `tc=` (`tc=inf depth=N`).
+- **Tests:** chess suites are in `test-app.cmd` (Modality.Chess / Chess.Service / Chess.Uci).
+
 ## Gotchas
 - Shells (Bash + PowerShell tools) **share a working directory** — a `cd` in one affects the other; use
   absolute paths or `Set-Location D:\Repositories\Laplace` first. A relative `scripts\win\...` from the
   wrong cwd fails with "system cannot find the path specified".
+- `.cmd` files written by tooling default to **LF**; cmd.exe needs **CRLF** or it mis-tokenizes every line.
+- **`ChessCompose` native compose is NOT thread-safe** (AccessViolation under parallel) — serialize it.
 - Never put a `C:\Program Files` (or other system) path in the same script as `Remove-Item`/destructive
   ops — the harness guard blocks the whole command and reports it as "Remove-Item on system path C:\Program".
 - ASAN-instrumented core won't report inside the .NET CLI (CLR SEH). Use the native test exe.
