@@ -21,9 +21,11 @@ internal static class ChessEndpoints
         app.MapPost("/chess/move", async (MoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, ct))).WithTags("chess");
 
-        // The bot's move from a FEN (temperature 0 = greedy best by eff_mu).
+        // The bot's move from a FEN — the strong ~2105-Elo alpha-beta search (PeSTO + quiescence + TT),
+        // root-biased by the substructure-fold substrate prior unless --substrate=false. `depth` defaults
+        // to 4. (The legacy depth-1 substrate-scoring path is still on /chess/legal for analysis.)
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.BestMoveAsync(req.Fen, req.Temperature ?? 0d, ct))).WithTags("chess");
+            Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
 
         // Background self-play training controls + live status.
         // games ≤ 0 (or omitted) trains until /stop; games > 0 plays exactly that many then stops.
@@ -40,5 +42,5 @@ internal static class ChessEndpoints
 
     private sealed record FenRequest(string Fen);
     private sealed record MoveRequest(string Fen, string Uci);
-    private sealed record BestMoveRequest(string Fen, double? Temperature);
+    private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate);
 }

@@ -154,30 +154,10 @@ public sealed class ChessPgnDecomposer : IDecomposer
         => elo <= 0 ? 3 : Math.Clamp((long)Math.Round((elo - 600) / 200.0), 1, 12);
 
     private static (int White, int Black) ParseElos(string game)
-        => (TagInt(game, "WhiteElo"), TagInt(game, "BlackElo"));
-
-    /// <summary>Read an integer PGN tag value (<c>[Tag "1234"]</c>) by a cheap scan; 0 if absent/blank.</summary>
-    private static int TagInt(string game, string tag)
-    {
-        int i = game.IndexOf("[" + tag + " \"", StringComparison.Ordinal);
-        if (i < 0) return 0;
-        i += tag.Length + 3;
-        int j = game.IndexOf('"', i);
-        return j > i && int.TryParse(game.AsSpan(i, j - i), out var v) ? v : 0;
-    }
+        => (PgnGames.TagInt(game, "WhiteElo"), PgnGames.TagInt(game, "BlackElo"));
 
     private static (string White, string Black) ParseNames(string game)
-        => (TagStr(game, "White"), TagStr(game, "Black"));
-
-    /// <summary>Read a string PGN tag value (<c>[Tag "value"]</c>); "" if absent.</summary>
-    private static string TagStr(string game, string tag)
-    {
-        int i = game.IndexOf("[" + tag + " \"", StringComparison.Ordinal);
-        if (i < 0) return "";
-        i += tag.Length + 3;
-        int j = game.IndexOf('"', i);
-        return j > i ? game[i..j].Trim() : "";
-    }
+        => (PgnGames.TagStr(game, "White"), PgnGames.TagStr(game, "Black"));
 
     /// <summary>Mint (dedup) the player entity and bind its display name via HAS_NAME_ALIAS. Returns null
     /// for unknown players (""/"?"), so no PLAYED_BY is attributed. The rating's EFFECT lands per-move via

@@ -164,6 +164,33 @@ public sealed class ChessEngineService : IAsyncDisposable
             chosen.Rated, status != "ongoing", status);
     }
 
+    // The strong move path: the ~2105-Elo alpha-beta Search (PeSTO eval + quiescence + TT), optionally
+    // biased at the root by the substructure-fold substrate prior (+24±23 Elo over the classical floor).
+    // This is what the web/UI should call — BestMoveAsync's depth-1 ModalityEngine is the substrate-scoring
+    // path (analysis / self-play), not competitive play.
+    private SubstructureFoldBias? _foldBias;
+
+    public async Task<ChessBestMove> BestMoveSearchAsync(
+        string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var state = SyncState(fen);
+        if (_modality!.Terminal(state) is { } term)
+            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
+
+        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds!)) : null;
+        var search = new Search(EvalTerm.All, bias);
+        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        if (result.BestMove is not { } mv)
+            return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
+
+        var next = _modality.Apply(state, mv);
+        SetLive(next); // the bot's move enters the authoritative game's repetition history
+        var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
+        // EffMu carries the search score in centipawns (side-to-move relative); Rated = substrate prior used.
+        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate, status != "ongoing", status);
+    }
+
     public async Task<ChessApplyResult> ApplyMoveAsync(string fen, string uci, CancellationToken ct = default)
     {
         await EngineAsync(ct);

@@ -108,10 +108,11 @@ public static class MatchRunner
     /// where sharing one stateful Search across threads would race. A small TT (<paramref name="ttBits"/>)
     /// keeps memory bounded across many concurrent games; a shared <paramref name="bias"/> must be thread-safe.</summary>
     public static Func<MoveChooser> SearcherFactory(
-        int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null, int ttBits = 16)
+        int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null, int ttBits = 16,
+        int[][]? mgPst = null, int[][]? egPst = null)
         => () =>
         {
-            var search = new Search(terms, bias, ttBits);
+            var search = new Search(terms, bias, ttBits, mgPst, egPst);
             return (s, rng) => search.Think(s.Board, new Search.Limits(MaxDepth: depth)).BestMove
                                ?? RandomChooser(s, rng);
         };

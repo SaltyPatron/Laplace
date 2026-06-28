@@ -66,15 +66,22 @@ public sealed class Search
 
     private readonly EvalTerm _terms;
     private readonly IRootBias? _rootBias;
+    private readonly int[][]? _mgPst;   // substrate-LEARNED piece-square tables (null = PeSTO floor)
+    private readonly int[][]? _egPst;
 
     /// <summary>Create a search whose leaf evaluation uses only the given overlay <paramref name="terms"/>
     /// (default: all), optionally biased at the root by <paramref name="rootBias"/> (the substrate seam).
     /// A SUBSET eval is how the ablation ladder measures the raw Elo value of each overlay; the root bias is
-    /// how the substrate's learned per-position value is injected without a DB hit in the hot loop.</summary>
-    public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20)
+    /// how the substrate's learned per-position value is injected without a DB hit in the hot loop.
+    /// <paramref name="mgPst"/>/<paramref name="egPst"/> swap the leaf eval's PeSTO PST for learned tables
+    /// at EVERY node (the data-driven eval); null keeps PeSTO.</summary>
+    public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
+        int[][]? mgPst = null, int[][]? egPst = null)
     {
         _terms = terms;
         _rootBias = rootBias;
+        _mgPst = mgPst;
+        _egPst = egPst;
         int bits = Math.Clamp(ttBits, 10, 24); // 1K..16M entries — smaller for many parallel match games
         _tt = new TtEntry[1 << bits];
         _ttMask = (1UL << bits) - 1;
@@ -181,7 +188,7 @@ public sealed class Search
         bool inCheck = MoveGen.InCheck(b, b.WhiteToMove);
         if (!inCheck)
         {
-            int standPat = Evaluation.Evaluate(b, _terms);
+            int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
         }
