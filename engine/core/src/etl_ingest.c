@@ -6,6 +6,7 @@
 
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/etl_anchor.h"
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/grammar_registry.h"
@@ -34,6 +35,7 @@ struct laplace_etl_session {
     size_t                    owned_edge_rule_count;
     const TSLanguage*         recipe;
     laplace_grammar_row_iter_t* iter;
+    const lp_ili_map_t*       ili_map; /* loaded from LAPLACE_CILI_DIR for anchor-kind edge fields; may be NULL */
     FILE*                     fp;
     char                      path[4096];
     size_t                    rows_left; /* 0 = unlimited */
@@ -149,7 +151,24 @@ static int witness_atomic2020(intent_stage_t* stage, const laplace_etl_config_t*
         cfg->trust_weight, 1, 1);
 }
 
+/*
+ * Resolve one edge field to its entity id by kind: a content field is tree-composed (witnessed here);
+ * an ILI-synset anchor field resolves its WN key through the session map to the existing ILI entity id
+ * (referenced, not witnessed — that entity is emitted by the OMW/WordNet path). Returns 0 = resolved
+ * (*out set), 1 = skip this edge (anchor didn't resolve / no map), -1 = fatal.
+ */
+static int resolve_edge_field(intent_stage_t* stage, const laplace_etl_config_t* cfg,
+                              const lp_ili_map_t* ili_map, uint8_t kind,
+                              const uint8_t* field, size_t flen, hash128_t* out) {
+    if (kind == LAPLACE_ETL_ANCHOR_ILI_SYNSET) {
+        if (!ili_map || !lp_resolve_synset_anchor(ili_map, (const char*)field, flen, out)) return 1;
+        return 0;
+    }
+    return content_id_for_span(stage, &cfg->source_id, field, flen, out) == 0 ? 0 : -1;
+}
+
 static int witness_field_edges(intent_stage_t* stage, const laplace_etl_config_t* cfg,
+                               const lp_ili_map_t* ili_map,
                                const uint8_t* line, size_t line_len, const laplace_ast_t* ast) {
     uint32_t starts[32], ends[32];
     size_t nf = 0;
@@ -158,7 +177,6 @@ static int witness_field_edges(intent_stage_t* stage, const laplace_etl_config_t
     for (size_t ri = 0; ri < cfg->edge_rule_count; ++ri) {
         const laplace_etl_edge_rule_t* rule = &cfg->edge_rules[ri];
         if (rule->subject_field >= nf || rule->object_field >= nf) continue;
-        if (rule->subject_kind != 0 || rule->object_kind != 0) continue; /* anchors not native */
 
         const uint8_t *subj, *obj;
         size_t slen, olen;
@@ -170,8 +188,12 @@ static int witness_field_edges(intent_stage_t* stage, const laplace_etl_config_t
             continue;
 
         hash128_t subject_id, object_id;
-        if (content_id_for_span(stage, &cfg->source_id, subj, slen, &subject_id) != 0) return -1;
-        if (content_id_for_span(stage, &cfg->source_id, obj, olen, &object_id) != 0) return -1;
+        int sr = resolve_edge_field(stage, cfg, ili_map, rule->subject_kind, subj, slen, &subject_id);
+        if (sr < 0) return -1;
+        if (sr == 1) continue; /* anchor didn't resolve — drop the edge (a miss, not a fabricated id) */
+        int or_ = resolve_edge_field(stage, cfg, ili_map, rule->object_kind, obj, olen, &object_id);
+        if (or_ < 0) return -1;
+        if (or_ == 1) continue;
 
         const hash128_t* ctx = cfg->context_is_null ? NULL : &cfg->context_id;
         if (laplace_attestation_categorical_add(
@@ -183,12 +205,13 @@ static int witness_field_edges(intent_stage_t* stage, const laplace_etl_config_t
 }
 
 static int witness_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,
+                       const lp_ili_map_t* ili_map,
                        const uint8_t* line, size_t line_len, const laplace_ast_t* ast) {
     switch (cfg->witness_kind) {
         case LAPLACE_ETL_WITNESS_ATOMIC2020:
             return witness_atomic2020(stage, cfg, line, line_len, ast);
         case LAPLACE_ETL_WITNESS_FIELD_EDGES:
-            return witness_field_edges(stage, cfg, line, line_len, ast);
+            return witness_field_edges(stage, cfg, ili_map, line, line_len, ast);
         case LAPLACE_ETL_WITNESS_CONCEPTNET:
             return etl_witness_conceptnet_row(stage, cfg, line, line_len, ast);
         default:
@@ -270,12 +293,13 @@ static void free_pending(etl_pending_row_t* p, size_t n) {
 }
 
 static int drain_pending_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,
+                             const lp_ili_map_t* ili_map,
                              etl_pending_row_t* pr, const uint8_t* bitmap, size_t bitmap_bits) {
     if (laplace_compose_drain_into_stage(
             pr->compose, stage, &cfg->source_id, cfg->now_unix_us, cfg->witness_weight, bitmap,
             bitmap_bits) != 0)
         return -1;
-    return witness_row(stage, cfg, pr->line, pr->line_len, pr->ast);
+    return witness_row(stage, cfg, ili_map, pr->line, pr->line_len, pr->ast);
 }
 
 static int flush_pending(laplace_etl_session_t* sess, intent_stage_t* stage,
@@ -292,7 +316,7 @@ static int flush_pending(laplace_etl_session_t* sess, intent_stage_t* stage,
         for (size_t i = 0; i < *pending_n; ++i) {
             size_t ec = laplace_compose_entity_count(pending[i].compose);
             size_t bits = ec;
-            rc = drain_pending_row(stage, &sess->cfg, &pending[i], bitmaps[i], bits);
+            rc = drain_pending_row(stage, &sess->cfg, sess->ili_map, &pending[i], bitmaps[i], bits);
             if (rc != 0) break;
             (*rows_emitted)++;
             sess->total.rows_emitted++;
@@ -377,7 +401,7 @@ static int process_row(laplace_etl_session_t* sess, intent_stage_t* stage,
         laplace_ast_free(ast);
         return -1;
     }
-    if (witness_row(stage, &sess->cfg, line, line_len, ast) != 0) {
+    if (witness_row(stage, &sess->cfg, sess->ili_map, line, line_len, ast) != 0) {
         laplace_compose_result_free(compose);
         laplace_ast_free(ast);
         return -1;
@@ -437,6 +461,18 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         free(s);
         return -3;
     }
+    // Load the ILI offset map for anchor-kind edge fields from the same place C# does (LAPLACE_CILI_DIR).
+    // Best-effort: if the env/file is absent the map stays NULL and anchor edges simply drop (a miss),
+    // exactly as the C# resolver counts a miss rather than fabricating an id.
+    {
+        const char* cili = getenv("LAPLACE_CILI_DIR");
+        if (cili && cili[0]) {
+            char mp[4096];
+            int wn = snprintf(mp, sizeof(mp), "%s/ili-map-pwn30.tab", cili);
+            if (wn > 0 && (size_t)wn < sizeof(mp)) s->ili_map = lp_ili_map_load(mp);
+        }
+    }
+
     memset(&s->total, 0, sizeof(s->total));
     *out = s;
     return 0;
@@ -445,6 +481,7 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
 void laplace_etl_session_close(laplace_etl_session_t* sess) {
     if (!sess) return;
     if (sess->fp) fclose(sess->fp);
+    if (sess->ili_map) lp_ili_map_free((lp_ili_map_t*)sess->ili_map);
     if (sess->iter) laplace_grammar_row_iter_free(sess->iter);
     if (sess->owned_edge_rules) {
         for (size_t i = 0; i < sess->owned_edge_rule_count; ++i)
