@@ -61,6 +61,20 @@ void lp_ili_map_free(lp_ili_map_t* map);
  */
 int lp_resolve_synset_anchor(const lp_ili_map_t* map, const char* raw, size_t n, hash128_t* out_id);
 
+/*
+ * Resolve a WordNet sense key (lemma%ss:lex:id[...]) to a content anchor id, mirroring SenseAnchor.Id:
+ * NormalizeSenseKey (trim, drop leading '?'/'!', lemma '_'->' ', first three ':'-fields) then
+ * laplace_content_root_id of "lemma%f0:f1:f2". Writes *out_id, returns 1; 0 if the key doesn't normalize.
+ */
+int lp_resolve_sense_anchor(const char* raw, size_t n, hash128_t* out_id);
+
+/*
+ * Resolve a category key (FrameNet frame / LU / VerbNet class / PropBank roleset) to a content anchor
+ * id, mirroring CategoryAnchor.Id: trim then laplace_content_root_id. Writes *out_id, returns 1; 0 if
+ * the key is empty after trimming.
+ */
+int lp_resolve_category_anchor(const char* raw, size_t n, hash128_t* out_id);
+
 #ifdef __cplusplus
 }
 #endif

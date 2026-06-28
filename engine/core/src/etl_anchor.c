@@ -249,3 +249,53 @@ int lp_resolve_synset_anchor(const lp_ili_map_t* map, const char* raw, size_t n,
 
     return laplace_content_root_id((const uint8_t*)ili, strlen(ili), out_id) == 0 ? 1 : 0;
 }
+
+int lp_resolve_sense_anchor(const char* raw, size_t n, hash128_t* out_id) {
+    if (!raw || !out_id) return 0;
+    const char* s = raw;
+    size_t len = n;
+    trim(&s, &len);
+    while (len > 0 && (s[0] == '?' || s[0] == '!')) { ++s; --len; }  /* TrimStart('?','!') */
+    if (len == 0) return 0;
+
+    size_t pct = (size_t)-1;
+    for (size_t i = 0; i < len; ++i) if (s[i] == '%') { pct = i; break; }
+    if (pct == (size_t)-1 || pct == 0 || pct + 1 >= len) return 0;
+
+    /* rest = s[pct+1 .. len): require >= 3 ':'-fields; take the first three. */
+    const char* rest = s + pct + 1;
+    size_t rlen = len - pct - 1;
+    size_t c1 = (size_t)-1, c2 = (size_t)-1, c3 = (size_t)-1;
+    for (size_t i = 0; i < rlen; ++i) {
+        if (rest[i] != ':') continue;
+        if (c1 == (size_t)-1) c1 = i;
+        else if (c2 == (size_t)-1) c2 = i;
+        else { c3 = i; break; }
+    }
+    if (c1 == (size_t)-1 || c2 == (size_t)-1) return 0;
+    size_t f2end = (c3 == (size_t)-1) ? rlen : c3;
+
+    /* Build "lemma%f0:f1:f2" with lemma '_' -> ' '. Sense keys are short; bail if it doesn't fit. */
+    char buf[512];
+    size_t bi = 0;
+#define LP_PUT(ch) do { if (bi >= sizeof(buf)) return 0; buf[bi++] = (char)(ch); } while (0)
+    for (size_t i = 0; i < pct; ++i) LP_PUT(s[i] == '_' ? ' ' : s[i]);
+    LP_PUT('%');
+    for (size_t i = 0; i < c1; ++i) LP_PUT(rest[i]);
+    LP_PUT(':');
+    for (size_t i = c1 + 1; i < c2; ++i) LP_PUT(rest[i]);
+    LP_PUT(':');
+    for (size_t i = c2 + 1; i < f2end; ++i) LP_PUT(rest[i]);
+#undef LP_PUT
+
+    return laplace_content_root_id((const uint8_t*)buf, bi, out_id) == 0 ? 1 : 0;
+}
+
+int lp_resolve_category_anchor(const char* raw, size_t n, hash128_t* out_id) {
+    if (!raw || !out_id) return 0;
+    const char* s = raw;
+    size_t len = n;
+    trim(&s, &len);
+    if (len == 0) return 0;
+    return laplace_content_root_id((const uint8_t*)s, len, out_id) == 0 ? 1 : 0;
+}
