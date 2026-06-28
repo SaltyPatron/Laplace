@@ -405,7 +405,18 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                 continue;
             }
             m = w;
-            tier = (uint8_t)((max_tier + 1) < 255 ? (max_tier + 1) : 255);
+            // Tier is composition DEPTH on a fixed semantic ladder (codepoint=0, grapheme=1,
+            // word=2, sentence=3, document=4) — NOT AST recursion depth. A deeply nested grammar
+            // AST (e.g. ConceptNet's file->row->field->token tsv) must NOT climb the depth axis past
+            // Document; the previous `max_tier + 1` clamped only at 255, so nested rows produced
+            // tier 6/7/8 entities that fail identity_law_violations() (tier_out_of_range). Structural
+            // nesting beyond Document is carried by grammar_type_id, not the tier field. Saturate at
+            // Document so composed ids stay inside the sanctioned 0..4 band.
+            {
+                const uint8_t TIER_DOCUMENT = 4;  // == EntityTier.Document
+                uint8_t next = (uint8_t)(max_tier + 1);
+                tier = next < TIER_DOCUMENT ? next : TIER_DOCUMENT;
+            }
         } else if (is_json_modality(modality_id)) {
             if (json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, r,
