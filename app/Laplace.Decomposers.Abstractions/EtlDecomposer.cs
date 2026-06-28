@@ -93,6 +93,11 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             ? null
             : static line => line.Length > 0 && line[0] != (byte)'#';
 
+        // Lean triple sources skip compose-time exist probes — they block the hot path on a warm DB.
+        ISubstrateReader? composeReader = NativeGrammarIngest.ShouldExistProbe(_src)
+            ? _containmentReader : null;
+        int composeWorkers = StructuredGrammarIngest.ResolveComposeWorkers();
+
         foreach (var file in files)
         {
             ct.ThrowIfCancellationRequested();
@@ -112,7 +117,7 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
                     contextId: fileContext,
                     commitEpoch: 0,
                     maxInputUnits: fileCap,
-                    containmentReader: _containmentReader,
+                    containmentReader: composeReader,
                     options: options,
                     ct: ct))
                 {
@@ -138,8 +143,9 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
                 contextId: fileContext,
                 commitEpoch: 0,
                 acceptRow: acceptRow,
+                composeWorkers: composeWorkers,
                 maxInputUnits: fileCap,
-                containmentReader: _containmentReader,
+                containmentReader: composeReader,
                 ct: ct))
             {
                 if (!options.DryRun)

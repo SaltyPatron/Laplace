@@ -14,7 +14,13 @@ public static unsafe class NativeGrammarIngest
     public static bool CanUseNative(in EtlSource src, DecomposerOptions? options = null)
     {
         if (string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal))
-            return options?.Languages?.IsActive != true;
+        {
+            if (options?.Languages?.IsActive == true) return false;
+            // Native feed is single-threaded; parallel StructuredGrammarIngest compose scales on
+            // multi-core boxes. Opt in with LAPLACE_INGEST_NATIVE=1 only for A/B or debugging.
+            return string.Equals(
+                Environment.GetEnvironmentVariable("LAPLACE_INGEST_NATIVE"), "1", StringComparison.Ordinal);
+        }
         if (string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal))
             return true;
         // IliSynset anchor fields now resolve natively (etl_anchor.c lp_resolve_synset_anchor),
@@ -52,7 +58,8 @@ public static unsafe class NativeGrammarIngest
             int bn = 0;
             long rowsReported = 0;
             long cap = maxInputUnits;
-            var probeBox = containmentReader is not null ? new ProbeBox(containmentReader) : null;
+            var probeBox = containmentReader is not null && ShouldExistProbe(src)
+                ? new ProbeBox(containmentReader) : null;
             GCHandle probeHandle = default;
             IntPtr probeCtx = IntPtr.Zero;
             NativeInterop.EtlExistProbeFn? probeFn = probeBox is not null ? ProbeCallback : null;
@@ -71,20 +78,31 @@ public static unsafe class NativeGrammarIngest
                     if (cap > 0 && rowsReported >= cap) yield break;
 
                     long fileCap = cap > 0 ? cap - rowsReported : 0;
-                    using var stage = IntentStage.New(Math.Max(batchSize * 32, 4096));
+                    // Ownership transfers to the SubstrateChange via AddIntentStage — do NOT dispose
+                    // here. `using var` disposed the stage when this iterator advanced to the next
+                    // batch while the prior change was still in the ingest channel (commit-lane
+                    // router calls IntentStage.Partition on a disposed handle → ObjectDisposedException).
+                    var stage = IntentStage.New(Math.Max(batchSize * 32, 4096));
                     long emitted = FeedBatch(sess, filePath, batchSize, fileCap, stage, probeFn, probeCtx,
                         acceptFn: null, acceptCtx: IntPtr.Zero, out int rc);
 
-                    if (rc < 0) yield break;
-                    if (emitted == 0 && rc == 0) break;
+                    if (rc < 0)
+                    {
+                        stage.Dispose();
+                        yield break;
+                    }
+                    if (emitted == 0 && rc == 0)
+                    {
+                        stage.Dispose();
+                        break;
+                    }
 
                     rowsReported += emitted;
                     reportUnits?.Invoke(rowsReported);
 
                     var b = new SubstrateChangeBuilder(src.SourceId, $"{batchLabelPrefix}/{bn++}", null,
                             entityCapacity: batchSize, physicalityCapacity: batchSize, attestationCapacity: batchSize * 4)
-                        .SetCommitEpoch(commitEpoch)
-                        .EnableDeferredContent(containmentReader);
+                        .SetCommitEpoch(commitEpoch);
                     b.AddIntentStage(stage);
                     yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct);
 
@@ -169,6 +187,14 @@ public static unsafe class NativeGrammarIngest
             foreach (var p in allocs) Marshal.FreeCoTaskMem(p);
         }
     }
+
+    /// <summary>
+    /// Lean triple sources (ConceptNet, Atomic2020) emit mostly novel term content; synchronous
+    /// exist probes on a warm DB stall the sole compose thread for no meaningful skip rate.
+    /// </summary>
+    internal static bool ShouldExistProbe(EtlSource src) =>
+        !string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal)
+        && !string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal);
 
     private static int ResolveWitnessKind(EtlSource src)
     {

@@ -55,7 +55,8 @@ public static class ChessGraph
     public static void AppendMoveEdge(
         SubstrateChangeBuilder b, string fromKey, string toKey, PlyOutcome outcome,
         long games, double witnessWeight,
-        Hash128? sourceId = null, Hash128? moverPlayerId = null, long moveChoiceGames = 0)
+        Hash128? sourceId = null, Hash128? moverPlayerId = null, long moveChoiceGames = 0,
+        Hash128? contextId = null)
     {
         var src = sourceId ?? ChessVocabulary.SourceId;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
@@ -67,10 +68,11 @@ public static class ChessGraph
         var to   = EmitNodes(b, toKey,   nowUs, src);
 
         // OUTCOME — position quality, credited to the side to move at `from`, weighted by `games`
-        // (defender-based: beating/holding a strong defender is stronger evidence).
+        // (defender-based: beating/holding a strong defender is stronger evidence). contextId ties each
+        // witness to the GAME it came from (the conventional tier), without a per-ply edge.
         foreach (var s in from.Substructures)
-            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, src));
-        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, src));
+            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, src, contextId));
+        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, src, contextId));
 
         // MOVE — the exact-case from→to edge. The CHOICE is the mover's, so it carries the mover-authority
         // observation count, not the defender's (a 2800's e4 here teaches more than a 1200's).
@@ -80,7 +82,7 @@ public static class ChessGraph
             typeId: ChessVocabulary.MoveType,
             obj: to.Position.Id,
             sourceId: src,
-            contextId: null,
+            contextId: contextId,
             games: moveChoiceGames,
             sumScoreFp1e9: moveSum,
             witnessWeight: witnessWeight));
@@ -88,7 +90,7 @@ public static class ChessGraph
         // PLAYED_BY — attribute the move to its named mover, when present (openings/self-play have none).
         if (moverPlayerId is { } mover)
             b.AddAttestation(NativeAttestation.Categorical(
-                from.Position.Id, "PLAYED_BY", mover, src, null, witnessWeight));
+                from.Position.Id, "PLAYED_BY", mover, src, contextId, witnessWeight));
     }
 
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
@@ -118,13 +120,14 @@ public static class ChessGraph
             ObservedAtUnixUs:  nowUs));
     }
 
-    private static AttestationRow Outcome(Hash128 subject, long games, long sum, double witnessWeight, Hash128 src) =>
+    private static AttestationRow Outcome(
+        Hash128 subject, long games, long sum, double witnessWeight, Hash128 src, Hash128? contextId = null) =>
         NativeAttestation.Aggregated(
             subject: subject,
             typeId: ChessVocabulary.OutcomeType,
             obj: ChessVocabulary.OutcomeObject,
             sourceId: src,
-            contextId: null,
+            contextId: contextId,
             games: games,
             sumScoreFp1e9: sum,
             witnessWeight: witnessWeight);

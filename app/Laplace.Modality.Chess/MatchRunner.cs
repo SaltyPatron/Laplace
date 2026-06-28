@@ -73,9 +73,10 @@ public static class MatchRunner
     }
 
     // Returns 0 = White win, 1 = Black win, 2 = draw (terminal or adjudicated at the ply cap).
+    // When `record` is non-null, each chosen move is appended (for PGN export / loop closure).
     private static int PlayOne(
         ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies,
-        ChessState? start = null)
+        ChessState? start = null, List<ChessMove>? record = null)
     {
         var s = start ?? m.Initial();
         for (int ply = 0; ; ply++)
@@ -84,7 +85,9 @@ public static class MatchRunner
             if (ply >= maxPlies) return 2;
             MoveChooser chooser = ply < openingPlies ? RandomChooser
                                 : s.Board.WhiteToMove ? white : black;
-            s = m.Apply(s, chooser(s, rng));
+            var mv = chooser(s, rng);
+            record?.Add(mv);
+            s = m.Apply(s, mv);
         }
     }
 
@@ -127,7 +130,8 @@ public static class MatchRunner
     public static MatchResult Play(
         Func<MoveChooser> makeA, Func<MoveChooser> makeB, int games,
         int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,
-        IReadOnlyList<string>? openingFens = null)
+        IReadOnlyList<string>? openingFens = null,
+        System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null)
     {
         bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0;
@@ -141,8 +145,10 @@ public static class MatchRunner
             // Pair consecutive games on the same book line (g/2), so both engines play each opening from
             // both sides — removes opening colour bias from the measured Elo.
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
+            var record = pgnSink is not null ? new List<ChessMove>() : null;
             int outcome = PlayOne(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
-                                  book ? 0 : openingPlies, start);
+                                  book ? 0 : openingPlies, start, record);
+            if (record is not null) pgnSink!.Add((record, outcome, start.Board.ToFen()));
             if (outcome == 2) Interlocked.Increment(ref draws);
             else if ((outcome == 0) == aWhite) Interlocked.Increment(ref aWins);
             else Interlocked.Increment(ref bWins);

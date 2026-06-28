@@ -70,11 +70,15 @@ rem UD: parallel treebank files (ResolveFileWorkers, headroom=4) + separate comm
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
 if /i "%STEP%"=="conceptnet" (
-  rem ConceptNet: single assertions.csv; file workers irrelevant. Commit pool sized for GiST I/O.
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
-  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
-  if not defined LAPLACE_INGEST_COMPOSE_WORKERS set "LAPLACE_INGEST_COMPOSE_WORKERS=4"
-  if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
+  rem ConceptNet: one assertions.csv — parallel COMPOSE workers + commit lanes (not native single-thread).
+  set "LAPLACE_INGEST_COMMIT_ROWS=500000"
+  set "LAPLACE_INGEST_BATCH=16384"
+  set "LAPLACE_INGEST_COMPOSE_WORKERS=8"
+  set "LAPLACE_INGEST_WORKERS=8"
+  set "LAPLACE_COMMIT_LANES=8"
+  rem Lanes already id-partition; writer must not re-split (double partition = idle cores + wrong progress).
+  set "LAPLACE_APPLY_PARTITIONS=1"
+  echo ConceptNet parallelism: compose=!LAPLACE_INGEST_COMPOSE_WORKERS! commit_lanes=!LAPLACE_COMMIT_LANES! batch=!LAPLACE_INGEST_BATCH!
 )
 if /i "%STEP%"=="ud" (
   call :probe_file_workers 4
@@ -139,6 +143,11 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_impl
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+if not errorlevel 1 (
+  echo ERROR: Laplace.Cli.exe is already running — wait for it to finish or stop it before seed-step %STEP%
+  exit /b 2
+)
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %STEP% %EXTRA%
 exit /b %ERRORLEVEL%

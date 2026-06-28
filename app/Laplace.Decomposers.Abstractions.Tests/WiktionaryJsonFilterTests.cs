@@ -6,6 +6,17 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 public sealed class WiktionaryJsonFilterTests
 {
+    private static string IsoDir =>
+        Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d ? d
+        : OperatingSystem.IsWindows() ? @"D:\Data\Ingest\ISO639" : "/vault/Data/ISO639";
+
+    private static void EnsureLanguageReference()
+    {
+        if (!File.Exists(Path.Combine(IsoDir, "iso-639-3.tab")))
+            throw new InvalidOperationException($"ISO639 data not found at {IsoDir}");
+        LanguageReference.Load(IsoDir);
+    }
+
     // Mirrors the real raw-wiktextract-data.jsonl key order: "translations" (whose
     // elements carry their own nested lang/lang_code for the TARGET language) is
     // serialized well before the row's own top-level "lang"/"lang_code" fields.
@@ -16,7 +27,7 @@ public sealed class WiktionaryJsonFilterTests
     [Fact]
     public void MatchesLanguageFilter_UsesRowsOwnTopLevelLangCode_NotEarlierNestedTranslationLang()
     {
-        LanguageReference.EnsureLoaded();
+        EnsureLanguageReference();
         byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(RowWithNestedTranslationLangFirst.Trim());
 
         var frFilter = LanguageFilter.FromSpec("fr");
@@ -37,7 +48,7 @@ public sealed class WiktionaryJsonFilterTests
         // Sanity check on the inverse: filtering for "abq" (the nested translation
         // language) must NOT match this row, because the row's own language is fr.
         // Pre-fix, the depth-unaware scan would have matched on the nested token.
-        LanguageReference.EnsureLoaded();
+        EnsureLanguageReference();
         byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(RowWithNestedTranslationLangFirst.Trim());
 
         var abqFilter = LanguageFilter.FromSpec("abq");
