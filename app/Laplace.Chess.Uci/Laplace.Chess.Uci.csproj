@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Laplace.Chess.Uci</RootNamespace>
+    <AssemblyName>laplace-uci</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pure chess engine only — no DB/native, so cutechess can spawn many fast-starting instances. -->
+    <ProjectReference Include="..\Laplace.Modality.Chess\Laplace.Modality.Chess.csproj" />
+  </ItemGroup>
+
+</Project>

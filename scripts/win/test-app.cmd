@@ -34,6 +34,9 @@ for %%P in (
   Laplace.Decomposers.PropBank.Tests
   Laplace.Decomposers.OpenSubtitles.Tests
   Laplace.Endpoints.OpenAICompat.Tests
+  Laplace.Modality.Chess.Tests
+  Laplace.Chess.Service.Tests
+  Laplace.Chess.Uci.Tests
 ) do (
   set "RUNIT=1"
   if defined FILTER (

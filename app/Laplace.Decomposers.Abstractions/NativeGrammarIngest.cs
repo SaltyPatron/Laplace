@@ -100,50 +100,63 @@ public static unsafe class NativeGrammarIngest
 
     private static unsafe IntPtr OpenSession(EtlSource src, Hash128? contextId)
     {
-        NativeInterop.EtlEdgeRuleNative[]? edgeArray = null;
         int witnessKind = ResolveWitnessKind(src);
-
-        if (witnessKind == NativeInterop.EtlWitnessFieldEdges)
+        // The structs are blittable now (IntPtr, not [MarshalAs] string), so WE marshal the UTF8. Native
+        // strdups both modality_id and each relation_surface (etl_ingest.c session_open), so free these
+        // right after session_open returns.
+        var allocs = new List<IntPtr>();
+        try
         {
-            edgeArray = new NativeInterop.EtlEdgeRuleNative[src.NodeEdgeMap.Count];
-            for (int i = 0; i < src.NodeEdgeMap.Count; i++)
+            NativeInterop.EtlEdgeRuleNative[]? edgeArray = null;
+            if (witnessKind == NativeInterop.EtlWitnessFieldEdges)
             {
-                var r = src.NodeEdgeMap[i];
-                edgeArray[i] = new NativeInterop.EtlEdgeRuleNative
+                edgeArray = new NativeInterop.EtlEdgeRuleNative[src.NodeEdgeMap.Count];
+                for (int i = 0; i < src.NodeEdgeMap.Count; i++)
                 {
-                    SubjectField = (ushort)r.SubjectField,
-                    ObjectField = (ushort)r.ObjectField,
-                    SubjectKind = (byte)(r.SubjectKind == EdgeRoleKind.Content ? 0 : 1),
-                    ObjectKind = (byte)(r.ObjectKind == EdgeRoleKind.Content ? 0 : 1),
-                    RelationSurface = r.RelationType,
-                };
+                    var r = src.NodeEdgeMap[i];
+                    IntPtr rel = Marshal.StringToCoTaskMemUTF8(r.RelationType);
+                    allocs.Add(rel);
+                    edgeArray[i] = new NativeInterop.EtlEdgeRuleNative
+                    {
+                        SubjectField = (ushort)r.SubjectField,
+                        ObjectField = (ushort)r.ObjectField,
+                        SubjectKind = (byte)(r.SubjectKind == EdgeRoleKind.Content ? 0 : 1),
+                        ObjectKind = (byte)(r.ObjectKind == EdgeRoleKind.Content ? 0 : 1),
+                        RelationSurface = rel,
+                    };
+                }
             }
-        }
 
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        IntPtr sess = IntPtr.Zero;
+            long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            IntPtr modalityId = Marshal.StringToCoTaskMemUTF8(src.Modality.GrammarId);
+            allocs.Add(modalityId);
+            IntPtr sess = IntPtr.Zero;
 
-        fixed (NativeInterop.EtlEdgeRuleNative* pRules = edgeArray)
-        {
-            var cfg = new NativeInterop.EtlConfigNative
+            fixed (NativeInterop.EtlEdgeRuleNative* pRules = edgeArray)
             {
-                ModalityId = src.Modality.GrammarId,
-                SourceId = src.SourceId,
-                TypeMetaId = BootstrapIntentBuilder.TypeMetaTypeId,
-                WitnessWeight = 1.0,
-                TrustWeight = src.Trust,
-                NowUnixUs = nowUs,
-                WitnessKind = witnessKind,
-                EdgeRules = edgeArray is null ? IntPtr.Zero : (IntPtr)pRules,
-                EdgeRuleCount = (nuint)(edgeArray?.Length ?? 0),
-                ContextId = contextId ?? default,
-                ContextIsNull = (byte)(contextId is null ? 1 : 0),
-                SkipCommentRows = (byte)(src.AcceptCommentRows ? 0 : 1),
-            };
-            NativeInterop.EtlSessionOpen(&cfg, &sess);
+                var cfg = new NativeInterop.EtlConfigNative
+                {
+                    ModalityId = modalityId,
+                    SourceId = src.SourceId,
+                    TypeMetaId = BootstrapIntentBuilder.TypeMetaTypeId,
+                    WitnessWeight = 1.0,
+                    TrustWeight = src.Trust,
+                    NowUnixUs = nowUs,
+                    WitnessKind = witnessKind,
+                    EdgeRules = edgeArray is null ? IntPtr.Zero : (IntPtr)pRules,
+                    EdgeRuleCount = (nuint)(edgeArray?.Length ?? 0),
+                    ContextId = contextId ?? default,
+                    ContextIsNull = (byte)(contextId is null ? 1 : 0),
+                    SkipCommentRows = (byte)(src.AcceptCommentRows ? 0 : 1),
+                };
+                NativeInterop.EtlSessionOpen(&cfg, &sess);
+            }
+            return sess;
         }
-
-        return sess;
+        finally
+        {
+            foreach (var p in allocs) Marshal.FreeCoTaskMem(p);
+        }
     }
 
     private static int ResolveWitnessKind(EtlSource src)

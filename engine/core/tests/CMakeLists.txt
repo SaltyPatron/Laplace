@@ -24,6 +24,8 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_grammar_compose.cpp
     test_grammar_tags.cpp
     test_relation_law.cpp
+    test_etl_ingest.cpp
+    test_etl_anchor.cpp
 )
 
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
@@ -55,4 +57,19 @@ if(WIN32)
                 "${_LAPLACE_LIBXML2_DLL}"
                 $<TARGET_FILE_DIR:laplace_core_tests>
         COMMENT "Copy laplace_core.dll + libxml2.dll beside laplace_core_tests.exe")
+
+    # icx -fsanitize=address links INTEL's asan runtime, but MSVC ships a same-named
+    # clang_rt.asan_dynamic-x86_64.dll that shadows it on PATH and breaks the loader with
+    # STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139). Copy Intel's beside the exe (app-dir wins over PATH).
+    if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address" OR CMAKE_C_FLAGS MATCHES "fsanitize=address")
+        get_filename_component(_ICX_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        file(GLOB _INTEL_ASAN_RT "${_ICX_BIN}/../lib/clang/*/lib/windows/clang_rt.asan_dynamic-x86_64.dll")
+        if(_INTEL_ASAN_RT)
+            list(GET _INTEL_ASAN_RT 0 _INTEL_ASAN_RT0)
+            add_custom_command(TARGET laplace_core_tests POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_INTEL_ASAN_RT0}" $<TARGET_FILE_DIR:laplace_core_tests>
+                COMMENT "Copy Intel asan runtime beside laplace_core_tests.exe (avoid MSVC asan shadowing)")
+        endif()
+    endif()
 endif()

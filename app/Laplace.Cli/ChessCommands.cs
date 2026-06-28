@@ -1,4 +1,6 @@
+using global::Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Modality.Chess;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -19,6 +21,7 @@ internal static class ChessCommands
             "selfplay" => await SelfPlayAsync(args[1..]),
             "move"     => await MoveAsync(args[1..]),
             "fetch"    => await FetchAsync(args[1..]),
+            "substrate-test" => await SubstrateTestAsync(args[1..]),
             _          => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
@@ -27,7 +30,40 @@ internal static class ChessCommands
         "usage: laplace chess <selfplay|move|fetch>\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
-        + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)";
+        + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"
+        + "  substrate-test [--games N] [--depth D] [--cp-per-point X] [--cap C]   (guided-vs-pure: the 34.5M-game graph's Elo lift)";
+
+    /// <summary>The real test: pit a search whose root is biased by the substrate's learned MOVE eff_mu
+    /// against the identical pure-classical search, and measure the Elo difference — i.e. how much the
+    /// 34.5M-relation game graph adds to the classical floor. Both play the SAME depth; only the root
+    /// prior differs.</summary>
+    private static async Task<int> SubstrateTestAsync(string[] args)
+    {
+        int games = ArgInt(args, "--games", 30);
+        int depth = ArgInt(args, "--depth", 4);
+        int maxPlies = ArgInt(args, "--max-plies", 160);
+        double cpPerPoint = ArgDouble(args, "--cp-per-point", 8.0);
+        int cap = ArgInt(args, "--cap", 150);
+        int concurrency = ArgInt(args, "--concurrency", 16); // 14900KS: 8P+16E — tune vs other load
+
+        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        var bias = new SubstrateRootBias(ds, cpPerPoint, cap);
+        var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias);
+        var pure   = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null);
+
+        Console.WriteLine($"substrate-test: guided (substrate root prior, {cpPerPoint}cp/pt, cap {cap}) vs pure classical");
+        Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, db={Redact(ChessEngineService.ResolveConnString())}");
+        var r = MatchRunner.Play(guided, pure, games, maxPlies, seed: 99, concurrency: concurrency);
+        string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
+        Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
+        Console.WriteLine(r.EloDiff > 5
+            ? "  => the 34.5M-game substrate measurably raises the classical floor."
+            : "  => no clear lift at this depth/scale — try more games, deeper, or a larger --cp-per-point.");
+        return 0;
+    }
+
+    private static string Redact(string conn) =>
+        System.Text.RegularExpressions.Regex.Replace(conn, "(?i)password=[^;]*", "password=***");
 
     private static async Task<int> SelfPlayAsync(string[] args)
     {

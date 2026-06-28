@@ -88,7 +88,10 @@ TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
     hash128_t depends_on = type_id("DEPENDS_ON");
     EXPECT_TRUE(hash128_equals(&dep_nsubj, &tid));
     EXPECT_TRUE(hash128_equals(&depends_on, &parent_id));
-    EXPECT_DOUBLE_EQ(0.73, rank);
+    // Deprels sit at the grammatical-glue floor: relation_types.toml [dynamic.deprel] rank =
+    // "lexical_glue" (0.18). (Was 0.73/partitive before the salience recalibration; the parent
+    // DEPENDS_ON keeps partitive, checked by id above — the deprel's OWN rank is lexical_glue.)
+    EXPECT_DOUBLE_EQ(0.18, rank);
     EXPECT_EQ(0, flip);
 
     ASSERT_EQ(0, laplace_relation_resolve_deprel(
@@ -228,4 +231,65 @@ TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
     ASSERT_EQ(0, laplace_attestation_aggregated_batch_build(
         flipped, 2, &sym, &src, NULL, 1, 0.7, 12345, symed));
     EXPECT_TRUE(hash128_equals(&symed[0].id, &symed[1].id));
+}
+
+// ── Reverse-index (laplace_relation_lookup) ──────────────────────────────────────────────────
+// The O(1) open-addressing bucket replaced the O(n) linear scan. These prove it is a faithful
+// drop-in: every canonical relation resolves back to its own def, misses are rejected, and the
+// def fields it returns are intact. (Isolate + prove, before the chain test below.)
+
+TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
+    // Enumerate via the exported manifest functions (the data table itself is not dll-exported).
+    size_t n = laplace_relation_manifest_count();
+    ASSERT_GT(n, 0u);
+    for (size_t i = 0; i < n; ++i) {
+        const char* name = laplace_relation_manifest_canonical(i);
+        ASSERT_NE(nullptr, name);
+        hash128_t tid = type_id(name);
+        const laplace_relation_def_t* def = nullptr;
+        ASSERT_EQ(0, laplace_relation_lookup(&tid, &def)) << "miss for " << name;
+        ASSERT_NE(nullptr, def);
+        // The bucket may land on a different probe slot, but the returned def MUST be the one whose
+        // id actually equals the query — i.e. its canonical name round-trips.
+        EXPECT_STREQ(name, def->canonical) << "wrong def for " << name;
+    }
+}
+
+TEST(LaplaceRelationLaw, ReverseLookupMissReturnsError) {
+    hash128_t bogus = type_id("NOT_A_REAL_RELATION_ZZZ");
+    const laplace_relation_def_t* def = reinterpret_cast<const laplace_relation_def_t*>(0x1);
+    EXPECT_EQ(-1, laplace_relation_lookup(&bogus, &def));
+}
+
+TEST(LaplaceRelationLaw, ReverseLookupRejectsNullArgs) {
+    const laplace_relation_def_t* def = nullptr;
+    hash128_t tid = type_id("IS_A");
+    EXPECT_EQ(-1, laplace_relation_lookup(nullptr, &def));
+    EXPECT_EQ(-1, laplace_relation_lookup(&tid, nullptr));
+}
+
+TEST(LaplaceRelationLaw, ReverseLookupCarriesDefFields) {
+    hash128_t isa = type_id("IS_A");
+    const laplace_relation_def_t* def = nullptr;
+    ASSERT_EQ(0, laplace_relation_lookup(&isa, &def));
+    ASSERT_NE(nullptr, def);
+    EXPECT_DOUBLE_EQ(0.9, def->rank);                              // taxonomic
+    EXPECT_EQ(LAPLACE_REL_SYMMETRY_ASYMMETRIC, def->symmetry);
+}
+
+// Chain: the resolved-attestation path orients subject/object by fetching the relation's symmetry
+// through laplace_relation_lookup. A symmetric relation must canonicalize (a,b) and (b,a) to the
+// same staged id — proving the bucket lookup feeds attestation_orient_resolved correctly.
+TEST(LaplaceAttestationEngine, ResolvedSymmetricOrientsViaLookup) {
+    hash128_t sym = type_id("IS_SYNONYM_OF");                      // symmetric in the manifest
+    hash128_t src = hash_path("src");
+    hash128_t a = hash_path("e/a"), b = hash_path("e/b");
+    laplace_attestation_staged_t ab, ba;
+    ASSERT_EQ(0, laplace_attestation_resolved_build(
+        &a, &sym, &b, 0, &src, NULL, 1, 0.7, 1, 1, 0, &ab));
+    ASSERT_EQ(0, laplace_attestation_resolved_build(
+        &b, &sym, &a, 0, &src, NULL, 1, 0.7, 1, 1, 0, &ba));
+    EXPECT_TRUE(hash128_equals(&ab.id, &ba.id));
+    EXPECT_TRUE(hash128_equals(&ab.subject_id, &ba.subject_id));
+    EXPECT_TRUE(hash128_equals(&ab.object_id, &ba.object_id));
 }

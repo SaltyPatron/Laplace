@@ -45,51 +45,69 @@ public static class ChessGraph
     /// Encoding trust in the game-count (a master/confirmed-mate game = more observations) gives the same
     /// up-weighting with a constant φ.
     /// </summary>
+    /// <param name="sourceId">Provenance of this evidence (PGN corpus / self-play / openings / user). Null =
+    ///   the legacy shared <see cref="ChessVocabulary.SourceId"/>, so existing callers are unchanged.</param>
+    /// <param name="moverPlayerId">The named human mover, when known — emits a <c>PLAYED_BY</c> edge so the
+    ///   move-choice is attributed. Null for openings/self-play (no named mover).</param>
+    /// <param name="moveChoiceGames">Observation count for the MOVE edge, keyed on the MOVER's strength
+    ///   ("Magnus's choice outweighs a weak player's"). ≤0 ⇒ falls back to <paramref name="games"/>, the
+    ///   defender-weighted outcome count.</param>
     public static void AppendMoveEdge(
         SubstrateChangeBuilder b, string fromKey, string toKey, PlyOutcome outcome,
-        long games, double witnessWeight)
+        long games, double witnessWeight,
+        Hash128? sourceId = null, Hash128? moverPlayerId = null, long moveChoiceGames = 0)
     {
+        var src = sourceId ?? ChessVocabulary.SourceId;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         if (games < 1) games = 1;
-        long sum = checked(ScoreFp1e9(outcome) * games);   // `games` observations, all this result
+        if (moveChoiceGames < 1) moveChoiceGames = games;   // default: move-choice weight == outcome weight
+        long sum = checked(ScoreFp1e9(outcome) * games);    // `games` observations, all this result
 
-        var from = EmitNodes(b, fromKey, nowUs);
-        var to   = EmitNodes(b, toKey,   nowUs);
+        var from = EmitNodes(b, fromKey, nowUs, src);
+        var to   = EmitNodes(b, toKey,   nowUs, src);
 
-        // OUTCOME — credit the side to move at `from` (outcome already from that mover's perspective).
+        // OUTCOME — position quality, credited to the side to move at `from`, weighted by `games`
+        // (defender-based: beating/holding a strong defender is stronger evidence).
         foreach (var s in from.Substructures)
-            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight));
-        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight));
+            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, src));
+        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, src));
 
-        // MOVE — the exact-case edge from → to, scored by the same result.
+        // MOVE — the exact-case from→to edge. The CHOICE is the mover's, so it carries the mover-authority
+        // observation count, not the defender's (a 2800's e4 here teaches more than a 1200's).
+        long moveSum = checked(ScoreFp1e9(outcome) * moveChoiceGames);
         b.AddAttestation(NativeAttestation.Aggregated(
             subject: from.Position.Id,
             typeId: ChessVocabulary.MoveType,
             obj: to.Position.Id,
-            sourceId: ChessVocabulary.SourceId,
+            sourceId: src,
             contextId: null,
-            games: games,
-            sumScoreFp1e9: sum,
+            games: moveChoiceGames,
+            sumScoreFp1e9: moveSum,
             witnessWeight: witnessWeight));
+
+        // PLAYED_BY — attribute the move to its named mover, when present (openings/self-play have none).
+        if (moverPlayerId is { } mover)
+            b.AddAttestation(NativeAttestation.Categorical(
+                from.Position.Id, "PLAYED_BY", mover, src, null, witnessWeight));
     }
 
-    private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs)
+    private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);
-        foreach (var s in c.Substructures) AddNode(b, s, ChessVocabulary.SubstructureType, nowUs);
-        AddNode(b, c.Position, ChessVocabulary.PositionType, nowUs);
+        foreach (var s in c.Substructures) AddNode(b, s, ChessVocabulary.SubstructureType, nowUs, src);
+        AddNode(b, c.Position, ChessVocabulary.PositionType, nowUs, src);
         return c;
     }
 
-    private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs)
+    private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
-        b.AddEntity(n.Id, n.Tier, typeId, ChessVocabulary.SourceId);
+        b.AddEntity(n.Id, n.Tier, typeId, src);
         if (Environment.GetEnvironmentVariable("LAPLACE_CHESS_NOPHYS") == "1") return; // DIAGNOSTIC bisection
         bool noTraj = Environment.GetEnvironmentVariable("LAPLACE_CHESS_NOTRAJ") == "1"; // DIAGNOSTIC bisection
         b.AddPhysicality(new PhysicalityRow(
             Id:                n.PhysId,
             EntityId:          n.Id,
-            SourceId:          ChessVocabulary.SourceId,
+            SourceId:          src,
             Type:              PhysicalityType.Content,
             CoordX:            n.Coord[0], CoordY: n.Coord[1], CoordZ: n.Coord[2], CoordM: n.Coord[3],
             HilbertIndex:      n.Hb,
@@ -100,12 +118,12 @@ public static class ChessGraph
             ObservedAtUnixUs:  nowUs));
     }
 
-    private static AttestationRow Outcome(Hash128 subject, long games, long sum, double witnessWeight) =>
+    private static AttestationRow Outcome(Hash128 subject, long games, long sum, double witnessWeight, Hash128 src) =>
         NativeAttestation.Aggregated(
             subject: subject,
             typeId: ChessVocabulary.OutcomeType,
             obj: ChessVocabulary.OutcomeObject,
-            sourceId: ChessVocabulary.SourceId,
+            sourceId: src,
             contextId: null,
             games: games,
             sumScoreFp1e9: sum,

@@ -601,6 +601,10 @@ public static unsafe partial class NativeInterop
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public unsafe delegate int EtlAcceptRowFn(IntPtr ctx, byte* line, nuint len);
 
+    // BLITTABLE: the string fields are IntPtr (pinned/marshalled UTF8 supplied by the caller), NOT
+    // [MarshalAs] string. A managed (string) field makes the struct non-blittable, so the EtlSessionOpen
+    // &cfg / fixed(EdgeRules) path blits the MANAGED layout — a String object reference where native reads
+    // a char* — passing garbage. Native strdups both, so the caller frees its UTF8 after session_open.
     [StructLayout(LayoutKind.Sequential)]
     public struct EtlEdgeRuleNative
     {
@@ -608,15 +612,13 @@ public static unsafe partial class NativeInterop
         public ushort ObjectField;
         public byte SubjectKind;
         public byte ObjectKind;
-        [MarshalAs(UnmanagedType.LPUTF8Str)]
-        public string RelationSurface;
+        public IntPtr RelationSurface;   // UTF8, native strdups
     }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct EtlConfigNative
     {
-        [MarshalAs(UnmanagedType.LPUTF8Str)]
-        public string ModalityId;
+        public IntPtr ModalityId;        // UTF8, native strdups
         public Hash128 SourceId;
         public Hash128 TypeMetaId;
         public double WitnessWeight;

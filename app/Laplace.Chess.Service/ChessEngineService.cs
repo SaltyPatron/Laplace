@@ -98,12 +98,32 @@ public sealed class ChessEngineService : IAsyncDisposable
             var host = new SubstrateTurnHost(ds, writer, reader, _witnessWeight);
             var modality = new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
-            await ChessVocabulary.BootstrapAsync(writer, ct);
+            var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
+            await RegisterCanonicalsAsync(ds, canonicalNames, ct);
             _ds = ds; _writer = writer; _host = host; _modality = modality; _engine = engine;
             _log.LogInformation("chess engine initialized against {Conn}", Redact(_connString));
             return engine;
         }
         finally { _initGate.Release(); }
+    }
+
+    // The self-play host bypasses the IDecomposer ingest path, so it registers its declared type/relation
+    // names into canonical_names itself — otherwise its types (Chess_Position, …) aren't queryable by name
+    // and render only via the slow HAS_NAME_ALIAS traversal. Mirrors IngestCommands.RegisterDynamicCanonicalsAsync.
+    private static async Task RegisterCanonicalsAsync(
+        NpgsqlDataSource ds, IReadOnlyCollection<string> names, CancellationToken ct)
+    {
+        if (names.Count == 0) return;
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        {
+            ParameterName = "names",
+            Value = names.ToArray(),
+            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
+        });
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private static void LoadPerfcache()

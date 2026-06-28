@@ -925,3 +925,6 @@
 [submodule "external/tree-sitter-grammars/tree-sitter-tact"]
 	path = external/tree-sitter-grammars/tree-sitter-tact
 	url = https://github.com/tact-lang/tree-sitter-tact
+[submodule "external/cutechess"]
+	path = external/cutechess
+	url = https://github.com/cutechess/cutechess.git
