@@ -20,10 +20,14 @@ typedef int (*laplace_etl_accept_row_fn)(
     const uint8_t*   line,
     size_t           len);
 
+/* Edge-rule field kind: how the field's text becomes an entity id. */
+#define LAPLACE_ETL_ANCHOR_NONE       0  /* content-witness the span (tree-composed RootId) */
+#define LAPLACE_ETL_ANCHOR_ILI_SYNSET 1  /* resolve a WN synset key -> ILI anchor id via the session map */
+
 typedef struct {
     uint16_t subject_field;
     uint16_t object_field;
-    uint8_t  subject_kind; /* 0 = content, 1 = anchor (anchor not native yet) */
+    uint8_t  subject_kind; /* LAPLACE_ETL_ANCHOR_* */
     uint8_t  object_kind;
     const char* relation_surface;
 } laplace_etl_edge_rule_t;

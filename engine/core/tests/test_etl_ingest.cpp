@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,14 @@
 #include "laplace/core/intent_stage.h"
 
 namespace {
+
+static void set_cili_dir(const std::string& d) {
+#ifdef _WIN32
+    _putenv_s("LAPLACE_CILI_DIR", d.c_str());
+#else
+    setenv("LAPLACE_CILI_DIR", d.c_str(), 1);
+#endif
+}
 
 // A NON-NULL probe is the only requirement to make the ETL take the two-phase probe_pending /
 // collect_entity_ids path (the over-write site) instead of the direct drain. Reports "nothing exists".
@@ -72,6 +81,82 @@ TEST(EtlIngest, ProbePathSizesIdBufferExactly) {
     intent_stage_free(stage);
     std::error_code ec;
     std::filesystem::remove(path, ec);
+}
+
+// Feed one FIELD_EDGES row "<synset key>\tdog" with subject_kind = ILI_SYNSET, reading the ILI map from
+// LAPLACE_CILI_DIR (set to `cili_dir`). Returns the staged attestation count.
+static size_t feed_anchor_field_edge(const std::string& cili_dir) {
+    set_cili_dir(cili_dir);
+
+    const std::string row = "30-02244956-v\tdog\n";   // subject = WN synset key, object = content "dog"
+    const auto path = std::filesystem::temp_directory_path() / "laplace_etl_anchor_edge.tab";
+    {
+        std::ofstream f(path, std::ios::binary);
+        f << row;
+    }
+
+    laplace_etl_edge_rule_t rule;
+    std::memset(&rule, 0, sizeof(rule));
+    rule.subject_field = 0;
+    rule.object_field  = 1;
+    rule.subject_kind  = LAPLACE_ETL_ANCHOR_ILI_SYNSET;
+    rule.object_kind   = LAPLACE_ETL_ANCHOR_NONE;
+    rule.relation_surface = "SENSE_OF";
+
+    laplace_etl_config_t cfg;
+    std::memset(&cfg, 0, sizeof(cfg));
+    cfg.modality_id = "tsv";
+    hash128_blake3(reinterpret_cast<const uint8_t*>("etl/anchor"), 10, &cfg.source_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &cfg.type_meta_id);
+    cfg.witness_weight  = 1.0;
+    cfg.trust_weight    = 1.0;
+    cfg.context_is_null = 1;
+    cfg.witness_kind    = LAPLACE_ETL_WITNESS_FIELD_EDGES;
+    cfg.edge_rules      = &rule;
+    cfg.edge_rule_count = 1;
+
+    laplace_etl_session_t* sess = nullptr;
+    EXPECT_EQ(laplace_etl_session_open(&cfg, &sess), 0);
+    intent_stage_t* stage = intent_stage_new(1u << 16);
+
+    while (laplace_etl_session_feed_file(
+               sess, path.string().c_str(), 1u << 20, 0, stage,
+               nullptr, nullptr, nullptr, nullptr, nullptr) == 1) { /* drain */ }
+
+    size_t count = intent_stage_attestation_count(stage);
+
+    laplace_etl_session_close(sess);
+    intent_stage_free(stage);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return count;
+}
+
+// The native field-edge witness resolves an ILI-synset anchor field through the session map and emits the
+// edge ONLY when it resolves — the wiring that replaced the old "anchors not native" skip. Same row text
+// both runs (identical compose), so the only thing that can differ is the field-edge witness output:
+// with the map present the anchor resolves and the SENSE_OF edge is staged; without it the edge drops.
+TEST(EtlIngest, FieldEdgeAnchorResolvesViaSessionMap) {
+    const auto base = std::filesystem::temp_directory_path();
+    const auto map_dir   = base / "laplace_etl_anchor_map";
+    const auto empty_dir = base / "laplace_etl_anchor_nomap";
+    std::filesystem::create_directories(map_dir);
+    std::filesystem::create_directories(empty_dir);
+    {
+        std::ofstream f(map_dir / "ili-map-pwn30.tab", std::ios::binary);
+        f << "i23456\t02244956-v\n";   // resolves 30-02244956-v -> i23456
+    }
+
+    size_t resolved   = feed_anchor_field_edge(map_dir.string());
+    size_t unresolved = feed_anchor_field_edge(empty_dir.string());
+
+    EXPECT_GT(resolved, unresolved)
+        << "the ILI-synset anchor edge must be staged only when the session map resolves the key";
+
+    set_cili_dir("");  // don't leak the env into other tests
+    std::error_code ec;
+    std::filesystem::remove_all(map_dir, ec);
+    std::filesystem::remove_all(empty_dir, ec);
 }
 
 }  // namespace
