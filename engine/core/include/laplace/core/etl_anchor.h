@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "laplace/core/hash128.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,6 +50,16 @@ const char* lp_ili_map_resolve(const lp_ili_map_t* map, int64_t offset, char ss)
 size_t lp_ili_map_count(const lp_ili_map_t* map);
 
 void lp_ili_map_free(lp_ili_map_t* map);
+
+/*
+ * Resolve a WordNet synset reference to a content-addressed anchor id, mirroring C#
+ * SourceEntityIdConventions.ResolveSynsetAnchor -> ConceptAnchor.SynsetId: trims, rejects NULL, strips
+ * everything up to the last '/', parses the MCR then MapNet form, maps (offset, ss_type) -> "iN" via
+ * `map`, and hashes "iN" with laplace_content_root_id (the tree-composed RootId). Writes *out_id and
+ * returns 1 on success; returns 0 if the key doesn't parse or the offset isn't in the map.
+ * (Sense-key fallback / language path land in later increments.)
+ */
+int lp_resolve_synset_anchor(const lp_ili_map_t* map, const char* raw, size_t n, hash128_t* out_id);
 
 #ifdef __cplusplus
 }

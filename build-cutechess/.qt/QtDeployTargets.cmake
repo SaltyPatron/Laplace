@@ -1,8 +1,0 @@
-set(__QT_DEPLOY_TARGET_lib_FILE D:/Repositories/Laplace/build-cutechess/cutechess.lib)
-set(__QT_DEPLOY_TARGET_lib_TYPE STATIC_LIBRARY)
-set(__QT_DEPLOY_TARGET_cli_FILE D:/Repositories/Laplace/build-cutechess/cutechess-cli.exe)
-set(__QT_DEPLOY_TARGET_cli_TYPE EXECUTABLE)
-set(__QT_DEPLOY_TARGET_cli_RUNTIME_DLLS D:/Qt/6.8.3/msvc2022_64/bin/Qt6Core5Compat.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Core.dll)
-set(__QT_DEPLOY_TARGET_gui_FILE D:/Repositories/Laplace/build-cutechess/cutechess.exe)
-set(__QT_DEPLOY_TARGET_gui_TYPE EXECUTABLE)
-set(__QT_DEPLOY_TARGET_gui_RUNTIME_DLLS D:/Qt/6.8.3/msvc2022_64/bin/Qt6Concurrent.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Svg.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6PrintSupport.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Widgets.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Gui.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Core5Compat.dll;D:/Qt/6.8.3/msvc2022_64/bin/Qt6Core.dll)

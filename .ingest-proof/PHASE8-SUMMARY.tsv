@@ -1,5 +1,0 @@
-source	exit	elapsed_s	peak_rss_gb	readback
-unicode	0	132.4	1.77	check U+0041 'A':
-iso639	0	5.7	0.21	check languages: 184 ISO code attestations
-atomic2020	0	307.5	2.38	check atomic: CAUSES=376 X_WANT=134,243
-wordnet	0	149.6	1.44	check wordnet/dog: id_ok=True senses=8 IS_A=89,124 HAS_SENSE=202,359

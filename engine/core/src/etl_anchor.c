@@ -1,4 +1,5 @@
 #include "laplace/core/etl_anchor.h"
+#include "laplace/core/content_witness_batch.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -227,4 +228,24 @@ void lp_ili_map_free(lp_ili_map_t* m) {
     for (size_t i = 0; i < m->n; ++i) free(m->e[i].ili);
     free(m->e);
     free(m);
+}
+
+int lp_resolve_synset_anchor(const lp_ili_map_t* map, const char* raw, size_t n, hash128_t* out_id) {
+    if (!map || !raw || !out_id) return 0;
+    trim(&raw, &n);
+    if (n == 0 || is_null_token(raw, n)) return 0;
+
+    /* WN-RDF tail: strip everything up to and including the last '/'. */
+    size_t slash = last_index_of(raw, n, '/');
+    if (slash != (size_t)-1 && slash + 1 < n) { raw += slash + 1; n -= slash + 1; }
+
+    int64_t offset;
+    char ss;
+    if (!lp_parse_mcr_synset(raw, n, &offset, &ss) && !lp_parse_mapnet_synset(raw, n, &offset, &ss))
+        return 0;
+
+    const char* ili = lp_ili_map_resolve(map, offset, ss);
+    if (!ili) return 0;
+
+    return laplace_content_root_id((const uint8_t*)ili, strlen(ili), out_id) == 0 ? 1 : 0;
 }
