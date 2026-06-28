@@ -30,7 +30,11 @@ static const char *EDGE_QUERY =
     /* never walk into a typing edge (entity -IS_A- its type) — those aren't content steps */
     "  AND NOT EXISTS (SELECT 1 FROM laplace.canonical_names n "
     "                  WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%') "
-    "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC "
+    /* Track D1: weight edge selection by relation SALIENCE × strength, not raw eff_mu — the same law
+       top_relations/completions use. A high-rank taxonomic/sequential edge (IS_A, PRECEDES) should win
+       over a high-strength scaffolding edge (HAS_POS, ATTENDS) of equal eff_mu, so the walk follows
+       meaning rather than recall. */
+    "ORDER BY laplace.relation_rank_resolved(c.type_id) * laplace.eff_mu(c.rating, c.rd) DESC "
     "LIMIT $3";
 
 static SPIPlanPtr edge_plan = NULL;

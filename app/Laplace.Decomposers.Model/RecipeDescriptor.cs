@@ -4,7 +4,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
-// The read-side, architecture-agnostic descriptor parsed from a build-a-bear recipe
+// The read-side, architecture-agnostic descriptor parsed from a Mold-A-Model recipe
 // (docs/invention/recipe-schema.md). Export fetches the recipe_json from laplace.model_recipes()
 // and parses it into this typed form, which drives the generic tensor manifest + per-head operator
 // materialize. This replaces the hardcoded ArchitectureProfile classes on the synthesis path.

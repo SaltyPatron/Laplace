@@ -3,6 +3,11 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
+rem The substrate SQL pulls in sql/generated/21_seed_*.sql.in (codegen output, not committed).
+rem Regenerate it before configure so the file(GLOB sql/generated/*.sql.in) sees it. Mirrors
+rem rebuild-all phase 2; harmless/idempotent when run via rebuild-all (which already codegens).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LAPLACE_ROOT%\scripts\codegen-attestation-law.ps1" || exit /b 1
+
 set "RECONF=0"
 set "CLEAN_FIRST=0"
 set "TARGETS="

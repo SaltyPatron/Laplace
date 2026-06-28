@@ -6,7 +6,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// Generic, architecture-agnostic recipe deposit (the "build-a-bear" spec — see
+// Generic, architecture-agnostic recipe deposit (the "Mold-A-Model" spec — see
 // docs/invention/recipe-schema.md). Unlike LlamaRecipeExtractor (hardcoded HF config keys), this
 // parses a laplace.recipe document, content-addresses it (recipeId = Blake3(canonical JSON)), and
 // deposits a Model_Recipe entity. The full operator array lives in the canonical JSON (returned by

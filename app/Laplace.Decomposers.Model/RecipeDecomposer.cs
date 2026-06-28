@@ -6,12 +6,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// Ingests a single build-a-bear recipe JSON (the simulated UI POST — see docs/invention/recipe-schema.md)
+// Ingests a single Mold-A-Model recipe JSON (the simulated UI POST — see docs/invention/recipe-schema.md)
 // into the substrate as a content-addressed Model_Recipe entity, so export can fetch it via
 // laplace.model_recipes() / --recipe-from. The recipe is stored content, never read from disk at export.
 public sealed class RecipeDecomposer : IDecomposer
 {
-    // A recipe is a user-curated build-a-bear artifact (composed in the UI). Must be a
+    // A recipe is a user-curated Mold-A-Model artifact (composed in the UI). Must be a
     // pre-registered trust class (see extension bootstrap) or referential integrity rejects it.
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");

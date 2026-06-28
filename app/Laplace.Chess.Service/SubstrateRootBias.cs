@@ -22,11 +22,6 @@ public sealed class SubstrateRootBias : IRootBias
 {
     private const double ShrinkK0 = 15_000d;
 
-    // ChessCompose's native merkle+centroid primitive is NOT thread-safe (shared native buffers — the known
-    // "native heap race"). Serialize the per-root compose across parallel match threads; the alpha-beta
-    // search itself is pure C# and still runs fully in parallel, so only this brief step is serialized.
-    private static readonly object NativeCompose = new();
-
     private readonly NpgsqlDataSource _ds;
     private readonly ChessModality _modality = new();
     private readonly double _cpPerPoint;  // centipawns per Glicko rating-point of deviation from neutral
@@ -47,7 +42,7 @@ public sealed class SubstrateRootBias : IRootBias
         // Content-address the root and each successor → the MOVE edge ids (pure compute, perfcache-backed).
         var state = _modality.FromFen(root.ToFen());
         var edgeIds = new Hash128[moves.Count];
-        lock (NativeCompose)
+        lock (ChessCompose.Gate)
         {
             var rootId = ChessCompose.PositionId(_modality.StateKey(state));
             for (int i = 0; i < moves.Count; i++)

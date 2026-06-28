@@ -1430,7 +1430,7 @@ internal static class FoundryExport
 
     // Per-head fill: head `headIdx` occupies rows [headIdx*headDim, (headIdx+1)*headDim) and is
     // filled from ITS OWN operator factor — one distinct attestation-type/metric operator per head
-    // (build-a-bear), not top-k of one mashed operator tiled across every head.
+    // (Mold-A-Model), not top-k of one mashed operator tiled across every head.
     internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
     {
         int baseRow = headIdx * headDim;
