@@ -90,3 +90,66 @@ public sealed class AnchorResolverParityTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort temp cleanup */ }
     }
 }
+
+/// <summary>
+/// Parity oracle for the sense and category native resolvers (no ILI map needed — pure normalize + hash).
+/// lp_resolve_sense_anchor must equal SenseAnchor.Id and lp_resolve_category_anchor must equal
+/// CategoryAnchor.Id, bit-identically, so a native bespoke witness can reference the exact same anchors.
+/// </summary>
+[Trait("Tier", "fast")]
+[Collection("GrammarPerfcache")]
+public sealed class SenseCategoryAnchorParityTests
+{
+    private const string Lib = "laplace_core";
+
+    [DllImport(Lib, EntryPoint = "lp_resolve_sense_anchor")]
+    private static extern int LpResolveSenseAnchor(byte[] raw, nuint n, out Hash128 outId);
+
+    [DllImport(Lib, EntryPoint = "lp_resolve_category_anchor")]
+    private static extern int LpResolveCategoryAnchor(byte[] raw, nuint n, out Hash128 outId);
+
+    [Theory]
+    [InlineData("give%2:40:00::")]    // trailing fields dropped -> give%2:40:00
+    [InlineData("hot_dog%1:13:00::")] // lemma '_' -> ' '
+    [InlineData("?!give%2:40:00::")]  // leading ?/! stripped
+    [InlineData("  cat%1:05:00::  ")] // outer whitespace trimmed
+    [InlineData("nokey")]             // no '%' -> null
+    [InlineData("%2:40:00")]          // '%' first -> null
+    [InlineData("give%2:40")]         // < 3 fields -> null
+    [InlineData("")]
+    public void NativeSenseResolver_MatchesCSharp(string key)
+    {
+        Hash128? expected = SenseAnchor.Id(key);
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        int rc = LpResolveSenseAnchor(raw, (nuint)raw.Length, out Hash128 got);
+        AssertParity(expected, rc, got);
+    }
+
+    [Theory]
+    [InlineData("Motion")]
+    [InlineData("  Cooking  ")]          // trimmed
+    [InlineData("Apply_heat/cook.v")]    // FrameNet LU key — underscores/slash kept verbatim
+    [InlineData("Causation")]
+    [InlineData("")]
+    [InlineData("   ")]                  // whitespace only -> null
+    public void NativeCategoryResolver_MatchesCSharp(string key)
+    {
+        Hash128? expected = CategoryAnchor.Id(key);
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        int rc = LpResolveCategoryAnchor(raw, (nuint)raw.Length, out Hash128 got);
+        AssertParity(expected, rc, got);
+    }
+
+    private static void AssertParity(Hash128? expected, int rc, Hash128 got)
+    {
+        if (expected is null)
+        {
+            Assert.Equal(0, rc);
+        }
+        else
+        {
+            Assert.Equal(1, rc);
+            Assert.Equal(expected.Value, got);
+        }
+    }
+}
