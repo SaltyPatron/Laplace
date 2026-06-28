@@ -383,7 +383,16 @@ int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_ty
         lines.append(f'    {{ "{surf}", {idx}, {1 if flip else 0} }},')
     lines.append("};")
     lines.append("")
-    
+
+    # Reverse-index sizing: next power of two >= 4*count keeps the open-addressing bucket load
+    # factor <= 25% so probe chains stay short. The bucket is filled at runtime in
+    # relation_ids_ensure() (the type-ids are BLAKE3, computed there — not knowable at codegen time).
+    rel_count = len(canon_names)
+    bucket_size = 1
+    while bucket_size < rel_count * 4:
+        bucket_size <<= 1
+    bucket_mask = bucket_size - 1
+
     impl = f"""
 const laplace_relation_def_t* laplace_relation_table = k_relations;
 const size_t laplace_relation_table_count = {len(canon_names)};
@@ -405,6 +414,14 @@ static int type_id_from_canonical(const char* canonical_name, hash128_t* out_typ
 
 static hash128_t k_relation_type_id_cache[{len(canon_names)}];
 
+/* Reverse index: type_id -> table ordinal, O(1). The type_id is a full BLAKE3 digest, so its low
+ * 64 bits are already a uniform hash; we bucket on (lo & mask) with linear probing. Built once in
+ * relation_ids_ensure() under the same init guard as the id cache. -1 == empty slot. The .shx to
+ * k_relations' .shp: index then read. */
+#define LAPLACE_REL_BUCKET_SIZE {bucket_size}u
+#define LAPLACE_REL_BUCKET_MASK {bucket_mask}u
+static int16_t k_relation_bucket[LAPLACE_REL_BUCKET_SIZE];
+
 #ifdef _WIN32
 #include <windows.h>
 static volatile LONG g_relation_ids_state = 0;
@@ -423,6 +440,12 @@ static void relation_ids_ensure(void) {{
     if (ids_try_begin()) {{
         for (size_t i = 0; i < laplace_relation_table_count; ++i)
             type_id_from_canonical(laplace_relation_table[i].canonical, &k_relation_type_id_cache[i]);
+        for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b) k_relation_bucket[b] = -1;
+        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
+            size_t b = (size_t)(k_relation_type_id_cache[i].lo & LAPLACE_REL_BUCKET_MASK);
+            while (k_relation_bucket[b] >= 0) b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
+            k_relation_bucket[b] = (int16_t)i;
+        }}
         ids_mark_ready();
     }} else {{
         while (!ids_ready()) {{ }}
@@ -500,11 +523,15 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
 int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def_t** out_def) {{
     if (!type_id || !out_def) return -1;
     relation_ids_ensure();
-    for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
-        if (hash128_equals(type_id, &k_relation_type_id_cache[i])) {{
-            *out_def = &laplace_relation_table[i];
+    size_t b = (size_t)(type_id->lo & LAPLACE_REL_BUCKET_MASK);
+    for (size_t probes = 0; probes < LAPLACE_REL_BUCKET_SIZE; ++probes) {{
+        int16_t idx = k_relation_bucket[b];
+        if (idx < 0) return -1;                 /* empty slot => not present */
+        if (hash128_equals(type_id, &k_relation_type_id_cache[idx])) {{
+            *out_def = &laplace_relation_table[idx];
             return 0;
         }}
+        b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
     }}
     return -1;
 }}
@@ -540,12 +567,10 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         *out = 1;
         return 0;
     }}
-    for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
-        if (table_entry_type_id(i, &entry_id) != 0) continue;
-        if (hash128_equals(type_id, &entry_id)) {{
-            *out = family_contains((int16_t)i, root_idx);
-            return 0;
-        }}
+    const laplace_relation_def_t* def = NULL;
+    if (laplace_relation_lookup(type_id, &def) == 0 && def) {{
+        *out = family_contains((int16_t)(def - laplace_relation_table), root_idx);
+        return 0;
     }}
     return 1;
 }}

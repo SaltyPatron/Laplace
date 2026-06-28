@@ -218,7 +218,12 @@ static int probe_pending(etl_pending_row_t* pending, size_t n, laplace_etl_exist
     size_t* counts = (size_t*)calloc(n, sizeof(size_t));
     if (!counts) return -1;
 
-    size_t cap = n * 64;
+    // Size the id buffer EXACTLY (the sum of per-row entity counts), not a fixed n*64 guess. A single
+    // text row decomposes into one entity per codepoint/grapheme/word/sentence — far past 64 — so the
+    // old guess let collect_entity_ids write past the allocation on real OMW/Wiktionary/Tatoeba data.
+    size_t cap = 0;
+    for (size_t i = 0; i < n; ++i) cap += laplace_compose_entity_count(pending[i].compose);
+    if (cap == 0) { free(counts); return 0; }
     hash128_t* ids = (hash128_t*)malloc(cap * sizeof(hash128_t));
     if (!ids) { free(counts); return -1; }
 
@@ -422,6 +427,16 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         free(s);
         return -3;
     }
+    // Own modality_id for the session: process_row passes sess->cfg.modality_id to compose on EVERY row,
+    // so the caller's (marshalled) string can't be relied on to outlive session_open. strdup + free at close,
+    // symmetric with relation_surface above.
+    s->cfg.modality_id = strdup(cfg->modality_id);
+    if (!s->cfg.modality_id) {
+        laplace_grammar_row_iter_free(s->iter);
+        free(s->owned_edge_rules);
+        free(s);
+        return -3;
+    }
     memset(&s->total, 0, sizeof(s->total));
     *out = s;
     return 0;
@@ -436,6 +451,7 @@ void laplace_etl_session_close(laplace_etl_session_t* sess) {
             free((void*)sess->owned_edge_rules[i].relation_surface);
         free(sess->owned_edge_rules);
     }
+    free((void*)sess->cfg.modality_id);
     free(sess);
 }
 

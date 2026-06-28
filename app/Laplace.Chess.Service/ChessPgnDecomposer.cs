@@ -26,15 +26,18 @@ namespace Laplace.Chess.Service;
 /// </summary>
 public sealed class ChessPgnDecomposer : IDecomposer
 {
-    public Hash128 SourceId     => ChessVocabulary.SourceId;
+    public Hash128 SourceId     => ChessVocabulary.PgnSourceId;
     public string  SourceName   => "ChessPgn";
     public int     LayerOrder   => 20;
-    public Hash128 TrustClassId => ChessVocabulary.SourceId;
+    public Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
     private const int GamesPerBatch = 64;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => ChessVocabulary.BootstrapAsync(context.Writer, ct);
+    private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
+
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context, DecomposerOptions options,
@@ -63,7 +66,11 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 if (result is null || moves.Count == 0) continue;
 
                 var (whiteElo, blackElo) = ParseElos(gameText);
-                AppendGame(builder, modality, moves, result.Value, whiteElo, blackElo);
+                var (whiteName, blackName) = ParseNames(gameText);
+                var whitePlayer = EmitPlayer(builder, whiteName);
+                var blackPlayer = EmitPlayer(builder, blackName);
+                AppendGame(builder, modality, moves, result.Value,
+                           whiteElo, blackElo, whitePlayer, blackPlayer);
 
                 if (++inBatch >= GamesPerBatch)
                 {
@@ -81,7 +88,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
         // Deferred-content skip ON: chess openings/positions repeat massively across games, so the probe
         // lets repeated content stage once instead of re-emitting every occurrence. Serial enumeration
         // keeps the probe's connection use bounded.
-        => new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/pgn").EnableDeferredContent(ctx.Reader);
+        => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn").EnableDeferredContent(ctx.Reader);
 
     /// <summary>
     /// Stream a PGN file game-by-game: read lines, accumulate from one <c>[Event </c> tag to the next,
@@ -116,7 +123,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
     /// opponent's judgment). Aborts on an unresolved move (malformed/illegal token).</summary>
     private static void AppendGame(
         SubstrateChangeBuilder b, ChessModality m, List<string> sans, GameOutcome result,
-        int whiteElo, int blackElo)
+        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
     {
         bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0; // '#' = proven checkmate
         int? winner = result.IsDraw ? null : result.Winner;
@@ -128,10 +135,15 @@ public sealed class ChessPgnDecomposer : IDecomposer
             if (mv is null) return; // malformed/illegal token → skip the rest of this game
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
+            // OUTCOME weight = DEFENDER Elo (anti-trap: a result against a strong defender is stronger
+            // evidence). MOVE-CHOICE weight = the MOVER's Elo ("Magnus's e4 here outweighs a 1200's").
             long games = EloGames(mover == 0 ? blackElo : whiteElo);
             if (mate && winner == mover) games += games / 2; // +50% for the confirmed-mating side
             ChessGraph.AppendMoveEdge(
-                b, m.StateKey(state), m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight);
+                b, m.StateKey(state), m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
+                sourceId: ChessVocabulary.PgnSourceId,
+                moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
+                moveChoiceGames: EloGames(mover == 0 ? whiteElo : blackElo));
             state = next;
         }
     }
@@ -153,6 +165,27 @@ public sealed class ChessPgnDecomposer : IDecomposer
         int j = game.IndexOf('"', i);
         return j > i && int.TryParse(game.AsSpan(i, j - i), out var v) ? v : 0;
     }
+
+    private static (string White, string Black) ParseNames(string game)
+        => (TagStr(game, "White"), TagStr(game, "Black"));
+
+    /// <summary>Read a string PGN tag value (<c>[Tag "value"]</c>); "" if absent.</summary>
+    private static string TagStr(string game, string tag)
+    {
+        int i = game.IndexOf("[" + tag + " \"", StringComparison.Ordinal);
+        if (i < 0) return "";
+        i += tag.Length + 3;
+        int j = game.IndexOf('"', i);
+        return j > i ? game[i..j].Trim() : "";
+    }
+
+    /// <summary>Mint (dedup) the player entity and bind its display name via HAS_NAME_ALIAS. Returns null
+    /// for unknown players (""/"?"), so no PLAYED_BY is attributed. The rating's EFFECT lands per-move via
+    /// the move-choice observation count; an explicit per-game HAS_RATING is a later refinement.</summary>
+    private static Hash128? EmitPlayer(SubstrateChangeBuilder b, string name)
+        => string.IsNullOrWhiteSpace(name) || name == "?"
+            ? null
+            : ChessVocabulary.EmitPlayer(b, ChessVocabulary.PlayerId(name), name, ChessVocabulary.PgnSourceId);
 
     /// <summary>Walk one game's parse tree: ordered mainline SAN + the terminating result.</summary>
     private static (List<string> Moves, GameOutcome? Result) ExtractGame(GrammarAst ast, byte[] utf8)
@@ -217,8 +250,10 @@ public sealed class ChessPgnDecomposer : IDecomposer
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback =>
-        new[] { "substrate/source/ChessSelfPlay/v1" };
+    // The bootstrap's declared type/relation names (Chess_Position, Chess_Player, MOVE, PLAYED_BY, …);
+    // RegisterDynamicCanonicalsAsync auto-adds substrate/source/ChessPgn/v1 from SourceName. So the types
+    // are queryable by name, not only legible via the slow HAS_NAME_ALIAS traversal.
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

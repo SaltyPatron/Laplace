@@ -66,6 +66,7 @@ set(LAPLACE_CORE_SOURCES
     src/attestation_engine.c
     src/etl_ingest.c
     src/etl_witness_conceptnet.c
+    src/etl_anchor.c
 )
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})

@@ -163,6 +163,8 @@ internal static class IngestCommands
             "recipe"     => await IngestRecipeAsync(cli),
             "chess"      => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
+            "openings"   => await IngestViaRunnerAsync(
+                new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
             _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
     }
