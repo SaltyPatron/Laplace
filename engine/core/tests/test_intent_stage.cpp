@@ -577,9 +577,8 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
         total_phys += intent_stage_physicality_count(parts[k]);
         total_att  += intent_stage_attestation_count(parts[k]);
 
-        // Disjointness invariant: every id routed to partition k has id.lo % N == k.
+        // Disjointness: entities/attestations route by id.lo % N; physicalities by Hilbert range.
         for (auto table : {INTENT_STAGE_TABLE_ENTITIES,
-                           INTENT_STAGE_TABLE_PHYSICALITIES,
                            INTENT_STAGE_TABLE_ATTESTATIONS}) {
             std::vector<uint64_t> los;
             collect_ids_lo(parts[k], table, los);

@@ -220,8 +220,9 @@ public class SourceEntityIdConventionsTests
     [Fact]
     public void ParseMcrSynsetKey_Parses_PredicateMatrix_Ili_Tokens()
     {
-        Assert.Equal((2244956L, 'v'), SourceEntityIdConventions.ParseMcrSynsetKey("ili-30-02244956-v"));
-        Assert.Equal((941990L, 'v'), SourceEntityIdConventions.ParseMcrSynsetKey("30-00941990-v"));
+        Assert.Equal((2244956L, 'v', "pwn30"), SourceEntityIdConventions.ParseMcrSynsetKey("ili-30-02244956-v"));
+        Assert.Equal((941990L, 'v', "pwn30"), SourceEntityIdConventions.ParseMcrSynsetKey("30-00941990-v"));
+        Assert.Equal((2244956L, 'v', null), SourceEntityIdConventions.ParseMcrSynsetKey("02244956-v"));
         Assert.Null(SourceEntityIdConventions.ParseMcrSynsetKey("NULL"));
     }
 

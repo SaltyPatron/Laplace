@@ -28,25 +28,19 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
     {
         string root = context.EcosystemPath;
         if (string.IsNullOrEmpty(root)) yield break;
+        if (options.DryRun) yield break;
 
-        foreach (string file in EnumerateInputFiles(root))
-        {
-            ct.ThrowIfCancellationRequested();
+        ISubstrateReader? reader = context.Reader;
+        if (IntentStage.IsBulkFreshBypass) reader = null;
 
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch { continue; }
-            if (bytes.Length == 0) continue;
+        int batchSize = options.BatchSize > 1 ? options.BatchSize : 32;
 
-            string label = File.Exists(root)
-                ? $"document/{Path.GetFileName(file)}"
-                : $"document/{Path.GetRelativePath(root, file).Replace('\\', '/')}";
-
-            if (!UserPromptContent.TryBuildWitnessChange(bytes, label, out var change, out _))
-                continue;
-
-            if (!options.DryRun) yield return change;
-        }
+        await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+            new DocumentMultiFileStream(root),
+            _ => new DocumentIngestHandler(),
+            label => DocumentIngestSupport.PipelineConfig(label, reader, batchSize),
+            ct))
+            yield return change;
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

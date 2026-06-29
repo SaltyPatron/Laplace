@@ -23,7 +23,7 @@ static void set_cili_dir(const std::string& d) {
 
 // A NON-NULL probe is the only requirement to make the ETL take the two-phase probe_pending /
 // collect_entity_ids path (the over-write site) instead of the direct drain. Reports "nothing exists".
-int probe_none(void*, const hash128_t*, size_t n, uint8_t* out_bitmap, size_t) {
+int probe_none(void*, const hash128_t*, const int32_t*, size_t n, uint8_t* out_bitmap, size_t) {
     std::memset(out_bitmap, 0, (n + 7) / 8);
     return 0;
 }

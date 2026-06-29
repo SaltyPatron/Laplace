@@ -183,7 +183,10 @@ public sealed class SemLinkDecomposerTests
 
     private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()
     {
-        byte[] utf8 = Encoding.UTF8.GetBytes(PbVnJson);
+        // Pipeline emits one top-level pair per compose row — match that shape, not the multi-pair fixture.
+        const string singlePair =
+            """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}}""";
+        byte[] utf8 = Encoding.UTF8.GetBytes(singlePair);
         var recipe = GrammarDecomposer.LookupById("json");
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
         using var composer = new GrammarRowComposer(utf8, ast, SemLinkDecomposer.Source, "json");

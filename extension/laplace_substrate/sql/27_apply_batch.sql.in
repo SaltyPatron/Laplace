@@ -9,13 +9,15 @@
 -- BLAKE3 / geometry / tiers) already ran client-side in laplace_core.
 --
 -- Returns (entities_inserted, physicalities_inserted, attestations_inserted,
--- attestations_folded) — folded = present attestations whose observation_count
--- was summed rather than dropped.
+-- attestations_folded, entities_skipped, physicalities_skipped) — skipped counts
+-- instrument rows staged but already present (should be ≈0 when descent dedup ran).
 CREATE OR REPLACE FUNCTION laplace_apply_batch(p_stage_prefix text)
     RETURNS TABLE (entities_inserted        bigint,
                    physicalities_inserted   bigint,
                    attestations_inserted    bigint,
-                   attestations_folded      bigint)
+                   attestations_folded      bigint,
+                   entities_skipped         bigint,
+                   physicalities_skipped    bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_apply_batch'
     LANGUAGE C VOLATILE
     SET session_replication_role = replica

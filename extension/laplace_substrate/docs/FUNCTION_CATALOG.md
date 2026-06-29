@@ -97,10 +97,15 @@ names (clean taxonomy; but gloss empty + 1.5s slow) · `word_id`/`resolve_phrase
 
 ## 1. Ingest / write / fold (🔒 internal — not user-callable)
 
-`laplace_apply_batch(prefix)` 🔒 — the one set-based COPY-staging→live merge (C). Anti-join inserts
-new entities/physicalities/attestations; folds duplicate attestations (observation_count +=). Heavy
-compute is client-side; DB does only the merge. No ON CONFLICT (disjoint hash partitions).
-· `entities_exist_bitmap(ids[])` / `intent_preflight(...)` 🔒 — bulk existence probes (C).
+`laplace_apply_batch(prefix)` 🔒 — the one set-based COPY-staging→live merge (C). Staging merge:
+dedupe temp → LEFT JOIN subtract existing ids → sorted append (entities by id, physicalities by
+`hilbert_index`); folds duplicate attestations (observation_count +=). Returns
+`(entities_inserted, physicalities_inserted, attestations_inserted, attestations_folded,
+entities_skipped, physicalities_skipped)` — skipped counts instrument descent slip-through (target ≈0).
+No ON CONFLICT. Client-side: `laplace_grammar_compose_probe` + `content_descent_bitmap` for O(tier)
+existence before compose.
+· `entities_exist_bitmap(ids[])` / `intent_preflight(...)` 🔒 — bulk existence probes (C); used by
+converse audit and C# containment readers, not the apply merge path.
 · Glicko-2: `laplace_glicko2_accumulate` (aggregate), `laplace_glicko2_accumulate_games` (scalar
 batch), `laplace_score`/`_inverse`, constants `glicko2_neutral_mu/initial_rd/initial_volatility/tau`.
 · `consensus_id(s,t,o)` — BLAKE3 of subject‖type‖COALESCE(object,zero16). · mu-law: `eff_mu`,

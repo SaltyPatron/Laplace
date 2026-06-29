@@ -7,26 +7,125 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
+    private readonly byte[] _utf8;
+    private readonly string _modalityId;
     private readonly Hash128 _sourceId;
     private readonly GrammarAst _ast;
-    private readonly IntPtr _compose;
+    private IntPtr _compose;
+    private IntPtr _probe;
     private bool _disposed;
 
     public GrammarRowComposer(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId)
     {
-        _sourceId = sourceId;
+        _utf8 = utf8;
         _ast = ast;
-        IntPtr result = IntPtr.Zero;
+        _sourceId = sourceId;
+        _modalityId = modalityId;
+    }
+
+    public Task<byte[]?> ProbeDescentBitmapAsync(ISubstrateReader reader, CancellationToken ct = default)
+        => GrammarRowComposerProbe.ProbeDescentBitmapAsync(this, reader, ct);
+
+    public static bool TryProbeRowRoot(
+        ReadOnlySpan<byte> utf8, GrammarAst ast, string modalityId, out Hash128 rootId, out byte tier)
+    {
+        rootId = default;
+        tier = 0;
+        byte tierLocal = 0;
+        Hash128 rootLocal = default;
         fixed (byte* p = utf8)
         {
+            int rc = NativeInterop.GrammarComposeRowRoot(
+                p, (nuint)utf8.Length, ast.Handle, modalityId, &rootLocal, &tierLocal);
+            if (rc != 0) return false;
+            rootId = rootLocal;
+            tier = tierLocal;
+            return true;
+        }
+    }
+
+    internal void EnsureProbed()
+    {
+        if (_probe != IntPtr.Zero || _compose != IntPtr.Zero) return;
+        IntPtr result = IntPtr.Zero;
+        fixed (byte* p = _utf8)
+        {
+            int rc = NativeInterop.GrammarComposeProbe(
+                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
+            if (rc != 0 || result == IntPtr.Zero)
+                throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+        }
+        _probe = result;
+    }
+
+    private void EnsureComposed()
+    {
+        EnsureComposed(existingBitmap: null);
+    }
+
+    private void EnsureComposed(byte[]? existingBitmap)
+    {
+        if (_compose != IntPtr.Zero) return;
+        if (_probe != IntPtr.Zero)
+        {
+            if (IsEntireTreePresent(existingBitmap))
+                return;
+            fixed (byte* p = _utf8)
+            {
+                int rc = NativeInterop.GrammarComposeMaterializePhys(
+                    _probe, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
+                if (rc != 0)
+                    throw new InvalidOperationException(
+                        $"laplace_grammar_compose_materialize_phys returned {rc}");
+            }
+            _compose = _probe;
+            return;
+        }
+        IntPtr result = IntPtr.Zero;
+        fixed (byte* p = _utf8)
+        {
             int rc = NativeInterop.GrammarCompose(
-                p, (nuint)utf8.Length, ast.Handle, modalityId,
-                sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
+                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
             if (rc != 0 || result == IntPtr.Zero)
                 throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
         }
         _compose = result;
     }
+
+    /// <summary>
+    /// When the descent bitmap marks every compose-tree node present, skip
+    /// <c>materialize_phys</c> and entity/physicality drain — PRECEDES + witness only.
+    /// </summary>
+    internal static bool IsEntireTreePresent(byte[]? existingBitmap, IntPtr composeOrProbe)
+    {
+        if (existingBitmap is not { Length: > 0 } || composeOrProbe == IntPtr.Zero)
+            return false;
+        IntPtr treePtr = NativeInterop.ComposeGetTierTree(composeOrProbe);
+        if (treePtr == IntPtr.Zero) return false;
+        using var tree = TierTree.FromBorrowedHandle(treePtr);
+        int nodeCount = tree.NodeCount;
+        nuint nEnt = NativeInterop.ComposeEntityCount(composeOrProbe);
+        if (nodeCount == 0 || nodeCount != (int)nEnt) return false;
+        if (existingBitmap.Length < (nodeCount + 7) / 8) return false;
+        var novelIdx = new uint[nodeCount];
+        return MerkleDedup.TrunkShortcircuit(tree, existingBitmap, novelIdx) == 0;
+    }
+
+    private bool IsEntireTreePresent(byte[]? existingBitmap)
+    {
+        EnsureProbed();
+        return IsEntireTreePresent(existingBitmap, ActiveResult);
+    }
+
+    internal IntPtr BorrowedTierTree()
+    {
+        EnsureProbed();
+        return NativeInterop.ComposeGetTierTree(ActiveResult);
+    }
+
+    private IntPtr ActiveResult => _compose != IntPtr.Zero ? _compose : _probe;
 
     
     
@@ -40,12 +139,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     
     public Hash128[] EntityIds()
     {
-        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        EnsureProbed();
+        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         var ids = new Hash128[(int)nEnt];
         for (nuint i = 0; i < nEnt; i++)
         {
             NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
             ids[(int)i] = e.Id;
         }
         return ids;
@@ -72,12 +172,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     
     private EmitFilter ComputeFilter(byte[]? existingBitmap)
     {
+        EnsureComposed(existingBitmap);
         if (existingBitmap is not { Length: > 0 }) return default;
-        IntPtr treePtr = NativeInterop.ComposeGetTierTree(_compose);
+        IntPtr treePtr = NativeInterop.ComposeGetTierTree(ActiveResult);
         if (treePtr == IntPtr.Zero) return default;   
         using var tree = TierTree.FromBorrowedHandle(treePtr);
         int nodeCount = tree.NodeCount;
-        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         if (nodeCount == 0 || nodeCount != (int)nEnt) return default;
         if (existingBitmap.Length < (nodeCount + 7) / 8) return default;
 
@@ -90,7 +191,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             if (!novelEntity[(int)i]) continue;
             NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
             novelIds.Add(e.Id);
         }
         return new EmitFilter(novelEntity, novelIds);
@@ -110,26 +211,27 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             ImmutableArray<AttestationRow> Precedes,
             Hash128 RootId) Materialize(double witnessWeight, byte[]? existingBitmap)
     {
+        EnsureComposed(existingBitmap);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var entities = ImmutableArray.CreateBuilder<EntityRow>();
         var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
         var precedes = ImmutableArray.CreateBuilder<AttestationRow>();
         var filter = ComputeFilter(existingBitmap);
 
-        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
         {
             if (!filter.EntityNovel(i)) continue;
             NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
             entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId, _sourceId));
         }
 
-        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
+        nuint nPhys = NativeInterop.ComposePhysicalityCount(ActiveResult);
         for (nuint i = 0; i < nPhys; i++)
         {
             NativeInterop.ComposePhysicalityNative ph;
-            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
+            NativeInterop.ComposeGetPhysicality(ActiveResult, i, &ph);
             if (!filter.PhysNovel(ph.EntityId)) continue;
             int trajLen = (int)ph.TrajectoryN.ToUInt64();
             double[] traj = trajLen > 0
@@ -144,11 +246,11 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: nowUs));
         }
 
-        nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);
+        nuint nPrec = NativeInterop.ComposePrecedesCount(ActiveResult);
         for (nuint i = 0; i < nPrec; i++)
         {
             NativeInterop.ComposePrecedesNative pr;
-            NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
+            NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
             long sumScore = checked(pr.Games * Glicko2.FpScale);
             precedes.Add(NativeAttestation.Aggregated(
                 pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
@@ -157,7 +259,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         }
 
         return (entities.ToImmutable(), physicalities.ToImmutable(),
-                precedes.ToImmutable(), NativeInterop.ComposeRootId(_compose));
+                precedes.ToImmutable(), NativeInterop.ComposeRootId(ActiveResult));
     }
 
     /// <summary>
@@ -184,16 +286,17 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         IntentStage stage, double witnessWeight, long nowUs,
         ImmutableArray<AttestationRow>.Builder precedesOut, byte[]? existingBitmap)
     {
+        EnsureComposed(existingBitmap);
         ArgumentNullException.ThrowIfNull(stage);
         ArgumentNullException.ThrowIfNull(precedesOut);
         var filter = ComputeFilter(existingBitmap);
 
-        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
         {
             if (!filter.EntityNovel(i)) continue;
             NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
             stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
         }
 
@@ -215,11 +318,11 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
         }
 
-        nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);
+        nuint nPrec = NativeInterop.ComposePrecedesCount(ActiveResult);
         for (nuint i = 0; i < nPrec; i++)
         {
             NativeInterop.ComposePrecedesNative pr;
-            NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
+            NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
             long sumScore = checked(pr.Games * Glicko2.FpScale);
             precedesOut.Add(NativeAttestation.Aggregated(
                 pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
@@ -227,7 +330,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
 
-        return NativeInterop.ComposeRootId(_compose);
+        return NativeInterop.ComposeRootId(ActiveResult);
     }
 
     /// <summary>
@@ -245,6 +348,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     
     public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? existingBitmap)
     {
+        EnsureComposed(existingBitmap);
         ArgumentNullException.ThrowIfNull(builder);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var stage = builder.ContentStage;
@@ -252,12 +356,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         unsafe
         {
             Hash128 src = _sourceId;
+            IntPtr active = ActiveResult;
             if (existingBitmap is { Length: > 0 })
             {
                 fixed (byte* bm = existingBitmap)
                 {
                     int rc = NativeInterop.ComposeDrainIntoStage(
-                        _compose, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
+                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
                         bm, (nuint)existingBitmap.Length * 8);
                     if (rc != 0)
                         throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
@@ -266,36 +371,37 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             else
             {
                 int rc = NativeInterop.ComposeDrainIntoStage(
-                    _compose, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
+                    active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
                 if (rc != 0)
                     throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
             }
         }
 
         // Keep the builder's within-batch seen-set in sync with what the native drain staged.
-        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
         {
             NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
             builder.TrySeeEntity(e.Id);
         }
-        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
+        nuint nPhys = NativeInterop.ComposePhysicalityCount(ActiveResult);
         for (nuint i = 0; i < nPhys; i++)
         {
             NativeInterop.ComposePhysicalityNative ph;
-            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
+            NativeInterop.ComposeGetPhysicality(ActiveResult, i, &ph);
             builder.TrySeePhysicality(ph.Id);
         }
 
-        return NativeInterop.ComposeRootId(_compose);
+        return NativeInterop.ComposeRootId(ActiveResult);
     }
 
     public bool TrySpanEntity(uint startByte, uint endByte, out Hash128 id)
     {
+        EnsureComposed();
         id = default;
         fixed (Hash128* p = &id)
-            return NativeInterop.ComposeSpanLookup(_compose, startByte, endByte, p) == 0;
+            return NativeInterop.ComposeSpanLookup(ActiveResult, startByte, endByte, p) == 0;
     }
 
     public IReadOnlyList<(uint Start, uint End)> FieldSpans()
@@ -313,8 +419,10 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        if (_compose != IntPtr.Zero)
+        if (_compose != IntPtr.Zero && _compose != _probe)
             NativeInterop.ComposeResultFree(_compose);
+        if (_probe != IntPtr.Zero)
+            NativeInterop.ComposeResultFree(_probe);
         _disposed = true;
         GC.SuppressFinalize(this);
     }

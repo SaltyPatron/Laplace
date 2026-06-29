@@ -275,7 +275,10 @@ internal static class PredicateMatrixIngest
     private static Hash128? SynsetAnchor(string raw)
     {
         var parsed = SourceEntityIdConventions.ParseMcrSynsetKey(raw);
-        return parsed is null ? null : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType);
+        return parsed is null
+            ? null
+            : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
+                                      parsed.Value.WnVersion ?? "pwn30");
     }
 
     private static void StageCorrespondsTo(

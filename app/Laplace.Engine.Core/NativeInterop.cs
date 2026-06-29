@@ -288,6 +288,19 @@ public static unsafe partial class NativeInterop
         byte* utf8, nuint len, IntPtr ast, string modalityId,
         Hash128 sourceId, Hash128 typeMetaId, IntPtr* outResult);
 
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_compose_probe", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int GrammarComposeProbe(
+        byte* utf8, nuint len, IntPtr ast, string modalityId,
+        Hash128 sourceId, Hash128 typeMetaId, IntPtr* outResult);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_compose_materialize_phys", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int GrammarComposeMaterializePhys(
+        IntPtr result, byte* utf8, nuint len, IntPtr ast, string modalityId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_compose_row_root", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int GrammarComposeRowRoot(
+        byte* utf8, nuint len, IntPtr ast, string modalityId, Hash128* outId, byte* outTier);
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_result_free")]
     public static partial void ComposeResultFree(IntPtr result);
 
@@ -643,7 +656,7 @@ public static unsafe partial class NativeInterop
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public unsafe delegate int EtlExistProbeFn(
-        IntPtr ctx, Hash128* ids, nuint n, byte* outBitmap, nuint bitmapBits);
+        IntPtr ctx, Hash128* ids, int* parents, nuint n, byte* outBitmap, nuint bitmapBits);
 
     [LibraryImport(Library, EntryPoint = "laplace_etl_session_open")]
     internal static partial int EtlSessionOpen(EtlConfigNative* cfg, IntPtr* outSess);

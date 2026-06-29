@@ -92,17 +92,50 @@ public sealed class GrammarEntityBuilder
         if (_utf8.Length == 0 || _ast.NodeCount == 0) return Empty;
         if (containmentReader is null) return Build(witnessWeight, null);
 
-        IntPtr composeResult = Compose();
+        IntPtr composeResult = ComposeProbe();
         try
         {
-            byte[]? bitmap =
-                await containmentReader.EntitiesExistBitmapAsync(ComposeEntityIds(composeResult), ct);
+            byte[]? bitmap = await GrammarRowComposerProbe.ProbeDescentBitmapAsync(
+                NativeInterop.ComposeGetTierTree(composeResult), containmentReader, ct);
+            if (bitmap is null)
+            {
+                bitmap = await containmentReader.EntitiesExistBitmapAsync(
+                    ComposeEntityIds(composeResult), ct);
+            }
+            if (bitmap is null || !GrammarRowComposer.IsEntireTreePresent(bitmap, composeResult))
+                MaterializePhys(composeResult);
             return Extract(composeResult, witnessWeight, bitmap);
         }
         finally
         {
             if (composeResult != IntPtr.Zero)
                 NativeInterop.ComposeResultFree(composeResult);
+        }
+    }
+
+    private unsafe IntPtr ComposeProbe()
+    {
+        IntPtr composeResult = IntPtr.Zero;
+        fixed (byte* p = _utf8)
+        {
+            int rc = NativeInterop.GrammarComposeProbe(
+                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
+            if (rc != 0 || composeResult == IntPtr.Zero)
+                throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+        }
+        return composeResult;
+    }
+
+    private unsafe void MaterializePhys(IntPtr composeResult)
+    {
+        fixed (byte* p = _utf8)
+        {
+            int rc = NativeInterop.GrammarComposeMaterializePhys(
+                composeResult, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"laplace_grammar_compose_materialize_phys returned {rc}");
         }
     }
 

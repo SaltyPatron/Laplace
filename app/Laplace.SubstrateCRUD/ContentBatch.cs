@@ -7,7 +7,7 @@ namespace Laplace.SubstrateCRUD;
 /// (<see cref="Append"/>) builds — once, deduped by the Blake3 of the canonical bytes — the content
 /// tier tree for each distinct content text and returns its natural-unit root id WITHOUT staging.
 /// <see cref="ProbeAndFlushAsync"/> (and the bounded auto-flush below) then runs one
-/// <c>entities_exist_bitmap</c> probe over the buffered trees' node ids and stages only the novel
+/// <c>content_descent_bitmap</c> probe (O(tier) top-down Merkle descent over T2+ trunks) and stages only the novel
 /// subtrees (a present trunk skips its whole subtree via <c>MerkleDedup.TrunkShortcircuit</c> inside
 /// the native content emit) — no second decomposition.
 ///
@@ -91,8 +91,10 @@ public sealed class ContentBatch : IDisposable
     }
 
     /// <summary>
-    /// Flush any remaining buffered trees: one batched <c>entities_exist_bitmap</c> probe over their
-    /// node ids, then stage only the novel subtrees into the builder's content stage. Idempotent.
+    /// Flush any remaining buffered trees: one batched <c>content_descent_bitmap</c> probe over their
+    /// T2+ node ids (tree-aware Merkle descent), then stage only the novel subtrees into the
+    /// builder's content stage. Idempotent. Skipped entirely when
+    /// <see cref="IntentStage.IsBulkFreshBypass"/> is set (bulk-fresh load).
     /// </summary>
     public Task ProbeAndFlushAsync(CancellationToken ct) => ProbeAndEmitAsync(ct);
 
@@ -101,58 +103,40 @@ public sealed class ContentBatch : IDisposable
         if (_map.Count == 0) return;
 
         var entries = new List<Entry>(_map.Count);
-        var perTreeIds = new List<Hash128[]>(_map.Count);
-        var perTreeTiers = new List<byte[]>(_map.Count);
         foreach (var e in _map.Values)
-        {
-            var ids = e.Tree.NodeIds();
-            var tiers = new byte[ids.Length];
-            for (int j = 0; j < ids.Length; j++)
-                tiers[j] = e.Tree.GetNode((uint)j).Tier;
             entries.Add(e);
-            perTreeIds.Add(ids);
-            perTreeTiers.Add(tiers);
-        }
-
-        // T0 codepoints + T1 graphemes are NEVER checked — perfcache-known by construction. Only trunks
-        // (tier >= 2) are candidates. The reader's session seen-set fronts the probe: a re-emitted trunk
-        // (content is immutable ⇒ proven-present is permanent) is an in-memory hit and never re-probes
-        // the DB. One batched entities_exist_bitmap over the UNKNOWN trunks ("which of these do you
-        // have?"); present (seen-set ∪ DB) → bit set → the native emit skips that subtree.
-        var candidates = new List<Hash128>();
-        for (int i = 0; i < entries.Count; i++)
-        {
-            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            for (int j = 0; j < ids.Length; j++)
-                if (tiers[j] >= 2) candidates.Add(ids[j]);
-        }
-
-        byte[]? combined = candidates.Count > 0
-            ? await _reader.EntitiesExistBitmapAsync(candidates, ct).ConfigureAwait(false)
-            : null;
-        long combinedBits = combined is null ? 0 : (long)combined.Length * 8;
 
         var stage = _stageProvider();
-        int g = 0;   // running index into the tier>=2 candidate bitmap, in (tree, node) order
-        for (int i = 0; i < entries.Count; i++)
+        if (IntentStage.IsBulkFreshBypass)
         {
-            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            int n = ids.Length;
-            var bm = new byte[(n + 7) / 8];   // bit j set = node j PRESENT (EmitContentTree skips present subtrees)
-            for (int j = 0; j < n; j++)
+            foreach (var e in entries)
             {
-                if (tiers[j] < 2) continue;   // tier<=1: emitted under novel trunks, skipped under present
-                if (combined is not null && g < combinedBits && (combined[g >> 3] & (1 << (g & 7))) != 0)
-                    bm[j >> 3] |= (byte)(1 << (j & 7));
-                g++;
+                if (e.Tree is null) continue;
+                stage.EmitContentTree(e.Tree, e.Source, ReadOnlySpan<byte>.Empty, out _);
             }
-            stage.EmitContentTree(entries[i].Tree, entries[i].Source, bm, out _);
         }
+        else
+        {
+            var probeTrees = new List<TierTree>(entries.Count);
+            foreach (var e in entries)
+            {
+                if (e.Tree is null) continue;
+                probeTrees.Add(e.Tree);
+            }
 
-        // After staging, every checked trunk is present — the present ones were, the novel ones are now
-        // staged (immutable ⇒ they WILL be inserted). Mark them all proven so the NEXT occurrence is a
-        // seen-set hit: zero DB probe, zero re-stage. This is the re-emission tax going to zero.
-        if (candidates.Count > 0) _reader.MarkProven(candidates);
+            byte[]?[] bitmaps = probeTrees.Count > 0
+                ? await TierTreeDescent.ProbeBatchEmitBitmapsAsync(probeTrees, _reader, ct)
+                    .ConfigureAwait(false)
+                : [];
+
+            int treeIdx = 0;
+            foreach (var e in entries)
+            {
+                if (e.Tree is null) continue;
+                byte[]? bm = treeIdx < bitmaps.Length ? bitmaps[treeIdx++] : null;
+                stage.EmitContentTree(e.Tree, e.Source, bm ?? ReadOnlySpan<byte>.Empty, out _);
+            }
+        }
 
         foreach (var e in _map.Values) e.Tree?.Dispose();
         _map.Clear();

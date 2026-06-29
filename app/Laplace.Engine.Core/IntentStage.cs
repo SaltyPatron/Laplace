@@ -184,6 +184,7 @@ public sealed class IntentStage : SafeHandle
     // NOT EXISTS handles uniqueness, so the bank buys nothing but OOMs on large corpora.
     private static volatile bool _bulkFreshBypass;
     public static void SetBulkFreshBypass(bool enabled) => _bulkFreshBypass = enabled;
+    public static bool IsBulkFreshBypass => _bulkFreshBypass;
 
     public bool TryAddContentWitness(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
     {
@@ -193,9 +194,9 @@ public sealed class IntentStage : SafeHandle
 
         if (_bulkFreshBypass)
         {
-            // Bulk-fresh: the global bank grows monotonically and OOMs on large corpora (e.g.
-            // OMW 1226 files). Skip the bank and emit via the two-phase tree path — DB uniqueness
-            // is guaranteed by ON CONFLICT DO NOTHING / NOT EXISTS, not the proven-set.
+            // Bulk-fresh: skip the global content bank (OOM on large corpora) and skip compose-time
+            // DB containment probes — the staged set is assumed novel; merge-time skipped counts
+            // instrument any unexpected conflict.
             var tree = BuildContentTree(canonical);
             if (tree is null) return false;
             using (tree) return EmitContentTree(tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);

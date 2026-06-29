@@ -103,7 +103,7 @@ public sealed class SubstrateChangeBuilder
     /// </summary>
     public SubstrateChangeBuilder EnableDeferredContent(ISubstrateReader? reader)
     {
-        if (reader is not null)
+        if (reader is not null && !IntentStage.IsBulkFreshBypass)
             _deferredContent ??= new ContentBatch(() => ContentStage, reader);
         return this;
     }

@@ -7,6 +7,18 @@ Everything shaken out across the "make the chess side sing" build. Status legend
 
 ---
 
+## SESSION DELIVERY (2026-06-29) — all tests green (Modality.Chess 89/89, Chess.Service 59/59, Chess.Uci 8/8)
+
+- **Lichess bot** — `LichessBot.cs`: full HTTP Bot API client; event stream + challenge filter + game handler
+  (time budget mirrors UciEngine.ParseGo; fresh Search/TT per game; standard chess only; `--substrate` opt-in
+  for fold+learned-PST). Wired into `laplace chess lichess`. **User initiates go-live.**
+- **GAME_AT emission** — was declared in `ChessVocabulary` + bootstrapped but never emitted; fixed
+  `ChessGraph.AppendMoveEdge` to emit `GAME_AT` per ply when `contextId` is non-null (PGN ingest only).
+- **ChessGameReview: `*` guard** — `ReviewGameText` returned a game for `*`-result PGNs (moves but no winner);
+  now returns null, matching the documented contract ("null if no result or no legal mainline").
+- **Test coverage** — added `PgnGamesTests` (7 tests, fast tier, pure C#) + `ChessGameReviewTests` (10 tests,
+  ACPL/blunder/crazy-win); Chess.Service suite expanded 19→59.
+
 ## SESSION DELIVERY (2026-06-28) — measured, all tests green (Modality.Chess 89/89, Chess.Service 19/19)
 
 The corpus contributes **~+30 Elo over the ~2105 classical floor (→ ~2135)**, best via a LIGHT learned-PST leaf
@@ -127,12 +139,10 @@ exactly why the first substrate test (random middlegames) came back silent.
 - 🔜 **Self-play Elo ladder across checkpoints** as the substrate/eval evolve.
 
 ### Track 6 — Play & deploy [E, some P-adjacent]
-- 🔜 **Lichess bot** (own HTTP Bot API client) — stream events/challenges, play, handle clock. Account is a BOT,
-  token in `.env` `LICHESS_API` + `deploy\secrets\lichess.env`. → rated games = human-scale anchor + corpus.
-  Unblocked (time mgmt done). **Outward-facing — user initiates go-live.**
-- 🔜 **Wire the α-β `Search` into `/chess/*` endpoints + redeploy** — `ChessEngineService` still plays the depth-1
-  `ModalityEngine`; swap in the 2105 engine so the web UI actually plays it. Then redeploy to IIS
-  (`D:\Data\inetsrv\laplace-api`, see [[laplace-iis-deploy]] — web.config DB must = `laplace`).
+- ✅ **Lichess bot** — `LichessBot.cs` built (2026-06-29); wired into `laplace chess lichess [--substrate]`.
+  **User initiates go-live** (token in `deploy\secrets\lichess.env`; `laplace chess lichess --substrate`).
+- ✅ **Wire the α-β `Search` into `/chess/*` endpoints** — `ChessEngineService` drives `/chess/bestmove`.
+  **Redeploy** to IIS when ready: `scripts\win\deploy-api.cmd` (web.config DB must = `laplace`).
 
 ### Crosscutting
 - 🔜 **"Crazy-win" / game-review analyzer** — run search+eval over ingested games → centipawn-loss

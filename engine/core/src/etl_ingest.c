@@ -1,5 +1,6 @@
 #include "laplace/core/etl_ingest.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 #include "laplace/core/grammar_registry.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/merkle_dedup.h"
+#include "laplace/core/tier_tree.h"
 
 int etl_witness_conceptnet_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,
                                const uint8_t* line, size_t line_len, const laplace_ast_t* ast);
@@ -219,68 +221,152 @@ static int witness_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,
     }
 }
 
-static size_t collect_entity_ids(const etl_pending_row_t* pending, size_t n, hash128_t* out,
-                                 size_t* per_row_counts) {
-    size_t total = 0;
-    for (size_t i = 0; i < n; ++i) {
-        size_t ec = laplace_compose_entity_count(pending[i].compose);
-        per_row_counts[i] = ec;
+static int probe_one_row(const laplace_compose_result_t* compose,
+                         laplace_etl_exist_probe_fn probe, void* probe_ctx,
+                         uint8_t** out_bm, size_t* out_bits) {
+    size_t ec = laplace_compose_entity_count(compose);
+    if (ec == 0) {
+        *out_bm = NULL;
+        *out_bits = 0;
+        return 0;
+    }
+
+    tier_tree_t* tree = laplace_compose_get_tier_tree(compose);
+    size_t nc = tree ? tier_tree_node_count(tree) : 0;
+    if (!tree || nc != ec) {
+        /* No containment tree — flat probe over every entity id. */
+        hash128_t* ids = (hash128_t*)malloc(ec * sizeof(hash128_t));
+        if (!ids) return -1;
         for (size_t j = 0; j < ec; ++j) {
             laplace_compose_entity_t e;
-            if (laplace_compose_get_entity(pending[i].compose, j, &e) == 0)
-                out[total++] = e.id;
+            if (laplace_compose_get_entity(compose, j, &e) != 0) { free(ids); return -1; }
+            ids[j] = e.id;
         }
+        uint8_t* bm = (uint8_t*)calloc((ec + 7) / 8, 1);
+        if (!bm) { free(ids); return -1; }
+        int rc = probe(probe_ctx, ids, NULL, ec, bm, ec);
+        free(ids);
+        if (rc != 0) { free(bm); return rc; }
+        *out_bm = bm;
+        *out_bits = ec;
+        return 0;
     }
-    return total;
+
+    const hash128_t* id_arr = tier_tree_id_array(tree);
+    const uint8_t*   tier_arr = tier_tree_tier_array(tree);
+    const uint32_t*  parent_arr = tier_tree_parent_idx_array(tree);
+    if (!id_arr || !tier_arr) return -1;
+
+    int32_t* tree_to_flat = (int32_t*)malloc(nc * sizeof(int32_t));
+    if (!tree_to_flat) return -1;
+    for (size_t j = 0; j < nc; ++j) tree_to_flat[j] = -1;
+
+    size_t trunk_cap = nc;
+    hash128_t* trunk_ids = (hash128_t*)malloc(trunk_cap * sizeof(hash128_t));
+    int32_t*   trunk_parents = (int32_t*)malloc(trunk_cap * sizeof(int32_t));
+    if (!trunk_ids || !trunk_parents) {
+        free(tree_to_flat); free(trunk_ids); free(trunk_parents);
+        return -1;
+    }
+    size_t n_trunks = 0;
+    for (size_t j = 0; j < nc; ++j) {
+        if (tier_arr[j] < 2) continue;
+        tree_to_flat[j] = (int32_t)n_trunks;
+        trunk_ids[n_trunks] = id_arr[j];
+        trunk_parents[n_trunks] = -1;
+        if (parent_arr) {
+            uint32_t p = parent_arr[j];
+            while (p != TIER_TREE_INVALID && p < (uint32_t)nc) {
+                if (tree_to_flat[p] >= 0) {
+                    trunk_parents[n_trunks] = tree_to_flat[p];
+                    break;
+                }
+                p = parent_arr ? parent_arr[p] : TIER_TREE_INVALID;
+            }
+        }
+        ++n_trunks;
+    }
+
+    uint8_t* node_bm = (uint8_t*)calloc((nc + 7) / 8, 1);
+    if (!node_bm) {
+        free(tree_to_flat); free(trunk_ids); free(trunk_parents);
+        return -1;
+    }
+
+    if (n_trunks > 0) {
+        uint8_t* trunk_bm = (uint8_t*)calloc((n_trunks + 7) / 8, 1);
+        if (!trunk_bm) {
+            free(node_bm); free(tree_to_flat); free(trunk_ids); free(trunk_parents);
+            return -1;
+        }
+        if (probe(probe_ctx, trunk_ids, trunk_parents, n_trunks, trunk_bm, n_trunks) != 0) {
+            free(trunk_bm); free(node_bm); free(tree_to_flat);
+            free(trunk_ids); free(trunk_parents);
+            return -1;
+        }
+        size_t g = 0;
+        for (size_t j = 0; j < nc; ++j) {
+            if (tier_arr[j] < 2) continue;
+            if (g < n_trunks && (trunk_bm[g >> 3] & (1u << (g & 7u))) != 0)
+                node_bm[j >> 3] |= (uint8_t)(1u << (j & 7u));
+            ++g;
+        }
+        free(trunk_bm);
+    }
+
+    /* Tier 0/1: flat probe — descent only covers T2+ trunks. */
+    hash128_t* tier01_ids = (hash128_t*)malloc(nc * sizeof(hash128_t));
+    uint32_t*  tier01_idx = (uint32_t*)malloc(nc * sizeof(uint32_t));
+    if (!tier01_ids || !tier01_idx) {
+        free(tier01_ids); free(tier01_idx);
+        free(tree_to_flat); free(trunk_ids); free(trunk_parents); free(node_bm);
+        return -1;
+    }
+    size_t n_tier01 = 0;
+    for (size_t j = 0; j < nc; ++j) {
+        if (tier_arr[j] >= 2) continue;
+        tier01_ids[n_tier01] = id_arr[j];
+        tier01_idx[n_tier01] = (uint32_t)j;
+        ++n_tier01;
+    }
+    if (n_tier01 > 0) {
+        uint8_t* tier01_bm = (uint8_t*)calloc((n_tier01 + 7) / 8, 1);
+        if (!tier01_bm) {
+            free(tier01_ids); free(tier01_idx);
+            free(tree_to_flat); free(trunk_ids); free(trunk_parents); free(node_bm);
+            return -1;
+        }
+        if (probe(probe_ctx, tier01_ids, NULL, n_tier01, tier01_bm, n_tier01) != 0) {
+            free(tier01_bm); free(tier01_ids); free(tier01_idx);
+            free(tree_to_flat); free(trunk_ids); free(trunk_parents); free(node_bm);
+            return -1;
+        }
+        for (size_t t = 0; t < n_tier01; ++t) {
+            if ((tier01_bm[t >> 3] & (1u << (t & 7u))) != 0)
+                node_bm[tier01_idx[t] >> 3] |= (uint8_t)(1u << (tier01_idx[t] & 7u));
+        }
+        free(tier01_bm);
+    }
+
+    free(tier01_ids);
+    free(tier01_idx);
+    free(tree_to_flat);
+    free(trunk_ids);
+    free(trunk_parents);
+    *out_bm = node_bm;
+    *out_bits = nc;
+    return 0;
 }
 
 static int probe_pending(etl_pending_row_t* pending, size_t n, laplace_etl_exist_probe_fn probe,
                          void* probe_ctx, uint8_t** per_row_bitmaps) {
     if (!probe || n == 0) return 0;
 
-    size_t* counts = (size_t*)calloc(n, sizeof(size_t));
-    if (!counts) return -1;
-
-    // Size the id buffer EXACTLY (the sum of per-row entity counts), not a fixed n*64 guess. A single
-    // text row decomposes into one entity per codepoint/grapheme/word/sentence — far past 64 — so the
-    // old guess let collect_entity_ids write past the allocation on real OMW/Wiktionary/Tatoeba data.
-    size_t cap = 0;
-    for (size_t i = 0; i < n; ++i) cap += laplace_compose_entity_count(pending[i].compose);
-    if (cap == 0) { free(counts); return 0; }
-    hash128_t* ids = (hash128_t*)malloc(cap * sizeof(hash128_t));
-    if (!ids) { free(counts); return -1; }
-
-    size_t total = collect_entity_ids(pending, n, ids, counts);
-    if (total == 0) { free(ids); free(counts); return 0; }
-
-    uint8_t* combined = (uint8_t*)calloc((total + 7) / 8, 1);
-    if (!combined) { free(ids); free(counts); return -1; }
-
-    if (probe(probe_ctx, ids, total, combined, total) != 0) {
-        free(combined); free(ids); free(counts);
-        return -1;
-    }
-
-    size_t off = 0;
     for (size_t i = 0; i < n; ++i) {
-        size_t ec = counts[i];
-        size_t bm_bytes = (ec + 7) / 8;
-        per_row_bitmaps[i] = (uint8_t*)calloc(bm_bytes, 1);
-        if (!per_row_bitmaps[i] && ec > 0) {
-            free(combined); free(ids); free(counts);
+        size_t bits = 0;
+        if (probe_one_row(pending[i].compose, probe, probe_ctx, &per_row_bitmaps[i], &bits) != 0)
             return -1;
-        }
-        for (size_t j = 0; j < ec; ++j) {
-            size_t gi = off + j;
-            if (gi < total && (combined[gi >> 3] & (1u << (gi & 7u))) != 0)
-                per_row_bitmaps[i][j >> 3] |= (uint8_t)(1u << (j & 7u));
-        }
-        off += ec;
     }
-
-    free(combined);
-    free(ids);
-    free(counts);
     return 0;
 }
 
@@ -295,6 +381,26 @@ static void free_pending(etl_pending_row_t* p, size_t n) {
 static int drain_pending_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,
                              const lp_ili_map_t* ili_map,
                              etl_pending_row_t* pr, const uint8_t* bitmap, size_t bitmap_bits) {
+    int all_present = 0;
+    if (bitmap && bitmap_bits > 0) {
+        tier_tree_t* tree = laplace_compose_get_tier_tree(pr->compose);
+        size_t ec = laplace_compose_entity_count(pr->compose);
+        size_t nc = tree ? tier_tree_node_count(tree) : 0;
+        if (tree && nc > 0 && nc == ec && bitmap_bits >= nc) {
+            uint32_t* novel_idx = (uint32_t*)malloc(nc * sizeof(uint32_t));
+            if (novel_idx) {
+                size_t out_n = 0;
+                if (merkle_dedup_trunk_shortcircuit(tree, bitmap, bitmap_bits, novel_idx, &out_n) == 0
+                    && out_n == 0)
+                    all_present = 1;
+                free(novel_idx);
+            }
+        }
+    }
+    if (!all_present
+        && laplace_grammar_compose_materialize_phys(
+               pr->compose, pr->line, pr->line_len, pr->ast, cfg->modality_id) != 0)
+        return -1;
     if (laplace_compose_drain_into_stage(
             pr->compose, stage, &cfg->source_id, cfg->now_unix_us, cfg->witness_weight, bitmap,
             bitmap_bits) != 0)
@@ -365,8 +471,8 @@ static int process_row(laplace_etl_session_t* sess, intent_stage_t* stage,
     }
 
     laplace_compose_result_t* compose = NULL;
-    if (laplace_grammar_compose(line, line_len, ast, sess->cfg.modality_id, sess->cfg.source_id,
-                                sess->cfg.type_meta_id, &compose) != 0 || !compose) {
+    if (laplace_grammar_compose_probe(line, line_len, ast, sess->cfg.modality_id, sess->cfg.source_id,
+                                      sess->cfg.type_meta_id, &compose) != 0 || !compose) {
         laplace_ast_free(ast);
         return 0;
     }

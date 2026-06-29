@@ -39,7 +39,7 @@ public class GrammarSpineConformanceTests
         var grammarSpine = new (string Project, string[] Needles)[]
         {
             ("Laplace.Decomposers.Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness"]),
-            ("Laplace.Decomposers.SemLink", ["StructuredGrammarIngest", "SemLinkGrammarWitness", "IGrammarWitness"]),
+            ("Laplace.Decomposers.SemLink", ["IngestBatchPipeline", "GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
             ("Laplace.Decomposers.Tatoeba", ["StructuredGrammarIngest", "TatoebaGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.ConceptNet", ["StructuredGrammarIngest", "ConceptNetGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),

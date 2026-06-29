@@ -87,11 +87,16 @@ public sealed class IngestRunner
             decomposer.SourceName, ctx.EcosystemPath, Directory.Exists(ctx.EcosystemPath));
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
+        long cap = options.DecomposerOptions.MaxInputUnits;
+        long declaredInput = inventory?.TotalInputUnits ?? 0;
+        if (cap > 0 && declaredInput > cap)
+            declaredInput = cap;
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
         log.LogInformation(
-            "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
+            "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files} cap={Cap}",
             decomposer.SourceName, decomposer.LayerOrder,
-            inventory?.UnitType ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
+            inventory?.UnitType ?? "units", declaredInput, inventory?.FileCount ?? 0,
+            cap > 0 ? cap : 0);
 
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters

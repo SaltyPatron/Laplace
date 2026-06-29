@@ -14,25 +14,21 @@
  *     - entities      : INSERT … SELECT DISTINCT ON (id) … WHERE NOT EXISTS (id).
  *                       Entities are pure content addresses (same id ⇔ same bytes),
  *                       so the id anti-join is exact and idempotent. NO ON CONFLICT.
- *     - physicalities : geometry is SOURCE-FREE (T1) so the natural key is
- *                       (entity_id, type) and the id is content-addressed from
- *                       (entity_id, type, coord, trajectory). One physicality row
- *                       per (entity_id, type): DISTINCT ON (entity_id, type) keep
- *                       the lowest id, anti-join BOTH the id PK and the
- *                       (entity_id, type) UNIQUE. NO ON CONFLICT.
+ *     - physicalities : dedup key is the BLAKE3 id PK only (schema forbids an
+ *                       (entity_id,type) unique — "dedup is the hash"). DISTINCT
+ *                       ON (id), id anti-join, ORDER BY hilbert_index for sequential
+ *                       index maintenance. NO ON CONFLICT.
  *     - attestations  : novel ids INSERTed (id anti-join, NO ON CONFLICT);
  *                       ids the substrate already holds are NOT dropped — their
  *                       observation_count and last_observed_at are folded
  *                       (count += staged count) under a FOR UPDATE SKIP LOCKED
  *                       lock so a re-observation is summed, never lost.
  *
- *   partition-by-hash (the writer splits each batch's staged rows NATIVELY by
- *   id.lo % N via intent_stage_partition and COPYs each partition to its OWN
- *   staging prefix, then calls this function once per partition on its own
- *   connection IN PARALLEL) guarantees the key space is disjoint across the
- *   concurrent apply calls, so the id PK can never collide cross-partition —
- *   which is exactly why there is no ON CONFLICT and no retry loop here. The
- *   set-based anti-join is the ONLY novelty mechanism.
+ *   The client stages a pre-filtered novel set (merkle descent before compose).
+ *   Conflicts at merge time should be ≈0; entities_skipped / physicalities_skipped
+ *   in the return tuple instrument any row that was staged but already present.
+ *   NO ON CONFLICT — append-only of the novel set; re-observations fold via
+ *   attestations only.
  *
  *   This mirrors the sanctioned binding pattern of consensus_fold_one_partition /
  *   pg_laplace_consensus_fold_partition: a C function reached from a thin SQL
@@ -89,10 +85,12 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
     int64       phys_ins = 0;
     int64       att_ins  = 0;
     int64       att_fold = 0;
+    int64       ent_skip = 0;
+    int64       phys_skip = 0;
 
     TupleDesc   tupdesc;
-    Datum       values[4];
-    bool        nulls[4] = { false, false, false, false };
+    Datum       values[6];
+    bool        nulls[6] = { false, false, false, false, false, false };
     HeapTuple   tuple;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
@@ -117,9 +115,9 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
     SPI_execute("SET session_replication_role = replica", false, 0);
 
     /*
-     * (1) entities — content addresses, deduped by the id PK. Bulk insert with ON CONFLICT (id)
-     * DO NOTHING (the unique index IS the dedup — one probe, inline, no separate anti-join), sorted
-     * by id. Partition-by-id.lo%N keeps key spaces disjoint across concurrent apply calls.
+     * (1) entities — set-based staging merge (§3.4): dedupe staging once, subtract existing
+     * ids in ONE hash anti-join into a temp novel set, then append without per-row lookup.
+     * Client merkle descent should make conflicts ≈0; ent_skip instruments any slip-through.
      */
     if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_ent),
                     true, 1) == SPI_OK_SELECT && SPI_processed == 1)
@@ -128,22 +126,50 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
                                                   SPI_tuptable->tupdesc, 1, &isnull));
         if (!isnull && present)
+        {
+            char *stage_dedup = quoted_stage(prefix, "entities_dedup");
+            char *stage_novel = quoted_stage(prefix, "entities_novel");
+            int64 staged = 0;
+
+            SPI_execute(psprintf(
+                "CREATE TEMP TABLE %s ON COMMIT DROP AS "
+                "SELECT DISTINCT ON (s.id) "
+                "       s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
+                "FROM %s s ORDER BY s.id",
+                stage_dedup, stage_ent), false, 0);
+
+            if (SPI_execute(psprintf("SELECT count(*) FROM %s", stage_dedup),
+                            true, 1) == SPI_OK_SELECT && SPI_processed == 1)
+            {
+                bool sn;
+                staged = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                       SPI_tuptable->tupdesc, 1, &sn));
+                if (sn) staged = 0;
+            }
+
+            SPI_execute(psprintf(
+                "CREATE TEMP TABLE %s ON COMMIT DROP AS "
+                "SELECT d.id, d.tier, d.type_id, d.first_observed_by, d.created_at "
+                "FROM %s d "
+                "LEFT JOIN laplace.entities e ON e.id = d.id "
+                "WHERE e.id IS NULL",
+                stage_novel, stage_dedup), false, 0);
+
             ent_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.entities "
                 "  (id, tier, type_id, first_observed_by, created_at) "
-                "SELECT DISTINCT ON (s.id) "
-                "       s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
-                "FROM %s s ORDER BY s.id "
-                "ON CONFLICT (id) DO NOTHING", stage_ent));
+                "SELECT id, tier, type_id, first_observed_by, created_at "
+                "FROM %s ORDER BY id", stage_novel));
+            if (staged > ent_ins) ent_skip = staged - ent_ins;
+            pfree(stage_dedup);
+            pfree(stage_novel);
+        }
     }
 
     /*
-     * (2) physicalities — same generic core, SPATIAL strategy: the hilbert-range
-     * cursor scan fills the existing_bitmap (sequential range scan on the clustered
-     * heap, not random id-PK probes), then the SAME merkle_dedup_filter_novel +
-     * INSERT … WHERE s.id = ANY($1). The inner DISTINCT ON (s.id) keeps within-batch
-     * dedup; the outer ORDER BY hilbert_index appends to the heap in space-filling
-     * order (clustered-by-construction).
+     * (2) physicalities — id PK only (no phantom (entity_id,type) unique). Staging merge
+     * subtracts existing ids set-based; final INSERT is sorted by hilbert_index for sequential
+     * GiST/B-tree append (no per-row existence check in the INSERT itself).
      */
     if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_phys),
                     true, 1) == SPI_OK_SELECT && SPI_processed == 1)
@@ -152,22 +178,48 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
                                                   SPI_tuptable->tupdesc, 1, &isnull));
         if (!isnull && present)
-            /* dedup key is the id PK ("dedup is the hash" — no (entity_id,type) unique exists).
-             * DISTINCT ON (s.id) collapses within-batch repeats; ON CONFLICT (id) DO NOTHING is the
-             * cross-batch dedup (one inline probe, no separate anti-join). Inner ORDER BY id for the
-             * DISTINCT ON; outer ORDER BY hilbert_index appends to the heap in space-filling order. */
+        {
+            char *stage_dedup = quoted_stage(prefix, "physicalities_dedup");
+            char *stage_novel = quoted_stage(prefix, "physicalities_novel");
+            int64 staged = 0;
+
+            SPI_execute(psprintf(
+                "CREATE TEMP TABLE %s ON COMMIT DROP AS "
+                "SELECT DISTINCT ON (s.id) "
+                "       s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
+                "       s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
+                "FROM %s s ORDER BY s.id",
+                stage_dedup, stage_phys), false, 0);
+
+            if (SPI_execute(psprintf("SELECT count(*) FROM %s", stage_dedup),
+                            true, 1) == SPI_OK_SELECT && SPI_processed == 1)
+            {
+                bool sn;
+                staged = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                       SPI_tuptable->tupdesc, 1, &sn));
+                if (sn) staged = 0;
+            }
+
+            SPI_execute(psprintf(
+                "CREATE TEMP TABLE %s ON COMMIT DROP AS "
+                "SELECT d.id, d.entity_id, d.type, d.coord, d.hilbert_index, d.trajectory, "
+                "       d.n_constituents, d.alignment_residual, d.source_dim, d.observed_at "
+                "FROM %s d "
+                "LEFT JOIN laplace.physicalities p ON p.id = d.id "
+                "WHERE p.id IS NULL",
+                stage_novel, stage_dedup), false, 0);
+
             phys_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.physicalities "
                 "  (id, entity_id, type, coord, hilbert_index, trajectory, "
                 "   n_constituents, alignment_residual, source_dim, observed_at) "
-                "SELECT d.id, d.entity_id, d.type, d.coord, d.hilbert_index, d.trajectory, "
-                "       d.n_constituents, d.alignment_residual, d.source_dim, d.observed_at "
-                "FROM (SELECT DISTINCT ON (s.id) "
-                "        s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
-                "        s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
-                "      FROM %s s ORDER BY s.id) d "
-                "ORDER BY d.hilbert_index "
-                "ON CONFLICT (id) DO NOTHING", stage_phys));
+                "SELECT id, entity_id, type, coord, hilbert_index, trajectory, "
+                "       n_constituents, alignment_residual, source_dim, observed_at "
+                "FROM %s ORDER BY hilbert_index", stage_novel));
+            if (staged > phys_ins) phys_skip = staged - phys_ins;
+            pfree(stage_dedup);
+            pfree(stage_novel);
+        }
     }
 
     /*
@@ -234,6 +286,8 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
     values[1] = Int64GetDatum(phys_ins);
     values[2] = Int64GetDatum(att_ins);
     values[3] = Int64GetDatum(att_fold);
+    values[4] = Int64GetDatum(ent_skip);
+    values[5] = Int64GetDatum(phys_skip);
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }

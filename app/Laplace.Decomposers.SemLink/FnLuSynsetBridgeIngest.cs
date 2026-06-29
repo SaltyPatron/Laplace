@@ -14,11 +14,7 @@ internal static class FnLuSynsetBridgeIngest
 {
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
 
-    /// <summary>
-    /// MapNet and WordFrameNet synsets use Princeton WordNet 1.6 offsets (MultiWordNet alignment) —
-    /// confirmed ~99.7% coverage vs pwn16 against ~0.5% vs pwn30. Both callers pass this.
-    /// </summary>
-    internal const string MultiWordNetVersion = "pwn16";
+    internal const string MultiWordNetVersion = SourceEntityIdConventions.MultiWordNetWnVersion;
 
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,

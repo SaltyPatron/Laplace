@@ -79,11 +79,8 @@ int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
 
 /*
- * Per-content-id partition: route every staged row of `src` into one of `part_count` fresh
- * output stages by (row.id.lo % part_count). out_parts must point to an array of at least
- * part_count intent_stage_t* slots; on success each slot owns a new stage the caller must
- * free, and the key space is disjoint across partitions (a given id appears in exactly one).
- * Returns 0 on success, -1 on error (no partitions are leaked on failure).
+ * Per-row partition: physicalities by contiguous equal-width Hilbert range on the full
+ * 128-bit index; entities/attestations by id.lo % N (content-addressed, Hilbert N/A).
  */
 int intent_stage_partition(
     const intent_stage_t* src,

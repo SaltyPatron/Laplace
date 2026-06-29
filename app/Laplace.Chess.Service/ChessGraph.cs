@@ -91,6 +91,13 @@ public static class ChessGraph
         if (moverPlayerId is { } mover)
             b.AddAttestation(NativeAttestation.Categorical(
                 from.Position.Id, "PLAYED_BY", mover, src, contextId, witnessWeight));
+
+        // GAME_AT — the game entity explicitly lists the positions it visited, enabling the forward
+        // query "all positions in game G" without scanning contextId attestations. Only emitted when
+        // a named game entity exists; self-play and openings have no game node (contextId is null).
+        if (contextId is { } gameId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                gameId, "GAME_AT", from.Position.Id, src, contextId: null, witnessWeight));
     }
 
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)

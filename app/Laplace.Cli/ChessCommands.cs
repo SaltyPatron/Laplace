@@ -2,6 +2,7 @@ using global::Npgsql;
 using Laplace.Chess.Service;
 using Laplace.Modality.Chess;
 using static Laplace.Cli.CliRuntime;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Cli;
 
@@ -27,12 +28,13 @@ internal static class ChessCommands
             "learned-pst" => await LearnedPstAsync(args[1..]),
             "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
             "tactics"  => await TacticsAsync(args[1..]),
+            "lichess"  => await LichessAsync(args[1..]),
             _          => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess>\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
         + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"
@@ -46,7 +48,9 @@ internal static class ChessCommands
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
         + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
         + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)\n"
-        + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)";
+        + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)\n"
+        + "  lichess [--token T] [--depth D] [--max-concurrent N] [--substrate] [--speed bullet|blitz|rapid|classical]\n"
+        + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
 
     /// <summary>The real test: pit a search whose root is biased by the substrate against the identical
     /// pure-classical search, and measure the Elo difference — how much the game graph adds to the
@@ -368,5 +372,63 @@ internal static class ChessCommands
     {
         int i = Array.IndexOf(a, flag);
         return i >= 0 && i + 1 < a.Length && double.TryParse(a[i + 1], out var v) ? v : def;
+    }
+
+    /// <summary>Stream Lichess account events and play rated games using the unified α-β engine.
+    /// Reads the token from <c>--token</c>, <c>LICHESS_API</c>, or <c>deploy\secrets\lichess.env</c>.
+    /// Press Ctrl-C to stop gracefully (finishes in-flight games first).</summary>
+    private static async Task<int> LichessAsync(string[] args)
+    {
+        string? token = LichessBot.ResolveToken(ArgStr(args, "--token", ""));
+        if (string.IsNullOrEmpty(token))
+            return Fail("usage: laplace chess lichess [--token T] [--depth D] [--max-concurrent N]\n"
+                      + "                             [--substrate] [--speed bullet|blitz|rapid|classical]\n"
+                      + "  Token from --token, LICHESS_API env var, or deploy\\secrets\\lichess.env.\n"
+                      + "  --substrate: bias the search with the substructure-fold + learned-PST (needs DB).\n"
+                      + "  --speed: accept only this time-control class (repeatable); default = all.");
+
+        int depth = ArgInt(args, "--depth", 4);
+        int maxConcurrent = ArgInt(args, "--max-concurrent", 4);
+        bool substrate = HasFlag(args, "--substrate");
+
+        // Collect accepted speeds (may appear multiple times via different flags).
+        var speeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--speed") speeds.Add(args[i + 1].ToLowerInvariant());
+        IReadOnlySet<string>? acceptSpeeds = speeds.Count > 0 ? speeds : null;
+
+        NpgsqlDataSource? ds = null;
+        IRootBias? bias = null;
+        int[][]? mg = null, eg = null;
+        if (substrate)
+        {
+            try
+            {
+                ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+                bias = new SubstructureFoldBias(ds);
+                try { (mg, eg) = LearnedPst.BuildTables(ds, 1.0); (mg, eg) = Evaluation.BlendPeStoWith(mg, eg); }
+                catch { /* substrate empty or unreachable — pure PeSTO leaf is fine */ }
+            }
+            catch (Exception ex) { Console.WriteLine($"[warn] substrate unavailable ({ex.Message}); running pure classical."); }
+        }
+
+        Console.WriteLine($"lichess bot: depth {depth}, max {maxConcurrent} concurrent games, "
+            + $"substrate {substrate}, speeds {(acceptSpeeds is null ? "all" : string.Join('+', acceptSpeeds))}");
+        Console.WriteLine($"  token: {token[..Math.Min(8, token.Length)]}…");
+        Console.WriteLine("  Ctrl-C to stop (finishes in-flight games first).");
+
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            Console.WriteLine("\n[lichess] stopping after in-flight games finish…");
+            cts.Cancel();
+        };
+
+        await using var bot = new LichessBot(token, depth, bias, mg, eg, acceptSpeeds);
+        await bot.RunAsync(maxConcurrent, cts.Token);
+
+        if (ds is not null) await ds.DisposeAsync();
+        return 0;
     }
 }
