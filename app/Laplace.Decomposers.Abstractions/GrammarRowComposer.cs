@@ -7,6 +7,9 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
+    /// <inheritdoc cref="LaplaceCoreGate.Native"/>
+    internal static object NativeComposeGate => LaplaceCoreGate.Native;
+
     private readonly byte[] _utf8;
     private readonly string _modalityId;
     private readonly Hash128 _sourceId;
@@ -35,9 +38,12 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         Hash128 rootLocal = default;
         fixed (byte* p = utf8)
         {
-            int rc = NativeInterop.GrammarComposeRowRoot(
-                p, (nuint)utf8.Length, ast.Handle, modalityId, &rootLocal, &tierLocal);
-            if (rc != 0) return false;
+            lock (NativeComposeGate)
+            {
+                int rc = NativeInterop.GrammarComposeRowRoot(
+                    p, (nuint)utf8.Length, ast.Handle, modalityId, &rootLocal, &tierLocal);
+                if (rc != 0) return false;
+            }
             rootId = rootLocal;
             tier = tierLocal;
             return true;
@@ -47,16 +53,20 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     internal void EnsureProbed()
     {
         if (_probe != IntPtr.Zero || _compose != IntPtr.Zero) return;
-        IntPtr result = IntPtr.Zero;
-        fixed (byte* p = _utf8)
+        lock (NativeComposeGate)
         {
-            int rc = NativeInterop.GrammarComposeProbe(
-                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
-                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
-            if (rc != 0 || result == IntPtr.Zero)
-                throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+            if (_probe != IntPtr.Zero || _compose != IntPtr.Zero) return;
+            IntPtr result = IntPtr.Zero;
+            fixed (byte* p = _utf8)
+            {
+                int rc = NativeInterop.GrammarComposeProbe(
+                    p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                    _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
+                if (rc != 0 || result == IntPtr.Zero)
+                    throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+            }
+            _probe = result;
         }
-        _probe = result;
     }
 
     private void EnsureComposed()
@@ -67,31 +77,35 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     private void EnsureComposed(byte[]? existingBitmap)
     {
         if (_compose != IntPtr.Zero) return;
-        if (_probe != IntPtr.Zero)
+        lock (NativeComposeGate)
         {
-            if (IsEntireTreePresent(existingBitmap))
+            if (_compose != IntPtr.Zero) return;
+            if (_probe != IntPtr.Zero)
+            {
+                if (IsEntireTreePresent(existingBitmap))
+                    return;
+                fixed (byte* p = _utf8)
+                {
+                    int rc = NativeInterop.GrammarComposeMaterializePhys(
+                        _probe, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
+                    if (rc != 0)
+                        throw new InvalidOperationException(
+                            $"laplace_grammar_compose_materialize_phys returned {rc}");
+                }
+                _compose = _probe;
                 return;
+            }
+            IntPtr result = IntPtr.Zero;
             fixed (byte* p = _utf8)
             {
-                int rc = NativeInterop.GrammarComposeMaterializePhys(
-                    _probe, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
-                if (rc != 0)
-                    throw new InvalidOperationException(
-                        $"laplace_grammar_compose_materialize_phys returned {rc}");
+                int rc = NativeInterop.GrammarCompose(
+                    p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                    _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
+                if (rc != 0 || result == IntPtr.Zero)
+                    throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
             }
-            _compose = _probe;
-            return;
+            _compose = result;
         }
-        IntPtr result = IntPtr.Zero;
-        fixed (byte* p = _utf8)
-        {
-            int rc = NativeInterop.GrammarCompose(
-                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
-                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
-            if (rc != 0 || result == IntPtr.Zero)
-                throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
-        }
-        _compose = result;
     }
 
     /// <summary>
@@ -357,23 +371,26 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             Hash128 src = _sourceId;
             IntPtr active = ActiveResult;
-            if (existingBitmap is { Length: > 0 })
+            lock (NativeComposeGate)
             {
-                fixed (byte* bm = existingBitmap)
+                if (existingBitmap is { Length: > 0 })
+                {
+                    fixed (byte* bm = existingBitmap)
+                    {
+                        int rc = NativeInterop.ComposeDrainIntoStage(
+                            active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
+                            bm, (nuint)existingBitmap.Length * 8);
+                        if (rc != 0)
+                            throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
+                    }
+                }
+                else
                 {
                     int rc = NativeInterop.ComposeDrainIntoStage(
-                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
-                        bm, (nuint)existingBitmap.Length * 8);
+                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
                     if (rc != 0)
                         throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
                 }
-            }
-            else
-            {
-                int rc = NativeInterop.ComposeDrainIntoStage(
-                    active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
-                if (rc != 0)
-                    throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
             }
         }
 
@@ -419,10 +436,15 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        if (_compose != IntPtr.Zero && _compose != _probe)
-            NativeInterop.ComposeResultFree(_compose);
-        if (_probe != IntPtr.Zero)
-            NativeInterop.ComposeResultFree(_probe);
+        lock (NativeComposeGate)
+        {
+            if (_compose != IntPtr.Zero && _compose != _probe)
+                NativeInterop.ComposeResultFree(_compose);
+            if (_probe != IntPtr.Zero)
+                NativeInterop.ComposeResultFree(_probe);
+        }
+        _compose = IntPtr.Zero;
+        _probe = IntPtr.Zero;
         _disposed = true;
         GC.SuppressFinalize(this);
     }

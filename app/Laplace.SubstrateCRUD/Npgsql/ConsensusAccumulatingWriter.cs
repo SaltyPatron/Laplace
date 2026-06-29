@@ -44,7 +44,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private int  _epochsFolded;
     private Task _foldChain = Task.CompletedTask;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
-    private readonly ReaderWriterLockSlim _swapLock = new();
+    private readonly object _accumLock = new();
     private int _inflightApplies;
     private volatile bool _disposing;
 
@@ -176,6 +176,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(changes);
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+        Interlocked.Increment(ref _inflightApplies);
+        try
+        {
+            if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+            return await AppendCoreAsync(changes, sourceId, ct);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inflightApplies);
+        }
+    }
+
+    private async Task<ApplyResult> AppendCoreAsync(
+        IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
 
         bool boundary = false;
         foreach (var c in changes)
@@ -251,8 +268,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private void Accumulate(AttestationRow a)
     {
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
-        _swapLock.EnterReadLock();
-        try
+        lock (_accumLock)
         {
             var acc = _accumulation.GetOrAdd((a.SubjectId, a.TypeId, a.ObjectId), static _ => new Acc());
             lock (acc)
@@ -272,10 +288,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
                 if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
             }
-        }
-        finally
-        {
-            _swapLock.ExitReadLock();
         }
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
@@ -419,15 +431,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 
                 
                 ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snap;
-                _swapLock.EnterWriteLock();
-                try
+                lock (_accumLock)
                 {
                     snap = _accumulation;
                     _accumulation = new ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc>();
-                }
-                finally
-                {
-                    _swapLock.ExitWriteLock();
                 }
                 if (!snap.IsEmpty)
                 {
@@ -459,15 +466,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }
 
             ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snapshot;
-            _swapLock.EnterWriteLock();
-            try
+            lock (_accumLock)
             {
                 snapshot = _accumulation;
                 _accumulation = new ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc>();
-            }
-            finally
-            {
-                _swapLock.ExitWriteLock();
             }
             if (snapshot.IsEmpty) return;
 
@@ -882,6 +884,5 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             _anyEpochCreated = false;
         }
         _stagingGate.Dispose();
-        _swapLock.Dispose();
     }
 }

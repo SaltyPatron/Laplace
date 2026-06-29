@@ -90,6 +90,27 @@ spi_staged_insert_pair(const char *sql, int64 *staged, int64 *inserted)
 }
 
 
+static bool
+staged_att_has_overlap(const char *stage_att)
+{
+    int rc = SPI_execute(psprintf(
+        "SELECT EXISTS ("
+        "  SELECT 1 FROM %s s "
+        "  INNER JOIN laplace.attestations a ON a.id = s.id"
+        ")", stage_att), true, 1);
+
+    if (rc != SPI_OK_SELECT || SPI_processed != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("laplace_apply_batch: attestation overlap probe failed")));
+    {
+        bool isnull;
+        return DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull))
+               && !isnull;
+    }
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_apply_batch);
 
 Datum
@@ -223,30 +244,29 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
              * their staged observation_count. present-set and novel-set are disjoint, so
              * folding before inserting is exact.
              */
-            att_fold = spi_exec_count(psprintf(
-                "WITH d AS MATERIALIZED ("
-                "  SELECT s.id, "
-                "         sum(s.observation_count)::bigint AS games, "
-                "         max(s.last_observed_at)          AS ts "
-                "  FROM %s s "
-                "  WHERE EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
-                "  GROUP BY s.id "
-                "), locked AS MATERIALIZED ("
-                "  SELECT a.id FROM laplace.attestations a "
-                "  WHERE a.id IN (SELECT id FROM d) "
-                "  ORDER BY a.id FOR UPDATE SKIP LOCKED "
-                ") "
-                "UPDATE laplace.attestations a SET "
-                "  observation_count = a.observation_count + d.games, "
-                "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
-                "FROM d "
-                "WHERE a.id = d.id AND a.id IN (SELECT id FROM locked)",
-                stage_att));
+            if (staged_att_has_overlap(stage_att))
+            {
+                att_fold = spi_exec_count(psprintf(
+                    "WITH d AS MATERIALIZED ("
+                    "  SELECT s.id, "
+                    "         sum(s.observation_count)::bigint AS games, "
+                    "         max(s.last_observed_at)          AS ts "
+                    "  FROM %s s "
+                    "  WHERE EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
+                    "  GROUP BY s.id "
+                    "), locked AS MATERIALIZED ("
+                    "  SELECT a.id FROM laplace.attestations a "
+                    "  WHERE a.id IN (SELECT id FROM d) "
+                    "  ORDER BY a.id FOR UPDATE SKIP LOCKED "
+                    ") "
+                    "UPDATE laplace.attestations a SET "
+                    "  observation_count = a.observation_count + d.games, "
+                    "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
+                    "FROM d "
+                    "WHERE a.id = d.id AND a.id IN (SELECT id FROM locked)",
+                    stage_att));
+            }
 
-            /* novel: INSERT the ids the substrate did not hold before this batch, as one
-             * set-based id anti-join. The fold above ran first, so present-set and novel-set
-             * are disjoint; this inserts only the genuinely new ids (DISTINCT ON collapses any
-             * within-batch repeats). */
             att_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.attestations "
                 "  (id, subject_id, type_id, object_id, source_id, context_id, "
