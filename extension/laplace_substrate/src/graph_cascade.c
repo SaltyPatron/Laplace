@@ -150,24 +150,19 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
             Oid   eargs[2] = { BYTEAOID, BYTEAOID };
             Datum eargv[2] = { steps[s - 1], steps[s] };
             int   erc = SPI_execute_with_args(
-                "SELECT c.type_id, c.subject_id "
-                "FROM laplace.consensus c "
-                "WHERE ((c.subject_id = $1 AND c.object_id = $2) "
-                "    OR (c.subject_id = $2 AND c.object_id = $1)) "
-                "  AND NOT laplace.refuted(c.rating, c.rd) "
-                "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC "
-                "LIMIT 1",
+                "SELECT type_id, "
+                "       CASE WHEN subject_id = $1 THEN 1 ELSE -1 END AS dir "
+                "FROM laplace.consensus_step_edge($1, $2)",
                 2, eargs, eargv, NULL, true, 1);
             if (erc == SPI_OK_SELECT && SPI_processed > 0)
             {
                 HeapTuple tup = SPI_tuptable->vals[0];
                 TupleDesc td  = SPI_tuptable->tupdesc;
                 bool      isnull;
-                Datum     subj;
                 via_types[s] = copy_bytea_datum(
                     SPI_getbinval(tup, td, 1, &isnull));
-                subj = SPI_getbinval(tup, td, 2, &isnull);
-                via_dirs[s] = bytea_eq(subj, steps[s - 1]) ? 1 : -1;
+                via_dirs[s] = DatumGetInt32(
+                    SPI_getbinval(tup, td, 2, &isnull));
             }
             if (costs[s] > max_cost)
                 max_cost = costs[s];

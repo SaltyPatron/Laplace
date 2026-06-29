@@ -115,66 +115,14 @@ prefix_cmp(const GenCorpus *c, int32 s, const int32 *ctx, int k)
 
 
 
-static const char *CORPUS_EDGE_QUERY =
-    "SELECT p.entity_id, u.entity_id, GREATEST(u.run_length, 1)::int "
-    "FROM (SELECT DISTINCT ON (entity_id) entity_id, trajectory "
-    "      FROM laplace.physicalities "
-    "      WHERE type = 1 AND trajectory IS NOT NULL "
-    "      ORDER BY entity_id) p "
-    "JOIN laplace.entities e ON e.id = p.entity_id AND e.tier > 2, "
-    "LATERAL public.ST_DumpPoints(p.trajectory) dp, "
-    "LATERAL public.laplace_mantissa_unpack(dp.geom) u "
-    "ORDER BY p.entity_id, u.ordinal";
-
-static const char *CORPUS_PROBE =
-    "SELECT count(*)::int8, "
-    "       COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::int8, 0) "
-    "FROM laplace.physicalities WHERE type = 1 AND trajectory IS NOT NULL";
-
-
-
-
-
-static const char *CORPUS_SEPARATOR_QUERY =
-    "SELECT v.ord::int4 - 1 "
-    "FROM unnest($1::bytea[]) WITH ORDINALITY v(id, ord), "
-    "LATERAL (SELECT laplace.render_text_fast(v.id, 8) AS s) r "
-    "WHERE laplace.is_all_whitespace(r.s)";
-
-#define CORPUS_WALK_DEPTH_CAP 256
-
-typedef struct CorpusNode
-{
-    char  id[16];                  
-    int32 idx;                     
-} CorpusNode;
-
-typedef struct NodeMeta
-{
-    int32 first_edge;              
-    int32 n_edges;
-    bool  has_parent;
-} NodeMeta;
-
-typedef struct CorpusEdge
-{
-    int32 child;                   
-    int32 run;
-} CorpusEdge;
-
-typedef struct WalkFrame
-{
-    int32 node;                    
-    int32 edge_i;                  
-    int32 rep_left;                
-} WalkFrame;
-
 static void
 corpus_probe(int64 *rows, int64 *max_us)
 {
     bool isnull;
 
-    if (SPI_execute(CORPUS_PROBE, true, 1) != SPI_OK_SELECT || SPI_processed == 0)
+    if (SPI_execute(
+            "SELECT rows, max_us FROM laplace.corpus_trajectory_probe()",
+            true, 1) != SPI_OK_SELECT || SPI_processed == 0)
         elog(ERROR, "trajectory_stream: trajectory probe failed");
     *rows = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
                                         SPI_tuptable->tupdesc, 1, &isnull));
@@ -260,76 +208,18 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     MemoryContextSwitchTo(old);
 
     {
-        StringInfoData q;
-        char           prev_parent[16];
-        bool           have_parent = false;
+        Oid    argtypes[2] = { TEXTOID, INT4OID };
+        Datum  args[2];
+        char   prev_parent[16];
+        bool   have_parent = false;
 
-        initStringInfo(&q);
-        appendStringInfoString(&q,
-            "WITH doc AS ("
-            "  SELECT e.id FROM laplace.entities e "
-            "  JOIN laplace.physicalities p "
-            "    ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL "
-            "  WHERE e.tier = 4");
-        /* Geometry is source-free: physicalities no longer carry source_id. A document's
-           provenance lives on the word-level (UAX-29) PRECEDES attestations it CONTEXTUALIZES
-           -- i.e. the tier-4 document is the context_id of its source's evidence. Scope the
-           book corpus to documents witnessed by the configured decomposer source through that
-           context link; the doc->sentence->word composition itself stays geometric (trajectory). */
-        if (c->document_source[0] != '\0')
-            appendStringInfo(&q,
-                " AND EXISTS (SELECT 1 FROM laplace.attestations a"
-                " WHERE a.context_id = e.id"
-                " AND a.source_id = laplace.source_id('%s'))",
-                c->document_source);
-        appendStringInfoString(&q,
-            "), book_sent AS ("
-            "  SELECT DISTINCT tc.entity_id AS id "
-            "  FROM doc d "
-            "  JOIN laplace.physicalities pd "
-            "    ON pd.entity_id = d.id AND pd.type = 1 AND pd.trajectory IS NOT NULL "
-            "  CROSS JOIN LATERAL public.laplace_trajectory_constituents(pd.trajectory) tc"
-            ")");
-        if (c->build_max_orphans > 0)
-        {
-            appendStringInfoString(&q,
-                ", orphan_sent AS ("
-                "  SELECT e.id "
-                "  FROM laplace.entities e "
-                "  JOIN laplace.physicalities ps "
-                "    ON ps.entity_id = e.id AND ps.type = 1 AND ps.trajectory IS NOT NULL "
-                "  WHERE e.tier = 3 "
-                "    AND NOT EXISTS ("
-                "      SELECT 1 FROM book_sent bs WHERE bs.id = e.id"
-                "    ) "
-                "  ORDER BY ps.observed_at DESC");
-            appendStringInfo(&q, " LIMIT %d", c->build_max_orphans);
-            appendStringInfoString(&q, ")");
-        }
-        appendStringInfoString(&q,
-            ", s AS ("
-            "  SELECT id FROM book_sent");
-        if (c->build_max_orphans > 0)
-            appendStringInfoString(&q, " UNION SELECT id FROM orphan_sent");
-        appendStringInfoString(&q,
-            ") "
-            "SELECT pp.entity_id, u.entity_id, GREATEST(u.run_length, 1)::int "
-            "FROM (SELECT DISTINCT ON (pp.entity_id) pp.entity_id, pp.trajectory "
-            "      FROM laplace.physicalities pp JOIN s ON s.id = pp.entity_id "
-            "      WHERE pp.type = 1 AND pp.trajectory IS NOT NULL "
-            "      ORDER BY pp.entity_id) pp "
-            "CROSS JOIN LATERAL public.laplace_trajectory_constituents(pp.trajectory) u "
-            /* Include words (tier 2), grapheme-segmented content (tier 1, e.g. CJK), AND the
-               whitespace separators between them. Whitespace is classified by is_all_whitespace
-               and folded into sep_after (skipped from the stream, emitted as the observed
-               separator), so generation is language-agnostic and renders real separators.
-               tier=2-only was English-word sabotage: it dropped every separator and every
-               non-word-segmented language from the generation corpus. */
-            "WHERE public.laplace_vertex_tier(u.flags) <= 2 "
-            "ORDER BY pp.entity_id, u.ordinal");
+        args[0] = CStringGetTextDatum(c->document_source);
+        args[1] = Int32GetDatum(c->build_max_orphans);
         portal = SPI_cursor_open_with_args(
-            "corpus_sentences", q.data, 0, NULL, NULL, NULL, true, 0);
-        pfree(q.data);
+            "corpus_sentences",
+            "SELECT parent_id, child_id, run_length "
+            "FROM laplace.corpus_sentence_constituents($1, $2)",
+            2, argtypes, args, NULL, true, 0);
 
         memset(prev_parent, 0, sizeof(prev_parent));
         for (;;)
@@ -437,8 +327,9 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             args[0] = PointerGetDatum(arr);
             MemoryContextSwitchTo(old2);
 
-            rc = SPI_execute_with_args(CORPUS_SEPARATOR_QUERY, 1, argtypes, args,
-                                       NULL, true, 0);
+            rc = SPI_execute_with_args(
+                "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)",
+                1, argtypes, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "trajectory_stream: separator classification failed: %s",
                      SPI_result_code_string(rc));

@@ -43,14 +43,11 @@ Kestrel on `127.0.0.1:5187`. Reachable on the LAN at `http://hart-server:8080`.
 sudo deploy/linux/bootstrap-host.sh
 #    then edit secrets in /opt/laplace/app/laplace-api.env (CICD won't touch it)
 
-# 2. routine deploy (what the GitHub Actions 'deploy-app' workflow runs)
-just build && just install        # native engine + extension
-dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release
-deploy/linux/deploy.sh            # build SPA, publish API, migrate DB, restart
+# 2. routine deploy (what the GitHub Actions 'laplace' workflow runs)
+bash scripts/pipeline.sh --mode hot
 ```
 
-CI: `.github/workflows/deploy-app.yml` (workflow_dispatch + push to `main`
-touching `app/…OpenAICompat`, `web/`, or `deploy/linux/`).
+CI: `.github/workflows/laplace.yml` (push/PR to `main`; `workflow_dispatch` for fresh_db / full_ladder).
 
 ## Config knobs (env)
 

@@ -8,7 +8,7 @@
     "law": "laplace = cumulative canonical DB (promote-only re-ingest). laplace_d_<source> = throwaway isolated proof DB (fresh db-isolate + prerequisite ingests + target). No pg clone between isolated DBs."
   },
   "manifest_order": [
-    "unicode", "iso639", "document",
+    "unicode", "iso639", "cili", "document",
     "wordnet", "omw", "verbnet", "propbank", "framenet", "mapnet", "wordframenet", "semlink",
     "conceptnet", "atomic2020", "ud", "wiktionary",
     "tatoeba", "opensubtitles"
@@ -33,6 +33,15 @@
         { "relation": "USES_SCRIPT", "min": 1 }
       ]
     },
+    "cili": {
+      "decomposer": "CILIDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "HAS_DEFINITION", "min": 1 },
+        { "relation": "IS_TYPED_AS", "min": 1 }
+      ]
+    },
     "document": {
       "decomposer": "UserPrompt",
       "layer": 2,
@@ -43,7 +52,7 @@
     "wordnet": {
       "decomposer": "WordNetDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": ["cili"],
       "consensus_gates": [
         { "relation": "IS_A", "min": 50000 },
         { "relation": "HAS_DOMAIN_TOPIC", "min": 1 },

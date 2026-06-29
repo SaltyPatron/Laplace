@@ -18,10 +18,12 @@ public sealed record IngestProgress(
     long     PhysicalitiesInserted = 0,
     long     AttestationsInserted = 0,
     long     RoundTrips = 0,
-    long     UnitsProduced = 0)
+    long     UnitsProduced = 0,
+    long     InputUnitsComposed = 0)
 {
     public double InputPercent =>
-        InputUnitsTotal > 0 ? 100.0 * InputUnitsDone / InputUnitsTotal
+        InputUnitsTotal > 0
+            ? 100.0 * Math.Max(InputUnitsDone, InputUnitsComposed) / InputUnitsTotal
         : UnitsProduced > 0 ? 100.0 * UnitsApplied / UnitsProduced
         : 0;
 

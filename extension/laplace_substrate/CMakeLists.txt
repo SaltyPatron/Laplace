@@ -1,7 +1,6 @@
 if(WIN32)
     add_library(laplace_substrate MODULE
         src/laplace_substrate.c
-        src/apply_batch.c
         src/consensus_fold_step.c
         src/consensus_fold_engine.c
         src/consensus_fold_walks.c
@@ -10,13 +9,11 @@ if(WIN32)
         src/trajectory_generate.c
         src/variant_synth.c
         src/astar_path.c
-        src/graph_geometry_reads.c
+        src/apply_batch.c
         src/graph_taxonomy.c
         src/graph_contrast.c
         src/graph_cascade.c
         src/foundry_crawl.c
-        src/consensus_reads.c
-        src/consensus_lexical_reads.c
         src/recall.c
         src/recall_route.c
         src/perfcache.c
@@ -62,7 +59,6 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 
 set(EXT_C_SOURCES
     src/laplace_substrate.c
-    src/apply_batch.c
     src/consensus_fold_step.c
     src/consensus_fold_engine.c
     src/consensus_fold_walks.c
@@ -71,13 +67,11 @@ set(EXT_C_SOURCES
     src/trajectory_generate.c
     src/variant_synth.c
     src/astar_path.c
-    src/graph_geometry_reads.c
+    src/apply_batch.c
     src/graph_taxonomy.c
     src/graph_contrast.c
     src/graph_cascade.c
     src/foundry_crawl.c
-    src/consensus_reads.c
-    src/consensus_lexical_reads.c
     src/recall.c
     src/recall_route.c
     src/perfcache.c
@@ -143,6 +137,17 @@ set(EXT_SQL_MODULES
     sql/25_intent_preflight.sql.in
     sql/26_generation.sql.in
     sql/27_apply_batch.sql.in
+    sql/28_apply_batch_merge.sql.in
+    sql/29_consensus_expand.sql.in
+    sql/30_realize_branches.sql.in
+    sql/31_consensus_reads.sql.in
+    sql/32_lexical_reads.sql.in
+    sql/33_taxonomy_expand.sql.in
+    sql/34_contrast_expand.sql.in
+    sql/35_variant_expand.sql.in
+    sql/36_recall_responses.sql.in
+    sql/37_corpus_expand.sql.in
+    sql/38_geometry_expand.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

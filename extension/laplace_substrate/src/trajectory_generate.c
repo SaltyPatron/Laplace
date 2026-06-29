@@ -370,14 +370,6 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
 
 
-            static const char *FLOOR_SQL =
-                "SELECT c.object_id, "
-                "       GREATEST(laplace.eff_mu(c.rating, c.rd) / 1000000000, 1)::int8 "
-                "FROM laplace.consensus c "
-                "WHERE c.subject_id = $1 AND c.object_id IS NOT NULL "
-                "  AND c.type_id = laplace.relation_type_id('COMPLETES_TO') "
-                "  AND NOT laplace.refuted(c.rating, c.rd) "
-                "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC LIMIT $2";
             Oid    argtypes[2] = { BYTEAOID, INT4OID };
             Datum  args[2];
             bytea *subj = (bytea *) palloc(VARHDRSZ + 16);
@@ -387,7 +379,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             memcpy(VARDATA(subj), c->ids[ctx[ctx_len - 1]], 16);
             args[0] = PointerGetDatum(subj);
             args[1] = Int32GetDatum(topk);
-            rc = SPI_execute_with_args(FLOOR_SQL, 2, argtypes, args, NULL, true, 0);
+            rc = SPI_execute_with_args(
+                "SELECT object_id, weight "
+                "FROM laplace.walk_completes_floor($1, $2)",
+                2, argtypes, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: consensus floor probe failed: %s",
                      SPI_result_code_string(rc));

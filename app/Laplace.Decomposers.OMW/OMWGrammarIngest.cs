@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OMW;
@@ -44,6 +46,7 @@ internal static class OMWGrammarIngest
         ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        CpuTopology.RequirePerformanceCorePin();
         long rowsParsed = 0;
         int fileBn = 0;
 
@@ -88,34 +91,55 @@ internal static class OMWGrammarIngest
                 FullMode = BoundedChannelFullMode.Wait,
             });
 
-        var workers = new Task[Math.Min(fileWorkers, tabFiles.Count)];
+        int workerCount = Math.Min(fileWorkers, tabFiles.Count);
+        var threads = new Thread[workerCount];
+        var errors = new ConcurrentQueue<Exception>();
         int nextFile = -1;
 
-        for (int w = 0; w < workers.Length; w++)
+        for (int w = 0; w < workerCount; w++)
         {
-            workers[w] = Task.Run(async () =>
+            int workerId = w;
+            threads[w] = new Thread(() =>
             {
-                while (true)
+                try
                 {
-                    int fileIdx = Interlocked.Increment(ref nextFile);
-                    if (fileIdx >= tabFiles.Count) break;
-
-                    string tabFile = tabFiles[fileIdx];
-                    await foreach (var change in IngestOneFileAsync(
-                        tabFile, batch, fileIdx, maxInputUnits, containmentReader, ct))
+                    CpuTopology.RequirePerformanceCorePin();
+                    while (true)
                     {
-                        await outChannel.Writer.WriteAsync(change, ct);
+                        int fileIdx = Interlocked.Increment(ref nextFile);
+                        if (fileIdx >= tabFiles.Count) break;
+
+                        string tabFile = tabFiles[fileIdx];
+                        var fileChanges = IngestOneFileAsync(
+                            tabFile, batch, fileIdx, maxInputUnits, containmentReader, ct);
+                        var enumerator = fileChanges.GetAsyncEnumerator(ct);
+                        try
+                        {
+                            while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+                            {
+                                var change = enumerator.Current;
+                                outChannel.Writer.WriteAsync(change, ct).AsTask().GetAwaiter().GetResult();
+                            }
+                        }
+                        finally
+                        {
+                            enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                        }
                     }
                 }
-            }, ct);
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    errors.Enqueue(ex);
+                }
+            }) { IsBackground = true, Name = $"omw-file-pcore-{workerId}" };
+            threads[w].Start();
         }
 
-        // Must always complete the channel, even on worker fault -- otherwise an exception in any one
-        // of N parallel file-workers is swallowed into this unobserved closer task, the channel never
-        // signals done, and the consumer's WaitToReadAsync below hangs forever with zero CPU and no
-        // error surfaced anywhere. Propagate the fault into the channel so the consumer rethrows it.
-        var closer = Task.Run(() => Task.WhenAll(workers), ct)
-            .ContinueWith(t => outChannel.Writer.TryComplete(t.Exception), TaskScheduler.Default);
+        var closer = Task.Run(() =>
+        {
+            foreach (var t in threads) t.Join();
+            outChannel.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
+        }, ct);
 
         long rowsParsed = 0;
         while (await outChannel.Reader.WaitToReadAsync(ct))

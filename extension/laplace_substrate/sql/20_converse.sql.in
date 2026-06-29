@@ -96,15 +96,7 @@ CREATE OR REPLACE FUNCTION word_language(p_word bytea)
     LIMIT 1
 $$;
 
-CREATE OR REPLACE FUNCTION senses(p_word bytea)
-    RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_senses';
-
-CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
-    RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_define';
+-- senses, define, examples: 32_lexical_reads.sql.in (included before this module)
 
 -- Emergent lexical-semantic reads — synonymy and translation are two halves of one structure
 -- (synset co-membership), never stored as direct edges. One object per file under inference/.
@@ -119,10 +111,7 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
     LANGUAGE C STABLE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_hypernyms';
 
-CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
-    RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_examples';
+-- examples: 32_lexical_reads.sql.in
 
 CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     RETURNS bytea
@@ -167,39 +156,12 @@ CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
     LIMIT 1
 $$;
 
-CREATE OR REPLACE FUNCTION shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
-                                     p_limit int DEFAULT 40)
-    RETURNS TABLE(object_id bytea, support int, total_mu numeric)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_shared_objects';
+-- shared_objects, related, salient_facts, usage_overlap, relate_path, relation_summary, gaps:
+-- 31_consensus_reads.sql.in
 
-CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
-    RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
-                  score numeric)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_senses_context';
+-- realize() — installed in 30_realize_branches.sql.in (SQL branch chain, not inline C SPI).
 
-CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
-    RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_define_context';
-
-CREATE OR REPLACE FUNCTION type_label(p_type bytea)
-    RETURNS text
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/type/(.+)/v1$', '\1'),
-                         '_', ' '))
-$$;
-
-
-
-
-
-CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
-    RETURNS text
-    AS 'MODULE_PATHNAME', 'pg_laplace_realize'
-    LANGUAGE C STABLE PARALLEL SAFE;
+-- realize() — installed in 30_realize_branches.sql.in (SQL branch chain, not inline C SPI).
 
 CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
@@ -229,44 +191,10 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[], p_dirs 
     FROM generate_subscripts(p_path, 1) AS i
 $$;
 
-CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
-                                   p_limit int DEFAULT 10)
-    RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_related';
-
-CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
-                                      p_limit int DEFAULT 10)
-    RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_related_in';
-
-CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
-                                    p_limit int DEFAULT 24)
-    RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_salient_facts';
-
 CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
     LANGUAGE C STABLE STRICT PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_isa_path';
-
-CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
-    RETURNS bigint
-    LANGUAGE C STABLE PARALLEL SAFE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_usage_overlap';
-
-CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
-    RETURNS TABLE(chain text, path_mu numeric, plane text)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_relate_path';
-
-CREATE OR REPLACE FUNCTION relation_summary(p_x bytea, p_y bytea)
-    RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
-                  geodesic double precision, verdict text)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_relation_summary';
 
 CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
@@ -281,15 +209,9 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
             WHERE c.object_id IS NOT NULL
               AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                     relation_type_id('HAS_LANGUAGE'))
-            -- rank-weighted: the p_limit cut keeps salient relations (meaning) over residual
-            -- scaffolding (HAS_POS/PRECEDES/…) that the explicit filter above doesn't catch.
             ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
             LIMIT p_limit),
-         
          lang(id) AS (SELECT COALESCE(p_lang, word_language(p_word))),
-         
-         
-         
          objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
          rendered AS (
             SELECT u.object_id, NULLIF(u.s, '') AS s
@@ -306,14 +228,8 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
     LEFT JOIN rendered rd ON rd.object_id = r.object_id
-    -- output rank-ordered too, not just the cut: salient facts first.
     ORDER BY relation_rank_resolved(r.type_id) * (eff_mu(r.rating, r.rd) / 1e9) DESC
 $$;
-
-CREATE OR REPLACE FUNCTION gaps(p_word bytea)
-    RETURNS TABLE(missing_arena text)
-    LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_gaps';
 
 CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 80)

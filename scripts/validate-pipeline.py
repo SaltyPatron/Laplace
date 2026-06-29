@@ -15,7 +15,8 @@ MANIFEST = ROOT / "scripts" / "win" / "witness-manifest.json"
 SEED_LADDER_DEPS: dict[str, list[str]] = {
     "unicode": [],
     "iso639": ["unicode"],
-    "wordnet": ["iso639"],
+    "cili": ["iso639"],
+    "wordnet": ["cili"],
     "omw": ["wordnet"],
     "verbnet": ["iso639"],
     "propbank": ["iso639"],
@@ -30,6 +31,47 @@ SEED_LADDER_DEPS: dict[str, list[str]] = {
     "atomic2020": ["iso639"],
     "opensubtitles": ["iso639"],
 }
+
+
+FOUNDATION_SOURCES = ("unicode", "iso639", "cili", "wordnet")
+
+
+def parse_ensure_foundation_sh(text: str) -> list[str] | None:
+    m = re.search(r'FOUNDATION=\(\s*([\s\S]*?)\s*\)', text)
+    if not m:
+        return None
+    out: list[str] = []
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # "unicode:UnicodeDecomposer:0"
+        cli = line.strip('"').split(":")[0]
+        if cli:
+            out.append(cli)
+    return out or None
+
+
+def validate_retired_workflows() -> list[str]:
+    errs: list[str] = []
+    workflows = ROOT / ".github" / "workflows"
+    for name in ("ci.yml", "integration.yml", "deploy-app.yml"):
+        if (workflows / name).is_file():
+            errs.append(f"retired workflow still present: .github/workflows/{name}")
+    laplace = workflows / "laplace.yml"
+    if not laplace.is_file():
+        errs.append("missing canonical workflow: .github/workflows/laplace.yml")
+    else:
+        text = read_text(laplace)
+        compact = re.sub(r"\s+", "", text)
+        if "pull_request:branches:[main]" not in compact:
+            errs.append("laplace.yml: expected pull_request trigger on main")
+        if "push:branches:[main]" not in compact:
+            errs.append("laplace.yml: expected push trigger on main")
+        for stale in ("integration.yml", "deploy-app.yml"):
+            if stale in text:
+                errs.append(f"laplace.yml: references retired workflow {stale}")
+    return errs
 
 
 def load_manifest() -> dict:
@@ -106,6 +148,13 @@ def stage_cli_lists(manifest: dict) -> dict[str, list[str]]:
         else:
             out[name] = [s["cli"] for s in sources]
     return out
+
+
+def expected_seed_stage_knowledge(manifest: dict) -> list[str]:
+    """seed-stage.cmd knowledge loop = floor cili (if any) + manifest knowledge order."""
+    stages = stage_cli_lists(manifest)
+    prefix = [c for c in stages.get("floor", []) if c == "cili"]
+    return prefix + stages["knowledge"]
 
 
 def flat_ingest_all(manifest: dict) -> list[str]:
@@ -256,6 +305,8 @@ def validate_seed_ladder_deps(deps: dict[str, list[str]]) -> list[str]:
                 errs.append(f"seed-ladder.yml: {bridge} must need {req}; has {bridge_needs}")
     if "wordnet" not in deps.get("omw", []):
         errs.append("seed-ladder.yml: omw must need wordnet")
+    if "cili" not in deps:
+        errs.append("seed-ladder.yml: missing cili job")
     return errs
 
 
@@ -338,6 +389,24 @@ def main() -> int:
     seed_stage = ROOT / "scripts" / "win" / "seed-stage.cmd"
     audit_sh = ROOT / "scripts" / "audit-decomposers.sh"
     seed_yml = ROOT / ".github" / "workflows" / "seed-ladder.yml"
+    ensure_foundation = ROOT / "scripts" / "ensure-foundation.sh"
+    pipeline_sh = ROOT / "scripts" / "pipeline.sh"
+
+    errs.extend(validate_retired_workflows())
+
+    if not pipeline_sh.is_file():
+        errs.append("missing canonical orchestrator: scripts/pipeline.sh")
+    elif "ensure-foundation.sh" not in read_text(pipeline_sh):
+        errs.append("pipeline.sh: must invoke scripts/ensure-foundation.sh")
+
+    if not ensure_foundation.is_file():
+        errs.append("missing foundation helper: scripts/ensure-foundation.sh")
+    else:
+        errs.extend(compare_order(
+            "ensure-foundation.sh",
+            list(FOUNDATION_SOURCES),
+            parse_ensure_foundation_sh(read_text(ensure_foundation)),
+        ))
 
     errs.extend(compare_order(
         "ingest-source.sh all",
@@ -346,7 +415,7 @@ def main() -> int:
     ))
     errs.extend(compare_order(
         "seed-stage.cmd knowledge",
-        knowledge,
+        expected_seed_stage_knowledge(manifest),
         parse_seed_stage_knowledge(read_text(seed_stage)),
     ))
     errs.extend(compare_audit_base(

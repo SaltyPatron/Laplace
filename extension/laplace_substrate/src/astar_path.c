@@ -18,21 +18,10 @@ PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
 
 static const char *Q_UNDIRECTED =
-    "SELECT nbr, rating, rd FROM ("
-    "  SELECT object_id AS nbr, rating, rd FROM laplace.consensus"
-    "   WHERE subject_id = $1 AND object_id IS NOT NULL"
-    "     AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
-    "  UNION ALL"
-    "  SELECT subject_id, rating, rd FROM laplace.consensus"
-    "   WHERE object_id = $1"
-    "     AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
-    ") e ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT $3";
+    "SELECT nbr, rating, rd FROM laplace.consensus_neighbors_undirected($1, $2, $3)";
 
 static const char *Q_DIRECTED =
-    "SELECT object_id AS nbr, rating, rd FROM laplace.consensus"
-    "  WHERE subject_id = $1 AND object_id IS NOT NULL"
-    "    AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
-    "  ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT $3";
+    "SELECT nbr, rating, rd FROM laplace.consensus_neighbors_directed($1, $2, $3)";
 
 static SPIPlanPtr plan_undirected = NULL;
 static SPIPlanPtr plan_directed   = NULL;

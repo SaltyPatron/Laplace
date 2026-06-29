@@ -46,7 +46,7 @@ Modes:
                         - run sudo bootstrap-laplace-runner.sh stripe for runner .env
 
 After 'setup' completes the host is ready. Trigger CI:
-  gh workflow run integration.yml
+  gh workflow run laplace.yml
   (or push to main)
 EOF
 }
@@ -151,7 +151,7 @@ What's running:
   - Extensions present in laplace DB: postgis, laplace
 
 Next:
-  gh workflow run integration.yml
+  gh workflow run laplace.yml
   (or push to main to trigger CI)
 
 Reset paths (each independently resettable):

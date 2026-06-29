@@ -1,0 +1,414 @@
+name: Laplace — build, deploy, test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      fresh_db:
+        description: "nuke + re-migrate + reseed foundation (required after destructive schema changes)"
+        type: boolean
+        default: false
+      full_ladder:
+        description: "after foundation, run the full seed ladder (multi-hour corpora + bridges)"
+        type: boolean
+        default: false
+      skip_seed:
+        description: "deploy only; skip ensure-foundation and seed ladder"
+        type: boolean
+        default: false
+      skip_clean:
+        description: "fresh mode only — keep existing build/ tree"
+        type: boolean
+        default: true
+
+concurrency:
+  group: laplace-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+  LAPLACE_INGEST_WORKERS: "2"
+  LAPLACE_DECOMPOSE_WORKERS: "2"
+  LAPLACE_FOLD_WORKERS: "4"
+  LAPLACE_APPLY_PARTITIONS: "6"
+  LAPLACE_UD_LANGS: en
+  LAPLACE_WIKTIONARY_LANGS: en
+
+jobs:
+
+  policy-checks:
+    name: Policy — manifest, attestation, vocabulary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate witness-manifest vs orchestration scripts
+        run: python scripts/validate-pipeline.py
+
+      - name: Regenerate attestation law and check drift
+        run: |
+          python scripts/codegen-attestation-law.py
+          git diff --exit-code engine/core/src/generated/ extension/laplace_substrate/sql/generated/
+
+      - name: Forbid C# attestation policy in decomposers
+        run: |
+          set -e
+          violations=0
+          files=$(find app -path 'app/Laplace.Decomposers.*/*.cs' \
+            ! -path 'app/Laplace.Decomposers.*.Tests/*')
+          for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::error file=$f::Forbidden attestation policy: $pattern"
+              violations=$((violations+1))
+            done < <(rg -l "$pattern" $files 2>/dev/null || true)
+          done
+          exit "$violations"
+
+      - name: Scan for unflagged banned terms
+        run: |
+          set +e
+          banned_terms=(
+            "HNSWLib" "hnswlib" "FAISS" "ScaNN" "Milvus" "Pinecone"
+            "oneDNN" "cuDNN"
+          )
+          files_to_scan=$(find . -type f \( -name '*.md' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.c' -o -name '*.cs' -o -name '*.sql' \) \
+            ! -path './.git/*' ! -path './node_modules/*')
+          violations=0
+          for term in "${banned_terms[@]}"; do
+            while IFS= read -r match; do
+              file=$(echo "$match" | cut -d: -f1)
+              case "$file" in
+                ./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md|./.github/workflows/laplace.yml)
+                  ;;
+                *)
+                  echo "::warning file=$file::Banned term '$term' appears outside allowed files"
+                  violations=$((violations+1))
+                  ;;
+              esac
+            done < <(grep -nH "$term" $files_to_scan 2>/dev/null)
+          done
+          echo "Total unflagged banned-term occurrences: $violations"
+          exit "$violations"
+
+  capabilities:
+    name: Verify self-hosted runner capabilities
+    if: github.event_name != 'pull_request'
+    needs: policy-checks
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Guard — workspace must stay submodule-free
+        run: |
+          fail=0
+          if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
+            echo "::error::.git/modules is populated — deps must source from \$LAPLACE_EXTERNAL"
+            fail=1
+          fi
+          init=$(git submodule status 2>/dev/null | grep -cE '^[ +U]' || true)
+          if [ "${init:-0}" -gt 0 ]; then
+            echo "::error::$init submodule(s) initialized in workspace"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "✓ workspace submodule-free"
+          exit "$fail"
+
+      - name: Ensure /opt/laplace install destinations exist
+        run: |
+          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
+            mkdir -p "/opt/laplace/$d"
+          done
+
+      - name: Sync /opt/laplace/external/ to .gitmodules pin
+        run: scripts/sync-external.sh
+
+      - name: Toolchain probes
+        run: |
+          [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
+          command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
+          command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
+          for dep in eigen spectra blake3 googletest postgresql postgis proj geos gdal tree-sitter; do
+            [ -d "$LAPLACE_EXTERNAL/$dep/.git" ] || { echo "::error::$LAPLACE_EXTERNAL/$dep missing"; exit 1; }
+          done
+          RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
+          [ "$RESULT" = "laplace_admin on postgres" ] || { echo "::error::peer auth failed: $RESULT"; exit 1; }
+
+  proj:
+    name: dep — proj
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: proj
+          verify: |
+            /opt/laplace/proj/lib/libproj.so
+            /opt/laplace/proj/include/proj.h
+
+  geos:
+    name: dep — geos
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: geos
+          verify: |
+            /opt/laplace/geos/lib/libgeos_c.so
+            /opt/laplace/geos/include/geos_c.h
+
+  gdal:
+    name: dep — gdal
+    if: github.event_name != 'pull_request'
+    needs: [capabilities, proj]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: gdal
+          verify: |
+            /opt/laplace/gdal/lib/libgdal.so
+            /opt/laplace/gdal/include/gdal.h
+
+  postgresql:
+    name: dep — postgresql 18
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgresql
+          verify: |
+            /opt/laplace/pgsql-18/bin/postgres
+            /opt/laplace/pgsql-18/include/server/postgres.h
+
+  postgis:
+    name: dep — postgis
+    if: github.event_name != 'pull_request'
+    needs: [capabilities, postgresql, geos, proj, gdal]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgis
+          verify: |
+            /opt/laplace/pgsql-18/lib/postgis-3.so
+            /opt/laplace/pgsql-18/share/extension/postgis.control
+
+  tree-sitter:
+    name: dep — tree-sitter
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: tree-sitter
+          verify: |
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a
+            /opt/laplace/tree-sitter/include/tree_sitter/api.h
+
+  build:
+    name: Build engine + extensions + app
+    if: github.event_name != 'pull_request'
+    needs: [postgis, tree-sitter]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: cmake + dotnet build
+        run: bash scripts/pipeline.sh --mode build-only --skip-install
+
+  endpoint-build:
+    name: Build endpoint + endpoint tests
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: dotnet build endpoint
+        run: |
+          dotnet build app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj -c Release
+          dotnet build app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
+
+  deploy:
+    name: Install → migrate → publish → ensure foundation
+    if: github.event_name != 'pull_request'
+    needs: [build, endpoint-build]
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: stop API service
+        run: sudo systemctl stop laplace-api || true
+
+      - name: pipeline — hot deploy or fresh reseed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
+            args=(--mode fresh)
+            [ "${{ inputs.skip_clean }}" = "true" ] && args+=(--skip-clean)
+          else
+            args=(--mode hot --skip-build)
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_seed }}" = "true" ]; then
+            args+=(--skip-seed)
+          fi
+          bash scripts/pipeline.sh "${args[@]}"
+
+      - name: start API service
+        run: sudo systemctl start laplace-api
+
+      - name: validate — health, substrate counts, recall
+        run: |
+          sleep 3
+          curl -fsS http://127.0.0.1:5187/health
+          echo
+          curl -fsS http://127.0.0.1:5187/health/ready
+          echo
+          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
+            -c "SELECT metric, value FROM laplace.substrate_counts();"
+          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
+          echo
+
+  test-engine:
+    name: ctest (engine unit tests)
+    if: github.event_name != 'pull_request'
+    needs: deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ctest -LE regress
+        run: ctest --test-dir build --output-on-failure -LE regress
+
+  dotnet-test:
+    name: dotnet test (engine bindings + substrate integration)
+    if: github.event_name != 'pull_request'
+    needs: deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: dotnet test
+        run: |
+          cd app
+          for proj in \
+            Laplace.Engine.Core.Tests \
+            Laplace.Engine.Dynamics.Tests \
+            Laplace.Engine.Synthesis.Tests \
+            Laplace.Decomposers.Abstractions.Tests \
+            Laplace.Decomposers.Containers.Abstractions.Tests \
+            Laplace.SubstrateCRUD.Tests \
+            Laplace.Ingestion.Tests \
+            Laplace.Decomposers.Unicode.Tests \
+            Laplace.Decomposers.Model.Tests \
+            Laplace.Decomposers.FrameNet.Tests \
+            Laplace.Decomposers.VerbNet.Tests \
+            Laplace.Decomposers.SemLink.Tests \
+            Laplace.Decomposers.PropBank.Tests \
+            Laplace.Decomposers.OpenSubtitles.Tests; do
+            echo "::group::dotnet test $proj"
+            dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal
+            echo "::endgroup::"
+          done
+
+  regress:
+    name: pg_regress smoke
+    if: github.event_name != 'pull_request'
+    needs: deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ctest -L regress
+        run: ctest --test-dir build --output-on-failure -L regress
+      - name: Show regress diffs on failure
+        if: failure()
+        run: |
+          for f in build/extension/*/tests/regress_output/regression.diffs; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+  endpoint-health:
+    name: Endpoint health probe
+    if: github.event_name != 'pull_request'
+    needs: [deploy, endpoint-build]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: Probe /health and /v1/capabilities
+        run: |
+          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
+
+  endpoint-test:
+    name: Endpoint tests
+    if: github.event_name != 'pull_request'
+    needs: [deploy, endpoint-build]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: dotnet test endpoint
+        run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
+
+  seed-ladder:
+    name: Seed ladder (full)
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.full_ladder == true
+      && inputs.skip_seed != true
+    needs: [regress, dotnet-test, endpoint-health]
+    uses: ./.github/workflows/seed-ladder.yml
+    with:
+      full_ladder: true
+
+  model-pipeline:
+    name: Model pipeline
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.full_ladder == true
+      && inputs.skip_seed != true
+    needs: [seed-ladder]
+    uses: ./.github/workflows/model-pipeline.yml

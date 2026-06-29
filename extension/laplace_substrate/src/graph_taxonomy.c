@@ -40,8 +40,7 @@ spi_top_synset(Datum word)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM laplace.senses($1) sn "
-        "ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1",
+        "SELECT laplace.top_synset($1)",
         1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -58,11 +57,7 @@ spi_gloss_for(Datum synset)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.render_text(g.object_id) "
-        "FROM laplace.consensus g "
-        "WHERE g.subject_id = $1 "
-        "  AND g.type_id = laplace.relation_type_id('DEFINES') "
-        "ORDER BY laplace.eff_mu(g.rating, g.rd) DESC LIMIT 1",
+        "SELECT laplace.synset_gloss($1)",
         1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -128,17 +123,8 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
             type_datums, up_type_n, BYTEAOID, -1, false, TYPALIGN_INT));
 
         rc = SPI_execute_with_args(
-            "SELECT c.object_id, c.type_id, c.rating, c.rd "
-            "FROM laplace.consensus c "
-            "WHERE c.subject_id = $1 "
-            "  AND c.type_id = ANY ($2) "
-            "  AND c.object_id IS NOT NULL "
-            "  AND NOT laplace.refuted(c.rating, c.rd) "
-            /* Skip typing edges (synset -IS_A- the WordNet_Synset *type* entity): a type entity is
-             * not a hypernym, and climbing into it pollutes the taxonomy walk. Real hypernyms are
-             * synsets, which carry no 'substrate/type/%' canonical name, so they are unaffected. */
-            "  AND NOT EXISTS (SELECT 1 FROM laplace.canonical_names n "
-            "                  WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%')",
+            "SELECT object_id, type_id, rating, rd "
+            "FROM laplace.consensus_taxonomy_edges($1, $2)",
             2, argtypes, args, NULL, true, 0);
         pfree(type_datums);
         pfree(DatumGetPointer(args[1]));
@@ -345,14 +331,11 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         targets[n_targets++] = datum_to_hash128(y);
 
         {
-            hash128_t trans_type = rel_type_id("IS_TRANSLATION_OF");
-            Oid       argtypes[2] = { BYTEAOID, BYTEAOID };
-            Datum     args[2] = { y, hash128_to_datum(&trans_type) };
+            Oid       argtypes[1] = { BYTEAOID };
+            Datum     args[1] = { y };
             int       rc = SPI_execute_with_args(
-                "SELECT c.subject_id FROM laplace.consensus c "
-                "WHERE c.type_id = $2 AND c.object_id = $1 "
-                "  AND NOT laplace.refuted(c.rating, c.rd)",
-                2, argtypes, args, NULL, true, 0);
+                "SELECT subject_id FROM laplace.translation_sources($1)",
+                1, argtypes, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "isa_path: translation targets query failed");
             for (uint64 r = 0; r < SPI_processed; r++)

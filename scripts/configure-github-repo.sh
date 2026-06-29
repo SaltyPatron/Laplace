@@ -34,5 +34,4 @@ echo
 ok "All Laplace workflow variables pushed to $REPO."
 echo "See: https://github.com/$REPO/settings/variables/actions"
 echo
-echo "Override per-run via 'gh workflow run integration.yml -f LAPLACE_PG_PREFIX=...'"
-echo "(once workflow_dispatch inputs are wired) or by editing the variable above."
+echo "Override per-run via 'gh workflow run laplace.yml' or repo Actions variables."

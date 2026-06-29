@@ -1,0 +1,87 @@
+-- Lexical consensus reads — installed SQL. Replaces inline SPI in consensus_lexical_reads.c.
+-- synonyms/translations live in inference/*.sql.in (synset_members-based); wired via 20_converse.
+
+CREATE OR REPLACE FUNCTION type_label(p_type bytea)
+    RETURNS text
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/type/(.+)/v1$', '\1'),
+                         '_', ' '))
+$$;
+
+CREATE OR REPLACE FUNCTION senses(p_word bytea)
+    RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.object_id, ss.object_id,
+           eff_mu_display(s.rating, s.rd),
+           s.witness_count + ss.witness_count
+    FROM consensus s
+    JOIN consensus ss ON ss.subject_id = s.object_id
+                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
+    WHERE s.subject_id = p_word
+      AND s.type_id = relation_type_id('HAS_SENSE')
+    ORDER BY eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd) DESC
+$$;
+
+CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
+    RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
+                  score numeric)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.object_id, ss.object_id,
+           eff_mu_display(s.rating, s.rd),
+           s.witness_count + ss.witness_count,
+           round(((eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd)
+             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
+                         WHERE c.subject_id = ANY (p_context) AND c.object_id = ss.object_id
+                           AND NOT refuted(c.rating, c.rd)), 0)
+             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
+                         WHERE c.subject_id = ss.object_id AND c.object_id = ANY (p_context)
+                           AND NOT refuted(c.rating, c.rd)), 0)) / 1e9)::numeric, 3)
+    FROM consensus s
+    JOIN consensus ss ON ss.subject_id = s.object_id
+                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
+    WHERE s.subject_id = p_word
+      AND s.type_id = relation_type_id('HAS_SENSE')
+    ORDER BY 5 DESC
+$$;
+
+CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
+    RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT render_text(g.object_id, 24),
+           eff_mu_display(g.rating, g.rd), g.witness_count
+    FROM senses(p_word) sn
+    JOIN consensus g ON g.subject_id = sn.synset_id
+                    AND g.type_id = relation_type_id('HAS_DEFINITION')
+    ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
+    LIMIT p_limit
+$$;
+
+CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
+    RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT render_text(g.object_id, 24),
+           eff_mu_display(g.rating, g.rd), g.witness_count
+    FROM senses(p_word, p_context) sn
+    JOIN consensus g ON g.subject_id = sn.synset_id
+                    AND g.type_id = relation_type_id('HAS_DEFINITION')
+    ORDER BY sn.score + eff_mu_display(g.rating, g.rd) DESC
+    LIMIT p_limit
+$$;
+
+CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
+    RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT render_text(g.object_id, 24),
+           eff_mu_display(g.rating, g.rd), g.witness_count
+    FROM senses(p_word) sn
+    JOIN consensus g ON g.subject_id = sn.synset_id
+                    AND g.type_id = relation_type_id('HAS_EXAMPLE')
+    ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
+    LIMIT p_limit
+$$;

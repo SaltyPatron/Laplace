@@ -19,6 +19,4 @@ CREATE OR REPLACE FUNCTION laplace_apply_batch(p_stage_prefix text)
                    entities_skipped         bigint,
                    physicalities_skipped    bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_apply_batch'
-    LANGUAGE C VOLATILE
-    SET session_replication_role = replica
-    SET work_mem = '1GB';
+    LANGUAGE C VOLATILE;

@@ -76,9 +76,7 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
-        
-        
-        
+        CpuTopology.EnsurePerformanceCoreExecution();
         Laplace.Engine.Core.IntentStage.ResetContentBank();
         Laplace.Engine.Core.IntentStage.SetBulkFreshBypass(options.BulkFresh);
 
@@ -125,6 +123,14 @@ public sealed class IngestRunner
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
+        // Never hold more than one commit batch worth of intents without flushing — large
+        // LAPLACE_INGEST_COMMIT_ROWS must not silence progress for minutes.
+        int maxIntentsPerCommit = commitRows > 0
+            ? Math.Max(batchSize, commitRows / Math.Max(1, 50_000) + 1)
+            : batchSize;
+        bool ShouldFlushWithCap(int intents, int rows) =>
+            ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
+
         
         
         
@@ -139,6 +145,7 @@ public sealed class IngestRunner
         bool syncIngest = Environment.GetEnvironmentVariable("LAPLACE_INGEST_SYNC") == "1";
         if (syncIngest)
         {
+            CpuTopology.RequirePerformanceCorePin();
             // Fully synchronous: iterate the decomposer INLINE and apply each batch on the SAME thread —
             // NO producer Task, so compose and apply never overlap. Diagnostic/mitigation for the native
             // heap-corruption race (producer composing into laplace_core while a consumer applies into it
@@ -149,6 +156,9 @@ public sealed class IngestRunner
                 .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
             {
                 Interlocked.Increment(ref counters._unitsProduced);
+                long units = intent.Metadata.InputUnitsConsumed;
+                if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                options.Progress?.Report(MakeProgress(counters));
                 if (batchSize == 1 && commitRows == 0)
                 {
                     await ProcessOneIntentAsync(intent, decomposer, options, rng,
@@ -157,7 +167,7 @@ public sealed class IngestRunner
                 }
                 sbatch.Add(intent);
                 sbatchRows += RowsOf(intent);
-                if (ShouldFlush(sbatch.Count, sbatchRows))
+                if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                 {
                     await ProcessBatchAsync(sbatch, decomposer, options, rng,
                                             counters, failures, log, ct);
@@ -169,29 +179,26 @@ public sealed class IngestRunner
                 await ProcessBatchAsync(sbatch, decomposer, options, rng,
                                         counters, failures, log, ct);
         }
-        else if (options.ParallelWorkers <= 1)
+        else
         {
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            long rowBudget = Math.Max((long)commitRows, batchSize) * 3L;
+            // Single commit consumer; parallelism inside NpgsqlSubstrateWriter.ApplyManyAsync.
+            int intentsPerCommit = commitRows > 0
+                ? commitRows / Math.Max(1, batchSize) + 1
+                : batchSize;
+            int channelCap = Math.Max(8, intentsPerCommit * 4 + 4);
+            long rowBudget = Math.Max((long)commitRows, batchSize) * channelCap;
             long bufferedRows = 0;
-            var drained = new SemaphoreSlim(0, 1);
+            var drained = new SemaphoreSlim(0, channelCap);
 
-            var channel = Channel.CreateUnbounded<SubstrateChange>(
-                new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+            var channel = Channel.CreateBounded<SubstrateChange>(
+                new BoundedChannelOptions(channelCap)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait,
+                });
 
-            var producer = Task.Run(async () =>
+            var producer = CpuTopology.RunOnPinnedThread(async ct =>
             {
                 try
                 {
@@ -199,6 +206,9 @@ public sealed class IngestRunner
                         .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
                     {
                         Interlocked.Increment(ref counters._unitsProduced);
+                        long units = intent.Metadata.InputUnitsConsumed;
+                        if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                        options.Progress?.Report(MakeProgress(counters));
                         int r = RowsOf(intent);
                         while (Interlocked.Read(ref bufferedRows) + r > rowBudget
                                && Volatile.Read(ref bufferedRows) > 0)
@@ -214,7 +224,7 @@ public sealed class IngestRunner
                 {
                     channel.Writer.TryComplete(ex);
                 }
-            }, ct);
+            }, "ingest-decompose-pcore", ct);
 
             var batch = new List<SubstrateChange>(batchSize);
             int batchRows = 0;
@@ -234,7 +244,7 @@ public sealed class IngestRunner
                     }
                     batch.Add(intent);
                     batchRows += RowsOf(intent);
-                    if (ShouldFlush(batch.Count, batchRows))
+                    if (ShouldFlushWithCap(batch.Count, batchRows))
                     {
                         await ProcessBatchAsync(batch, decomposer, options, rng,
                                                 counters, failures, log, ct);
@@ -250,12 +260,6 @@ public sealed class IngestRunner
             
             await producer;
         }
-        else
-        {
-            await RunUnorderedParallelAsync(
-                decomposer, ctx, options, batchSize, commitRows, ShouldFlush, RowsOf,
-                counters, failures, log, rng, ct);
-        }
 
         unitsAttempted        = counters.UnitsAttempted;
         unitsApplied          = counters.UnitsApplied;
@@ -268,7 +272,8 @@ public sealed class IngestRunner
         if (!options.SkipSourceCompletion
             && counters.UnitsFailed == 0
             && failures.Count == 0
-            && counters.UnitsApplied > 0)
+            && counters.UnitsApplied > 0
+            && options.DecomposerOptions.MaxInputUnits <= 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();
@@ -313,262 +318,6 @@ public sealed class IngestRunner
                 $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "
                 + "but ingested 0 — grammar/format mismatch (silent no-op). Failing instead of reporting success. "
                 + "Check the decomposer's modality/grammar matches the actual file format.");
-        return result;
-    }
-
-    private async Task RunUnorderedParallelAsync(
-        IDecomposer decomposer,
-        InternalContext ctx,
-        IngestRunOptions options,
-        int batchSize,
-        int commitRows,
-        Func<int, int, bool> shouldFlush,
-        Func<SubstrateChange, int> rowsOf,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        Random rng,
-        CancellationToken ct)
-    {
-        // HEAVY COMPUTE IS PARALLEL; THE LIGHT MERGE IS PER-CONTENT-ID PARALLEL. The decomposer's
-        // DecomposeAsync runs parse / compose / BLAKE3 / geometry / tier build in parallel and
-        // yields already-computed SubstrateChanges. The commit is no longer a serial lane: the
-        // writer (NpgsqlSubstrateWriter) splits each batch's staged rows NATIVELY by id.lo % N
-        // (intent_stage_partition) into N disjoint partitions and COPYs+applies them on N
-        // connections IN PARALLEL. Because a given content id lands in exactly one partition, the
-        // set-based anti-join cannot collide cross-partition — no 23505, no ON CONFLICT, no retry.
-        //
-        // The id-partition lives in laplace_core precisely because a native IntentStage carries
-        // many ids that managed code cannot split out of the opaque tuple blob; the old approach of
-        // routing a whole intent to a worker by ONE representative id left the intent's OTHER novel
-        // ids shared across two workers (the 23505 bug). Splitting PER ROW by each row's own id
-        // fixes that by construction.
-        //
-        // The consumer here stays SINGLE so that two apply calls never run concurrently over an
-        // overlapping id-space (a cross-batch collision the in-call partition cannot prevent): the
-        // partition's parallelism is INSIDE one apply call, ordered by this one consumer. The heavy
-        // commit work therefore fans out across N connections without a serial commit floor, while
-        // the single consumer keeps the merge collision-proof. A fatal cancels the shared token so
-        // the producer stops instead of deadlocking on a full channel.
-        using var stopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var runCt = stopCts.Token;
-
-        // Channel capacity: bound to a few commit batches so the parallel compose overlaps the
-        // serial apply without unbounded native-IntentStage accumulation (the old 32K-deep channel
-        // exhausted the native heap during stalls → -3 from laplace_grammar_compose). Multiplier is
-        // commitRows/batchSize (SubstrateChange items per commit), not batchSize (rows per item).
-        int intentsPerCommit = commitRows > 0
-            ? commitRows / Math.Max(1, batchSize) + 1
-            : batchSize;
-        int channelCap = intentsPerCommit * 4 + 4;
-        var channel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(channelCap)
-            {
-                SingleWriter = true,
-                SingleReader = true,
-                FullMode = BoundedChannelFullMode.Wait,
-            });
-
-        var producer = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, runCt)
-                                                        .WithCancellation(runCt))
-                {
-                    Interlocked.Increment(ref counters._unitsProduced);
-                    await channel.Writer.WriteAsync(intent, runCt);
-                }
-            }
-            finally
-            {
-                channel.Writer.TryComplete();
-            }
-        }, runCt);
-
-        // PARALLEL COMMIT LANES — this is what kills the single consumer that ran the commit on one
-        // thread (the 7.5%-CPU floor). The router splits every change's rows by id.lo % N (native
-        // stages via IntentStage.Partition; managed rows + walks by id.lo % N) so a given content id is
-        // only ever committed by ONE lane. Lanes run concurrently and their id-spaces are disjoint, so
-        // the set-based apply can never collide cross-lane (no 23505) while the per-attestation
-        // consensus accumulate AND the COPY/apply now run on N cores instead of one. Within a lane it
-        // stays serial, so the same id is never applied twice at once. (Pair with LAPLACE_APPLY_PARTITIONS=1
-        // so the writer does not re-partition an already-partitioned lane sub-change.)
-        int lanes;
-        if (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_COMMIT_LANES"), out var cl) && cl > 0)
-            lanes = cl;
-        else if (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_WORKERS"), out var iw) && iw > 0)
-            lanes = iw;
-        else
-            lanes = Math.Max(1, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 12));
-
-        if (lanes == 1)
-        {
-            await DrainLaneAsync(channel.Reader, decomposer, options, counters, failures, log,
-                                 batchSize, commitRows, shouldFlush, rowsOf, stopCts, runCt);
-            await producer;
-            return;
-        }
-
-        var laneChans = new Channel<SubstrateChange>[lanes];
-        for (int k = 0; k < lanes; k++)
-            laneChans[k] = Channel.CreateBounded<SubstrateChange>(
-                new BoundedChannelOptions(channelCap)
-                { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
-
-        var laneTasks = new Task[lanes];
-        for (int k = 0; k < lanes; k++)
-        {
-            int lane = k;
-            laneTasks[lane] = Task.Run(() => DrainLaneAsync(
-                laneChans[lane].Reader, decomposer, options, counters, failures, log,
-                batchSize, commitRows, shouldFlush, rowsOf, stopCts, runCt), runCt);
-        }
-
-        var router = Task.Run(async () =>
-        {
-            try
-            {
-                while (await channel.Reader.WaitToReadAsync(runCt))
-                    while (channel.Reader.TryRead(out var c))
-                    {
-                        var subs = PartitionChange(c, lanes);
-                        for (int k = 0; k < lanes; k++)
-                            if (subs[k] is { } s)
-                                await laneChans[k].Writer.WriteAsync(s, runCt);
-                    }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                stopCts.Cancel();
-                throw;
-            }
-            finally
-            {
-                for (int k = 0; k < lanes; k++) laneChans[k].Writer.TryComplete();
-            }
-        }, runCt);
-
-        await Task.WhenAll(producer, router);
-        await Task.WhenAll(laneTasks);
-    }
-
-    // One commit lane: drains its id-partitioned sub-changes, batches, and applies them serially on its
-    // own connection path. N of these run concurrently over disjoint id-spaces.
-    private async Task DrainLaneAsync(
-        ChannelReader<SubstrateChange> reader,
-        IDecomposer decomposer, IngestRunOptions options, RunCounters counters,
-        List<IngestFailure> failures, ILogger log, int batchSize, int commitRows,
-        Func<int, int, bool> shouldFlush, Func<SubstrateChange, int> rowsOf,
-        CancellationTokenSource stopCts, CancellationToken runCt)
-    {
-        var localRng = new Random(unchecked((int)decomposer.SourceId.Lo));
-        var batch = new List<SubstrateChange>(batchSize);
-        int batchRows = 0;
-        try
-        {
-            while (await reader.WaitToReadAsync(runCt))
-                while (reader.TryRead(out var intent))
-                {
-                    if (batchSize == 1 && commitRows == 0)
-                    {
-                        await ProcessOneIntentAsync(intent, decomposer, options,
-                                                    localRng, counters, failures, log, runCt);
-                        continue;
-                    }
-                    batch.Add(intent);
-                    batchRows += rowsOf(intent);
-                    if (shouldFlush(batch.Count, batchRows))
-                    {
-                        await ProcessBatchAsync(batch, decomposer, options,
-                                                localRng, counters, failures, log, runCt);
-                        batch.Clear();
-                        batchRows = 0;
-                    }
-                }
-            if (batch.Count > 0)
-                await ProcessBatchAsync(batch, decomposer, options,
-                                        localRng, counters, failures, log, runCt);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            stopCts.Cancel();
-            throw;
-        }
-    }
-
-    // Split one change into N id-disjoint sub-changes (lane k = rows with id.lo % N == k). Native
-    // IntentStages are split by IntentStage.Partition (the same id.lo % N the apply uses); managed rows
-    // and walks are bucketed by their own id. The source's native stages are consumed (disposed) here;
-    // each lane's partition handles are disposed by the writer when applied. Lanes with no rows are null.
-    private static SubstrateChange[] PartitionChange(SubstrateChange c, int n)
-    {
-        string unit = c.Metadata.SourceContentUnitName;
-        if (unit.StartsWith("period-boundary/", StringComparison.Ordinal)
-            || unit.StartsWith("layer-complete/", StringComparison.Ordinal))
-        {
-            var pass = new SubstrateChange[n];
-            pass[0] = c;
-            for (int k = 1; k < n; k++) pass[k] = null!;
-            return pass;
-        }
-
-        var result = new SubstrateChange[n];
-        var ents = new List<EntityRow>[n];
-        var phys = new List<PhysicalityRow>[n];
-        var atts = new List<AttestationRow>[n];
-        var stageParts = new List<IntentStage>[n];
-        List<TestimonyWalkRow>[]? walks = c.TestimonyWalks.IsDefaultOrEmpty ? null : new List<TestimonyWalkRow>[n];
-        for (int k = 0; k < n; k++)
-        {
-            ents[k] = new List<EntityRow>();
-            phys[k] = new List<PhysicalityRow>();
-            atts[k] = new List<AttestationRow>();
-            stageParts[k] = new List<IntentStage>();
-            if (walks != null) walks[k] = new List<TestimonyWalkRow>();
-        }
-
-        foreach (var e in c.Entities) ents[(int)(e.Id.Lo % (ulong)n)].Add(e);
-        foreach (var p in c.Physicalities) phys[(int)(p.Id.Lo % (ulong)n)].Add(p);
-        foreach (var a in c.Attestations) atts[(int)(a.Id.Lo % (ulong)n)].Add(a);
-        if (walks != null)
-            foreach (var w in c.TestimonyWalks) walks[(int)(w.Subject.Lo % (ulong)n)].Add(w);
-
-        if (!c.IntentStages.IsDefaultOrEmpty)
-            foreach (var st in c.IntentStages)
-            {
-                if (st.IsInvalid) continue;
-                var split = st.Partition(n);
-                for (int k = 0; k < n; k++) stageParts[k].Add(split[k]);
-                st.Dispose();
-            }
-
-        // Exactly one non-empty partition carries the unit's identity for run-metric accounting, so a
-        // unit is counted once (not once per lane its rows scatter to). The rest are CountsAsUnit=false.
-        bool unitCounted = false;
-        for (int k = 0; k < n; k++)
-        {
-            bool any = ents[k].Count > 0 || phys[k].Count > 0 || atts[k].Count > 0
-                       || stageParts[k].Count > 0 || (walks != null && walks[k].Count > 0);
-            if (!any)
-            {
-                foreach (var s in stageParts[k]) s.Dispose();
-                result[k] = null!;
-                continue;
-            }
-            bool isRepresentative = !unitCounted;
-            unitCounted = true;
-            result[k] = c with
-            {
-                Entities = ents[k].ToImmutableArray(),
-                Physicalities = phys[k].ToImmutableArray(),
-                Attestations = atts[k].ToImmutableArray(),
-                IntentStages = stageParts[k].ToImmutableArray(),
-                TestimonyWalks = walks != null ? walks[k].ToImmutableArray() : c.TestimonyWalks,
-                Metadata = isRepresentative ? c.Metadata : c.Metadata with { InputUnitsConsumed = 0 },
-                CountsAsUnit = isRepresentative,
-            };
-        }
         return result;
     }
 
@@ -825,7 +574,8 @@ public sealed class IngestRunner
             c.PhysicalitiesInserted,
             c.AttestationsInserted,
             c.RoundTrips,
-            c.UnitsProduced);
+            c.UnitsProduced,
+            c.InputUnitsComposed);
     }
 
     private sealed class RunCounters
@@ -839,6 +589,7 @@ public sealed class IngestRunner
         internal long _roundTrips;
         internal long _unitsProduced;
         internal long _inputUnitsDone;
+        internal long _inputUnitsComposed;
         internal int _filesDone;
         internal string? _currentFile;
         internal Stopwatch? Sw;
@@ -846,6 +597,7 @@ public sealed class IngestRunner
         internal int LayerOrder;
         internal IngestInventory? Inventory;
         public long InputUnitsDone => Interlocked.Read(ref _inputUnitsDone);
+        public long InputUnitsComposed => Interlocked.Read(ref _inputUnitsComposed);
         public int FilesDone => Volatile.Read(ref _filesDone);
         public string? CurrentFile => Volatile.Read(ref _currentFile);
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);

@@ -12,6 +12,7 @@ that sources env.cmd** (or source it yourself) — otherwise the native DLLs won
 ## Build & deploy — use the scripts, never hand-copy artifacts
 - **Full clean/rebuild/redeploy:** `scripts\win\rebuild-all.cmd`
   (Phase 1 clean → 2 codegen → 3 engine → 4 extensions → 5 **deploy/install** → 6 app → 7 perfcache).
+  Linux CI / self-hosted runner: `scripts/pipeline.sh --mode hot|fresh|build-only`.
   Flags: `--skip-clean`, `--skip-app`.
 - **Engine only:** `build-engine.cmd [--clean-first|--reconfigure] [targets]` → `build-win\` (Release, icx):
   `laplace_core.dll`, `laplace_dynamics.dll`, `laplace_synthesis.dll`.

@@ -117,21 +117,11 @@ if defined LAPLACE_DECOMPOSE_WORKERS (
 exit /b 0
 
 :run_ingest_omw_commit
-rem OMW = 1226 .tab files. File fan-out: ResolveFileWorkers (~P-core-2). Native compose is
-rem thread-safe (confirmed by static analysis); COMPOSE_WORKERS inherits env default (4).
-rem 8 commit workers + 500K commit rows = fewer, larger commits = lower DB round-trip overhead.
-set "_saved_iw=%LAPLACE_INGEST_WORKERS%"
-set "_saved_cr=%LAPLACE_INGEST_COMMIT_ROWS%"
-if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
-if "!LAPLACE_INGEST_WORKERS!"=="1" set "LAPLACE_INGEST_WORKERS=8"
-if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
+rem OMW: parallel file workers + native apply partitions (single commit consumer).
 call :probe_file_workers 2
-echo OMW parallelism: files=!_file_workers! compose=%LAPLACE_INGEST_COMPOSE_WORKERS% commit=!LAPLACE_INGEST_WORKERS! commitRows=%LAPLACE_INGEST_COMMIT_ROWS%
+echo OMW parallelism: files=!_file_workers! workers=%LAPLACE_INGEST_WORKERS% commitRows=%LAPLACE_INGEST_COMMIT_ROWS%
 call :run_ingest_impl
-set "RC=%ERRORLEVEL%"
-if defined _saved_iw (set "LAPLACE_INGEST_WORKERS=%_saved_iw%") else set "LAPLACE_INGEST_WORKERS="
-if defined _saved_cr (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved_cr%") else set "LAPLACE_INGEST_COMMIT_ROWS="
-exit /b %RC%
+exit /b %ERRORLEVEL%
 
 :run_ingest_path
 if "%EXTRA%"=="" (
@@ -146,6 +136,9 @@ tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >n
 if not errorlevel 1 (
   echo ERROR: Laplace.Cli.exe is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
+)
+if not defined LAPLACE_INGEST_WORKERS (
+  for /f "delims=" %%i in ('dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --io-bound-workers 8 2^>nul') do set "LAPLACE_INGEST_WORKERS=%%i"
 )
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %STEP% %EXTRA%

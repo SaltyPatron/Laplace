@@ -20,14 +20,6 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
-
-
-
-
-
-
-
-
 typedef struct
 {
     ReturnSetInfo *rsinfo;
@@ -80,15 +72,6 @@ pg_laplace_word_segment(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-
-
-
-
-
-
-
-
-
 typedef struct
 {
     const uint8_t *base;
@@ -123,7 +106,7 @@ phrase_collect_emit(void *ctx_, uint32_t ordinal,
         }
         ctx->cap = newcap;
     }
-    
+
     ctx->off[ctx->n] = (uint32_t) (word_utf8 - ctx->base);
     ctx->len[ctx->n] = word_len;
     ctx->n++;
@@ -134,13 +117,18 @@ phrase_id_is_entity(hash128_t *id)
 {
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1];
+    bool  isnull;
     int   rc;
+    Datum d;
 
     args[0] = hash128_to_datum(id);
     rc = SPI_execute_with_args(
-        "SELECT 1 FROM laplace.entities WHERE id = $1",
+        "SELECT laplace.entity_exists($1)",
         1, argtypes, args, NULL, true, 1);
-    return rc == SPI_OK_SELECT && SPI_processed > 0;
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        return false;
+    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    return !isnull && DatumGetBool(d);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_phrase);
@@ -181,8 +169,6 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "resolve_phrase: SPI_connect failed");
 
-    
-
     for (int L = ctx.n; L >= 1 && !found; L--)
     {
         for (int i = 0; i + L <= ctx.n && !found; i++)
@@ -217,186 +203,4 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     if (!found)
         PG_RETURN_NULL();
     PG_RETURN_DATUM(hash128_to_datum(&found_id));
-}
-
-
-
-
-
-
-
-/*
- * Each realize branch is a fixed SQL string run once per row by recall — re-planning every call is
- * pure overhead. Prepare each branch's plan once (SPI_keepplan → CacheMemoryContext, persists for the
- * backend) and SPI_execute_plan thereafter. Mirrors edge_plan/constituents_plan in generate_walk.c.
- *
- * Branch order is load-bearing: a synset's own render_text is its bare WordNet offset (e.g. "i46360") —
- * that IS its content, so a render_text-first chain short-circuits and hides the real lemma. Resolve
- * synset -> representative lemma FIRST (synset -IS_SENSE_OF- sense -HAS_SENSE- word, language-preferred).
- * That branch returns NULL for non-synsets (a word is never the object of IS_SENSE_OF), so words fall
- * through to render_text and render directly.
- */
-enum
-{
-    RB_SYNSET_LEMMA = 0,
-    RB_RENDER_TEXT,
-    RB_TRANSLATION,
-    RB_HAS_NAME,
-    RB_CANONICAL,
-    RB_DEFINES,
-    RB_COUNT
-};
-
-typedef struct
-{
-    const char *sql;
-    int         nargs;
-    SPIPlanPtr  plan;
-} realize_plan_t;
-
-static realize_plan_t realize_plans[RB_COUNT] = {
-    [RB_SYNSET_LEMMA] = {
-        "SELECT q.s FROM ("
-        "  SELECT laplace.render_text(hs.subject_id) AS s, "
-        "         (lang.object_id IS NOT NULL) AS lp, "
-        "         laplace.eff_mu(hs.rating, hs.rd) AS mu "
-        "  FROM laplace.consensus io "
-        "  JOIN laplace.consensus hs ON hs.object_id = io.subject_id "
-        "    AND hs.type_id = laplace.relation_type_id('HAS_SENSE') "
-        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id "
-        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-        "    AND lang.object_id = $2 "
-        "  WHERE io.object_id = $1 "
-        "    AND io.type_id = laplace.relation_type_id('IS_SENSE_OF') "
-        "    AND NOT laplace.refuted(io.rating, io.rd)"
-        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
-        "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", 2, NULL },
-    [RB_RENDER_TEXT] = {
-        "SELECT NULLIF(laplace.render_text($1), '')", 1, NULL },
-    [RB_TRANSLATION] = {
-        "SELECT q.s FROM ("
-        "  SELECT laplace.render_text(m.object_id) AS s, "
-        "         (lang.object_id IS NOT NULL) AS lp, "
-        "         laplace.eff_mu(m.rating, m.rd) AS mu "
-        "  FROM laplace.consensus m "
-        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id "
-        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-        "    AND lang.object_id = $2 "
-        "  WHERE m.subject_id = $1 "
-        "    AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF') "
-        "    AND NOT laplace.refuted(m.rating, m.rd)"
-        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
-        "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", 2, NULL },
-    [RB_CANONICAL] = {
-        "SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1') "
-        "FROM laplace.canonical_names n "
-        "WHERE n.id = $1 AND n.name LIKE 'substrate/%'", 1, NULL },
-    [RB_DEFINES] = {
-        "SELECT laplace.render_text(g.object_id) "
-        "FROM laplace.consensus g "
-        "WHERE g.subject_id = $1 AND g.type_id = laplace.relation_type_id('DEFINES') "
-        "  AND NOT laplace.refuted(g.rating, g.rd) "
-        "ORDER BY laplace.eff_mu(g.rating, g.rd) DESC "
-        "LIMIT 1", 1, NULL },
-    [RB_HAS_NAME] = {
-        /* A concept's name is an attestation, language-preferred: subject -HAS_NAME/HAS_NAME_ALIAS->
-         * name string, ranked by (the name's HAS_LANGUAGE = $2) then HAS_NAME over the alias then
-         * consensus mu. Placed AFTER render_text so true content (codepoint -> glyph, word -> text)
-         * renders as itself; a concept whose own render is a bare key resolves to its deposited name
-         * here. There is NO label() crutch after this — a genuinely unnamed concept returns NULL
-         * (loud), never the "POS:6ea49d29" type:hash placeholder. */
-        "SELECT q.s FROM ("
-        "  SELECT laplace.render_text(nm.object_id) AS s, "
-        "         (lang.object_id IS NOT NULL) AS lp, "
-        "         (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim, "
-        "         laplace.eff_mu(nm.rating, nm.rd) AS mu "
-        "  FROM laplace.consensus nm "
-        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id "
-        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-        "    AND lang.object_id = $2 "
-        "  WHERE nm.subject_id = $1 "
-        "    AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'), "
-        "                       laplace.relation_type_id('HAS_NAME_ALIAS')) "
-        "    AND NOT laplace.refuted(nm.rating, nm.rd)"
-        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
-        "ORDER BY q.lp DESC, q.prim DESC, q.mu DESC LIMIT 1", 2, NULL },
-};
-
-static text *
-realize_branch(int slot, Datum id, Datum lang)
-{
-    realize_plan_t *rp = &realize_plans[slot];
-    Datum args[2] = { id, lang };
-    char  nulls[2] = { ' ', ' ' };
-    bool  isnull;
-    int   rc;
-    Datum d;
-    text *src;
-    text *dst;
-    Size  sz;
-
-    if (rp->plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(rp->sql, rp->nargs, argtypes);
-
-        if (plan == NULL)
-            elog(ERROR, "realize: SPI_prepare failed (slot %d): %s",
-                 slot, SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "realize: SPI_keepplan failed (slot %d)", slot);
-        rp->plan = plan;
-    }
-
-    if (rp->nargs == 2 && lang == (Datum) 0)
-        nulls[1] = 'n';
-    rc = SPI_execute_plan(rp->plan, args, nulls, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return NULL;
-    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        return NULL;
-    src = DatumGetTextPP(d);
-    if (VARSIZE_ANY_EXHDR(src) == 0)
-        return NULL;
-    sz = VARSIZE_ANY(src);
-    dst = (text *) SPI_palloc(sz);
-    memcpy(dst, src, sz);
-    return dst;
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_realize);
-
-Datum
-pg_laplace_realize(PG_FUNCTION_ARGS)
-{
-    Datum id, lang;
-    bool  spi_top = false;
-    text *out;
-
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-    id = PG_GETARG_DATUM(0);
-    lang = PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1);
-
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "realize: SPI_connect failed");
-
-    out = realize_branch(RB_SYNSET_LEMMA, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_RENDER_TEXT, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_TRANSLATION, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_HAS_NAME, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_CANONICAL, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_DEFINES, id, lang);
-
-    laplace_spi_finish(spi_top);
-
-    if (out == NULL)
-        PG_RETURN_NULL();
-    PG_RETURN_TEXT_P(out);
 }

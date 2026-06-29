@@ -122,19 +122,32 @@ public sealed class SecondaryIndexPolicy
         NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
     {
         await using var conn = await ds.OpenConnectionAsync(ct);
-        await using (var t = conn.CreateCommand())
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        try
         {
-            t.CommandText =
-                "SET maintenance_work_mem = '2GB'; "
-                + "SET max_parallel_maintenance_workers = 4";
-            await t.ExecuteNonQueryAsync(ct);
+            await using (var t = conn.CreateCommand())
+            {
+                t.Transaction = tx;
+                t.CommandText =
+                    "SET LOCAL maintenance_work_mem = '2GB'; "
+                    + "SET LOCAL max_parallel_maintenance_workers = 4";
+                await t.ExecuteNonQueryAsync(ct);
+            }
+            foreach (var def in indexDefs)
+            {
+                await using var c = conn.CreateCommand();
+                c.Transaction = tx;
+                c.CommandTimeout = 0;
+                c.CommandText = def;
+                await c.ExecuteNonQueryAsync(ct);
+            }
+            await tx.CommitAsync(ct);
         }
-        foreach (var def in indexDefs)
+        catch
         {
-            await using var c = conn.CreateCommand();
-            c.CommandTimeout = 0;
-            c.CommandText = def;
-            await c.ExecuteNonQueryAsync(ct);
+            try { await tx.RollbackAsync(CancellationToken.None); }
+            catch { }
+            throw;
         }
     }
 }
@@ -148,6 +161,7 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger _log;
     private List<string> _pending;
+    private bool _suppressDisposeRebuild;
 
     internal SecondaryIndexScope(
         NpgsqlDataSource ds, ILogger log, string table, bool tableWasPopulated, List<string> droppedDefs)
@@ -175,6 +189,9 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
     
     public bool Rebuilt => _pending.Count == 0;
 
+    /// <summary>Skip auto-rebuild on dispose; caller rebuilds later (foundation seed defer).</summary>
+    public void SuppressAutoRebuild() => _suppressDisposeRebuild = true;
+
     
     
     
@@ -190,7 +207,7 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
     
     public async ValueTask DisposeAsync()
     {
-        if (_pending.Count == 0) return;
+        if (_pending.Count == 0 || _suppressDisposeRebuild) return;
         try
         {
             await RebuildAsync();

@@ -18,7 +18,8 @@
       "order": 0,
       "sources": [
         { "cli": "unicode", "path": "UCD/Public/UCD/latest", "layer": "L0", "role": "codepoint atoms — the only dedup floor" },
-        { "cli": "iso639", "path": "ISO639", "layer": "L1", "role": "the language axis; 639-1/-2/-3 codes for one language converge to one language entity, macrolanguage = IS_A/HAS_MEMBER" }
+        { "cli": "iso639", "path": "ISO639", "layer": "L1", "role": "the language axis; 639-1/-2/-3 codes for one language converge to one language entity, macrolanguage = IS_A/HAS_MEMBER" },
+        { "cli": "cili", "path": "CILI", "layer": "L2", "role": "Collaborative Interlingual Index — ILI concept anchors; MUST precede wordnet/omw so synsets bind to shared concept entities" }
       ]
     },
     {
