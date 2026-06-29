@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text;
+using Laplace.Engine.Core;
+using Laplace.Modality;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -108,5 +110,93 @@ public sealed class PgnGamesTests
         var path = Path.GetTempFileName();
         File.WriteAllText(path, content, Encoding.UTF8);
         return path;
+    }
+
+    // ----- PgnMovetext (shared AST walk) -----
+
+    private static PgnMovetext.PgnWalkResult WalkMovetext(string movetext)
+    {
+        var bytes = Encoding.UTF8.GetBytes(movetext + " 1-0");
+        using var ast = GrammarDecomposer.Parse(bytes, "pgn");
+        return PgnMovetext.Walk(ast, bytes);
+    }
+
+    private static List<string> ExtractMainline(string movetext)
+    {
+        var bytes = Encoding.UTF8.GetBytes(movetext + " 1-0");
+        using var ast = GrammarDecomposer.Parse(bytes, "pgn");
+        return PgnMovetext.Extract(ast, bytes).Moves;
+    }
+
+    [Fact]
+    public void PgnMovetext_Extract_MainlineSansOnly()
+    {
+        var moves = ExtractMainline("1. e4 e5 2. Nf3 Nc6");
+        Assert.Equal(["e4", "e5", "Nf3", "Nc6"], moves);
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_SkipsVariationMoves()
+    {
+        var walk = WalkMovetext("1. e4 e5 (1... c5) 2. Nf3");
+        var mainline = walk.Mainline.Select(s => s.San).ToList();
+        Assert.Equal(["e4", "e5", "Nf3"], mainline);
+        Assert.Contains(walk.AllPlies, s => s.InVariation && s.San == "c5");
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_MainlinePlyIndexIsZeroBased()
+    {
+        var walk = WalkMovetext("1. e4 e5 2. Nf3");
+        Assert.Equal([0, 1, 2], walk.Mainline.Select(s => s.PlyIndex));
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_PostMoveCommentAligns()
+    {
+        var walk = WalkMovetext("1. e4 { [%clk 0:15:00] } e5");
+        var e4 = walk.Mainline.First(s => s.San == "e4");
+        Assert.Equal("[%clk 0:15:00]", e4.CommentText);
+        Assert.Null(walk.Mainline.First(s => s.San == "e5").CommentText);
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_PreMoveCommentAligns()
+    {
+        var walk = WalkMovetext("1. { opening } e4 e5");
+        var e4 = walk.Mainline.First(s => s.San == "e4");
+        Assert.Equal("opening", e4.CommentText);
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_NagAlignsToPrecedingMove()
+    {
+        var walk = WalkMovetext("1. e4 e5 $2 2. Nf3");
+        Assert.Equal(2, walk.Mainline.First(s => s.San == "e5").Nag);
+    }
+
+    [Fact]
+    public void PgnMovetext_Walk_StandaloneAnnotationAligns()
+    {
+        var walk = WalkMovetext("1. e4 e5 2. Nc6 !?");
+        var nc6 = walk.AllPlies.First(s => s.San == "Nc6");
+        Assert.Equal("!?", nc6.StandaloneAnnotation);
+    }
+
+    [Fact]
+    public void PgnEvals_ParseToken_DecimalPawns()
+        => Assert.Equal(35, PgnEvals.ParseToken("0.35"));
+
+    [Fact]
+    public void PgnEvals_Centipawns_AlignedWithMoves()
+    {
+        const string game = """
+            [Event "Test"]
+            1. e4 {[%eval 0.35]} e5 {[%eval -0.12]} 1-0
+            """;
+        var cp = PgnEvals.Centipawns(game, 2);
+        Assert.NotNull(cp);
+        Assert.Equal(35, cp![0]);
+        Assert.Equal(-12, cp[1]);
     }
 }

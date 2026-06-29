@@ -27,7 +27,6 @@ public sealed class UdConlluFileStream : IRecordStream<UdIngestRecord>
         {
             ct.ThrowIfCancellationRequested();
             yield return new UdIngestRecord(sentence, _langId, _langCode);
-            await Task.Yield();
         }
     }
 }
@@ -50,7 +49,6 @@ public sealed class UdConlluMultiFileStream : IMultiFileRecordStream<UdIngestRec
             {
                 ct.ThrowIfCancellationRequested();
                 yield return (label, new UdIngestRecord(sentence, langId, langCode));
-                await Task.Yield();
             }
         }
     }
@@ -208,7 +206,8 @@ public static class UdIngestSupport
     }
 
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSentences, ISubstrateReader? reader) =>
+        Hash128 sourceId, string batchLabelPrefix, int batchSentences, ISubstrateReader? reader,
+        long maxInputUnits = 0) =>
         new()
         {
             SourceId = sourceId,
@@ -216,6 +215,7 @@ public static class UdIngestSupport
             BatchSize = batchSentences,
             ProbeChunkSize = Math.Clamp(batchSentences, 64, 512),
             ContainmentReader = reader,
+            MaxInputUnits = maxInputUnits,
             EnableDeferredContentOnBuilder = false,
             EntityCapacity = batchSentences * 40,
             PhysicalityCapacity = batchSentences * 40,

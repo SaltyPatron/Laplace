@@ -44,6 +44,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
         string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
         string links     = Path.Combine(context.EcosystemPath, "links.csv");
         int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
+        long cap = options.MaxInputUnits;
+        long consumed = 0;
 
         // LANGUAGE-FILTER buffer (NOT a referential/FK safety set). It exists only to keep the
         // links pass in-language: IS_TRANSLATION_OF is emitted only when BOTH endpoints are
@@ -57,6 +59,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
 
         if (File.Exists(sentences))
         {
+            if (cap > 0 && consumed >= cap) yield break;
+            long fileCap = cap > 0 ? cap - consumed : 0;
             var witness = new TatoebaGrammarWitness(TatoebaRowKind.Sentence, allowedSentenceIds);
             Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
                 ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
@@ -65,14 +69,21 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 sentences, "tsv", Source, witness, batch, 1.0, "tatoeba/sent",
                 reportUnits: null, contextId: null, commitEpoch: 0,
-                acceptRow: acceptSent, containmentReader: context.Reader, ct: ct))
+                acceptRow: acceptSent, maxInputUnits: fileCap,
+                containmentReader: context.Reader, ct: ct))
             {
-                if (!options.DryRun) yield return change;
+                if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
+                    yield return change;
+                }
             }
         }
 
         if (File.Exists(links))
         {
+            if (cap > 0 && consumed >= cap) yield break;
+            long fileCap = cap > 0 ? cap - consumed : 0;
             var witness = new TatoebaGrammarWitness(TatoebaRowKind.Link, allowedSentenceIds);
             Func<ReadOnlySpan<byte>, bool>? acceptLink = allowedSentenceIds is not null
                 ? line => TatoebaRowFilter.MatchesLinkFilter(line, allowedSentenceIds)
@@ -81,9 +92,14 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 links, "tsv", Source, witness, batch, 1.0, "tatoeba/link",
                 reportUnits: null, contextId: null, commitEpoch: 1,
-                acceptRow: acceptLink, containmentReader: context.Reader, ct: ct))
+                acceptRow: acceptLink, maxInputUnits: fileCap,
+                containmentReader: context.Reader, ct: ct))
             {
-                if (!options.DryRun) yield return change;
+                if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
+                    yield return change;
+                }
             }
         }
     }
@@ -91,8 +107,15 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
     public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        if (options.Languages?.IsActive == true)
-            return null;
+        if (options.MaxInputUnits > 0)
+        {
+            var paths = new List<string>();
+            string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
+            string links = Path.Combine(context.EcosystemPath, "links.csv");
+            if (File.Exists(sentences)) paths.Add(sentences);
+            if (File.Exists(links)) paths.Add(links);
+            return IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct);
+        }
         return await EtlInventory.TatoebaAsync(context.EcosystemPath, options.Languages, ct);
     }
 

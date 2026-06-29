@@ -31,8 +31,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
     public int     LayerOrder   => 20;
     public Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
-    private const int GamesPerBatch = 64;
-
     // NOTE: NO game-level skip. Dedup is STRUCTURAL — a position/move composes deterministically + losslessly
     // to a content id (g2g3·f1g2 = the fianchetto, the same way [c,a,t] = "cat"), so it is RECORDED ONCE and
     // WITNESSED every time it's played; the witness count IS the run-length. Skipping a repeated game would
@@ -48,55 +46,56 @@ public sealed class ChessPgnDecomposer : IDecomposer
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (options.DryRun) yield break;
-
-        // Serial yielder: one tiny parse per streamed game, the deferred-content skip kept on. The
-        // IngestRunner parallelizes the commit lanes + the consensus fold runs parallel partitions —
-        // that's the parallelism; rolling our own on top double-enumerated and re-processed.
         var modality = new ChessModality();
-        foreach (var file in EnumerateFiles(context.EcosystemPath))
+        int batch    = options.BatchSize > 1 ? options.BatchSize : 512;
+
+        await foreach (var change in DecomposerBatch.RunAsync(
+            StreamAllGamesAsync(context.EcosystemPath, ct),
+            (gameText, b) => ComposeGame(gameText, b, modality),
+            ChessVocabulary.PgnSourceId, "chess/pgn", batch, context.Reader, options, ct))
+            yield return change;
+    }
+
+    // Streams every game text string across all PGN files under the ecosystem path.
+    private static async IAsyncEnumerable<string> StreamAllGamesAsync(
+        string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var file in EnumerateFiles(ecosystemPath))
         {
             ct.ThrowIfCancellationRequested();
-            var builder = NewBuilder(context);
-            int inBatch = 0;
             await foreach (var gameText in StreamGamesAsync(file, ct).WithCancellation(ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                var gameBytes = Encoding.UTF8.GetBytes(gameText);
-
-                List<string> moves;
-                GameOutcome? result;
-                using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
-                    (moves, result) = ExtractGame(ast, gameBytes);
-                if (result is null || moves.Count == 0) continue;
-
-                var (whiteElo, blackElo) = ParseElos(gameText);
-                var (whiteName, blackName) = ParseNames(gameText);
-                var whitePlayer = EmitPlayer(builder, whiteName);
-                var blackPlayer = EmitPlayer(builder, blackName);
-
-                // The conventional GAME tier: one Chess_Game node carrying the full metadata, content-addressed
-                // by (players + date + moves) so the same game across DBs is recorded once + witnessed each time.
-                string date = PgnGames.TagStr(gameText, "Date");
-                var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
-                EmitGame(builder, gameId, gameText, result.Value, whitePlayer, blackPlayer, whiteElo, blackElo);
-
-                // Recover the per-move clocks the grammar strips → think-time evidence weight (no-op when absent).
-                var clocks = PgnClocks.SecondsRemaining(gameText, moves.Count);
-                double medianDrop = PgnClocks.MedianDrop(clocks);
-                AppendGame(builder, modality, moves, result.Value,
-                           whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId);
-
-                if (++inBatch >= GamesPerBatch)
-                {
-                    yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-                    builder = NewBuilder(context);
-                    inBatch = 0;
-                }
-            }
-            if (inBatch > 0)
-                yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
+                yield return gameText;
         }
+    }
+
+    private static void ComposeGame(string gameText, SubstrateChangeBuilder b, ChessModality modality)
+    {
+        var gameBytes = Encoding.UTF8.GetBytes(gameText);
+        PgnMovetext.PgnWalkResult walk;
+        using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
+            walk = PgnMovetext.Walk(ast, gameBytes);
+        if (walk.Result is null || walk.Mainline.Count == 0) return;
+
+        var moves = walk.Mainline.Select(p => p.San).ToList();
+        var result = walk.Result.Value;
+
+        var (whiteElo, blackElo) = ParseElos(gameText);
+        var (whiteName, blackName) = ParseNames(gameText);
+        var whitePlayer = EmitPlayer(b, whiteName);
+        var blackPlayer = EmitPlayer(b, blackName);
+
+        string date = PgnGames.TagStr(gameText, "Date");
+        var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
+        EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo);
+
+        var clocks = PgnClocks.SecondsRemaining(gameText, moves.Count);
+        double medianDrop = PgnClocks.MedianDrop(clocks);
+        var evals = PgnEvals.Centipawns(gameText, moves.Count);
+        AppendGame(b, modality, walk.Mainline, result,
+                   whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId, evals);
+
+        if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_VARIATIONS"), "1", StringComparison.Ordinal))
+            AppendVariations(b, modality, walk.AllPlies, whiteElo, blackElo, whitePlayer, blackPlayer);
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
@@ -191,36 +190,100 @@ public sealed class ChessPgnDecomposer : IDecomposer
     }
 
     private static void AppendGame(
-        SubstrateChangeBuilder b, ChessModality m, List<string> sans, GameOutcome result,
-        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
-        double[] clocks, double medianDrop, Hash128 gameId)
+        SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> plies,
+        GameOutcome result, int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
+        double[] clocks, double medianDrop, Hash128 gameId, int[]? evals)
     {
-        bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0; // '#' = proven checkmate
+        bool mate = plies.Count > 0 && plies[^1].San.IndexOf('#') >= 0;
         int? winner = result.IsDraw ? null : result.Winner;
+        const long evalGames = 2;
+        const double evalWeight = 0.55;
 
         var state = m.Initial();
-        for (int ply = 0; ply < sans.Count; ply++)
+        for (int ply = 0; ply < plies.Count; ply++)
         {
-            var mv = San.Resolve(state.Board, m.LegalActions(state), sans[ply]);
-            if (mv is null) return; // malformed/illegal token → skip the rest of this game
+            var plyStream = plies[ply];
+            var mv = San.Resolve(state.Board, m.LegalActions(state), plyStream.San);
+            if (mv is null) return;
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
-            // OUTCOME weight = DEFENDER Elo (anti-trap: a result against a strong defender is stronger
-            // evidence). MOVE-CHOICE weight = the MOVER's Elo ("Magnus's e4 here outweighs a 1200's"),
-            // FURTHER scaled by think-time: a move played after a real think is stronger testimony of
-            // intent than a pre-move/scramble (ThinkFactor∈[0.5,1.5]; 1.0 when the game has no clocks).
+            string fromKey = m.StateKey(state);
+
             long games = EloGames(mover == 0 ? blackElo : whiteElo);
-            if (mate && winner == mover) games += games / 2; // +50% for the confirmed-mating side
+            if (mate && winner == mover) games += games / 2;
             double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
             long moveChoiceGames = Math.Max(1, (long)Math.Round(EloGames(mover == 0 ? whiteElo : blackElo) * tf));
+
             ChessGraph.AppendMoveEdge(
-                b, m.StateKey(state), m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
+                b, fromKey, m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
                 sourceId: ChessVocabulary.PgnSourceId,
                 moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
                 moveChoiceGames: moveChoiceGames,
-                contextId: gameId);
+                contextId: gameId,
+                ply: ply + 1);
+
+            if (evals is not null && ply < evals.Length)
+            {
+                int cp = mover == 0 ? evals[ply] : -evals[ply];
+                ChessGraph.AppendEval(b, fromKey, cp, evalGames, evalWeight, ChessVocabulary.EvalPgnSourceId, gameId);
+            }
+
+            if (MoveQuality.FromStream(plyStream) is { } quality)
+                ChessGraph.AppendMoveQuality(
+                    b, fromKey, quality, 1, PgnWitnessWeight * 0.5, ChessVocabulary.PgnSourceId, gameId);
+
             state = next;
         }
+    }
+
+    /// <summary>Variation plies: MOVE edges only, no game OUTCOME chain, lower trust, no game context.</summary>
+    private static void AppendVariations(
+        SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
+        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
+    {
+        const double varWeight = 0.35;
+        var mainState = m.Initial();
+        var varState = m.Initial();
+        bool inVar = false;
+
+        foreach (var plyStream in allPlies)
+        {
+            if (plyStream.InVariation)
+            {
+                if (!inVar) { varState = CloneState(m, mainState); inVar = true; }
+                if (TryPlay(m, ref varState, plyStream.San, out var fromKey, out var toKey, out int mover))
+                {
+                    long games = Math.Max(1, EloGames(mover == 0 ? blackElo : whiteElo) / 2);
+                    ChessGraph.AppendMoveEdge(
+                        b, fromKey, toKey, PlyOutcome.Draw, games, varWeight,
+                        sourceId: ChessVocabulary.PgnSourceId,
+                        moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
+                        contextId: null);
+                }
+            }
+            else
+            {
+                inVar = false;
+                TryPlay(m, ref mainState, plyStream.San, out _, out _, out _);
+            }
+        }
+    }
+
+    private static ChessState CloneState(ChessModality m, ChessState s) => m.FromFen(s.Board.ToFen());
+
+    private static bool TryPlay(
+        ChessModality m, ref ChessState state, string san,
+        out string fromKey, out string toKey, out int mover)
+    {
+        fromKey = toKey = "";
+        mover = 0;
+        var mv = San.Resolve(state.Board, m.LegalActions(state), san);
+        if (mv is null) return false;
+        mover = m.SideToMove(state);
+        fromKey = m.StateKey(state);
+        state = m.Apply(state, mv.Value);
+        toKey = m.StateKey(state);
+        return true;
     }
 
     /// <summary>Defender Elo → Glicko observation count (1..12): unknown → a neutral middle; rises with
@@ -238,54 +301,16 @@ public sealed class ChessPgnDecomposer : IDecomposer
     /// for unknown players (""/"?"), so no PLAYED_BY is attributed. The rating's EFFECT lands per-move via
     /// the move-choice observation count; an explicit per-game HAS_RATING is a later refinement.</summary>
     private static Hash128? EmitPlayer(SubstrateChangeBuilder b, string name)
-        => string.IsNullOrWhiteSpace(name) || name == "?"
-            ? null
-            : ChessVocabulary.EmitPlayer(b, ChessVocabulary.PlayerId(name), name, ChessVocabulary.PgnSourceId);
-
-    /// <summary>Walk one game's parse tree: ordered mainline SAN + the terminating result.</summary>
-    private static (List<string> Moves, GameOutcome? Result) ExtractGame(GrammarAst ast, byte[] utf8)
     {
-        var moves = new List<string>();
-        GameOutcome? result = null;
-        int n = ast.NodeCount;
-        for (int i = 0; i < n; i++)
-        {
-            var node = ast.GetNode(i);
-            var name = ast.NodeTypeName(node.NodeTypeId);
-            if (name == "san_move")
-            {
-                if (!InsideVariation(ast, node)) moves.Add(Text(utf8, node));
-            }
-            else if (name == "game_result")
-            {
-                result = ParseResult(Text(utf8, node));
-            }
-        }
-        return (moves, result);
+        if (string.IsNullOrWhiteSpace(name) || name == "?") return null;
+        var canonicalId = ChessVocabulary.PlayerId(name);
+        ChessVocabulary.EmitPlayer(b, canonicalId, name, ChessVocabulary.PgnSourceId);
+        var legacyId = ChessVocabulary.LegacyPlayerId(name);
+        if (legacyId != canonicalId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                canonicalId, "SAME_AS", legacyId, ChessVocabulary.PgnSourceId, null, PgnWitnessWeight));
+        return canonicalId;
     }
-
-    private static bool InsideVariation(GrammarAst ast, LaplaceAstNode node)
-    {
-        uint p = node.Parent;
-        while (p != GrammarAst.Root)
-        {
-            var pn = ast.GetNode((int)p);
-            if (ast.NodeTypeName(pn.NodeTypeId) == "variation") return true;
-            p = pn.Parent;
-        }
-        return false;
-    }
-
-    private static string Text(byte[] utf8, LaplaceAstNode node)
-        => Encoding.UTF8.GetString(utf8, (int)node.StartByte, (int)(node.EndByte - node.StartByte)).Trim();
-
-    private static GameOutcome? ParseResult(string r) => r switch
-    {
-        "1-0" => GameOutcome.WonBy(0),
-        "0-1" => GameOutcome.WonBy(1),
-        "1/2-1/2" => GameOutcome.Draw,
-        _ => null, // "*" — unfinished, no outcome to learn from
-    };
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {

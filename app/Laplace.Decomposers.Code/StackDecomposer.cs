@@ -168,15 +168,18 @@ public sealed class StackDecomposer : IDecomposer
 
                 if (++inBatch >= batch)
                 {
-                    if (!options.DryRun) yield return await b.BuildAsync(ct);
+                    if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct); IntentStage.ResetContentBank(); }
                     b = NewBuilder(++bn, reader);
                     inBatch = 0;
-                    await Task.Yield();
                 }
             }
         }
 
-        if (inBatch > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
+        if (inBatch > 0 && !options.DryRun)
+        {
+            yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
+            IntentStage.ResetContentBank();
+        }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

@@ -54,24 +54,29 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         if (!Directory.Exists(context.EcosystemPath)) yield break;
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
-        int workers = ResolveDecomposeWorkers();
+        long cap = options.MaxInputUnits;
+        int workers = cap > 0 ? 1 : ResolveDecomposeWorkers();
         int chunk = Math.Clamp(batch / 4, 512, 4096);
         var zips = SelectZips(context.EcosystemPath, options);
         if (zips.Count == 0) yield break;
 
-        // Decompose-time tier-containment dedup: the per-worker micro builders defer their subtitle-line
-        // content emissions, probe distinct content roots/node-ids once via entities_exist_bitmap, and
-        // stage only novel subtrees. reader == null keeps the original one-pass behavior byte-for-byte.
         ISubstrateReader? reader = context.Reader;
+        long consumed = 0;
 
         if (workers <= 1)
         {
             foreach (var (zipPath, pairStem) in zips)
             {
                 ct.ThrowIfCancellationRequested();
-                await foreach (var change in IngestZipSerialAsync(zipPath, pairStem, batch, reader, ct))
+                if (cap > 0 && consumed >= cap) yield break;
+                await foreach (var change in IngestZipSerialAsync(zipPath, pairStem, batch, reader, cap > 0 ? cap - consumed : 0, ct))
                 {
-                    if (!options.DryRun) yield return change;
+                    if (!options.DryRun)
+                    {
+                        consumed += change.Metadata.InputUnitsConsumed;
+                        yield return change;
+                    }
+                    if (cap > 0 && consumed >= cap) yield break;
                 }
             }
             yield break;
@@ -216,15 +221,19 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         string pairStem,
         int batchSize,
         ISubstrateReader? reader,
+        long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string unitStem = Path.GetFileNameWithoutExtension(zipPath);
         SubstrateChangeBuilder? b = null;
         Hash128 langA = default, langB = default;
         int n = 0, bn = 0;
+        long pairsTotal = 0;
 
         await foreach (var pair in OpenSubtitlesZipIngest.ReadZipPairsAsync(zipPath, pairStem, ct))
         {
+            if (maxInputUnits > 0 && pairsTotal >= maxInputUnits) yield break;
+
             if (b is null)
             {
                 langA = pair.LangA;
@@ -233,34 +242,46 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
             }
 
             if (!OpenSubtitlesZipIngest.TryAppendPair(b, pair, out _)) continue;
+            pairsTotal++;
 
             if (++n >= batchSize)
             {
                 yield return await b.SetInputUnitsConsumed(n).BuildAsync(ct);
+                IntentStage.ResetContentBank();
                 bn++;
                 b = OpenSubtitlesZipIngest.NewBuilder(
                     $"opensubtitles/{unitStem}/{bn}", batchSize, langA, langB, reader);
                 n = 0;
             }
+            if (maxInputUnits > 0 && pairsTotal >= maxInputUnits) yield break;
         }
 
         if (b is not null && n > 0)
+        {
             yield return await b.SetInputUnitsConsumed(n).BuildAsync(ct);
+            IntentStage.ResetContentBank();
+        }
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         if (!Directory.Exists(context.EcosystemPath)) return Task.FromResult<IngestInventory?>(null);
-        var files = SelectZips(context.EcosystemPath, options)
+        var zips = SelectZips(context.EcosystemPath, options);
+        if (zips.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        if (options.MaxInputUnits > 0)
+        {
+            var paths = zips.Select(z => z.Path).ToList();
+            return Task.FromResult(IngestInventory.FromFiles("pairs", paths, options.MaxInputUnits, ct));
+        }
+        var files = zips
             .Select(z =>
             {
                 long pairs = PairCounts.FirstOrDefault(x => x.Pair == z.Stem).Pairs;
                 return new IngestFileSpec(z.Stem, z.Path, pairs);
             })
             .ToList();
-        long total = 0;
-        foreach (var f in files) total += f.InputUnits;
+        long total = files.Sum(f => f.InputUnits);
         return Task.FromResult<IngestInventory?>(new IngestInventory("pairs", total, files));
     }
 

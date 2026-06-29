@@ -22,6 +22,7 @@ internal static class FnLuSynsetBridgeIngest
         string labelPrefix,
         int batchSize,
         string synsetVersion = "pwn30",
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -34,6 +35,7 @@ internal static class FnLuSynsetBridgeIngest
         var batch = NewBuilder(source, $"{labelPrefix}/0", batchSize);
         var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
         int count = 0, batchNum = 0;
+        long rowsTotal = 0;
 
         while (true)
         {
@@ -51,6 +53,9 @@ internal static class FnLuSynsetBridgeIngest
             Hash128? luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey(frame, luName));
             if (luId is null) continue;
 
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            rowsTotal++;
+
             StageCorrespondsTo(batch, seen, source, luId.Value, LuTypeId, synId.Value);
 
             if (++count >= batchSize)
@@ -60,6 +65,8 @@ internal static class FnLuSynsetBridgeIngest
                 seen.Clear();
                 count = 0;
             }
+
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
 
         if (count > 0)
@@ -76,6 +83,7 @@ internal static class FnLuSynsetBridgeIngest
         string labelPrefix,
         int batchSize,
         string synsetVersion = "pwn30",
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -88,6 +96,7 @@ internal static class FnLuSynsetBridgeIngest
         var batch = NewBuilder(source, $"{labelPrefix}/0", batchSize);
         var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
         int count = 0, batchNum = 0;
+        long rowsTotal = 0;
         string? currentFrame = null;
 
         while (true)
@@ -114,6 +123,9 @@ internal static class FnLuSynsetBridgeIngest
             Hash128? luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey(currentFrame, luName));
             if (luId is null) continue;
 
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            rowsTotal++;
+
             StageCorrespondsTo(batch, seen, source, luId.Value, LuTypeId, synId.Value);
 
             if (++count >= batchSize)
@@ -123,6 +135,8 @@ internal static class FnLuSynsetBridgeIngest
                 seen.Clear();
                 count = 0;
             }
+
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
 
         if (count > 0)

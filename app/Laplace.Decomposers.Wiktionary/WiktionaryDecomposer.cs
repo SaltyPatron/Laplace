@@ -93,18 +93,21 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        
-        
-        if (options.Languages?.IsActive == true)
-            return Task.FromResult<IngestInventory?>(null);
-        return CountInventoryAsync(context.EcosystemPath, langs: null, ct);
+        string? file = ResolveInput(context.EcosystemPath, options.Languages);
+        if (file is null) return Task.FromResult<IngestInventory?>(null);
+
+        // Bench slices: never scan a multi-GB file just to log progress totals.
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.SingleFile(
+                "jsonl", file, options.MaxInputUnits, ct));
+
+        return CountInventoryAsync(context.EcosystemPath, options.Languages, ct);
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        
-        
-        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
+        var inv = await DescribeInputAsync(
+            context, DecomposerOptions.ForWitness(SourceName), ct).ConfigureAwait(false);
         return inv?.TotalInputUnits;
     }
 
@@ -144,13 +147,13 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         return null;
     }
 
-    private static async Task<IngestInventory?> CountInventoryAsync(
+    private static Task<IngestInventory?> CountInventoryAsync(
         string dir, LanguageFilter? langs, CancellationToken ct)
     {
         string? file = ResolveInput(dir, langs);
-        if (file is null) return null;
-        long n = await EtlInventory.CountDataLinesAsync(file, static line =>
-            line.Length > 0 && line[0] == '{', ct: ct);
-        return new IngestInventory("jsonl", n, [new IngestFileSpec(Path.GetFileName(file), file, n)]);
+        if (file is null) return Task.FromResult<IngestInventory?>(null);
+        long n = EtlInventory.EstimateNewlineCount(file, ct);
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("jsonl", n, [new IngestFileSpec(Path.GetFileName(file), file, n)]));
     }
 }

@@ -87,16 +87,11 @@ public sealed class IngestRunner
             decomposer.SourceName, ctx.EcosystemPath, Directory.Exists(ctx.EcosystemPath));
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
-        long cap = options.DecomposerOptions.MaxInputUnits;
-        long declaredInput = inventory?.TotalInputUnits ?? 0;
-        if (cap > 0 && declaredInput > cap)
-            declaredInput = cap;
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
         log.LogInformation(
-            "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files} cap={Cap}",
+            "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
             decomposer.SourceName, decomposer.LayerOrder,
-            inventory?.UnitType ?? "units", declaredInput, inventory?.FileCount ?? 0,
-            cap > 0 ? cap : 0);
+            inventory?.UnitType ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
 
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters
@@ -774,14 +769,22 @@ public sealed class IngestRunner
         IngestRunOptions options,
         CancellationToken ct)
     {
+        long cap = options.DecomposerOptions.MaxInputUnits;
         if (decomposer is IIngestInventoryProvider provider)
         {
             var inv = await provider.DescribeInputAsync(ctx, options.DecomposerOptions, ct);
-            if (inv is not null) return inv;
+            if (inv is not null) return ApplyInputCap(inv, cap);
         }
+        if (cap > 0)
+            return IngestInventory.Single(cap, "records");
         long? est = await decomposer.EstimateUnitCountAsync(ctx, ct);
         return est is long n ? IngestInventory.Single(n) : null;
     }
+
+    private static IngestInventory ApplyInputCap(IngestInventory inv, long cap) =>
+        cap > 0 && inv.TotalInputUnits > cap
+            ? inv with { TotalInputUnits = cap }
+            : inv;
 
     private static void TrackIntent(RunCounters c, SubstrateChange intent)
     {

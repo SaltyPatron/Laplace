@@ -57,22 +57,15 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider{
         }
     }
 
-    public async Task<IngestInventory?> DescribeInputAsync(
+    public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         string wnsDir = Path.Combine(context.EcosystemPath, "wns");
-        if (!Directory.Exists(wnsDir)) return null;
-        var files = new List<IngestFileSpec>();
-        foreach (string tab in OMWTabFiles.EnumerateTabFiles(wnsDir, options.Languages)
-                     .OrderBy(p => p, StringComparer.Ordinal))
-        {
-            string lang = OMWTabFiles.FileLang(tab);
-            long n = EtlInventory.EstimateNewlineCount(tab, ct);
-            files.Add(new(lang, tab, n));
-        }
-        long total = 0;
-        foreach (var f in files) total += f.InputUnits;
-        return new IngestInventory("records", total, files);
+        if (!Directory.Exists(wnsDir)) return Task.FromResult<IngestInventory?>(null);
+        var paths = OMWTabFiles.EnumerateTabFiles(wnsDir, options.Languages)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

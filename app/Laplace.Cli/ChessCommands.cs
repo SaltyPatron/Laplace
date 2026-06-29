@@ -1,8 +1,9 @@
 using global::Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD;
 using static Laplace.Cli.CliRuntime;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Cli;
 
@@ -126,10 +127,20 @@ internal static class ChessCommands
     private static Task<int> ReviewAsync(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--"))
-            return Task.FromResult(Fail("usage: laplace chess review <pgn-file|dir> [--depth D] [--max-games N]"));
+            return Task.FromResult(Fail("usage: laplace chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]"));
         var path = args[0];
         int depth = ArgInt(args, "--depth", 4);
         int maxGames = ArgInt(args, "--max-games", 20);
+        bool reIngest = HasFlag(args, "--re-ingest");
+
+        if (reIngest)
+        {
+            var m = new ChessModality();
+            var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review");
+            int n = ChessReviewIngest.IngestPath(b, m, path, depth);
+            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth})");
+            return Task.FromResult(0);
+        }
 
         var games = ChessGameReview.ReviewFile(path, depth, maxGames);
         Console.WriteLine($"reviewed {games.Count} games (depth {depth}) from {path}");

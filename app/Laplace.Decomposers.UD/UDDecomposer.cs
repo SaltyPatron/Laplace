@@ -46,7 +46,8 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         if (options.DryRun) yield break;
 
         int batchSentences = UdIngestSupport.ResolveBatchSentences(options);
-        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
+        long cap = options.MaxInputUnits;
+        int workers = cap > 0 ? 1 : IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
         var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;
 
@@ -55,7 +56,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
 
         if (workers <= 1 || files.Count == 1)
         {
-            await foreach (var change in IngestFilesSerialAsync(files, reader, batchSentences, ct))
+            await foreach (var change in IngestFilesSerialAsync(files, reader, batchSentences, cap, ct))
                 yield return change;
             yield break;
         }
@@ -80,7 +81,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     ct.ThrowIfCancellationRequested();
                     string stem = Path.GetFileNameWithoutExtension(conllu);
                     await foreach (var change in IngestOneFileAsync(
-                        conllu, reader, batchSentences, $"ud/w{worker}/{stem}", ct))
+                        conllu, reader, batchSentences, $"ud/w{worker}/{stem}", maxInputUnits: 0, ct))
                         await channel.Writer.WriteAsync(change, ct);
                     await channel.Writer.WriteAsync(PeriodBoundary(stem), ct);
                 }
@@ -102,16 +103,25 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         List<string> files,
         ISubstrateReader? reader,
         int batchSentences,
+        long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        long consumed = 0;
         foreach (string conllu in files)
         {
             ct.ThrowIfCancellationRequested();
+            if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
+            long fileCap = maxInputUnits > 0 ? maxInputUnits - consumed : 0;
             string stem = Path.GetFileNameWithoutExtension(conllu);
             await foreach (var change in IngestOneFileAsync(
-                conllu, reader, batchSentences, $"ud/{stem}", ct))
+                conllu, reader, batchSentences, $"ud/{stem}", fileCap, ct))
+            {
+                consumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
+                if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
+            }
             yield return PeriodBoundary(stem);
+            if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
         }
     }
 
@@ -120,13 +130,15 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         ISubstrateReader? reader,
         int batchSentences,
         string batchLabelPrefix,
+        long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string langCode = UdIngestSupport.ExtractLangCode(Path.GetFileName(conllu));
         Hash128 langId = LanguageReference.Resolve(langCode);
         var stream = new UdConlluFileStream(conllu, langId, langCode);
         var handler = new UdIngestHandler(Source, _canonicalNames);
-        var config = UdIngestSupport.PipelineConfig(Source, batchLabelPrefix, batchSentences, reader);
+        var config = UdIngestSupport.PipelineConfig(
+            Source, batchLabelPrefix, batchSentences, reader, maxInputUnits);
         await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
         {
             handler.ResetBatchState();
@@ -140,15 +152,16 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
         if (!Directory.Exists(treebanksDir))
             return Task.FromResult<IngestInventory?>(null);
-        var files = ListTreebankFiles(treebanksDir, options)
-            .Select(p =>
-            {
-                string id = Path.GetFileNameWithoutExtension(p);
-                return new IngestFileSpec(id, p, EtlInventory.CountConlluSentences(p));
-            })
-            .ToList();
-        long total = 0;
-        foreach (var f in files) total += f.InputUnits;
+        var paths = ListTreebankFiles(treebanksDir, options);
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.FromFiles("sentences", paths, options.MaxInputUnits, ct));
+        var files = paths.Select(p =>
+        {
+            string id = Path.GetFileNameWithoutExtension(p);
+            return new IngestFileSpec(id, p, EtlInventory.CountConlluSentences(p));
+        }).ToList();
+        long total = files.Sum(f => f.InputUnits);
         return Task.FromResult<IngestInventory?>(new IngestInventory("sentences", total, files));
     }
 

@@ -64,7 +64,85 @@ public static class PositionContent
           .Append('r').Append(Bitboards.Count(bb.Of(Piece.BRook)))
           .Append('q').Append(Bitboards.Count(bb.Of(Piece.BQueen)));
 
+        if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY"), "1", StringComparison.Ordinal))
+            AppendFeatureTokens(sb, b, bb);
+
         return sb.ToString();
+    }
+
+    /// <summary>Optional feature tokens (mobility, open files, king zone, outposts) behind LAPLACE_CHESS_REKEY=1.</summary>
+    private static void AppendFeatureTokens(StringBuilder sb, Board b, Bitboards bb)
+    {
+        int mob = MoveGen.Legal(b).Count;
+        sb.Append(" mob:").Append(mob);
+
+        int open = 0;
+        for (int f = 0; f < 8; f++)
+        {
+            ulong pawns = (bb.Of(Piece.WPawn) | bb.Of(Piece.BPawn)) & Bitboards.FileMask(f);
+            if (pawns == 0) open++;
+        }
+        sb.Append(" open:").Append(open);
+
+        int kingSq = FindKing(b, b.WhiteToMove);
+        sb.Append(" kzone:").Append(KingZoneCount(kingSq));
+
+        sb.Append(" outpost:").Append(CountOutposts(bb, b.WhiteToMove));
+    }
+
+    private static int FindKing(Board b, bool white)
+    {
+        var target = white ? Piece.WKing : Piece.BKing;
+        for (int sq = 0; sq < 128; sq++)
+        {
+            if ((sq & 0x88) != 0) { sq += 7; continue; }
+            if (b.Squares[sq] == target) return Bitboards.Bit(sq);
+        }
+        return 0;
+    }
+
+    private static int KingZoneCount(int kingBit)
+    {
+        int f = Bitboards.FileOfBit(kingBit), r = Bitboards.RankOfBit(kingBit);
+        int n = 0;
+        for (int df = -1; df <= 1; df++)
+            for (int dr = -1; dr <= 1; dr++)
+            {
+                int nf = f + df, nr = r + dr;
+                if (nf is >= 0 and <= 7 && nr is >= 0 and <= 7) n++;
+            }
+        return n;
+    }
+
+    private static int CountOutposts(Bitboards bb, bool white)
+    {
+        ulong minors = bb.Of(white ? Piece.WKnight : Piece.BKnight) | bb.Of(white ? Piece.WBishop : Piece.WBishop);
+        ulong own = bb.Of(white ? Piece.WPawn : Piece.BPawn);
+        ulong enemy = bb.Of(white ? Piece.BPawn : Piece.WPawn);
+        int count = 0;
+        foreach (int bit in Bitboards.Bits(minors))
+        {
+            int r = Bitboards.RankOfBit(bit);
+            if (white ? r < 2 || r > 5 : r < 2 || r > 5) continue;
+            int f = Bitboards.FileOfBit(bit);
+            bool defended = (own & Bitboards.AdjacentFiles(f) & RankMask(r)) != 0;
+            bool blocked = (enemy & Bitboards.AdjacentFiles(f) & ForwardRanks(r, white)) != 0;
+            if (defended && !blocked) count++;
+        }
+        return count;
+    }
+
+    private static ulong RankMask(int rank) => 0xFFUL << (rank * 8);
+
+    private static ulong ForwardRanks(int rank, bool white)
+    {
+        if (white)
+        {
+            int start = (rank + 1) * 8;
+            return start < 64 ? (~0UL << start) : 0;
+        }
+        int end = rank * 8;
+        return end > 0 ? (1UL << end) - 1 : 0;
     }
 
     private static void AppendPawns(StringBuilder sb, string tag, ulong pawns)

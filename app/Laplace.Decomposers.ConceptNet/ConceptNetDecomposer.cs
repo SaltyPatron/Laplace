@@ -68,15 +68,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        
-        if (options.Languages?.IsActive == true)
-            return Task.FromResult<IngestInventory?>(null);
-
         string file = Path.Combine(context.EcosystemPath, "assertions.csv");
-        if (!File.Exists(file)) return Task.FromResult<IngestInventory?>(null);
-        long n = EtlInventory.EstimateNewlineCount(file, ct);
-        return Task.FromResult<IngestInventory?>(
-            new IngestInventory("assertions", n, [new IngestFileSpec("assertions", file, n)]));
+        return Task.FromResult(IngestInventory.SingleFile(
+            "assertions", file, options.MaxInputUnits, ct));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

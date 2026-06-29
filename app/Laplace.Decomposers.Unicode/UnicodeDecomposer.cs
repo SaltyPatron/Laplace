@@ -108,7 +108,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
             ct.ThrowIfCancellationRequested();
             int end = Math.Min(start + batch, total);
             yield return BuildBatch(start, end, options.DryRun ? 0 : end - start, commitEpoch: 0);
-            await Task.Yield();
+            IntentStage.ResetContentBank();
         }
 
         {
@@ -133,12 +133,13 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
                 }
                 if (count >= batch)
                 {
+                    b.SetInputUnitsConsumed(count);
                     yield return b.Build();
+                    IntentStage.ResetContentBank();
                     b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
                         entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
                         .SetCommitEpoch(1);
                     count = 0;
-                    await Task.Yield();
                 }
             }
 
@@ -156,15 +157,21 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
                         StageCodepointTarget(b, recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
                 if (++count >= batch)
                 {
+                    b.SetInputUnitsConsumed(count);
                     yield return b.Build();
+                    IntentStage.ResetContentBank();
                     b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
                         entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
                         .SetCommitEpoch(1);
                     count = 0;
-                    await Task.Yield();
                 }
             }
-            if (count > 0) yield return b.Build();
+            if (count > 0)
+            {
+                b.SetInputUnitsConsumed(count);
+                yield return b.Build();
+                IntentStage.ResetContentBank();
+            }
         }
 
         {

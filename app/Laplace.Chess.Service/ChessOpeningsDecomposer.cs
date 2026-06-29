@@ -52,6 +52,7 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
     {
         if (options.DryRun) yield break;
 
+        int linesPerBatch = options.BatchSize > 1 ? options.BatchSize : LinesPerBatch;
         var modality = new ChessModality();
         foreach (var file in EnumerateFiles(context.EcosystemPath))
         {
@@ -66,15 +67,19 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
                 if (sans.Count == 0) continue;
                 AppendLine(builder, modality, sans, row.Eco, row.Name);   // a malformed token aborts that line only
 
-                if (++inBatch >= LinesPerBatch)
+                if (++inBatch >= linesPerBatch)
                 {
                     yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
+                    IntentStage.ResetContentBank();
                     builder = NewBuilder(context);
                     inBatch = 0;
                 }
             }
             if (inBatch > 0)
+            {
                 yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
+                IntentStage.ResetContentBank();
+            }
         }
     }
 

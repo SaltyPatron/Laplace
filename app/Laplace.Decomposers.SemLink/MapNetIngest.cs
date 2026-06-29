@@ -21,13 +21,14 @@ internal static class MapNetIngest
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase))
         {
             await foreach (var change in FnLuSynsetBridgeIngest.StreamAsync(
                                path, MapNetDecomposer.Source, "mapnet/lu", batchSize,
-                               FnLuSynsetBridgeIngest.MultiWordNetVersion, ct))
+                               FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct))
                 yield return change;
             yield break;
         }
@@ -42,6 +43,7 @@ internal static class MapNetIngest
         var batch = NewBuilder("mapnet/frame/0", batchSize);
         var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
         int count = 0, batchNum = 0;
+        long rowsTotal = 0;
 
         while (true)
         {
@@ -60,6 +62,9 @@ internal static class MapNetIngest
             Hash128? synId = SynsetAnchor(synRaw);
             if (synId is null) continue;
 
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            rowsTotal++;
+
             StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, synId.Value);
 
             if (++count >= batchSize)
@@ -69,6 +74,7 @@ internal static class MapNetIngest
                 seen.Clear();
                 count = 0;
             }
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
 
         if (count > 0)

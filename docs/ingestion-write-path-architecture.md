@@ -108,10 +108,11 @@ not dropping indexes, not "the floor."
 | Bulk insert ordered by hilbert | `apply_batch.c` / writer | **done** |
 | Descent feeds reduced rowset | `ContentBatch` / `content_descent_bitmap` | **done** |
 | Compose skip when trunk all-present (no materialize_phys) | `GrammarRowComposer`, `GrammarEntityBuilder`, `etl_ingest.c` | **done** |
-| Shared-machine-aware worker counts + headroom | `StructuredGrammarIngest.ResolveComposeWorkers` | **done** (`headroom: 2`, `maxCap: 16`; env override) |
+| Shared `IngestBatchPipeline` for grammar/tabular sources | `StructuredGrammarIngest`, decomposers | **done** |
+| Capped inventory skips full-file scan | `IngestInventory`, decomposers | **done** |
 | Default `LAPLACE_APPLY_PARTITIONS=1` (no double-partition) | `NpgsqlSubstrateWriter` | **done** |
 | ModelDecomposer unified write-path (yield batches) | `ModelDecomposer.cs` | **done** |
-| Manifest / CLI EtlDecomposer routing | `IngestCommands`, `EtlManifest` | **partial** (atomic2020/conceptnet/omw/wiktionary via `IsRoutable`; bespoke classes remain for grammar-not-ready sources) |
+| Manifest / CLI EtlDecomposer routing | `IngestCommands`, `EtlManifest` | **partial** (native ConceptNet opt-in; WordNet/FrameNet bespoke emitters) |
 | Per-source streaming (Document/SemLink) | decomposers | **partial** (streamed FileStream read; full-file still required for compose) |
 | Image/Audio ingest stubs | — | **skipped** (placeholder decomposers only; no write-path work needed) |
 

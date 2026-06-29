@@ -33,8 +33,7 @@ public sealed class StructuredGrammarIngestTests
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, maxInputUnits: 7,
-                composeWorkers: 1))
+                batchLabelPrefix: "test", reportUnits: null, maxInputUnits: 7))
             {
                 changes.Add(change);
             }
@@ -48,42 +47,8 @@ public sealed class StructuredGrammarIngestTests
         }
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task IngestFileAsync_MaxInputUnits_ParallelStopsEarly(int composeWorkers)
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-cap-p-{Guid.NewGuid():N}.tsv");
-        try
-        {
-            var lines = Enumerable.Range(1, 20)
-                .Select(i => $"{i}\tRelatedTo\t/c/en/a{i}\t/c/en/b{i}\t{{}}")
-                .ToArray();
-            await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
-
-            var witness = new NullGrammarWitness("tsv");
-            var changes = new List<SubstrateChange>();
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, maxInputUnits: 7,
-                composeWorkers: composeWorkers))
-            {
-                changes.Add(change);
-            }
-
-            long consumed = changes.Sum(c => c.Metadata.InputUnitsConsumed);
-            Assert.Equal(7, consumed);
-        }
-        finally
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task IngestFileAsync_TsvRows_CompletesWithoutCrash(int composeWorkers)
+    [Fact]
+    public async Task IngestFileAsync_TsvRows_CompletesWithoutCrash()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-{Guid.NewGuid():N}.tsv");
         try
@@ -100,7 +65,7 @@ public sealed class StructuredGrammarIngestTests
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 2, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers))
+                batchLabelPrefix: "test", reportUnits: null))
             {
                 changes.Add(change);
             }
@@ -129,8 +94,7 @@ public sealed class StructuredGrammarIngestTests
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 8, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null,
-                acceptRow: line => !line.StartsWith("skip"u8),
-                composeWorkers: 4))
+                acceptRow: line => !line.StartsWith("skip"u8)))
             {
                 changes.Add(change);
             }
@@ -144,26 +108,19 @@ public sealed class StructuredGrammarIngestTests
         }
     }
 
-    // RFC-4180: a quoted field may contain a literal newline; the surrounding record is ONE row.
-    // The tree-sitter csv grammar models this (quoted text = '"' (any-non-'"' | '""')* '"'); a raw
-    // '\n' pre-split severs the record before the grammar can honor the quote. This is the front-door
-    // bug: the splitter usurps the grammar's record-boundary job and gets it wrong.
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task IngestFileAsync_QuotedEmbeddedNewline_IsOneRecord(int composeWorkers)
+    [Fact]
+    public async Task IngestFileAsync_QuotedEmbeddedNewline_IsOneRecord()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-csv-qnl-{Guid.NewGuid():N}.csv");
         try
         {
-            // One logical record, four fields; field 3 = "line1\nline2".
             await File.WriteAllTextAsync(path, "a,b,\"line1\nline2\",c\n");
 
             var witness = new NullGrammarWitness("csv");
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "csv", Src, witness, batchSize: 8, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers))
+                batchLabelPrefix: "test", reportUnits: null))
             {
                 changes.Add(change);
             }
@@ -177,9 +134,6 @@ public sealed class StructuredGrammarIngestTests
         }
     }
 
-    // Returns a uniform "present" or "absent" bitmap for every probe, and records the candidate
-    // counts it was asked about so the test can assert the pipeline actually probes through the
-    // existing entities_exist_bitmap contract.
     private sealed class UniformReader(bool present) : ISubstrateReader
     {
         public int Probes;
@@ -203,10 +157,8 @@ public sealed class StructuredGrammarIngestTests
             ? 0L
             : c.IntentStages.Sum(s => (long)s.EntityCount));
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public async Task IngestFileAsync_PresentBitmap_SkipsAllContentEntities(int composeWorkers)
+    [Fact]
+    public async Task IngestFileAsync_PresentBitmap_SkipsAllContentEntities()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-present-{Guid.NewGuid():N}.tsv");
         try
@@ -220,16 +172,15 @@ public sealed class StructuredGrammarIngestTests
             var baseline = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers))
+                batchLabelPrefix: "test", reportUnits: null))
                 baseline.Add(change);
             Assert.True(ContentEntityCount(baseline) > 0);
 
-            // Every entity already present => the whole compose subtree is skipped upstream.
             var present = new UniformReader(present: true);
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers,
+                batchLabelPrefix: "test", reportUnits: null,
                 containmentReader: present))
                 changes.Add(change);
 
@@ -243,14 +194,9 @@ public sealed class StructuredGrammarIngestTests
         }
     }
 
-    // Serial only: parallel batch grouping is nondeterministic (rows fan out across workers), so
-    // per-batch dedup totals legitimately vary run to run; the exact-equality invariant holds for
-    // the deterministic serial path. The parallel two-phase drain is covered by the present-bitmap
-    // theory above (composeWorkers: 4).
     [Fact]
     public async Task IngestFileAsync_AbsentBitmap_EmitsSameAsNoReader()
     {
-        const int composeWorkers = 1;
         string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-absent-{Guid.NewGuid():N}.tsv");
         try
         {
@@ -263,14 +209,14 @@ public sealed class StructuredGrammarIngestTests
             var baseline = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers))
+                batchLabelPrefix: "test", reportUnits: null))
                 baseline.Add(change);
 
             var absent = new UniformReader(present: false);
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers,
+                batchLabelPrefix: "test", reportUnits: null,
                 containmentReader: absent))
                 changes.Add(change);
 

@@ -94,6 +94,24 @@ public sealed class IngestBatchConfig
 
     internal ISubstrateReader? EffectiveReader =>
         IntentStage.IsBulkFreshBypass ? null : ContainmentReader;
+
+    public IngestBatchConfig WithMaxInputUnits(long max) =>
+        new()
+        {
+            SourceId = SourceId,
+            BatchLabelPrefix = BatchLabelPrefix,
+            BatchSize = BatchSize,
+            ProbeChunkSize = ProbeChunkSize,
+            WitnessWeight = WitnessWeight,
+            CommitEpoch = CommitEpoch,
+            ContainmentReader = ContainmentReader,
+            ReportUnits = ReportUnits,
+            MaxInputUnits = max,
+            EnableDeferredContentOnBuilder = EnableDeferredContentOnBuilder,
+            EntityCapacity = EntityCapacity,
+            PhysicalityCapacity = PhysicalityCapacity,
+            AttestationCapacity = AttestationCapacity,
+        };
 }
 
 /// <summary>
@@ -186,23 +204,42 @@ public static class IngestBatchPipeline
         IMultiFileRecordStream<TRecord> stream,
         Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
         Func<string, IngestBatchConfig> configFactory,
+        long maxTotalUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string? currentLabel = null;
         IIngestRecordHandler<TRecord>? handler = null;
         IngestBatchConfig? config = null;
         var buffer = new List<TRecord>();
+        long unitsConsumed = 0;
+
+        async IAsyncEnumerable<SubstrateChange> FlushBuffer()
+        {
+            if (buffer.Count == 0 || handler is null || config is null)
+                yield break;
+            long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
+            var runConfig = fileCap > 0 ? config.WithMaxInputUnits(fileCap) : config;
+            await foreach (var change in RunAsync(new ListRecordStream<TRecord>(buffer), handler, runConfig, ct))
+            {
+                unitsConsumed += change.Metadata.InputUnitsConsumed;
+                yield return change;
+                if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+                    yield break;
+            }
+            buffer.Clear();
+        }
 
         await foreach (var (label, record) in stream.RecordsAsync(ct))
         {
+            if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+                yield break;
+
             if (label != currentLabel)
             {
-                if (buffer.Count > 0 && handler is not null && config is not null)
-                {
-                    await foreach (var change in RunAsync(new ListRecordStream<TRecord>(buffer), handler, config, ct))
-                        yield return change;
-                    buffer.Clear();
-                }
+                await foreach (var change in FlushBuffer())
+                    yield return change;
+                if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+                    yield break;
 
                 currentLabel = label;
                 handler = handlerFactory(label);
@@ -211,11 +248,8 @@ public static class IngestBatchPipeline
             buffer.Add(record);
         }
 
-        if (buffer.Count > 0 && handler is not null && config is not null)
-        {
-            await foreach (var change in RunAsync(new ListRecordStream<TRecord>(buffer), handler, config, ct))
-                yield return change;
-        }
+        await foreach (var change in FlushBuffer())
+            yield return change;
     }
 
     private static async IAsyncEnumerable<SubstrateChange> FlushPending<TRecord>(
@@ -294,14 +328,19 @@ public static class IngestBatchPipeline
         public async Task<SubstrateChange> YieldBatchAsync(CancellationToken ct)
         {
             var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
+            IntentStage.ResetContentBank();
             InBatch = 0;
             _rowsInBatch = 0;
             BatchNumber++;
             return change;
         }
 
-        public Task<SubstrateChange> BuildRemainingAsync(CancellationToken ct) =>
-            Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
+        public async Task<SubstrateChange> BuildRemainingAsync(CancellationToken ct)
+        {
+            var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
+            IntentStage.ResetContentBank();
+            return change;
+        }
     }
 
     internal sealed class ListRecordStream<TRecord>(IReadOnlyList<TRecord> records) : IRecordStream<TRecord>

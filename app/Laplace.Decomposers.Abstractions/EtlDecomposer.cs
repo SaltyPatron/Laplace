@@ -96,7 +96,6 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
         // Lean triple sources skip compose-time exist probes — they block the hot path on a warm DB.
         ISubstrateReader? composeReader = NativeGrammarIngest.ShouldExistProbe(_src)
             ? _containmentReader : null;
-        int composeWorkers = StructuredGrammarIngest.ResolveComposeWorkers();
 
         foreach (var file in files)
         {
@@ -143,7 +142,6 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
                 contextId: fileContext,
                 commitEpoch: 0,
                 acceptRow: acceptRow,
-                composeWorkers: composeWorkers,
                 maxInputUnits: fileCap,
                 containmentReader: composeReader,
                 ct: ct))
@@ -169,19 +167,12 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             .OrderBy(p => p, StringComparer.Ordinal);
     }
 
-    public async Task<IngestInventory?> DescribeInputAsync(
+    public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var files = new List<IngestFileSpec>();
-        foreach (var f in EnumerateFiles(context.EcosystemPath))
-        {
-            long n = EtlInventory.EstimateNewlineCount(f, ct);
-            files.Add(new(Path.GetFileName(f), f, n));
-        }
-        if (files.Count == 0) return null;
-        long total = 0;
-        foreach (var f in files) total += f.InputUnits;
-        return new IngestInventory("records", total, files);
+        var paths = EnumerateFiles(context.EcosystemPath).ToList();
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct));
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

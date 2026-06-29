@@ -69,12 +69,18 @@ public sealed class PropBankDecomposer : IDecomposer{
     {
         string framesDir = ResolveFramesDir(context.EcosystemPath);
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        var reader = context.Reader;
 
-        var b = NewBuilder("propbank/batch-0", batch, reader);
-        int n = 0, bn = 0;
+        await foreach (var change in DecomposerBatch.RunAsync(
+            ParseFramesetsAsync(framesDir, context.EcosystemPath, ct),
+            static (root, b) => ComposeFrameset(root, b),
+            Source, "propbank", batch, context.Reader, options, ct))
+            yield return change;
+    }
 
-        foreach (var file in EnumerateFramesetFiles(framesDir, context.EcosystemPath))
+    private static async IAsyncEnumerable<XmlElement> ParseFramesetsAsync(
+        string framesDir, string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var file in EnumerateFramesetFiles(framesDir, ecosystemPath))
         {
             ct.ThrowIfCancellationRequested();
             var doc = new XmlDocument();
@@ -82,19 +88,15 @@ public sealed class PropBankDecomposer : IDecomposer{
             catch (XmlException) { continue; }
             var root = doc.DocumentElement;
             if (root is null || !root.Name.Equals("frameset", StringComparison.Ordinal)) continue;
-
-            foreach (XmlNode pNode in root.GetElementsByTagName("predicate"))
-                if (pNode is XmlElement predicate)
-                    EmitPredicate(b, predicate);
-
-            if (++n >= batch)
-            {
-                if (!options.DryRun) yield return await b.BuildAsync(ct);
-                b = NewBuilder($"propbank/batch-{++bn}", batch, reader);
-                n = 0; await Task.Yield();
-            }
+            yield return root;
         }
-        if (n > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
+    }
+
+    private static void ComposeFrameset(XmlElement root, SubstrateChangeBuilder b)
+    {
+        foreach (XmlNode pNode in root.GetElementsByTagName("predicate"))
+            if (pNode is XmlElement predicate)
+                EmitPredicate(b, predicate);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -228,15 +230,6 @@ public sealed class PropBankDecomposer : IDecomposer{
             }
     }
 
-    // Lemmas, roleset names/definitions, role descriptions, function tags, theta roles, and examples
-    // all route through the SHARED two-phase containment (EnableDeferredContent) so content shared
-    // across 7.5k framesets is committed once; the builder MUST be drained via BuildAsync.
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
-        new SubstrateChangeBuilder(Source, unit, null,
-            entityCapacity:      batch * 96,
-            physicalityCapacity: batch * 96,
-            attestationCapacity: batch * 48)
-            .EnableDeferredContent(reader);
 
     private static IEnumerable<XmlElement> DescendantElements(XmlElement el, string name)
     {

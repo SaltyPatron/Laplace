@@ -18,7 +18,7 @@ internal static class OMWGrammarIngest
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int batch = batchSize > 1 ? batchSize : DefaultBatch;
-        int fileWorkers = IngestParallelism.ResolveFileWorkers();
+        int fileWorkers = maxInputUnits > 0 ? 1 : IngestParallelism.ResolveFileWorkers();
 
         var tabFiles = OMWTabFiles.EnumerateTabFiles(wnsDir, langs)
             .OrderBy(p => p, StringComparer.Ordinal)
@@ -53,7 +53,11 @@ internal static class OMWGrammarIngest
             if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
                 yield break;
 
-            await foreach (var change in IngestOneFileAsync(tabFile, batch, fileBn++, containmentReader, ct))
+            long fileCap = maxInputUnits > 0 ? maxInputUnits - rowsParsed : 0;
+            if (fileCap == 0 && maxInputUnits > 0) yield break;
+
+            await foreach (var change in IngestOneFileAsync(
+                tabFile, batch, fileBn++, fileCap, containmentReader, ct))
             {
                 rowsParsed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -97,7 +101,8 @@ internal static class OMWGrammarIngest
                     if (fileIdx >= tabFiles.Count) break;
 
                     string tabFile = tabFiles[fileIdx];
-                    await foreach (var change in IngestOneFileAsync(tabFile, batch, fileIdx, containmentReader, ct))
+                    await foreach (var change in IngestOneFileAsync(
+                        tabFile, batch, fileIdx, maxInputUnits, containmentReader, ct))
                     {
                         await outChannel.Writer.WriteAsync(change, ct);
                     }
@@ -134,6 +139,7 @@ internal static class OMWGrammarIngest
         string tabFile,
         int batch,
         int fileBn,
+        long maxInputUnits,
         ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -152,6 +158,7 @@ internal static class OMWGrammarIngest
             contextId: null,
             commitEpoch: 0,
             acceptRow: static line => line.Length > 0 && line[0] != (byte)'#',
+            maxInputUnits: maxInputUnits,
             containmentReader: containmentReader,
             ct: ct))
         {

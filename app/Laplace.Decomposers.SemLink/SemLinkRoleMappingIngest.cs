@@ -113,6 +113,7 @@ internal static class SemLinkRoleMappingIngest
                     {
                         batch.SetInputUnitsConsumed(count);
                         yield return await batch.BuildAsync(ct);
+                        IntentStage.ResetContentBank();
                         batch = NewBuilder($"semlink/vn-fn-role-mapping/{++batchNum}", batchSize, containmentReader);
                         count = 0;
                     }
@@ -124,6 +125,7 @@ internal static class SemLinkRoleMappingIngest
         {
             batch.SetInputUnitsConsumed(count);
             yield return await batch.BuildAsync(ct);
+            IntentStage.ResetContentBank();
         }
     }
 

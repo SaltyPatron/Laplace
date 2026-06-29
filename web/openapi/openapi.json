@@ -1133,6 +1133,170 @@
           }
         }
       }
+    },
+    "/chess/lab/catalog": {
+      "get": {
+        "tags": [
+          "chess-lab"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/start": {
+      "post": {
+        "tags": [
+          "chess-lab"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/stop/{jobId}": {
+      "post": {
+        "tags": [
+          "chess-lab"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/jobs": {
+      "get": {
+        "tags": [
+          "chess-lab"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/jobs/{jobId}": {
+      "get": {
+        "tags": [
+          "chess-lab"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/jobs/{jobId}/events": {
+      "get": {
+        "tags": [
+          "chess-lab"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/jobs/{jobId}/artifact/{name}": {
+      "get": {
+        "tags": [
+          "chess-lab"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lab/jobs/{jobId}/ingest": {
+      "post": {
+        "tags": [
+          "chess-lab"
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3146,6 +3310,27 @@
           }
         }
       },
+      "LabStartRequest": {
+        "required": [
+          "kind",
+          "config"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "config": {
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        }
+      },
       "LaplaceChatMetadata": {
         "required": [
           "provenance"
@@ -4662,6 +4847,9 @@
     },
     {
       "name": "chess"
+    },
+    {
+      "name": "chess-lab"
     }
   ]
 }

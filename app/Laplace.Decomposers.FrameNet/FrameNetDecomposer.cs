@@ -11,7 +11,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : IDecomposer{
+public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -113,19 +113,78 @@ public sealed class FrameNetDecomposer : IDecomposer{
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string frameDir    = Path.Combine(context.EcosystemPath, "frame");
+        string luDir       = Path.Combine(context.EcosystemPath, "lu");
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        var reader = context.Reader;
+        int batch    = options.BatchSize > 1 ? options.BatchSize : 4096;
+        var uncapped = options with { MaxInputUnits = 0 };
 
-        await foreach (var change in StreamFramesAsync(frameDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        await foreach (var change in DecomposerBatch.RunAsync(
+            ParseAllFramesAsync(frameDir, ct),
+            static (frame, b) => { EmitFrameEntities(b, frame); EmitFrameAttestations(b, frame); },
+            Source, "framenet/frame", batch, context.Reader, options, ct))
+            yield return change;
 
+        if (options.MaxInputUnits > 0) yield break;
+
+        await foreach (var change in DecomposerBatch.RunAsync(
+            FrameNetLuIngest.ParseAllLusAsync(luDir, ct),
+            (lu, b) => FrameNetLuIngest.EmitLu(b, lu, Source),
+            Source, "framenet/lu", batch, context.Reader, uncapped, ct))
+            yield return change;
+
+        await foreach (var change in DecomposerBatch.RunAsync(
+            ParseAllFulltextAsync(fulltextDir, ct),
+            static (ann, b) => ComposeFulltextAnno(ann, b),
+            Source, "framenet/fulltext", batch, context.Reader, uncapped, ct))
+            yield return change;
+    }
+
+    private static async IAsyncEnumerable<Frame> ParseAllFramesAsync(
+        string frameDir, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!Directory.Exists(frameDir)) yield break;
+        foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (ParseFrame(path) is { } frame) yield return frame;
+        }
+    }
+
+    private static async IAsyncEnumerable<FulltextAnno> ParseAllFulltextAsync(
+        string fulltextDir, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!Directory.Exists(fulltextDir)) yield break;
+        foreach (var path in Directory.EnumerateFiles(fulltextDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            await foreach (var ann in ParseFulltextAsync(path, ct))
+                yield return ann;
+        }
+    }
+
+    private static void ComposeFulltextAnno(FulltextAnno ann, SubstrateChangeBuilder b)
+    {
+        var sentId   = ContentEmitter.Emit(b, ann.Sentence, Source);
+        var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
+        var frameId  = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
+        if (sentId is not null && targetId is not null && frameId is not null)
+            b.AddAttestation(NativeAttestation.Categorical(
+                targetId.Value, "EVOKES_FRAME", frameId.Value,
+                Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
+    }
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string frameDir = Path.Combine(context.EcosystemPath, "frame");
         string luDir = Path.Combine(context.EcosystemPath, "lu");
-        await foreach (var change in FrameNetLuIngest.StreamLuAsync(luDir, batch, Source, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-
-        await foreach (var change in StreamFulltextAsync(fulltextDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        var paths = new List<string>();
+        if (Directory.Exists(frameDir))
+            paths.AddRange(Directory.EnumerateFiles(frameDir, "*.xml"));
+        if (Directory.Exists(luDir))
+            paths.AddRange(Directory.EnumerateFiles(luDir, "lu*.xml"));
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        return Task.FromResult(IngestInventory.FromFiles("frames", paths, options.MaxInputUnits, ct));
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -152,33 +211,6 @@ public sealed class FrameNetDecomposer : IDecomposer{
         }
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
-        string frameDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        if (!Directory.Exists(frameDir)) yield break;
-        var b = NewBuilder("framenet/frame-0", batch, reader);
-        int count = 0, batchNum = 0;
-
-        foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
-        {
-            ct.ThrowIfCancellationRequested();
-            Frame? frame = ParseFrame(path);
-            if (frame is null) continue;
-
-            EmitFrameEntities(b, frame);
-            EmitFrameAttestations(b, frame);
-
-            if (++count >= batch)
-            {
-                yield return await b.BuildAsync(ct);
-                b = NewBuilder($"framenet/frame-{++batchNum}", batch, reader);
-                count = 0;
-                await Task.Yield();
-            }
-        }
-        if (count > 0) yield return await b.BuildAsync(ct);
-    }
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
@@ -285,52 +317,6 @@ public sealed class FrameNetDecomposer : IDecomposer{
         }
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamFulltextAsync(
-        string fulltextDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        if (!Directory.Exists(fulltextDir)) yield break;
-        var b = NewBuilder("framenet/fulltext-0", batch, reader);
-        int count = 0, batchNum = 0;
-
-        foreach (var path in Directory.EnumerateFiles(fulltextDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
-        {
-            ct.ThrowIfCancellationRequested();
-            await foreach (var ann in ParseFulltextAsync(path, ct))
-            {
-                var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
-                var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
-                var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
-                if (sentId is not null && targetId is not null && frameId is not null)
-                {
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        targetId.Value, "EVOKES_FRAME", frameId.Value,
-                        Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
-                }
-
-                if (++count >= batch)
-                {
-                    yield return await b.BuildAsync(ct);
-                    b = NewBuilder($"framenet/fulltext-{++batchNum}", batch, reader);
-                    count = 0;
-                    await Task.Yield();
-                }
-            }
-        }
-        if (count > 0) yield return await b.BuildAsync(ct);
-    }
-
-    // Every content emission (frame/FE/LU names, definitions, examples, fulltext sentences) routes
-    // through the SHARED two-phase containment (EnableDeferredContent) — the same mechanism the
-    // grammar sources and CILI use — so the graphemes/words shared across thousands of frames are
-    // committed ONCE, not re-COPYed per frame. The builder MUST be drained with BuildAsync (not
-    // Build) so the deferred-content probe-and-flush actually runs.
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
-        new SubstrateChangeBuilder(Source, unit, null,
-            entityCapacity:      batch * 32,
-            physicalityCapacity: batch * 32,
-            attestationCapacity: batch * 32)
-            .EnableDeferredContent(reader);
 
 
     internal static Frame? ParseFrame(string path)

@@ -14,11 +14,11 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessProvenanceTests
 {
     [Fact]
-    public void PlayerId_IsStable_Distinct_AndTrimmed()
+    public void PlayerId_IsStable_Distinct_AndCanonicalized()
     {
-        Assert.Equal(ChessVocabulary.PlayerId("Carlsen, Magnus"), ChessVocabulary.PlayerId("Carlsen, Magnus"));
-        Assert.Equal(ChessVocabulary.PlayerId("Carlsen, Magnus"), ChessVocabulary.PlayerId("  Carlsen, Magnus  "));
+        Assert.Equal(ChessVocabulary.PlayerId("Carlsen, Magnus"), ChessVocabulary.PlayerId("Magnus Carlsen"));
         Assert.NotEqual(ChessVocabulary.PlayerId("Carlsen, Magnus"), ChessVocabulary.PlayerId("Nakamura, Hikaru"));
+        Assert.Equal("magnus carlsen", PlayerAlias.Canonical("Carlsen, Magnus"));
     }
 
     [Fact]

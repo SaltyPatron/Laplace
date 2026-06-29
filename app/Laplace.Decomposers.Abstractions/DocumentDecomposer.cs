@@ -39,6 +39,7 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
             new DocumentMultiFileStream(root),
             _ => new DocumentIngestHandler(),
             label => DocumentIngestSupport.PipelineConfig(label, reader, batchSize),
+            maxTotalUnits: options.MaxInputUnits,
             ct))
             yield return change;
     }
@@ -46,11 +47,12 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var files = EnumerateInputFiles(context.EcosystemPath).ToList();
-        if (files.Count == 0) return Task.FromResult<IngestInventory?>(null);
-
-        var specs = files.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
-        return Task.FromResult<IngestInventory?>(new IngestInventory("documents", files.Count, specs));
+        var paths = EnumerateInputFiles(context.EcosystemPath).ToList();
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.FromFiles("documents", paths, options.MaxInputUnits, ct));
+        var specs = paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
+        return Task.FromResult<IngestInventory?>(new IngestInventory("documents", paths.Count, specs));
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

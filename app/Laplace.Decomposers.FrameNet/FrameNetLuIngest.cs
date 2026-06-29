@@ -13,31 +13,15 @@ internal static class FrameNetLuIngest
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamLuAsync(
-        string luDir, int batch, Hash128 source, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
+    internal static async IAsyncEnumerable<LuDocument> ParseAllLusAsync(
+        string luDir, [EnumeratorCancellation] CancellationToken ct)
     {
         if (!Directory.Exists(luDir)) yield break;
-        var b = NewBuilder("framenet/lu-0", batch, reader);
-        int count = 0, batchNum = 0;
-
         foreach (var path in Directory.EnumerateFiles(luDir, "lu*.xml").OrderBy(p => p, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            LuDocument? lu = ParseLu(path);
-            if (lu is null) continue;
-
-            EmitLu(b, lu, source);
-
-            if (++count >= batch)
-            {
-                yield return await b.BuildAsync(ct);
-                b = NewBuilder($"framenet/lu-{++batchNum}", batch, reader);
-                count = 0;
-                await Task.Yield();
-            }
+            if (ParseLu(path) is { } lu) yield return lu;
         }
-        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
     internal static LuDocument? ParseLu(string path)
@@ -128,7 +112,7 @@ internal static class FrameNetLuIngest
         return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, patterns, sentences);
     }
 
-    private static void EmitLu(SubstrateChangeBuilder b, LuDocument lu, Hash128 source)
+    internal static void EmitLu(SubstrateChangeBuilder b, LuDocument lu, Hash128 source)
     {
         Hash128? luAnchor = CategoryAnchor.Emit(b, lu.LuKey, LuTypeId, source, SourceTrust.AcademicCurated);
         Hash128? frameAnchor = CategoryAnchor.Emit(b, lu.FrameName, EntityTypeRegistry.FrameNetFrame, source, SourceTrust.AcademicCurated);
@@ -215,14 +199,6 @@ internal static class FrameNetLuIngest
         return sb.ToString().Trim();
     }
 
-    // LU lemmas/definitions/valence-patterns/example-sentences route through the SHARED two-phase
-    // containment (EnableDeferredContent) so shared content is committed once; drained via BuildAsync.
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
-        new SubstrateChangeBuilder(FrameNetDecomposer.Source, unit, null,
-            entityCapacity:      batch * 48,
-            physicalityCapacity: batch * 48,
-            attestationCapacity: batch * 64)
-            .EnableDeferredContent(reader);
 
     internal sealed record LuDocument(
         int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,

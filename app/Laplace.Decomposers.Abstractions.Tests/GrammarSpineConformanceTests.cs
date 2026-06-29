@@ -44,6 +44,7 @@ public class GrammarSpineConformanceTests
             ("Laplace.Decomposers.ConceptNet", ["StructuredGrammarIngest", "ConceptNetGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
             ("Laplace.Decomposers.Atomic2020", ["StructuredGrammarIngest", "Atomic2020GrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            ("Laplace.Decomposers.UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)

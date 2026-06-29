@@ -80,14 +80,13 @@ public sealed class CodeDecomposer : IDecomposer
 
             if (++inBatch >= batch)
             {
-                if (!options.DryRun) yield return b.Build();
+                if (!options.DryRun) { yield return b.SetInputUnitsConsumed(inBatch).Build(); }
                 b = NewBuilder(++bn);
                 inBatch = 0;
-                await Task.Yield();
             }
         }
 
-        if (inBatch > 0 && !options.DryRun) yield return b.Build();
+        if (inBatch > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(inBatch).Build();
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

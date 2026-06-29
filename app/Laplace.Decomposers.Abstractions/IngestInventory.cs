@@ -12,6 +12,49 @@ public sealed record IngestInventory(
 
     public static IngestInventory Single(long units, string unitType = "units") =>
         new(unitType, units, Array.Empty<IngestFileSpec>());
+
+    /// <summary>Inventory for one file — skips full scan when <paramref name="maxInputUnits"/> is set.</summary>
+    public static IngestInventory? SingleFile(
+        string unitType,
+        string filePath,
+        long maxInputUnits,
+        CancellationToken ct = default)
+    {
+        if (!File.Exists(filePath)) return null;
+        if (maxInputUnits > 0)
+        {
+            return new IngestInventory(
+                unitType,
+                maxInputUnits,
+                [new IngestFileSpec(Path.GetFileName(filePath), filePath, maxInputUnits)]);
+        }
+        long n = EtlInventory.EstimateNewlineCount(filePath, ct);
+        return new IngestInventory(unitType, n, [new IngestFileSpec(Path.GetFileName(filePath), filePath, n)]);
+    }
+
+    /// <summary>Multi-file inventory — skips per-file scan when capped.</summary>
+    public static IngestInventory? FromFiles(
+        string unitType,
+        IReadOnlyList<string> paths,
+        long maxInputUnits,
+        CancellationToken ct = default)
+    {
+        if (paths.Count == 0) return null;
+        if (maxInputUnits > 0)
+        {
+            var specs = paths.Select(p => new IngestFileSpec(Path.GetFileName(p), p, maxInputUnits)).ToList();
+            return new IngestInventory(unitType, maxInputUnits, specs);
+        }
+        var files = new List<IngestFileSpec>();
+        long total = 0;
+        foreach (var p in paths)
+        {
+            long n = EtlInventory.EstimateNewlineCount(p, ct);
+            files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
+            total += n;
+        }
+        return new IngestInventory(unitType, total, files);
+    }
 }
 
 public interface IIngestInventoryProvider

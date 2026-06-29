@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
+public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/Atomic2020Decomposer/v1");
@@ -68,6 +68,16 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1_331_113L);
 
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = Splits
+            .Select(s => Path.Combine(context.EcosystemPath, $"{s}.tsv"))
+            .Where(File.Exists)
+            .ToList();
+        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
+    }
+
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
@@ -93,9 +103,13 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         [EnumeratorCancellation] CancellationToken ct)
     {
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
+        long cap = options.MaxInputUnits;
+        long consumed = 0;
 
         foreach (var split in Splits)
         {
+            if (cap > 0 && consumed >= cap) yield break;
+            long fileCap = cap > 0 ? cap - consumed : 0;
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
             if (!File.Exists(file)) continue;
 
@@ -113,9 +127,11 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                 reportUnits: null,
                 contextId: splitId,
                 commitEpoch: 0,
+                maxInputUnits: fileCap,
                 containmentReader: ContainmentReader,
                 ct: ct))
             {
+                consumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
             }
         }
