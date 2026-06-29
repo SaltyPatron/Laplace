@@ -23,16 +23,20 @@ public sealed class IntentStage : SafeHandle
 
     protected override bool ReleaseHandle()
     {
-        NativeInterop.IntentStageFree(handle);
+        lock (LaplaceCoreGate.Native)
+            NativeInterop.IntentStageFree(handle);
         return true;
     }
 
     public static IntentStage New(int rowCapacityHint)
     {
         if (rowCapacityHint < 0) throw new ArgumentOutOfRangeException(nameof(rowCapacityHint));
-        IntPtr h = NativeInterop.IntentStageNew((nuint)rowCapacityHint);
-        if (h == IntPtr.Zero) throw new OutOfMemoryException("intent_stage_new returned NULL");
-        return new IntentStage(h);
+        lock (LaplaceCoreGate.Native)
+        {
+            IntPtr h = NativeInterop.IntentStageNew((nuint)rowCapacityHint);
+            if (h == IntPtr.Zero) throw new OutOfMemoryException("intent_stage_new returned NULL");
+            return new IntentStage(h);
+        }
     }
 
     public int EntityCount      { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStageEntityCount(handle)); } }
@@ -52,16 +56,15 @@ public sealed class IntentStage : SafeHandle
         if (tier < 0 || tier > 255) throw new ArgumentOutOfRangeException(nameof(tier));
         unsafe
         {
-            int rc;
-            if (firstObservedBy is Hash128 fob)
+            lock (LaplaceCoreGate.Native)
             {
-                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, &fob);
+                int rc;
+                if (firstObservedBy is Hash128 fob)
+                    rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, &fob);
+                else
+                    rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, null);
+                if (rc != 0) throw new InvalidOperationException("intent_stage_add_entity failed");
             }
-            else
-            {
-                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, null);
-            }
-            if (rc != 0) throw new InvalidOperationException("intent_stage_add_entity failed");
         }
     }
 
@@ -93,11 +96,14 @@ public sealed class IntentStage : SafeHandle
                 int sdNull = sourceDim          is null ? 1 : 0;
                 double arVal = alignmentResidual ?? 0.0;
                 int    sdVal = sourceDim          ?? 0;
-                int rc = NativeInterop.IntentStageAddPhysicality(
-                    handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
-                    nVerts == 0 ? null : pTraj, nVerts, nConstituents,
-                    arNull, arVal, sdNull, sdVal, observedAtUnixUs);
-                if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
+                lock (LaplaceCoreGate.Native)
+                {
+                    int rc = NativeInterop.IntentStageAddPhysicality(
+                        handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
+                        nVerts == 0 ? null : pTraj, nVerts, nConstituents,
+                        arNull, arVal, sdNull, sdVal, observedAtUnixUs);
+                    if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
+                }
             }
         }
     }
@@ -118,15 +124,17 @@ public sealed class IntentStage : SafeHandle
         if (outcome is < 0 or > 2) throw new ArgumentOutOfRangeException(nameof(outcome));
         unsafe
         {
-            int rc;
-            Hash128 obj = objectId ?? default;
-            Hash128 ctx = contextId ?? default;
-            Hash128* objPtr = objectId is null ? null : &obj;
-            Hash128* ctxPtr = contextId is null ? null : &ctx;
-            rc = NativeInterop.IntentStageAddAttestation(
-                handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
-                outcome, lastObservedAtUnixUs, observationCount);
-            if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
+            lock (LaplaceCoreGate.Native)
+            {
+                Hash128 obj = objectId ?? default;
+                Hash128 ctx = contextId ?? default;
+                Hash128* objPtr = objectId is null ? null : &obj;
+                Hash128* ctxPtr = contextId is null ? null : &ctx;
+                int rc = NativeInterop.IntentStageAddAttestation(
+                    handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
+                    outcome, lastObservedAtUnixUs, observationCount);
+                if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
+            }
         }
     }
 
@@ -176,7 +184,11 @@ public sealed class IntentStage : SafeHandle
     
     
     
-    public static void ResetContentBank() => NativeInterop.ContentWitnessReset();
+    public static void ResetContentBank()
+    {
+        lock (LaplaceCoreGate.Native)
+            NativeInterop.ContentWitnessReset();
+    }
 
     // When true, TryAddContentWitness bypasses the global native bank and emits via
     // BuildContentTree+EmitContentTree instead. The bank is a cross-run dedup optimisation
@@ -204,17 +216,20 @@ public sealed class IntentStage : SafeHandle
 
         unsafe
         {
-            Hash128 src = sourceId;
-            Hash128 root = default;
-            fixed (byte* utf8 = canonical)
+            lock (LaplaceCoreGate.Native)
             {
-                int rc = NativeInterop.ContentWitnessBatchAdd(
-                    handle, utf8, (nuint)canonical.Length, &src, &root);
-                if (rc == -3) throw new InvalidOperationException(
-                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-                if (rc != 0) return false;
-                rootId = root;
-                return true;
+                Hash128 src = sourceId;
+                Hash128 root = default;
+                fixed (byte* utf8 = canonical)
+                {
+                    int rc = NativeInterop.ContentWitnessBatchAdd(
+                        handle, utf8, (nuint)canonical.Length, &src, &root);
+                    if (rc == -3) throw new InvalidOperationException(
+                        "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                    if (rc != 0) return false;
+                    rootId = root;
+                    return true;
+                }
             }
         }
     }
@@ -230,15 +245,18 @@ public sealed class IntentStage : SafeHandle
         if (canonical.IsEmpty) return null;
         unsafe
         {
-            IntPtr treePtr = IntPtr.Zero;
-            fixed (byte* p = canonical)
+            lock (LaplaceCoreGate.Native)
             {
-                int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
-                if (rc == -3) throw new InvalidOperationException(
-                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-                if (rc != 0 || treePtr == IntPtr.Zero) return null;
+                IntPtr treePtr = IntPtr.Zero;
+                fixed (byte* p = canonical)
+                {
+                    int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
+                    if (rc == -3) throw new InvalidOperationException(
+                        "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                    if (rc != 0 || treePtr == IntPtr.Zero) return null;
+                }
+                return TierTree.FromExistingHandle(treePtr);
             }
-            return TierTree.FromExistingHandle(treePtr);
         }
     }
 
@@ -256,27 +274,30 @@ public sealed class IntentStage : SafeHandle
         ThrowIfDisposed();
         unsafe
         {
-            Hash128 src = sourceId;
-            Hash128 root = default;
-            int rc;
-            if (existingBitmap.IsEmpty)
+            lock (LaplaceCoreGate.Native)
             {
-                rc = NativeInterop.ContentWitnessEmitTree(
-                    handle, tree.DangerousNativeHandle, &src, null, 0, &root);
-            }
-            else
-            {
-                fixed (byte* bm = existingBitmap)
+                Hash128 src = sourceId;
+                Hash128 root = default;
+                int rc;
+                if (existingBitmap.IsEmpty)
                 {
                     rc = NativeInterop.ContentWitnessEmitTree(
-                        handle, tree.DangerousNativeHandle, &src, bm, (nuint)tree.NodeCount, &root);
+                        handle, tree.DangerousNativeHandle, &src, null, 0, &root);
                 }
+                else
+                {
+                    fixed (byte* bm = existingBitmap)
+                    {
+                        rc = NativeInterop.ContentWitnessEmitTree(
+                            handle, tree.DangerousNativeHandle, &src, bm, (nuint)tree.NodeCount, &root);
+                    }
+                }
+                if (rc == -3) throw new InvalidOperationException(
+                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0) return false;
+                rootId = root;
+                return true;
             }
-            if (rc == -3) throw new InvalidOperationException(
-                "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-            if (rc != 0) return false;
-            rootId = root;
-            return true;
         }
     }
 
@@ -297,10 +318,13 @@ public sealed class IntentStage : SafeHandle
         var raw = new IntPtr[partCount];
         unsafe
         {
-            fixed (IntPtr* p = raw)
+            lock (LaplaceCoreGate.Native)
             {
-                int rc = NativeInterop.IntentStagePartition(handle, (nuint)partCount, p);
-                if (rc != 0) throw new InvalidOperationException("intent_stage_partition failed");
+                fixed (IntPtr* p = raw)
+                {
+                    int rc = NativeInterop.IntentStagePartition(handle, (nuint)partCount, p);
+                    if (rc != 0) throw new InvalidOperationException("intent_stage_partition failed");
+                }
             }
         }
         var parts = new IntentStage[partCount];

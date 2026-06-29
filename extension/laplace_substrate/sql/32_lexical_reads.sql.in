@@ -1,5 +1,5 @@
 -- Lexical consensus reads — installed SQL. Replaces inline SPI in consensus_lexical_reads.c.
--- synonyms/translations live in inference/*.sql.in (synset_members-based); wired via 20_converse.
+-- synonyms/translations live under inference/ (synset_members-based); wired via 20_converse.
 
 CREATE OR REPLACE FUNCTION type_label(p_type bytea)
     RETURNS text

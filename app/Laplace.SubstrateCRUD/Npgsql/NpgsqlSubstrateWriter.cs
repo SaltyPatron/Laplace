@@ -91,9 +91,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         Span<double> coord = stackalloc double[4];
 
-        // Within-batch de-dup only (a batch can legitimately re-emit the same id many
-        // times). Across batches and across workers, the server-side set-based merge in
-        // laplace_apply_batch is the sole novelty decision — there is no client cache.
+        // Within-batch de-dup only (a batch can legitimately re-emit the same id many times).
         var seenEntity = new HashSet<Hash128>();
         var seenPhys   = new HashSet<Hash128>();
         var seenAtt    = new HashSet<Hash128>();
@@ -253,8 +251,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     /// One partition's commit: its own connection + transaction, COPY its disjoint sub-stages
     /// into per-partition temp staging, then ONE laplace_apply_batch call. Runs concurrently with
     /// the other partitions; their key spaces never overlap, so the set-based anti-join in the SPI
-    /// merge cannot collide cross-partition. Prefer a single partition (default) unless
-    /// explicitly configured — double-partition with IngestRunner lanes scatters writes.
+    /// merge cannot collide cross-partition. Default fan-out is P-core count via
+    /// CpuTopology.ResolveApplyPartitions(); Ingest CLI sets LAPLACE_APPLY_PARTITIONS from workers.
     /// </summary>
     private async Task<(int e, int p, int a, long f, long es, long ps, int rt)> ApplyPartitionAsync(
         IReadOnlyList<IntentStage> stages, int partitionIndex, CancellationToken ct)
