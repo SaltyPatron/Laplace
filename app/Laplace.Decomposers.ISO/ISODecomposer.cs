@@ -71,8 +71,10 @@ public sealed class ISODecomposer : IDecomposer{
             entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000)
             .EnableDeferredContent(reader);
 
+        int isoUnits = 0;
         await foreach (var rec in ParseAsync(dataPath, ct))
         {
+            isoUnits++;
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
             _codeNames.Add(VocabularyNames.LanguageIso639_3(rec.Id));
@@ -209,8 +211,10 @@ public sealed class ISODecomposer : IDecomposer{
         }
 
         if (!options.DryRun)
-            yield return await b.BuildAsync(ct);
-        await Task.Yield();
+        {
+            yield return await b.SetInputUnitsConsumed(isoUnits).BuildAsync(ct);
+            IntentStage.ResetContentBank();
+        }
 
         string namePath = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
         if (File.Exists(namePath))
@@ -236,15 +240,18 @@ public sealed class ISODecomposer : IDecomposer{
                         lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
                 if (++n >= 2048)
                 {
-                    if (!options.DryRun) yield return await nb.BuildAsync(ct);
+                    if (!options.DryRun) { yield return await nb.SetInputUnitsConsumed(n).BuildAsync(ct); IntentStage.ResetContentBank(); }
                     nb = new SubstrateChangeBuilder(Source, $"iso639/names-{++bn}", null,
                         entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
                         .EnableDeferredContent(reader);
                     n = 0;
-                    await Task.Yield();
                 }
             }
-            if (n > 0 && !options.DryRun) yield return await nb.BuildAsync(ct);
+            if (n > 0 && !options.DryRun)
+            {
+                yield return await nb.SetInputUnitsConsumed(n).BuildAsync(ct);
+                IntentStage.ResetContentBank();
+            }
         }
     }
 

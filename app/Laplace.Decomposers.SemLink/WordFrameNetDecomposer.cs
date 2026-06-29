@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.SemLink;
 /// <summary>
 /// Ingests WordFrameNet FrameNet LU → WordNet synset mapping TSV (Adimen WFN / XWFN packages).
 /// </summary>
-public sealed class WordFrameNetDecomposer : IDecomposer
+public sealed class WordFrameNetDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordFrameNetDecomposer/v1");
@@ -36,14 +36,30 @@ public sealed class WordFrameNetDecomposer : IDecomposer
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
         int batchSize = options.BatchSize > 0 ? options.BatchSize : 4096;
+        long cap = options.MaxInputUnits;
+        long consumed = 0;
         foreach (string path in WordFrameNetIngest.ResolvePaths(context.EcosystemPath))
         {
-            await foreach (var change in WordFrameNetIngest.StreamAsync(path, batchSize, ct))
+            if (cap > 0 && consumed >= cap) yield break;
+            long fileCap = cap > 0 ? cap - consumed : 0;
+            await foreach (var change in WordFrameNetIngest.StreamAsync(path, batchSize, fileCap, ct))
             {
                 if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
                     yield return change;
+                }
+                if (cap > 0 && consumed >= cap) yield break;
             }
         }
+    }
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = WordFrameNetIngest.ResolvePaths(context.EcosystemPath).ToList();
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

@@ -76,6 +76,29 @@ public sealed class PositionContentTests
     }
 
     [Fact]
+    public void Surface_Rekey_AddsFeatureTokens_WhenEnabled()
+    {
+        var prev = Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", "1");
+            var s = Surface(ChessModality.StartFen);
+            Assert.Contains(" mob:", s);
+            Assert.Contains(" open:", s);
+            Assert.Contains(" kzone:", s);
+            Assert.Contains(" outpost:", s);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", prev);
+        }
+    }
+
+    [Fact]
+    public void Surface_DefaultOmitsFeatureTokens()
+        => Assert.DoesNotContain(" mob:", Surface(ChessModality.StartFen));
+
+    [Fact]
     public void Bitboards_StartCounts()
     {
         var bb = Bitboards.FromBoard(Board.FromFen(ChessModality.StartFen));

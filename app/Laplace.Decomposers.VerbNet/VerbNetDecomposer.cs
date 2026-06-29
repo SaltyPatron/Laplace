@@ -56,11 +56,17 @@ public sealed class VerbNetDecomposer : IDecomposer{
     {
         string classDir = ResolveClassDir(context.EcosystemPath);
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        var reader = context.Reader;
 
-        var b = NewBuilder("verbnet/batch-0", batch, reader);
-        int n = 0, bn = 0;
+        await foreach (var change in DecomposerBatch.RunAsync(
+            ParseVnClassesAsync(classDir, ct),
+            static (root, b) => EmitClass(b, root, parentClassId: null),
+            Source, "verbnet", batch, context.Reader, options, ct))
+            yield return change;
+    }
 
+    private static async IAsyncEnumerable<XmlElement> ParseVnClassesAsync(
+        string classDir, [EnumeratorCancellation] CancellationToken ct)
+    {
         foreach (var file in EnumerateClassFiles(classDir))
         {
             ct.ThrowIfCancellationRequested();
@@ -69,17 +75,8 @@ public sealed class VerbNetDecomposer : IDecomposer{
             catch (XmlException) { continue; }
             var root = doc.DocumentElement;
             if (root is null || !root.Name.Equals("VNCLASS", StringComparison.Ordinal)) continue;
-
-            EmitClass(b, root, parentClassId: null);
-
-            if (++n >= batch)
-            {
-                if (!options.DryRun) yield return await b.BuildAsync(ct);
-                b = NewBuilder($"verbnet/batch-{++bn}", batch, reader);
-                n = 0; await Task.Yield();
-            }
+            yield return root;
         }
-        if (n > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -221,15 +218,6 @@ public sealed class VerbNetDecomposer : IDecomposer{
                 EmitClass(b, sub, parentClassId: classId);
     }
 
-    // Class member lemmas, thematic-role names, verb-frame descriptions, and examples all route
-    // through the SHARED two-phase containment (EnableDeferredContent) so shared content commits
-    // once; the builder MUST be drained via BuildAsync.
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
-        new SubstrateChangeBuilder(Source, unit, null,
-            entityCapacity:      batch * 64,
-            physicalityCapacity: batch * 64,
-            attestationCapacity: batch * 32)
-            .EnableDeferredContent(reader);
 
     private static string ResolveClassDir(string ecosystemPath)
     {

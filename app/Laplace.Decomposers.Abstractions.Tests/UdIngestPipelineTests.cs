@@ -108,6 +108,42 @@ public sealed class UdIngestPipelineTests
     }
   }
 
+  [Fact]
+  public async Task DescribeInputAsync_MaxInputUnits_ReturnsCapWithoutScanningSentences()
+  {
+    string dir = Directory.CreateDirectory(
+        Path.Combine(Path.GetTempPath(), "laplace-ud-inv-" + Guid.NewGuid().ToString("N"))).FullName;
+    try
+    {
+      string treebanks = Path.Combine(dir, "ud-treebanks-v2.17");
+      Directory.CreateDirectory(treebanks);
+      await File.WriteAllTextAsync(
+          Path.Combine(treebanks, "en_test.conllu"), FakeConllu(5), Encoding.UTF8);
+
+      var dec = new UDDecomposer();
+      var inv = await dec.DescribeInputAsync(
+          new UdTempContext(dir),
+          DecomposerOptions.Default with { MaxInputUnits = 50_000 });
+
+      Assert.NotNull(inv);
+      Assert.Equal(50_000, inv!.TotalInputUnits);
+    }
+    finally
+    {
+      try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+  }
+
+  private sealed class UdTempContext(string ecosystemPath) : IDecomposerContext
+  {
+    public string EcosystemPath => ecosystemPath;
+    public ISubstrateWriter Writer => throw new NotSupportedException();
+    public ISubstrateReader Reader => throw new NotSupportedException();
+    public Microsoft.Extensions.Logging.ILogger Logger =>
+        Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+    public string SubstrateVersion => "test";
+  }
+
   private static List<UdIngestRecord> BuildFakeSentences(int count)
   {
     string langCode = "en";

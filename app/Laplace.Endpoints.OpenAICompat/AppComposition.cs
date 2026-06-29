@@ -30,6 +30,8 @@ internal static class AppComposition
         services.AddSingleton(sp => new ChessEngineService(
             ChessEngineService.ResolveConnString(), chessWeight,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
+        services.AddSingleton(sp => new ChessLabService(
+            sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();

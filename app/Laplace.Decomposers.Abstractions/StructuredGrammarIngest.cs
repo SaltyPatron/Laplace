@@ -9,7 +9,6 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class StructuredGrammarIngest
 {
-    /// <param name="composeWorkers">Ignored. Retained for call-site compatibility; compose parallelism removed.</param>
     public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
         string filePath,
         string modalityId,
@@ -22,7 +21,6 @@ public static class StructuredGrammarIngest
         Hash128? contextId = null,
         int commitEpoch = 0,
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
-        int composeWorkers = 0,
         long maxInputUnits = 0,
         ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
@@ -33,15 +31,6 @@ public static class StructuredGrammarIngest
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
             batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
             maxInputUnits, containmentReader, ct);
-    }
-
-    [Obsolete("Compose worker pool removed; grammar ingest is always IngestBatchPipeline.")]
-    public static int ResolveComposeWorkers()
-    {
-        string? compose = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMPOSE_WORKERS");
-        if (int.TryParse(compose, out int cw) && cw >= 1)
-            return cw;
-        return 1;
     }
 
     internal static unsafe IntPtr CreateRowIterForPipeline(IntPtr recipe) => CreateRowIter(recipe);

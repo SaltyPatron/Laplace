@@ -206,14 +206,14 @@ public sealed class TabularDecomposer : IDecomposer
 
             if (++emitted >= batch)
             {
-                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct); IntentStage.ResetContentBank(); }
                 b = NewBuilder(++bn, reader);
                 emitted = 0;
             }
         }
 
-        
-        
+
+
         foreach (var ((pa, ta, pb, tb), nm) in counts2)
         {
             ct.ThrowIfCancellationRequested();
@@ -228,13 +228,17 @@ public sealed class TabularDecomposer : IDecomposer
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
             if (++emitted >= batch)
             {
-                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct); IntentStage.ResetContentBank(); }
                 b = NewBuilder(++bn, reader);
                 emitted = 0;
             }
         }
 
-        if (emitted > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
+        if (emitted > 0 && !options.DryRun)
+        {
+            yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct);
+            IntentStage.ResetContentBank();
+        }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

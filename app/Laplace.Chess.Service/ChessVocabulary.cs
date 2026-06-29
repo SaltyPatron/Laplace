@@ -42,6 +42,8 @@ public static class ChessVocabulary
     // are content-addressed — but each carries its own source + a REAL trust class (not trustClassId:
     // SourceId): a curated master game outweighs self-play jitter, and a user-prompt game is weighted as such.
     public static readonly Hash128 PgnSourceId        = Hash128.OfCanonical("substrate/source/ChessPgn/v1");
+    public static readonly Hash128 EvalPgnSourceId    = Hash128.OfCanonical("substrate/source/ChessEvalPgn/v1");
+    public static readonly Hash128 ReviewSourceId     = Hash128.OfCanonical("substrate/source/ChessReview/v1");
     public static readonly Hash128 UserPromptSourceId = Hash128.OfCanonical("substrate/source/ChessUserPrompt/v1");
     public static readonly Hash128 OpeningsSourceId   = Hash128.OfCanonical("substrate/source/ChessOpenings/v1");
 
@@ -50,6 +52,10 @@ public static class ChessVocabulary
     // UserPromptContent, NOT the SourceTrust constant names Response/UserPrompt) or HAS_TRUST_CLASS
     // points at an unseeded entity with no weight.
     public static readonly Hash128 PgnTrustClass        = TrustClass("AcademicCurated");   // real player games
+    /// <summary>PGN engine-eval annotations — below curated game results, above self-play.</summary>
+    public static readonly Hash128 EvalPgnTrustClass    = TrustClass("StructuredCorpus");
+    /// <summary>Offline review tags (blunder/mistake) — low trust, distinct from PGN.</summary>
+    public static readonly Hash128 ReviewTrustClass     = TrustClass("UserPromptContent");
     public static readonly Hash128 SelfPlayTrustClass   = TrustClass("ResponseContent");   // substrate's own high-temp play
     public static readonly Hash128 UserPromptTrustClass = TrustClass("UserPromptContent"); // user-prompt games
     public static readonly Hash128 OpeningsTrustClass   = TrustClass("AcademicCurated");   // curated ECO book (openings decomposer)
@@ -79,6 +85,10 @@ public static class ChessVocabulary
     public static readonly Hash128 HasTerminationType  = EntityTypeRegistry.Id("HAS_TERMINATION");  // game → "Normal|Time forfeit|…"
     public static readonly Hash128 HasResultType       = EntityTypeRegistry.Id("HAS_RESULT");       // game → "1-0|0-1|1/2-1/2"
     public static readonly Hash128 GameMoveType        = EntityTypeRegistry.Id("GAME_AT");          // game → position (a ply of this game)
+    public static readonly Hash128 GameAtPlyType       = EntityTypeRegistry.Id("GAME_AT_PLY");      // position → ply ordinal in game
+    public static readonly Hash128 HasEvalType         = EntityTypeRegistry.Id("HAS_EVAL");        // position eval (distinct from OUTCOME)
+    public static readonly Hash128 HasEvalObject       = EntityTypeRegistry.Id("Chess_Eval");      // sentinel object for HAS_EVAL rows
+    public static readonly Hash128 MoveQualityType     = EntityTypeRegistry.Id("MOVE_QUALITY");    // annotation / review quality tag
 
     /// <summary>Content-addressed id of a game from its identity (players + date + full move sequence) — the
     /// same real game across overlapping databases composes to the SAME node (recorded once, witnessed each
@@ -86,8 +96,11 @@ public static class ChessVocabulary
     public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
         => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
 
-    /// <summary>Player entity id from the raw PGN name (alias-merge is a later canonicalization pass).</summary>
-    public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{name.Trim()}");
+    /// <summary>Player entity id from the canonicalized name (<see cref="PlayerAlias"/>).</summary>
+    public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
+
+    /// <summary>Legacy raw-name id (for SAME_AS migration edges).</summary>
+    public static Hash128 LegacyPlayerId(string rawName) => Hash128.OfCanonical($"chess/player/{rawName.Trim()}");
 
     /// <summary>The self-play mover: the substrate playing itself. Self-play moves are attributed to this
     /// player (<c>PLAYED_BY Laplace</c>) — low corpus trust (<see cref="SelfPlayTrustClass"/>), but a real
@@ -148,6 +161,10 @@ public static class ChessVocabulary
         boot.AddRelationType("HAS_TERMINATION");
         boot.AddRelationType("HAS_RESULT");
         boot.AddRelationType("GAME_AT");
+        boot.AddRelationType("GAME_AT_PLY");
+        boot.AddType("Chess_Eval");
+        boot.AddRelationType("HAS_EVAL");
+        boot.AddRelationType("MOVE_QUALITY");
         await writer.ApplyAsync(boot.Build(), ct);
         return boot.CanonicalNames;
     }

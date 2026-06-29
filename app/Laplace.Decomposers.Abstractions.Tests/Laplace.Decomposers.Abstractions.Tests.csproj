@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.ConceptNet\Laplace.Decomposers.ConceptNet.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.SemLink\Laplace.Decomposers.SemLink.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.UD\Laplace.Decomposers.UD.csproj" />

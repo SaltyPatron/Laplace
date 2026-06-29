@@ -107,7 +107,7 @@ public static class PCoreParallelCompose
                                 // BuildAsync flushes the deferred-content containment (the O(tier)
                                 // skip) when enabled; it is exactly Build() when it is not. Blocking
                                 // on this dedicated, sync-context-free worker thread is deadlock-safe.
-                                output.Writer.TryWrite(builder.BuildAsync(runCt).GetAwaiter().GetResult());
+                                output.Writer.TryWrite(builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult());
                                 builder = newBuilder();
                                 n = 0;
                             }
@@ -117,7 +117,7 @@ public static class PCoreParallelCompose
                         var wait = reader.WaitToReadAsync(runCt).AsTask();
                         if (!wait.GetAwaiter().GetResult()) break; // completed + drained
                     }
-                    if (n > 0) output.Writer.TryWrite(builder.BuildAsync(runCt).GetAwaiter().GetResult());
+                    if (n > 0) output.Writer.TryWrite(builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult());
                 }
                 catch (OperationCanceledException) { /* shutting down */ }
                 catch (Exception ex)

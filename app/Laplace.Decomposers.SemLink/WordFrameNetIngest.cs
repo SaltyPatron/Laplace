@@ -33,6 +33,7 @@ internal static class WordFrameNetIngest
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string baseName = Path.GetFileName(path);
@@ -44,10 +45,10 @@ internal static class WordFrameNetIngest
         var stream = LooksLikeNativeWfn(path)
             ? FnLuSynsetBridgeIngest.StreamWfnNativeAsync(
                   path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, ct)
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct)
             : FnLuSynsetBridgeIngest.StreamAsync(
                   path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, ct);
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct);
         await foreach (var change in stream)
             yield return change;
     }

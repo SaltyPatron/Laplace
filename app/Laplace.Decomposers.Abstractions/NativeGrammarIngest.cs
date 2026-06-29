@@ -16,8 +16,7 @@ public static unsafe class NativeGrammarIngest
         if (string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal))
         {
             if (options?.Languages?.IsActive == true) return false;
-            // Native feed is single-threaded; parallel StructuredGrammarIngest compose scales on
-            // multi-core boxes. Opt in with LAPLACE_INGEST_NATIVE=1 only for A/B or debugging.
+            // Opt in with LAPLACE_INGEST_NATIVE=1 for A/B or debugging; default is C# pipeline.
             return string.Equals(
                 Environment.GetEnvironmentVariable("LAPLACE_INGEST_NATIVE"), "1", StringComparison.Ordinal);
         }

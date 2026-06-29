@@ -10,6 +10,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/v1': endpoint,
+      '/chess': endpoint,
       '/health': endpoint,
       '/openapi': endpoint,
     },

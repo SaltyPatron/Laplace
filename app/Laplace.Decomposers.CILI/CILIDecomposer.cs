@@ -25,7 +25,7 @@ public sealed class CILIDecomposer : IDecomposer
     private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
     private static readonly Hash128 EngLang = LanguageEntityId.FromIso639_3("eng");
 
-    private const int BatchSize = 2048;
+    private const int DefaultBatchSize = 2048;
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "CILIDecomposer";
@@ -65,6 +65,7 @@ public sealed class CILIDecomposer : IDecomposer
         // stages only NOVEL subtrees, so the graphemes/words shared across 117k definitions are
         // committed ONCE, not re-COPYed and re-anti-joined every record.
         var reader = context.Reader;
+        int batchSize = options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
 
         // P-CORE-PINNED PARALLEL COMPOSE. CILI's per-record work (content-id derivation = BLAKE3
         // over the ILI/definition canonical bytes + attestation assembly) is a pure function of the
@@ -81,8 +82,8 @@ public sealed class CILIDecomposer : IDecomposer
         {
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliTtlAsync(ttl, ct),
-                workers, BatchSize,
-                () => NewBuilder("cili/concepts", 0).EnableDeferredContent(reader),
+                workers, batchSize,
+                () => NewBuilder("cili/concepts", 0, batchSize).EnableDeferredContent(reader),
                 (b, rec) =>
                 {
                     var (ili, def) = rec;
@@ -121,8 +122,8 @@ public sealed class CILIDecomposer : IDecomposer
             string version = VersionLabel(tab);
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapAsync(tab, version, ct),
-                workers, BatchSize,
-                () => NewBuilder($"cili/map/{version}", 0).EnableDeferredContent(reader),
+                workers, batchSize,
+                () => NewBuilder($"cili/map/{version}", 0, batchSize).EnableDeferredContent(reader),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
@@ -145,8 +146,8 @@ public sealed class CILIDecomposer : IDecomposer
             string version = VersionLabel(ttlMap);
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapTtlAsync(ttlMap, version, ct),
-                workers, BatchSize,
-                () => NewBuilder($"cili/map/{version}", 0).EnableDeferredContent(reader),
+                workers, batchSize,
+                () => NewBuilder($"cili/map/{version}", 0, batchSize).EnableDeferredContent(reader),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
@@ -237,10 +238,10 @@ public sealed class CILIDecomposer : IDecomposer
         return s.Length > 0 && s[0] == 'i' && s.Length > 1 && char.IsDigit(s[1]) ? s : string.Empty;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string label, int bn) =>
+    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize) =>
         new(Source, $"{label}-{bn}", null,
-            entityCapacity: BatchSize * 4, physicalityCapacity: BatchSize * 4,
-            attestationCapacity: BatchSize * 4);
+            entityCapacity: batchSize * 4, physicalityCapacity: batchSize * 4,
+            attestationCapacity: batchSize * 4);
 
     private static string VersionLabel(string path)
     {

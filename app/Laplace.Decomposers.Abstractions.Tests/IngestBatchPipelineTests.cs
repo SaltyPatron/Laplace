@@ -255,6 +255,32 @@ public sealed class IngestBatchPipelineTests
     }
 
     [Fact]
+    public async Task MultiFileTier_MaxTotalUnits_StopsAcrossFiles()
+    {
+        var files = new Dictionary<string, IReadOnlyList<ContentIngestRecord>>
+        {
+            ["file-a"] = [ContentRecord("a1"), ContentRecord("a2"), ContentRecord("a3")],
+            ["file-b"] = [ContentRecord("b1"), ContentRecord("b2")],
+        };
+
+        var changes = new List<SubstrateChange>();
+        await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+            new LabeledContentMultiFileStream(files),
+            _ => new ContentIngestHandler(TestSource),
+            label => new IngestBatchConfig
+            {
+                SourceId = TestSource,
+                BatchLabelPrefix = $"cap/{label}",
+                BatchSize = 8,
+                ProbeChunkSize = 1024,
+            },
+            maxTotalUnits: 4))
+            changes.Add(change);
+
+        Assert.Equal(4, changes.Sum(c => c.Metadata.InputUnitsConsumed));
+    }
+
+    [Fact]
     public async Task GrammarPipelineViaAdapter_MatchesStructuredIngestPresentBitmap()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-pipeline-tsv-{Guid.NewGuid():N}.tsv");
@@ -286,9 +312,9 @@ public sealed class IngestBatchPipelineTests
     }
 
     [Fact]
-    public async Task ParallelGrammar_BatchedProbe()
+    public async Task GrammarIngest_BatchedProbe()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"laplace-parallel-probe-{Guid.NewGuid():N}.tsv");
+        string path = Path.Combine(Path.GetTempPath(), $"laplace-grammar-probe-{Guid.NewGuid():N}.tsv");
         try
         {
             const int rowCount = 12;
@@ -302,42 +328,12 @@ public sealed class IngestBatchPipelineTests
 
             await foreach (var _ in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", TestSource, witness, batchSize: 64, witnessWeight: 1.0,
-                batchLabelPrefix: "parallel-probe", reportUnits: null, composeWorkers: 4,
+                batchLabelPrefix: "grammar-probe", reportUnits: null,
                 containmentReader: reader))
             { }
 
             Assert.True(reader.DescentProbeCalls < rowCount,
-                "parallel grammar ingest must batch probe within pending chunks, not one descent call per row");
-            Assert.True(reader.DescentProbeCalls <= 4,
-                "each compose worker should probe at most once per pending flush for this small file");
-        }
-        finally
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public async Task SerialGrammar_BatchedProbe()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"laplace-serial-probe-{Guid.NewGuid():N}.tsv");
-        try
-        {
-            const int rowCount = 12;
-            var lines = Enumerable.Range(1, rowCount)
-                .Select(i => $"{i}\tRelatedTo\t/c/en/serial{i}\t/c/en/target{i}\t{{}}")
-                .ToArray();
-            await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
-
-            var witness = new NullGrammarWitness("tsv");
-            var reader = new ProbeTrackingReader(present: false);
-
-            await foreach (var _ in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", TestSource, witness, batchSize: 64, witnessWeight: 1.0,
-                batchLabelPrefix: "serial-probe", reportUnits: null, composeWorkers: 1,
-                containmentReader: reader))
-            { }
-
+                "grammar ingest must batch probe within pending chunks, not one descent call per row");
             Assert.Equal(ExpectedDescentProbeChunks(rowCount, 1024), reader.DescentProbeCalls);
         }
         finally

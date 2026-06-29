@@ -33,6 +33,7 @@ internal static class PredicateMatrixIngest
         string path,
         int batchSize,
         LanguageFilter? langs,
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -48,6 +49,7 @@ internal static class PredicateMatrixIngest
         var batch = NewBuilder("semlink/predicate-matrix/0", batchSize);
         var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
         int count = 0, batchNum = 0;
+        long rowsTotal = 0;
 
         while (true)
         {
@@ -69,6 +71,9 @@ internal static class PredicateMatrixIngest
 
             Hash128? synId = SynsetAnchor(fields[ColMcrIli]);
             if (synId is null) continue;
+
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            rowsTotal++;
 
             // The lemma-specific WN sense (was dropped) — sense-level precision that converges with
             // WordNet's own sense entities, so each predicate corresponds not just to the broad synset
@@ -125,6 +130,7 @@ internal static class PredicateMatrixIngest
                 seen.Clear();
                 count = 0;
             }
+            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
 
         if (count > 0)

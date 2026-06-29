@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : IDecomposer{
+public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -39,32 +39,50 @@ public sealed class SemLinkDecomposer : IDecomposer{
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
+        long cap = options.MaxInputUnits;
+        long consumed = 0;
 
         foreach (var (path, kind, label) in JsonDocumentSpecs(instancesDir))
         {
+            if (cap > 0 && consumed >= cap) yield break;
             int jsonBatch = options.BatchSize > 0 ? options.BatchSize : 1;
             ISubstrateReader? reader = context.Reader;
             if (IntentStage.IsBulkFreshBypass) reader = null;
+            long fileCap = cap > 0 ? cap - consumed : 0;
 
             await foreach (var change in SemLinkIngestSupport.IngestJsonDocumentAsync(
-                               path, kind, label, jsonBatch, reader, ct))
+                               path, kind, label, jsonBatch, reader, fileCap, ct))
             {
                 if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
                     yield return change;
+                }
+                if (cap > 0 && consumed >= cap) yield break;
             }
         }
+
+        if (cap > 0 && consumed >= cap) yield break;
 
         foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
         {
+            if (cap > 0 && consumed >= cap) yield break;
             int pmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
+            long fileCap = cap > 0 ? cap - consumed : 0;
             await foreach (var change in PredicateMatrixIngest.StreamAsync(
-                               pmPath, pmBatch, options.Languages, ct))
+                               pmPath, pmBatch, options.Languages, fileCap, ct))
             {
                 if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
                     yield return change;
+                    if (cap > 0 && consumed >= cap) yield break;
+                }
             }
             break;
         }
+
+        if (cap > 0 && consumed >= cap) yield break;
 
         string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
         if (roleMappingPath is not null)
@@ -73,9 +91,34 @@ public sealed class SemLinkDecomposer : IDecomposer{
             await foreach (var change in SemLinkRoleMappingIngest.StreamAsync(roleMappingPath, rmBatch, context.Reader, ct))
             {
                 if (!options.DryRun)
+                {
+                    consumed += change.Metadata.InputUnitsConsumed;
                     yield return change;
+                    if (cap > 0 && consumed >= cap) yield break;
+                }
             }
         }
+    }
+
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string instancesDir = ResolveInstancesDir(context.EcosystemPath);
+        var paths = new List<string>();
+        foreach (var (path, _, _) in JsonDocumentSpecs(instancesDir))
+            paths.Add(path);
+        foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
+        {
+            paths.Add(pmPath);
+            break;
+        }
+        string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
+        if (roleMappingPath is not null) paths.Add(roleMappingPath);
+        if (paths.Count == 0) return null;
+        if (options.MaxInputUnits > 0)
+            return IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct);
+        long? total = await EstimateUnitCountAsync(context, ct);
+        return total is long n ? IngestInventory.Single(n, "records") : null;
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

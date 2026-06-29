@@ -56,26 +56,21 @@ public static class ChessGraph
         SubstrateChangeBuilder b, string fromKey, string toKey, PlyOutcome outcome,
         long games, double witnessWeight,
         Hash128? sourceId = null, Hash128? moverPlayerId = null, long moveChoiceGames = 0,
-        Hash128? contextId = null)
+        Hash128? contextId = null, int ply = -1)
     {
         var src = sourceId ?? ChessVocabulary.SourceId;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         if (games < 1) games = 1;
-        if (moveChoiceGames < 1) moveChoiceGames = games;   // default: move-choice weight == outcome weight
-        long sum = checked(ScoreFp1e9(outcome) * games);    // `games` observations, all this result
+        if (moveChoiceGames < 1) moveChoiceGames = games;
+        long sum = checked(ScoreFp1e9(outcome) * games);
 
         var from = EmitNodes(b, fromKey, nowUs, src);
         var to   = EmitNodes(b, toKey,   nowUs, src);
 
-        // OUTCOME — position quality, credited to the side to move at `from`, weighted by `games`
-        // (defender-based: beating/holding a strong defender is stronger evidence). contextId ties each
-        // witness to the GAME it came from (the conventional tier), without a per-ply edge.
         foreach (var s in from.Substructures)
             b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, src, contextId));
         b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, src, contextId));
 
-        // MOVE — the exact-case from→to edge. The CHOICE is the mover's, so it carries the mover-authority
-        // observation count, not the defender's (a 2800's e4 here teaches more than a 1200's).
         long moveSum = checked(ScoreFp1e9(outcome) * moveChoiceGames);
         b.AddAttestation(NativeAttestation.Aggregated(
             subject: from.Position.Id,
@@ -87,17 +82,48 @@ public static class ChessGraph
             sumScoreFp1e9: moveSum,
             witnessWeight: witnessWeight));
 
-        // PLAYED_BY — attribute the move to its named mover, when present (openings/self-play have none).
         if (moverPlayerId is { } mover)
             b.AddAttestation(NativeAttestation.Categorical(
                 from.Position.Id, "PLAYED_BY", mover, src, contextId, witnessWeight));
 
-        // GAME_AT — the game entity explicitly lists the positions it visited, enabling the forward
-        // query "all positions in game G" without scanning contextId attestations. Only emitted when
-        // a named game entity exists; self-play and openings have no game node (contextId is null).
         if (contextId is { } gameId)
+        {
             b.AddAttestation(NativeAttestation.Categorical(
                 gameId, "GAME_AT", from.Position.Id, src, contextId: null, witnessWeight));
+            if (ply >= 0 && ContentEmitter.Emit(b, ply.ToString(), src) is { } plyId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    from.Position.Id, "GAME_AT_PLY", plyId, src, gameId, witnessWeight));
+        }
+    }
+
+    /// <summary>
+    /// Engine-eval attestation on the from-position (distinct from game-result OUTCOME). Maps cp → Glicko
+    /// sum via sigmoid around 0.5 (<see cref="PgnEvals.EvalSumFp1e9"/>).
+    /// </summary>
+    public static void AppendEval(
+        SubstrateChangeBuilder b, string fromKey, int cpSideToMove, long games, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        if (games < 1) games = 1;
+        long sum = PgnEvals.EvalSumFp1e9(cpSideToMove, games);
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        foreach (var s in from.Substructures)
+            b.AddAttestation(EvalRow(s.Id, games, sum, witnessWeight, sourceId, contextId));
+        b.AddAttestation(EvalRow(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
+    }
+
+    /// <summary>Move-quality tag (PGN glyph / NAG / review) on the from-position.</summary>
+    public static void AppendMoveQuality(
+        SubstrateChangeBuilder b, string fromKey, string qualityToken, long games, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, qualityToken, sourceId) is not { } qid) return;
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        b.AddAttestation(NativeAttestation.Categorical(
+            from.Position.Id, "MOVE_QUALITY", qid, sourceId, contextId, witnessWeight,
+            observationCount: games));
     }
 
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
@@ -133,6 +159,18 @@ public static class ChessGraph
             subject: subject,
             typeId: ChessVocabulary.OutcomeType,
             obj: ChessVocabulary.OutcomeObject,
+            sourceId: src,
+            contextId: contextId,
+            games: games,
+            sumScoreFp1e9: sum,
+            witnessWeight: witnessWeight);
+
+    private static AttestationRow EvalRow(
+        Hash128 subject, long games, long sum, double witnessWeight, Hash128 src, Hash128? contextId = null) =>
+        NativeAttestation.Aggregated(
+            subject: subject,
+            typeId: ChessVocabulary.HasEvalType,
+            obj: ChessVocabulary.HasEvalObject,
             sourceId: src,
             contextId: contextId,
             games: games,

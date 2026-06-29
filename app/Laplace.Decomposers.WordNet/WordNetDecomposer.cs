@@ -109,40 +109,54 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
-
-        // Decompose-time tier-containment dedup: when a reader is available, each batch builder defers
-        // its content-witness emissions (lemmas, glosses, examples, sense keys, frames, exceptions,
-        // verb sentences), probes the distinct content roots/node-ids once via entities_exist_bitmap,
-        // and stages only the novel subtrees. reader == null keeps the original one-pass behavior.
         ISubstrateReader? reader = context.Reader;
+        var frames = await LoadVerbFramesAsync(dictDir, ct);
 
-        await foreach (var change in StreamDataAsync(dictDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-        await foreach (var change in StreamSensesAsync(dictDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        // Pass 1: synsets — subject to MaxInputUnits cap (benchmark/sandbox slice)
+        await foreach (var c in DecomposerBatch.RunAsync(
+            ParseAllSynsetsAsync(dictDir, ct),
+            (syn, b) => { EmitSynsetEntities(b, syn, frames); EmitSynsetAttestations(b, syn, frames); },
+            Source, "wordnet/data", batch, reader, options, ct))
+            yield return c;
 
-        await foreach (var change in StreamExceptionsAsync(dictDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        if (options.MaxInputUnits > 0) yield break;
 
-        await foreach (var change in StreamVerbSentencesAsync(dictDir, batch, reader, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        // Passes 2-4 always run to completion (no cap — they are structural, not volume)
+        var uncapped = options with { MaxInputUnits = 0 };
+
+        await foreach (var c in DecomposerBatch.RunAsync(
+            ParseSensesAsync(Path.Combine(dictDir, "index.sense"), ct),
+            static (s, b) => ComposeSense(s, b),
+            Source, "wordnet/sense", batch, reader, uncapped, ct))
+            yield return c;
+
+        await foreach (var c in DecomposerBatch.RunAsync(
+            ParseExceptionsAsync(dictDir, ct),
+            static (exc, b) => ComposeExcLine(exc, b),
+            Source, "wordnet/exc", batch, reader, uncapped, ct))
+            yield return c;
+
+        await foreach (var c in DecomposerBatch.RunAsync(
+            ParseVerbSentencesAsync(dictDir, ct),
+            static (entry, b) => ComposeVerbSentEntry(entry, b),
+            Source, "wordnet/sents", batch, reader, uncapped, ct))
+            yield return c;
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
-        var files = new List<IngestFileSpec>();
-        foreach (var pos in PosFiles)
-        {
-            string p = Path.Combine(dictDir, pos);
-            if (File.Exists(p))
-                files.Add(new(pos, p, CountSynsetLines(p)));
-        }
-        long total = 0;
-        foreach (var f in files) total += f.InputUnits;
-        return Task.FromResult<IngestInventory?>(
-            files.Count > 0 ? new IngestInventory("synsets", total, files) : null);
+        var paths = PosFiles
+            .Select(pos => Path.Combine(dictDir, pos))
+            .Where(File.Exists)
+            .ToList();
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.FromFiles("synsets", paths, options.MaxInputUnits, ct));
+        var files = paths.Select(p => new IngestFileSpec(Path.GetFileName(p), p, CountSynsetLines(p))).ToList();
+        long total = files.Sum(f => f.InputUnits);
+        return Task.FromResult<IngestInventory?>(new IngestInventory("synsets", total, files));
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -176,34 +190,16 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamDataAsync(
-        string dictDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
+    private static async IAsyncEnumerable<WnSynset> ParseAllSynsetsAsync(
+        string dictDir, [EnumeratorCancellation] CancellationToken ct)
     {
-        var b = NewBuilder("wordnet/data-0", batch, reader);
-        int count = 0, batchNum = 0;
-        var frameTemplates = await LoadVerbFramesAsync(dictDir, ct);
-
         foreach (var posFile in PosFiles)
         {
             string filePath = Path.Combine(dictDir, posFile);
             if (!File.Exists(filePath)) continue;
-
             await foreach (var syn in ParseDataAsync(filePath, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                EmitSynsetEntities(b, syn, frameTemplates);
-                EmitSynsetAttestations(b, syn, frameTemplates);
-
-                if (++count >= batch)
-                {
-                    yield return await b.SetInputUnitsConsumed(count).BuildAsync(ct);
-                    b = NewBuilder($"wordnet/data-{++batchNum}", batch, reader);
-                    count = 0;
-                }
-            }
+                yield return syn;
         }
-        if (count > 0) yield return await b.SetInputUnitsConsumed(count).BuildAsync(ct);
     }
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
@@ -311,71 +307,37 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         }
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamSensesAsync(
-        string dictDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
+    private static void ComposeSense(WnSense s, SubstrateChangeBuilder b)
     {
-        string path = Path.Combine(dictDir, "index.sense");
-        if (!File.Exists(path)) yield break;
+        EmitSurface(b, s.SenseKey, Source);
+        EmitSurface(b, s.Lemma, Source);
 
-        var b = NewBuilder("wordnet/sense-0", batch, reader);
-        int count = 0, batchNum = 0;
+        var senseId   = SenseAnchor.IdNormalized(s.SenseKey);
+        var lemmaId   = RootSurface(s.Lemma);
+        var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
+        if (senseId is null || lemmaId is null || synAnchor is null) return;
 
-        await foreach (var s in ParseSensesAsync(path, ct))
+        SenseAnchor.AttestSenseCategory(b, senseId.Value, Source, SourceTrust.StandardsDerived);
+        b.AddAttestation(NativeAttestation.Categorical(
+            lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
+            magnitude: s.TagCount, arenaScale: 1.0));
+        b.AddAttestation(NativeAttestation.Categorical(
+            senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
+        b.AddAttestation(NativeAttestation.Categorical(
+            senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, SourceTrust.StandardsDerived));
+        PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
+            PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
+            _vocabularyNames);
+        int lexFilenum = ParseLexFilenum(s.SenseKey);
+        if (lexFilenum >= 0 && lexFilenum < Lexnames.Length)
         {
-            ct.ThrowIfCancellationRequested();
-            EmitSurface(b, s.SenseKey, Source);
-            EmitSurface(b, s.Lemma, Source);
-
-            var senseId   = SenseAnchor.IdNormalized(s.SenseKey);
-            var lemmaId   = RootSurface(s.Lemma);
-            var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
-            if (senseId is not null && lemmaId is not null && synAnchor is not null)
-            {
-                SenseAnchor.AttestSenseCategory(b, senseId.Value, Source, SourceTrust.StandardsDerived);
+            EmitSurface(b, Lexnames[lexFilenum], Source);
+            var lexId = RootSurface(Lexnames[lexFilenum]);
+            if (lexId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
-                    magnitude: s.TagCount, arenaScale: 1.0));
-                b.AddAttestation(NativeAttestation.Categorical(
-                    senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
-
-                // The sense key (lemma%ss_type:lex_filenum:lex_id) is a JOIN anchor, not a label —
-                // its content-address must stay the key for VerbNet/SemLink/CILI convergence, but its
-                // composite fields belong as first-class structure, not mashed in the surfaced node.
-                // Emit the parsed fields and a human-readable name alias (the lemma) so the sense never
-                // surfaces as the raw key.
-                b.AddAttestation(NativeAttestation.Categorical(
-                    senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, SourceTrust.StandardsDerived));
-                PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
-                    PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
-                    _vocabularyNames);
-                int lexFilenum = ParseLexFilenum(s.SenseKey);
-                if (lexFilenum >= 0 && lexFilenum < Lexnames.Length)
-                {
-                    EmitSurface(b, Lexnames[lexFilenum], Source);
-                    var lexId = RootSurface(Lexnames[lexFilenum]);
-                    if (lexId is not null)
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, SourceTrust.StandardsDerived));
-                }
-            }
-
-            if (++count >= batch)
-            {
-                yield return await b.BuildAsync(ct);
-                b = NewBuilder($"wordnet/sense-{++batchNum}", batch, reader);
-                count = 0;
-            }
+                    senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, SourceTrust.StandardsDerived));
         }
-        if (count > 0) yield return await b.BuildAsync(ct);
     }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader = null) =>
-        new SubstrateChangeBuilder(Source, unit, null,
-            entityCapacity:      batch * 6,
-            physicalityCapacity: batch * 6,
-            attestationCapacity: batch * 8)
-            .EnableDeferredContent(reader);
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
@@ -421,75 +383,73 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         return templates;
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamExceptionsAsync(
-        string dictDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
+    private readonly record struct WnExcLine(string Inflected, List<string> Bases);
+
+    private static async IAsyncEnumerable<WnExcLine> ParseExceptionsAsync(
+        string dictDir, [EnumeratorCancellation] CancellationToken ct)
     {
-        var b = NewBuilder("wordnet/exc-0", batch, reader);
-        int count = 0, batchNum = 0;
         foreach (var excFile in new[] { "noun.exc", "verb.exc", "adj.exc", "adv.exc" })
         {
             string path = Path.Combine(dictDir, excFile);
             if (!File.Exists(path)) continue;
             await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
-                ct.ThrowIfCancellationRequested();
                 ReadOnlySpan<byte> line = lineMem.Span;
                 int sp = line.IndexOf((byte)' ');
                 if (sp <= 0) continue;
-                var infId = EmitSurface(b, System.Text.Encoding.UTF8.GetString(line[..sp]), Source);
-                if (infId is null) continue;
+                string inf = System.Text.Encoding.UTF8.GetString(line[..sp]);
+                if (inf.Length == 0) continue;
+                var bases = new List<string>();
                 int idx = sp + 1;
                 while (idx < line.Length)
                 {
                     int next = line[idx..].IndexOf((byte)' ');
                     ReadOnlySpan<byte> part = next < 0 ? line[idx..] : line.Slice(idx, next);
                     if (!part.IsEmpty)
-                    {
-                        var baseId = EmitSurface(b, System.Text.Encoding.UTF8.GetString(part), Source);
-                        if (baseId is not null)
-                            b.AddAttestation(NativeAttestation.Categorical(
-                                baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
-                    }
+                        bases.Add(System.Text.Encoding.UTF8.GetString(part));
                     if (next < 0) break;
                     idx += next + 1;
                 }
-                if (++count >= batch)
-                {
-                    yield return await b.BuildAsync(ct);
-                    b = NewBuilder($"wordnet/exc-{++batchNum}", batch, reader);
-                    count = 0;
-                }
+                if (bases.Count > 0) yield return new WnExcLine(inf, bases);
             }
         }
-        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> StreamVerbSentencesAsync(
-        string dictDir, int batch, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
+    private static void ComposeExcLine(WnExcLine exc, SubstrateChangeBuilder b)
     {
-        string idxPath = Path.Combine(dictDir, "sentidx.vrb");
+        var infId = EmitSurface(b, exc.Inflected, Source);
+        if (infId is null) return;
+        foreach (var baseStr in exc.Bases)
+        {
+            var baseId = EmitSurface(b, baseStr, Source);
+            if (baseId is not null)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
+        }
+    }
+
+    private readonly record struct WnVerbSentEntry(Hash128 SynId, List<string> SentTexts);
+
+    private static async IAsyncEnumerable<WnVerbSentEntry> ParseVerbSentencesAsync(
+        string dictDir, [EnumeratorCancellation] CancellationToken ct)
+    {
+        string idxPath   = Path.Combine(dictDir, "sentidx.vrb");
         string sentsPath = Path.Combine(dictDir, "sents.vrb");
         if (!File.Exists(idxPath) || !File.Exists(sentsPath)) yield break;
 
-        var sentences = await LoadVerbSentencesAsync(sentsPath, ct);
+        var sentences  = await LoadVerbSentencesAsync(sentsPath, ct);
         if (sentences.Count == 0) yield break;
-
         var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
         if (senseIndex.Count == 0) yield break;
-
-        var b = NewBuilder("wordnet/sents-0", batch, reader);
-        int count = 0, batchNum = 0;
 
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(idxPath, ct))
         {
             ct.ThrowIfCancellationRequested();
             ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
             if (line.IsEmpty) continue;
-
             int sp = line.IndexOf((byte)' ');
             if (sp <= 0) continue;
+
             string senseKey = System.Text.Encoding.UTF8.GetString(line[..sp]);
             string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
             if (normKey is null || !senseIndex.TryGetValue(normKey, out var syn)) continue;
@@ -498,6 +458,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             if (synId is null) continue;
 
             ReadOnlySpan<byte> idList = line[(sp + 1)..];
+            var texts = new List<string>();
             int idStart = 0;
             for (int i = 0; i <= idList.Length; i++)
             {
@@ -506,22 +467,22 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
                 idStart = i + 1;
                 if (idSpan.IsEmpty) continue;
                 if (!int.TryParse(System.Text.Encoding.UTF8.GetString(idSpan), out int sentId)) continue;
-                if (!sentences.TryGetValue(sentId, out string? sentText) || sentText.Length == 0) continue;
-
-                var exId = EmitSurface(b, sentText, Source);
-                if (exId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        synId.Value, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
+                if (sentences.TryGetValue(sentId, out string? text) && text.Length > 0)
+                    texts.Add(text);
             }
-
-            if (++count >= batch)
-            {
-                yield return await b.BuildAsync(ct);
-                b = NewBuilder($"wordnet/sents-{++batchNum}", batch, reader);
-                count = 0;
-            }
+            if (texts.Count > 0) yield return new WnVerbSentEntry(synId.Value, texts);
         }
-        if (count > 0) yield return await b.BuildAsync(ct);
+    }
+
+    private static void ComposeVerbSentEntry(WnVerbSentEntry entry, SubstrateChangeBuilder b)
+    {
+        foreach (var text in entry.SentTexts)
+        {
+            var exId = EmitSurface(b, text, Source);
+            if (exId is not null)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    entry.SynId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
+        }
     }
 
     private static async Task<Dictionary<int, string>> LoadVerbSentencesAsync(

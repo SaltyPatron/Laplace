@@ -1,5 +1,6 @@
 using System.Net;
 using System.Threading.RateLimiting;
+using Laplace.Chess.Service;
 using Microsoft.AspNetCore.HttpOverrides;
 using Laplace.Endpoints.OpenAICompat;
 using Npgsql;
@@ -7,6 +8,8 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Formatting.Compact;
+
+ChessLabPaths.LoadEnvFile();
 
 var builder = WebApplication.CreateBuilder(args);
 

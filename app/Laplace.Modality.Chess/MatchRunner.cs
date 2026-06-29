@@ -131,10 +131,11 @@ public static class MatchRunner
         Func<MoveChooser> makeA, Func<MoveChooser> makeB, int games,
         int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,
         IReadOnlyList<string>? openingFens = null,
-        System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null)
+        System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null,
+        IProgress<(int Done, int AWins, int Draws, int BWins)>? progress = null)
     {
         bool book = openingFens is { Count: > 0 };
-        int aWins = 0, draws = 0, bWins = 0;
+        int aWins = 0, draws = 0, bWins = 0, done = 0;
         Parallel.For(0, games, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, concurrency) }, g =>
         {
             var m = new ChessModality();
@@ -142,8 +143,6 @@ public static class MatchRunner
             var a = makeA();
             var b = makeB();
             bool aWhite = (g % 2 == 0);
-            // Pair consecutive games on the same book line (g/2), so both engines play each opening from
-            // both sides — removes opening colour bias from the measured Elo.
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var record = pgnSink is not null ? new List<ChessMove>() : null;
             int outcome = PlayOne(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
@@ -152,6 +151,8 @@ public static class MatchRunner
             if (outcome == 2) Interlocked.Increment(ref draws);
             else if ((outcome == 0) == aWhite) Interlocked.Increment(ref aWins);
             else Interlocked.Increment(ref bWins);
+            int d = Interlocked.Increment(ref done);
+            progress?.Report((d, Volatile.Read(ref aWins), Volatile.Read(ref draws), Volatile.Read(ref bWins)));
         });
         return new MatchResult(games, aWins, draws, bWins);
     }

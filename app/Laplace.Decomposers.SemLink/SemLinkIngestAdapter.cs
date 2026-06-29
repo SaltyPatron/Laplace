@@ -104,7 +104,8 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
 public static class SemLinkIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader) =>
+        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader,
+        long maxInputUnits = 0) =>
         new()
         {
             SourceId = sourceId,
@@ -112,6 +113,7 @@ public static class SemLinkIngestSupport
             BatchSize = Math.Max(1, batchSize),
             ProbeChunkSize = Math.Clamp(batchSize, 64, 1024),
             ContainmentReader = reader,
+            MaxInputUnits = maxInputUnits,
             EnableDeferredContentOnBuilder = false,
         };
 
@@ -121,12 +123,13 @@ public static class SemLinkIngestSupport
         string batchLabelPrefix,
         int batchSize,
         ISubstrateReader? containmentReader,
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var witness = new SemLinkGrammarWitness(kind);
         var stream = new SemLinkJsonPairStream(path);
         var handler = new GrammarIngestHandler(SemLinkDecomposer.Source, witness.ModalityId, witness);
-        var config = PipelineConfig(SemLinkDecomposer.Source, batchLabelPrefix, batchSize, containmentReader);
+        var config = PipelineConfig(SemLinkDecomposer.Source, batchLabelPrefix, batchSize, containmentReader, maxInputUnits);
         await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
             yield return change;
     }
