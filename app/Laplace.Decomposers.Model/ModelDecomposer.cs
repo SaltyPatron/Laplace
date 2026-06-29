@@ -176,33 +176,13 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 
         // Legacy HF config-scalar deposit (best effort): keeps the existing HAS_* scalars + IS_A
         // architecture edge for known decoders, but an unknown model_type must never crash ingest.
-        try
-        {
-            var recipe = LlamaRecipeExtractor.Parse(configPath);
-            await context.Writer.ApplyAsync(LlamaRecipeExtractor.BuildChange(
-                recipe, Source, ModelRecipeTypeId,
-                HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
-                HasIntermSizeTypeId, HasVocabSizeTypeId,
-                IsATypeId, LlamaArchitectureId), ct);
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
-        }
+        SubstrateChange? legacyRecipe = TryBuildLegacyRecipeChange(configPath, log);
+        if (legacyRecipe is { } lr)
+            yield return lr;
 
-        // ── Lane D: synthesize a portable laplace.recipe from the manifest, deposit it (closes the
-        // ingest↔export loop with Mold-A-Model). Independent of the legacy deposit above. ─────────
-        try
-        {
-            var synth = RecipeSynthesizer.Synthesize(manifest);
-            await context.Writer.ApplyAsync(RecipeExtractor.BuildChange(
-                synth, Source, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId), ct);
-            log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited", synth.NumLayers);
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
-        }
+        SubstrateChange? synthRecipe = TryBuildSynthesizedRecipeChange(manifest, log);
+        if (synthRecipe is { } sr)
+            yield return sr;
 
         if (manifest.Coverage == Coverage.Unsupported)
         {
@@ -222,7 +202,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
         tokChange.AddEntity(tokEntityId, EntityTier.Vocabulary, ModelTokenizerTypeId, firstObservedBy: Source);
-        await context.Writer.ApplyAsync(tokChange.Build(), ct);
+        yield return tokChange.Build();
 
         phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
@@ -235,7 +215,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             tokens, Source, TextTypeId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
-            await context.Writer.ApplyAsync(batch, ct);
+            yield return batch;
             vocabBatches++;
         }
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
@@ -247,7 +227,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         foreach (var batch in LlamaTokenizerParser.BuildMergesBatches(merges, Source, TextTypeId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
-            await context.Writer.ApplyAsync(batch, ct);
+            yield return batch;
             mergeBatches++;
         }
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
@@ -327,6 +307,40 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         long perLayerPlanes = 3L * distinctVocab * partners * r.NumLayers;
         long similarTo = distinctVocab * partners;
         return distinctVocab + perLayerPlanes + similarTo;
+    }
+
+    private SubstrateChange? TryBuildLegacyRecipeChange(string configPath, ILogger log)
+    {
+        try
+        {
+            var recipe = LlamaRecipeExtractor.Parse(configPath);
+            return LlamaRecipeExtractor.BuildChange(
+                recipe, Source, ModelRecipeTypeId,
+                HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
+                HasIntermSizeTypeId, HasVocabSizeTypeId,
+                IsATypeId, LlamaArchitectureId);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
+            return null;
+        }
+    }
+
+    private SubstrateChange? TryBuildSynthesizedRecipeChange(ModelManifest manifest, ILogger log)
+    {
+        try
+        {
+            var synth = RecipeSynthesizer.Synthesize(manifest);
+            log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited", synth.NumLayers);
+            return RecipeExtractor.BuildChange(
+                synth, Source, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
+            return null;
+        }
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

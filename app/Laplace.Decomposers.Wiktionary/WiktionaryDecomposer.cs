@@ -82,6 +82,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             batchLabelPrefix: "wiktionary",
             reportUnits: null,
             acceptRow: acceptRow,
+            maxInputUnits: options.MaxInputUnits,
             containmentReader: context.Reader,
             ct: ct))
         {

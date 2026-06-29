@@ -212,7 +212,7 @@ int etl_witness_conceptnet_trunk_skip(intent_stage_t* stage, const laplace_etl_c
 
     hash128_t ids[2] = {start_id, end_id};
     uint8_t bm[1] = {0};
-    if (probe(probe_ctx, ids, 2, bm, 2) != 0) return 0;
+    if (probe(probe_ctx, ids, NULL, 2, bm, 2) != 0) return 0;
     if ((bm[0] & 0x03) != 0x03) return 0;
 
     double weight = parse_weight_json(meta, meta_len);

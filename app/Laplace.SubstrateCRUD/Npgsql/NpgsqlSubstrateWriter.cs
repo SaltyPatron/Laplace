@@ -15,13 +15,13 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// already-computed entity / physicality / attestation tuples into three UNLOGGED
 /// staging tables) and then calls the single SPI function laplace_apply_batch once.
 /// That one call does the entire light set-based merge inside the native extension:
-/// set-based novelty (no per-row ON CONFLICT — partition-by-hash makes the keys
-/// disjoint so collisions cannot occur) and the attestation observation-count fold.
+/// id anti-join append (no ON CONFLICT — the staged set is pre-filtered novel by merkle
+/// descent) and the attestation observation-count fold. Skipped-at-merge counts in the
+/// return tuple instrument any unexpected conflict (should be ≈0).
 ///
-/// There is deliberately NO client dedup cache, NO per-record existence check, NO
-/// entities_exist_bitmap / intent_preflight preflight, and NO DISTINCT-ON /
-/// anti-join in this writer: novelty is decided server-side in the one call. The
-/// only dedup is the perfcache (client ids) + that in-call set-based merge.
+/// There is deliberately NO client dedup cache and NO per-record existence check in this
+/// writer: containment descent runs at compose time (ContentBatch / grammar ingest);
+/// apply_batch is a dumb sorted append of the novel set.
 /// </summary>
 public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 {
@@ -38,22 +38,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
-        _ = bulkFreshSource; // novelty is now decided server-side; no client preflight to toggle.
+        _ = bulkFreshSource; // bulk-fresh toggles compose-time probes via IntentStage.IsBulkFreshBypass.
         _applyPartitions = ResolveApplyPartitions();
     }
 
-    // PER-CONTENT-ID PARALLEL APPLY. A batch's staged rows are split natively by id.lo % N
-    // into N disjoint partitions (intent_stage_partition). Each partition COPYs to its OWN
-    // staging tables and runs laplace_apply_batch on its OWN connection in parallel. Because a
-    // given content id lands in exactly one partition, the apply anti-joins never race on the
-    // same id across partitions — no 23505, no ON CONFLICT, no serial lane. N defaults to the
-    // P-core count (the apply is light/IO-ish so it scales to the commit fan-out, not compute).
+    // Default LAPLACE_APPLY_PARTITIONS=1 — IngestRunner commit lanes provide parallelism.
+    // Physicalities partition by contiguous Hilbert range; entities/attestations by id.lo.
     private static int ResolveApplyPartitions()
     {
         string? raw = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
         if (int.TryParse(raw, out int n) && n >= 1)
             return Math.Min(n, 64);
-        return Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16);
+        return 1;
     }
 
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
@@ -144,13 +140,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long attestationsFolded = 0;
+        long entitiesSkipped = 0, physicalitiesSkipped = 0;
         bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
         if (anyRows)
         {
-            // PER-CONTENT-ID PARTITION (native, by id.lo % N). Each source stage partitions
-            // independently; because the router is deterministic on the id, the union of the
-            // k-th sub-stages across all source stages is still a disjoint partition k.
+            // Hilbert-range partition for physicalities; id.lo % N for entities/attestations.
+            // Each source stage partitions independently; partition k is disjoint across sources.
             int parts = Math.Max(1, _applyPartitions);
 
             // Partition every source stage; gather sub-stage[k] lists per partition.
@@ -174,17 +170,14 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     }
                 }
 
-                (int e, int p, int a, long f, int rt)[] results;
+                (int e, int p, int a, long f, long es, long ps, int rt)[] results;
                 if (parts == 1)
                 {
-                    // One partition ⇒ run INLINE on this thread, no Task.Run. A serial config
-                    // (LAPLACE_APPLY_PARTITIONS=1) is then genuinely single-threaded — the heap-corruption
-                    // race only bites under concurrent native calls, so this is the deterministic-safe lane.
                     results = new[] { await ApplyPartitionAsync(perPartition[0], 0, ct) };
                 }
                 else
                 {
-                    var tasks = new Task<(int e, int p, int a, long f, int rt)>[parts];
+                    var tasks = new Task<(int e, int p, int a, long f, long es, long ps, int rt)>[parts];
                     for (int k = 0; k < parts; k++)
                     {
                         int idx = k;
@@ -199,7 +192,17 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     physicalitiesInserted = (int)Math.Min(int.MaxValue, (long)physicalitiesInserted + r.p);
                     attestationsInserted  = (int)Math.Min(int.MaxValue, (long)attestationsInserted + r.a);
                     attestationsFolded   += r.f;
+                    entitiesSkipped      += r.es;
+                    physicalitiesSkipped += r.ps;
                     roundTrips           += r.rt;
+                }
+
+                if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
+                {
+                    _log.LogWarning(
+                        "MERGE_CONFLICT entities_skipped={EntitiesSkipped} physicalities_skipped={PhysicalitiesSkipped} "
+                        + "(staged rows already present — descent dedup should have removed these)",
+                        entitiesSkipped, physicalitiesSkipped);
                 }
             }
             finally
@@ -239,14 +242,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             AttestationsInserted: attestationsInserted,
             RoundTrips: roundTrips,
             WallClock: sw.Elapsed,
-            // Short-circuit = the merge found everything already present: nothing was
-            // inserted and nothing was folded. Novelty is now decided server-side, so this
-            // is read from the apply result rather than a client preflight. An empty batch
-            // (no staged rows at all) also counts as a no-op short-circuit.
             TrunkShortcircuitHit:
                 !anyRows ||
                 (entitiesInserted == 0 && physicalitiesInserted == 0
-                 && attestationsInserted == 0 && attestationsFolded == 0));
+                 && attestationsInserted == 0 && attestationsFolded == 0),
+            EntitiesSkippedAtMerge: entitiesSkipped,
+            PhysicalitiesSkippedAtMerge: physicalitiesSkipped);
     }
 
     private static readonly long RtBudgetPer10K =
@@ -259,20 +260,21 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     /// One partition's commit: its own connection + transaction, COPY its disjoint sub-stages
     /// into per-partition temp staging, then ONE laplace_apply_batch call. Runs concurrently with
     /// the other partitions; their key spaces never overlap, so the set-based anti-join in the SPI
-    /// merge cannot collide cross-partition (no ON CONFLICT, no retry).
+    /// merge cannot collide cross-partition. Prefer a single partition (default) unless
+    /// explicitly configured — double-partition with IngestRunner lanes scatters writes.
     /// </summary>
-    private async Task<(int e, int p, int a, long f, int rt)> ApplyPartitionAsync(
+    private async Task<(int e, int p, int a, long f, long es, long ps, int rt)> ApplyPartitionAsync(
         IReadOnlyList<IntentStage> stages, int partitionIndex, CancellationToken ct)
     {
         long entCount  = stages.Sum(s => (long)s.EntityCount);
         long physCount = stages.Sum(s => (long)s.PhysicalityCount);
         long attCount  = stages.Sum(s => (long)s.AttestationCount);
         if (entCount == 0 && physCount == 0 && attCount == 0)
-            return (0, 0, 0, 0, 0);
+            return (0, 0, 0, 0, 0, 0, 0);
 
         int rt = 0;
         int eIns = 0, pIns = 0, aIns = 0;
-        long aFold = 0;
+        long aFold = 0, eSkip = 0, pSkip = 0;
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
@@ -302,7 +304,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 apply.CommandTimeout = 0;
                 apply.CommandText =
                     "SELECT entities_inserted, physicalities_inserted, attestations_inserted, "
-                    + "attestations_folded "
+                    + "attestations_folded, entities_skipped, physicalities_skipped "
                     + "FROM laplace.laplace_apply_batch(@prefix)";
                 apply.Parameters.AddWithValue("prefix", prefix);
                 await using var rd = await apply.ExecuteReaderAsync(ct);
@@ -312,6 +314,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     pIns  = (int)Math.Min(int.MaxValue, rd.GetInt64(1));
                     aIns  = (int)Math.Min(int.MaxValue, rd.GetInt64(2));
                     aFold = rd.GetInt64(3);
+                    eSkip = rd.GetInt64(4);
+                    pSkip = rd.GetInt64(5);
                 }
             }
             rt++;
@@ -324,7 +328,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             catch { }
             throw;
         }
-        return (eIns, pIns, aIns, aFold, rt);
+        return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt);
     }
 
     /// <summary>

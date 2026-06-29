@@ -1,0 +1,6 @@
+source=conceptnet
+path=D:\Data\Ingest\ConceptNet
+file_count=1
+total_bytes=10157160611
+total_size=9.460 GB
+file=9.460 GB D:\Data\Ingest\ConceptNet\assertions.csv

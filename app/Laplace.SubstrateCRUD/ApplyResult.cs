@@ -9,4 +9,6 @@ public sealed record ApplyResult(
     int AttestationsInserted,
     int RoundTrips,
     TimeSpan WallClock,
-    bool TrunkShortcircuitHit);
+    bool TrunkShortcircuitHit,
+    long EntitiesSkippedAtMerge = 0,
+    long PhysicalitiesSkippedAtMerge = 0);

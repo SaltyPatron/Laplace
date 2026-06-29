@@ -58,11 +58,13 @@ typedef struct {
 
 /*
  * Probe `n` content ids; write `n` bits into `out_bitmap` ((n+7)/8 bytes). Returns 0 on success.
- * `bitmap_bits` must be >= n.
+ * `bitmap_bits` must be >= n. When `parents` is non-null, callers use top-down Merkle descent
+ * (content_descent_bitmap); when null, a flat entities_exist_bitmap probe is used.
  */
 typedef int (*laplace_etl_exist_probe_fn)(
     void*            ctx,
     const hash128_t* ids,
+    const int32_t*   parents,
     size_t           n,
     uint8_t*         out_bitmap,
     size_t           bitmap_bits);

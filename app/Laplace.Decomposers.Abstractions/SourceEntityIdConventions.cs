@@ -25,6 +25,11 @@ public static class SourceEntityIdConventions
 
     public static string CiliMapPath() => Path.Combine(CiliDirectory(), IliMap.MapFileName);
 
+    /// <summary>
+    /// WordNet map version for MapNet / WordFrameNet / MultiWordNet bridge sources (PWN 1.6 offsets).
+    /// </summary>
+    public const string MultiWordNetWnVersion = "pwn16";
+
     public static void EnsureCiliMapForIngest(ILogger logger, string sourceName)
     {
         var (ok, path, _) = EvaluateCiliMap();
@@ -43,7 +48,11 @@ public static class SourceEntityIdConventions
             path, sourceName);
     }
 
-    internal static void ResetIliMapCacheForTests() => _iliMap = new Lazy<IliMap?>(LoadIliMap);
+    internal static void ResetIliMapCacheForTests()
+    {
+        _iliMap = new Lazy<IliMap?>(LoadIliMap);
+        _versionMaps.Clear();
+    }
 
     private static IliMap? LoadIliMap()
     {
@@ -144,9 +153,11 @@ public static class SourceEntityIdConventions
     }
 
     /// <summary>
-    /// Parse a Predicate Matrix MCR ILI synset key (<c>30-02244956-v</c> or <c>ili-30-02244956-v</c>) to WordNet offset + ss_type.
+    /// Parse a Predicate Matrix MCR ILI synset key (<c>30-02244956-v</c> or <c>ili-30-02244956-v</c>) to
+    /// WordNet offset + ss_type. When the key carries an MCR version prefix (<c>30-</c>, <c>16-</c>, …),
+    /// <see cref="WnVersion"/> names the matching <c>pwn*</c> ILI map; bare offset-pos keys leave it null.
     /// </summary>
-    public static (long Offset, char SsType)? ParseMcrSynsetKey(string? raw)
+    public static (long Offset, char SsType, string? WnVersion)? ParseMcrSynsetKey(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -159,10 +170,32 @@ public static class SourceEntityIdConventions
         if (ssType is not ('n' or 'v' or 'a' or 's' or 'r')) return null;
         string rest = s[..lastDash];
         int offDash = rest.LastIndexOf('-');
-        ReadOnlySpan<char> offSpan = offDash >= 0 ? rest.AsSpan(offDash + 1) : rest.AsSpan();
+        string? wnVersion = null;
+        ReadOnlySpan<char> offSpan;
+        if (offDash >= 0)
+        {
+            wnVersion = McrVersionToPwn(rest.AsSpan(..offDash));
+            offSpan = rest.AsSpan(offDash + 1);
+        }
+        else
+        {
+            offSpan = rest.AsSpan();
+        }
         if (!long.TryParse(offSpan, out long offset) || offset <= 0) return null;
-        return (offset, ssType);
+        return (offset, ssType, wnVersion);
     }
+
+    private static string? McrVersionToPwn(ReadOnlySpan<char> mcrVersion) => mcrVersion switch
+    {
+        "30" => "pwn30",
+        "21" => "pwn21",
+        "20" => "pwn20",
+        "171" => "pwn171",
+        "17" => "pwn17",
+        "16" => "pwn16",
+        "15" => "pwn15",
+        _ => null,
+    };
 
     /// <summary>
     /// Canonical FrameNet LU category key shared by FrameNet ingest and FN→WN bridge sources (MapNet, WordFrameNet).
@@ -205,7 +238,7 @@ public static class SourceEntityIdConventions
         if (slash >= 0 && slash + 1 < s.Length)
             s = s[(slash + 1)..];
         if (ParseMcrSynsetKey(s) is { } mcr)
-            return ConceptAnchor.SynsetId(mcr.Offset, mcr.SsType, version);
+            return ConceptAnchor.SynsetId(mcr.Offset, mcr.SsType, mcr.WnVersion ?? version);
         if (ParseMapNetSynsetKey(s) is { } mapNet)
             return ConceptAnchor.SynsetId(mapNet.Offset, mapNet.SsType, version);
         string? senseKey = NormalizeSenseKey(s);

@@ -1,0 +1,6 @@
+source=wiktionary-en
+path=D:\Data\Ingest\Wiktionary
+file_count=1
+total_bytes=2911743598
+total_size=2.712 GB
+file=2.712 GB D:\Data\Ingest\Wiktionary\kaikki.org-dictionary-English.jsonl

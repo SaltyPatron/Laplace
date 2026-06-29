@@ -232,7 +232,7 @@ public static unsafe class NativeGrammarIngest
     }
 
     private static unsafe int ProbeCallbackImpl(
-        IntPtr ctx, Hash128* ids, nuint n, byte* outBitmap, nuint bitmapBits)
+        IntPtr ctx, Hash128* ids, int* parents, nuint n, byte* outBitmap, nuint bitmapBits)
     {
         try
         {
@@ -244,8 +244,19 @@ public static unsafe class NativeGrammarIngest
             var candidates = new Hash128[count];
             for (int i = 0; i < count; i++) candidates[i] = ids[i];
 
-            byte[] bm = box.Reader.EntitiesExistBitmapAsync(candidates, CancellationToken.None)
-                .GetAwaiter().GetResult();
+            byte[] bm;
+            if (parents != null)
+            {
+                var parentList = new int[count];
+                for (int i = 0; i < count; i++) parentList[i] = parents[i];
+                bm = box.Reader.ContentDescentBitmapAsync(candidates, parentList, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
+            else
+            {
+                bm = box.Reader.EntitiesExistBitmapAsync(candidates, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
 
             int need = (count + 7) / 8;
             for (int i = 0; i < need; i++) outBitmap[i] = i < bm.Length ? bm[i] : (byte)0;

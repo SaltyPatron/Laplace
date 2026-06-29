@@ -5,7 +5,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-internal enum SemLinkDocumentKind { PbVn, VnFn, PbWn, VnWn, FnWn, VnPbExternal }
+public enum SemLinkDocumentKind { PbVn, VnFn, PbWn, VnWn, FnWn, VnPbExternal }
 
 internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammarWitness
 {

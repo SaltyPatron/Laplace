@@ -100,14 +100,20 @@ not dropping indexes, not "the floor."
 
 ## 4. What must change (code)
 
-| Change | Where | Why |
+| Change | Where | Status |
 |---|---|---|
-| Remove phantom `(entity_id,type)` anti-join | `apply_batch.c` physicalities insert | no such constraint exists; contradicts schema |
-| Hilbert-range partitioning (replace `id.lo % N`) | `NpgsqlSubstrateWriter` partition + `intent_stage_partition` | random-hash scatters every index write; range = sequential + disjoint |
-| Bulk Hilbert merge dedup (replace per-row anti-join) | `apply_batch.c` | per-row anti-join over millions is the RBAR wall |
-| Bulk insert ordered by hilbert (ensure contiguous ranges) | `apply_batch.c` / writer | sequential append, no page splits |
-| Descent feeds reduced rowset (done) | `ContentBatch` / `content_descent_bitmap` | fewer rows reach the indexed insert |
-| Shared-machine-aware worker counts + headroom; revert greedy 7 + whole-process P-core pin | `StructuredGrammarIngest.ResolveComposeWorkers`, `IngestCommands` affinity | machine is in use (user + 2 GPUs + hypervisor + WSL + other pools); greedy grab starves it → freezes |
+| Remove phantom `(entity_id,type)` anti-join | `apply_batch.c` physicalities insert | **done** |
+| Hilbert-range partitioning (replace `id.lo % N` / high-qword `% N`) | `NpgsqlSubstrateWriter` partition + `intent_stage_partition` | **done** (phys: contiguous 128-bit range; ent/att: id.lo % N) |
+| Bulk Hilbert merge dedup (replace per-row anti-join) | `apply_batch.c` | **done** (temp dedup → LEFT JOIN subtract → sorted append) |
+| Bulk insert ordered by hilbert | `apply_batch.c` / writer | **done** |
+| Descent feeds reduced rowset | `ContentBatch` / `content_descent_bitmap` | **done** |
+| Compose skip when trunk all-present (no materialize_phys) | `GrammarRowComposer`, `GrammarEntityBuilder`, `etl_ingest.c` | **done** |
+| Shared-machine-aware worker counts + headroom | `StructuredGrammarIngest.ResolveComposeWorkers` | **done** (`headroom: 2`, `maxCap: 16`; env override) |
+| Default `LAPLACE_APPLY_PARTITIONS=1` (no double-partition) | `NpgsqlSubstrateWriter` | **done** |
+| ModelDecomposer unified write-path (yield batches) | `ModelDecomposer.cs` | **done** |
+| Manifest / CLI EtlDecomposer routing | `IngestCommands`, `EtlManifest` | **partial** (atomic2020/conceptnet/omw/wiktionary via `IsRoutable`; bespoke classes remain for grammar-not-ready sources) |
+| Per-source streaming (Document/SemLink) | decomposers | **partial** (streamed FileStream read; full-file still required for compose) |
+| Image/Audio ingest stubs | — | **skipped** (placeholder decomposers only; no write-path work needed) |
 
 ## 5. Anti-patterns — never again
 

@@ -59,7 +59,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     // present forever — never stale, never rebuilt. This is the seen-set/perfcache: a re-emitted trunk
     // (re-quoted verse, repeated word, pwn15/16/17 re-ref) is a hit here and never re-probes the DB nor
     // re-stages. Thread-safe because the reader is shared across parallel compose workers; correctness
-    // does not depend on it (apply_batch ON CONFLICT is the floor), so a racy double-add is harmless.
+    // does not depend on it (merge skipped counts instrument unexpected conflicts), so a racy
+    // double-add is harmless.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
 
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)

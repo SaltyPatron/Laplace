@@ -1,0 +1,13 @@
+wall_clock_sec=0.84
+ingest_elapsed_s=
+input_units=0
+input_bytes=2911743598
+mb_per_sec=0
+units_per_sec=0
+intents_applied=0
+entities_inserted=0
+physicalities_inserted=0
+round_trips=0
+entities_skipped=0
+physicalities_skipped=0
+consensus_relations=0

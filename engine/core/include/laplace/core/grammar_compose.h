@@ -73,12 +73,42 @@ int laplace_grammar_compose(
     hash128_t                   type_meta_id,
     laplace_compose_result_t**  out);
 
+/* Light compose for probe-before-materialize: entities + tier tree + spans + PRECEDES,
+ * no physicality arrays (no trajectory_build). Pair with laplace_grammar_compose_materialize_phys
+ * before drain when novel subtrees remain. */
+int laplace_grammar_compose_probe(
+    const uint8_t*              utf8,
+    size_t                      len,
+    laplace_ast_t*              ast,
+    const char*                 modality_id,
+    hash128_t                   source_id,
+    hash128_t                   type_meta_id,
+    laplace_compose_result_t**  out);
+
+/* Populate physicalities on a probe result (no-op if already materialized). */
+int laplace_grammar_compose_materialize_phys(
+    laplace_compose_result_t*   r,
+    const uint8_t*              utf8,
+    size_t                      len,
+    laplace_ast_t*              ast,
+    const char*                 modality_id);
+
 
 int laplace_grammar_compose_node_id(
     const uint8_t*     utf8,
     size_t             len,
     laplace_ast_t*     ast,
+    const char*        modality_id,
     size_t             ast_node_index,
+    hash128_t*         out_id,
+    uint8_t*           out_tier);
+
+/* Cheap root-trunk id for compose-before-probe: same as node_id index 0, no full materialize. */
+int laplace_grammar_compose_row_root(
+    const uint8_t*     utf8,
+    size_t             len,
+    laplace_ast_t*     ast,
+    const char*        modality_id,
     hash128_t*         out_id,
     uint8_t*           out_tier);
 

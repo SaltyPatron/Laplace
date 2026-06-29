@@ -9,24 +9,10 @@ namespace Laplace.Decomposers.SemLink.Tests;
 
 public sealed class MapNetDecomposerTests
 {
-    static MapNetDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
-
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    static MapNetDecomposerTests() => SemLinkTestPerfcache.Load();
 
     private const string FrameRow = "Accoutrements\tn#02814860";
-    private const string LuRow = "Accoutrements\taccoutrement.n\tn#02814860";
+    private const string LuRow = "Accoutrements\thelmet.n\tn#02814860";
 
     [Fact]
     public void ResolvePaths_Finds_VaultRoot_Versioned_MapNet()
@@ -54,10 +40,10 @@ public sealed class MapNetDecomposerTests
         if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
 
         var atts = await CollectAttestationsAsync();
-        var luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey("Accoutrements", "accoutrement.n"))!.Value;
-        Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n');
+        var luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey("Accoutrements", "helmet.n"))!.Value;
+        Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
         Assert.NotNull(synId);
-        Assert.Contains(atts, a => a.SubjectId == luId && a.ObjectId == synId);
+        CorrespondsToAssert.Contains(atts, luId, synId.Value);
     }
 
     [Fact]
@@ -68,9 +54,9 @@ public sealed class MapNetDecomposerTests
 
         var atts = await CollectAttestationsAsync();
         var frameId = CategoryAnchor.Id("Accoutrements")!.Value;
-        Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n');
+        Hash128? synId = ConceptAnchor.SynsetId(2814860, 'n', SourceEntityIdConventions.MultiWordNetWnVersion);
         Assert.NotNull(synId);
-        Assert.Contains(atts, a => a.SubjectId == frameId && a.ObjectId == synId);
+        CorrespondsToAssert.Contains(atts, frameId, synId.Value);
     }
 
     [Fact]

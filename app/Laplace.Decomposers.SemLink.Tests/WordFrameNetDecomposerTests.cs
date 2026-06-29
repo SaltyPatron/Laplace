@@ -9,24 +9,12 @@ namespace Laplace.Decomposers.SemLink.Tests;
 
 public sealed class WordFrameNetDecomposerTests
 {
-    static WordFrameNetDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
-
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    static WordFrameNetDecomposerTests() => SemLinkTestPerfcache.Load();
 
     private const string MapStyleRow = "Giving\tgive.v\t30-02244956-v";
-    private const string FourColRow = "Giving\tgive\tv\t02244956-v";
+    // Native WFN rows carry bare PWN 1.6 offsets (not pwn30 MCR keys).
+    private const string NativeGiveRow = "give v 01536410-v to transfer possession";
+    private const string FourColRow = "Giving\tgive\tv\t01536410-v";
 
     [Fact]
     public void TryParseRow_Accepts_MapStyle_And_FourColumn_Rows()
@@ -39,7 +27,7 @@ public sealed class WordFrameNetDecomposerTests
         Assert.True(FnLuSynsetBridgeIngest.TryParseRow(FourColRow, out var f2, out var lu2, out var s2));
         Assert.Equal("Giving", f2);
         Assert.Equal("give.v", lu2);
-        Assert.Equal("02244956-v", s2);
+        Assert.Equal("01536410-v", s2);
     }
 
     [Fact]
@@ -132,7 +120,7 @@ public sealed class WordFrameNetDecomposerTests
         var luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey("Giving", "give.v"))!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
-        Assert.Contains(atts, a => a.SubjectId == luId && a.ObjectId == synId);
+        CorrespondsToAssert.Contains(atts, luId, synId.Value);
     }
 
     [Fact]
@@ -157,7 +145,7 @@ public sealed class WordFrameNetDecomposerTests
         Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(Path.Combine(dir, "WordFrameNet"),
             "Frame: Giving" + Environment.NewLine +
-            "give v 02244956-v to transfer possession" + Environment.NewLine);
+            NativeGiveRow + Environment.NewLine);
         try
         {
             var dec = new WordFrameNetDecomposer();

@@ -23,9 +23,8 @@ rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e
 rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
 rem per COPY on the hot path. Default off; set LAPLACE_COPY_VALIDATE=1 to re-arm for debugging.
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
-rem Bulk-fresh skips the per-batch entity-existence probe (entities_exist_bitmap round-trip)
-rem and attestation preflight — decomposers do all content-addressing client-side, the DB gets
-rem a plain COPY stream + ON CONFLICT DO NOTHING for entities as the only dedup mechanism.
+rem Bulk-fresh skips compose-time containment probes (IntentStage.IsBulkFreshBypass) and
+rem the global content witness bank. Merge-time skipped counts instrument conflicts.
 rem Default on for seed operations (initial loads). Set LAPLACE_BULK_FRESH=0 to force incremental.
 if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
 

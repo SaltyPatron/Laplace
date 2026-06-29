@@ -488,7 +488,9 @@ internal static class IngestCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
         bool force = cli?.Force ?? false;
-        bool bulkFresh = force || IsEnvEnabled("LAPLACE_BULK_FRESH");
+        // --force = re-run ingest (skip source-completion gate), NOT bulk-fresh bypass.
+        // Bulk-fresh is opt-in via LAPLACE_BULK_FRESH only (unicode floor, etc.).
+        bool bulkFresh = IsEnvEnabled("LAPLACE_BULK_FRESH");
         var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh);
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,

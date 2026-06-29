@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 #include <stdlib.h>
+#include <intrin.h>
 #define htobe16(x) _byteswap_ushort(x)
 #define htobe32(x) _byteswap_ulong(x)
 #define htobe64(x) _byteswap_uint64(x)
@@ -405,21 +406,10 @@ int intent_stage_add_attestation(
 }
 
 /*
- * Per-content-id partition of a staging blob into N disjoint output stages by id.lo % N.
- *
- * WHY NATIVE: the staging tuple blob is the wire-format the writer COPYs verbatim; managed
- * code holds only an opaque (ptr,len) and cannot split a row out of it. Routing a whole
- * managed intent to a worker by ONE representative id leaves the intent's *other* novel ids
- * shared across two workers (both pass the apply anti-join → 23505). The split must be
- * PER-ROW, by each row's OWN id, so a given content id lands in exactly one worker's stream
- * and the key space is provably disjoint across workers — that is what makes the apply
- * ON-CONFLICT-free and serial-lane-free.
- *
- * Every staging row begins with: be16 column-count, then field 1 = the 16-byte content id
- * (entities.id, physicalities.id, attestations.id all lead). Each field is a be32 length
- * (or -1 = NULL) followed by that many bytes. We walk fields to find the row boundary and
- * copy the whole row verbatim into partition (id.lo % part_count). No re-encoding: the bytes
- * are already in PG binary-COPY field form, so a copied row is byte-identical to the source.
+ * Per-row partition of a staging blob into N disjoint output stages.
+ * Entities/attestations: id.lo % N (content-addressed BLAKE3 keys — Hilbert range N/A).
+ * Physicalities: contiguous equal-width Hilbert range on the full 128-bit index
+ * (part = floor(hilbert * N / 2^128)) so concurrent writers own disjoint sequential buckets.
  */
 static uint32_t be32_at(const uint8_t* p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
@@ -442,23 +432,93 @@ static size_t row_byte_len(const uint8_t* src, size_t len, size_t off) {
     return p - off;
 }
 
+/* Locate field `field_1based` (1-indexed) inside one COPY-binary row. */
+static int row_field_at(const uint8_t* data, size_t len, size_t off, int field_1based,
+                        const uint8_t** out, int32_t* out_len) {
+    if (off + 2 > len) return -1;
+    uint16_t cols = (uint16_t)((data[off] << 8) | data[off + 1]);
+    size_t p = off + 2;
+    for (uint16_t c = 0; c < cols; ++c) {
+        if (p + 4 > len) return -1;
+        int32_t flen = (int32_t)be32_at(data + p);
+        p += 4;
+        if ((int)(c + 1) == field_1based) {
+            if (flen < 0) return -1;
+            if (p + (size_t)flen > len) return -1;
+            *out = data + p;
+            *out_len = flen;
+            return 0;
+        }
+        if (flen < 0) continue;
+        p += (size_t)flen;
+    }
+    return -1;
+}
+
+static uint64_t read_be64(const uint8_t* p) {
+    return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48)
+         | ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32)
+         | ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16)
+         | ((uint64_t)p[6] << 8)  | (uint64_t)p[7];
+}
+
+#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__ == 16
+typedef unsigned __int128 uint128_be_t;
+
+static uint128_be_t read_be128(const uint8_t* hb) {
+    return (((uint128_be_t)read_be64(hb)) << 64) | (uint128_be_t)read_be64(hb + 8);
+}
+
+/* Contiguous Hilbert range: part i owns [i*2^128/N, (i+1)*2^128/N). */
+static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
+    if (part_count <= 1) return 0;
+    uint128_be_t h = read_be128(hb);
+    uint128_be_t r = h * (uint128_be_t)part_count;
+    return (size_t)(r >> 64 >> 64);
+}
+#else
+/* Fallback when uint128 is unavailable: high-qword equal-width ranges (contiguous in hi half). */
+static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
+    if (part_count <= 1) return 0;
+    uint64_t hi = read_be64(hb);
+#ifdef _WIN32
+    uint64_t ignored;
+    return (size_t)(_umul128(hi, (uint64_t)part_count, &ignored));
+#else
+    return (size_t)(((unsigned __int128)hi * (unsigned __int128)part_count) >> 64);
+#endif
+}
+#endif
+
+static size_t partition_row(const uint8_t* data, size_t len, size_t off, size_t part_count,
+                            int table_kind) {
+    size_t id_off = off + 2 + 4;
+    uint64_t lo;
+    memcpy(&lo, data + id_off + 8, 8);
+
+    if (table_kind == 1) {
+        /* physicalities: field 5 = hilbert_index (16 bytes, big-endian in COPY blob) */
+        const uint8_t* hb;
+        int32_t hb_len;
+        if (row_field_at(data, len, off, 5, &hb, &hb_len) == 0 && hb_len >= 16)
+            return hilbert_range_partition(hb, part_count);
+    }
+    /* entities / attestations: id.lo % N — content-addressed, not Hilbert-sequenced */
+    return (size_t)(lo % (uint64_t)part_count);
+}
+
 static int partition_one_buf(
     const byte_buf_t* src,
     byte_buf_t*       outs,
-    size_t            part_count) {
+    size_t            part_count,
+    int               table_kind) {
     const uint8_t* data = src->data;
     const size_t   len  = src->len;
     size_t off = 0;
     for (size_t r = 0; r < src->row_count; ++r) {
         size_t rlen = row_byte_len(data, len, off);
         if (rlen == 0) return -1;
-        /* field 1 starts at off+2: be32 length (==16) then the 16-byte id. id.lo is the
-         * little-endian-stored low 8 bytes; the blob stores the hash128 struct verbatim
-         * (hi then lo as laid out in memory) so lo occupies bytes [8..16) of the id field. */
-        size_t id_off = off + 2 + 4;           /* skip col-count + field-1 length prefix */
-        uint64_t lo;
-        memcpy(&lo, data + id_off + 8, 8);      /* hash128_t = { uint64 hi; uint64 lo; } */
-        size_t part = (size_t)(lo % (uint64_t)part_count);
+        size_t part = partition_row(data, len, off, part_count, table_kind);
         if (buf_append(&outs[part], data + off, rlen) != 0) return -1;
         outs[part].row_count++;
         off += rlen;
@@ -505,7 +565,7 @@ int intent_stage_partition(
                 default: tbl_outs[i] = parts[i]->attestations; break;
             }
         }
-        int rc = partition_one_buf(sb, tbl_outs, part_count);
+        int rc = partition_one_buf(sb, tbl_outs, part_count, (int)t);
         /* Copy the (possibly realloc'd/grown) buffers back into the partition stages. */
         for (size_t i = 0; i < part_count; ++i) {
             switch (t) {

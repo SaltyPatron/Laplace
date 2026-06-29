@@ -57,6 +57,7 @@ public static class ChessGameReview
         using (var ast = GrammarDecomposer.Parse(bytes, "pgn"))
             (sans, result) = PgnMovetext.Extract(ast, bytes);
         if (sans.Count == 0) return null;
+        if (result is null) return null;     // "*" / abandoned game — no signal for outcome analysis
 
         var m = new ChessModality();
         var best = new Search(EvalTerm.All);
