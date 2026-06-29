@@ -149,25 +149,16 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
     {
         Oid pargs[3] = { BYTEAOID, INT4OID, BYTEAARRAYOID };
         plan = SPI_prepare(
-            "SELECT c.object_id, e.tier, c.rating, c.rd "
-            "FROM laplace.consensus c "
-            "JOIN laplace.entities e ON e.id = c.object_id "
-            "WHERE c.subject_id = $1 AND c.object_id IS NOT NULL "
-            "  AND c.type_id = ANY ($3) "
-            "ORDER BY (c.rating - 2 * c.rd) DESC "
-            "LIMIT $2",
+            "SELECT object_id, tier, rating, rd "
+            "FROM laplace.foundry_crawl_neighbors($1, $2, $3)",
             3, pargs);
     }
     else
     {
         Oid pargs[2] = { BYTEAOID, INT4OID };
         plan = SPI_prepare(
-            "SELECT c.object_id, e.tier, c.rating, c.rd "
-            "FROM laplace.consensus c "
-            "JOIN laplace.entities e ON e.id = c.object_id "
-            "WHERE c.subject_id = $1 AND c.object_id IS NOT NULL "
-            "ORDER BY (c.rating - 2 * c.rd) DESC "
-            "LIMIT $2",
+            "SELECT object_id, tier, rating, rd "
+            "FROM laplace.foundry_crawl_neighbors($1, $2, NULL)",
             2, pargs);
     }
     if (plan == NULL)

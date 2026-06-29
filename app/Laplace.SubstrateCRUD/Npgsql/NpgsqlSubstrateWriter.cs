@@ -42,15 +42,10 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _applyPartitions = ResolveApplyPartitions();
     }
 
-    // Default LAPLACE_APPLY_PARTITIONS=1 — IngestRunner commit lanes provide parallelism.
-    // Physicalities partition by contiguous Hilbert range; entities/attestations by id.lo.
-    private static int ResolveApplyPartitions()
-    {
-        string? raw = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
-        if (int.TryParse(raw, out int n) && n >= 1)
-            return Math.Min(n, 64);
-        return 1;
-    }
+    // Parallel apply_batch fan-out: each partition = own connection, COPY disjoint rows, one
+    // set-based laplace_apply_batch (P-core pinned). Override via LAPLACE_APPLY_PARTITIONS.
+    // Ingest CLI sets this from LAPLACE_INGEST_WORKERS before constructing the writer.
+    private static int ResolveApplyPartitions() => CpuTopology.ResolveApplyPartitions();
 
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
     {
@@ -170,20 +165,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     }
                 }
 
-                (int e, int p, int a, long f, long es, long ps, int rt)[] results;
+                (int e, int p, int a, long f, long es, long ps, int rt)[] results =
+                    new (int e, int p, int a, long f, long es, long ps, int rt)[parts];
                 if (parts == 1)
                 {
-                    results = new[] { await ApplyPartitionAsync(perPartition[0], 0, ct) };
+                    results[0] = await ApplyPartitionAsync(perPartition[0], 0, ct);
                 }
                 else
                 {
-                    var tasks = new Task<(int e, int p, int a, long f, long es, long ps, int rt)>[parts];
-                    for (int k = 0; k < parts; k++)
+                    await CpuTopology.RunPinnedAsyncParallel(parts, async (idx, token) =>
                     {
-                        int idx = k;
-                        tasks[k] = Task.Run(() => ApplyPartitionAsync(perPartition[idx], idx, ct), ct);
-                    }
-                    results = await Task.WhenAll(tasks);
+                        results[idx] = await ApplyPartitionAsync(perPartition[idx], idx, token);
+                    }, ct);
                 }
 
                 foreach (var r in results)
@@ -282,6 +275,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             await using (var guc = conn.CreateCommand())
             {
+                guc.Transaction = tx;
                 guc.CommandText = "SET LOCAL session_replication_role = replica";
                 await guc.ExecuteNonQueryAsync(ct);
             }
@@ -292,15 +286,16 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             string prefix = $"_lab_{Environment.CurrentManagedThreadId:x}_{partitionIndex:x}_";
 
             if (entCount > 0)
-                await CopyStageAsync(conn, stages, IntentStageTable.Entities, "entities", prefix, ct);
+                await CopyStageAsync(conn, tx, stages, IntentStageTable.Entities, "entities", prefix, ct);
             if (physCount > 0)
-                await CopyStageAsync(conn, stages, IntentStageTable.Physicalities, "physicalities", prefix, ct);
+                await CopyStageAsync(conn, tx, stages, IntentStageTable.Physicalities, "physicalities", prefix, ct);
             if (attCount > 0)
-                await CopyStageAsync(conn, stages, IntentStageTable.Attestations, "attestations", prefix, ct);
+                await CopyStageAsync(conn, tx, stages, IntentStageTable.Attestations, "attestations", prefix, ct);
             rt += (entCount > 0 ? 1 : 0) + (physCount > 0 ? 1 : 0) + (attCount > 0 ? 1 : 0);
 
             await using (var apply = conn.CreateCommand())
             {
+                apply.Transaction = tx;
                 apply.CommandTimeout = 0;
                 apply.CommandText =
                     "SELECT entities_inserted, physicalities_inserted, attestations_inserted, "
@@ -339,6 +334,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     /// </summary>
     private static async Task CopyStageAsync(
         NpgsqlConnection conn,
+        NpgsqlTransaction tx,
         IReadOnlyList<IntentStage> stages,
         IntentStageTable table,
         string tableName,
@@ -356,6 +352,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         string stageName = $"{prefix}{tableName}";
         await using (var ddl = conn.CreateCommand())
         {
+            ddl.Transaction = tx;
             ddl.CommandTimeout = 0;
             // TEMP (not UNLOGGED): ON COMMIT DROP is only valid on temp tables, and a
             // session-local temp table keeps concurrent workers' staging disjoint without a

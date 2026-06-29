@@ -45,6 +45,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private Task _foldChain = Task.CompletedTask;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
     private readonly ReaderWriterLockSlim _swapLock = new();
+    private int _inflightApplies;
+    private volatile bool _disposing;
 
     public bool PersistEvidence => _persistEvidence;
 
@@ -125,7 +127,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(changes);
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+        Interlocked.Increment(ref _inflightApplies);
+        try
+        {
+            if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+            return await ApplyManyCoreAsync(changes, ct);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inflightApplies);
+        }
+    }
 
+    private async Task<ApplyResult> ApplyManyCoreAsync(
+        IReadOnlyList<SubstrateChange> changes, CancellationToken ct)
+    {
         bool boundary = false;
         foreach (var c in changes)
         {
@@ -233,6 +250,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private void Accumulate(AttestationRow a)
     {
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
         _swapLock.EnterReadLock();
         try
         {
@@ -477,22 +495,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             for (int k = 0; k < _partitions; k++) buckets[k] = new List<Acc>();
             foreach (var acc in snapshot.Values) buckets[PartitionOf(acc)].Add(acc);
 
-            if (_partitions == 1)
+            await CpuTopology.RunPinnedAsyncParallel(_partitions, async (part, token) =>
             {
-                // One partition ⇒ run INLINE, no Task.Run, so a serial config is genuinely
-                // single-threaded (no concurrent native staging racing the compose).
-                await CopyPartitionAsync(epoch, 0, buckets[0], ct);
-            }
-            else
-            {
-                var copies = new Task[_partitions];
-                for (int k = 0; k < _partitions; k++)
-                {
-                    int part = k;
-                    copies[k] = Task.Run(() => CopyPartitionAsync(epoch, part, buckets[part], ct), ct);
-                }
-                await Task.WhenAll(copies);
-            }
+                await CopyPartitionAsync(epoch, part, buckets[part], token);
+            }, ct);
             stageSw.Stop();
             int staged = Interlocked.Increment(ref _epochsStaged);
             _log.LogInformation(
@@ -556,31 +562,44 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         await prev.ConfigureAwait(false);
         var foldSw = System.Diagnostics.Stopwatch.StartNew();
-        var folds = new Task<long>[_partitions];
-        for (int k = 0; k < _partitions; k++)
+        var counts = new long[_partitions];
+        await CpuTopology.RunPinnedAsyncParallel(_partitions, async (part, token) =>
         {
-            int part = k;
-            folds[k] = Task.Run(async () =>
+            await using var conn = await _ds.OpenConnectionAsync(token).ConfigureAwait(false);
+            conn.Notice += (_, e) =>
+                _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
+            await using (var sub = conn.CreateCommand())
             {
-                await using var conn = await _ds.OpenConnectionAsync().ConfigureAwait(false);
-                conn.Notice += (_, e) =>
-                    _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
-                await using (var sub = conn.CreateCommand())
+                sub.CommandText = "SET client_min_messages = 'log'";
+                await sub.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+            await using var tx = await conn.BeginTransactionAsync(token).ConfigureAwait(false);
+            try
+            {
+                await using (var guc = conn.CreateCommand())
                 {
-                    sub.CommandText = "SET client_min_messages = 'log'";
-                    await sub.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    guc.Transaction = tx;
+                    guc.CommandText = "SET LOCAL session_replication_role = replica";
+                    await guc.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
                 await using var mat = conn.CreateCommand();
+                mat.Transaction = tx;
                 mat.CommandTimeout = 0;
                 mat.CommandText = _freshSource
                     ? "SELECT laplace.materialize_period_partition_fresh(laplace.period_staging_table($1, $2))"
                     : "SELECT laplace.materialize_period_partition(laplace.period_staging_table($1, $2))";
                 mat.Parameters.AddWithValue(epoch);
                 mat.Parameters.AddWithValue(part);
-                return (long)(await mat.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
-            });
-        }
-        var counts = await Task.WhenAll(folds).ConfigureAwait(false);
+                counts[part] = (long)(await mat.ExecuteScalarAsync(token).ConfigureAwait(false) ?? 0L);
+                await tx.CommitAsync(token).ConfigureAwait(false);
+            }
+            catch
+            {
+                try { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { }
+                throw;
+            }
+        }, CancellationToken.None).ConfigureAwait(false);
         foldSw.Stop();
         long total = counts.Sum();
         Interlocked.Add(ref _foldedRelations, total);
@@ -704,17 +723,35 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 laneCmd.CommandText = $"SET laplace.fold_lane = '{(impl == "sql" ? "sql" : "engine")}'";
                 await laneCmd.ExecuteNonQueryAsync(ct);
             }
-            await using var fin = conn.CreateCommand();
-            fin.CommandTimeout = 0;
-            fin.CommandText = resumable
-                ? "CALL laplace.finish_consensus_fold_steps(NULL)"
-                : "SELECT laplace.finish_consensus_fold()";
-            long n = (long)(await fin.ExecuteScalarAsync(ct) ?? 0L);
-            Interlocked.Add(ref _foldedRelations, n);
-            _log.LogInformation(
-                "terminal fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
-                n, sw.Elapsed.TotalSeconds, n / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
-            return Interlocked.Read(ref _foldedRelations);
+            await using var tx = await conn.BeginTransactionAsync(ct);
+            try
+            {
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.Transaction = tx;
+                    guc.CommandText = "SET LOCAL session_replication_role = replica";
+                    await guc.ExecuteNonQueryAsync(ct);
+                }
+                await using var fin = conn.CreateCommand();
+                fin.Transaction = tx;
+                fin.CommandTimeout = 0;
+                fin.CommandText = resumable
+                    ? "CALL laplace.finish_consensus_fold_steps(NULL)"
+                    : "SELECT laplace.finish_consensus_fold()";
+                long n = (long)(await fin.ExecuteScalarAsync(ct) ?? 0L);
+                await tx.CommitAsync(ct);
+                Interlocked.Add(ref _foldedRelations, n);
+                _log.LogInformation(
+                    "terminal fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
+                    n, sw.Elapsed.TotalSeconds, n / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
+                return Interlocked.Read(ref _foldedRelations);
+            }
+            catch
+            {
+                try { await tx.RollbackAsync(CancellationToken.None); }
+                catch { }
+                throw;
+            }
         }
         await _foldChain;
         return Interlocked.Read(ref _foldedRelations);
@@ -779,10 +816,28 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 sub.CommandText = "SET client_min_messages = 'log'";
                 await sub.ExecuteNonQueryAsync(ct);
             }
-            await using var fin = conn.CreateCommand();
-            fin.CommandTimeout = 0;
-            fin.CommandText = "SELECT laplace.walk_fold_finalize()";
-            await fin.ExecuteNonQueryAsync(ct);
+            await using var tx = await conn.BeginTransactionAsync(ct);
+            try
+            {
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.Transaction = tx;
+                    guc.CommandText = "SET LOCAL session_replication_role = replica";
+                    await guc.ExecuteNonQueryAsync(ct);
+                }
+                await using var fin = conn.CreateCommand();
+                fin.Transaction = tx;
+                fin.CommandTimeout = 0;
+                fin.CommandText = "SELECT laplace.walk_fold_finalize()";
+                await fin.ExecuteNonQueryAsync(ct);
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                try { await tx.RollbackAsync(CancellationToken.None); }
+                catch { }
+                throw;
+            }
         }
         Interlocked.Add(ref _foldedRelations, total);
         _log.LogInformation(
@@ -793,6 +848,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public async ValueTask DisposeAsync()
     {
+        _disposing = true;
+        var spin = new SpinWait();
+        while (Interlocked.CompareExchange(ref _inflightApplies, 0, 0) > 0)
+            spin.SpinOnce();
+
         try
         {
             await _foldChain;

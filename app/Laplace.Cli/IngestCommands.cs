@@ -409,9 +409,7 @@ internal static class IngestCommands
     {
         var raw = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS");
         if (int.TryParse(raw, out var env) && env >= 0)
-            return env;
-        // High-fanout grammar witnesses emit hundreds of thousands of substrate rows per
-        // input line; keep commit threshold above typical intent size to batch DB applies.
+            return Math.Min(env, 250_000);
         return sourceName switch
         {
             "ConceptNetDecomposer" => 4_000_000,
@@ -431,20 +429,25 @@ internal static class IngestCommands
             lastMs = now;
             double secs = Math.Max(0.001, p.Elapsed.TotalSeconds);
             long rowsNew = p.EntitiesInserted + p.PhysicalitiesInserted + p.AttestationsInserted;
+            long inputProgress = Math.Max(p.InputUnitsDone, p.InputUnitsComposed);
             string filePart = p.FilesTotal > 0 ? $"files={p.FilesDone}/{p.FilesTotal} file_pct={p.FilePercent:F1}" : "";
             string inputPart = p.InputUnitsTotal > 0
-                ? $"input={p.InputUnitsDone}/{p.InputUnitsTotal} input_pct={p.InputPercent:F1}"
+                ? $"input={inputProgress}/{p.InputUnitsTotal} input_pct={p.InputPercent:F1}"
+                  + (p.InputUnitsComposed > p.InputUnitsDone
+                      ? $" composed={p.InputUnitsComposed:N0} committed={p.InputUnitsDone:N0}"
+                      : "")
                 : $"intents={p.UnitsApplied}/{p.UnitsProduced} intent_pct={p.InputPercent:F1}";
             string cur = string.IsNullOrEmpty(p.CurrentFile) ? "" : $" current={p.CurrentFile}";
             Console.Error.WriteLine(
                 $"INGEST_PROGRESS source={p.SourceName} layer={p.LayerOrder} unit_type={p.UnitType} "
                 + $"{inputPart} {filePart}{cur} "
-                + $"rows_new={rowsNew:N0} rate_rows_s={rowsNew / secs:N0} round_trips={p.RoundTrips:N0} "
-                + $"elapsed_s={p.Elapsed.TotalSeconds:F0}"
+                + $"rows_new={rowsNew:N0} rate_input_s={inputProgress / secs:N0} rate_rows_new_s={rowsNew / secs:N0} "
+                + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
         int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
-        int workers = EnvInt("LAPLACE_INGEST_WORKERS", CpuTopology.ResolveIoBoundWorkers(defaultCap: 8), min: 1);
+        int workers = EnvInt("LAPLACE_INGEST_WORKERS",
+            CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 16), min: 1);
         long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
         int commitRows = ResolveCommitRows(sourceName);
         var decoOpts = DecomposerOptions.ForWitness(
@@ -484,6 +487,14 @@ internal static class IngestCommands
         CodepointPerfcache.Load(ResolveBlob());
 
         LanguageReference.EnsureLoaded();
+        CpuTopology.EnsurePerformanceCoreExecution();
+
+        // Single commit consumer in IngestRunner; native COPY parallelism via apply partitions.
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS")))
+        {
+            int ap = EnvInt("LAPLACE_INGEST_WORKERS", CpuTopology.ResolveApplyPartitions(), min: 1);
+            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", ap.ToString());
+        }
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
@@ -491,6 +502,7 @@ internal static class IngestCommands
         // --force = re-run ingest (skip source-completion gate), NOT bulk-fresh bypass.
         // Bulk-fresh is opt-in via LAPLACE_BULK_FRESH only (unicode floor, etc.).
         bool bulkFresh = IsEnvEnabled("LAPLACE_BULK_FRESH");
+        bool deferPhysRebuild = IsEnvEnabled("LAPLACE_DEFER_PHYS_INDEX_REBUILD");
         var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh);
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
@@ -549,7 +561,7 @@ internal static class IngestCommands
 
 
 
-        if (physScope.Dropped && !physScope.Rebuilt)
+        if (physScope.Dropped && !physScope.Rebuilt && !deferPhysRebuild)
         {
             Console.WriteLine($"B2: rebuilding {physScope.DroppedIndexDefs.Count} secondary physicalities "
                             + "index(es) (coord GiST via Hilbert-packed bulk build) ...");
@@ -557,6 +569,13 @@ internal static class IngestCommands
             await physScope.RebuildAsync(CancellationToken.None);
             ixSw.Stop();
             Console.WriteLine($"B2: secondary physicalities indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
+        }
+        else if (deferPhysRebuild && physScope.Dropped && !physScope.Rebuilt)
+        {
+            physScope.SuppressAutoRebuild();
+            DeferredPhysIndexRebuild.Register(physScope.DroppedIndexDefs);
+            Console.WriteLine($"B2: deferring rebuild of {physScope.DroppedIndexDefs.Count} physicalities "
+                            + "index(es) (LAPLACE_DEFER_PHYS_INDEX_REBUILD)");
         }
 
         try { await PrintIngestValidationAsync(ds, dec); }
@@ -569,6 +588,21 @@ internal static class IngestCommands
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await PrintIngestValidationAsync(ds, decomposer: null);
+        return 0;
+    }
+
+    public static async Task<int> RebuildPhysIndexesAsync()
+    {
+        if (!DeferredPhysIndexRebuild.HasPending)
+        {
+            Console.WriteLine("no deferred physicalities indexes to rebuild");
+            return 0;
+        }
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var sw = Stopwatch.StartNew();
+        await DeferredPhysIndexRebuild.RebuildAsync(ds);
+        sw.Stop();
+        Console.WriteLine($"B2: deferred physicalities indexes rebuilt in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
     }
 

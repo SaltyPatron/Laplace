@@ -19,13 +19,14 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
-      - name: build + install engine/extensions
-        run: |
-          just build
-          just install
-      - name: build app
-        run: dotnet build app/Laplace.slnx -c Release
+      - name: build + install + migrate
+        env:
+          PGDATABASE: ${{ inputs.database }}
+          LAPLACE_DBNAME: ${{ inputs.database }}
+        run: bash scripts/pipeline.sh --mode build-only
       - name: migrate up
         env:
           PGDATABASE: ${{ inputs.database }}
-        run: dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll up
+        run: |
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release
+          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll up

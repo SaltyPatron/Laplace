@@ -18,8 +18,12 @@ jobs:
     needs: unicode
     uses: ./.github/workflows/iso639.yml
 
-  wordnet:
+  cili:
     needs: iso639
+    uses: ./.github/workflows/cili.yml
+
+  wordnet:
+    needs: cili
     uses: ./.github/workflows/wordnet.yml
   ud:
     needs: iso639

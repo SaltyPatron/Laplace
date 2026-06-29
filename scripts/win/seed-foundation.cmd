@@ -5,6 +5,7 @@ cd /d "%LAPLACE_ROOT%"
 
 set "LOG=%LAPLACE_ROOT%\seed-foundation.log"
 set "ERR=0"
+set "LAPLACE_DEFER_PHYS_INDEX_REBUILD=1"
 
 echo ===== seed-foundation started %DATE% %TIME% =====>> "%LOG%"
 echo ===== seed-foundation started %DATE% %TIME% =====
@@ -25,6 +26,11 @@ for %%S in (unicode iso639 cili wordnet omw) do (
 )
 
 :done
+set "LAPLACE_DEFER_PHYS_INDEX_REBUILD="
+if "!ERR!"=="0" (
+  call "%~dp0rebuild-phys-indexes.cmd" >> "%LOG%" 2>&1
+  if errorlevel 1 set "ERR=1"
+)
 echo.>> "%LOG%"
 echo ===== seed-foundation finished %DATE% %TIME% err=!ERR! =====>> "%LOG%"
 echo ===== seed-foundation finished err=!ERR! =====

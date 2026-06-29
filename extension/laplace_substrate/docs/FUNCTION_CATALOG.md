@@ -97,7 +97,8 @@ names (clean taxonomy; but gloss empty + 1.5s slow) · `word_id`/`resolve_phrase
 
 ## 1. Ingest / write / fold (🔒 internal — not user-callable)
 
-`laplace_apply_batch(prefix)` 🔒 — the one set-based COPY-staging→live merge (C). Staging merge:
+`laplace_apply_batch(prefix)` 🔒 — the one set-based COPY-staging→live merge (**C SPI** in
+`apply_batch.c`; thin `LANGUAGE C` binding in `27_apply_batch.sql.in`). Staging merge:
 dedupe temp → LEFT JOIN subtract existing ids → sorted append (entities by id, physicalities by
 `hilbert_index`); folds duplicate attestations (observation_count +=). Returns
 `(entities_inserted, physicalities_inserted, attestations_inserted, attestations_folded,
@@ -117,6 +118,10 @@ batch), `laplace_score`/`_inverse`, constants `glicko2_neutral_mu/initial_rd/ini
 (PROCEDURE, mid-fold COMMITs), `consensus_fold_swap` (atomic table swap, empty-swap guarded),
 `walk_fold_prepare`/`finalize`, `drop_period_staging`, `create_walk_staging`.
 `materialize_period_consensus` + 1-arg `create_period_staging` = test-only (no prod caller).
+**GUC policy:** no function-level `SET work_mem` / `session_replication_role` /
+`maintenance_work_mem`; callers use `SET LOCAL` in txn (see `NpgsqlSubstrateWriter`,
+`ConsensusAccumulatingWriter`). Resumable `finish_consensus_fold_steps` re-applies
+`SET LOCAL session_replication_role` per partition after internal `COMMIT`.
 Invariants: one φ per (subj,type,obj) per period (`period_phi_mixed` tripwire); walk XOR flat;
 empty-swap protection.
 

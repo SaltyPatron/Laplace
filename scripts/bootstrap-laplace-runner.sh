@@ -1115,7 +1115,7 @@ do_bootstrap() {
     echo "                     # → substrate schema flows in via the extension"
     echo
     echo "Layer 2 (CI verification) — push to main, or:"
-    echo "  gh workflow run integration.yml"
+    echo "  gh workflow run laplace.yml"
     echo
     echo "Layer 1 reset (start fresh without touching Layer 0):"
     echo "  just db-nuke       # DROP DATABASE laplace, re-create empty"

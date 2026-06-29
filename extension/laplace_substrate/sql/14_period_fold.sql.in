@@ -90,9 +90,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION materialize_period_partition(p_table text)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica
-    SET work_mem = '2GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     n_materialized bigint;
     t0 timestamptz := clock_timestamp();
@@ -174,9 +172,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION materialize_period_partition_fresh(p_table text)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica
-    SET work_mem = '2GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     n_materialized bigint;
     t0 timestamptz := clock_timestamp();
@@ -473,8 +469,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION consensus_fold_swap()
     RETURNS void LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET maintenance_work_mem = '4GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     rel record;
 BEGIN
@@ -580,9 +575,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION walk_fold_finalize()
     RETURNS void LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica
-    SET maintenance_work_mem = '4GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     rel record;
 BEGIN
@@ -603,10 +596,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION finish_consensus_fold()
     RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica
-    SET work_mem = '4GB'
-    SET maintenance_work_mem = '4GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     nparts  integer;
     nwalk   integer;
@@ -791,8 +781,7 @@ BEGIN
 
     IF nparts IS NOT NULL THEN
         FOR p IN 0 .. nparts - 1 LOOP
-            PERFORM set_config('work_mem', '4GB', true);
-            PERFORM set_config('session_replication_role', 'replica', true);
+            EXECUTE 'SET LOCAL session_replication_role = replica';
             n_round := consensus_fold_one_partition(p, nparts, fresh, lane);
             IF n_round > 0 OR EXISTS (
                 SELECT 1
@@ -817,7 +806,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    PERFORM set_config('maintenance_work_mem', '4GB', true);
     PERFORM consensus_fold_swap();
     SELECT count(*) INTO p_total FROM consensus;
     RAISE LOG 'terminal fold (resumable): % consensus relations after swap in %',
@@ -827,9 +815,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION materialize_period_consensus(p_partition integer DEFAULT NULL)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica
-    SET work_mem = '4GB' AS $$
+    SET search_path = @extschema@, public AS $$
 DECLARE
     t text;
     total bigint := 0;

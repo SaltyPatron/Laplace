@@ -939,10 +939,7 @@ $$;
 
 
 
-CREATE OR REPLACE FUNCTION consensus_peer(p_id bytea, p_k int DEFAULT 6)
-    RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_peer'
-    LANGUAGE C STABLE;
+-- consensus_peer: installed SQL in 35_variant_expand.sql.in (replaces former C binding)
 
 CREATE OR REPLACE FUNCTION variant_walk(p_id bytea, p_swap float8 DEFAULT 0.3,
                           p_k int DEFAULT 6, p_depth int DEFAULT 4)

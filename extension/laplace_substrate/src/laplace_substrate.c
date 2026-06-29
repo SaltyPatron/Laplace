@@ -308,11 +308,8 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     args[0]     = PointerGetDatum(ids_array);
 
     spi_rc = SPI_execute_with_args(
-        "SELECT (u.ord - 1)::int "
-        "FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord) "
-        "JOIN laplace.entities e ON e.id = u.id",
-        1, argtypes, args, NULL,
-        true, 0);
+        "SELECT idx FROM laplace.entities_present_ordinals($1)",
+        1, argtypes, args, NULL, true, 0);
 
     if (spi_rc != SPI_OK_SELECT)
     {
@@ -426,16 +423,7 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     argtypes[1] = INT4ARRAYOID;  args[1] = PointerGetDatum(par_array);
 
     spi_rc = SPI_execute_with_args(
-        "WITH RECURSIVE nodes(idx, id, parent) AS ("
-        "    SELECT (u.ord - 1)::int, u.id, ($2)[u.ord] "
-        "    FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord)), "
-        "descent AS ("
-        "    SELECT n.idx, NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = n.id) AS novel "
-        "    FROM nodes n WHERE n.parent < 0 "
-        "  UNION ALL "
-        "    SELECT c.idx, NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = c.id) "
-        "    FROM descent d JOIN nodes c ON c.parent = d.idx WHERE d.novel) "
-        "SELECT idx FROM descent WHERE novel",
+        "SELECT idx FROM laplace.content_descent_novel_ordinals($1, $2)",
         2, argtypes, args, NULL, true, 0);
 
     if (spi_rc != SPI_OK_SELECT)
@@ -476,11 +464,10 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
     int         bitmap_bytes;
     bytea*      result;
     uint8*      bm;
-    Oid         argtypes[1];
-    Datum       args[1];
+    Oid         argtypes[2];
+    Datum       args[2];
     int         spi_rc;
     uint64      i;
-    char        query[256];
 
     if (ARR_NDIM(ids_array) > 1)
         ereport(ERROR,
@@ -524,16 +511,14 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
             (errcode(ERRCODE_INTERNAL_ERROR),
              errmsg("intent_preflight: SPI_connect failed")));
 
-    snprintf(query, sizeof(query),
-             "SELECT (u.ord - 1)::int "
-             "FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord) "
-             "JOIN laplace.%s t ON t.id = u.id",
-             table);
+    argtypes[0] = TEXTOID;
+    args[0]     = CStringGetTextDatum(table);
+    argtypes[1] = BYTEAARRAYOID;
+    args[1]     = PointerGetDatum(ids_array);
 
-    argtypes[0] = BYTEAARRAYOID;
-    args[0]     = PointerGetDatum(ids_array);
-
-    spi_rc = SPI_execute_with_args(query, 1, argtypes, args, NULL, true, 0);
+    spi_rc = SPI_execute_with_args(
+        "SELECT idx FROM laplace.table_present_ordinals($1, $2)",
+        2, argtypes, args, NULL, true, 0);
     if (spi_rc != SPI_OK_SELECT)
     {
         SPI_finish();

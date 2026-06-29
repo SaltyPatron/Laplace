@@ -119,9 +119,14 @@ entity N hops". See §4.
   `render_gaps()`, `api(like)` (self-catalog: lists every function — `SELECT * FROM api()`)
 
 ### Ingest / fold (server-side, called by the runtime not by you)
-- `laplace_apply_batch(prefix)` — the one set-based COPY-staging→live merge (C)
+- `laplace_apply_batch(prefix)` — the one set-based COPY-staging→live merge (**C SPI** via `apply_batch.c`; not plpgsql)
 - `entities_exist_bitmap(ids[])` / `intent_preflight(...)` — bulk existence probes (C)
 - `finish_consensus_fold()` / `consensus_fold_one_partition(...)` — partitioned Glicko-2 fold
+
+**GUC policy:** extension functions never set `work_mem`, `maintenance_work_mem`, or
+`session_replication_role` via `CREATE FUNCTION … SET` or in-body `set_config`. Callers
+(`NpgsqlSubstrateWriter`, `ConsensusAccumulatingWriter`, `SecondaryIndexPolicy`) use
+`SET LOCAL` inside a transaction where needed. Cluster tuning lives in `scripts/win/tune-pg.cmd`.
 
 ---
 

@@ -88,7 +88,7 @@ public static class PCoreParallelCompose
         {
             workers[w] = new Thread(() =>
             {
-                CpuTopology.PinCurrentThreadToPerformanceCores();
+                CpuTopology.RequirePerformanceCorePin();
                 try
                 {
                     var builder = newBuilder();

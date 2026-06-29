@@ -180,11 +180,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
                 args[0] = subj;
                 rc = SPI_execute_with_args(
-                    "SELECT c.type_id, c.object_id, c.rating, c.rd "
-                    "FROM laplace.consensus c "
-                    "WHERE c.subject_id = $1 "
-                    "  AND c.object_id IS NOT NULL "
-                    "  AND NOT laplace.refuted(c.rating, c.rd)",
+                    "SELECT type_id, object_id, rating, rd "
+                    "FROM laplace.consensus_subject_edges($1)",
                     1, argtypes, args, NULL, true, 0);
                 if (rc != SPI_OK_SELECT)
                     elog(ERROR, "contrast: consensus query failed");

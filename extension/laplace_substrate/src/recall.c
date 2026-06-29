@@ -263,7 +263,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
                     rnulls[2] = 'n';
 
                 crc = SPI_execute_with_args(
-                    "SELECT 'Yes — ' || laplace.realize_path($1, $2, $3)",
+                    "SELECT laplace.recall_is_a_yes_reply($1, $2, $3)",
                     3, rtypes, rargs, rnulls, true, 1);
                 if (crc == SPI_OK_SELECT && SPI_processed > 0)
                 {
@@ -289,10 +289,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
                 rnulls[2] = 'n';
 
             crc = SPI_execute_with_args(
-                "SELECT 'No witnessed IS_A path from \"' "
-                "       || COALESCE(laplace.realize($1, $3), laplace.label($1)) "
-                "       || '\" to \"' "
-                "       || COALESCE(laplace.realize($2, $3), laplace.label($2)) || '\".'",
+                "SELECT laplace.recall_is_a_no_reply($1, $2, $3)",
                 3, rtypes, rargs, rnulls, true, 1);
             if (crc == SPI_OK_SELECT && SPI_processed > 0)
             {
@@ -327,10 +324,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[2] = { TEXTOID, BYTEAOID };
         Datum args[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,
-            "SELECT d.definition, d.eff_mu, d.witnesses "
-            "FROM laplace.define($2, "
-            "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
-            "            WHERE ps.id <> $2), ARRAY[]::bytea[])) d",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_define_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
@@ -340,14 +335,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[2] = { TEXTOID, BYTEAOID };
         Datum args[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,
-            "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
-            "FROM laplace.define($2, "
-            "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
-            "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d "
-            "UNION ALL "
-            "SELECT repeat('  ', h.depth) || E'\\u2192 is ' || COALESCE(h.hypernym, '?') "
-            "       || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint "
-            "FROM laplace.hypernyms($2, 6) h WHERE h.depth > 0",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_what_is_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no sense consensus has been witnessed yet.");
@@ -364,8 +353,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         else
             nulls[1] = 'n';
         n = spi_forward_replies(buf,
-            "SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', "
-            "       t.eff_mu, t.witnesses FROM laplace.translate_to($1, $2) t",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_translate_response($1, $2)",
             2, types, args, nulls);
         if (n == 0)
         {
@@ -390,8 +379,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT lc.reply, lc.eff_mu, lc.witnesses "
-            "FROM laplace.language_coverage($1) lc",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_languages_response($1)",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no cross-language consensus yet.");
@@ -401,7 +390,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT s.synonym, s.eff_mu, s.witnesses FROM laplace.synonyms($1) s",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_synonyms_response($1)",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no synonym consensus yet.");
@@ -411,8 +401,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT replace(e.example, '%s', laplace.label($1)), e.eff_mu, e.witnesses "
-            "FROM laplace.examples($1) e",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_examples_response($1)",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no example consensus yet.");
@@ -422,8 +412,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses "
-            "FROM laplace.salient_facts($1, laplace.word_language($1)) d",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_describe_response($1)",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no relation consensus to describe yet.");
@@ -434,8 +424,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Datum args[2] = { topic,
                           CStringGetTextDatum(route.type_name ? route.type_name : "") };
         n = spi_forward_replies(buf,
-            "SELECT replace(f.fact, '%s', laplace.label($1)), f.eff_mu, f.witnesses "
-            "FROM laplace.related($1, laplace.relation_type_id($2), laplace.word_language($1)) f",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_related_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_type_miss(buf, topic, route.type_name, false);
@@ -446,8 +436,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Datum args[2] = { topic,
                           CStringGetTextDatum(route.type_name ? route.type_name : "") };
         n = spi_forward_replies(buf,
-            "SELECT f.fact, f.eff_mu, f.witnesses "
-            "FROM laplace.related_in($1, laplace.relation_type_id($2), laplace.word_language($1)) f",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_related_in_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_type_miss(buf, topic, route.type_name, true);
@@ -471,10 +461,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
             Oid   types[2] = { BYTEAOID, BYTEAOID };
             Datum args[2] = { topic, topic2 };
             spi_forward_replies(buf,
-                "SELECT CASE WHEN rs.relation IS NOT NULL "
-                "            THEN rs.relation || '  [' || rs.verdict || ']' "
-                "            ELSE rs.verdict END, rs.mu, rs.usage "
-                "FROM laplace.relation_summary($1, $2) rs",
+                "SELECT reply, eff_mu, witnesses "
+                "FROM laplace.recall_relation_summary_response($1, $2)",
                 2, types, args, NULL);
         }
     }
@@ -484,14 +472,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[2] = { BYTEAOID, TEXTOID };
         Datum args[2] = { topic, CStringGetTextDatum(route.intent) };
         n = spi_forward_replies(buf,
-            "SELECT COALESCE(laplace.realize($1, laplace.word_language($1)), laplace.label($1)) "
-            "       || string_agg(' —' || COALESCE(laplace.type_label(g.type_id), '?') || E'\\u2192 ' "
-            "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
-            "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
-            "       min(g.eff_mu), NULL::bigint "
-            "FROM laplace.walk_strongest($1, "
-            "     CASE WHEN $2 = 'complete' THEN laplace.relation_type_id('COMPLETES_TO') END, 8) g "
-            "HAVING count(*) > 0",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_walk_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no outgoing consensus to walk yet.");
@@ -510,22 +492,16 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   dtypes[2] = { TEXTOID, BYTEAOID };
         Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,
-            "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
-            "FROM laplace.define($2, "
-            "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
-            "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_fallback_gloss($1, $2)",
             2, dtypes, dargs, NULL);
         if (n == 0)
         {
             Oid   wtypes[1] = { BYTEAOID };
             Datum wargs[1] = { topic };
             n = spi_forward_replies(buf,
-                "SELECT COALESCE(laplace.realize($1, laplace.word_language($1)), laplace.label($1)) "
-                "       || string_agg(' —' || COALESCE(laplace.type_label(g.type_id), '?') || E'\\u2192 ' "
-                "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
-                "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
-                "       min(g.eff_mu), NULL::bigint "
-                "FROM laplace.walk_strongest($1, NULL::bytea, 6) g HAVING count(*) > 0",
+                "SELECT reply, eff_mu, witnesses "
+                "FROM laplace.recall_fallback_walk($1)",
                 1, wtypes, wargs, NULL);
             if (n == 0)
                 emit_label_fallback(buf, topic, "no gloss or continuation witnessed yet.");
@@ -536,10 +512,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[2] = { TEXTOID, BYTEAOID };
         Datum args[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,
-            "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
-            "FROM laplace.define($2, "
-            "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
-            "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d",
+            "SELECT reply, eff_mu, witnesses "
+            "FROM laplace.recall_define_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
@@ -660,9 +634,7 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             Datum args[1] = { session };
             bool  isnull;
             int   rc = SPI_execute_with_args(
-                "SELECT t.resolved_id FROM laplace.session_topics t "
-                "WHERE t.session_id = $1 AND t.resolved_id IS NOT NULL "
-                "ORDER BY t.ord DESC LIMIT 1",
+                "SELECT laplace.session_last_resolved($1)",
                 1, types, args, NULL, true, 1);
             if (rc == SPI_OK_SELECT && SPI_processed > 0)
             {
@@ -690,9 +662,7 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
 
 
             SPI_execute_with_args(
-                "INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id) "
-                "SELECT $1, COALESCE(max(t.ord), 0) + 1, $2, $3 "
-                "FROM laplace.session_topics t WHERE t.session_id = $1",
+                "SELECT laplace.session_record_prompt($1, $2, $3)",
                 3, itypes, iargs, topic == (Datum) 0 ? "  n" : NULL, false, 0);
         }
 

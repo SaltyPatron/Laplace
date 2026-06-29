@@ -1,0 +1,150 @@
+-- Recall intent response queries — installed SQL for pg_laplace_recall dispatch.
+
+CREATE OR REPLACE FUNCTION recall_context_exclude(p_prompt text, p_topic bytea)
+    RETURNS bytea[]
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(array_agg(ps.id), ARRAY[]::bytea[])
+    FROM prompt_state(p_prompt) ps
+    WHERE ps.id <> p_topic
+$$;
+
+CREATE OR REPLACE FUNCTION recall_define_response(p_prompt text, p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT d.definition, d.eff_mu, d.witnesses
+    FROM define(p_topic, recall_context_exclude(p_prompt, p_topic)) d
+$$;
+
+CREATE OR REPLACE FUNCTION recall_what_is_response(p_prompt text, p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
+    FROM define(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
+    UNION ALL
+    SELECT repeat('  ', h.depth) || E'\u2192 is ' || COALESCE(h.hypernym, '?')
+           || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint
+    FROM hypernyms(p_topic, 6) h
+    WHERE h.depth > 0
+$$;
+
+CREATE OR REPLACE FUNCTION recall_translate_response(p_topic bytea, p_lang text DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', t.eff_mu, t.witnesses
+    FROM translate_to(p_topic, p_lang) t
+$$;
+
+CREATE OR REPLACE FUNCTION recall_languages_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT lc.reply, lc.eff_mu, lc.witnesses
+    FROM language_coverage(p_topic) lc
+$$;
+
+CREATE OR REPLACE FUNCTION recall_synonyms_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.synonym, s.eff_mu, s.witnesses FROM synonyms(p_topic) s
+$$;
+
+CREATE OR REPLACE FUNCTION recall_examples_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT replace(e.example, '%s', label(p_topic)), e.eff_mu, e.witnesses
+    FROM examples(p_topic) e
+$$;
+
+CREATE OR REPLACE FUNCTION recall_describe_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
+    FROM salient_facts(p_topic, word_language(p_topic)) d
+$$;
+
+CREATE OR REPLACE FUNCTION recall_related_response(p_topic bytea, p_type_name text)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT replace(f.fact, '%s', label(p_topic)), f.eff_mu, f.witnesses
+    FROM related(p_topic, relation_type_id(p_type_name), word_language(p_topic)) f
+$$;
+
+CREATE OR REPLACE FUNCTION recall_related_in_response(p_topic bytea, p_type_name text)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT f.fact, f.eff_mu, f.witnesses
+    FROM related_in(p_topic, relation_type_id(p_type_name), word_language(p_topic)) f
+$$;
+
+CREATE OR REPLACE FUNCTION recall_relation_summary_response(p_topic bytea, p_topic2 bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT CASE WHEN rs.relation IS NOT NULL
+                THEN rs.relation || '  [' || rs.verdict || ']'
+                ELSE rs.verdict END,
+           rs.mu, rs.usage
+    FROM relation_summary(p_topic, p_topic2) rs
+$$;
+
+CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
+           || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'\u2192 '
+                         || COALESCE(realize(g.entity_id, word_language(p_topic)),
+                                     label(g.entity_id)), '' ORDER BY g.step),
+           min(g.eff_mu), NULL::bigint
+    FROM walk_strongest(p_topic,
+         CASE WHEN p_mode = 'complete' THEN relation_type_id('COMPLETES_TO') END, 8) g
+    HAVING count(*) > 0
+$$;
+
+CREATE OR REPLACE FUNCTION recall_fallback_gloss(p_prompt text, p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
+    FROM define(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
+$$;
+
+CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
+           || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'\u2192 '
+                         || COALESCE(realize(g.entity_id, word_language(p_topic)),
+                                     label(g.entity_id)), '' ORDER BY g.step),
+           min(g.eff_mu), NULL::bigint
+    FROM walk_strongest(p_topic, NULL::bytea, 6) g
+    HAVING count(*) > 0
+$$;
+
+CREATE OR REPLACE FUNCTION recall_is_a_yes_reply(
+        p_path bytea[], p_types bytea[], p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'Yes — ' || realize_path(p_path, p_types, p_lang)
+$$;
+
+CREATE OR REPLACE FUNCTION recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'No witnessed IS_A path from "'
+           || COALESCE(realize(p_from, p_lang), label(p_from))
+           || '" to "'
+           || COALESCE(realize(p_to, p_lang), label(p_to)) || '".'
+$$;

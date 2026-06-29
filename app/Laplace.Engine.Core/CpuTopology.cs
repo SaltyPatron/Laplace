@@ -31,6 +31,35 @@ public static class CpuTopology
     public static int ResolveIoBoundWorkers(int defaultCap = 8) =>
         Math.Clamp(Math.Min(LogicalProcessorCount, defaultCap), 1, defaultCap);
 
+    /// <summary>Native apply_batch / Hilbert COPY fan-out — CPU-bound on P-cores, not E-cores.</summary>
+    public static int ResolveApplyPartitions()
+    {
+        if (TryParsePositiveEnv("LAPLACE_APPLY_PARTITIONS", out int hard))
+            return Math.Min(hard, 64);
+        return ResolveCpuBoundWorkers(headroom: 0, maxCap: Math.Max(PerformanceCoreCount, 1));
+    }
+
+    /// <summary>
+    /// Hybrid ingest entry: refuse to run if P-core affinity cannot be established. No silent
+    /// scheduler scatter onto E-cores and no "just run serial" degradation.
+    /// </summary>
+    public static void EnsurePerformanceCoreExecution()
+    {
+        if (!IsHybrid) return;
+        if (PerformanceCoreCpuIndices.Count == 0)
+            throw new InvalidOperationException(
+                "Hybrid CPU detected but P-core logical processor indices are unknown. "
+                + "Ingest refuses to run on the OS scheduler (E-core scatter). "
+                + "Set LAPLACE_P_CORES or fix CpuTopology detection.");
+        if (!PinCurrentThreadToPerformanceCores())
+            throw new InvalidOperationException(
+                "Hybrid CPU: SetThreadAffinityMask to P-core set failed. "
+                + "Ingest refuses unpinned execution.");
+    }
+
+    /// <summary>Pin current thread to P-cores; on hybrid boxes failure is fatal (see Ensure).</summary>
+    public static void RequirePerformanceCorePin() => EnsurePerformanceCoreExecution();
+
     /// <summary>
     /// Logical-processor indices that belong to performance (P) cores. Empty when the topology is
     /// not hybrid or could not be detected (in which case pinning is a no-op and work simply runs
@@ -45,11 +74,9 @@ public static class CpuTopology
         new(DetectPerformanceCoreIndices, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>
-    /// Pin the CURRENT OS thread to the performance-core set, on Windows AND Linux. Worker COUNT
-    /// alone does not keep compute on P-cores — the scheduler scatters threads onto the weak
-    /// E-cores; this restricts the thread's affinity to the P-core logical processors. Returns true
-    /// if affinity was actually applied (so callers can VERIFY pinning, not just request it).
-    /// No-op returning false on a non-hybrid box or when the P-core set is unknown.
+    /// Pin the CURRENT OS thread to the performance-core set. On hybrid CPUs callers must use
+    /// <see cref="RequirePerformanceCorePin"/> at ingest/compute entry — silent unpinned execution
+    /// is not acceptable on P/E silicon.
     /// </summary>
     public static bool PinCurrentThreadToPerformanceCores()
     {
@@ -64,9 +91,8 @@ public static class CpuTopology
     }
 
     /// <summary>
-    /// Run <paramref name="body"/> over [0, count) on <paramref name="workers"/> threads, each
-    /// pinned to the P-core set (verified). Used to parallelize a pure per-record compose across
-    /// P-cores. Falls back to unpinned threads when the topology is not hybrid.
+    /// Run <paramref name="body"/> over [0, count) on <paramref name="workers"/> P-core-pinned
+    /// dedicated threads (never ThreadPool — the hybrid scheduler parks those on E-cores).
     /// </summary>
     public static void RunPinnedParallel(int count, int workers, Action<int> body)
     {
@@ -76,7 +102,7 @@ public static class CpuTopology
 
         if (workers == 1)
         {
-            PinCurrentThreadToPerformanceCores();
+            RequirePerformanceCorePin();
             for (int i = 0; i < count; i++) body(i);
             return;
         }
@@ -88,18 +114,65 @@ public static class CpuTopology
         {
             threads[w] = new Thread(() =>
             {
-                PinCurrentThreadToPerformanceCores();
+                RequirePerformanceCorePin();
                 int i;
                 while ((i = Interlocked.Increment(ref next)) < count)
                 {
                     try { body(i); }
                     catch (Exception ex) { Interlocked.CompareExchange(ref failure, ex, null); return; }
                 }
-            }) { IsBackground = true, Name = $"compose-pcore-{w}" };
+            }) { IsBackground = true, Name = $"laplace-pcore-{w}" };
             threads[w].Start();
         }
         foreach (var t in threads) t.Join();
         if (failure is not null) throw failure;
+    }
+
+    /// <summary>Run <paramref name="count"/> independent async jobs on pinned dedicated threads.</summary>
+    public static async Task RunPinnedAsyncParallel(int count, Func<int, CancellationToken, Task> body, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (count <= 0) return;
+        var threads = new Thread[count];
+        var errors = new Exception?[count];
+        for (int i = 0; i < count; i++)
+        {
+            int idx = i;
+            threads[idx] = new Thread(() =>
+            {
+                try
+                {
+                    RequirePerformanceCorePin();
+                    body(idx, ct).GetAwaiter().GetResult();
+                }
+                catch (Exception ex) { errors[idx] = ex; }
+            }) { IsBackground = true, Name = $"laplace-pcore-async-{idx}" };
+            threads[idx].Start();
+        }
+        foreach (var t in threads) t.Join();
+        ct.ThrowIfCancellationRequested();
+        foreach (var ex in errors)
+            if (ex is not null) throw ex;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Run one async body on a dedicated P-core-pinned thread (never ThreadPool).</summary>
+    public static Task RunOnPinnedThread(Func<CancellationToken, Task> body, string threadName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                RequirePerformanceCorePin();
+                body(ct).GetAwaiter().GetResult();
+                tcs.SetResult();
+            }
+            catch (Exception ex) { tcs.SetException(ex); }
+        }) { IsBackground = true, Name = threadName };
+        thread.Start();
+        return tcs.Task;
     }
 
     private static int[] DetectPerformanceCoreIndices()
