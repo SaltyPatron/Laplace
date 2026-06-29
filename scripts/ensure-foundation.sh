@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Idempotent foundation seed: unicode → iso639 → cili → wordnet
-# (Linux counterpart to scripts/win/seed-foundation.cmd core layers).
+# Idempotent foundation seed: unicode → iso639 → cili → wordnet → omw
+# (Linux counterpart to scripts/win/seed-foundation.cmd).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,12 +40,13 @@ layer_ok() {
     | grep -qi true
 }
 
-# cli:decomposer:layer
+# cli:decomposer:layer — must match scripts/win/seed-foundation.cmd order
 FOUNDATION=(
   "unicode:UnicodeDecomposer:0"
   "iso639:ISO639Decomposer:1"
   "cili:CILIDecomposer:2"
   "wordnet:WordNetDecomposer:2"
+  "omw:OMWDecomposer:3"
 )
 
 export LAPLACE_DBNAME="$DB"

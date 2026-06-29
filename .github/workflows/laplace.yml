@@ -137,6 +137,7 @@ jobs:
       - name: Toolchain probes
         run: |
           [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
+          command -v python3 >/dev/null || command -v python >/dev/null || { echo "::error::python3 missing"; exit 1; }
           command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
           command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
           for dep in eigen spectra blake3 googletest postgresql postgis proj geos gdal tree-sitter; do
@@ -235,37 +236,12 @@ jobs:
             /opt/laplace/tree-sitter/lib/libtree-sitter.a
             /opt/laplace/tree-sitter/include/tree_sitter/api.h
 
-  build:
-    name: Build engine + extensions + app
+  run:
+    name: Build → deploy → test (single self-hosted job)
     if: github.event_name != 'pull_request'
-    needs: [postgis, tree-sitter]
+    needs: [postgis, tree-sitter, policy-checks]
     runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-      - name: cmake + dotnet build
-        run: bash scripts/pipeline.sh --mode build-only --skip-install
-
-  endpoint-build:
-    name: Build endpoint + endpoint tests
-    if: github.event_name != 'pull_request'
-    needs: capabilities
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - name: dotnet build endpoint
-        run: |
-          dotnet build app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj -c Release
-          dotnet build app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
-
-  deploy:
-    name: Install → migrate → publish → ensure foundation
-    if: github.event_name != 'pull_request'
-    needs: [build, endpoint-build]
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 240
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -274,58 +250,22 @@ jobs:
       - name: stop API service
         run: sudo systemctl stop laplace-api || true
 
-      - name: pipeline — hot deploy or fresh reseed
+      - name: pipeline
         run: |
+          args=(--mode hot)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
             args=(--mode fresh)
             [ "${{ inputs.skip_clean }}" = "true" ] && args+=(--skip-clean)
-          else
-            args=(--mode hot --skip-build)
           fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_seed }}" = "true" ]; then
             args+=(--skip-seed)
           fi
           bash scripts/pipeline.sh "${args[@]}"
 
-      - name: start API service
-        run: sudo systemctl start laplace-api
-
-      - name: validate — health, substrate counts, recall
-        run: |
-          sleep 3
-          curl -fsS http://127.0.0.1:5187/health
-          echo
-          curl -fsS http://127.0.0.1:5187/health/ready
-          echo
-          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
-            -c "SELECT metric, value FROM laplace.substrate_counts();"
-          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
-            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
-          echo
-
-  test-engine:
-    name: ctest (engine unit tests)
-    if: github.event_name != 'pull_request'
-    needs: deploy
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-      - name: ctest -LE regress
+      - name: ctest (engine unit tests, excludes pg_regress)
         run: ctest --test-dir build --output-on-failure -LE regress
 
-  dotnet-test:
-    name: dotnet test (engine bindings + substrate integration)
-    if: github.event_name != 'pull_request'
-    needs: deploy
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-      - name: dotnet test
+      - name: dotnet test (engine bindings + substrate integration)
         run: |
           cd app
           for proj in \
@@ -348,17 +288,9 @@ jobs:
             echo "::endgroup::"
           done
 
-  regress:
-    name: pg_regress smoke
-    if: github.event_name != 'pull_request'
-    needs: deploy
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-      - name: ctest -L regress
+      - name: pg_regress smoke
         run: ctest --test-dir build --output-on-failure -L regress
+
       - name: Show regress diffs on failure
         if: failure()
         run: |
@@ -369,29 +301,25 @@ jobs:
             echo "::endgroup::"
           done
 
-  endpoint-health:
-    name: Endpoint health probe
-    if: github.event_name != 'pull_request'
-    needs: [deploy, endpoint-build]
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - name: Probe /health and /v1/capabilities
+      - name: start API service
+        run: sudo systemctl start laplace-api
+
+      - name: endpoint health + tests
         run: |
+          sleep 3
           curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"'
           curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
-
-  endpoint-test:
-    name: Endpoint tests
-    if: github.event_name != 'pull_request'
-    needs: [deploy, endpoint-build]
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - name: dotnet test endpoint
-        run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.skip_seed }}" != "true" ]; then
+            curl -fsS http://127.0.0.1:5187/health/ready
+            echo
+            psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
+              -c "SELECT metric, value FROM laplace.substrate_counts();"
+            curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+              -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+              --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
+            echo
+          fi
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --nologo --verbosity minimal
 
   seed-ladder:
     name: Seed ladder (full)
@@ -399,7 +327,7 @@ jobs:
       github.event_name == 'workflow_dispatch'
       && inputs.full_ladder == true
       && inputs.skip_seed != true
-    needs: [regress, dotnet-test, endpoint-health]
+    needs: [run]
     uses: ./.github/workflows/seed-ladder.yml
     with:
       full_ladder: true

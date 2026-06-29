@@ -19,22 +19,33 @@ LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
 PGDATABASE="${PGDATABASE:-laplace}"
 
+PYTHON=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON=python
+else
+  echo "::error::python3 not found — install python3 on the runner (hart-server)" >&2
+  exit 127
+fi
+
 usage() {
   cat <<EOF
-Usage: $0 --mode hot|fresh|build-only [options]
+Usage: $0 --mode hot|fresh|build-only|provision [options]
 
 Modes:
   build-only  codegen + cmake build + perfcache + dotnet build (no install/deploy)
-  hot         build + install + migrate + extension sync + ensure-foundation (default)
-  fresh       optional clean + build + install + nuke + migrate + force foundation seed
+  provision   install + migrate + extension sync + perfcache GUC (requires build/)
+  hot         build-only + provision + publish + ensure-foundation
+  fresh       optional clean + build-only + provision (nuke) + publish + force foundation
 
 Options:
-  --skip-clean     incremental native build (no rm -rf build)
-  --skip-build     skip cmake/dotnet build (install/deploy only)
-  --skip-install   skip cmake --install
-  --skip-seed      skip ensure-foundation
-  --skip-publish   skip deploy/linux/deploy.sh
-  --fresh-db       nuke DB before migrate (also set by --mode fresh)
+  --skip-clean        keep existing build/ tree (fresh mode only)
+  --skip-build        skip cmake/dotnet build
+  --skip-install      skip cmake --install (build-only mode only)
+  --skip-seed         skip ensure-foundation
+  --skip-publish      skip deploy/linux/deploy.sh
+  --fresh-db          nuke DB before migrate (also set by --mode fresh)
   --force-foundation  pass --force to ensure-foundation.sh
 EOF
   exit 2
@@ -56,7 +67,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  hot|fresh|build-only) ;;
+  hot|fresh|build-only|provision) ;;
   *) echo "invalid --mode: $MODE" >&2; exit 2 ;;
 esac
 
@@ -67,7 +78,7 @@ fi
 
 phase_codegen() {
   echo "===== PHASE — CODEGEN ====="
-  python "$ROOT/scripts/codegen-attestation-law.py"
+  "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
 }
 
 phase_clean() {
@@ -89,17 +100,20 @@ phase_build() {
   cmake --build build --target laplace_t0_perfcache
   echo "===== PHASE — BUILD APP ====="
   ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+  dotnet build app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj -c Release
+  dotnet build app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
 }
 
 phase_install() {
   echo "===== PHASE — INSTALL ====="
+  test -d build || { echo "::error::build/ missing — run build-only first"; exit 1; }
   umask 0002
   cmake --install build
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
 }
 
 phase_migrate() {
-  echo "===== PHASE — MIGRATE ====="
+  echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
   dotnet build "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release
   local mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
   if [[ "$FRESH_DB" -eq 1 ]]; then
@@ -155,7 +169,15 @@ phase_ensure_foundation() {
   echo "===== PHASE — ENSURE FOUNDATION ====="
   local args=()
   [[ "$FORCE_FOUNDATION" -eq 1 ]] && args+=(--force)
-  bash "$ROOT/scripts/ensure-foundation.sh" "${args[@]}"
+  LAPLACE_DBNAME="$PGDATABASE" \
+    bash "$ROOT/scripts/ensure-foundation.sh" "${args[@]}"
+}
+
+phase_provision() {
+  [[ "$SKIP_INSTALL" -eq 0 ]] && phase_install
+  phase_migrate
+  phase_sync_extension
+  phase_perfcache_guc
 }
 
 # ----- execute -----
@@ -164,21 +186,25 @@ if [[ "$SKIP_CLEAN" -eq 0 && "$MODE" == "fresh" ]]; then
   phase_clean
 fi
 
-if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  phase_build
-fi
-
 if [[ "$MODE" == "build-only" ]]; then
+  phase_build
   [[ "$SKIP_INSTALL" -eq 0 ]] && phase_install
   echo "===== PIPELINE COMPLETE (build-only) ====="
   exit 0
 fi
 
-[[ "$SKIP_INSTALL" -eq 0 ]] && phase_install
-phase_migrate
-phase_sync_extension
-phase_perfcache_guc
-[[ "$SKIP_PUBLISH" -eq 0 ]] && phase_publish
+if [[ "$MODE" == "provision" ]]; then
+  phase_provision
+  echo "===== PIPELINE COMPLETE (provision) ====="
+  exit 0
+fi
+
+if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  phase_build
+fi
+
+phase_provision
 [[ "$SKIP_SEED" -eq 0 ]] && phase_ensure_foundation
+[[ "$SKIP_PUBLISH" -eq 0 ]] && phase_publish
 
 echo "===== PIPELINE COMPLETE ($MODE) ====="

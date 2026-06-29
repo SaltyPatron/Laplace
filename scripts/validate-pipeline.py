@@ -33,7 +33,7 @@ SEED_LADDER_DEPS: dict[str, list[str]] = {
 }
 
 
-FOUNDATION_SOURCES = ("unicode", "iso639", "cili", "wordnet")
+FOUNDATION_SOURCES = ("unicode", "iso639", "cili", "wordnet", "omw")
 
 
 def parse_ensure_foundation_sh(text: str) -> list[str] | None:

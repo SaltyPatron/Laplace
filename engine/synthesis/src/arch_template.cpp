@@ -172,10 +172,8 @@ struct arch_template {
 
 extern "C" arch_template_t* arch_template_load(const char* template_name) {
     if (!template_name) return nullptr;
-    
-    
-    
-    
+    if (std::strcmp(template_name, "llama") != 0) return nullptr;
+
     auto* t = new arch_template();
     t->arch_name = template_name;
     return t;
