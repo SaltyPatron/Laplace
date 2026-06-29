@@ -32,7 +32,7 @@ public class PCoreParallelComposeTests
             workers,
             recordsPerChange: 64,
             () => new SubstrateChangeBuilder(Src, "pcore-unit"),
-            (b, i) => b.AddEntity(EntityIdFor(i), EntityTier.Vocabulary, Src, Src),
+            (b, i) => b.AddEntity(EntityIdFor(i), EntityTier.Word, Src, Src),
             CancellationToken.None);
 
         await foreach (var change in changes)

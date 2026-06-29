@@ -89,7 +89,7 @@ public sealed class LlamaRecipeExtractor
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
             entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8);
 
-        b.AddEntity(recipe.RecipeEntityId, EntityTier.Vocabulary, modelRecipeTypeId, firstObservedBy: sourceId);
+        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
         void AddAttestation(Hash128 typeId, Hash128? objectId)
             => b.AddAttestation(NativeAttestation.CategoricalResolved(
@@ -99,7 +99,7 @@ public sealed class LlamaRecipeExtractor
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
             var valueId    = Hash128.Blake3(valueBytes);
-            b.AddEntity(valueId, EntityTier.Vocabulary, EntityTypeRegistry.Scalar, sourceId);
+            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             AddAttestation(typeId, valueId);
         }
 
@@ -110,7 +110,7 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasIntermSizeTypeId,  recipe.IntermediateSize.ToString());
         AddScalar(hasVocabSizeTypeId,   recipe.VocabSize.ToString());
 
-        b.AddEntity(architectureEntityId, EntityTier.Vocabulary, EntityTypeRegistry.Architecture, sourceId);
+        b.AddEntity(architectureEntityId, EntityTier.Word, EntityTypeRegistry.Architecture, sourceId);
         AddAttestation(isATypeId, architectureEntityId);
 
         return b.Build();

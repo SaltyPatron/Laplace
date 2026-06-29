@@ -51,6 +51,9 @@ typedef struct laplace_grammar_row_iter laplace_grammar_row_iter_t;
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
                                  laplace_grammar_row_iter_t** out);
 
+/** When set, one physical newline is one record (ignores grammar row quoting). */
+void laplace_grammar_row_iter_set_line_framed(laplace_grammar_row_iter_t* it, int on);
+
 typedef struct {
     laplace_ast_t* ast;
     uint8_t*       row_utf8;

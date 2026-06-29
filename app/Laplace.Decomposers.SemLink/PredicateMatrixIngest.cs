@@ -297,7 +297,7 @@ internal static class PredicateMatrixIngest
         if (subjectId is null) return;
         if (!seen.Add((subjectId.Value, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Vocabulary, subjectType, SemLinkDecomposer.Source));
+        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Word, subjectType, SemLinkDecomposer.Source));
         CategoryAnchor.AttestCategory(b, subjectId.Value, subjectType, SemLinkDecomposer.Source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
             subjectId.Value, "CORRESPONDS_TO", synId, SemLinkDecomposer.Source, TC.AcademicCurated));

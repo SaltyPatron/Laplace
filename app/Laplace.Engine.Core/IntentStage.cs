@@ -39,9 +39,32 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    public int EntityCount      { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStageEntityCount(handle)); } }
-    public int PhysicalityCount { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStagePhysicalityCount(handle)); } }
-    public int AttestationCount { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStageAttestationCount(handle)); } }
+    public int EntityCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return checked((int)NativeInterop.IntentStageEntityCount(handle));
+        }
+    }
+
+    public int PhysicalityCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return checked((int)NativeInterop.IntentStagePhysicalityCount(handle));
+        }
+    }
+
+    public int AttestationCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return checked((int)NativeInterop.IntentStageAttestationCount(handle));
+        }
+    }
 
     public static string CopyColumnList(IntentStageTable table)
     {
@@ -117,7 +140,8 @@ public sealed class IntentStage : SafeHandle
         Hash128? contextId,
         short    outcome,
         long     lastObservedAtUnixUs,
-        long     observationCount)
+        long     observationCount,
+        Mask256  highwayMask = default)
     {
         ThrowIfDisposed();
         if (observationCount < 0) throw new ArgumentOutOfRangeException(nameof(observationCount));
@@ -130,9 +154,11 @@ public sealed class IntentStage : SafeHandle
                 Hash128 ctx = contextId ?? default;
                 Hash128* objPtr = objectId is null ? null : &obj;
                 Hash128* ctxPtr = contextId is null ? null : &ctx;
+                Mask256 mask = highwayMask;
+                byte* maskPtr = mask.IsZero ? null : (byte*)&mask;
                 int rc = NativeInterop.IntentStageAddAttestation(
                     handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
-                    outcome, lastObservedAtUnixUs, observationCount);
+                    outcome, lastObservedAtUnixUs, observationCount, maskPtr);
                 if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
             }
         }

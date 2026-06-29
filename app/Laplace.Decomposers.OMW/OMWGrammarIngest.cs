@@ -20,7 +20,7 @@ internal static class OMWGrammarIngest
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int batch = batchSize > 1 ? batchSize : DefaultBatch;
-        int fileWorkers = maxInputUnits > 0 ? 1 : IngestParallelism.ResolveFileWorkers();
+        int fileWorkers = IngestParallelism.ResolveFileWorkers();
 
         var tabFiles = OMWTabFiles.EnumerateTabFiles(wnsDir, langs)
             .OrderBy(p => p, StringComparer.Ordinal)
@@ -46,7 +46,7 @@ internal static class OMWGrammarIngest
         ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        CpuTopology.RequirePerformanceCorePin();
+        CpuTopology.PinWorkerThread(0);
         long rowsParsed = 0;
         int fileBn = 0;
 
@@ -84,7 +84,7 @@ internal static class OMWGrammarIngest
         // exhausting native memory for subsequent grammar_compose calls (returns -3).
         // Back-pressure via FullMode.Wait serialises production to the commit rate.
         var outChannel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(fileWorkers * 4)
+            new BoundedChannelOptions(IngestTopology.Current.Sizing.FileWorkerChannelDepth)
             {
                 SingleWriter = false,
                 SingleReader = true,
@@ -103,7 +103,7 @@ internal static class OMWGrammarIngest
             {
                 try
                 {
-                    CpuTopology.RequirePerformanceCorePin();
+                    CpuTopology.PinWorkerThread(workerId);
                     while (true)
                     {
                         int fileIdx = Interlocked.Increment(ref nextFile);
@@ -172,8 +172,7 @@ internal static class OMWGrammarIngest
 
         await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             tabFile,
-            modalityId: "tsv",
-            sourceId: OMWDecomposer.Source,
+            EtlManifest.Get("omw"),
             witness: witness,
             batchSize: batch,
             witnessWeight: 1.0,

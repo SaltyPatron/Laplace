@@ -1,4 +1,3 @@
-using global::Npgsql;
 using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
@@ -13,83 +12,44 @@ public class SecondaryIndexPolicyTests
     private readonly LocalPgFixture _pg;
     public SecondaryIndexPolicyTests(LocalPgFixture pg) => _pg = pg;
 
-    private async Task ResetTableAsync(bool seedRow)
+    private async Task ResetTableAsync()
     {
         await using var conn = await _pg.DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $@"
             DROP TABLE IF EXISTS laplace.{Table};
             CREATE TABLE laplace.{Table} (id bigint PRIMARY KEY, v int);
-            CREATE INDEX {SecondaryIndex} ON laplace.{Table} (v);
-            {(seedRow ? $"INSERT INTO laplace.{Table} (id, v) VALUES (1, 7);" : "")}";
+            CREATE INDEX {SecondaryIndex} ON laplace.{Table} (v);";
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private async Task<int> SecondaryIndexCountAsync()
+    [Fact]
+    public async Task SecondaryIndexesPresentAsync_TrueWhenSecondaryIndexExists()
+    {
+        await ResetTableAsync();
+        var policy = new SecondaryIndexPolicy(_pg.DataSource);
+        Assert.True(await policy.SecondaryIndexesPresentAsync(Table));
+    }
+
+    [Fact]
+    public async Task EnsureIndexesAsync_CreatesMissingIndexesWithoutDropping()
     {
         await using var conn = await _pg.DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            SELECT count(*) FROM pg_index i
-            JOIN pg_class t ON t.oid = i.indrelid
-            JOIN pg_namespace n ON n.oid = t.relnamespace
-            WHERE n.nspname = 'laplace' AND t.relname = $1
-              AND NOT i.indisprimary AND NOT i.indisunique";
-        cmd.Parameters.AddWithValue(Table);
-        return (int)(long)(await cmd.ExecuteScalarAsync())!;
-    }
+        cmd.CommandText = $@"
+            DROP TABLE IF EXISTS laplace.{Table};
+            CREATE TABLE laplace.{Table} (id bigint PRIMARY KEY, v int);";
+        await cmd.ExecuteNonQueryAsync();
 
-    [Fact]
-    public async Task EmptyTable_DropsSecondaryIndexes_AndExplicitRebuildRestoresThem()
-    {
-        await ResetTableAsync(seedRow: false);
         var policy = new SecondaryIndexPolicy(_pg.DataSource);
+        Assert.False(await policy.SecondaryIndexesPresentAsync(Table));
 
-        await using (var scope = await policy.SuspendForBulkLoadAsync(Table))
-        {
-            Assert.True(scope.Dropped);
-            Assert.False(scope.TableWasPopulated);
-            Assert.Single(scope.DroppedIndexDefs);
-            Assert.Equal(0, await SecondaryIndexCountAsync()); 
+        await SecondaryIndexPolicy.EnsureIndexesAsync(
+            _pg.DataSource,
+            [$"CREATE INDEX IF NOT EXISTS {SecondaryIndex} ON laplace.{Table} (v)"],
+            CancellationToken.None);
 
-            await scope.RebuildAsync();
-            Assert.True(scope.Rebuilt);
-            Assert.Equal(1, await SecondaryIndexCountAsync()); 
-        }
-
-        
-        Assert.Equal(1, await SecondaryIndexCountAsync());
-    }
-
-    [Fact]
-    public async Task PopulatedTable_KeepsIndexesLive()
-    {
-        await ResetTableAsync(seedRow: true);
-        var policy = new SecondaryIndexPolicy(_pg.DataSource);
-
-        await using var scope = await policy.SuspendForBulkLoadAsync(Table);
-
-        Assert.False(scope.Dropped);
-        Assert.True(scope.TableWasPopulated);
-        Assert.Empty(scope.DroppedIndexDefs);
-        Assert.Equal(1, await SecondaryIndexCountAsync()); 
-    }
-
-    [Fact]
-    public async Task Dispose_RebuildsEvenWhenCallerForgets()
-    {
-        await ResetTableAsync(seedRow: false);
-        var policy = new SecondaryIndexPolicy(_pg.DataSource);
-
-        
-        
-        await using (var scope = await policy.SuspendForBulkLoadAsync(Table))
-        {
-            Assert.Equal(0, await SecondaryIndexCountAsync());
-            Assert.False(scope.Rebuilt);
-        }
-
-        Assert.Equal(1, await SecondaryIndexCountAsync());
+        Assert.True(await policy.SecondaryIndexesPresentAsync(Table));
     }
 
     [Theory]
@@ -99,6 +59,6 @@ public class SecondaryIndexPolicyTests
     public async Task UnsafeTableIdentifier_Throws(string table)
     {
         var policy = new SecondaryIndexPolicy(_pg.DataSource);
-        await Assert.ThrowsAsync<ArgumentException>(() => policy.TableHasAnyRowsAsync(table));
+        await Assert.ThrowsAsync<ArgumentException>(() => policy.SecondaryIndexesPresentAsync(table));
     }
 }

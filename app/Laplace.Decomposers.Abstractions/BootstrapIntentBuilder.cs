@@ -34,7 +34,7 @@ public sealed class BootstrapIntentBuilder
         _inner = new SubstrateChangeBuilder(
             sourceId, $"bootstrap/{sourceName}", parentIntentId: null);
 
-        _inner.AddEntity(sourceId, EntityTier.Vocabulary, SourceTypeId, sourceId);
+        _inner.AddEntity(sourceId, EntityTier.Word, SourceTypeId, sourceId);
     }
 
     
@@ -49,7 +49,7 @@ public sealed class BootstrapIntentBuilder
     {
         var id = Hash128.OfCanonical($"substrate/type/{canonicalTypeName}/v1");
         _canonicalNames.Add($"substrate/type/{canonicalTypeName}/v1");
-        _inner.AddEntity(id, EntityTier.Vocabulary, TypeMetaTypeId, _sourceId);
+        _inner.AddEntity(id, EntityTier.Word, TypeMetaTypeId, _sourceId);
         // Substrate-native legibility: name the entity type via a codepoint-walk content entity +
         // HAS_NAME_ALIAS, so even unregistered types (e.g. WordNet_Sense) render from their own
         // codepoints instead of a bare hash. See render() COALESCE in 15_readback.sql.in.
@@ -67,7 +67,7 @@ public sealed class BootstrapIntentBuilder
         
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
         _canonicalNames.Add($"substrate/type/{r.Canonical}/v1");
-        _inner.AddEntity(id, EntityTier.Vocabulary, RelationTypeMetaTypeId, _sourceId);
+        _inner.AddEntity(id, EntityTier.Word, RelationTypeMetaTypeId, _sourceId);
         return id;
     }
 

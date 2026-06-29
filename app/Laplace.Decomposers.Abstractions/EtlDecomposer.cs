@@ -132,8 +132,7 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             var witness = new EtlWitness(new EtlWitnessContext(_src, file, options));
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 file,
-                modalityId: _src.Modality.GrammarId,
-                sourceId: _src.SourceId,
+                _src,
                 witness: witness,
                 batchSize: batch,
                 witnessWeight: 1.0,

@@ -9,20 +9,23 @@ public static class TextDecomposer
         IntPtr handle = IntPtr.Zero;
         unsafe
         {
-            fixed (byte* p = utf8)
+            lock (LaplaceCoreGate.Native)
             {
-                int rc = NativeInterop.TextDecomposerRun(p, (nuint)utf8.Length, &handle);
-                if (rc != 0)
+                fixed (byte* p = utf8)
                 {
-                    string reason = rc switch
+                    int rc = NativeInterop.TextDecomposerRun(p, (nuint)utf8.Length, &handle);
+                    if (rc != 0)
                     {
-                        -1 => "null args",
-                        -2 => "invalid UTF-8 sequence",
-                        -3 => "allocation failure",
-                        _  => $"rc={rc}",
-                    };
-                    throw new InvalidOperationException(
-                        $"laplace_text_decomposer_run failed: {reason}");
+                        string reason = rc switch
+                        {
+                            -1 => "null args",
+                            -2 => "invalid UTF-8 sequence",
+                            -3 => "allocation failure",
+                            _  => $"rc={rc}",
+                        };
+                        throw new InvalidOperationException(
+                            $"laplace_text_decomposer_run failed: {reason}");
+                    }
                 }
             }
         }
@@ -46,25 +49,22 @@ public static class TextDecomposer
         return Run(heap.AsSpan());
     }
 
-    
-    
-    
-    
-    
-    
     public static Hash128? ContentRootId(ReadOnlySpan<byte> utf8)
     {
         if (utf8.Length == 0) return null;
         Hash128 id = default;
         unsafe
         {
-            fixed (byte* p = utf8)
+            lock (LaplaceCoreGate.Native)
             {
-                int rc = NativeInterop.ContentRootId(p, (nuint)utf8.Length, &id);
-                if (rc == -3) throw new InvalidOperationException(
-                    "laplace_content_root_id: perfcache not loaded — call CodepointPerfcache.LoadDefault() first");
-                if (rc != 0) throw new InvalidOperationException(
-                    $"laplace_content_root_id failed (rc={rc})");
+                fixed (byte* p = utf8)
+                {
+                    int rc = NativeInterop.ContentRootId(p, (nuint)utf8.Length, &id);
+                    if (rc == -3) throw new InvalidOperationException(
+                        "laplace_content_root_id: perfcache not loaded — call CodepointPerfcache.LoadDefault() first");
+                    if (rc != 0) throw new InvalidOperationException(
+                        $"laplace_content_root_id failed (rc={rc})");
+                }
             }
         }
         return id;

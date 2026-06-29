@@ -1,11 +1,12 @@
-namespace Laplace.Engine.Core;
-
-/// <summary>
-/// Single process-wide gate for all <c>laplace_core</c> entry points (grammar compose, intent_stage,
-/// content witness bank, chess merkle compose). The native heap is not thread-safe; IngestRunner overlaps
-/// decompose and apply on different threads, so every native P/Invoke must serialize on this object.
-/// </summary>
-public static class LaplaceCoreGate
-{
-    public static readonly object Native = new();
-}
+namespace Laplace.Engine.Core;
+
+/// <summary>
+/// Process-wide gate for native entry points that touch shared global state (perfcache load,
+/// chess merkle compose). Grammar compose uses per-instance handles and thread-local parsers —
+/// parallel file workers must NOT serialize on this object.
+/// </summary>
+public static class LaplaceCoreGate
+{
+    public static readonly object Native = new();
+}
+

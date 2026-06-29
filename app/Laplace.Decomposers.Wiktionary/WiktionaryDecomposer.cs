@@ -74,8 +74,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
 
         await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             file,
-            modalityId: "json",
-            sourceId: Source,
+            EtlManifest.Get("wiktionary"),
             witness: witness,
             batchSize: options.BatchSize > 1 ? options.BatchSize : 1024,
             witnessWeight: 0.7,

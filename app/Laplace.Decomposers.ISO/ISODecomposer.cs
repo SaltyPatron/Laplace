@@ -76,7 +76,7 @@ public sealed class ISODecomposer : IDecomposer{
         {
             isoUnits++;
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
-            b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
+            b.AddEntity(langId, EntityTier.Word, LanguageTypeId, Source);
             _codeNames.Add(VocabularyNames.LanguageIso639_3(rec.Id));
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeIsLanguageCode, null, Source, null,
@@ -87,7 +87,7 @@ public sealed class ISODecomposer : IDecomposer{
                 var iso1Name = $"iso639-1:{rec.Part1}";
                 _codeNames.Add(iso1Name);
                 var iso1Id = Hash128.OfCanonical(iso1Name);
-                b.AddEntity(iso1Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
+                b.AddEntity(iso1Id, EntityTier.Word, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     langId, RelTypeHasIso6391Code, iso1Id, Source, null,
                     RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
@@ -102,7 +102,7 @@ public sealed class ISODecomposer : IDecomposer{
                 var iso2Name = $"iso639-2:{p2}";
                 _codeNames.Add(iso2Name);
                 var iso2Id = Hash128.OfCanonical(iso2Name);
-                b.AddEntity(iso2Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
+                b.AddEntity(iso2Id, EntityTier.Word, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, rel, iso2Id, Source, SourceTrust.StandardsDerived));
             }
@@ -110,7 +110,7 @@ public sealed class ISODecomposer : IDecomposer{
             {
                 var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
                 _codeNames.Add($"substrate/iso639/scope/{rec.Scope}/v1");
-                b.AddEntity(scopeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
+                b.AddEntity(scopeId, EntityTier.Word, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
             }
@@ -118,7 +118,7 @@ public sealed class ISODecomposer : IDecomposer{
             {
                 var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
                 _codeNames.Add($"substrate/iso639/type/{rec.Type}/v1");
-                b.AddEntity(typeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
+                b.AddEntity(typeId, EntityTier.Word, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_TYPE", typeId, Source, SourceTrust.StandardsDerived));
             }
@@ -144,8 +144,8 @@ public sealed class ISODecomposer : IDecomposer{
         {
             var indivId = LanguageEntityId.FromIso639_3(indiv);
             var macroId = LanguageEntityId.FromIso639_3(macro);
-            b.AddEntity(indivId, EntityTier.Vocabulary, LanguageTypeId, Source);
-            b.AddEntity(macroId, EntityTier.Vocabulary, LanguageTypeId, Source);
+            b.AddEntity(indivId, EntityTier.Word, LanguageTypeId, Source);
+            b.AddEntity(macroId, EntityTier.Word, LanguageTypeId, Source);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
                 RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
@@ -158,13 +158,13 @@ public sealed class ISODecomposer : IDecomposer{
         {
             var langId = LanguageReference.Resolve(subtag);
             if (langId.Equals(undId)) continue;
-            b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
+            b.AddEntity(langId, EntityTier.Word, LanguageTypeId, Source);
             foreach (var code in scriptCodes)
             {
                 if (!scriptName.TryGetValue(code, out var name)) continue;
                 _codeNames.Add($"unicode/script/{name}/v1");
                 var scriptId = LanguageGraph.ScriptEntityId(name);
-                b.AddEntity(scriptId, EntityTier.Vocabulary, UcdClassifierTypeId, Source);
+                b.AddEntity(scriptId, EntityTier.Word, UcdClassifierTypeId, Source);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     langId, RelTypeUsesScript, scriptId, Source, null,
                     RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
@@ -184,8 +184,8 @@ public sealed class ISODecomposer : IDecomposer{
                 if (retired.Length != 3 || changeTo.Length != 3) continue;
                 var retId = LanguageEntityId.FromIso639_3(retired);
                 var sucId = LanguageEntityId.FromIso639_3(changeTo);
-                b.AddEntity(retId, EntityTier.Vocabulary, LanguageTypeId, Source);
-                b.AddEntity(sucId, EntityTier.Vocabulary, LanguageTypeId, Source);
+                b.AddEntity(retId, EntityTier.Word, LanguageTypeId, Source);
+                b.AddEntity(sucId, EntityTier.Word, LanguageTypeId, Source);
                 // Retirement is directional (retired -> successor), not a symmetric variant.
                 b.AddAttestation(NativeAttestation.Categorical(
                     retId, "SUPERSEDED_BY", sucId, Source, SourceTrust.StandardsDerived));
@@ -196,13 +196,13 @@ public sealed class ISODecomposer : IDecomposer{
         {
             var variantId = LanguageGraph.VariantEntityId(subtag);
             _codeNames.Add($"substrate/iso639/variant/{subtag.ToLowerInvariant()}/v1");
-            b.AddEntity(variantId, EntityTier.Vocabulary, LanguageVariantTypeId, Source);
+            b.AddEntity(variantId, EntityTier.Word, LanguageVariantTypeId, Source);
 
             foreach (var prefix in prefixes)
             {
                 var parentId = LanguageReference.Resolve(prefix);
                 if (parentId.Equals(undId)) continue;
-                b.AddEntity(parentId, EntityTier.Vocabulary, LanguageTypeId, Source);
+                b.AddEntity(parentId, EntityTier.Word, LanguageTypeId, Source);
                 // A variant can attach under several prefixes (e.g. multiple base tags it may
                 // follow); each is its own HAS_VARIANT_OF edge from the variant to that parent.
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -233,7 +233,7 @@ public sealed class ISODecomposer : IDecomposer{
                 string id = c[0].Trim(), printName = c[1].Trim();
                 if (id.Length != 3 || printName.Length == 0) continue;
                 var lid = LanguageEntityId.FromIso639_3(id);
-                nb.AddEntity(lid, EntityTier.Vocabulary, LanguageTypeId, Source);
+                nb.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
                 var nameId = ContentEmitter.Emit(nb, printName, Source);
                 if (nameId is { } nid)
                     nb.AddAttestation(NativeAttestation.Categorical(

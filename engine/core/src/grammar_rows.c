@@ -6,6 +6,12 @@
 
 #include "tree_sitter/api.h"
 
+/* Grammar-framed TSV/CSV can span newlines inside quoted fields. A malformed corpus with an
+   unclosed quote (OMW isl wn-data-isl.tab line 214 → 15752) accumulates hundreds of logical
+   rows into one ~200 KiB record and OOMs compose (-3). Fall back to '\n' framing when carry or
+   any emitted record exceeds this bound — valid OMW/Wiktionary rows are well under it. */
+#define LAPLACE_GRAMMAR_ROW_MAX (65536u)
+
 typedef struct { uint32_t s; uint32_t e; } laplace_row_rng_t;
 
 struct laplace_grammar_row_iter {
@@ -17,6 +23,7 @@ struct laplace_grammar_row_iter {
     int               oom;
     TSSymbol          row_symbol;      /* the grammar's `row` record symbol, 0 if none */
     int               row_structured;  /* 1 => frame records via the grammar, not via '\n' */
+    int               force_line_framed;
 };
 
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
@@ -42,6 +49,14 @@ int laplace_grammar_row_iter_new(const TSLanguage* recipe,
     it->row_structured = it->row_symbol != 0;
     *out = it;
     return 0;
+}
+
+void laplace_grammar_row_iter_set_line_framed(laplace_grammar_row_iter_t* it, int on) {
+    if (it) it->force_line_framed = on ? 1 : 0;
+}
+
+static int use_grammar_row_framing(const laplace_grammar_row_iter_t* it) {
+    return it->row_structured && !it->force_line_framed;
 }
 
 static int append_carry(laplace_grammar_row_iter_t* it,
@@ -129,6 +144,10 @@ fail:
     return -3;
 }
 
+static int row_span_too_large(uint32_t s, uint32_t e) {
+    return e > s && (e - s) > LAPLACE_GRAMMAR_ROW_MAX;
+}
+
 /* Grammar-framed record splitting: parse the accumulated carry with the grammar and emit each
    complete `row` record's bytes. Unlike the '\n' scan, this honors records that span newlines (a
    quoted CSV/TSV field), because the grammar — not a byte scan — decides where a record ends. The
@@ -161,6 +180,14 @@ static int split_carry_records(laplace_grammar_row_iter_t* it, int finalize,
         rr[rn].s = ts_node_start_byte(c);
         rr[rn].e = ts_node_end_byte(c);
         rn++;
+    }
+
+    for (size_t i = 0; i < rn; ++i) {
+        if (row_span_too_large(rr[i].s, rr[i].e)) {
+            free(rr);
+            ts_tree_delete(tree);
+            return split_carry_lines(it, finalize, out_rows, out_count);
+        }
     }
 
     size_t   emit       = 0;
@@ -216,7 +243,11 @@ int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
     if (chunk && len > 0) {
         if (append_carry(it, chunk, len) != 0) return -3;
     }
-    if (it->row_structured)
+    if (use_grammar_row_framing(it) && it->carry_len > LAPLACE_GRAMMAR_ROW_MAX) {
+        /* Pathological open-quote span with no complete rows yet — recover via '\n' framing. */
+        return split_carry_lines(it, finalize, out_rows, out_count);
+    }
+    if (use_grammar_row_framing(it))
         return split_carry_records(it, finalize, out_rows, out_count);
     return split_carry_lines(it, finalize, out_rows, out_count);
 }

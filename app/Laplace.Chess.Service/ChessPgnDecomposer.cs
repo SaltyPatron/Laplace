@@ -143,7 +143,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
         Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
     {
         var src = ChessVocabulary.PgnSourceId;
-        b.AddEntity(gameId, EntityTier.Vocabulary, ChessVocabulary.GameType, src);
+        b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
 
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));

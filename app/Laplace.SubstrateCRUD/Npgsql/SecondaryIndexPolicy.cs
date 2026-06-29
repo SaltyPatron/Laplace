@@ -1,126 +1,52 @@
 using System.Text.RegularExpressions;
 using global::Npgsql;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/// <summary>
+/// Read-only substrate index helpers. Indexes are created at schema deploy time and maintained
+/// incrementally during ingest — this type never drops indexes.
+/// </summary>
 public sealed class SecondaryIndexPolicy
 {
-    
-    
     private static readonly Regex SafeTable = new("^[a-z_][a-z0-9_]*$", RegexOptions.Compiled);
 
     private readonly NpgsqlDataSource _ds;
-    private readonly ILogger _log;
 
-    public SecondaryIndexPolicy(NpgsqlDataSource dataSource, ILogger? logger = null)
+    public SecondaryIndexPolicy(NpgsqlDataSource dataSource)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
-        _log = logger ?? NullLogger.Instance;
     }
 
-    private static string RequireSafeTable(string table)
+    internal static string RequireSafeTable(string table)
     {
         if (string.IsNullOrEmpty(table) || !SafeTable.IsMatch(table))
             throw new ArgumentException($"unsafe substrate table identifier: '{table}'", nameof(table));
         return table;
     }
 
-    
-    
-    
-    
-    public async Task<bool> TableHasAnyRowsAsync(string table, CancellationToken ct = default)
+    public async Task<bool> SecondaryIndexesPresentAsync(string table, CancellationToken ct = default)
     {
         RequireSafeTable(table);
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT EXISTS(SELECT 1 FROM laplace.{table})";
+        cmd.CommandText =
+            "SELECT EXISTS ("
+            + "SELECT 1 FROM pg_index i "
+            + "JOIN pg_class t ON t.oid = i.indrelid "
+            + "JOIN pg_namespace n ON n.oid = t.relnamespace "
+            + "WHERE n.nspname = 'laplace' AND t.relname = $1 "
+            + "  AND NOT i.indisprimary AND NOT i.indisunique)";
+        cmd.Parameters.AddWithValue(table);
         var r = await cmd.ExecuteScalarAsync(ct);
         return r is bool b && b;
     }
 
-    
-    
-    
-    
-    
-    public async Task<SecondaryIndexScope> SuspendForBulkLoadAsync(string table, CancellationToken ct = default)
-    {
-        RequireSafeTable(table);
-        bool populated = await TableHasAnyRowsAsync(table, ct);
-        // NEVER drop secondary indexes on a POPULATED table. The dedup existence-checks — entities_exist_bitmap,
-        // the "which of these do you have?" content probe, the seen-set DB lookups — REQUIRE these indexes;
-        // dropping them turns every dedup probe into a seq scan and destroys the ingest. Indexes stay live.
-        // Throughput comes from the dedup REDUCING how much is inserted (compose-is-dedup) + bulk COPY of the
-        // genuinely-novel rows — never from dropping indexes. (Drop only on the first empty table.)
-        var dropped = populated
-            ? new List<string>()
-            : await DropSecondaryIndexesAsync(_ds, table, ct);
-        return new SecondaryIndexScope(_ds, _log, table, populated, dropped);
-    }
-
-    
-    
-    
-    
-    internal static async Task<List<string>> DropSecondaryIndexesAsync(
-        NpgsqlDataSource ds, string table, CancellationToken ct)
-    {
-        RequireSafeTable(table);
-        var names = new List<string>();
-        var defs = new List<string>();
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using (var q = conn.CreateCommand())
-        {
-            q.CommandText =
-                "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
-                + "FROM pg_index i "
-                + "JOIN pg_class c ON c.oid = i.indexrelid "
-                + "JOIN pg_class t ON t.oid = i.indrelid "
-                + "JOIN pg_namespace n ON n.oid = t.relnamespace "
-                + "WHERE n.nspname = 'laplace' AND t.relname = $1 "
-                + "  AND NOT i.indisprimary AND NOT i.indisunique";
-            q.Parameters.AddWithValue(table);
-            await using var r = await q.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-            {
-                names.Add(r.GetString(0));
-                defs.Add(r.GetString(1));
-            }
-        }
-        foreach (var n in names)
-        {
-            await using var d = conn.CreateCommand();
-            d.CommandTimeout = 0;
-            d.CommandText = $"DROP INDEX IF EXISTS laplace.\"{n}\"";
-            await d.ExecuteNonQueryAsync(ct);
-        }
-        return defs;
-    }
-
-    
-    internal static async Task RebuildIndexesAsync(
+    /// <summary>CREATE INDEX IF NOT EXISTS only — never drops.</summary>
+    public static async Task EnsureIndexesAsync(
         NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
     {
+        var defs = DedupeIndexDefs(indexDefs);
         await using var conn = await ds.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
         try
@@ -133,12 +59,12 @@ public sealed class SecondaryIndexPolicy
                     + "SET LOCAL max_parallel_maintenance_workers = 4";
                 await t.ExecuteNonQueryAsync(ct);
             }
-            foreach (var def in indexDefs)
+            foreach (var def in defs)
             {
                 await using var c = conn.CreateCommand();
                 c.Transaction = tx;
                 c.CommandTimeout = 0;
-                c.CommandText = def;
+                c.CommandText = EnsureCreateIndexIfNotExists(def);
                 await c.ExecuteNonQueryAsync(ct);
             }
             await tx.CommitAsync(ct);
@@ -150,74 +76,41 @@ public sealed class SecondaryIndexPolicy
             throw;
         }
     }
-}
 
-
-
-
-
-public sealed class SecondaryIndexScope : IAsyncDisposable
-{
-    private readonly NpgsqlDataSource _ds;
-    private readonly ILogger _log;
-    private List<string> _pending;
-    private bool _suppressDisposeRebuild;
-
-    internal SecondaryIndexScope(
-        NpgsqlDataSource ds, ILogger log, string table, bool tableWasPopulated, List<string> droppedDefs)
+    internal static List<string> DedupeIndexDefs(IReadOnlyList<string> indexDefs)
     {
-        _ds = ds;
-        _log = log;
-        Table = table;
-        TableWasPopulated = tableWasPopulated;
-        DroppedIndexDefs = droppedDefs;
-        _pending = new List<string>(droppedDefs);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var deduped = new List<string>(indexDefs.Count);
+        foreach (var def in indexDefs)
+        {
+            var name = TryExtractIndexName(def);
+            if (name is not null && !seen.Add(name)) continue;
+            deduped.Add(def);
+        }
+        return deduped;
     }
 
-    
-    public string Table { get; }
-
-    
-    public bool TableWasPopulated { get; }
-
-    
-    public IReadOnlyList<string> DroppedIndexDefs { get; }
-
-    
-    public bool Dropped => DroppedIndexDefs.Count > 0;
-
-    
-    public bool Rebuilt => _pending.Count == 0;
-
-    /// <summary>Skip auto-rebuild on dispose; caller rebuilds later (foundation seed defer).</summary>
-    public void SuppressAutoRebuild() => _suppressDisposeRebuild = true;
-
-    
-    
-    
-    
-    public async Task RebuildAsync(CancellationToken ct = default)
+    internal static string EnsureCreateIndexIfNotExists(string indexDef)
     {
-        if (_pending.Count == 0) return;
-        var defs = _pending;
-        _pending = new List<string>();
-        await SecondaryIndexPolicy.RebuildIndexesAsync(_ds, defs, ct);
+        if (indexDef.Contains("IF NOT EXISTS", StringComparison.OrdinalIgnoreCase))
+            return indexDef;
+        return Regex.Replace(
+            indexDef,
+            @"^(\s*CREATE\s+INDEX\s+)",
+            "$1IF NOT EXISTS ",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
-    
-    public async ValueTask DisposeAsync()
+    internal static string? TryExtractIndexName(string indexDef)
     {
-        if (_pending.Count == 0 || _suppressDisposeRebuild) return;
-        try
-        {
-            await RebuildAsync();
-        }
-        catch (Exception ex)
-        {
-            
-            
-            _log.LogError(ex, "B2: rebuild of {Count} secondary {Table} index(es) FAILED on scope dispose; "
-                + "the table may be left index-free — rebuild manually", _pending.Count, Table);
-        }
+        var m = Regex.Match(
+            indexDef,
+            @"CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?<schema>\w+)\.)?(?<name>""[^""]+""|\w+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!m.Success) return null;
+        var name = m.Groups["name"].Value;
+        return name.Length >= 2 && name[0] == '"' && name[^1] == '"'
+            ? name[1..^1]
+            : name;
     }
 }

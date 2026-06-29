@@ -33,19 +33,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
         ILogger<NpgsqlSubstrateWriter>? logger = null,
-        bool bulkFreshSource = false)
+        bool bulkFreshSource = false,
+        int? applyPartitions = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
-        _ = bulkFreshSource; // bulk-fresh toggles compose-time probes via IntentStage.IsBulkFreshBypass.
-        _applyPartitions = ResolveApplyPartitions();
+        _ = bulkFreshSource;
+        _applyPartitions = applyPartitions ?? IngestTopology.Current.ApplyPartitions;
     }
 
     // Parallel apply_batch fan-out: each partition = own connection, COPY disjoint rows, one
-    // set-based laplace_apply_batch (P-core pinned). Override via LAPLACE_APPLY_PARTITIONS.
-    // Ingest CLI sets this from LAPLACE_INGEST_WORKERS before constructing the writer.
-    private static int ResolveApplyPartitions() => CpuTopology.ResolveApplyPartitions();
+    // set-based laplace_apply_batch (P-core pinned). Count from IngestTopology at ingest entry.
 
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
     {
@@ -86,46 +85,53 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (!pre.IsInvalid) prebuiltStages.Add(pre);
         }
 
-        using var stage = IntentStage.New(
-            Math.Max(Math.Max(entitiesAttempted, physAttempted), attAttempted));
+        // Content compose drains leaf-to-trunk into IntentStages; only marshal managed rows
+        // (mostly attestations on vocabulary sources) when present — never re-copy entities/phys
+        // that already live in a native stage.
+        IntentStage? managedStage = null;
+        if (entitiesAttempted > 0 || physAttempted > 0 || attAttempted > 0)
+        {
+            managedStage = IntentStage.New(
+                Math.Max(Math.Max(entitiesAttempted, physAttempted), attAttempted));
+            Span<double> coord = stackalloc double[4];
+            var seenEntity = new HashSet<Hash128>();
+            var seenPhys   = new HashSet<Hash128>();
+            var seenAtt    = new HashSet<Hash128>();
 
-        Span<double> coord = stackalloc double[4];
-
-        // Within-batch de-dup only (a batch can legitimately re-emit the same id many times).
-        var seenEntity = new HashSet<Hash128>();
-        var seenPhys   = new HashSet<Hash128>();
-        var seenAtt    = new HashSet<Hash128>();
-
-        foreach (var c in changes)
-            foreach (var e in c.Entities)
-            {
-                if (!seenEntity.Add(e.Id)) continue;
-                stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
-            }
-        foreach (var c in changes)
-            foreach (var p in c.Physicalities)
-            {
-                if (!seenPhys.Add(p.Id)) continue;
-                coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
-                stage.AddPhysicality(
-                    p.Id, p.EntityId, (short)p.Type,
-                    coord, p.HilbertIndex,
-                    p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
-                                              : p.TrajectoryXyzm.AsSpan(),
-                    p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
-            }
-        foreach (var c in changes)
-            foreach (var a in c.Attestations)
-            {
-                if (!seenAtt.Add(a.Id)) continue;
-                stage.AddAttestation(
-                    a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
-                    (short)a.Outcome, a.LastObservedAtUnixUs, a.ObservationCount);
-            }
+            foreach (var c in changes)
+                foreach (var e in c.Entities)
+                {
+                    if (!seenEntity.Add(e.Id)) continue;
+                    managedStage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
+                }
+            foreach (var c in changes)
+                foreach (var p in c.Physicalities)
+                {
+                    if (!seenPhys.Add(p.Id)) continue;
+                    coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
+                    managedStage.AddPhysicality(
+                        p.Id, p.EntityId, (short)p.Type,
+                        coord, p.HilbertIndex,
+                        p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
+                                                  : p.TrajectoryXyzm.AsSpan(),
+                        p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+                }
+            foreach (var c in changes)
+                foreach (var a in c.Attestations)
+                {
+                    if (!seenAtt.Add(a.Id)) continue;
+                    managedStage.AddAttestation(
+                        a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
+                        (short)a.Outcome, a.LastObservedAtUnixUs, a.ObservationCount, a.HighwayMask);
+                }
+        }
 
         var sourceStages = new List<IntentStage>(prebuiltStages.Count + 1);
         sourceStages.AddRange(prebuiltStages);
-        sourceStages.Add(stage);
+        if (managedStage is not null
+            && (managedStage.EntityCount > 0 || managedStage.PhysicalityCount > 0
+                || managedStage.AttestationCount > 0))
+            sourceStages.Add(managedStage);
 
         long entCount  = sourceStages.Sum(s => (long)s.EntityCount);
         long physCount = sourceStages.Sum(s => (long)s.PhysicalityCount);
@@ -136,6 +142,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         long entitiesSkipped = 0, physicalitiesSkipped = 0;
         bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
+        try
+        {
         if (anyRows)
         {
             // Hilbert-range partition for physicalities; id.lo % N for entities/attestations.
@@ -207,6 +215,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             foreach (var pre in prebuiltStages)
                 pre.Dispose();
         }
+        }
+        finally
+        {
+            managedStage?.Dispose();
+        }
 
         sw.Stop();
 
@@ -252,7 +265,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     /// into per-partition temp staging, then ONE laplace_apply_batch call. Runs concurrently with
     /// the other partitions; their key spaces never overlap, so the set-based anti-join in the SPI
     /// merge cannot collide cross-partition. Default fan-out is P-core count via
-    /// CpuTopology.ResolveApplyPartitions(); Ingest CLI sets LAPLACE_APPLY_PARTITIONS from workers.
+    /// CpuTopology.ResolveApplyPartitions(); ingest passes IngestTopology.Current.ApplyPartitions.
     /// </summary>
     private async Task<(int e, int p, int a, long f, long es, long ps, int rt)> ApplyPartitionAsync(
         IReadOnlyList<IntentStage> stages, int partitionIndex, CancellationToken ct)

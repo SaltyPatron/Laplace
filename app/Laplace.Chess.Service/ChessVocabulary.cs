@@ -113,7 +113,7 @@ public static class ChessVocabulary
     /// and are queryable. Content-addressed, so repeats across games/batches converge to one entity.</summary>
     public static Hash128 EmitPlayer(SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId)
     {
-        b.AddEntity(playerId, EntityTier.Vocabulary, PlayerType, sourceId);
+        b.AddEntity(playerId, EntityTier.Word, PlayerType, sourceId);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
             b.AddAttestation(NativeAttestation.Categorical(
                 playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.AcademicCurated));

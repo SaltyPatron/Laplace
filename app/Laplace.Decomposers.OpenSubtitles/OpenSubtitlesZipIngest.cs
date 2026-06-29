@@ -143,8 +143,8 @@ internal static class OpenSubtitlesZipIngest
         // Subtitle-line content (TryAppendPair) is deferred and tier-deduped per micro-batch when a
         // reader is available; the language entities above are plain managed rows.
         b.EnableDeferredContent(reader);
-        b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
-        b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
+        b.AddEntity(new EntityRow(langA, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
+        b.AddEntity(new EntityRow(langB, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
         return b;
     }
 }

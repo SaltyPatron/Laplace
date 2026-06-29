@@ -24,16 +24,9 @@ if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
-rem Commit pool default: parallel (8) so EVERY decomposer commits multi-worker, not just
-rem the steps that override it (omw/conceptnet/ud). Was 1; raised so light steps (unicode,
-rem cili, wordnet, verbnet, ...) also use the full commit pool. Set =1 to force serial commit.
-if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
-rem File-level decompose fan-out (OMW/UD/OpenSubtitles): leave LAPLACE_DECOMPOSE_WORKERS unset so
-rem IngestParallelism.ResolveFileWorkers auto-scales to P-core count minus headroom. Commit pool
-rem (LAPLACE_INGEST_WORKERS above) is separate and I/O-bound — do not conflate the two.
-rem Within-file compose (grammar): LAPLACE_INGEST_COMPOSE_WORKERS; OMW seed-step pins this to 1.
-rem Leave LAPLACE_INGEST_COMPOSE_WORKERS UNSET so the code resolves P-cores-1 (7 on a 14900KS),
-rem not a hardcoded 4. OMW's seed-step still pins it to 1 explicitly for its key-sharing race.
+rem Ingest worker counts (file decompose, commit pool, apply partitions) are resolved at runtime
+rem from CpuTopology in managed code — do NOT set LAPLACE_INGEST_WORKERS / LAPLACE_DECOMPOSE_WORKERS
+rem in scripts unless you are deliberately overriding detection for a one-off experiment.
 if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"

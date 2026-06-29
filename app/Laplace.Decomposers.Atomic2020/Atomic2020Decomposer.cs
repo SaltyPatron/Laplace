@@ -60,8 +60,8 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
             entityCapacity: 1 + Splits.Length, physicalityCapacity: 0, attestationCapacity: 0);
-        seed.AddEntity(new EntityRow(NoneId, EntityTier.Vocabulary, MarkerTypeId, Source));
-        foreach (var s in Splits) seed.AddEntity(new EntityRow(SplitId(s), EntityTier.Vocabulary, SplitTypeId, Source));
+        seed.AddEntity(new EntityRow(NoneId, EntityTier.Word, MarkerTypeId, Source));
+        foreach (var s in Splits) seed.AddEntity(new EntityRow(SplitId(s), EntityTier.Word, SplitTypeId, Source));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -118,8 +118,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
 
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 file,
-                modalityId: "tsv",
-                sourceId: Source,
+                EtlManifest.Get("atomic2020"),
                 witness: witness,
                 batchSize: batch,
                 witnessWeight: 1.0,

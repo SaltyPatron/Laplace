@@ -62,7 +62,8 @@ int intent_stage_add_attestation(
     const hash128_t* context_id,
     int16_t          outcome,
     int64_t          last_observed_at_unix_us,
-    int64_t          observation_count);
+    int64_t          observation_count,
+    const uint8_t*   highway_mask);   /* 32 bytes or NULL */
 
 size_t intent_stage_emit_copy_binary(
     const intent_stage_t* stage,

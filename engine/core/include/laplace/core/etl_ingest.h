@@ -45,6 +45,8 @@ typedef struct {
     hash128_t   context_id;
     uint8_t     context_is_null;
     uint8_t     skip_comment_rows; /* 1 => skip lines starting with '#' */
+    uint8_t     line_framed;       /* 1 => one physical newline = one record */
+    uint8_t     _pad_cfg[5];
 } laplace_etl_config_t;
 
 typedef struct laplace_etl_session laplace_etl_session_t;

@@ -176,6 +176,7 @@ public static unsafe class NativeGrammarIngest
                     ContextId = contextId ?? default,
                     ContextIsNull = (byte)(contextId is null ? 1 : 0),
                     SkipCommentRows = (byte)(src.AcceptCommentRows ? 0 : 1),
+                    LineFramed = (byte)(src.Modality.RecordFraming == GrammarRecordFraming.Line ? 1 : 0),
                 };
                 NativeInterop.EtlSessionOpen(&cfg, &sess);
             }

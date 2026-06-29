@@ -327,7 +327,7 @@ public sealed class LlamaTokenizerParser
                 }
                 else
                 {
-                    b.AddEntity(rec.EntityId, EntityTier.Vocabulary, TextEntityBuilder.WordTypeId,
+                    b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
                         firstObservedBy: sourceId);
                 }
 
@@ -418,7 +418,7 @@ public sealed class LlamaTokenizerParser
                 return rootId;
         }
         var id = Hash128.Blake3(canonical);
-        b.AddEntity(id, EntityTier.Vocabulary, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
+        b.AddEntity(id, EntityTier.Word, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
         return id;
     }
 

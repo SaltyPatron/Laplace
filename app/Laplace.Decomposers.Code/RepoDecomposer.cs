@@ -81,7 +81,7 @@ public sealed class RepoDecomposer : IDecomposer
         var reader = context.Reader;
         var b = NewBuilder(0, reader);
         int inBatch = 0, bn = 0;
-        b.AddEntity(new EntityRow(repoId, EntityTier.Vocabulary, RepoTypeId, Source));
+        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
 
         char sep = Path.DirectorySeparatorChar;
         string[] skipSegs = { $"{sep}obj{sep}", $"{sep}bin{sep}", $"{sep}.git{sep}", $"{sep}node_modules{sep}" };

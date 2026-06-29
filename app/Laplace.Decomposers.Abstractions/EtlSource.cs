@@ -20,13 +20,31 @@ public enum AnchorResolver
 }
 
 /// <summary>
+/// How physical bytes are split into records before tree-sitter parses each record.
+/// <see cref="Grammar"/> — the grammar's <c>row</c> rule frames records (RFC4180 quoted fields may
+/// span newlines). <see cref="Line"/> — one <c>\n</c>-delimited physical line is one record; robust
+/// for line-oriented corpora (OMW .tab, Atomic2020 triples) where malformed quotes must not slurp
+/// the rest of the file. Delimiter (tab/comma/pipe) is selected separately via
+/// <see cref="EtlModality.GrammarId"/> (<c>tsv</c>, <c>csv</c>, <c>psv</c>, …).
+/// </summary>
+public enum GrammarRecordFraming
+{
+    Grammar,
+    Line,
+}
+
+/// <summary>
 /// How the source modality is selected for <see cref="StructuredGrammarIngest"/>: a compiled
 /// grammar/recipe id ("tsv", "json", ...) and/or a file extension glob. A row whose
 /// <see cref="GrammarReady"/> is false names a grammar that is not yet wired into
 /// <c>grammar_registry.c</c> + <c>grammars/CMakeLists.txt</c> (turtle for CILI; xml for
 /// FrameNet/PropBank/VerbNet); Migrate wires those, after which the row becomes complete.
 /// </summary>
-public readonly record struct EtlModality(string GrammarId, string? Glob = null, bool GrammarReady = true);
+public readonly record struct EtlModality(
+    string GrammarId,
+    string? Glob = null,
+    bool GrammarReady = true,
+    GrammarRecordFraming RecordFraming = GrammarRecordFraming.Grammar);
 
 /// <summary>
 /// One field-role-to-edge mapping rule for the generic TSV/PSV walker: the subject/object field

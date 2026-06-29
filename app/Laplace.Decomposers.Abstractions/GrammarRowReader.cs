@@ -2,13 +2,50 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
 
-
 public static class GrammarRowReader
 {
-    public static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsAsync(
+    public static IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsAsync(
         string filePath,
         string modalityId,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
+        CancellationToken ct = default)
+        => ReadFieldsAsync(filePath, new EtlModality(modalityId, RecordFraming: recordFraming), ct);
+
+    public static IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsAsync(
+        string filePath,
+        EtlModality modality,
+        CancellationToken ct = default)
+    {
+        if (modality.RecordFraming == GrammarRecordFraming.Line)
+            return ReadFieldsLineFramedAsync(filePath, modality.GrammarId, ct);
+        return ReadFieldsGrammarFramedAsync(filePath, modality.GrammarId, ct);
+    }
+
+    private static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsLineFramedAsync(
+        string filePath,
+        string modalityId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
+        if (recipe == IntPtr.Zero) yield break;
+
+        long units = 0;
+        await foreach (ReadOnlyMemory<byte> lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (lineMem.Length == 0) continue;
+            units += lineMem.Length;
+            byte[] lineUtf8 = lineMem.Span.ToArray();
+            string[]? fields = TryFieldStrings(lineUtf8, recipe, modalityId);
+            if (fields is not null)
+                yield return (fields, units);
+        }
+    }
+
+    private static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsGrammarFramedAsync(
+        string filePath,
+        string modalityId,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
         if (recipe == IntPtr.Zero) yield break;
@@ -42,6 +79,28 @@ public static class GrammarRowReader
     {
         IntPtr iter = IntPtr.Zero;
         return NativeInterop.GrammarRowIterNew(recipe, &iter) == 0 ? iter : IntPtr.Zero;
+    }
+
+    private static string[]? TryFieldStrings(byte[] lineUtf8, IntPtr recipe, string modalityId)
+    {
+        try
+        {
+            using var ast = GrammarDecomposer.Parse(lineUtf8, recipe);
+            using var composer = new GrammarRowComposer(lineUtf8, ast, Hash128.Zero, modalityId);
+            var spans = composer.FieldSpans();
+            var fields = new string[spans.Count];
+            for (int i = 0; i < spans.Count; i++)
+            {
+                var sp = spans[i];
+                fields[i] = System.Text.Encoding.UTF8.GetString(
+                    lineUtf8.AsSpan((int)sp.Start, (int)(sp.End - sp.Start)));
+            }
+            return fields;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static unsafe List<string[]> FeedChunkFields(IntPtr iter, byte[] buf, int read, string modalityId)

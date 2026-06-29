@@ -15,10 +15,13 @@ public static unsafe class GrammarTags
         LaplaceTag* outTags = null;
         nuint n = 0;
         int rc;
-        fixed (byte* t = tagsScm)
-        fixed (byte* u = utf8)
+        lock (LaplaceCoreGate.Native)
         {
-            rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
+            fixed (byte* t = tagsScm)
+            fixed (byte* u = utf8)
+            {
+                rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
+            }
         }
         if (rc != 0 || outTags == null) return Array.Empty<TagCapture>();
 
@@ -34,7 +37,8 @@ public static unsafe class GrammarTags
         }
         finally
         {
-            NativeInterop.GrammarTagsFree(outTags);
+            lock (LaplaceCoreGate.Native)
+                NativeInterop.GrammarTagsFree(outTags);
         }
     }
 

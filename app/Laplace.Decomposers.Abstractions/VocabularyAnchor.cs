@@ -39,11 +39,11 @@ public static class VocabularyAnchor
     {
         if (!seen.Add(id)) return;
 
-        builder.AddEntity(new EntityRow(id, EntityTier.Vocabulary, metaTypeId, sourceId));
+        builder.AddEntity(new EntityRow(id, EntityTier.Word, metaTypeId, sourceId));
 
         if (parentId is { } parent)
         {
-            builder.AddEntity(new EntityRow(parent, EntityTier.Vocabulary, metaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(parent, EntityTier.Word, metaTypeId, sourceId));
             builder.AddAttestation(NativeAttestation.Categorical(
                 id, parentRelation, parent, sourceId, null, trust));
         }

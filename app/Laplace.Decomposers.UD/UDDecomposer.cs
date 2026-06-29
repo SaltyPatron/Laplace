@@ -47,7 +47,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
 
         int batchSentences = UdIngestSupport.ResolveBatchSentences(options);
         long cap = options.MaxInputUnits;
-        int workers = cap > 0 ? 1 : IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
+        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
         var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;
 

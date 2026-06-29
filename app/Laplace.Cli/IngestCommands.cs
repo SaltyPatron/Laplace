@@ -116,10 +116,7 @@ internal static class IngestCommands
 
 
 
-        // NOTE: no process-wide CPU pin. The machine is shared (the user works on it; GPUs, hypervisor,
-        // WSL all run too). Seizing every P-core logical thread starves the box. The OS hybrid scheduler
-        // already keeps active CPU-bound work on P-cores when they're free and leaves headroom for the
-        // user; worker counts (compose/decompose/commit) are the place to bound load, not affinity.
+        // Hybrid topology: worker counts and P-core pinning are resolved once in IngestTopology.EnsureReady().
         CodepointPerfcache.Load(ResolveBlob());
 
         // Make the bespoke witnesses of the already-grammar-conforming sources available to the
@@ -165,8 +162,34 @@ internal static class IngestCommands
                 new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
             "openings"   => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
+            "omw-probe"  => await OmwProbeAsync(cli),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, omw-probe, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
+    }
+
+    private static async Task<int> OmwProbeAsync(IngestCliArgs cli)
+    {
+        string wns = IngestDataPaths.Resolve("omw", cli.Path);
+        if (!Directory.Exists(wns))
+            return Fail($"OMW path not found: {wns}");
+
+        long start = EnvLong("LAPLACE_OMW_PROBE_START", 0, min: 0);
+        long max = EnvLong("LAPLACE_OMW_PROBE_MAX", 0, min: 0);
+        CodepointPerfcache.Load(ResolveBlob());
+
+        Console.Error.WriteLine($"omw-probe: scanning {wns} start_row={start} max_rows={(max > 0 ? max.ToString() : "all")}");
+        var fail = await OmwComposeProbe.ScanFirstFailureAsync(wns, cli.LangOverride, start, max);
+        if (fail is null)
+        {
+            Console.Error.WriteLine("omw-probe: all rows passed probe+materialize_phys");
+            return 0;
+        }
+
+        Console.Error.WriteLine(
+            $"omw-probe: FAIL row={fail.RowIndex} file={fail.FilePath}\n"
+            + $"  error={fail.Error}\n"
+            + $"  bytes={fail.LineBytes} preview={fail.LinePreview}");
+        return 1;
     }
 
     private static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
@@ -244,21 +267,6 @@ internal static class IngestCommands
 
         Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
 
-        
-        
-        var indexPolicy = new SecondaryIndexPolicy(ds, loggerFactory.CreateLogger<SecondaryIndexPolicy>());
-        await using var attScope = await indexPolicy.SuspendForBulkLoadAsync("attestations", CancellationToken.None);
-        if (attScope.Dropped)
-            Console.WriteLine($"B2: dropped {attScope.DroppedIndexDefs.Count} secondary attestations index(es) for index-free bulk load (empty table); rebuilt after apply");
-        else if (attScope.TableWasPopulated)
-            Console.WriteLine("B2: attestations populated — keeping indexes live; bounded model load maintains them incrementally (no whole-table rebuild)");
-
-        await using var consScope = await indexPolicy.SuspendForBulkLoadAsync("consensus", CancellationToken.None);
-        if (consScope.Dropped)
-            Console.WriteLine($"B2: dropped {consScope.DroppedIndexDefs.Count} secondary consensus index(es) for index-free fold (empty table); rebuilt after the consensus fold");
-        else if (consScope.TableWasPopulated)
-            Console.WriteLine("B2: consensus populated — keeping indexes live; bounded model fold maintains them incrementally (no whole-table rebuild)");
-
         var sw = Stopwatch.StartNew();
         try
         {
@@ -306,29 +314,7 @@ internal static class IngestCommands
         }
         finally
         {
-            
-            
-            
-            
-            
-            
             sw.Stop();
-            if (attScope.Dropped && !attScope.Rebuilt)
-            {
-                Console.WriteLine($"B2: rebuilding {attScope.DroppedIndexDefs.Count} secondary attestations index(es) ...");
-                var ixSw = Stopwatch.StartNew();
-                await attScope.RebuildAsync(CancellationToken.None);
-                ixSw.Stop();
-                Console.WriteLine($"B2: secondary attestations indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
-            }
-            if (consScope.Dropped && !consScope.Rebuilt)
-            {
-                Console.WriteLine($"B2: rebuilding {consScope.DroppedIndexDefs.Count} secondary consensus index(es) ...");
-                var cixSw = Stopwatch.StartNew();
-                await consScope.RebuildAsync(CancellationToken.None);
-                cixSw.Stop();
-                Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
-            }
         }
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
@@ -421,6 +407,7 @@ internal static class IngestCommands
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false, bool bulkFresh = false)
     {
+        IngestTopology.EnsureReady();
         long lastMs = -10_000;
         var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
         {
@@ -445,11 +432,19 @@ internal static class IngestCommands
                 + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
-        int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
-        int workers = EnvInt("LAPLACE_INGEST_WORKERS",
-            CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 16), min: 1);
+        int batch = EnvInt("LAPLACE_INGEST_BATCH", 0, min: 0);
+        int workers = IngestTopology.Current.CommitWorkers;
         long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
-        int commitRows = ResolveCommitRows(sourceName);
+        int? envCommit = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS"), out var cr) && cr >= 0
+            ? Math.Min(cr, 250_000) : null;
+        var sizing = IngestSizing.Resolve(
+            IngestTopology.Current.PerformanceCoreCount,
+            IngestTopology.Current.FileWorkers,
+            IngestTopology.Current.ApplyPartitions,
+            recordBatchOverride: batch > 0 ? batch : null,
+            commitRowsOverride: envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : null));
+        if (batch <= 0) batch = sizing.RecordBatchSize;
+        int commitRows = envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : sizing.CommitRows);
         var decoOpts = DecomposerOptions.ForWitness(
             sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);
         if (maxUnits > 0)
@@ -487,23 +482,14 @@ internal static class IngestCommands
         CodepointPerfcache.Load(ResolveBlob());
 
         LanguageReference.EnsureLoaded();
-        CpuTopology.EnsurePerformanceCoreExecution();
-
-        // Single commit consumer in IngestRunner; native COPY parallelism via apply partitions.
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS")))
-        {
-            int ap = EnvInt("LAPLACE_INGEST_WORKERS", CpuTopology.ResolveApplyPartitions(), min: 1);
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", ap.ToString());
-        }
+        var topo = IngestTopology.EnsureReady();
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
         bool force = cli?.Force ?? false;
-        // --force = re-run ingest (skip source-completion gate), NOT bulk-fresh bypass.
-        // Bulk-fresh is opt-in via LAPLACE_BULK_FRESH only (unicode floor, etc.).
         bool bulkFresh = IsEnvEnabled("LAPLACE_BULK_FRESH");
-        bool deferPhysRebuild = IsEnvEnabled("LAPLACE_DEFER_PHYS_INDEX_REBUILD");
-        var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh);
+        var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh,
+            applyPartitions: topo.ApplyPartitions);
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
             freshSource: bulkFresh,
@@ -513,19 +499,6 @@ internal static class IngestCommands
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
-
-
-
-
-
-        var indexPolicy = new SecondaryIndexPolicy(ds, loggerFactory.CreateLogger<SecondaryIndexPolicy>());
-        await using var physScope = await indexPolicy.SuspendForBulkLoadAsync("physicalities", CancellationToken.None);
-        if (physScope.Dropped)
-            Console.WriteLine($"B2: dropped {physScope.DroppedIndexDefs.Count} secondary physicalities index(es) "
-                            + "(incl. coord GiST + trajectory GIN) for index-free bulk load (empty table); rebuilt after apply");
-        else if (physScope.TableWasPopulated)
-            Console.WriteLine("B2: physicalities populated — keeping indexes live (incremental maintenance; "
-                            + "fresh-DB seeds drop once and rebuild after all decomposers)");
 
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)")
@@ -559,25 +532,6 @@ internal static class IngestCommands
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
 
-
-
-        if (physScope.Dropped && !physScope.Rebuilt && !deferPhysRebuild)
-        {
-            Console.WriteLine($"B2: rebuilding {physScope.DroppedIndexDefs.Count} secondary physicalities "
-                            + "index(es) (coord GiST via Hilbert-packed bulk build) ...");
-            var ixSw = Stopwatch.StartNew();
-            await physScope.RebuildAsync(CancellationToken.None);
-            ixSw.Stop();
-            Console.WriteLine($"B2: secondary physicalities indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
-        }
-        else if (deferPhysRebuild && physScope.Dropped && !physScope.Rebuilt)
-        {
-            physScope.SuppressAutoRebuild();
-            DeferredPhysIndexRebuild.Register(physScope.DroppedIndexDefs);
-            Console.WriteLine($"B2: deferring rebuild of {physScope.DroppedIndexDefs.Count} physicalities "
-                            + "index(es) (LAPLACE_DEFER_PHYS_INDEX_REBUILD)");
-        }
-
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
@@ -593,18 +547,33 @@ internal static class IngestCommands
 
     public static async Task<int> RebuildPhysIndexesAsync()
     {
-        if (!DeferredPhysIndexRebuild.HasPending)
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var indexPolicy = new SecondaryIndexPolicy(ds);
+        if (await indexPolicy.SecondaryIndexesPresentAsync("physicalities", CancellationToken.None))
         {
-            Console.WriteLine("no deferred physicalities indexes to rebuild");
+            Console.WriteLine("physicalities secondary indexes already present");
             return 0;
         }
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        Console.WriteLine("creating missing physicalities indexes (CREATE IF NOT EXISTS) ...");
         var sw = Stopwatch.StartNew();
-        await DeferredPhysIndexRebuild.RebuildAsync(ds);
+        await SecondaryIndexPolicy.EnsureIndexesAsync(ds, SchemaPhysIndexDefs, CancellationToken.None);
         sw.Stop();
-        Console.WriteLine($"B2: deferred physicalities indexes rebuilt in {sw.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"physicalities secondary indexes ensured in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
     }
+
+    private static readonly string[] SchemaPhysIndexDefs =
+    [
+        "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
+        "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)",
+        "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)",
+        "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
+        "CREATE INDEX IF NOT EXISTS physicalities_radius_btree ON laplace.physicalities USING btree (radius_origin)",
+        "CREATE INDEX IF NOT EXISTS physicalities_residual_btree ON laplace.physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
+        "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL",
+    ];
 
     private static async Task RegisterDynamicCanonicalsAsync(
         NpgsqlDataSource ds, IDecomposer decomposer)

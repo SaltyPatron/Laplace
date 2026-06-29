@@ -497,7 +497,7 @@ static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_sta
     hash128_t* ctx_ptr = a->context_is_null ? NULL : (hash128_t*)&a->context_id;
     return intent_stage_add_attestation(
         stage, &a->id, &a->subject_id, &a->type_id, obj_ptr, &a->source_id, ctx_ptr,
-        a->outcome, a->last_observed_at_unix_us, a->observation_count);
+        a->outcome, a->last_observed_at_unix_us, a->observation_count, NULL);
 }
 
 int laplace_attestation_categorical_add(

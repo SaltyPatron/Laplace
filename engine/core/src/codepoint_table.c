@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -27,6 +28,8 @@ static struct {
     uint64_t                           record_count;
     uint64_t                           decomp_count;
     uint64_t                           compose_count;
+    uint32_t*                          rev_idx;
+    uint64_t                           rev_count;
 } g_pc = {0};
 
 #ifdef _WIN32
@@ -88,6 +91,9 @@ static void pc_unmap(const uint8_t* base, size_t len) {
 void codepoint_table_unload(void) {
     if (g_pc.base) {
         pc_unmap(g_pc.base, g_pc.length);
+    }
+    if (g_pc.rev_idx) {
+        free(g_pc.rev_idx);
     }
     memset(&g_pc, 0, sizeof(g_pc));
 }
@@ -216,6 +222,44 @@ int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
     out_coord[3] = e->coord[3];
     *out_hb = e->hilbert;
     return 0;
+}
+
+static int rev_cmp(const void* pa, const void* pb) {
+    uint32_t a = *(const uint32_t*)pa;
+    uint32_t b = *(const uint32_t*)pb;
+    return memcmp(&g_pc.records[a].hash, &g_pc.records[b].hash, sizeof(hash128_t));
+}
+
+static void rev_index_ensure(void) {
+    if (g_pc.rev_idx || !g_pc.records || g_pc.record_count == 0) return;
+    uint32_t* idx = (uint32_t*)malloc(sizeof(uint32_t) * g_pc.record_count);
+    if (!idx) return;
+    for (uint64_t i = 0; i < g_pc.record_count; ++i)
+        idx[i] = (uint32_t)i;
+    qsort(idx, g_pc.record_count, sizeof(uint32_t), rev_cmp);
+    g_pc.rev_idx = idx;
+    g_pc.rev_count = g_pc.record_count;
+}
+
+int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
+    if (!id || !g_pc.records) return -1;
+    rev_index_ensure();
+    if (!g_pc.rev_idx) return -1;
+
+    uint64_t lo = 0, hi = g_pc.rev_count;
+    while (lo < hi) {
+        uint64_t mid = lo + ((hi - lo) >> 1);
+        uint32_t cp = g_pc.rev_idx[mid];
+        int c = memcmp(id, &g_pc.records[cp].hash, sizeof(hash128_t));
+        if (c < 0) hi = mid;
+        else if (c > 0) lo = mid + 1;
+        else {
+            if (cp == 0 || (cp >= 0xD800u && cp <= 0xDFFFu)) return -1;
+            if (out_cp) *out_cp = cp;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 

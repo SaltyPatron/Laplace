@@ -198,7 +198,7 @@ internal static class MapNetIngest
         if (subjectId is null) return;
         if (!seen.Add((subjectId.Value, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Vocabulary, subjectType, MapNetDecomposer.Source));
+        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Word, subjectType, MapNetDecomposer.Source));
         CategoryAnchor.AttestCategory(b, subjectId.Value, subjectType, MapNetDecomposer.Source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
             subjectId.Value, "CORRESPONDS_TO", synId, MapNetDecomposer.Source, TC.AcademicCurated));

@@ -11,29 +11,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "scripts" / "win" / "witness-manifest.json"
 
-# CI job -> needs (from manifest signal-dependency law)
-SEED_LADDER_DEPS: dict[str, list[str]] = {
-    "unicode": [],
-    "iso639": ["unicode"],
-    "cili": ["iso639"],
-    "wordnet": ["cili"],
-    "omw": ["wordnet"],
-    "verbnet": ["iso639"],
-    "propbank": ["iso639"],
-    "framenet": ["wordnet"],
-    "mapnet": ["wordnet", "framenet"],
-    "wordframenet": ["wordnet", "framenet"],
-    "semlink": ["wordnet", "verbnet", "propbank", "framenet"],
-    "ud": ["iso639"],
-    "tatoeba": ["iso639"],
-    "conceptnet": ["iso639"],
-    "wiktionary": ["iso639"],
-    "atomic2020": ["iso639"],
-    "opensubtitles": ["iso639"],
-}
+
+def foundation_sources(manifest: dict) -> list[str]:
+    block = manifest.get("foundation")
+    if not isinstance(block, dict):
+        return []
+    srcs = block.get("sources")
+    if not isinstance(srcs, list):
+        return []
+    return [s for s in srcs if isinstance(s, str) and s]
 
 
-FOUNDATION_SOURCES = ("unicode", "iso639", "cili", "wordnet", "omw")
+def parse_seed_foundation_cmd(text: str) -> list[str] | None:
+    m = re.search(r"for\s+%%S\s+in\s+\(([^)]+)\)", text, re.IGNORECASE)
+    if not m:
+        return None
+    out = [s.strip() for s in m.group(1).split() if s.strip()]
+    return out or None
 
 
 def parse_ensure_foundation_sh(text: str) -> list[str] | None:
@@ -55,7 +49,7 @@ def parse_ensure_foundation_sh(text: str) -> list[str] | None:
 def validate_retired_workflows() -> list[str]:
     errs: list[str] = []
     workflows = ROOT / ".github" / "workflows"
-    for name in ("ci.yml", "integration.yml", "deploy-app.yml"):
+    for name in ("ci.yml", "integration.yml", "deploy-app.yml", "seed-ladder.yml"):
         if (workflows / name).is_file():
             errs.append(f"retired workflow still present: .github/workflows/{name}")
     laplace = workflows / "laplace.yml"
@@ -68,7 +62,7 @@ def validate_retired_workflows() -> list[str]:
             errs.append("laplace.yml: expected pull_request trigger on main")
         if "push:branches:[main]" not in compact:
             errs.append("laplace.yml: expected push trigger on main")
-        for stale in ("integration.yml", "deploy-app.yml"):
+        for stale in ("integration.yml", "deploy-app.yml", "seed-ladder.yml"):
             if stale in text:
                 errs.append(f"laplace.yml: references retired workflow {stale}")
     return errs
@@ -214,26 +208,6 @@ def parse_audit_ladder(text: str) -> list[str] | None:
     return base
 
 
-def parse_seed_ladder_yml(text: str) -> dict[str, list[str]]:
-    deps: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in text.splitlines():
-        job_m = re.match(r"^  (\w+):\s*$", line)
-        if job_m and not line.startswith("    "):
-            current = job_m.group(1)
-            if current not in ("convergence",):
-                deps.setdefault(current, [])
-            continue
-        if current and "needs:" in line:
-            need_part = line.split("needs:", 1)[1].strip()
-            if need_part.startswith("["):
-                jobs = re.findall(r"(\w+)", need_part)
-                deps[current] = jobs
-            else:
-                deps[current] = [need_part]
-    return deps
-
-
 def compare_order(label: str, expected: list[str], actual: list[str] | None) -> list[str]:
     if actual is None:
         return [f"{label}: could not parse ordering"]
@@ -278,36 +252,6 @@ def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
     out["tatoeba"] = len(knowledge) + 2
     out["opensubtitles"] = len(knowledge) + 3
     return out
-
-
-def validate_seed_ladder_deps(deps: dict[str, list[str]]) -> list[str]:
-    errs: list[str] = []
-    for job, needs in SEED_LADDER_DEPS.items():
-        if job not in deps:
-            continue
-        actual = deps[job]
-        for req in needs:
-            if req not in actual:
-                errs.append(
-                    f"seed-ladder.yml: job '{job}' needs '{req}' "
-                    f"(manifest dependency); has {actual or '[]'}"
-                )
-    semlink_needs = deps.get("semlink", [])
-    for req in ("wordnet", "verbnet", "propbank", "framenet"):
-        if req not in semlink_needs:
-            errs.append(f"seed-ladder.yml: semlink must need {req}; has {semlink_needs}")
-    for bridge in ("mapnet", "wordframenet"):
-        bridge_needs = deps.get(bridge, [])
-        for req in ("wordnet", "framenet"):
-            if bridge not in deps:
-                continue
-            if req not in bridge_needs:
-                errs.append(f"seed-ladder.yml: {bridge} must need {req}; has {bridge_needs}")
-    if "wordnet" not in deps.get("omw", []):
-        errs.append("seed-ladder.yml: omw must need wordnet")
-    if "cili" not in deps:
-        errs.append("seed-ladder.yml: missing cili job")
-    return errs
 
 
 def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
@@ -381,14 +325,17 @@ def main() -> int:
 
     manifest = load_manifest()
     errs = manifest_errors(manifest)
+    foundation = foundation_sources(manifest)
+    if not foundation:
+        errs.append("manifest: missing or empty foundation.sources[]")
     stages = stage_cli_lists(manifest)
     knowledge = stages["knowledge"]
     ingest_all_expected = flat_ingest_all(manifest)
 
     ingest_sh = ROOT / "scripts" / "ingest-source.sh"
     seed_stage = ROOT / "scripts" / "win" / "seed-stage.cmd"
+    seed_foundation = ROOT / "scripts" / "win" / "seed-foundation.cmd"
     audit_sh = ROOT / "scripts" / "audit-decomposers.sh"
-    seed_yml = ROOT / ".github" / "workflows" / "seed-ladder.yml"
     ensure_foundation = ROOT / "scripts" / "ensure-foundation.sh"
     pipeline_sh = ROOT / "scripts" / "pipeline.sh"
 
@@ -404,9 +351,18 @@ def main() -> int:
     else:
         errs.extend(compare_order(
             "ensure-foundation.sh",
-            list(FOUNDATION_SOURCES),
+            foundation,
             parse_ensure_foundation_sh(read_text(ensure_foundation)),
         ))
+
+    if seed_foundation.is_file():
+        errs.extend(compare_order(
+            "seed-foundation.cmd",
+            foundation,
+            parse_seed_foundation_cmd(read_text(seed_foundation)),
+        ))
+    else:
+        errs.append("missing foundation helper: scripts/win/seed-foundation.cmd")
 
     errs.extend(compare_order(
         "ingest-source.sh all",
@@ -445,9 +401,6 @@ def main() -> int:
                 + ", ".join(f"{k}={actual_layers[k]} (expected {expected_layers[k]})" for k in drift)
             )
 
-    seed_deps = parse_seed_ladder_yml(read_text(seed_yml))
-    errs.extend(validate_seed_ladder_deps(seed_deps))
-
     gates_path = ROOT / "scripts" / "decomposer-gates.json"
     if gates_path.is_file():
         with gates_path.open(encoding="utf-8") as f:
@@ -463,6 +416,7 @@ def main() -> int:
         return 1
 
     print("validate-pipeline: OK")
+    print(f"  foundation:      {' -> '.join(foundation)}")
     print(f"  knowledge order: {' -> '.join(knowledge)}")
     print(f"  ingest all:      {' -> '.join(ingest_all_expected)}")
     return 0

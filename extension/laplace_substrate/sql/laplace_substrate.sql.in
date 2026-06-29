@@ -24,6 +24,7 @@
 #include "21_seed.sql.in"
 #include "22_cascade_surface.sql.in"
 #include "23_structural_surface.sql.in"
+#include "33_lexical_variants.sql.in"
 #include "24_identity_health.sql.in"
 #include "25_intent_preflight.sql.in"
 #include "26_generation.sql.in"
@@ -38,3 +39,4 @@
 #include "36_recall_responses.sql.in"
 #include "37_corpus_expand.sql.in"
 #include "38_geometry_expand.sql.in"
+#include "39_highway.sql.in"

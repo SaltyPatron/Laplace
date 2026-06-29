@@ -23,6 +23,7 @@ public static class StructuredGrammarIngest
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         long maxInputUnits = 0,
         ISubstrateReader? containmentReader = null,
+        GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
         CancellationToken ct = default)
     {
         if (IntentStage.IsBulkFreshBypass)
@@ -30,8 +31,40 @@ public static class StructuredGrammarIngest
         return IngestFileViaPipelineAsync(
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
             batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
-            maxInputUnits, containmentReader, ct);
+            maxInputUnits, containmentReader, recordFraming, ct);
     }
+
+    /// <summary>Ingest one file using record framing from the manifest row.</summary>
+    public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
+        string filePath,
+        EtlSource source,
+        IGrammarWitness witness,
+        int batchSize,
+        double witnessWeight,
+        string batchLabelPrefix,
+        Action<long>? reportUnits,
+        Hash128? contextId = null,
+        int commitEpoch = 0,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
+        long maxInputUnits = 0,
+        ISubstrateReader? containmentReader = null,
+        CancellationToken ct = default)
+        => IngestFileAsync(
+            filePath,
+            source.Modality.GrammarId,
+            source.SourceId,
+            witness,
+            batchSize,
+            witnessWeight,
+            batchLabelPrefix,
+            reportUnits,
+            contextId,
+            commitEpoch,
+            acceptRow,
+            maxInputUnits,
+            containmentReader,
+            source.Modality.RecordFraming,
+            ct);
 
     internal static unsafe IntPtr CreateRowIterForPipeline(IntPtr recipe) => CreateRowIter(recipe);
 
@@ -58,15 +91,17 @@ public static class StructuredGrammarIngest
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         long maxInputUnits = 0,
         ISubstrateReader? containmentReader = null,
+        GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
         CancellationToken ct = default)
     {
-        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow);
+        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
         var config = new IngestBatchConfig
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = batchSize,
+            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
             ContainmentReader = containmentReader,
@@ -75,6 +110,38 @@ public static class StructuredGrammarIngest
         };
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
+
+    /// <summary>Pipeline ingest using modality + record framing from the manifest row.</summary>
+    public static IAsyncEnumerable<SubstrateChange> IngestFileViaPipelineAsync(
+        string filePath,
+        EtlSource source,
+        IGrammarWitness witness,
+        int batchSize,
+        double witnessWeight,
+        string batchLabelPrefix,
+        Action<long>? reportUnits,
+        Hash128? contextId = null,
+        int commitEpoch = 0,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
+        long maxInputUnits = 0,
+        ISubstrateReader? containmentReader = null,
+        CancellationToken ct = default)
+        => IngestFileViaPipelineAsync(
+            filePath,
+            source.Modality.GrammarId,
+            source.SourceId,
+            witness,
+            batchSize,
+            witnessWeight,
+            batchLabelPrefix,
+            reportUnits,
+            contextId,
+            commitEpoch,
+            acceptRow,
+            maxInputUnits,
+            containmentReader,
+            source.Modality.RecordFraming,
+            ct);
 
     private static unsafe IntPtr CreateRowIter(IntPtr recipe)
     {
