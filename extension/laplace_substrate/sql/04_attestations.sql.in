@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS attestations (
     context_id        bytea                  REFERENCES entities(id),
     outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
     last_observed_at  timestamptz   NOT NULL,
-    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0)
+    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
+    highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
 );
 
 SELECT pg_extension_config_dump('attestations', '');

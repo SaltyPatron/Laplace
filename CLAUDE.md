@@ -69,3 +69,72 @@ Full backlog + priorities: **`docs\chess-engine-roadmap-2026-06-27.md`** (read t
 - Never put a `C:\Program Files` (or other system) path in the same script as `Remove-Item`/destructive
   ops — the harness guard blocks the whole command and reports it as "Remove-Item on system path C:\Program".
 - ASAN-instrumented core won't report inside the .NET CLI (CLR SEH). Use the native test exe.
+
+---
+
+## Rules for AI agents — stop drifting from the invention
+
+### Identity & tier (most commonly violated)
+- `id = blake3(content)`. Tier = `max(child)+1`, emergent from composition, **never stamped, never a
+  fixed integer category, never a vocabulary enum**. The text ladder 0–4 is UAX29 only; every modality
+  composes its own depth. Hardcoding `Vocabulary = 5` or any tier-as-category is a bug.
+- **Two orthogonal axes — do not collapse them.** (1) Compositional / geometric: tier, coord, radius,
+  Hilbert — built bottom-up by `grammar_compose`. (2) Referential / semantic: typed attestation edges
+  (IS_A, HAS_POS, HAS_SENSE, PRECEDES…) linking nodes top-down via Glicko-2 consensus. Meaning is the
+  fold, not the coordinates.
+- Meta vocabulary (POS, RelationType, Language, ILI/synset) is **distinct from its name-as-text**. A
+  concept node and the word "noun" are different entities with different ids. `type_id + physicality +
+  trust/source` carry the distinction — never tier, never merge meta into content.
+- Content-addressing is non-negotiable: `OfCanonical("language:iso3")` hashes a language as a stable
+  namespace key (correct — a language is not text). Position identity (chess) = Merkle over ALL surface
+  tokens. Any surface change orphans the ingested seed; that is the re-key decision gate.
+
+### Ingest write-path (the bulk of past agent mistakes)
+- **Stage 1** (tree-sitter / grammar parse) → streams raw records. **Stage 2** (hash → descent →
+  Hilbert-sorted bulk append → Glicko fold) is pure native engine. They are **separate**. Stage 1 is
+  out of the loop once records emit. Never route structured content (chess positions, code, SCADA) back
+  through the UAX29 text composer — it was the root of the chess row-explosion and AccessViolation crash.
+- **Descent is the only existence check** — once, top-down on the reduced T2+ trunk set, before the
+  insert. The insert looks up nothing. No `ON CONFLICT`, no per-row anti-join at insert time. If
+  `ON CONFLICT` fires at scale, the descent was skipped — that is the bug to fix.
+- Bulk append is ordered by `hilbert_index` → sequential B-tree / GiST maintenance → no page-split cliff.
+  **Never drop indexes**: they are the dedup probe and every read path. "Indexes are expensive" is the
+  random-order half-truth; sequential-order maintenance is cheap.
+- Descent gates the **compute** too: a present top trunk ⟹ skip decomposition entirely, not just the
+  insert. Dedup key for physicalities is the **BLAKE3 id only** — there is no `(entity_id, type)` unique
+  constraint, and adding one is a phantom check against a non-existent constraint.
+
+### Measurement discipline
+- No perf number enters code, memory, or a report without a committed, re-runnable script + exact output
+  + hardware (i9-14900KS, 48 GB, RAID-0 NVMe, PG18 native Windows). Training knowledge ("B-trees are
+  normally slow on random keys") is a hypothesis — verify against the actual workload.
+- Size runs to the claim: 24 games ≠ a 500-game Elo distribution. One hot batch ≠ a population mean.
+- Elo anchors: always `UCI_LimitStrength=true UCI_Elo=X` balanced Stockfish. Depth-limited Stockfish is
+  positionally superhuman and tactically blind — a bad anchor.
+
+### Chess substrate
+- Raw `MOVE`-edge `eff_mu` ≈ popularity, not strength (spurious-correlation trap; raw test came back
+  null, −17). The fair fusion test is substructure-fold over opening-seeded positions.
+- `ChessCompose` native compose is NOT thread-safe — serialize all calls through the static gate.
+
+### Foundry synthesis
+- Reconcile the rank band window `[0.30–0.86]` in `FoundryCommands.cs` with `engine/manifest/
+  relation_types.toml` whenever ranks change. After recalibration IS_A=0.90 and PRECEDES=0.18 both
+  fell outside the window silently, excluding taxonomy's strongest edges and the sequential edge —
+  that killed the embedding geometry. The build-a-bear path is the designed-for-coherence path.
+
+### Design authority — stop here and ask Anthony
+Open decisions that are **not** for an AI agent to resolve unilaterally:
+- Meta-node identity (content-addressed-but-distinct vs. namespaced scheme vs. other).
+- Re-key for feature enrichment (one-time re-ingest; orphans the seed — the biggest architectural fork).
+- Lichess go-live (outward-facing public games; token in `deploy\secrets\lichess.env`).
+- Raw engine-strength climb direction (pursue, or leave at ~2105 and let the substrate be the differentiator).
+- Trust-class structure changes, any source-level re-seeding that would double-count testimony.
+
+Do not scope-reduce, offer partial deliveries, or fork the plan without explicit direction.
+
+### Tests & tooling
+- Run tests via `scripts\win\test-app.cmd`, **never** `dotnet test` directly (requires oneAPI, perfcache,
+  and PG env that env.cmd sets up).
+- Unit-test each piece **before** running a live ingest event. Isolate → prove → chain. The SVD row-
+  explosion bug should have been a unit test, not discovered inside a 2 GB ingest run.

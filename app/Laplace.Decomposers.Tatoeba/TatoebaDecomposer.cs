@@ -67,7 +67,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
                 : null;
 
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                sentences, "tsv", Source, witness, batch, 1.0, "tatoeba/sent",
+                sentences, EtlManifest.Get("tatoeba"), witness, batch, 1.0, "tatoeba/sent",
                 reportUnits: null, contextId: null, commitEpoch: 0,
                 acceptRow: acceptSent, maxInputUnits: fileCap,
                 containmentReader: context.Reader, ct: ct))
@@ -90,7 +90,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
                 : null;
 
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                links, "tsv", Source, witness, batch, 1.0, "tatoeba/link",
+                links, EtlManifest.Get("tatoeba"), witness, batch, 1.0, "tatoeba/link",
                 reportUnits: null, contextId: null, commitEpoch: 1,
                 acceptRow: acceptLink, maxInputUnits: fileCap,
                 containmentReader: context.Reader, ct: ct))

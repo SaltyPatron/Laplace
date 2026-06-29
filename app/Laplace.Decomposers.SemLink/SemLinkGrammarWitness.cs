@@ -191,7 +191,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
     {
         Hash128? id = CategoryAnchor.Id(key);
         if (id is null) return null;
-        b.AddEntity(new EntityRow(id.Value, EntityTier.Vocabulary, categoryTypeId, SemLinkDecomposer.Source));
+        b.AddEntity(new EntityRow(id.Value, EntityTier.Word, categoryTypeId, SemLinkDecomposer.Source));
         CategoryAnchor.AttestCategory(b, id.Value, categoryTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
         return id;
     }

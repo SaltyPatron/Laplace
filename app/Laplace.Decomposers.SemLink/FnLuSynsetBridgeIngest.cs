@@ -271,7 +271,7 @@ internal static class FnLuSynsetBridgeIngest
     {
         if (!seen.Add((subjectId, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId, EntityTier.Vocabulary, subjectType, source));
+        b.AddEntity(new EntityRow(subjectId, EntityTier.Word, subjectType, source));
         CategoryAnchor.AttestCategory(b, subjectId, subjectType, source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
             subjectId, "CORRESPONDS_TO", synId, source, TC.AcademicCurated));

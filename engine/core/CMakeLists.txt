@@ -28,6 +28,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/unicode_seed.h
     include/laplace/core/relation_law.h
     include/laplace/core/pos_law.h
+    include/laplace/core/highway_manifest.h
+    include/laplace/core/highway_table.h
     include/laplace/core/attestation_engine.h
     include/laplace/core/etl_ingest.h
 )
@@ -63,34 +65,42 @@ set(LAPLACE_CORE_SOURCES
     src/unicode_seed.cpp
     src/generated/relation_law.c
     src/generated/pos_law.c
+    src/highway_table.c
     src/attestation_engine.c
     src/etl_ingest.c
     src/etl_witness_conceptnet.c
     src/etl_anchor.c
 )
 
-# ── Attestation-law codegen ─────────────────────────────────────────────────────────────────────
-# relation_law/pos_law (.c/.h) + the seed SQL are GENERATED from engine/manifest/*.toml by
-# scripts/codegen-attestation-law.py and are NOT committed. This rule regenerates them for any build
-# path (build-engine, raw cmake, rebuild-all). Edit the generator or the TOML, never these outputs.
-# relation_law.c / pos_law.c appear in LAPLACE_CORE_SOURCES, so the target depends on this command.
+# ── Attestation-law + highway codegen ───────────────────────────────────────────────────────────
+# relation_law/pos_law (.c/.h) + seed SQL + highway_manifest.h + laplace_highway_perfcache.bin
+# are GENERATED from engine/manifest/*.toml by scripts/codegen-attestation-law.py and are NOT
+# committed.  Edit the generator or the TOML, never these outputs.
+set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
+set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"
+    CACHE FILEPATH "Built highway perf-cache blob (consumed by tests + installed)" FORCE)
+
 find_program(LAPLACE_CODEGEN_PYTHON NAMES python python3 REQUIRED)
 set(LAPLACE_CODEGEN_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/codegen-attestation-law.py)
 set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/relation_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/pos_law.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/highway_manifest.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/relation_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/pos_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_relation_types.sql.in
     ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_pos.sql.in
+    ${LAPLACE_HIGHWAY_BIN}
 )
 add_custom_command(
     OUTPUT  ${LAPLACE_CODEGEN_OUTPUTS}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
     COMMAND ${LAPLACE_CODEGEN_PYTHON} ${LAPLACE_CODEGEN_SCRIPT}
+            "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
             ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/relation_types.toml
             ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/pos_tags.toml
-    COMMENT "Codegen attestation law (relation_law/pos_law + seed SQL) from manifest TOML"
+    COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
     VERBATIM
 )
 
@@ -112,7 +122,7 @@ if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()
 
-set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
+# LAPLACE_PERFCACHE_DIR is defined in the codegen section above.
 set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.nounihan.flat.xml")
 set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.bin"
     CACHE FILEPATH "Built T0 codepoint perf-cache blob (consumed by tests + installed)" FORCE)
@@ -140,7 +150,8 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_target(laplace_t0_perfcache ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
+add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
+add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
 
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
@@ -194,5 +205,11 @@ install(TARGETS laplace_core
 install(FILES ${LAPLACE_PERFCACHE_BIN}
     DESTINATION share/laplace
     RENAME "laplace_t0_perfcache_${LAPLACE_UNICODE_VERSION}.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
+
+install(FILES ${LAPLACE_HIGHWAY_BIN}
+    DESTINATION share/laplace
+    RENAME "laplace_highway_perfcache.bin"
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

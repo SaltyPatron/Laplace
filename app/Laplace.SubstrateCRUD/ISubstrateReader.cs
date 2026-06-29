@@ -17,6 +17,10 @@ public interface ISubstrateReader
 
     Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default);
 
+    // Session seen-set lookup — no DB. Trunk shortcircuit must not issue per-row
+    // EntitiesExistBitmapAsync; batched content_descent_bitmap probes populate this set.
+    bool IsProvenPresent(Hash128 id) => false;
+
     // Mark ids as proven-present in the reader's session seen-set (content is immutable ⇒ permanent).
     // The deferred-content path calls this after staging a batch so re-emitted content is never
     // re-probed or re-staged. Default no-op for readers without a seen-set (test doubles).

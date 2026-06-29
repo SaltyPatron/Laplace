@@ -115,51 +115,42 @@ public sealed class GrammarEntityBuilder
 
     private unsafe IntPtr ComposeProbe()
     {
-        lock (LaplaceCoreGate.Native)
+        IntPtr composeResult = IntPtr.Zero;
+        fixed (byte* p = _utf8)
         {
-            IntPtr composeResult = IntPtr.Zero;
-            fixed (byte* p = _utf8)
-            {
-                int rc = NativeInterop.GrammarComposeProbe(
-                    p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
-                    _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
-                if (rc != 0 || composeResult == IntPtr.Zero)
-                    throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
-            }
-            return composeResult;
+            int rc = NativeInterop.GrammarComposeProbe(
+                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
+            if (rc != 0 || composeResult == IntPtr.Zero)
+                throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
         }
+        return composeResult;
     }
 
     private unsafe void MaterializePhys(IntPtr composeResult)
     {
-        lock (LaplaceCoreGate.Native)
+        fixed (byte* p = _utf8)
         {
-            fixed (byte* p = _utf8)
-            {
-                int rc = NativeInterop.GrammarComposeMaterializePhys(
-                    composeResult, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
-                if (rc != 0)
-                    throw new InvalidOperationException(
-                        $"laplace_grammar_compose_materialize_phys returned {rc}");
-            }
+            int rc = NativeInterop.GrammarComposeMaterializePhys(
+                composeResult, p, (nuint)_utf8.Length, _ast.Handle, _modalityId);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"laplace_grammar_compose_materialize_phys returned {rc}");
         }
     }
 
     private unsafe IntPtr Compose()
     {
-        lock (LaplaceCoreGate.Native)
+        IntPtr composeResult = IntPtr.Zero;
+        fixed (byte* p = _utf8)
         {
-            IntPtr composeResult = IntPtr.Zero;
-            fixed (byte* p = _utf8)
-            {
-                int rc = NativeInterop.GrammarCompose(
-                    p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
-                    _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
-                if (rc != 0 || composeResult == IntPtr.Zero)
-                    throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
-            }
-            return composeResult;
+            int rc = NativeInterop.GrammarCompose(
+                p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
+            if (rc != 0 || composeResult == IntPtr.Zero)
+                throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
         }
+        return composeResult;
     }
 
     private static unsafe Hash128[] ComposeEntityIds(IntPtr composeResult)

@@ -98,6 +98,8 @@ SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
 SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
 SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
+SELECT word_id('dog') = ANY(lexical_peers(word_id('dog'))) AS peer_includes_self;
+
 SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
 
 SELECT definition, witnesses FROM define(word_id('dog'));

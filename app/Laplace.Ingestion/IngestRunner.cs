@@ -76,7 +76,7 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
-        CpuTopology.EnsurePerformanceCoreExecution();
+        IngestTopology.EnsureReady();
         Laplace.Engine.Core.IntentStage.ResetContentBank();
         Laplace.Engine.Core.IntentStage.SetBulkFreshBypass(options.BulkFresh);
 
@@ -102,14 +102,16 @@ public sealed class IngestRunner
 
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
-
-        
-        
-        
-        
-        
-        
-        
+        var topo = IngestTopology.Current;
+        var sizing = IngestSizing.Resolve(
+            topo.PerformanceCoreCount,
+            topo.FileWorkers,
+            topo.ApplyPartitions,
+            recordBatchOverride: batchSize,
+            commitRowsOverride: commitRows > 0 ? commitRows : null);
+        int maxIntentsPerCommit = commitRows > 0
+            ? Math.Max(1, Math.Min(batchSize, sizing.MaxIntentsPerCommit))
+            : batchSize;
         static int RowsOf(SubstrateChange c)
         {
             int rows = c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
@@ -123,21 +125,9 @@ public sealed class IngestRunner
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
-        // Never hold more than one commit batch worth of intents without flushing — large
-        // LAPLACE_INGEST_COMMIT_ROWS must not silence progress for minutes.
-        int maxIntentsPerCommit = commitRows > 0
-            ? Math.Max(batchSize, commitRows / Math.Max(1, 50_000) + 1)
-            : batchSize;
         bool ShouldFlushWithCap(int intents, int rows) =>
             ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
-        
-        
-        
-        
-        
-        
-        
         // Referential integrity is no longer pre-checked, so every SubstrateChange is a
         // self-contained, independently-consistent batch and commit order across batches is
         // irrelevant (the consensus fold is commutative). Multi-worker runs therefore all use the
@@ -182,11 +172,8 @@ public sealed class IngestRunner
         else
         {
             // Single commit consumer; parallelism inside NpgsqlSubstrateWriter.ApplyManyAsync.
-            int intentsPerCommit = commitRows > 0
-                ? commitRows / Math.Max(1, batchSize) + 1
-                : batchSize;
-            int channelCap = Math.Max(8, intentsPerCommit * 4 + 4);
-            long rowBudget = Math.Max((long)commitRows, batchSize) * channelCap;
+            int channelCap = sizing.DecomposeChannelCapacity;
+            long rowBudget = sizing.RowBudget;
             long bufferedRows = 0;
             var drained = new SemaphoreSlim(0, channelCap);
 
@@ -356,6 +343,7 @@ public sealed class IngestRunner
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
+                Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
             catch (OperationCanceledException)
@@ -453,6 +441,7 @@ public sealed class IngestRunner
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
+                Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
             catch (OperationCanceledException)

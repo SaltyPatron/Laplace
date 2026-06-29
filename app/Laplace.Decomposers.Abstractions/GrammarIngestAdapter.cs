@@ -29,22 +29,27 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
         _contextId = contextId;
     }
 
-    public async ValueTask<bool> TryTrunkShortcircuitAsync(
+    public ValueTask<bool> TryTrunkShortcircuitAsync(
         GrammarIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
         double witnessWeight, CancellationToken ct)
     {
+        if (!_witness.TrunkShortcircuitWithoutCompose)
+            return ValueTask.FromResult(false);
+
         if (!GrammarRowComposer.TryProbeRowRoot(
                 record.LineUtf8, record.Ast, _modalityId, out var rootId, out var tier) || tier < 2)
-            return false;
+            return ValueTask.FromResult(false);
 
-        byte[] bm = await reader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false);
-        if ((bm[0] & 1) == 0) return false;
+        // Never per-row DB: the batched descent probe (ProbeChunkSize) is the only containment
+        // round-trip. Session seen-set hits skip compose for re-emitted trunks (OMW re-ingest).
+        if (!reader.IsProvenPresent(rootId))
+            return ValueTask.FromResult(false);
 
         _witness.WalkRow(
             new GrammarComposeContext(record.LineUtf8, record.Ast, rootId, null,
                 JsonGrammarHelper.FindRootObjectNode(record.Ast)),
             new RowContext(record.RowIndex, record.RowsTotal, _contextId), builder);
-        return true;
+        return ValueTask.FromResult(true);
     }
 
     public IIngestDeferredUnit CreateDeferredUnit(GrammarIngestRecord record) =>
@@ -98,24 +103,47 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
     }
 }
 
-/// <summary>Streams parsed rows from a grammar file without ReadAllBytes.</summary>
+/// <summary>
+/// Streams parsed rows from a grammar file without ReadAllBytes.
+/// <see cref="GrammarRecordFraming.Line"/> — one physical line is one record (delimiter/field parse
+/// still comes from the tree-sitter grammar id). <see cref="GrammarRecordFraming.Grammar"/> — the
+/// grammar's <c>row</c> rule frames records (RFC4180 quoted fields may span newlines).
+/// </summary>
 public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
 {
     private readonly string _filePath;
     private readonly string _modalityId;
     private readonly Func<ReadOnlySpan<byte>, bool>? _acceptRow;
+    private readonly GrammarRecordFraming _recordFraming;
 
     public GrammarFileRecordStream(
-        string filePath, string modalityId, Func<ReadOnlySpan<byte>, bool>? acceptRow = null)
+        string filePath,
+        string modalityId,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
+        GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar)
     {
         _filePath = filePath;
         _modalityId = modalityId;
         _acceptRow = acceptRow;
+        _recordFraming = recordFraming;
     }
+
+    public static GrammarFileRecordStream ForSource(
+        string filePath,
+        EtlSource source,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null)
+        => new(filePath, source.Modality.GrammarId, acceptRow, source.Modality.RecordFraming);
 
     public async IAsyncEnumerable<GrammarIngestRecord> RecordsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (_recordFraming == GrammarRecordFraming.Line)
+        {
+            await foreach (var record in RecordsLineFramedAsync(ct))
+                yield return record;
+            yield break;
+        }
+
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
         if (recipe == IntPtr.Zero) yield break;
 
@@ -158,6 +186,39 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
         {
             if (iter != IntPtr.Zero)
                 NativeInterop.GrammarRowIterFree(iter);
+        }
+    }
+
+    private async IAsyncEnumerable<GrammarIngestRecord> RecordsLineFramedAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
+        if (recipe == IntPtr.Zero) yield break;
+
+        int rowIndex = 0;
+        long rowsTotal = 0;
+
+        await foreach (ReadOnlyMemory<byte> lineMem in StreamingUtf8LineReader.ReadLinesAsync(_filePath, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (lineMem.Length == 0) continue;
+
+            rowsTotal++;
+            byte[] lineUtf8 = lineMem.Span.ToArray();
+            if (_acceptRow is not null && !_acceptRow(lineUtf8))
+                continue;
+
+            GrammarAst ast;
+            try
+            {
+                ast = GrammarDecomposer.Parse(lineUtf8, recipe);
+            }
+            catch (InvalidOperationException)
+            {
+                continue;
+            }
+
+            yield return new GrammarIngestRecord(lineUtf8, ast, rowIndex++, rowsTotal);
         }
     }
 }

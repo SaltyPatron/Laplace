@@ -413,7 +413,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
             byte[]? entityId;
             await using (var resolve = new NpgsqlCommand(resolveSql, conn))
             {
-                resolve.Parameters.AddWithValue("target", target.Trim().ToLowerInvariant());
+                resolve.Parameters.AddWithValue("target", target.Trim());
                 entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
             }
             if (entityId is null)
@@ -576,7 +576,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
             byte[]? entityId;
             await using (var resolve = new NpgsqlCommand(resolveSql, conn))
             {
-                resolve.Parameters.AddWithValue("target", input.Trim().ToLowerInvariant());
+                resolve.Parameters.AddWithValue("target", input.Trim());
                 entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
             }
             if (entityId is null)

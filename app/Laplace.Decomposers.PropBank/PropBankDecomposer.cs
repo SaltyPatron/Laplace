@@ -156,7 +156,7 @@ public sealed class PropBankDecomposer : IDecomposer{
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
                 _canonicalNames.TryAdd($"ordinal/{ord}/v1", 0);
                 Hash128 ordEntity = OrdinalId(ord);
-                b.AddEntity(new EntityRow(ordEntity, EntityTier.Vocabulary, OrdinalTypeId, Source));
+                b.AddEntity(new EntityRow(ordEntity, EntityTier.Word, OrdinalTypeId, Source));
                 ctx = ordEntity;
             }
 

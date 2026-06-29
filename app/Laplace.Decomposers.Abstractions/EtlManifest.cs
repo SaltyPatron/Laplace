@@ -83,23 +83,23 @@ public static class EtlManifest
             // ---- Layer 2: lexical / relational sources ------------------------------------------
             // ConceptNet: bespoke (URI parse + JSON meta + POS/synset bridges) -> witness factory.
             ["conceptnet"] = Row("conceptnet", "ConceptNetDecomposer", 2, "UserCuratedResource", TC.UserCuratedResource,
-                "conceptnet", tsv, anchor: AnchorResolver.IliSynset,
+                "conceptnet", tsv with { RecordFraming = GrammarRecordFraming.Line }, anchor: AnchorResolver.IliSynset,
                 bootstrapRelations: ConceptNetBootstrap),
 
             // Atomic2020: pure head/rel/tail triples -> declarative edge map (parity oracle for the
             // generic TSV walker). Three split files (train/dev/test) under the dir.
             ["atomic2020"] = Row("atomic2020", "Atomic2020Decomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
-                "atomic2020", tsv, glob: "*.tsv",
+                "atomic2020", tsv with { RecordFraming = GrammarRecordFraming.Line }, glob: "*.tsv",
                 bootstrapRelations: AtomicBootstrap, contextIdFromFile: AtomicSplit),
 
             // Tatoeba: sentence + link files, external-id keyed -> bespoke witness factory.
             ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
-                "tatoeba", new EtlModality("tsv", Glob: "*.csv"),
+                "tatoeba", new EtlModality("tsv", Glob: "*.csv", RecordFraming: GrammarRecordFraming.Line),
                 bootstrapRelations: TatoebaBootstrap),
 
             // Wiktionary: JSONL with deep sense/etymology/form trees -> bespoke witness factory.
             ["wiktionary"] = Row("wiktionary", "WiktionaryDecomposer", 2, "AcademicCuratedUserInput", TC.AcademicCuratedUserInput,
-                "wiktionary", new EtlModality("json", Glob: "*.json*"),
+                "wiktionary", new EtlModality("json", Glob: "*.json*", RecordFraming: GrammarRecordFraming.Line),
                 bootstrapRelations: WiktionaryBootstrap),
 
             // UD CoNLL-U: reuses the psv/tsv row grammar; HEAD/DEPREL columns -> dependency edges.
@@ -119,7 +119,7 @@ public static class EtlManifest
             ["repo"]       = Row("repo", "RepoDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
                 "repo", new EtlModality("code", GrammarReady: false)),
             ["tabular"]    = Row("tabular", "TabularDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
-                "tabular", new EtlModality("tsv", GrammarReady: false)),
+                "tabular", new EtlModality("csv", GrammarReady: false, RecordFraming: GrammarRecordFraming.Line)),
             ["tiny-codes"] = Row("tiny-codes", "TinyCodesDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
                 "tiny-codes", new EtlModality("json", GrammarReady: false)),
             ["stack"]      = Row("stack", "StackDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
@@ -130,7 +130,7 @@ public static class EtlManifest
             // ---- Layer 3: concept-convergent / cross-source bridges -----------------------------
             // OMW: ILI-anchored synset lexicalization (lemma/def/exe rows) -> bespoke witness factory.
             ["omw"] = Row("omw", "OMWDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
-                "omw", new EtlModality("tsv", Glob: "*.tab"),
+                "omw", new EtlModality("tsv", Glob: "*.tab", RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset, acceptCommentRows: false,
                 bootstrapRelations: OmwBootstrap, requireIliMap: true),
 
@@ -160,13 +160,15 @@ public static class EtlManifest
                 "semlink", new EtlModality("json", Glob: "*.json", GrammarReady: false),
                 anchor: AnchorResolver.IliSynset),
             ["mapnet"] = Row("mapnet", "MapNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
-                "mapnet", new EtlModality("tsv", Glob: "*.tsv", GrammarReady: false),
+                "mapnet", new EtlModality("tsv", Glob: "*.tsv", GrammarReady: false,
+                    RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),
             ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "wordframenet", new EtlModality("text", GrammarReady: false),
                 anchor: AnchorResolver.FrameCategory),
             ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
-                "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false),
+                "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
+                    RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),
         };
         return m;

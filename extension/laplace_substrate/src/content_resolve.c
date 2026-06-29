@@ -9,9 +9,7 @@
 
 #include "fmgr.h"
 #include "funcapi.h"
-#include "catalog/pg_collation.h"
 #include "utils/builtins.h"
-#include "utils/formatting.h"
 
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
@@ -177,19 +175,8 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
             size_t  splen = (size_t) ((ctx.off[i + L - 1] + ctx.len[i + L - 1])
                                       - ctx.off[i]);
             hash128_t id;
-            char     *lowered;
 
             if (laplace_content_root_id(sp, splen, &id) == 0
-                && phrase_id_is_entity(&id))
-            {
-                found_id = id;
-                found = true;
-                break;
-            }
-            lowered = str_tolower((const char *) sp, splen, DEFAULT_COLLATION_OID);
-            if (lowered != NULL
-                && laplace_content_root_id((const uint8_t *) lowered,
-                                           strlen(lowered), &id) == 0
                 && phrase_id_is_entity(&id))
             {
                 found_id = id;

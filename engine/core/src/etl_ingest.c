@@ -557,6 +557,8 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         free(s);
         return -3;
     }
+    if (cfg->line_framed)
+        laplace_grammar_row_iter_set_line_framed(s->iter, 1);
     // Own modality_id for the session: process_row passes sess->cfg.modality_id to compose on EVERY row,
     // so the caller's (marshalled) string can't be relied on to outlive session_open. strdup + free at close,
     // symmetric with relation_surface above.

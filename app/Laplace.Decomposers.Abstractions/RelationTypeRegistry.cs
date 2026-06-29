@@ -171,7 +171,7 @@ public static class RelationTypeRegistry
     {
         var all = new List<RelationTypeResolution>(AllCanonical());
         foreach (var k in all)
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         foreach (var k in all)
             if (k.ParentId is { } parent)
                 builder.AddAttestation(NativeAttestation.Categorical(
@@ -200,15 +200,15 @@ public static class RelationTypeRegistry
         // (DEP_DET, FEAT_*, EDEP_* rendered empty before — 0 HAS_NAME_ALIAS, code-table only).
         VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
         if (seenEntitiesThisBatch.Add(k.Id))
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         // Parent edge + substrate-native name alias, once per run — emitted even when the type has no
         // parent, so a parentless dynamic type is still legible and walkable in the DAG.
         if (seenAttestationsThisRun.Add(k.Id))
         {
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
             if (k.ParentId is { } parent)
             {
-                builder.AddEntity(new EntityRow(parent, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+                builder.AddEntity(new EntityRow(parent, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
             }

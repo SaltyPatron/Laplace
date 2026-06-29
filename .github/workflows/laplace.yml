@@ -11,12 +11,8 @@ on:
         description: "nuke + re-migrate + reseed foundation (required after destructive schema changes)"
         type: boolean
         default: false
-      full_ladder:
-        description: "after foundation, run the full seed ladder (multi-hour corpora + bridges)"
-        type: boolean
-        default: false
       skip_seed:
-        description: "deploy only; skip ensure-foundation and seed ladder"
+        description: "deploy only; skip ensure-foundation"
         type: boolean
         default: false
       skip_clean:
@@ -322,23 +318,3 @@ jobs:
             echo
           fi
           dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --nologo --verbosity minimal
-
-  seed-ladder:
-    name: Seed ladder (full)
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      && inputs.full_ladder == true
-      && inputs.skip_seed != true
-    needs: [run]
-    uses: ./.github/workflows/seed-ladder.yml
-    with:
-      full_ladder: true
-
-  model-pipeline:
-    name: Model pipeline
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      && inputs.full_ladder == true
-      && inputs.skip_seed != true
-    needs: [seed-ladder]
-    uses: ./.github/workflows/model-pipeline.yml

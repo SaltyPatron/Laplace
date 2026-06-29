@@ -155,7 +155,7 @@ static int attest_triple(intent_stage_t* stage, const laplace_etl_config_t* cfg,
     hash128_t* ctx_ptr = staged.context_is_null ? NULL : (hash128_t*)&staged.context_id;
     return intent_stage_add_attestation(
         stage, &staged.id, &staged.subject_id, &staged.type_id, obj_ptr, &staged.source_id,
-        ctx_ptr, staged.outcome, staged.last_observed_at_unix_us, staged.observation_count);
+        ctx_ptr, staged.outcome, staged.last_observed_at_unix_us, staged.observation_count, NULL);
 }
 
 int etl_witness_conceptnet_row(intent_stage_t* stage, const laplace_etl_config_t* cfg,

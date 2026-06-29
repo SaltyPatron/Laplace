@@ -432,7 +432,7 @@ internal static class QueryCommands
         for (uint i = 0; i < (uint)tree.NodeCount; i++)
         {
             var v = tree.GetNode(i);
-            if (v.Tier != 2) continue;
+            if (v.Tier != EntityTier.Word) continue; // UAX29 composition depth: only word-level text nodes carry dictionary knowledge
             if (!wordSeen.Add(v.Id)) continue;
             words.Add((v.Id, Encoding.UTF8.GetString(utf8Input, (int)v.TextRangeOff, (int)v.TextRangeLen)));
         }

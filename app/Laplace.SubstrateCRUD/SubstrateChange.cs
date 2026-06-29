@@ -95,4 +95,5 @@ public sealed record AttestationRow(
     long               ObservationCount,
     long               ScoreFp1e9,
     long               OpponentRdFp1e9,
-    long?              SumScoreFp1e9 = null);
+    long?              SumScoreFp1e9 = null,
+    Mask256            HighwayMask = default);

@@ -11,6 +11,13 @@ public interface IGrammarWitness
 {
     string ModalityId { get; }
 
+    /// <summary>
+    /// When true, <see cref="GrammarIngestHandler"/> may skip compose on a session-proven trunk and
+    /// still walk the witness. Only witnesses that can parse attestations from raw row bytes (OMW .tab)
+    /// may opt in — JSON/tree witnesses need composed node ids and must stay false.
+    /// </summary>
+    bool TrunkShortcircuitWithoutCompose => false;
+
     void WalkRow(
         in GrammarComposeContext composed,
         in RowContext ctx,

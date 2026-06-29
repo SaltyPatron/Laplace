@@ -83,6 +83,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "codepoint_table_records")]
     internal static partial int CodepointTableRecords(CodepointRecord** outRecords, ulong* outCount);
 
+    [LibraryImport(Library, EntryPoint = "codepoint_table_lookup_id")]
+    internal static partial int CodepointTableLookupId(Hash128* id, uint* outCp);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_new")]
     internal static partial IntPtr TierTreeNew(nuint capacityHint);
 
@@ -187,7 +190,8 @@ public static unsafe partial class NativeInterop
         Hash128* id, Hash128* subjectId, Hash128* typeId,
         Hash128* objectId, Hash128* sourceId, Hash128* contextId,
         short outcome,
-        long lastObservedAtUnixUs, long observationCount);
+        long lastObservedAtUnixUs, long observationCount,
+        byte* highwayMask);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_emit_copy_binary")]
     internal static partial nuint IntentStageEmitCopyBinary(
@@ -643,6 +647,12 @@ public static unsafe partial class NativeInterop
         public Hash128 ContextId;
         public byte ContextIsNull;
         public byte SkipCommentRows;
+        public byte LineFramed;
+        public byte Pad0;
+        public byte Pad1;
+        public byte Pad2;
+        public byte Pad3;
+        public byte Pad4;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -686,4 +696,37 @@ public static unsafe partial class NativeInterop
         double witnessWeight,
         byte* existingBitmap,
         nuint bitmapBits);
+
+    // ── Highway perfcache ──────────────────────────────────────────────────────
+
+    [LibraryImport(Library, EntryPoint = "highway_table_load", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int HighwayTableLoad(string path);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_unload")]
+    internal static partial void HighwayTableUnload();
+
+    [LibraryImport(Library, EntryPoint = "highway_table_is_loaded")]
+    internal static partial int HighwayTableIsLoaded();
+
+    /// <summary>Look up a relation type by its type-id hash.
+    /// Returns 1 if found; outBitPos/outRank/outBand are only valid on success.</summary>
+    [LibraryImport(Library, EntryPoint = "highway_table_relation_by_hash")]
+    internal static partial int HighwayTableRelationByHash(
+        Hash128* typeId, byte* outBitPos, float* outRank, byte* outBand);
+
+    /// <summary>Returns a band mask (32 bytes) for the given band index; 0 on success.</summary>
+    [LibraryImport(Library, EntryPoint = "highway_table_band_mask")]
+    internal static partial int HighwayTableBandMask(byte band, Mask256* outMask);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_mask_or")]
+    internal static partial Mask256 HighwayTableMaskOr(Mask256 a, Mask256 b);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_mask_and")]
+    internal static partial Mask256 HighwayTableMaskAnd(Mask256 a, Mask256 b);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_mask_test")]
+    internal static partial int HighwayTableMaskTest(Mask256* mask, byte bit);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_mask_any")]
+    internal static partial int HighwayTableMaskAny(Mask256* mask);
 }

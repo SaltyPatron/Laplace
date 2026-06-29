@@ -97,8 +97,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
         await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             file,
-            modalityId: "tsv",
-            sourceId: Source,
+            EtlManifest.Get("conceptnet"),
             witness: witness,
             batchSize: batch,
             witnessWeight: 1.0,

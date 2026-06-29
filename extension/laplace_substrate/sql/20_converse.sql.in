@@ -11,8 +11,6 @@ CREATE OR REPLACE FUNCTION word_id(p_text text)
 
 
 
-
-
 CREATE OR REPLACE FUNCTION word_segment(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_word_segment'
@@ -76,9 +74,7 @@ CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     
     
     SELECT ws.ord, ws.word,
-           COALESCE(
-               (SELECT e.id FROM entities e WHERE e.id = ws.id),
-               (SELECT e.id FROM entities e WHERE e.id = word_id(lower(ws.word))))
+           (SELECT e.id FROM entities e WHERE e.id = ws.id)
     FROM word_segment(p_text) ws
     ORDER BY ws.ord
 $$;

@@ -90,7 +90,7 @@ public sealed class HeadClassifier
         var b = new SubstrateChangeBuilder(_source, "model/decoder-ring",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
             .SetCommitEpoch(commitEpoch);
-        b.AddEntity(circuit, EntityTier.Vocabulary, ModelCircuitTypeId, firstObservedBy: _source);
+        b.AddEntity(circuit, EntityTier.Word, ModelCircuitTypeId, firstObservedBy: _source);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             circuit, EncodesTypeId, winner, _source, null, witnessWeight));
 

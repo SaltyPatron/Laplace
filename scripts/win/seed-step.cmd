@@ -23,10 +23,13 @@ rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e
 rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
 rem per COPY on the hot path. Default off; set LAPLACE_COPY_VALIDATE=1 to re-arm for debugging.
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
-rem Bulk-fresh skips compose-time containment probes (IntentStage.IsBulkFreshBypass) and
-rem the global content witness bank. Merge-time skipped counts instrument conflicts.
-rem Default on for seed operations (initial loads). Set LAPLACE_BULK_FRESH=0 to force incremental.
-if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
+rem Bulk-fresh only for the first empty-table step (unicode). Later foundation steps MUST run
+rem trunk-to-leaf descent — bulk-fresh skips it and re-stages every content node.
+if /i "%STEP%"=="unicode" (
+  if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
+) else (
+  if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=0"
+)
 
 cd /d "%LAPLACE_ROOT%\app"
 
@@ -34,7 +37,7 @@ if /i "%STEP%"=="unicode"       goto run_ingest
 if /i "%STEP%"=="iso639"        goto run_ingest
 if /i "%STEP%"=="cili"          goto run_ingest
 if /i "%STEP%"=="wordnet"       goto run_ingest
-if /i "%STEP%"=="omw"           goto run_ingest_omw_commit
+if /i "%STEP%"=="omw"           goto run_ingest
 if /i "%STEP%"=="verbnet"       goto run_ingest
 if /i "%STEP%"=="propbank"      goto run_ingest
 if /i "%STEP%"=="framenet"      goto run_ingest
@@ -65,23 +68,11 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_ud_commit
-rem UD: parallel treebank files (ResolveFileWorkers, headroom=4) + separate commit pool.
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
 if /i "%STEP%"=="conceptnet" (
-  rem ConceptNet: one assertions.csv — parallel COMPOSE workers + commit lanes (not native single-thread).
-  set "LAPLACE_INGEST_COMMIT_ROWS=500000"
-  set "LAPLACE_INGEST_BATCH=16384"
-  set "LAPLACE_INGEST_COMPOSE_WORKERS=8"
-  set "LAPLACE_INGEST_WORKERS=8"
-  set "LAPLACE_COMMIT_LANES=8"
-  rem Lanes already id-partition; writer must not re-split (double partition = idle cores + wrong progress).
-  set "LAPLACE_APPLY_PARTITIONS=1"
-  echo ConceptNet parallelism: compose=!LAPLACE_INGEST_COMPOSE_WORKERS! commit_lanes=!LAPLACE_COMMIT_LANES! batch=!LAPLACE_INGEST_BATCH!
-)
-if /i "%STEP%"=="ud" (
-  call :probe_file_workers 4
-  echo UD parallelism: files=!_file_workers! commit=!LAPLACE_INGEST_WORKERS!
+  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
+  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=16384"
 )
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
@@ -89,10 +80,6 @@ if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_
 exit /b %RC%
 
 :run_ingest_opensubtitles_commit
-rem OpenSubtitles: parallel zip files (ResolveFileWorkers) + separate commit pool.
-if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
-call :probe_file_workers 2
-echo OpenSubtitles parallelism: files=!_file_workers! commit=!LAPLACE_INGEST_WORKERS!
 call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
@@ -103,25 +90,6 @@ call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
 exit /b %RC%
-
-:probe_file_workers
-rem Optional arg 1 = cpu-topology headroom (default 2). Sets _file_workers for echo only.
-set "_probe_hr=%~1"
-if not defined _probe_hr set "_probe_hr=2"
-if defined LAPLACE_DECOMPOSE_WORKERS (
-  set "_file_workers=!LAPLACE_DECOMPOSE_WORKERS!"
-) else (
-  set "_file_workers=?"
-  for /f "delims=" %%i in ('dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --cpu-bound-workers !_probe_hr! 2^>nul') do set "_file_workers=%%i"
-)
-exit /b 0
-
-:run_ingest_omw_commit
-rem OMW: parallel file workers + native apply partitions (single commit consumer).
-call :probe_file_workers 2
-echo OMW parallelism: files=!_file_workers! workers=%LAPLACE_INGEST_WORKERS% commitRows=%LAPLACE_INGEST_COMMIT_ROWS%
-call :run_ingest_impl
-exit /b %ERRORLEVEL%
 
 :run_ingest_path
 if "%EXTRA%"=="" (
@@ -137,12 +105,18 @@ if not errorlevel 1 (
   echo ERROR: Laplace.Cli.exe is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
 )
-if not defined LAPLACE_INGEST_WORKERS (
-  for /f "delims=" %%i in ('dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --io-bound-workers 8 2^>nul') do set "LAPLACE_INGEST_WORKERS=%%i"
-)
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %STEP% %EXTRA%
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" exit /b %RC%
+call :wait_cli_exit
+exit /b 0
+
+:wait_cli_exit
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+if errorlevel 1 exit /b 0
+timeout /t 1 /nobreak >nul 2>nul
+goto wait_cli_exit
 
 :run_model_tinyllama
 call :resolve_model LAPLACE_MODEL_TINYLLAMA LAPLACE_TINYLLAMA_DIR "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" TINYLLAMA || exit /b 1

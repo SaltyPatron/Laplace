@@ -79,12 +79,12 @@ public sealed class RecipeExtractor
         var b = new SubstrateChangeBuilder(sourceId, "recipe/laplace.recipe",
             entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 4);
 
-        b.AddEntity(recipe.RecipeEntityId, EntityTier.Vocabulary, modelRecipeTypeId, firstObservedBy: sourceId);
+        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
         void AddScalar(Hash128 typeId, string value)
         {
             var valueId = Hash128.Blake3(Encoding.UTF8.GetBytes(value));
-            b.AddEntity(valueId, EntityTier.Vocabulary, EntityTypeRegistry.Scalar, sourceId);
+            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe.RecipeEntityId, typeId, valueId, sourceId, null, 1.0));
         }

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent foundation seed: unicode → iso639 → cili → wordnet → omw
-# (Linux counterpart to scripts/win/seed-foundation.cmd).
+# CI foundation seed — order from scripts/win/witness-manifest.json foundation.sources
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,13 +39,18 @@ layer_ok() {
     | grep -qi true
 }
 
-# cli:decomposer:layer — must match scripts/win/seed-foundation.cmd order
+# cli:decomposer:layer — must match scripts/win/seed-foundation.cmd and witness-manifest.json
 FOUNDATION=(
   "unicode:UnicodeDecomposer:0"
   "iso639:ISO639Decomposer:1"
   "cili:CILIDecomposer:2"
   "wordnet:WordNetDecomposer:2"
-  "omw:OMWDecomposer:3"
+  "verbnet:VerbNetDecomposer:2"
+  "propbank:PropBankDecomposer:2"
+  "framenet:FrameNetDecomposer:3"
+  "mapnet:MapNetDecomposer:3"
+  "wordframenet:WordFrameNetDecomposer:3"
+  "semlink:SemLinkDecomposer:3"
 )
 
 export LAPLACE_DBNAME="$DB"
@@ -71,7 +75,6 @@ if [[ "$needs_work" -eq 0 ]]; then
 fi
 
 echo "==== ensure-foundation on $DB ===="
-export LAPLACE_DEFER_PHYS_INDEX_REBUILD=1
 
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
@@ -82,14 +85,5 @@ for entry in "${FOUNDATION[@]}"; do
     echo "==== skip $cli (layer complete) ===="
   fi
 done
-
-unset LAPLACE_DEFER_PHYS_INDEX_REBUILD 2>/dev/null || true
-
-if [[ -f "$ROOT/build/deferred-phys-index-defs.json" ]]; then
-  echo "==== rebuild deferred physicalities indexes ===="
-  ( cd "$ROOT/app"
-    dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release --no-build -- rebuild-phys-indexes
-  )
-fi
 
 echo "ENSURE-FOUNDATION COMPLETE: $DB"

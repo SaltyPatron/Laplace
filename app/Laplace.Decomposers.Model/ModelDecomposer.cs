@@ -201,7 +201,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
-        tokChange.AddEntity(tokEntityId, EntityTier.Vocabulary, ModelTokenizerTypeId, firstObservedBy: Source);
+        tokChange.AddEntity(tokEntityId, EntityTier.Word, ModelTokenizerTypeId, firstObservedBy: Source);
         yield return tokChange.Build();
 
         phaseSw.Restart();

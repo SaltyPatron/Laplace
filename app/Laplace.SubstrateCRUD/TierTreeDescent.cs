@@ -166,8 +166,59 @@ public static class TierTreeDescent
     }
 
     /// <summary>
-    /// Flat tier 0/1 ids across a batch of trees, with placement back to (treeIndex, nodeIndex).
+    /// Tier 0 node ids resolved by the T0 perfcache — O(1) client-side, no DB round trip.
+    /// Tier 1 (UAX#29 graphemes) is excluded; those still use <see cref="BuildBatchTier1Probe"/>.
     /// </summary>
+    public static void BuildBatchTier0PerfcachePresent(
+        IReadOnlyList<TierTree> trees,
+        byte[][] perTreeEmitBm,
+        out List<(int TreeIndex, int NodeIndex)> unresolvedTier0)
+    {
+        unresolvedTier0 = new List<(int, int)>();
+        for (int t = 0; t < trees.Count; t++)
+        {
+            var tree = trees[t];
+            int n = tree.NodeCount;
+            for (int j = 0; j < n; j++)
+            {
+                if (tree.GetNode((uint)j).Tier != 0) continue;
+                var id = tree.GetNode((uint)j).Id;
+                if (CodepointPerfcache.IsKnownCodepointId(id))
+                    perTreeEmitBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                else
+                    unresolvedTier0.Add((t, j));
+            }
+        }
+    }
+
+    /// <summary>Tier 1 (UAX#29 grapheme) ids for a flat DB existence probe.</summary>
+    public static void BuildBatchTier1Probe(
+        IReadOnlyList<TierTree> trees,
+        out List<Hash128> ids,
+        out List<(int TreeIndex, int NodeIndex)> placements)
+    {
+        ids = new List<Hash128>();
+        placements = new List<(int, int)>();
+        for (int t = 0; t < trees.Count; t++)
+        {
+            var tree = trees[t];
+            int n = tree.NodeCount;
+            for (int j = 0; j < n; j++)
+            {
+                if (tree.GetNode((uint)j).Tier != 1) continue;
+                placements.Add((t, j));
+                ids.Add(tree.GetNode((uint)j).Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tier 0/1 node ids for a flat <see cref="ISubstrateReader.EntitiesExistBitmapAsync"/>
+    /// probe — descent only covers tier&gt;=2 trunks; without these bits,
+    /// <see cref="MerkleDedup.TrunkShortcircuit"/> still treats unmarked ancestors as novel.
+    /// Prefer <see cref="BuildBatchTier0PerfcachePresent"/> + <see cref="BuildBatchTier1Probe"/>.
+    /// </summary>
+    [Obsolete("Use BuildBatchTier0PerfcachePresent + BuildBatchTier1Probe")]
     public static void BuildBatchTier01Probe(
         IReadOnlyList<TierTree> trees,
         out List<Hash128> ids,
@@ -241,11 +292,24 @@ public static class TierTreeDescent
                 : NodeEmitBitmap(tree, descentBm, treeIdxToFlat[t]);
         }
 
-        BuildBatchTier01Probe(probeTrees, out var tier01Ids, out var tier01Placements);
-        if (tier01Ids.Count > 0)
+        BuildBatchTier0PerfcachePresent(probeTrees, perTreeBm, out var unresolvedTier0);
+
+        BuildBatchTier1Probe(probeTrees, out var tier1Ids, out var tier1Placements);
+
+        var dbIds = new List<Hash128>(tier1Ids.Count + unresolvedTier0.Count);
+        var dbPlacements = new List<(int TreeIndex, int NodeIndex)>(tier1Placements.Count + unresolvedTier0.Count);
+        dbPlacements.AddRange(tier1Placements);
+        dbIds.AddRange(tier1Ids);
+        foreach (var (t, j) in unresolvedTier0)
         {
-            byte[] tier01Flat = await reader.EntitiesExistBitmapAsync(tier01Ids, ct).ConfigureAwait(false);
-            ApplyBatchTier01Present(perTreeBm, tier01Placements, tier01Flat);
+            dbPlacements.Add((t, j));
+            dbIds.Add(probeTrees[t].GetNode((uint)j).Id);
+        }
+
+        if (dbIds.Count > 0)
+        {
+            byte[] flat = await reader.EntitiesExistBitmapAsync(dbIds, ct).ConfigureAwait(false);
+            ApplyBatchTier01Present(perTreeBm, dbPlacements, flat);
         }
 
         if (ids.Count > 0) reader.MarkProven(ids);

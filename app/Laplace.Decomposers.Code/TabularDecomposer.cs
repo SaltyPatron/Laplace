@@ -65,7 +65,7 @@ public sealed class TabularDecomposer : IDecomposer
         boot.AddRelationType("PREDICTS");
         boot.AddRelationType("IS_VALUE_IN");
         boot.AddRelationType("IS_INSTANCE_OF");
-        boot.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
+        boot.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
         _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
@@ -83,7 +83,8 @@ public sealed class TabularDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string[]? header = null;
-            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(f, "csv", ct))
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                f, EtlManifest.Get("tabular").Modality, ct))
             {
                 if (header is null) { header = fields; continue; }
                 if (fields.Length != header.Length) continue;
@@ -157,7 +158,7 @@ public sealed class TabularDecomposer : IDecomposer
         var reader = context.Reader;
 
         var b = NewBuilder(0, reader);
-        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
+        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
         // The outcome's target-column name and positive-value token are content (meaningful surface
         // strings): emit them via ContentEmitter and link the version-resolving outcome anchor to them
         // as IS_INSTANCE_OF, so the names get geometry and stay context rather than baked into the id.
@@ -169,7 +170,7 @@ public sealed class TabularDecomposer : IDecomposer
                 OutcomeId, "IS_INSTANCE_OF", posValId, Source, SourceTrust.StructuredCorpus));
         foreach (var c in featureCols)
         {
-            b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Vocabulary, ColumnTypeId, Source));
+            b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Word, ColumnTypeId, Source));
             _canonicalNames.Add($"tabular/column/{c}/v1");
 
             // The column NAME is content (a meaningful surface string like "Geography"/"Age"):
@@ -185,7 +186,7 @@ public sealed class TabularDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             var cq = ValueId(col, tok);
-            b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
+            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
             _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
 
             
@@ -221,7 +222,7 @@ public sealed class TabularDecomposer : IDecomposer
             // content string. Its constituents (the two columns + their value tokens) already carry
             // content/geometry from the per-value loop above, so this composite stays an anchor.
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
-            b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
+            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
             _canonicalNames.Add($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: null,

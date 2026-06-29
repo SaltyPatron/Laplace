@@ -100,10 +100,10 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
             Source, "bootstrap/framenet-vocab", null,
             entityCapacity: CorenessValues.Length + 1,
             physicalityCapacity: 0, attestationCapacity: 0);
-        seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Vocabulary,
+        seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Word,
             BootstrapIntentBuilder.TypeMetaTypeId, Source));
         foreach (var c in CorenessValues)
-            seed.AddEntity(new EntityRow(CorenessId(c), EntityTier.Vocabulary, CorenessTypeId, Source));
+            seed.AddEntity(new EntityRow(CorenessId(c), EntityTier.Word, CorenessTypeId, Source));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 

@@ -42,8 +42,11 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MKL_CHECK") != "1")
-            MklAvailability.EnsureOrThrow();
+        if (args.Length == 0 || args[0] != "cpu-topology")
+        {
+            if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MKL_CHECK") != "1")
+                MklAvailability.EnsureOrThrow();
+        }
 
         if (args.Length == 0)
         {

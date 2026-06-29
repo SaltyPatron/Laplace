@@ -54,7 +54,7 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
 
             Hash128 langEntity = LanguageReference.Resolve(langCode);
             VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, langCode);
-            builder.AddEntity(new EntityRow(langEntity, EntityTier.Vocabulary, LanguageTypeId, WiktionaryDecomposer.Source));
+            builder.AddEntity(new EntityRow(langEntity, EntityTier.Word, LanguageTypeId, WiktionaryDecomposer.Source));
             builder.AddAttestation(NativeAttestation.Categorical(
                 wordId, "HAS_LANGUAGE", langEntity, WiktionaryDecomposer.Source, TC.AcademicCuratedUserInput));
         }

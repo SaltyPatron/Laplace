@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS entities (
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
     type_id            bytea            NOT NULL,
     first_observed_by  bytea,
-    created_at         timestamptz      NOT NULL DEFAULT now()
+    created_at         timestamptz      NOT NULL DEFAULT now(),
+    highway_mask       bytea            CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
 );
 
 SELECT pg_extension_config_dump('entities', '');

@@ -293,6 +293,8 @@ public static class IngestBatchPipeline
                     : unit.DrainInto(state.Builder, config.WitnessWeight,
                         count > 0 ? flatBitmaps[start] : null);
                 handler.WalkWitness(record, root, state.Builder, unit);
+                if (root != default)
+                    reader.MarkProven([root]);
             }
             finally
             {

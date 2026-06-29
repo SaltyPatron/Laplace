@@ -80,8 +80,23 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         if (unknownIdx.Count == 0) return bm;   // everything already proven — zero DB work
 
-        var byteaArray = new byte[unknownIdx.Count][];
-        for (int u = 0; u < unknownIdx.Count; u++) byteaArray[u] = candidates[unknownIdx[u]].ToBytes();
+        // T0 Unicode codepoints: O(1) perfcache reverse lookup — never round-trip the DB for these.
+        var dbUnknownIdx = new List<int>(unknownIdx.Count);
+        for (int u = 0; u < unknownIdx.Count; u++)
+        {
+            int i = unknownIdx[u];
+            if (CodepointPerfcache.IsKnownCodepointId(candidates[i]))
+            {
+                bm[i >> 3] |= (byte)(1 << (i & 7));
+                _proven.TryAdd(candidates[i], 1);
+            }
+            else
+                dbUnknownIdx.Add(i);
+        }
+        if (dbUnknownIdx.Count == 0) return bm;
+
+        var byteaArray = new byte[dbUnknownIdx.Count][];
+        for (int u = 0; u < dbUnknownIdx.Count; u++) byteaArray[u] = candidates[dbUnknownIdx[u]].ToBytes();
 
         await using var cmd = _ds.CreateCommand("SELECT laplace.entities_exist_bitmap($1)");
         var p = cmd.Parameters.AddWithValue(byteaArray);
@@ -91,11 +106,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         long dbBits = (long)dbBm.Length * 8;
 
         // Map the unknowns' DB results back to the candidate bitmap; cache the present ones (immutable).
-        for (int u = 0; u < unknownIdx.Count; u++)
+        for (int u = 0; u < dbUnknownIdx.Count; u++)
         {
             if (u < dbBits && (dbBm[u >> 3] & (1 << (u & 7))) != 0)
             {
-                int i = unknownIdx[u];
+                int i = dbUnknownIdx[u];
                 bm[i >> 3] |= (byte)(1 << (i & 7));
                 _proven.TryAdd(candidates[i], 1);
             }
@@ -108,6 +123,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         if (ids is null) return;
         for (int i = 0; i < ids.Count; i++) _proven.TryAdd(ids[i], 1);
     }
+
+    public bool IsProvenPresent(Hash128 id) => _proven.ContainsKey(id);
 
     // Canonical-hash → natural-unit-root cache. compose IS the dedup: a canonical already composed this
     // session has a known, immutable content-address, so the expensive BuildContentTree (BLAKE3 +

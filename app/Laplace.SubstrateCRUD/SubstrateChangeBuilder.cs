@@ -173,7 +173,11 @@ public sealed class SubstrateChangeBuilder
         else
         {
             _attestationIndex[row.Id] = _attestations.Count;
-            _attestations.Add(row);
+            // Auto-populate the highway mask from the perfcache when not already set.
+            var withMask = row.HighwayMask.IsZero && HighwayPerfcache.IsLoaded
+                ? row with { HighwayMask = HighwayPerfcache.MaskForRelationType(row.TypeId) }
+                : row;
+            _attestations.Add(withMask);
         }
         return this;
     }

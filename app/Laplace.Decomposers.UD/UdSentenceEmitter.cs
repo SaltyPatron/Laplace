@@ -46,7 +46,7 @@ public sealed class UdSentenceEmitContext
         UdSentenceEmitContext ctx,
         Hash128 sourceId)
     {
-        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, sourceId));
+        b.AddEntity(new EntityRow(langId, EntityTier.Word, LanguageTypeId, sourceId));
         VocabularyNames.TrackLanguage(canonicalNames, langCode);
 
         ctx.FormId = new Hash128?[s.MaxId + 1];

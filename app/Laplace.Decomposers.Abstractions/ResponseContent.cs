@@ -24,11 +24,11 @@ public static class ResponseContent
     public static SubstrateChange BuildBootstrapChange()
     {
         var b = new SubstrateChangeBuilder(Source, "bootstrap/Response", parentIntentId: null);
-        b.AddEntity(Source, EntityTier.Vocabulary, BootstrapIntentBuilder.SourceTypeId, Source);
-        b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.WordTypeId,     EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.SentenceTypeId, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.DocumentTypeId, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, Source);
+        b.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, Source);
+        b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
+        b.AddEntity(TextEntityBuilder.WordTypeId,     EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
+        b.AddEntity(TextEntityBuilder.SentenceTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
+        b.AddEntity(TextEntityBuilder.DocumentTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
         return b.Build();
     }
 

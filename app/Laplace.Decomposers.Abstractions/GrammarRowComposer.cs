@@ -7,13 +7,11 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
-    /// <inheritdoc cref="LaplaceCoreGate.Native"/>
-    internal static object NativeComposeGate => LaplaceCoreGate.Native;
-
     private readonly byte[] _utf8;
     private readonly string _modalityId;
     private readonly Hash128 _sourceId;
     private readonly GrammarAst _ast;
+    private readonly object _sync = new();
     private IntPtr _compose;
     private IntPtr _probe;
     private bool _disposed;
@@ -38,12 +36,9 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         Hash128 rootLocal = default;
         fixed (byte* p = utf8)
         {
-            lock (NativeComposeGate)
-            {
-                int rc = NativeInterop.GrammarComposeRowRoot(
-                    p, (nuint)utf8.Length, ast.Handle, modalityId, &rootLocal, &tierLocal);
-                if (rc != 0) return false;
-            }
+            int rc = NativeInterop.GrammarComposeRowRoot(
+                p, (nuint)utf8.Length, ast.Handle, modalityId, &rootLocal, &tierLocal);
+            if (rc != 0) return false;
             rootId = rootLocal;
             tier = tierLocal;
             return true;
@@ -53,7 +48,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     internal void EnsureProbed()
     {
         if (_probe != IntPtr.Zero || _compose != IntPtr.Zero) return;
-        lock (NativeComposeGate)
+        lock (_sync)
         {
             if (_probe != IntPtr.Zero || _compose != IntPtr.Zero) return;
             IntPtr result = IntPtr.Zero;
@@ -77,7 +72,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     private void EnsureComposed(byte[]? existingBitmap)
     {
         if (_compose != IntPtr.Zero) return;
-        lock (NativeComposeGate)
+        lock (_sync)
         {
             if (_compose != IntPtr.Zero) return;
             if (_probe != IntPtr.Zero)
@@ -371,30 +366,26 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             Hash128 src = _sourceId;
             IntPtr active = ActiveResult;
-            lock (NativeComposeGate)
+            if (existingBitmap is { Length: > 0 })
             {
-                if (existingBitmap is { Length: > 0 })
-                {
-                    fixed (byte* bm = existingBitmap)
-                    {
-                        int rc = NativeInterop.ComposeDrainIntoStage(
-                            active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
-                            bm, (nuint)existingBitmap.Length * 8);
-                        if (rc != 0)
-                            throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
-                    }
-                }
-                else
+                fixed (byte* bm = existingBitmap)
                 {
                     int rc = NativeInterop.ComposeDrainIntoStage(
-                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
+                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
+                        bm, (nuint)existingBitmap.Length * 8);
                     if (rc != 0)
                         throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
                 }
             }
+            else
+            {
+                int rc = NativeInterop.ComposeDrainIntoStage(
+                    active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
+                if (rc != 0)
+                    throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
+            }
         }
 
-        // Keep the builder's within-batch seen-set in sync with what the native drain staged.
         nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
         {
@@ -436,7 +427,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        lock (NativeComposeGate)
+        lock (_sync)
         {
             if (_compose != IntPtr.Zero && _compose != _probe)
                 NativeInterop.ComposeResultFree(_compose);

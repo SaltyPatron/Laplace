@@ -9,6 +9,21 @@
   },
   "cadence_law": "floor (atoms + the language axis) → document (raw-text distributional trajectories: the corpus that proves AI-via-SQL answers from text ALONE) → knowledge (the *Net synset hub + the semantic/syntactic graph — uniform :ingest steps converging on shared content anchors) → usage (language in use) → code capstone (the full tree-sitter/grammar/AST pipeline; the precondition for model export) → models (LAST, because deposition presupposes export). Each layer ENRICHES the prior; none is 'deferred bulk'. The QKVO/FFN-exact analog lives in the knowledge layer; the de-blob lives there.",
   "anchor_law": "Concepts are decomposed CONTENT, never OfCanonical(\"witness/namespace/string\") blobs. A synset's identity is its Collaborative Interlingual Index (CILI, e.g. i46531) decomposed to codepoints — NOT the WordNet byte-offset, which is a file address that differs across languages and versions. Witness → source_id; category (synset/sense/class/frame/roleset) and pos → IS_A / HAS_POS attestations. Every language's distinct wordforms (dog != perro — never merged) converge by attesting onto the same shared concept anchor. The codepoint floor is the only dedup level. The shared de-blob surfaces are ConceptAnchor (ILI-resolving) and CategoryAnchor (key-as-content + IS_A); decomposers are thin callers, never minting their own blobs.",
+  "foundation": {
+    "law": "CI/CD auto-seeds this ordered batch on push and fresh_db (scripts/ensure-foundation.sh, scripts/win/seed-foundation.cmd). Every other ingest source is workflow_dispatch only — one workflow per source, never batched.",
+    "sources": [
+      "unicode",
+      "iso639",
+      "cili",
+      "wordnet",
+      "verbnet",
+      "propbank",
+      "framenet",
+      "mapnet",
+      "wordframenet",
+      "semlink"
+    ]
+  },
   "vault_root": "D:/Data/Ingest on Windows (env.cmd sets INGEST and LAPLACE_DATA_ROOT); /vault/Data on Linux. Override LAPLACE_DATA_ROOT only when the vault lives elsewhere.",
   "repos_root": "<REPOS> — example only; env.cmd default D:/Repositories",
   "models_root": "<LAPLACE_MODEL_HUB> — example only; env.cmd default D:/Models/hub",

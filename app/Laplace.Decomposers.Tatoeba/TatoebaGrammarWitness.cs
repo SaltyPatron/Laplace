@@ -49,8 +49,8 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         Hash128 extId = SourceEntityIdConventions.TatoebaSentence(id);
         Hash128 langId = LanguageReference.Resolve(lang);
         VocabularyNames.TrackLanguage(TatoebaDecomposer.LanguageNames, lang);
-        b.AddEntity(new EntityRow(extId, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(extId, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
 
         if (!ContentWitnessBatch.TryAppendToBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
@@ -74,8 +74,8 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
 
         Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
         Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
-        b.AddEntity(new EntityRow(ea, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(eb, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(ea, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(eb, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddAttestation(NativeAttestation.Categorical(
             ea, "IS_TRANSLATION_OF", eb, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }

@@ -13,11 +13,19 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
 {
     public string ModalityId => "tsv";
 
+    public bool TrunkShortcircuitWithoutCompose => true;
+
     public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder b)
     {
-        if (composed.Composer is null) return;
-        if (!OMWRowParser.TryParseFields(
-                composed.Composer.FieldSpans(), composed.Utf8, fileLang, out var row, out var valueUtf8))
+        OmwRow row;
+        ReadOnlySpan<byte> valueUtf8;
+        if (composed.Composer is { } composer)
+        {
+            if (!OMWRowParser.TryParseFields(
+                    composer.FieldSpans(), composed.Utf8, fileLang, out row, out valueUtf8))
+                return;
+        }
+        else if (!OMWRowParser.TryParseRow(composed.Utf8, fileLang, out row, out valueUtf8))
             return;
 
         EmitRow(b, row, valueUtf8);
@@ -35,7 +43,7 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
         OMWDecomposer.TrackLanguage(row.Lang);
-        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, EntityTypeRegistry.Language, OMWDecomposer.Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Word, EntityTypeRegistry.Language, OMWDecomposer.Source));
 
         switch (row.Type)
         {
