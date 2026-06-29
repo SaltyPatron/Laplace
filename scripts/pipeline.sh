@@ -89,12 +89,18 @@ phase_clean() {
 phase_build() {
   phase_codegen
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
+  local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+  local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
-    -DLAPLACE_INSTALL_STAGED=ON
+    -DLAPLACE_INSTALL_STAGED=ON \
+    -DLAPLACE_UCD_PATH="$ucd" \
+    -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
+    -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
+    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
   LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
     cmake --build build
   cmake --build build --target laplace_t0_perfcache

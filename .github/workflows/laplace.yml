@@ -145,6 +145,8 @@ jobs:
           done
           RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
           [ "$RESULT" = "laplace_admin on postgres" ] || { echo "::error::peer auth failed: $RESULT"; exit 1; }
+          UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
+          [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
 
   proj:
     name: dep — proj
