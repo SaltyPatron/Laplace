@@ -28,7 +28,7 @@ BEGIN;
 SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/fold/source');
     rel    bytea := laplace_hash128_blake3('test/fold/reltype');
     sA bytea := laplace_hash128_blake3('test/fold/subjectA');
@@ -269,7 +269,7 @@ NOTICE:  ✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budge
 -- by the fold itself.
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/walk/source');
     rel    bytea := laplace_hash128_blake3('test/walk/reltype');
     sW  bytea := laplace_hash128_blake3('test/walk/subject');
@@ -402,7 +402,7 @@ BEGIN
 END $$;
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/walkconv/source');
     rel    bytea := laplace_hash128_blake3('test/walkconv/reltype');
     sZ  bytea := laplace_hash128_blake3('test/walkconv/nullobj-subject');
@@ -472,7 +472,7 @@ NOTICE:  ✓ consensus_fold: converted partials ride the walk journal — zero16
 -- consensus untouched. (Once wiped a live 14M-row consensus, 2026-06-12.)
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     s bytea := laplace_hash128_blake3('test/guard/subject');
     t bytea := laplace_hash128_blake3('test/guard/reltype');
     o bytea := laplace_hash128_blake3('test/guard/object');
@@ -522,7 +522,7 @@ NOTICE:  ✓ consensus_fold_swap: degenerate empty swap refused (consensus intac
 -- expected rows — this fixture is the regression probe for that.)
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src bytea := laplace_hash128_blake3('test/shared/source');
     rel bytea := laplace_hash128_blake3('test/shared/reltype');
     s   bytea := laplace_hash128_blake3('test/shared/subject');

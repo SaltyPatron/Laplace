@@ -40,7 +40,7 @@ WHERE id IN (
 (1 row)
 
 SELECT relation_type_id('IS_A')
-       = laplace_hash128_blake3('substrate/type/IS_A/v1'::bytea) AS relation_type_path_law;
+       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
  relation_type_path_law 
 ------------------------
  t
