@@ -20,7 +20,7 @@ SET search_path = laplace, public;
 
 INSERT INTO canonical_names (id, name)
 SELECT relation_type_id(pf.p || '_' || upper(d)),
-       'substrate/type/' || pf.p || '_' || upper(d) || '/v1'
+       pf.p || '_' || upper(d)
 FROM (VALUES ('DEP'), ('EDEP')) AS pf(p)
 CROSS JOIN unnest(ARRAY[
   'acl','advcl','advmod','amod','appos','aux','case','cc','ccomp','clf','compound',
@@ -34,7 +34,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO canonical_names (id, name)
 SELECT relation_type_id('FEAT_' || upper(f)),
-       'substrate/type/FEAT_' || upper(f) || '/v1'
+       'FEAT_' || upper(f)
 FROM unnest(ARRAY[
   'Case','Number','Gender','Tense','Person','Mood','VerbForm','Aspect','Voice',
   'Definite','PronType','NumType','Poss','Reflex','Degree','Polarity','Animacy',

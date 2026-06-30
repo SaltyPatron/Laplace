@@ -54,7 +54,7 @@ TEST(EtlIngest, ProbePathSizesIdBufferExactly) {
     std::memset(&cfg, 0, sizeof(cfg));
     cfg.modality_id = "tsv";
     hash128_blake3(reinterpret_cast<const uint8_t*>("etl/probe"), 9, &cfg.source_id);
-    hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &cfg.type_meta_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &cfg.type_meta_id);
     cfg.witness_weight  = 1.0;
     cfg.trust_weight    = 1.0;
     cfg.context_is_null = 1;
@@ -107,7 +107,7 @@ static size_t feed_anchor_field_edge(const std::string& cili_dir) {
     std::memset(&cfg, 0, sizeof(cfg));
     cfg.modality_id = "tsv";
     hash128_blake3(reinterpret_cast<const uint8_t*>("etl/anchor"), 10, &cfg.source_id);
-    hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &cfg.type_meta_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &cfg.type_meta_id);
     cfg.witness_weight  = 1.0;
     cfg.trust_weight    = 1.0;
     cfg.context_is_null = 1;

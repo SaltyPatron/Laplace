@@ -776,7 +776,7 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
 
         SELECT array_agg(e.id) AS ids
         FROM entities e
-        WHERE e.type_id = canonical_id('substrate/type/RelationType/v1')
+        WHERE e.type_id = canonical_id('RelationType')
           AND relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (

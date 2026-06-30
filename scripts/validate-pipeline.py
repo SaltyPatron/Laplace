@@ -318,6 +318,55 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     return errs
 
 
+# Legacy entity/relation type namespace banned after content-addressed identity law.
+_LEGACY_TYPE_PATH = re.compile(r"substrate/type/[A-Z]")
+_TYPE_IDENTITY_CARVEOUTS = (
+    "substrate/type/grammar/",
+    "substrate/type/HasLayerCompleted/",
+    "substrate/type_tier/",
+)
+
+
+def _legacy_type_path_hits(path: Path, text: str) -> list[tuple[int, str]]:
+    hits: list[tuple[int, str]] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if _LEGACY_TYPE_PATH.search(line) and not any(c in line for c in _TYPE_IDENTITY_CARVEOUTS):
+            hits.append((lineno, line.strip()))
+    return hits
+
+
+def validate_type_identity_law() -> list[str]:
+    """Fail if production SQL/C#/native code still uses the legacy namespaced type path."""
+    errs: list[str] = []
+    scan_roots: list[tuple[Path, tuple[str, ...]]] = [
+        (ROOT / "extension" / "laplace_substrate" / "sql", (".sql.in",)),
+        (ROOT / "app", (".cs",)),
+        (ROOT / "engine", (".c", ".cpp", ".h")),
+        (ROOT / "scripts", (".py", ".sql", ".sh")),
+    ]
+    skip_dirs = {"audit-2026-06-26", "node_modules", "bin", "obj"}
+    skip_files = {"migrate-seed-type-paths.py"}
+
+    for root, suffixes in scan_roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in skip_dirs for part in path.parts):
+                continue
+            if path.name in skip_files:
+                continue
+            if not path.name.endswith(suffixes):
+                continue
+            hits = _legacy_type_path_hits(path, read_text(path))
+            for lineno, snippet in hits[:3]:
+                errs.append(f"type identity drift: {path.relative_to(ROOT)}:{lineno}: {snippet[:120]}")
+            if len(hits) > 3:
+                errs.append(f"type identity drift: {path.relative_to(ROOT)}: +{len(hits) - 3} more hits")
+    return errs
+
+
 def main() -> int:
     if not MANIFEST.is_file():
         print(f"ERROR: manifest not found: {MANIFEST}", file=sys.stderr)
@@ -325,6 +374,7 @@ def main() -> int:
 
     manifest = load_manifest()
     errs = manifest_errors(manifest)
+    errs.extend(validate_type_identity_law())
     foundation = foundation_sources(manifest)
     if not foundation:
         errs.append("manifest: missing or empty foundation.sources[]")

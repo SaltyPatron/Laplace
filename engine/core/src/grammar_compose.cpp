@@ -176,7 +176,7 @@ static int emit_grapheme_floor_entities(
     tier_tree_t* tree, const laplace_grapheme_floor_t* floor,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap) {
     hash128_t grapheme_type;
-    hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+    hash_canonical("Grapheme", &grapheme_type);
     size_t g_first = laplace_grapheme_floor_graph_first_idx(floor);
     size_t g_count = laplace_grapheme_floor_graph_count(floor);
     for (size_t g = 0; g < g_count; ++g) {
@@ -819,7 +819,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         }
 
         hash128_t grapheme_type;
-        hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+        hash_canonical("Grapheme", &grapheme_type);
 
         size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
         size_t g_count = laplace_grapheme_floor_graph_count(&floor);

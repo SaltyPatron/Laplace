@@ -81,7 +81,9 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
             FROM consensus c
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
-              AND render(c.type_id) LIKE 'substrate/type/%'
+              AND EXISTS (
+                  SELECT 1 FROM entities et
+                  WHERE et.id = c.type_id AND et.type_id = entity_type_id('RelationType'))
               AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
               AND c.type_id NOT IN (
                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
@@ -91,8 +93,8 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
                 relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
                 relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'))
               AND NOT EXISTS (
-                  SELECT 1 FROM canonical_names n
-                  WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%')
+                  SELECT 1 FROM entities et
+                  WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
     )

@@ -45,11 +45,11 @@ public class TypeColumnLawTests
     }
 
     [Fact]
-    public async Task RelationTypeId_UsesSubstrateTypePath()
+    public async Task RelationTypeId_UsesContentAddressedName()
     {
         await using var cmd = _pg.DataSource.CreateCommand(@"
             SELECT laplace.relation_type_id('IS_A')
-                 = public.laplace_hash128_blake3('substrate/type/IS_A/v1'::bytea)");
+                 = public.laplace_hash128_blake3('IS_A'::bytea)");
         var eq = (bool)(await cmd.ExecuteScalarAsync())!;
         Assert.True(eq);
     }

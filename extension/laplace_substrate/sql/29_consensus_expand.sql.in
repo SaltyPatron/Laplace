@@ -19,8 +19,8 @@ CREATE OR REPLACE FUNCTION consensus_walk_edges(
       AND NOT refuted(c.rating, c.rd)
       AND NOT (c.object_id = ANY (COALESCE(p_exclude, '{}'::bytea[])))
       AND NOT EXISTS (
-          SELECT 1 FROM canonical_names n
-          WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%')
+          SELECT 1 FROM entities et
+          WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
     ORDER BY relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;

@@ -240,7 +240,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
             foreach (var v in ucd.JoiningTypeEntityIds.Keys)      names.Add($"unicode/joining_type/{v}/v1");
             foreach (var v in ucd.NumericTypeEntityIds.Keys)      names.Add($"unicode/numeric_type/{v}/v1");
             for (int cc = 1; cc <= 254; cc++)               names.Add($"unicode/combining_class/{cc}/v1");
-            names.Add("substrate/type/Byte/v1");
+            names.Add("Byte");
             names.Add("substrate/encoding/ISO-8859-1/v1");
             names.Add("substrate/encoding/windows-1252/v1");
             foreach (var role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
