@@ -494,18 +494,10 @@ BEGIN
         ALTER COLUMN witness_count SET NOT NULL,
         ALTER COLUMN last_observed_at SET NOT NULL;
     ALTER TABLE consensus_next ADD PRIMARY KEY (id);
-    IF EXISTS (
-        SELECT 1 FROM pg_depend d
-        JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
-        WHERE e.extname = 'laplace_substrate'
-          AND d.classid = 'pg_class'::regclass
-          AND d.objid = to_regclass(current_schema() || '.consensus')
-          AND d.deptype = 'e')
-    THEN
-        EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
-    END IF;
+    EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
     ALTER TABLE consensus RENAME TO consensus_retired;
     ALTER TABLE consensus_next RENAME TO consensus;
+    EXECUTE format('ALTER EXTENSION %I ADD TABLE consensus', 'laplace_substrate');
     DROP TABLE consensus_retired;
 
     

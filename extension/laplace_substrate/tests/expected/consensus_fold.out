@@ -23,7 +23,6 @@ NOTICE:  extension "laplace_substrate" already exists, skipping
 --   - the engine lane under forced spill is row-identical to the sql lane;
 --   - mixed φ within one fold refuses in both lanes.
 -- Rows are placed by consensus_partition_of — the SQL twin of the writer's
--- PartitionOf — because the per-partition fold routes seeds with it.
 BEGIN;
 SET search_path = laplace, public;
 DO $$
@@ -191,7 +190,6 @@ NOTICE:  ✓ consensus_fold: both terminal-fold lanes agree with the merge lane 
 -- result must equal the sql lane's on the same staged input. 3000 relations ×
 -- 2 epochs with fold_mem_mb=1 forces multiple runs (the arena floor is 1024
 -- rows), so a relation's epochs meet across run boundaries — and still fold
--- as one period.
 DO $$
 DECLARE
     rel  bytea := laplace_hash128_blake3('test/fold/spill/reltype');
@@ -266,7 +264,6 @@ NOTICE:  ✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budge
 -- flags). Pinned: the walk fold's values equal one accumulate_games call (the
 -- period rule); seeds whose subjects have NO walks pass through the swap
 -- unchanged; the conservation receipt (games in == games folded) is enforced
--- by the fold itself.
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('Type');
@@ -374,7 +371,6 @@ NOTICE:  ✓ consensus_fold: the trajectory journal folds without sorting — wa
 -- a zero16 vertex (the identity-preimage law carried into the vertex), and a
 -- partial (games, sum) splits into ≤2 score levels — q×(games−rem) and
 -- (q+1)×rem — which the fold re-merges into the EXACT accumulate_games period
--- the flat lane would compute from (games, sum).
 CREATE FUNCTION pg_temp.walk_vertex(p_oid bytea, p_ord int, p_run int, p_score bigint)
 RETURNS bytea LANGUAGE plpgsql AS $$
 DECLARE
@@ -469,7 +465,6 @@ NOTICE:  ✓ consensus_fold: converted partials ride the walk journal — zero16
 -- A fold that yields an EMPTY consensus_next while consensus is populated is
 -- always a bug (an errored/no-op fold, a search_path mishap); swapping it would
 -- wipe the substrate's product. consensus_fold_swap must refuse it and leave
--- consensus untouched. (Once wiped a live 14M-row consensus, 2026-06-12.)
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('Type');
@@ -519,7 +514,6 @@ NOTICE:  ✓ consensus_fold_swap: degenerate empty swap refused (consensus intac
 -- token witnessed by two models) carries existing consensus seeds AND new walk
 -- objects. The fold must emit S + (W − matched), never a cross product. (A
 -- seeded TinyLlama fold over an 11.8M MiniLM consensus emitted ~10× the
--- expected rows — this fixture is the regression probe for that.)
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('Type');
@@ -577,7 +571,6 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: a subject with both seeds and walks emits S + (W − matched), never a cross product';
 END $$;
 NOTICE:  ✓ consensus_fold: a subject with both seeds and walks emits S + (W − matched), never a cross product
--- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE
     rel bytea := laplace_hash128_blake3('test/fold/phi/reltype');

@@ -244,9 +244,9 @@ BEGIN
     traj := public.ST_MakeLine(ARRAY[
         public.laplace_mantissa_pack(chH, 1, 1, (1 + (104::bigint << 31))),
         public.laplace_mantissa_pack(chI, 2, 1, (1 + (105::bigint << 31)))]);
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/inband/phys'), word, src, 1,
+    VALUES (laplace_hash128_blake3('test/inband/phys'), word, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'), traj, 2, now());
     rendered := render_text(word);
