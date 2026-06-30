@@ -196,7 +196,7 @@ public sealed class FrameNetDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == FrameNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
-            e.Id == Hash128.OfCanonical("substrate/type/FrameNet_Frame/v1")
+            e.Id == EntityTypeRegistry.Id("FrameNet_Frame")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
         Assert.Contains(boot.Attestations, a =>

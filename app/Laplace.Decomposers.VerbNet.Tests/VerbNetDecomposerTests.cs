@@ -93,7 +93,7 @@ public sealed class VerbNetDecomposerTests
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
             && a.SubjectId == classId!.Value
-            && a.ObjectId == Hash128.OfCanonical("substrate/type/VerbNet_Class/v1"));
+            && a.ObjectId == EntityTypeRegistry.Id("VerbNet_Class"));
 
         var subId = CategoryAnchor.Id(VerbNetDecomposer.NumericClassId("give-13.1-1"));
         Assert.NotNull(subId);
@@ -153,7 +153,7 @@ public sealed class VerbNetDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == VerbNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
-            e.Id == Hash128.OfCanonical("substrate/type/VerbNet_Class/v1")
+            e.Id == EntityTypeRegistry.Id("VerbNet_Class")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));

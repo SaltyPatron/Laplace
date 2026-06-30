@@ -24,17 +24,11 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Tatoeba_Sentence");
-        boot.AddRelationType("HAS_EXTERNAL_ID");
-        boot.AddRelationType("IS_TRANSLATION_OF");
-        boot.AddRelationType("HAS_LANGUAGE");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            LanguageNames.TryAdd(n, 0);
-    }
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Tatoeba_Sentence"],
+            relationNodeNames: ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"],
+            readbackNames: LanguageNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

@@ -12,17 +12,10 @@ public sealed class BootstrapIntentBuilder
     private readonly Hash128 _sourceCanonicalSource;
     private readonly SubstrateChangeBuilder _inner;
 
-    public static readonly Hash128 SourceTypeId =
-        Hash128.OfCanonical("substrate/type/Source/v1");
-
-    public static readonly Hash128 TypeMetaTypeId =
-        Hash128.OfCanonical("substrate/type/Type/v1");
-
-    public static readonly Hash128 RelationTypeMetaTypeId =
-        Hash128.OfCanonical("substrate/type/RelationType/v1");
-
-    public static readonly Hash128 HasTrustClassTypeId =
-        Hash128.OfCanonical("substrate/type/HAS_TRUST_CLASS/v1");
+    public static readonly Hash128 SourceTypeId        = EntityTypeRegistry.Id("Source");
+    public static readonly Hash128 TypeMetaTypeId      = EntityTypeRegistry.Id("Type");
+    public static readonly Hash128 RelationTypeMetaTypeId = EntityTypeRegistry.Id("RelationType");
+    public static readonly Hash128 HasTrustClassTypeId = EntityTypeRegistry.Id("HAS_TRUST_CLASS");
 
     public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId)
     {
@@ -47,8 +40,8 @@ public sealed class BootstrapIntentBuilder
 
     public Hash128 AddType(string canonicalTypeName)
     {
-        var id = Hash128.OfCanonical($"substrate/type/{canonicalTypeName}/v1");
-        _canonicalNames.Add($"substrate/type/{canonicalTypeName}/v1");
+        var id = EntityTypeRegistry.Id(canonicalTypeName);
+        _canonicalNames.Add(canonicalTypeName);
         _inner.AddEntity(id, EntityTier.Word, TypeMetaTypeId, _sourceId);
         // Substrate-native legibility: name the entity type via a codepoint-walk content entity +
         // HAS_NAME_ALIAS, so even unregistered types (e.g. WordNet_Sense) render from their own
@@ -61,12 +54,9 @@ public sealed class BootstrapIntentBuilder
 
     public Hash128 AddRelationType(string canonicalRelationTypeName)
     {
-        var id = Hash128.OfCanonical($"substrate/type/{canonicalRelationTypeName}/v1");
-        _canonicalNames.Add($"substrate/type/{canonicalRelationTypeName}/v1");
-        
-        
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
-        _canonicalNames.Add($"substrate/type/{r.Canonical}/v1");
+        var id = r.Id;
+        _canonicalNames.Add(r.Canonical);
         _inner.AddEntity(id, EntityTier.Word, RelationTypeMetaTypeId, _sourceId);
         return id;
     }

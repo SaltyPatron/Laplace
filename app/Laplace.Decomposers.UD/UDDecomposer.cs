@@ -22,19 +22,12 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("TRANSCRIBES_AS");
-        boot.AddRelationType("ENHANCED_DEPENDS_ON");
-        boot.AddRelationType("HAS_XPOS");
-        boot.AddRelationType("HAS_LANGUAGE");
-        boot.AddType("UD_Feature");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            _canonicalNames.TryAdd(n, 0);
-    }
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["UD_Feature"],
+            relationNodeNames: ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
+                "HAS_XPOS", "HAS_LANGUAGE"],
+            readbackNames: _canonicalNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

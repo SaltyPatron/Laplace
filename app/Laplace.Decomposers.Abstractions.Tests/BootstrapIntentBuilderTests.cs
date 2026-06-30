@@ -1,3 +1,4 @@
+using System.Text;
 using Xunit;
 using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
@@ -11,6 +12,9 @@ public class BootstrapIntentBuilderTests
         Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     private static readonly Hash128 TrustClassId =
         Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+
+    private static Hash128 TypeHash(string name) =>
+        Hash128.Blake3(Encoding.UTF8.GetBytes(name));
 
     [Fact]
     public void Build_RegistersSourceEntity()
@@ -30,8 +34,8 @@ public class BootstrapIntentBuilderTests
         var senseId = b.AddType("WordNet_Sense");
         var change = b.Build();
 
-        Assert.Equal(Hash128.OfCanonical("substrate/type/WordNet_Synset/v1"), synsetId);
-        Assert.Equal(Hash128.OfCanonical("substrate/type/WordNet_Sense/v1"), senseId);
+        Assert.Equal(TypeHash("WordNet_Synset"), synsetId);
+        Assert.Equal(TypeHash("WordNet_Sense"), senseId);
         Assert.Contains(change.Entities, e => e.Id == synsetId);
         Assert.Contains(change.Entities, e => e.Id == senseId);
     }
@@ -40,9 +44,9 @@ public class BootstrapIntentBuilderTests
     public void Build_AddRelationTypeRegistersEntityWithStableId()
     {
         var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
-        var typeId = b.AddRelationType("IS_HYPERNYM_OF");
+        var typeId = b.AddRelationType("HAS_DEFINITION");
         var change = b.Build();
-        Assert.Equal(Hash128.OfCanonical("substrate/type/IS_HYPERNYM_OF/v1"), typeId);
+        Assert.Equal(TypeHash("HAS_DEFINITION"), typeId);
         Assert.Contains(change.Entities, e => e.Id == typeId);
     }
 
@@ -77,15 +81,11 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
-    public void CanonicalIdConventions_AreStable()
+    public void CanonicalIdConventions_AreContentAddressed()
     {
-        Assert.Equal(Hash128.OfCanonical("substrate/type/Source/v1"),
-                     BootstrapIntentBuilder.SourceTypeId);
-        Assert.Equal(Hash128.OfCanonical("substrate/type/Type/v1"),
-                     BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Equal(Hash128.OfCanonical("substrate/type/RelationType/v1"),
-                     BootstrapIntentBuilder.RelationTypeMetaTypeId);
-        Assert.Equal(Hash128.OfCanonical("substrate/type/HAS_TRUST_CLASS/v1"),
-                     BootstrapIntentBuilder.HasTrustClassTypeId);
+        Assert.Equal(TypeHash("Source"),        BootstrapIntentBuilder.SourceTypeId);
+        Assert.Equal(TypeHash("Type"),          BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Equal(TypeHash("RelationType"),  BootstrapIntentBuilder.RelationTypeMetaTypeId);
+        Assert.Equal(TypeHash("HAS_TRUST_CLASS"), BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }

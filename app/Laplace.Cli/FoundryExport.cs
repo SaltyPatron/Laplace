@@ -270,6 +270,70 @@ internal static class FoundryExport
     
     
     
+    /// <summary>Band-mask variant of <see cref="ReadLayerPlaneAsync"/> — uses
+    /// <c>consensus_layer_plane_masked</c> instead of the float rank window.</summary>
+    internal static async Task<PlaneCoo> ReadLayerPlaneMaskedAsync(
+        NpgsqlDataSource ds, Mask256 bandMask,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane_masked($1, $2, $3)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = bandMask.ToByteArray(), NpgsqlDbType = NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(degreeCap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2) * rdr.GetDouble(3);
+                if (w == 0.0) continue;
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (layer plane [masked band] unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
+
+        long kept = 0;
+        foreach (var row in adj.Values)
+        {
+            row.Sort((a, b) =>
+            {
+                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
+                return c != 0 ? c : a.Col.CompareTo(b.Col);
+            });
+            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            kept += row.Count;
+        }
+        var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
+        long at = 0;
+        foreach (var r in adj.Keys.OrderBy(k => k))
+            foreach (var (c, w) in adj[r])
+            {
+                rows[at] = r; cols[at] = c; vals[at] = w; at++;
+            }
+        return new PlaneCoo(rows, cols, vals);
+    }
+
     internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
 
     internal static async Task<List<TypePlane>> ReadTypePlanesAsync(

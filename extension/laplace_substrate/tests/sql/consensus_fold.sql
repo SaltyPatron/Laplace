@@ -28,7 +28,7 @@ SET search_path = laplace, public;
 
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/fold/source');
     rel    bytea := laplace_hash128_blake3('test/fold/reltype');
     sA bytea := laplace_hash128_blake3('test/fold/subjectA');
@@ -269,7 +269,7 @@ END $$;
 
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/walk/source');
     rel    bytea := laplace_hash128_blake3('test/walk/reltype');
     sW  bytea := laplace_hash128_blake3('test/walk/subject');
@@ -403,7 +403,7 @@ END $$;
 
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/walkconv/source');
     rel    bytea := laplace_hash128_blake3('test/walkconv/reltype');
     sZ  bytea := laplace_hash128_blake3('test/walkconv/nullobj-subject');
@@ -473,7 +473,7 @@ END $$;
 
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     s bytea := laplace_hash128_blake3('test/guard/subject');
     t bytea := laplace_hash128_blake3('test/guard/reltype');
     o bytea := laplace_hash128_blake3('test/guard/object');
@@ -523,7 +523,7 @@ END $$;
 
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src bytea := laplace_hash128_blake3('test/shared/source');
     rel bytea := laplace_hash128_blake3('test/shared/reltype');
     s   bytea := laplace_hash128_blake3('test/shared/subject');

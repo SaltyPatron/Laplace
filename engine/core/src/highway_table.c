@@ -95,10 +95,9 @@ static void hw_unmap(const uint8_t* base, size_t len) {
 /* ── Type-id computation (must match relation_law.c's type_id_from_canonical) ── */
 
 static void type_id_for_canonical(const char* name, uint8_t name_len, hash128_t* out) {
-    char path[256];
-    int n = snprintf(path, sizeof(path), "substrate/type/%.*s/v1", (int)name_len, name);
-    if (n <= 0 || (size_t)n >= sizeof(path)) { hash128_zero(out); return; }
-    hash128_blake3((const uint8_t*)path, (size_t)n, out);
+    /* Content-addressed: entity hash = blake3(canonical_name_utf8_bytes).
+     * Must match relation_law.c type_id_from_canonical and EntityTypeRegistry.Id() in C#. */
+    hash128_blake3((const uint8_t*)name, (size_t)name_len, out);
 }
 
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */

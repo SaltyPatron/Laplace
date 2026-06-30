@@ -17,21 +17,11 @@ public sealed class ImageDecomposer : IDecomposer
     public int     LayerOrder   => 11;
     public Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Pixel");
-        boot.AddType("Patch");
-        boot.AddType("Region");
-        boot.AddType("Image");
-        boot.AddType("Image_Collection");
-        boot.AddRelationType("DEPICTS");
-        boot.AddRelationType("CAPTIONS");
-        boot.AddRelationType("IS_PIXEL_OF");
-        boot.AddRelationType("HAS_COLOR");
-        boot.AddRelationType("ADJACENT_TO_PIXEL");
-        return context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Pixel", "Patch", "Region", "Image", "Image_Collection"],
+            relationNodeNames: ["DEPICTS", "CAPTIONS", "IS_PIXEL_OF", "HAS_COLOR", "ADJACENT_TO_PIXEL"],
+            ct: ct);
 
 #pragma warning disable CS1998
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

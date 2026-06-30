@@ -34,20 +34,12 @@ public sealed class VerbNetDecomposer : IDecomposer{
 
     private const long EstimatedClasses = 329L;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("VerbNet_Class");
-        boot.AddRelationType("IS_A");
-        boot.AddRelationType("MEMBER_OF_VERBNET_CLASS");
-        boot.AddRelationType("HAS_THEMATIC_ROLE");
-        boot.AddRelationType("HAS_VERB_FRAME");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("CORRESPONDS_TO");
-        boot.AddRelationType("EVOKES_FRAME");
-        boot.AddRelationType("HAS_NAME_ALIAS");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["VerbNet_Class"],
+            relationNodeNames: ["IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE",
+                "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME_ALIAS"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

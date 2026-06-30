@@ -3,7 +3,7 @@ SET search_path = laplace, public;
 
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t   bytea := laplace_hash128_blake3('Type');
     src      bytea := laplace_hash128_blake3('test/s10/source');
     rel_type  bytea := laplace_hash128_blake3('test/s10/reltype');
     subj     bytea := laplace_hash128_blake3('test/s10/subject');

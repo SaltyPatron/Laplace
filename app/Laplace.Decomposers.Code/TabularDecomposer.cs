@@ -58,16 +58,15 @@ public sealed class TabularDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("TabularColumn");
-        boot.AddType("TabularValue");
-        boot.AddType("TabularOutcome");
-        boot.AddRelationType("PREDICTS");
-        boot.AddRelationType("IS_VALUE_IN");
-        boot.AddRelationType("IS_INSTANCE_OF");
-        boot.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["TabularColumn", "TabularValue", "TabularOutcome"],
+            relationNodeNames: ["PREDICTS", "IS_VALUE_IN", "IS_INSTANCE_OF"],
+            ct: ct);
+        var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
+            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
+        seed.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
         _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
+        await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

@@ -20,16 +20,11 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
     // or Predicate Matrix TSV (PredicateMatrix.txt). Each record stages category anchors and CORRESPONDS_TO
     // edges over content-addressed ids; WordNet synset targets resolve via CILI/ILI (ConceptAnchor).
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("VerbNet_Class");
-        boot.AddType("PropBank_Roleset");
-        boot.AddType("FrameNet_Frame");
-        boot.AddRelationType("CORRESPONDS_TO");
-        boot.AddRelationType("ROLE_CORRESPONDS_TO");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"],
+            relationNodeNames: ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

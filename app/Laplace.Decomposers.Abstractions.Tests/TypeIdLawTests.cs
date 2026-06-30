@@ -11,13 +11,9 @@ public class TypeIdLawTests
         @"Hash128\.OfCanonical\s*\(\s*""substrate/type/",
         RegexOptions.Compiled);
 
-    private static readonly HashSet<string> AllowedFiles = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "EntityTypeRegistry.cs",
-        "RelationTypeRegistry.cs",
-        "BootstrapIntentBuilder.cs",
-        "ByteAtoms.cs",
-    };
+    // All OfCanonical("substrate/type/...") literal-string usages are banned.
+    // Compound/interpolated namespace keys (substrate/type/grammar/...) are exempt by the regex.
+    private static readonly HashSet<string> AllowedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void DecomposerSources_DoNotMintTypeIdsOutsideRegistries()
@@ -97,9 +93,10 @@ public class TypeIdLawTests
     [InlineData("Language")]
     [InlineData("WordNet_Synset")]
     [InlineData("FrameNet_Frame")]
-    public void EntityTypeRegistry_MatchesCanonicalPath(string name)
+    public void EntityTypeRegistry_IsContentAddressed(string name)
     {
-        var expected = Hash128.OfCanonical($"substrate/type/{name}/v1");
+        // Entity type identity is blake3(utf8_bytes(name)) — no namespace prefix
+        var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
         Assert.Equal(expected, EntityTypeRegistry.Id(name));
     }
 

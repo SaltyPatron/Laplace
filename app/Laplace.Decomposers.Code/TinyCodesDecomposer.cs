@@ -56,14 +56,10 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("CodeConcept");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("CALLS");
-        boot.AddRelationType("DEFINES");
-        boot.AddRelationType("REFERENCES");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
+        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["CodeConcept"],
+            relationNodeNames: ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"],
+            ct: ct);
         _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 

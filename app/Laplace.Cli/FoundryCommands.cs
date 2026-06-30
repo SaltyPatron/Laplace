@@ -518,18 +518,36 @@ internal static class FoundryCommands
         
         
         
-        Task<FoundryExport.PlaneCoo> LayerAsync(double lo, double hi)
-            => FoundryExport.ReadLayerPlaneAsync(ds, lo, hi, tokenSlots, degreeCap);
-        // Bands map to rank CLASSES in engine/manifest/relation_types.toml [ranks]. They were
-        // silently broken by the rank recalibration: definitional(0.97)/taxonomic(0.90)/mandate(1.0)
-        // moved ABOVE the old 0.86 ceiling, so the "what IS X" backbone (IS_A, HAS_DEFINITION,
-        // hypernyms) was excluded from embed + every operator → starved layers, bigram lm_head.
-        // Each band stays bound to ONE role; scaffolding (lexical_glue 0.18, scalar 0.12,
-        // standards_structural 0.08, probationary 0.05) stays excluded — sequence enters via `traj`.
-        var simTask = LayerAsync(0.78, 0.87);   // equivalence(0.82)                       → embed identity (synonym clustering)
-        var relTask = LayerAsync(0.70, 1.001);  // partitive+taxonomic+definitional+mandate → V/O taxonomic routing ("what is X")
-        var preTask = LayerAsync(0.55, 0.70);   // causal(0.64)                             → FFN
-        var attTask = LayerAsync(0.30, 0.52);   // associative(0.36)+oppositional(0.45)     → attention
+        Task<FoundryExport.PlaneCoo> LayerMaskedAsync(Mask256 bandMask)
+            => FoundryExport.ReadLayerPlaneMaskedAsync(ds, bandMask, tokenSlots, degreeCap);
+        // Band masks from highway perfcache — no float range, no silent exclusions.
+        // HIGHWAY_BAND_EQUIVALENCE=3, TAXONOMIC=2, DEFINITIONAL=1, MANDATE=0, PARTITIVE=4,
+        // CAUSAL=5, OPPOSITIONAL=6, ASSOCIATIVE=7. OR-ing gives multi-band planes.
+        // Falls back to rank-range if highway perfcache is not loaded.
+        var simMask = HighwayPerfcache.BandMask(3);                                          // equivalence          → embed identity
+        var relMask = HighwayPerfcache.BandMask(0) | HighwayPerfcache.BandMask(1)
+                    | HighwayPerfcache.BandMask(2) | HighwayPerfcache.BandMask(4);          // mandate+defn+taxo+part → V/O routing
+        var preMask = HighwayPerfcache.BandMask(5);                                          // causal               → FFN
+        var attMask = HighwayPerfcache.BandMask(6) | HighwayPerfcache.BandMask(7);          // oppositional+assoc   → attention
+
+        Task<FoundryExport.PlaneCoo> simTask, relTask, preTask, attTask;
+        if (!simMask.IsZero)
+        {
+            simTask = LayerMaskedAsync(simMask);
+            relTask = LayerMaskedAsync(relMask);
+            preTask = LayerMaskedAsync(preMask);
+            attTask = LayerMaskedAsync(attMask);
+        }
+        else
+        {
+            // Highway perfcache not loaded — fall back to float rank bands.
+            Task<FoundryExport.PlaneCoo> LayerAsync(double lo, double hi)
+                => FoundryExport.ReadLayerPlaneAsync(ds, lo, hi, tokenSlots, degreeCap);
+            simTask = LayerAsync(0.78, 0.87);
+            relTask = LayerAsync(0.70, 1.001);
+            preTask = LayerAsync(0.55, 0.70);
+            attTask = LayerAsync(0.30, 0.52);
+        }
         await Task.WhenAll(simTask, relTask, preTask, attTask);
         var sim = FoundryExport.Normalize(simTask.Result);
         var rel = FoundryExport.Normalize(relTask.Result);

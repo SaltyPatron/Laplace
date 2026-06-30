@@ -7,7 +7,7 @@ SET search_path = laplace, public;
 
 DO $$
 DECLARE
-    type_t  bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t  bytea := laplace_hash128_blake3('Type');
     src     bytea := laplace_hash128_blake3('test/period/source');
     rel_type bytea := laplace_hash128_blake3('test/period/reltype');
     subjA   bytea := laplace_hash128_blake3('test/period/subjectA');
@@ -147,7 +147,7 @@ BEGIN;
 SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t  bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t  bytea := laplace_hash128_blake3('Type');
     src     bytea := laplace_hash128_blake3('test/epoch/source');
     rel_type bytea := laplace_hash128_blake3('test/epoch/reltype');
     subjD   bytea := laplace_hash128_blake3('test/epoch/subjectD');
@@ -211,7 +211,7 @@ BEGIN;
 SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t bytea := laplace_hash128_blake3('Type');
     src    bytea := laplace_hash128_blake3('test/inband/source');
     word   bytea := laplace_hash128_blake3('test/inband/word');
     chH    bytea := laplace_hash128_blake3('test/inband/child-h');

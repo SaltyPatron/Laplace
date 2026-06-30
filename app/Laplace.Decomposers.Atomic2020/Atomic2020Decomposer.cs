@@ -6,6 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
+[UsesNativeIngest]
 public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
@@ -51,12 +52,10 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Atomic_Marker");
-        boot.AddType("Atomic_Split");
-        foreach (var name in Relations.Select(r => r.Type).Distinct())
-            boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
-        await context.Writer.ApplyAsync(boot.Build(), ct);
+        var relTypes = Relations.Select(r => RelationTypeRegistry.Resolve(r.Type).Canonical).Distinct();
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Atomic_Marker", "Atomic_Split"],
+            relationNodeNames: relTypes, ct: ct);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
             entityCapacity: 1 + Splits.Length, physicalityCapacity: 0, attestationCapacity: 0);

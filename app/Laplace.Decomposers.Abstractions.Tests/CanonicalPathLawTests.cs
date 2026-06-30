@@ -9,12 +9,12 @@ public class CanonicalPathLawTests
     [InlineData("IS_A")]
     [InlineData("HAS_PART")]
     [InlineData("PRECEDES")]
-    public void RelationTypeId_PathUsesSubstrateType(string name)
+    public void RelationTypeId_IsContentAddressed(string name)
     {
+        // Relation type identity is blake3(utf8_bytes(name)) — no namespace prefix
         var id = RelationTypeRegistry.RelationTypeId(name);
-        var canonical = Hash128.OfCanonical($"substrate/type/{name}/v1");
-        Assert.Equal(canonical, id);
-        Assert.Contains("/type/", $"substrate/type/{name}/v1");
+        var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
+        Assert.Equal(expected, id);
     }
 
     [Fact]

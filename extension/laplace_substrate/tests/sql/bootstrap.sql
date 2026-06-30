@@ -6,22 +6,22 @@ SET search_path TO laplace, public;
 
 SELECT count(*) AS canonical_type_count FROM entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/type/IS_A/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/HAS_PART/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/CO_OCCURS_WITH/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/FOLLOWS/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/PRECEDES/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/OCCURS_IN_CONTEXT/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/HAS_LANGUAGE/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/IS_TRANSLATION_OF/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/DEPICTS/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/CAPTIONS/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/TRANSCRIBES_AS/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/IS_LOSSY_ENCODING_OF/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/HAS_VARIANT_OF/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/IS_REPLACED_BY/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/HAS_TRUST_CLASS/v1'::bytea),
-    laplace_hash128_blake3('substrate/type/IS_ALIAS_OF/v1'::bytea)
+    laplace_hash128_blake3('IS_A'::bytea),
+    laplace_hash128_blake3('HAS_PART'::bytea),
+    laplace_hash128_blake3('CO_OCCURS_WITH'::bytea),
+    laplace_hash128_blake3('FOLLOWS'::bytea),
+    laplace_hash128_blake3('PRECEDES'::bytea),
+    laplace_hash128_blake3('OCCURS_IN_CONTEXT'::bytea),
+    laplace_hash128_blake3('HAS_LANGUAGE'::bytea),
+    laplace_hash128_blake3('IS_TRANSLATION_OF'::bytea),
+    laplace_hash128_blake3('DEPICTS'::bytea),
+    laplace_hash128_blake3('CAPTIONS'::bytea),
+    laplace_hash128_blake3('TRANSCRIBES_AS'::bytea),
+    laplace_hash128_blake3('IS_LOSSY_ENCODING_OF'::bytea),
+    laplace_hash128_blake3('HAS_VARIANT_OF'::bytea),
+    laplace_hash128_blake3('IS_REPLACED_BY'::bytea),
+    laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea),
+    laplace_hash128_blake3('IS_ALIAS_OF'::bytea)
 );
 
 SELECT EXISTS(
@@ -61,7 +61,7 @@ WHERE id IN (
 SELECT EXISTS(
     SELECT 1 FROM attestations
     WHERE subject_id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
-      AND type_id    = laplace_hash128_blake3('substrate/type/HAS_TRUST_CLASS/v1'::bytea)
+      AND type_id    = laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea)
       AND object_id  = laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea)
       AND source_id  = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_trust_class_set;

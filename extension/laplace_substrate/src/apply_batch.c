@@ -270,10 +270,11 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
             att_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.attestations "
                 "  (id, subject_id, type_id, object_id, source_id, context_id, "
-                "   outcome, last_observed_at, observation_count) "
+                "   outcome, last_observed_at, observation_count, highway_mask) "
                 "SELECT DISTINCT ON (s.id) "
                 "       s.id, s.subject_id, s.type_id, s.object_id, s.source_id, "
-                "       s.context_id, s.outcome, s.last_observed_at, s.observation_count "
+                "       s.context_id, s.outcome, s.last_observed_at, s.observation_count, "
+                "       s.highway_mask "
                 "FROM %s s "
                 "WHERE NOT EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
                 "ORDER BY s.id", stage_att));

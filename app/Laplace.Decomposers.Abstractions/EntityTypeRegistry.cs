@@ -5,8 +5,9 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class EntityTypeRegistry
 {
-    public static Hash128 Id(string canonicalName) =>
-        Hash128.OfCanonical($"substrate/type/{canonicalName}/v1");
+    /// <summary>Content-addressed identity for an entity type: <c>blake3(utf8_bytes(canonicalName))</c>.
+    /// Matches <c>HighwayPerfcache.NodeHash</c> and the C engine <c>type_id_from_canonical</c>.</summary>
+    public static Hash128 Id(string canonicalName) => HighwayPerfcache.NodeHash(canonicalName);
 
     public static readonly Hash128 Architecture       = Id("Architecture");
     public static readonly Hash128 AtomicMarker       = Id("Atomic_Marker");

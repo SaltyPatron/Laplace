@@ -75,29 +75,16 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("WordNet_Synset");
-        boot.AddType("WordNet_Sense");
-
-        boot.AddRelationType("IS_SYNONYM_OF");
-        boot.AddRelationType("HAS_POS");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_LEX_CATEGORY");
-        boot.AddRelationType("HAS_DOMAIN_TOPIC");
-        boot.AddRelationType("HAS_VERB_FRAME");
-        boot.AddRelationType("IS_LEMMA_OF");
-        boot.AddRelationType("HAS_SENSE");
-        boot.AddRelationType("IS_SENSE_OF");
-        boot.AddRelationType("HAS_NAME_ALIAS");
-
+        var relTypes = new List<string>(
+            ["IS_SYNONYM_OF", "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
+             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
+             "HAS_NAME_ALIAS", "MANNER_OF"]);
         foreach (var name in PointerTypes.Values)
-            boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
-        boot.AddRelationType("MANNER_OF");
-
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            _vocabularyNames.TryAdd(n, 0);
+            relTypes.Add(RelationTypeRegistry.Resolve(name).Canonical);
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["WordNet_Synset", "WordNet_Sense"],
+            relationNodeNames: relTypes,
+            readbackNames: _vocabularyNames, ct: ct);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

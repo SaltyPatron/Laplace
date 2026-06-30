@@ -67,34 +67,13 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("FrameNet_Frame");
-        boot.AddType("FrameNet_FE");
-        boot.AddType("FrameNet_LU");
-        boot.AddType("FrameNet_Coreness");
-
-        boot.AddRelationType("EVOKES_FRAME");
-        boot.AddRelationType("HAS_FRAME_ELEMENT");
-        boot.AddRelationType("REQUIRES");
-        boot.AddRelationType("EXCLUDES");
-        boot.AddRelationType("HAS_VALENCE_PATTERN");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_POS");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("FRAME_USES");
-        boot.AddRelationType("PERSPECTIVE_ON");
-        boot.AddRelationType("INHERITS_FROM");
-        boot.AddRelationType("CAUSATIVE_OF");
-        boot.AddRelationType("INCHOATIVE_OF");
-        boot.AddRelationType("PRECEDES");
-        boot.AddRelationType("ALSO_SEE");
-        boot.AddRelationType("IS_A");
-        boot.AddRelationType("HAS_SUBEVENT");
-        boot.AddRelationType("RELATED_TO");
-
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            _vocabularyNames.TryAdd(n, 0);
+        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["FrameNet_Frame", "FrameNet_FE", "FrameNet_LU", "FrameNet_Coreness"],
+            relationNodeNames: ["EVOKES_FRAME", "HAS_FRAME_ELEMENT", "REQUIRES", "EXCLUDES",
+                "HAS_VALENCE_PATTERN", "HAS_DEFINITION", "HAS_POS", "HAS_EXAMPLE",
+                "FRAME_USES", "PERSPECTIVE_ON", "INHERITS_FROM", "CAUSATIVE_OF",
+                "INCHOATIVE_OF", "PRECEDES", "ALSO_SEE", "IS_A", "HAS_SUBEVENT", "RELATED_TO"],
+            readbackNames: _vocabularyNames, ct: ct);
 
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,

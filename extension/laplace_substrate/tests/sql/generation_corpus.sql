@@ -21,7 +21,7 @@ SET laplace_substrate.corpus_document_source = '';
 
 DO $$
 DECLARE
-    type_t    bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t    bytea := laplace_hash128_blake3('Type');
     src       bytea := laplace_hash128_blake3('test/corpus/source');
     w_the     bytea := laplace_hash128_blake3('test/corpus/word-the');
     w_capital bytea := laplace_hash128_blake3('test/corpus/word-capital');
