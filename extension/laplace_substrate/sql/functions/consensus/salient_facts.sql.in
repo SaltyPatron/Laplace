@@ -1,0 +1,43 @@
+CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
+                                    p_limit int DEFAULT 24)
+    RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (
+        SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
+    ), top AS (
+        SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
+        FROM subj s CROSS JOIN LATERAL (
+            SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
+            FROM consensus c
+            WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
+              AND NOT refuted(c.rating, c.rd)
+              AND EXISTS (
+                  SELECT 1 FROM entities et
+                  WHERE et.id = c.type_id AND et.type_id = entity_type_id('RelationType'))
+              AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
+              AND c.type_id NOT IN (
+                relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+                relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
+                relation_type_id('FOLLOWS'), relation_type_id('CO_OCCURS_WITH'),
+                relation_type_id('OCCURS_IN_CONTEXT'), relation_type_id('HAS_LEX_CATEGORY'),
+                relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
+                relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'))
+              AND NOT EXISTS (
+                  SELECT 1 FROM entities et
+                  WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
+            ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
+        ) cc
+    )
+    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
+        SELECT type_label(t.type_id) AS type,
+               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
+               eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
+               eff_mu(t.rating, t.rd) AS sort_mu
+        FROM top t
+    ) d
+    WHERE d.fact IS NOT NULL AND d.fact <> ''
+      AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'
+    ORDER BY d.sort_mu DESC
+    LIMIT p_limit
+$$;

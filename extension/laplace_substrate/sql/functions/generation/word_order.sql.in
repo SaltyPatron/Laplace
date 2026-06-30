@@ -1,0 +1,26 @@
+CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT p_trajs
+    ),
+    g AS (
+        SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        JOIN v ON v.id = tc.entity_id
+    ),
+    bg AS (
+        SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g
+    ),
+    cnt AS (
+        SELECT cur, nxt, count(*)::float8 AS c
+        FROM bg WHERE nxt IS NOT NULL AND cur <> nxt GROUP BY cur, nxt
+    )
+    SELECT cur, nxt, c FROM cnt
+$$;

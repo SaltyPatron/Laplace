@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON physicalities USING brin (observed_at);

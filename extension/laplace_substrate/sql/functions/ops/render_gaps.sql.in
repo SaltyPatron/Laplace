@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION render_gaps(p_limit integer DEFAULT 50)
+    RETURNS TABLE(id bytea, roles text, refs bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH refs AS (
+        SELECT c.type_id AS id, 'type' AS role FROM @extschema@.consensus c
+        UNION ALL
+        SELECT c.object_id, 'object' FROM @extschema@.consensus c WHERE c.object_id IS NOT NULL
+        UNION ALL
+        SELECT c.subject_id, 'subject' FROM @extschema@.consensus c
+    ),
+    agg AS (
+        SELECT r.id, string_agg(DISTINCT r.role, ',' ORDER BY r.role) AS roles, count(*) AS refs
+        FROM refs r GROUP BY r.id
+    )
+    SELECT a.id, a.roles, a.refs
+    FROM agg a
+    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
+      AND @extschema@.codepoint_for_id(a.id) IS NULL
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.physicalities p
+                      WHERE p.entity_id = a.id AND p.type = 1 AND p.trajectory IS NOT NULL)
+    ORDER BY a.refs DESC
+    LIMIT p_limit
+$$;

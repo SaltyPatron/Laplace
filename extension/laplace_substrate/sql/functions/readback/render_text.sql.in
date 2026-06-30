@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
+    LANGUAGE C STABLE;

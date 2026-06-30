@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION nearest_neighbors_4d(p_word text, p_k integer DEFAULT 10)
+    RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT neighbor, geodesic, frechet FROM structural_neighbors(p_word, p_k)
+$$;

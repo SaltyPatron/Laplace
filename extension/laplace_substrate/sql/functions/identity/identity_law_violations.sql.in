@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION identity_law_violations()
+RETURNS TABLE(id bytea, tier smallint, reason text)
+LANGUAGE sql
+STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT e.id, e.tier, 'tier_out_of_range'::text
+    FROM @extschema@.entities e
+    WHERE e.tier < 0 OR e.tier >= 256;
+$$;

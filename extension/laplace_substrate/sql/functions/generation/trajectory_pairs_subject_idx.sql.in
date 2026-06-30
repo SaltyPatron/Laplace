@@ -1,0 +1,9 @@
+CREATE INDEX IF NOT EXISTS trajectory_pairs_subject_idx ON trajectory_pairs (subject_id);
+
+CREATE TABLE IF NOT EXISTS trajectory_pairs_meta (
+    only_row     boolean PRIMARY KEY DEFAULT true CHECK (only_row),
+    probe_rows   bigint  NOT NULL,
+    probe_max_us bigint  NOT NULL,
+    max_gap      int     NOT NULL,
+    built_at     timestamptz NOT NULL DEFAULT now()
+);

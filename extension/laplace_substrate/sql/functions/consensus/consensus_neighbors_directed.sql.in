@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION consensus_neighbors_directed(
+    p_subject bytea,
+    p_types   bytea[],
+    p_limit   int)
+    RETURNS TABLE(nbr bytea, rating bigint, rd bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id AS nbr, c.rating, c.rd
+    FROM consensus c
+    WHERE c.subject_id = p_subject
+      AND c.object_id IS NOT NULL
+      AND c.type_id = ANY (p_types)
+      AND NOT refuted(c.rating, c.rd)
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT p_limit
+$$;

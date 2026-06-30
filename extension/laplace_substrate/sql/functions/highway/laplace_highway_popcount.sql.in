@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION laplace_highway_popcount(mask bytea)
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT COALESCE(
+        (SELECT sum(bit_count)::integer
+         FROM (SELECT length(replace(get_byte(mask, g)::bit(8)::text, '0', '')) AS bit_count
+               FROM generate_series(0, octet_length(mask) - 1) AS g) bits),
+        0)
+$$;

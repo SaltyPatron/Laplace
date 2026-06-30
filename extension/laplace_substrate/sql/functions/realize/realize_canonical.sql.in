@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION _realize_canonical(p_id bytea)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
+    FROM canonical_names n
+    WHERE n.id = p_id AND n.name LIKE 'substrate/%'
+$$;

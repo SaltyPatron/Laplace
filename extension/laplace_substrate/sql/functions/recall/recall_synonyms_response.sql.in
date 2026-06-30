@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION recall_synonyms_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.synonym, s.eff_mu, s.witnesses FROM synonyms(p_topic) s
+$$;

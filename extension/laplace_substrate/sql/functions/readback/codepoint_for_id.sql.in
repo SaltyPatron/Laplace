@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION codepoint_for_id(p_id bytea)
+    RETURNS integer
+    AS 'MODULE_PATHNAME', 'pg_laplace_codepoint_for_id'
+    LANGUAGE C LAPLACE_STABLE_STRICT;

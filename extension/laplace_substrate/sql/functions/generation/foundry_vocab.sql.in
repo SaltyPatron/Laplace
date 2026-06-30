@@ -1,0 +1,61 @@
+CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
+    RETURNS TABLE(entity_id bytea, surface text, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH freq AS (
+        SELECT c.subject_id AS id, count(*) AS d
+        FROM consensus c
+        WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
+        GROUP BY c.subject_id
+    ),
+    seeds AS (
+        SELECT f.id, f.d
+        FROM freq f JOIN entities e ON e.id = f.id AND e.tier = 2
+        ORDER BY f.d DESC LIMIT p_size
+    ),
+    closure AS (
+        SELECT DISTINCT c.object_id AS id
+        FROM consensus c
+        JOIN seeds s ON s.id = c.subject_id
+        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+        WHERE c.object_id IS NOT NULL
+          AND c.type_id IN (
+              relation_type_id('IS_A'), relation_type_id('IS_SYNONYM_OF'),
+              relation_type_id('RELATED_TO'), relation_type_id('HAS_PART'),
+              relation_type_id('DERIVATIONALLY_RELATED'), relation_type_id('IS_COORDINATE_TERM_WITH'))
+    ),
+    ids AS (SELECT id FROM seeds UNION SELECT id FROM closure),
+    
+    
+    
+    
+    
+    
+    ranked AS (
+        SELECT i.id, COALESCE(f.d, 0) AS d
+        FROM ids i LEFT JOIN freq f ON f.id = i.id
+        ORDER BY COALESCE(f.d, 0) DESC, i.id
+        LIMIT p_size * 3
+    ),
+    arr AS (
+        SELECT array_agg(id ORDER BY d DESC, id) AS a,
+               array_agg(d  ORDER BY d DESC, id) AS ds
+        FROM ranked
+    ),
+    named AS (
+        
+        
+        SELECT u.id, u.s, a.ds[u.ord::int] AS d
+        FROM arr a
+        CROSS JOIN LATERAL unnest(a.a, render_text_batch(a.a, 64)) WITH ORDINALITY AS u(id, s, ord)
+        WHERE a.a IS NOT NULL
+    ),
+    clean AS (
+        SELECT DISTINCT ON (n.s) n.id, n.s, n.d
+        FROM named n
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
+          AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
+        ORDER BY n.s, n.d DESC
+    )
+    SELECT c.id, c.s, c.d FROM clean c ORDER BY c.d DESC, c.id LIMIT p_size
+$$;

@@ -1,0 +1,31 @@
+CREATE OR REPLACE FUNCTION laplace_ancestry(
+    p_entity_id bytea,
+    p_band_mask  bytea,
+    p_max_depth  integer DEFAULT 10)
+RETURNS TABLE(ancestor_id bytea, depth integer, best_eff_mu numeric)
+LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    WITH RECURSIVE
+        band_types AS MATERIALIZED (
+            SELECT e.id FROM entities e
+            WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+        ),
+        ancestry(ancestor_id, depth, eff_mu_raw) AS (
+            SELECT c.object_id, 1, eff_mu(c.rating, c.rd)
+            FROM consensus c
+            JOIN band_types bt ON bt.id = c.type_id
+            WHERE c.subject_id = p_entity_id
+              AND c.object_id IS NOT NULL
+              AND eff_mu(c.rating, c.rd) > 0
+            UNION ALL
+            SELECT c.object_id, anc.depth + 1, eff_mu(c.rating, c.rd)
+            FROM ancestry anc
+            JOIN consensus c ON c.subject_id = anc.ancestor_id
+            JOIN band_types bt ON bt.id = c.type_id
+            WHERE c.object_id IS NOT NULL
+              AND eff_mu(c.rating, c.rd) > 0
+              AND anc.depth < p_max_depth
+        )
+    SELECT ancestor_id, min(depth)::integer, eff_mu_display(max(eff_mu_raw), 0)
+    FROM ancestry
+    GROUP BY ancestor_id
+$$;

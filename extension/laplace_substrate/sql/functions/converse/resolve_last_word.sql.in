@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT pw.id FROM prompt_words(p_phrase) pw
+    WHERE pw.id IS NOT NULL
+    ORDER BY pw.ord DESC
+    LIMIT 1
+$$;

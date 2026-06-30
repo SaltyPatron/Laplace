@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using global::Npgsql;
 using Xunit;
@@ -8,15 +9,66 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// Write-path throughput gates (200k rows/sec). Tagged <c>Tier=perf</c> — excluded from CI
-/// (<c>--filter Tier!=perf</c>) because they run against the live seeded substrate.
+/// Write-path throughput gates. Tagged <c>Tier=perf</c> — excluded from default CI
+/// (<c>--filter Tier!=perf</c>) because they run against a live PostgreSQL substrate.
 /// </summary>
+/// <summary>Isolated fixture — one throughput gate per class so prior inserts do not skew anti-join.</summary>
 [Trait("Tier", "perf")]
-[Collection("substrate-pg")]
+[Collection("substrate-pg-writer-throughput")]
+public sealed class EntityWriterThroughputTests
+{
+    private readonly LocalPgFixture _pg;
+
+    private static readonly Hash128 ThroughputSrc =
+        Hash128.OfCanonical("substrate/source/test/throughput-ent/v1");
+    private static readonly Hash128 ThroughputTypeId =
+        Hash128.OfCanonical("ThroughputFixture");
+
+    public EntityWriterThroughputTests(LocalPgFixture pg) => _pg = pg;
+
+    private Hash128 Id(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
+
+    [Fact]
+    public async Task NativeStage_Exceeds_500k_RowsPerSecond()
+    {
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES "
+          + "($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
+        await cmd.ExecuteNonQueryAsync();
+
+        IntentStage.SetBulkFreshBypass(true);
+        try
+        {
+            var writer = new NpgsqlSubstrateWriter(_pg.DataSource, bulkFreshSource: true, applyPartitions: 1);
+        const int totalRows = 500_000;
+        var stage = IntentStage.New(totalRows);
+        for (int i = 0; i < totalRows; i++)
+            stage.AddEntity(Id(10_000_000 + i), 0, ThroughputTypeId, null);
+
+        var change = WriterThroughputTests.NativeOnly(stage, ThroughputSrc, "tp-ent-native");
+        var sw = Stopwatch.StartNew();
+        var result = await writer.ApplyAsync(change);
+        sw.Stop();
+
+        Assert.Equal(totalRows, result.EntitiesInserted);
+        double rowsPerSec = result.EntitiesInserted / sw.Elapsed.TotalSeconds;
+        Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
+            $"Entity apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
+          + $"({result.EntitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+        }
+        finally
+        {
+            IntentStage.SetBulkFreshBypass(false);
+        }
+    }
+}
+
+[Trait("Tier", "perf")]
+[Collection("substrate-pg-writer-throughput")]
 public sealed class WriterThroughputTests
 {
     private readonly LocalPgFixture _pg;
-    private readonly NpgsqlSubstrateWriter _writer;
 
     private static readonly Hash128 ThroughputSrc =
         Hash128.OfCanonical("substrate/source/test/throughput/v1");
@@ -25,11 +77,10 @@ public sealed class WriterThroughputTests
     private static readonly Hash128 RelTypeId =
         Hash128.OfCanonical("ThroughputRelation");
 
-    public WriterThroughputTests(LocalPgFixture pg)
-    {
-        _pg = pg;
-        _writer = new NpgsqlSubstrateWriter(pg.DataSource);
-    }
+    public WriterThroughputTests(LocalPgFixture pg) => _pg = pg;
+
+    private static NpgsqlSubstrateWriter Writer(NpgsqlDataSource ds) =>
+        new(ds, bulkFreshSource: true, applyPartitions: 1);
 
     private Hash128 Id(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
@@ -45,143 +96,136 @@ public sealed class WriterThroughputTests
         await cmd.ExecuteNonQueryAsync();
     }
 
-    [Fact]
-    public async Task Entity_Throughput_Exceeds_200k_RowsPerSecond()
+    internal static SubstrateChange NativeOnly(
+        IntentStage stage, Hash128 src, string unitName, long inputUnits = 0)
     {
+        return new SubstrateChange(
+            ImmutableArray<EntityRow>.Empty,
+            ImmutableArray<PhysicalityRow>.Empty,
+            ImmutableArray<AttestationRow>.Empty,
+            new SubstrateChangeMetadata(
+                Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(unitName)),
+                src,
+                unitName,
+                DateTimeOffset.UtcNow,
+                null,
+                InputUnitsConsumed: inputUnits),
+            IntentStages: [stage]);
+    }
+
+    [Fact]
+    public async Task Attestation_NativeStage_Exceeds_500k_RowsPerSecond()
+    {
+        IntentStage.SetBulkFreshBypass(true);
+        try
+        {
         await EnsureVocabAsync();
+        var writer = Writer(_pg.DataSource);
 
         const int totalRows = 500_000;
-        const int batchSize = 50_000;
-        const int batches   = totalRows / batchSize;
-
-        long totalInserted = 0;
-        var sw = Stopwatch.StartNew();
-
-        for (int b = 0; b < batches; b++)
-        {
-            int base_ = b * batchSize + 10_000_000; // offset avoids collision with other tests
-            var builder = new SubstrateChangeBuilder(ThroughputSrc, $"tp-ent/{b}", null,
-                entityCapacity: batchSize, physicalityCapacity: 0, attestationCapacity: 0);
-            for (int i = 0; i < batchSize; i++)
-                builder.AddEntity(Id(base_ + i), 0, ThroughputTypeId);
-            var result = await _writer.ApplyAsync(builder.Build());
-            totalInserted += result.EntitiesInserted;
-        }
-
-        sw.Stop();
-        double rowsPerSec = totalInserted / sw.Elapsed.TotalSeconds;
-        Assert.True(rowsPerSec >= 200_000,
-            $"Entity throughput {rowsPerSec:F0} rows/sec is below the 200k target "
-          + $"({totalInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s)");
-    }
-
-    [Fact]
-    public async Task Attestation_Throughput_Exceeds_200k_RowsPerSecond()
-    {
-        await EnsureVocabAsync();
-
-        const int batchSize  = 50_000;
-        const int batches    = 10;
-        const int totalPairs = batchSize * batches;
-
-        // Pre-seed subject and object entities (required for FK integrity in apply_batch)
         int seedBase = 20_000_000;
+
+        var seedStage = IntentStage.New(totalRows * 2);
+        for (int i = 0; i < totalRows * 2; i++)
+            seedStage.AddEntity(Id(seedBase + i), 0, ThroughputTypeId, null);
+        await writer.ApplyAsync(NativeOnly(seedStage, ThroughputSrc, "tp-att-seed"));
+
+        var attStage = IntentStage.New(totalRows);
+        for (int i = 0; i < totalRows; i++)
         {
-            var seedBuilder = new SubstrateChangeBuilder(ThroughputSrc, "tp-att-seed", null,
-                entityCapacity: totalPairs * 2, physicalityCapacity: 0, attestationCapacity: 0);
-            for (int i = 0; i < totalPairs * 2; i++)
-                seedBuilder.AddEntity(Id(seedBase + i), 0, ThroughputTypeId);
-            await _writer.ApplyAsync(seedBuilder.Build());
+            Hash128 subj = Id(seedBase + i);
+            Hash128 obj  = Id(seedBase + totalRows + i);
+            attStage.AddAttestation(
+                Id(40_000_000 + i), subj, RelTypeId, obj, ThroughputSrc, null,
+                (short)AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1L);
         }
 
-        long totalInserted = 0;
         var sw = Stopwatch.StartNew();
-
-        for (int b = 0; b < batches; b++)
-        {
-            int base_ = seedBase + b * batchSize;
-            var builder = new SubstrateChangeBuilder(ThroughputSrc, $"tp-att/{b}", null,
-                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: batchSize);
-            for (int i = 0; i < batchSize; i++)
-            {
-                Hash128 subj = Id(base_ + i);
-                Hash128 obj  = Id(base_ + totalPairs + i);
-                builder.AddAttestation(new AttestationRow(
-                    Id:                    Id(40_000_000 + b * batchSize + i),
-                    SubjectId:             subj,
-                    TypeId:                RelTypeId,
-                    ObjectId:              obj,
-                    SourceId:              ThroughputSrc,
-                    ContextId:             null,
-                    Outcome:               AttestationOutcome.Confirm,
-                    LastObservedAtUnixUs:  IntentStage.PgEpochUnixUs,
-                    ObservationCount:      1L,
-                    ScoreFp1e9:            1_000_000_000L,
-                    OpponentRdFp1e9:       0L));
-            }
-            var result = await _writer.ApplyAsync(builder.Build());
-            totalInserted += result.AttestationsInserted;
-        }
-
+        var result = await writer.ApplyAsync(NativeOnly(attStage, ThroughputSrc, "tp-att-native"));
         sw.Stop();
-        double rowsPerSec = totalInserted / sw.Elapsed.TotalSeconds;
-        Assert.True(rowsPerSec >= 200_000,
-            $"Attestation throughput {rowsPerSec:F0} rows/sec is below the 200k target "
-          + $"({totalInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s)");
+
+        Assert.Equal(totalRows, result.AttestationsInserted);
+        Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
+        double rowsPerSec = result.AttestationsInserted / sw.Elapsed.TotalSeconds;
+        Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
+            $"Attestation apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
+            + $"({result.AttestationsInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+        }
+        finally
+        {
+            IntentStage.SetBulkFreshBypass(false);
+        }
     }
 
     [Fact]
-    public async Task Combined_Entity_Attestation_Throughput_Exceeds_200k_RowsPerSecond()
+    public async Task Physicality_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        await EnsureVocabAsync();
-
-        // Each batch: N entities + N attestations linking pairs → 2N rows
-        const int batchSize   = 25_000;
-        const int batches     = 10;
-        const int rowsPerBatch = batchSize * 2;
-
-        long totalEntities     = 0;
-        long totalAttestations = 0;
-        var sw = Stopwatch.StartNew();
-        int base_ = 30_000_000;
-
-        for (int b = 0; b < batches; b++)
+        IntentStage.SetBulkFreshBypass(true);
+        try
         {
-            int batchBase = base_ + b * batchSize * 2;
-            var builder = new SubstrateChangeBuilder(ThroughputSrc, $"tp-combined/{b}", null,
-                entityCapacity: batchSize * 2, physicalityCapacity: 0, attestationCapacity: batchSize);
+        await EnsureVocabAsync();
+        var writer = Writer(_pg.DataSource);
 
-            for (int i = 0; i < batchSize; i++)
-            {
-                Hash128 subj = Id(batchBase + i);
-                Hash128 obj  = Id(batchBase + batchSize + i);
-                builder.AddEntity(subj, 0, ThroughputTypeId);
-                builder.AddEntity(obj,  0, ThroughputTypeId);
-                builder.AddAttestation(new AttestationRow(
-                    Id:                    Id(50_000_000 + b * batchSize + i),
-                    SubjectId:             subj,
-                    TypeId:                RelTypeId,
-                    ObjectId:              obj,
-                    SourceId:              ThroughputSrc,
-                    ContextId:             null,
-                    Outcome:               AttestationOutcome.Confirm,
-                    LastObservedAtUnixUs:  IntentStage.PgEpochUnixUs,
-                    ObservationCount:      1L,
-                    ScoreFp1e9:            1_000_000_000L,
-                    OpponentRdFp1e9:       0L));
-            }
+        const int totalRows = 500_000;
+        int entBase = 60_000_000;
 
-            var result = await _writer.ApplyAsync(builder.Build());
-            totalEntities     += result.EntitiesInserted;
-            totalAttestations += result.AttestationsInserted;
+        var entStage = IntentStage.New(totalRows);
+        for (int i = 0; i < totalRows; i++)
+            entStage.AddEntity(Id(entBase + i), 2, ThroughputTypeId, null);
+        await writer.ApplyAsync(NativeOnly(entStage, ThroughputSrc, "tp-phys-seed"));
+
+        Span<double> coord = stackalloc double[4];
+        coord[0] = 0.1; coord[1] = 0.2; coord[2] = 0.3; coord[3] = 0.4;
+        var hilbert = Hilbert128.Encode(coord);
+        var physStage = IntentStage.New(totalRows);
+        for (int i = 0; i < totalRows; i++)
+        {
+            var entId = Id(entBase + i);
+            physStage.AddPhysicality(
+                Id(70_000_000 + i), entId, (short)PhysicalityType.Content,
+                coord, hilbert,
+                ReadOnlySpan<double>.Empty, 1, 0.0, 4, IntentStage.PgEpochUnixUs);
         }
 
+        var sw = Stopwatch.StartNew();
+        var result = await writer.ApplyAsync(NativeOnly(physStage, ThroughputSrc, "tp-phys-native"));
         sw.Stop();
-        long totalRows = totalEntities + totalAttestations;
-        double rowsPerSec = totalRows / sw.Elapsed.TotalSeconds;
-        Assert.True(rowsPerSec >= 200_000,
-            $"Combined throughput {rowsPerSec:F0} rows/sec is below the 200k target "
-          + $"({totalRows:N0} rows in {sw.Elapsed.TotalSeconds:F2}s, "
-          + $"entities={totalEntities:N0} attestations={totalAttestations:N0})");
+
+        Assert.Equal(totalRows, result.PhysicalitiesInserted);
+        Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
+        double rowsPerSec = result.PhysicalitiesInserted / sw.Elapsed.TotalSeconds;
+        Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
+            $"Physicality apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
+            + $"({result.PhysicalitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+        }
+        finally
+        {
+            IntentStage.SetBulkFreshBypass(false);
+        }
+    }
+
+    [Fact]
+    public async Task ApplyPartitions_One_Vs_Eight_RoundTrips_SingleBulkApplyIsLeaner()
+    {
+        await EnsureVocabAsync();
+        const int rows = 50_000;
+        var stage = IntentStage.New(rows);
+        for (int i = 0; i < rows; i++)
+            stage.AddEntity(Id(80_000_000 + i), 0, ThroughputTypeId, null);
+        var change = NativeOnly(stage, ThroughputSrc, "tp-rt-compare");
+
+        var single = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 1);
+        var r1 = await single.ApplyAsync(change);
+        Assert.InRange(r1.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
+
+        var stage2 = IntentStage.New(rows);
+        for (int i = 0; i < rows; i++)
+            stage2.AddEntity(Id(81_000_000 + i), 0, ThroughputTypeId, null);
+        var change2 = NativeOnly(stage2, ThroughputSrc, "tp-rt-compare-8");
+
+        var oct = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 8);
+        var r8 = await oct.ApplyAsync(change2);
+        Assert.True(r8.RoundTrips > r1.RoundTrips,
+            $"expected 8-way apply fan-out to exceed single bulk apply (1-part={r1.RoundTrips} RT, 8-part={r8.RoundTrips} RT)");
     }
 }

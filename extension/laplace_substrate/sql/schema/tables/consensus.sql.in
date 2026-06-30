@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS consensus (
+    id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
+    subject_id        bytea       NOT NULL REFERENCES entities(id),
+    type_id           bytea       NOT NULL REFERENCES entities(id),
+    object_id         bytea                REFERENCES entities(id),
+    rating            bigint      NOT NULL,
+    rd                bigint      NOT NULL CHECK (rd > 0),
+    volatility        bigint      NOT NULL CHECK (volatility > 0),
+    witness_count     bigint      NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
+    last_observed_at  timestamptz NOT NULL
+);
+
+SELECT pg_extension_config_dump('consensus', '');

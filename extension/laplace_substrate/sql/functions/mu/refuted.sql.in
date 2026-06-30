@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION refuted(p_rating bigint, p_rd bigint)
+    RETURNS boolean LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_rating + 2 * p_rd < @extschema@.glicko2_neutral_mu()
+$$;

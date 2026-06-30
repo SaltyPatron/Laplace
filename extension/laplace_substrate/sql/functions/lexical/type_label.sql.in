@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION type_label(p_type bytea)
+    RETURNS text
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT lower(replace(render(p_type), '_', ' '))
+$$;

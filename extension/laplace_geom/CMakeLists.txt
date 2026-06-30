@@ -179,15 +179,17 @@ configure_file(
     @ONLY
 )
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../laplace_substrate/cmake/SqlManifest.cmake)
+laplace_write_sql_chain(
+    "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/install_chain.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql")
+set(_geom_install_deps ${SQL_CHAIN_DEPS})
+
 set(EXT_SQL_MODULES
     sql/laplace_geom.sql.in
-    sql/01_meta.sql.in
-    sql/02_hash128.sql.in
-    sql/03_hash128_ops.sql.in
-    sql/04_hilbert.sql.in
-    sql/05_mantissa.sql.in
-    sql/06_st_4d.sql.in
-    sql/07_s3_opclass.sql.in
+    sql/manifest.install
+    ${_geom_install_deps}
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

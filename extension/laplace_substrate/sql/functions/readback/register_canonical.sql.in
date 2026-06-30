@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION register_canonical(p_name text) RETURNS bytea
+    LANGUAGE sql AS $$
+    INSERT INTO canonical_names (id, name)
+    VALUES (@extschema@.canonical_id(p_name), p_name)
+    ON CONFLICT (id) DO NOTHING;
+    SELECT @extschema@.canonical_id(p_name)
+$$;

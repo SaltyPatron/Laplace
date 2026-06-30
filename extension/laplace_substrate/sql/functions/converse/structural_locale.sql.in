@@ -1,0 +1,39 @@
+CREATE OR REPLACE FUNCTION structural_locale(p_word text, p_near double precision DEFAULT 0.05)
+    RETURNS TABLE(nearest double precision, within_near bigint,
+                  within_2x bigint, within_5x bigint, isolated boolean)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $sl$
+DECLARE
+    v_id    bytea;
+    v_coord geometry;
+BEGIN
+    SELECT p.entity_id, p.coord INTO v_id, v_coord
+    FROM physicalities p
+    JOIN prompt_state(p_word) s ON p.entity_id = s.id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+    -- geometry is source-free; order by id for determinism (was p.source_id)
+    ORDER BY s.ord, p.id
+    LIMIT 1;
+    IF v_id IS NULL THEN RETURN; END IF;
+
+    RETURN QUERY
+    WITH cand AS (
+        SELECT p.entity_id, p.coord
+        FROM physicalities p
+        WHERE p.type = 1
+        ORDER BY p.coord <<->> v_coord
+        LIMIT 3000),
+    g AS (
+        SELECT DISTINCT ON (c.entity_id) c.entity_id,
+               public.laplace_angular_distance_4d(c.coord, v_coord) AS d
+        FROM cand c
+        WHERE c.entity_id <> v_id
+        ORDER BY c.entity_id, public.laplace_angular_distance_4d(c.coord, v_coord))
+    SELECT min(d),
+           count(*) FILTER (WHERE d <= p_near),
+           count(*) FILTER (WHERE d <= 2 * p_near),
+           count(*) FILTER (WHERE d <= 5 * p_near),
+           COALESCE(min(d) > p_near, true)
+    FROM g;
+END;
+$sl$;

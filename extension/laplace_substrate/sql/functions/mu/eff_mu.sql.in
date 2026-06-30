@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION @extschema@.eff_mu(p_rating bigint, p_rd bigint)
+    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_rating - 2 * p_rd
+$$;

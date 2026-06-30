@@ -1,0 +1,19 @@
+CREATE OR REPLACE FUNCTION attestation_response_type(
+    p_subject_id   bytea,
+    p_relation_type_id      bytea,
+    p_source_scope bytea[]    DEFAULT NULL,
+    p_context_id   bytea      DEFAULT NULL,
+    p_top_k        integer    DEFAULT 32
+)
+RETURNS TABLE(
+    object_id        bytea,
+    combined_eff_mu  double precision,
+    source_count     integer,
+    rating_fp1e9     bigint,
+    rd_fp1e9         bigint
+)
+LANGUAGE sql STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT * FROM attestation_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id, p_top_k)
+$$;

@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
+    RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
+    LANGUAGE C STABLE STRICT PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_isa_path';

@@ -8,6 +8,48 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 
 
+internal sealed class UnreachableSubstrateClient : ISubstrateClient
+{
+    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
+        string prompt, int steps = 32, int maxOrder = 5, double temperature = 0.7, int topK = 10,
+        CancellationToken ct = default) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<SubstrateAuditReport> AuditReportAsync(
+        bool includeConsensus, bool includeConvergence, int topRelationLimit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<SubstrateVisualizationGraph> VisualizationGraphAsync(
+        int limit, bool includeGeometry, bool includeEvidence, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
+        string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<EmbeddingResult> EmbeddingAsync(
+        string input, bool includeMeaning, int meaningLimit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ReadinessResponse> ReadinessAsync(CancellationToken ct) =>
+        Task.FromResult(new ReadinessResponse(
+            Ready: false,
+            SubstrateReachable: false,
+            Entities: 0,
+            ConsensusRelations: 0,
+            PerfcacheReady: false));
+}
+
 internal sealed class FakeSubstrateClient : ISubstrateClient
 {
     private const string WhaleIdHex    = "00112233445566778899aabbccddeeff";

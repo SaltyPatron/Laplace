@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
+    RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT CASE
+        WHEN p_phrase IS NULL OR btrim(p_phrase) = '' THEN p_context
+        WHEN p_context IS NOT NULL
+             AND btrim(lower(p_phrase), ' ?.!') ~ '^(it|its|that|this|they|their|them|those|these|one|he|she|him|her)$'
+            THEN p_context
+        ELSE COALESCE(resolve_phrase(p_phrase), resolve_last_word(p_phrase))
+    END
+$$;

@@ -1,0 +1,7 @@
+CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
+        OUT entity_id  bytea,
+        OUT ordinal    integer,
+        OUT run_length integer,
+        OUT flags      bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_unpack'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

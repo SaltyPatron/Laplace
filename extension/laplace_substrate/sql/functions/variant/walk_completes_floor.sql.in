@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION walk_completes_floor(p_subject bytea, p_limit int)
+    RETURNS TABLE(object_id bytea, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id,
+           GREATEST(eff_mu(c.rating, c.rd) / 1000000000, 1)::int8 AS weight
+    FROM consensus c
+    WHERE c.subject_id = p_subject
+      AND c.object_id IS NOT NULL
+      AND c.type_id = relation_type_id('COMPLETES_TO')
+      AND NOT refuted(c.rating, c.rd)
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT p_limit
+$$;

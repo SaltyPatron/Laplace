@@ -1,0 +1,22 @@
+CREATE OR REPLACE FUNCTION word_case_variant_ids(p_word bytea)
+    RETURNS bytea[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(array_agg(DISTINCT q.id ORDER BY q.id), ARRAY[p_word])
+    FROM (
+        SELECT p_word AS id
+        UNION
+        SELECT word_id(v.surface)
+        FROM (
+            SELECT word_case_map_surface(p_word, 'lower') AS surface
+            UNION ALL
+            SELECT word_case_map_surface(p_word, 'upper')
+            UNION ALL
+            SELECT word_case_map_surface(p_word, 'title')
+        ) v
+        WHERE v.surface IS NOT NULL
+          AND v.surface IS DISTINCT FROM render_text(p_word)
+    ) q
+    WHERE q.id IS NOT NULL
+      AND (q.id = p_word OR entity_exists(q.id))
+$$;

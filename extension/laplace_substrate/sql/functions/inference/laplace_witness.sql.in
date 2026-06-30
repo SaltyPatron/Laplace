@@ -1,0 +1,31 @@
+CREATE OR REPLACE FUNCTION laplace_witness(
+    p_subject  bytea, p_type  bytea, p_object  bytea,
+    p_source   bytea,
+    p_score_fp1e9 bigint DEFAULT 1000000000)
+RETURNS void
+LANGUAGE plpgsql VOLATILE SET search_path = @extschema@, public AS $$
+DECLARE
+    v_id   bytea := consensus_id(p_subject, p_type, p_object);
+    v_rec  record;
+    v_new  laplace_glicko2_result;
+BEGIN
+    SELECT rating, rd, volatility INTO v_rec FROM consensus WHERE id = v_id;
+    IF NOT FOUND THEN
+        INSERT INTO consensus(id, subject_id, type_id, object_id,
+            rating, rd, volatility, witness_count, last_observed_at)
+        VALUES(v_id, p_subject, p_type, p_object,
+            glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+            1, now());
+        RETURN;
+    END IF;
+    v_new := laplace_glicko2_accumulate_games(
+        v_rec.rating, v_rec.rd, v_rec.volatility,
+        glicko2_neutral_mu(), glicko2_initial_rd(),
+        1, p_score_fp1e9, glicko2_tau());
+    UPDATE consensus
+    SET rating = v_new.rating, rd = v_new.rd, volatility = v_new.volatility,
+        witness_count = witness_count + 1,
+        last_observed_at = now()
+    WHERE id = v_id;
+END;
+$$;

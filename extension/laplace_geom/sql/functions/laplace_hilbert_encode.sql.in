@@ -1,0 +1,4 @@
+CREATE FUNCTION @extschema@.laplace_hilbert_encode(p geometry)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_encode'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

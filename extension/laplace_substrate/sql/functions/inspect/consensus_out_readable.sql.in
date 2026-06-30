@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT render(c.type_id), render(c.object_id),
+           c.eff_mu, c.witness_count
+    FROM v_consensus_resolved c
+    WHERE c.subject_id = p_id
+    ORDER BY relation_rank_resolved(c.type_id) * (c.eff_mu_raw / 1e9) DESC
+    LIMIT p_limit
+$$;

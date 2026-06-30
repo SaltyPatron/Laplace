@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION laplace_forward_step(
+    p_entity   bytea,
+    p_band_mask bytea)
+RETURNS bytea
+LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
+    SELECT n.entity_id
+    FROM laplace_attention_centroid(p_entity, p_band_mask) c
+    JOIN LATERAL laplace_nearest_entity(c.cx, c.cy, c.cz, c.cm, 1, p_band_mask) n ON TRUE
+    WHERE c.total_weight > 0
+      AND n.entity_id IS NOT NULL
+      AND n.entity_id <> p_entity
+    LIMIT 1
+$$;

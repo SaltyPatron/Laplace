@@ -1,0 +1,13 @@
+CREATE OR REPLACE AGGREGATE laplace_glicko2_accumulate(
+    prior_rating     bigint,
+    prior_rd         bigint,
+    prior_volatility bigint,
+    opponent_rating  bigint,
+    opponent_rd      bigint,
+    score            bigint,
+    tau              bigint
+) (
+    SFUNC     = laplace_glicko2_sfunc,
+    STYPE     = internal,
+    FINALFUNC = laplace_glicko2_finalfunc
+);

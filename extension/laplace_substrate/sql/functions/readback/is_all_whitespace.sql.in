@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION is_all_whitespace(p_text text)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_is_all_whitespace'
+    LANGUAGE C LAPLACE_STABLE_STRICT;

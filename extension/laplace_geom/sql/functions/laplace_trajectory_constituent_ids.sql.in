@@ -1,0 +1,4 @@
+CREATE FUNCTION @extschema@.laplace_trajectory_constituent_ids(traj geometry)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_constituent_ids'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

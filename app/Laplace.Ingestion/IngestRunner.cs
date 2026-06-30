@@ -110,7 +110,7 @@ public sealed class IngestRunner
             recordBatchOverride: batchSize,
             commitRowsOverride: commitRows > 0 ? commitRows : null);
         int maxIntentsPerCommit = commitRows > 0
-            ? Math.Max(1, Math.Min(batchSize, sizing.MaxIntentsPerCommit))
+            ? sizing.MaxIntentsPerCommit
             : batchSize;
         static int RowsOf(SubstrateChange c)
         {

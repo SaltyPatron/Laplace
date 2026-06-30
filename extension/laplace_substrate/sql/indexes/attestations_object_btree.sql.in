@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS attestations_object_btree ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;

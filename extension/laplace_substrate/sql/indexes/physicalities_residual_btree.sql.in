@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_residual_btree ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;

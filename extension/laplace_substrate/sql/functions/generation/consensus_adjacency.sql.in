@@ -1,0 +1,35 @@
+CREATE OR REPLACE FUNCTION consensus_adjacency(
+        p_vocab bytea[], p_degree_cap int DEFAULT 64)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED  
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         edges AS MATERIALIZED (
+             
+             
+             
+             
+             
+             
+             
+             SELECT c.subject_id, c.object_id, c.rating, c.rd,
+                    relation_rank_resolved(c.type_id) AS rk  
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN v vo        ON vo.id = c.object_id
+         ),
+         summed AS (
+             SELECT e.subject_id, e.object_id,
+                    sum(e.rk * (eff_mu(e.rating, e.rd))::float8 / 1e9) AS w
+             FROM edges e
+             WHERE e.rk IS NOT NULL
+             GROUP BY e.subject_id, e.object_id
+         ),
+         capped AS (
+             SELECT s.subject_id, s.object_id, s.w,
+                    row_number() OVER (PARTITION BY s.subject_id ORDER BY s.w DESC, s.object_id) AS rn
+             FROM summed s
+             WHERE s.w > 0
+         )
+    SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
+$$;

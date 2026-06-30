@@ -1,0 +1,4 @@
+CREATE FUNCTION @extschema@.laplace_angular_distance_4d(a geometry, b geometry)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_angular_distance_4d'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

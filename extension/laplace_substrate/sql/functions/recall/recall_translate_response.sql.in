@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_translate_response(p_topic bytea, p_lang text DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', t.eff_mu, t.witnesses
+    FROM translate_to(p_topic, p_lang) t
+$$;

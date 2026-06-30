@@ -64,7 +64,17 @@ internal static class PgBinaryCopy
     private static async Task WriteBlobBodyAsync(
         Stream stream, IntPtr ptr, long len, byte[]? reuse, CancellationToken ct)
     {
-        if (len <= 0) return;
+        if (len <= int.MaxValue)
+        {
+            int n = (int)len;
+            byte[] buf = reuse is not null && reuse.Length >= n ? reuse : new byte[n];
+            unsafe
+            {
+                new ReadOnlySpan<byte>((void*)ptr, n).CopyTo(buf);
+            }
+            await stream.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
+            return;
+        }
         byte[] window = reuse ?? new byte[(int)Math.Min(DefaultChunkBytes, len)];
         for (long off = 0; off < len; off += window.Length)
         {
@@ -73,7 +83,7 @@ internal static class PgBinaryCopy
             {
                 new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
             }
-            await stream.WriteAsync(window.AsMemory(0, n), ct);
+            await stream.WriteAsync(window.AsMemory(0, n), ct).ConfigureAwait(false);
         }
     }
 

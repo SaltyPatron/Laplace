@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION word_shape_distance(p_a text, p_b text) RETURNS double precision
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT public.laplace_frechet_4d(word_curve(word_id(p_a)), word_curve(word_id(p_b)))
+$$;

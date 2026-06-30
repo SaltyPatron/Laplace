@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION laplace_entities_at_depth(p_depth smallint)
+RETURNS SETOF entities
+LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT * FROM entities WHERE tier = p_depth
+$$;

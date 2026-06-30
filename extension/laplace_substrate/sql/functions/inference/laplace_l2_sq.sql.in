@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION laplace_l2_sq(a geometry, b geometry)
+RETURNS float8
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+    SELECT (ST_X(a) - ST_X(b))^2 + (ST_Y(a) - ST_Y(b))^2
+         + (ST_Z(a) - ST_Z(b))^2 + (ST_M(a) - ST_M(b))^2
+$$;

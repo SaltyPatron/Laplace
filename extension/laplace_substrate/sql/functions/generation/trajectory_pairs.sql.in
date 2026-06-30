@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS trajectory_pairs (
+    subject_id    bytea  NOT NULL,
+    object_id     bytea  NOT NULL,
+    gap           int    NOT NULL,
+    cnt           bigint NOT NULL,
+    subject_total bigint NOT NULL
+);

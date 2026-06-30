@@ -2,7 +2,8 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// One-shot ingest parallelism resolved from <see cref="CpuTopology"/> at first use.
-/// No script env vars — detect physical P/E cores, pin via CPU Sets, cache counts.
+/// Worker counts come from detected P/E cores; <c>LAPLACE_APPLY_PARTITIONS</c> overrides the
+/// per-commit writer fan-out (default 1 — one Hilbert-sorted bulk apply per batch).
 /// </summary>
 public sealed class IngestTopology
 {
@@ -97,7 +98,7 @@ public sealed class IngestTopology
         int fileWorkers = CpuTopology.ResolveCpuBoundWorkers(headroom: 2);
         int composeWorkers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
         int commitWorkers = CpuTopology.ResolveIngestCommitWorkers(headroom: 1);
-        int applyPartitions = CpuTopology.ResolveApplyPartitions();
+        int applyPartitions = ResolveApplyPartitions();
         int pCores = CpuTopology.PerformanceCoreCount;
         var sizing = IngestSizing.Resolve(pCores, fileWorkers, applyPartitions);
         return new IngestTopology(
@@ -115,6 +116,20 @@ public sealed class IngestTopology
             commitWorkers,
             applyPartitions,
             sizing);
+    }
+
+    /// <summary>
+    /// Writer apply fan-out per commit batch. Default 1 = one COPY + one
+    /// <c>laplace_apply_batch</c> (Hilbert-sorted bulk append). Compose and commit workers
+    /// still run on P/E cores in parallel; this is not single-threaded ingest.
+    /// Override via <c>LAPLACE_APPLY_PARTITIONS</c> for experiments (bench scripts may set &gt;1).
+    /// </summary>
+    public static int ResolveApplyPartitions()
+    {
+        var raw = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
+        if (int.TryParse(raw, out int n) && n >= 1)
+            return n;
+        return 1;
     }
 
     internal static void ResetForTests() { }

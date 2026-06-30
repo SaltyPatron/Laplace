@@ -1,0 +1,22 @@
+CREATE OR REPLACE FUNCTION substrate_health()
+RETURNS TABLE(
+    ok boolean,
+    fake_tier_bands bigint,
+    identity_violations bigint,
+    bootstrap_entities bigint
+)
+LANGUAGE sql
+STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT
+        (@extschema@.fake_tier_band_count() = 0
+         AND (SELECT count(*) FROM @extschema@.identity_law_violations()) = 0
+         AND EXISTS (
+             SELECT 1 FROM @extschema@.entities
+             WHERE id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+         )) AS ok,
+        @extschema@.fake_tier_band_count() AS fake_tier_bands,
+        (SELECT count(*) FROM @extschema@.identity_law_violations()) AS identity_violations,
+        (SELECT count(*) FROM @extschema@.entities) AS bootstrap_entities;
+$$;

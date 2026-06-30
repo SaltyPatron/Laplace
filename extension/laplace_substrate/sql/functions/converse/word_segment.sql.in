@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION word_segment(p_text text)
+    RETURNS TABLE(ord int, word text, id bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_segment'
+    LANGUAGE C STABLE;

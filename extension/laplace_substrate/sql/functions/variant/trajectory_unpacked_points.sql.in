@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION trajectory_unpacked_points(p_entity bytea)
+    RETURNS TABLE(entity_id bytea, run_length int, ctier int)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT u.entity_id,
+           GREATEST(u.run_length, 1)::int AS run_length,
+           (SELECT e.tier FROM entities e WHERE e.id = u.entity_id) AS ctier
+    FROM physicalities p,
+    LATERAL public.ST_DumpPoints(p.trajectory) dp,
+    LATERAL public.laplace_mantissa_unpack(dp.geom) u
+    WHERE p.entity_id = p_entity AND p.type = 1 AND p.trajectory IS NOT NULL
+    ORDER BY u.ordinal
+$$;

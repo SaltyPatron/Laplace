@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION laplace_glicko2_finalfunc(internal)
+    RETURNS laplace_glicko2_result
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_finalfunc'
+    LANGUAGE C;

@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_examples_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT replace(e.example, '%s', label(p_topic)), e.eff_mu, e.witnesses
+    FROM examples(p_topic) e
+$$;

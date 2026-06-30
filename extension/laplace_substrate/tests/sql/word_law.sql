@@ -23,16 +23,16 @@ SELECT word_id('') IS NULL AS empty_is_null;
 
 
 WITH ids AS (
-    SELECT laplace_hash128_blake3(convert_to('e', 'UTF8'))           AS e_id,
+    SELECT laplace_hash128_blake3(convert_to('q', 'UTF8'))           AS q_id,
            laplace_hash128_blake3(convert_to(U&'\0301', 'UTF8'))     AS acc_id,
            laplace_hash128_blake3(convert_to('x', 'UTF8'))           AS x_id
 )
-SELECT word_id('e' || U&'\0301' || 'x')
+SELECT word_id('q' || U&'\0301' || 'x')
            = laplace_hash128_blake3('\x01'::bytea
-                 || laplace_hash128_blake3('\x01'::bytea || e_id || acc_id)
+                 || laplace_hash128_blake3('\x01'::bytea || q_id || acc_id)
                  || x_id)                                            AS grapheme_law_nested,
-       word_id('e' || U&'\0301' || 'x')
-           <> laplace_hash128_blake3('\x01'::bytea || e_id || acc_id || x_id)
+       word_id('q' || U&'\0301' || 'x')
+           <> laplace_hash128_blake3('\x01'::bytea || q_id || acc_id || x_id)
                                                                      AS grapheme_law_not_flat
 FROM ids;
 

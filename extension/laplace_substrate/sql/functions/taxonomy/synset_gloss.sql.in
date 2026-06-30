@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION synset_gloss(p_synset bytea)
+    RETURNS text
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT render_text(g.object_id, 24)
+    FROM consensus g
+    WHERE g.subject_id = p_synset
+      AND g.type_id = relation_type_id('DEFINES')
+      AND NOT refuted(g.rating, g.rd)
+    ORDER BY eff_mu(g.rating, g.rd) DESC
+    LIMIT 1
+$$;

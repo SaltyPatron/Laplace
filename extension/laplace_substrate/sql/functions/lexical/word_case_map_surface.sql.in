@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION word_case_map_surface(p_word bytea, p_map text)
+    RETURNS text
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT string_agg(
+               repeat(
+                   COALESCE(render_text(grapheme_case_target(c.child_id, p_map)),
+                            render_text(c.child_id)),
+                   GREATEST(c.run_length, 1)),
+               '' ORDER BY c.ordinal)
+    FROM constituents(p_word) c
+$$;

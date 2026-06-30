@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION vertex_tier(p_flags bigint) RETURNS smallint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT public.laplace_vertex_tier(p_flags)
+$$;

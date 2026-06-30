@@ -1,0 +1,35 @@
+CREATE OR REPLACE FUNCTION trajectory_pairs_ensure(p_max_gap int DEFAULT 8)
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    cur_rows bigint;
+    cur_us   bigint;
+    m        trajectory_pairs_meta%ROWTYPE;
+    n        bigint;
+BEGIN
+    SELECT count(*)::bigint,
+           COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::bigint, 0)
+      INTO cur_rows, cur_us
+      FROM physicalities
+     WHERE type = 1 AND trajectory IS NOT NULL;
+
+    SELECT * INTO m FROM trajectory_pairs_meta WHERE only_row;
+    IF FOUND AND m.probe_rows = cur_rows AND m.probe_max_us = cur_us
+       AND m.max_gap >= p_max_gap THEN
+        RETURN (SELECT count(*) FROM trajectory_pairs);   
+    END IF;
+
+    TRUNCATE trajectory_pairs;
+    INSERT INTO trajectory_pairs (subject_id, object_id, gap, cnt, subject_total)
+    SELECT subject_id, object_id, gap, cnt, subject_total
+    FROM trajectory_cooccurrence_by_stride(p_max_gap);
+    GET DIAGNOSTICS n = ROW_COUNT;
+
+    INSERT INTO trajectory_pairs_meta (only_row, probe_rows, probe_max_us, max_gap, built_at)
+    VALUES (true, cur_rows, cur_us, p_max_gap, now())
+    ON CONFLICT (only_row) DO UPDATE
+        SET probe_rows = excluded.probe_rows, probe_max_us = excluded.probe_max_us,
+            max_gap = excluded.max_gap, built_at = excluded.built_at;
+    RETURN n;
+END $$;

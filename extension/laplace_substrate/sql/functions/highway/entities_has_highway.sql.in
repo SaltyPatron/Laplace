@@ -1,0 +1,3 @@
+CREATE INDEX IF NOT EXISTS entities_has_highway
+    ON entities (id)
+    WHERE highway_mask IS NOT NULL;

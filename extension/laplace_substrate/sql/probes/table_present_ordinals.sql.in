@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION table_present_ordinals(p_table text, p_ids bytea[])
+    RETURNS TABLE(idx int)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT o.idx FROM entities_present_ordinals(p_ids) o WHERE p_table = 'entities'
+    UNION ALL
+    SELECT o.idx FROM physicalities_present_ordinals(p_ids) o WHERE p_table = 'physicalities'
+    UNION ALL
+    SELECT o.idx FROM attestations_present_ordinals(p_ids) o WHERE p_table = 'attestations'
+$$;

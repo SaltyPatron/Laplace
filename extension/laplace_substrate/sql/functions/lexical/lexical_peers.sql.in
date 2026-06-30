@@ -1,0 +1,19 @@
+CREATE OR REPLACE FUNCTION lexical_peers(p_word bytea)
+    RETURNS bytea[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH ucd AS (
+        SELECT unnest(word_case_variant_ids(p_word)) AS id
+    ),
+    shape AS (
+        SELECT unnest(word_shape_peers(p_word, 0.02::double precision)) AS id
+    ),
+    merged AS (
+        SELECT p_word AS id
+        UNION SELECT id FROM ucd
+        UNION SELECT id FROM shape WHERE id IS NOT NULL
+    )
+    SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
+    FROM merged
+    WHERE id IS NOT NULL
+$$;

@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION source_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT @extschema@.canonical_id('substrate/source/' || p_name || '/v1')
+$$;

@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION prompt_state(p_text text)
+    RETURNS TABLE(ord int, word text, id bytea, language bytea)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT pw.ord, pw.word, pw.id, word_language(pw.id)
+    FROM prompt_words(p_text) pw
+    WHERE pw.id IS NOT NULL
+$$;

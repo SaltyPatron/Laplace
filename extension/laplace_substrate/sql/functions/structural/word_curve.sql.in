@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION word_curve(p_word bytea) RETURNS geometry
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT public.ST_MakeLine(p.coord ORDER BY c.ordinal)
+    FROM constituents(p_word) c
+    JOIN physicalities p ON p.entity_id = c.child_id AND p.type = 1
+$$;

@@ -1,0 +1,2 @@
+CREATE OR REPLACE FUNCTION relation_rank(p_type_id bytea) RETURNS float8
+    LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_rank';

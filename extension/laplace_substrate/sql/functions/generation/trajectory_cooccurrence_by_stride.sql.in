@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION trajectory_cooccurrence_by_stride(p_max_gap int DEFAULT 8)
+    RETURNS TABLE(subject_id bytea, object_id bytea, gap int, cnt bigint, subject_total bigint)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.subject_id, s.object_id, s.gap, s.cnt,
+           sum(s.cnt) OVER (PARTITION BY s.subject_id, s.gap)::bigint
+    FROM cooccurrence_scan(p_max_gap) s
+$$;

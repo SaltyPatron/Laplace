@@ -8,7 +8,7 @@ set "PATH=%PATH%;C:\Program Files\Git\usr\bin"
 if not exist "%LAPLACE_ROOT%\build-win-ext\regress_geom" mkdir "%LAPLACE_ROOT%\build-win-ext\regress_geom"
 if not exist "%LAPLACE_ROOT%\build-win-ext\regress_substrate" mkdir "%LAPLACE_ROOT%\build-win-ext\regress_substrate"
 
-"%PGBIN%\dropdb.exe" %CONN% --if-exists laplace_regress_geom || exit /b 1
+"%PGBIN%\dropdb.exe" %CONN% --force --if-exists laplace_regress_geom || exit /b 1
 "%PGBIN%\createdb.exe" %CONN% laplace_regress_geom || exit /b 1
 "%PGREGRESS%" --bindir="%PGBIN%" --host=localhost --user=postgres ^
   --inputdir=extension\laplace_geom\tests ^
@@ -17,7 +17,7 @@ if not exist "%LAPLACE_ROOT%\build-win-ext\regress_substrate" mkdir "%LAPLACE_RO
   hash128 st_4d
 set GEOM_RC=%ERRORLEVEL%
 
-"%PGBIN%\dropdb.exe" %CONN% --if-exists laplace_regress_substrate || exit /b 1
+"%PGBIN%\dropdb.exe" %CONN% --force --if-exists laplace_regress_substrate || exit /b 1
 "%PGBIN%\createdb.exe" %CONN% laplace_regress_substrate || exit /b 1
 "%PGREGRESS%" --bindir="%PGBIN%" --host=localhost --user=postgres ^
   --inputdir=extension\laplace_substrate\tests ^

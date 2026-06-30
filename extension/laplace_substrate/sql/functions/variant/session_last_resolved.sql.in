@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION session_last_resolved(p_session bytea)
+    RETURNS bytea
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT t.resolved_id
+    FROM session_topics t
+    WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
+    ORDER BY t.ord DESC
+    LIMIT 1
+$$;

@@ -1,0 +1,3 @@
+CREATE FUNCTION @extschema@.laplace_vertex_tier(flags bigint) RETURNS smallint
+    AS 'MODULE_PATHNAME', 'pg_laplace_vertex_tier'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

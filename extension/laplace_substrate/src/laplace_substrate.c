@@ -13,6 +13,9 @@
 #include "laplace/core/glicko2.h"
 #include "laplace/core/score.h"
 #include "laplace/core/hash128.h"
+
+#include "descent_probe.h"
+#include "perfcache_native.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/dynamics/init.h"
 
@@ -257,10 +260,6 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     int         bitmap_bytes;
     bytea*      result;
     uint8*      bm;
-    Oid         argtypes[1];
-    Datum       args[1];
-    int         spi_rc;
-    uint64      i;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR,
@@ -304,38 +303,16 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INTERNAL_ERROR),
              errmsg("entities_exist_bitmap: SPI_connect failed")));
 
-    argtypes[0] = BYTEAARRAYOID;
-    args[0]     = PointerGetDatum(ids_array);
-
-    spi_rc = SPI_execute_with_args(
-        "SELECT idx FROM laplace.entities_present_ordinals($1)",
-        1, argtypes, args, NULL, true, 0);
-
-    if (spi_rc != SPI_OK_SELECT)
     {
+        int rc = laplace_entities_present_bitmap(ids_array, bm, candidate_count);
+
         SPI_finish();
-        ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("entities_exist_bitmap: SPI_execute_with_args failed (rc=%d)", spi_rc)));
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("entities_exist_bitmap: bulk probe failed (rc=%d)", rc)));
     }
 
-    for (i = 0; i < SPI_processed; i++)
-    {
-        bool   isnull;
-        Datum  d = SPI_getbinval(SPI_tuptable->vals[i],
-                                  SPI_tuptable->tupdesc,
-                                  1, &isnull);
-        if (!isnull)
-        {
-            int pos = DatumGetInt32(d);
-            if (pos >= 0 && pos < candidate_count)
-            {
-                bm[pos >> 3] |= (uint8)(1u << (pos & 7u));
-            }
-        }
-    }
-
-    SPI_finish();
     PG_RETURN_BYTEA_P(result);
 }
 
@@ -362,10 +339,15 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     int         bitmap_bytes;
     bytea*      result;
     uint8*      bm;
-    Oid         argtypes[2];
-    Datum       args[2];
-    int         spi_rc;
-    uint64      i;
+    Datum      *id_elems;
+    Datum      *par_elems;
+    bool       *id_nulls;
+    bool       *par_nulls;
+    int         id_nelems;
+    int         par_nelems;
+    uint8      *flat_ids;
+    int32      *flat_parents;
+    int         i;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR,
@@ -414,41 +396,43 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     if (candidate_count == 0)
         PG_RETURN_BYTEA_P(result);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i',
+                      &id_elems, &id_nulls, &id_nelems);
+    deconstruct_array(par_array, INT4OID, sizeof(int32), true, 'i',
+                      &par_elems, &par_nulls, &par_nelems);
+    if (id_nelems != candidate_count || par_nelems != candidate_count)
         ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("content_descent_bitmap: SPI_connect failed")));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("content_descent_bitmap: deconstruct length mismatch")));
 
-    argtypes[0] = BYTEAARRAYOID; args[0] = PointerGetDatum(ids_array);
-    argtypes[1] = INT4ARRAYOID;  args[1] = PointerGetDatum(par_array);
-
-    spi_rc = SPI_execute_with_args(
-        "SELECT idx FROM laplace.content_descent_novel_ordinals($1, $2)",
-        2, argtypes, args, NULL, true, 0);
-
-    if (spi_rc != SPI_OK_SELECT)
+    flat_ids = (uint8 *) palloc((size_t) candidate_count * 16);
+    flat_parents = (int32 *) palloc(sizeof(int32) * candidate_count);
+    for (i = 0; i < candidate_count; i++)
     {
-        SPI_finish();
-        ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("content_descent_bitmap: descent failed (rc=%d)", spi_rc)));
+        bytea *b;
+
+        if (id_nulls[i] || par_nulls[i])
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                     errmsg("content_descent_bitmap: arrays must not contain NULL")));
+        b = DatumGetByteaPP(id_elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != 16)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("content_descent_bitmap: id length must be 16")));
+        memcpy(flat_ids + (size_t) i * 16, VARDATA_ANY(b), 16);
+        flat_parents[i] = DatumGetInt32(par_elems[i]);
     }
 
-    for (i = 0; i < SPI_processed; i++)
-    {
-        bool   isnull;
-        Datum  d = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull);
-        if (!isnull)
-        {
-            int pos = DatumGetInt32(d);
-            if (pos >= 0 && pos < candidate_count)
-                bm[pos >> 3] &= (uint8) ~(1u << (pos & 7u));   /* novel ⇒ clear PRESENT */
-        }
-    }
+    laplace_content_descent_bitmap_core(flat_ids, flat_parents, candidate_count, bm);
 
-    SPI_finish();
+    pfree(flat_ids);
+    pfree(flat_parents);
+    pfree(id_elems);
+    pfree(id_nulls);
+    pfree(par_elems);
+    pfree(par_nulls);
 
-    /* keep padding bits beyond candidate_count clear, matching entities_exist_bitmap */
     if (bitmap_bytes > 0 && (candidate_count & 7) != 0)
         bm[bitmap_bytes - 1] &= (uint8)((1u << (candidate_count & 7)) - 1);
 
@@ -457,6 +441,21 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_intent_preflight);
 
+static const char*
+present_ordinals_sql(const char* table)
+{
+    if (strcmp(table, "entities") == 0)
+        return "SELECT idx FROM laplace.entities_present_ordinals($1)";
+    if (strcmp(table, "physicalities") == 0)
+        return "SELECT idx FROM laplace.physicalities_present_ordinals($1)";
+    if (strcmp(table, "attestations") == 0)
+        return "SELECT idx FROM laplace.attestations_present_ordinals($1)";
+    ereport(ERROR,
+        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+         errmsg("intent_preflight: unknown table \"%s\"", table)));
+    return NULL;
+}
+
 static bytea*
 build_exist_bitmap(ArrayType* ids_array, const char* table)
 {
@@ -464,10 +463,11 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
     int         bitmap_bytes;
     bytea*      result;
     uint8*      bm;
-    Oid         argtypes[2];
-    Datum       args[2];
+    Oid         argtypes[1];
+    Datum       args[1];
     int         spi_rc;
     uint64      i;
+    const char* sql;
 
     if (ARR_NDIM(ids_array) > 1)
         ereport(ERROR,
@@ -511,14 +511,11 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
             (errcode(ERRCODE_INTERNAL_ERROR),
              errmsg("intent_preflight: SPI_connect failed")));
 
-    argtypes[0] = TEXTOID;
-    args[0]     = CStringGetTextDatum(table);
-    argtypes[1] = BYTEAARRAYOID;
-    args[1]     = PointerGetDatum(ids_array);
+    argtypes[0] = BYTEAARRAYOID;
+    args[0]     = PointerGetDatum(ids_array);
+    sql         = present_ordinals_sql(table);
 
-    spi_rc = SPI_execute_with_args(
-        "SELECT idx FROM laplace.table_present_ordinals($1, $2)",
-        2, argtypes, args, NULL, true, 0);
+    spi_rc = SPI_execute_with_args(sql, 1, argtypes, args, NULL, true, 0);
     if (spi_rc != SPI_OK_SELECT)
     {
         SPI_finish();

@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION consensus_tier_distribution()
+    RETURNS TABLE(subject_tier smallint, relations bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.tier, count(*)
+    FROM @extschema@.consensus c JOIN @extschema@.entities e ON e.id = c.subject_id
+    WHERE c.object_id IS NOT NULL
+      AND e.type_id = ANY(@extschema@.compositional_type_ids())
+    GROUP BY e.tier ORDER BY e.tier
+$$;

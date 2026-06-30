@@ -552,6 +552,9 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
 public sealed class LocalPgFixture : IAsyncLifetime
 {
+    private static readonly SemaphoreSlim InitGate = new(1, 1);
+    private static int _refCount;
+
     public const string DatabaseName = "laplace_ingest_test";
 
     public static readonly string PgHost =
@@ -575,25 +578,46 @@ public sealed class LocalPgFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await RunAdminAsync("dropdb",   $"-h {PgHost} -U {PgUser} --if-exists {DatabaseName}");
-        await RunAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
-        var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
-        _ds = dsb.Build();
-        await using var conn = await _ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
+        await InitGate.WaitAsync();
+        try
+        {
+            if (_refCount++ == 0)
+            {
+                await RunAdminAsync("dropdb",   $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+                await RunAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
+            }
+
+            var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
+            _ds = dsb.Build();
+            await using var conn = await _ds.OpenConnectionAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
             CREATE EXTENSION IF NOT EXISTS postgis;
             CREATE EXTENSION IF NOT EXISTS laplace_geom;
             CREATE EXTENSION IF NOT EXISTS laplace_substrate;
             SET search_path TO laplace, public;
         ";
-        await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            InitGate.Release();
+        }
     }
 
     public async Task DisposeAsync()
     {
-        if (_ds is not null) { await _ds.DisposeAsync(); _ds = null; }
-        await RunAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --if-exists {DatabaseName}");
+        await InitGate.WaitAsync();
+        try
+        {
+            if (_ds is not null) { await _ds.DisposeAsync(); _ds = null; }
+            if (--_refCount == 0)
+                await RunAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+        }
+        finally
+        {
+            InitGate.Release();
+        }
     }
 
     private static async Task RunAdminAsync(string program, string args)

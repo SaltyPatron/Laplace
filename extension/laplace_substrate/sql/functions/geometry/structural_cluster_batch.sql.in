@@ -1,0 +1,18 @@
+CREATE OR REPLACE FUNCTION structural_cluster_batch(
+    p_seeds bytea[],
+    p_eps   double precision DEFAULT 0.05,
+    p_limit integer          DEFAULT 200)
+    RETURNS TABLE(seed bytea, entity_id bytea, label text, frechet double precision, recurrence bigint)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $scb$
+DECLARE
+    v_seed bytea;
+BEGIN
+    IF p_seeds IS NULL THEN RETURN; END IF;
+    FOREACH v_seed IN ARRAY p_seeds LOOP
+        RETURN QUERY
+        SELECT v_seed, sc.entity_id, sc.label, sc.frechet, sc.recurrence
+        FROM structural_cluster(v_seed, p_eps, p_limit) sc;
+    END LOOP;
+END;
+$scb$;

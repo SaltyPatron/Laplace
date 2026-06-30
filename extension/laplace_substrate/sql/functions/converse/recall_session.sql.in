@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION recall_session(p_prompt text, p_session bytea DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE C VOLATILE
+    AS 'MODULE_PATHNAME', 'pg_laplace_recall_session';

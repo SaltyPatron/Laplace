@@ -1,0 +1,15 @@
+CREATE OR REPLACE FUNCTION session_record_prompt(
+        p_session bytea, p_prompt text, p_resolved bytea DEFAULT NULL)
+    RETURNS void
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+BEGIN
+    INSERT INTO session_topics (session_id, ord, prompt, resolved_id)
+    VALUES (
+        p_session,
+        COALESCE((SELECT max(t.ord) FROM session_topics t WHERE t.session_id = p_session), 0) + 1,
+        p_prompt,
+        p_resolved
+    );
+END;
+$$;

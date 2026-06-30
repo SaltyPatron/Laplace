@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION word_language(p_word bytea)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id
+    FROM consensus c
+    WHERE c.subject_id = p_word
+      AND c.type_id = relation_type_id('HAS_LANGUAGE')
+      AND c.object_id IS NOT NULL
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT 1
+$$;

@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION compositional_tier_distribution()
+RETURNS TABLE(tier smallint, n bigint)
+LANGUAGE sql
+STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT e.tier, count(*)::bigint
+    FROM @extschema@.entities e
+    WHERE @extschema@.is_compositional_type(e.type_id)
+    GROUP BY e.tier
+    ORDER BY e.tier;
+$$;

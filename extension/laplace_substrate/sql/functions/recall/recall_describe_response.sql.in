@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_describe_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
+    FROM salient_facts(p_topic, word_language(p_topic)) d
+$$;

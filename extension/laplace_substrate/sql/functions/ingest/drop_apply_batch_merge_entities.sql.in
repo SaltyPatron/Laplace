@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS _apply_batch_merge_entities(regclass);

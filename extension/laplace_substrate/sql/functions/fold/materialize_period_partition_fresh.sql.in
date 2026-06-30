@@ -1,0 +1,57 @@
+CREATE OR REPLACE FUNCTION materialize_period_partition_fresh(p_table text)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    n_materialized bigint;
+    t0 timestamptz := clock_timestamp();
+BEGIN
+    IF to_regclass(p_table) IS NULL THEN
+        RAISE EXCEPTION 'materialize_period_partition_fresh: staging % does not exist', p_table;
+    END IF;
+    EXECUTE format('ANALYZE %I', p_table);
+    
+    EXECUTE format($f$
+        WITH merged AS (
+            SELECT s.subject_id, s.type_id, s.object_id,
+                   min(s.phi)               AS phi_min,
+                   max(s.phi)               AS phi_max,
+                   sum(s.games)::bigint     AS games,
+                   sum(s.sum_score)::bigint AS sum_score,
+                   max(s.last_ts)           AS last_ts
+            FROM %I s
+            GROUP BY s.subject_id, s.type_id, s.object_id
+        )
+        INSERT INTO consensus (id, subject_id, type_id, object_id,
+                               rating, rd, volatility, witness_count, last_observed_at)
+        SELECT m.cid,
+               m.subject_id, m.type_id, m.object_id,
+               (m.acc).rating, (m.acc).rd, (m.acc).volatility,
+               m.games, m.last_ts
+        FROM (
+            SELECT mm.subject_id, mm.type_id, mm.object_id, mm.games, mm.last_ts,
+                   consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid,
+                   laplace_glicko2_accumulate_games(
+                       glicko2_neutral_mu(),
+                       glicko2_initial_rd(),
+                       glicko2_initial_volatility(),
+                       glicko2_neutral_mu(),
+                       CASE WHEN mm.phi_min <> mm.phi_max
+                            THEN period_phi_mixed(mm.subject_id, mm.type_id, mm.object_id)
+                            ELSE mm.phi_min END,
+                       mm.games,
+                       mm.sum_score,
+                       glicko2_tau()
+                   ) AS acc
+            FROM merged mm
+        ) m
+        ORDER BY m.cid
+        ON CONFLICT (id) DO NOTHING
+    $f$, p_table);
+    GET DIAGNOSTICS n_materialized = ROW_COUNT;
+
+    EXECUTE format('DROP TABLE %I', p_table);
+    RAISE LOG 'period fold (fresh) %: % relations materialized in %',
+        p_table, n_materialized, clock_timestamp() - t0;
+    RETURN n_materialized;
+END;
+$$;

@@ -66,5 +66,5 @@ public static class DecomposerBatch
                 entityCapacity:      batchSize * 4,
                 physicalityCapacity: batchSize * 2,
                 attestationCapacity: batchSize * 8)
-            .EnableDeferredContent(reader);
+            .EnableDeferredContent(IntentStage.IsBulkFreshBypass ? null : reader);
 }

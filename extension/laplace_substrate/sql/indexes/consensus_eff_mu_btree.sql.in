@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;

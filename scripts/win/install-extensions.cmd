@@ -16,6 +16,7 @@ call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /
 call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
 call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
 copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\laplace_t0_perfcache.bin" >nul || exit /b 1
+copy /y "build-win\core\perfcache\laplace_highway_perfcache.bin" "%DEPLOY%\share\laplace_highway_perfcache.bin" >nul || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
 echo deployed: %DEPLOY%

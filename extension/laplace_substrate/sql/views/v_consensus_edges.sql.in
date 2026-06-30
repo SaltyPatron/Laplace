@@ -1,0 +1,8 @@
+CREATE OR REPLACE VIEW v_consensus_edges AS
+SELECT c.id, c.subject_id, c.type_id, c.object_id,
+       c.rating, c.rd, c.volatility, c.witness_count,
+       c.last_observed_at,
+       c.eff_mu_raw, c.eff_mu
+FROM v_consensus_resolved c
+WHERE c.object_id IS NOT NULL
+  AND c.eff_mu_raw > 0;

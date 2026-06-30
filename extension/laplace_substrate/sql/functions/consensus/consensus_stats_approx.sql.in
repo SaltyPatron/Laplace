@@ -1,0 +1,19 @@
+CREATE OR REPLACE FUNCTION consensus_stats_approx()
+    RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
+                  avg_witnesses numeric, max_witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    WITH est AS (
+        SELECT c.relname,
+               GREATEST(c.reltuples, 0)::bigint AS est_rows
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema()
+          AND c.relname IN ('attestations', 'consensus')
+    )
+    SELECT (SELECT est_rows FROM est WHERE relname = 'attestations'),
+           (SELECT est_rows FROM est WHERE relname = 'consensus'),
+           round((SELECT est_rows FROM est WHERE relname = 'attestations')::numeric
+                 / NULLIF((SELECT est_rows FROM est WHERE relname = 'consensus'), 0), 3),
+           NULL::numeric,
+           NULL::bigint
+$$;

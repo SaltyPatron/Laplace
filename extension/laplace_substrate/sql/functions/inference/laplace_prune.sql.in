@@ -1,0 +1,23 @@
+CREATE OR REPLACE FUNCTION laplace_prune(
+    p_max_eff_mu bigint DEFAULT 0,
+    p_dry_run    boolean DEFAULT true)
+RETURNS TABLE(affected_rows bigint)
+LANGUAGE plpgsql VOLATILE SET search_path = @extschema@, public AS $$
+BEGIN
+    IF p_dry_run THEN
+        RETURN QUERY
+            SELECT count(*)::bigint FROM consensus
+            WHERE object_id IS NOT NULL
+              AND eff_mu(rating, rd) < p_max_eff_mu;
+    ELSE
+        RETURN QUERY
+        WITH deleted AS (
+            DELETE FROM consensus
+            WHERE object_id IS NOT NULL
+              AND eff_mu(rating, rd) < p_max_eff_mu
+            RETURNING 1
+        )
+        SELECT count(*)::bigint FROM deleted;
+    END IF;
+END;
+$$;

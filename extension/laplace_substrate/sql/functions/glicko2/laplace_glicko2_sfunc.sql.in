@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION laplace_glicko2_sfunc(
+    internal,
+    bigint, bigint, bigint,
+    bigint, bigint, bigint,
+    bigint
+) RETURNS internal
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_sfunc'
+    LANGUAGE C;

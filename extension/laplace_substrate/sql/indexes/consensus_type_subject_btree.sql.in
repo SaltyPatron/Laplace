@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS consensus_type_subject_btree ON consensus (type_id, subject_id) WHERE object_id IS NOT NULL;

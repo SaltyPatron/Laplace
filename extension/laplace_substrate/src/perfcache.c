@@ -29,6 +29,7 @@
 #include "perfcache_native.h"
 
 static char *perfcache_path = NULL;
+static bool ingest_bulk_novel = false;
 
 void
 laplace_substrate_perfcache_init(void)
@@ -40,6 +41,15 @@ laplace_substrate_perfcache_init(void)
         &perfcache_path,
         "",
         PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomBoolVariable(
+        "laplace_substrate.ingest_bulk_novel",
+        "Skip merge anti-join for batches the client already proved novel (bulk-fresh path).",
+        NULL,
+        &ingest_bulk_novel,
+        false,
+        PGC_USERSET,
         0,
         NULL, NULL, NULL);
     MarkGUCPrefixReserved("laplace_substrate");

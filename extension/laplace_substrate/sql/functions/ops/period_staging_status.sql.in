@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION period_staging_status()
+    RETURNS TABLE(partition_table text, staged_rows bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.relname::text,
+           coalesce(s.n_live_tup, 0)::bigint
+    FROM pg_class c
+    JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+    WHERE ns.nspname = current_schema()
+      AND c.relkind = 'r'
+      AND c.relname LIKE 'consensus\_period\_staging\_%'
+    ORDER BY c.relname
+$$;

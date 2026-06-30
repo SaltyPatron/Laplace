@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION content_descent_bitmap(ids bytea[], parents int[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_content_descent_bitmap'
+    LANGUAGE C STABLE;

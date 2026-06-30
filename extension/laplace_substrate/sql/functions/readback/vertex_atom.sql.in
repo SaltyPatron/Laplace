@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT public.laplace_vertex_atom(p_flags)
+$$;

@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION relation_summary(p_x bytea, p_y bytea)
+    RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
+                  geodesic double precision, verdict text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT r.chain, r.plane, r.path_mu, COALESCE(u.n, 0), g.geo,
+           concat_ws('',
+             CASE WHEN r.chain IS NOT NULL THEN 'related via ' || r.plane
+                  ELSE 'no witnessed conceptual path' END,
+             CASE WHEN COALESCE(u.n, 0) >= 10 THEN '; strong shared usage (' || u.n || ')'
+                  WHEN COALESCE(u.n, 0) > 0 THEN '; some shared usage (' || u.n || ')'
+                  ELSE '' END,
+             CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near'
+                  ELSE '' END)
+    FROM (SELECT 1) one
+    LEFT JOIN LATERAL (SELECT * FROM relate_path(p_x, p_y) LIMIT 1) r ON true
+    LEFT JOIN LATERAL (SELECT usage_overlap(p_x, p_y) AS n) u ON true
+    LEFT JOIN LATERAL (
+        SELECT public.laplace_angular_distance_4d(
+            (SELECT coord FROM physicalities WHERE entity_id = p_x AND type = 1
+             AND coord IS NOT NULL LIMIT 1),
+            (SELECT coord FROM physicalities WHERE entity_id = p_y AND type = 1
+             AND coord IS NOT NULL LIMIT 1)) AS geo) g ON true
+$$;

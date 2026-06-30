@@ -1,0 +1,4 @@
+CREATE FUNCTION laplace_hash128_merkle(tier smallint, child_hashes bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hash128_merkle'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

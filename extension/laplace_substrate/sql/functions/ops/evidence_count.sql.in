@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION evidence_count(
+    p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*)
+    FROM @extschema@.attestations a
+    WHERE (p_type   IS NULL OR a.type_id   = p_type)
+      AND (p_source IS NULL OR a.source_id = p_source)
+      AND (p_object IS NULL OR a.object_id = p_object)
+$$;

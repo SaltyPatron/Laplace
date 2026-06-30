@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION entity_exists(p_id bytea)
+    RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT EXISTS (SELECT 1 FROM entities e WHERE e.id = p_id)
+$$;

@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION anagrams_of(p_word text)
+    RETURNS TABLE(word text, entity_id bytea)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT DISTINCT render(p2.entity_id), p2.entity_id
+    FROM physicalities p1
+    JOIN physicalities p2 ON p2.hilbert_index = p1.hilbert_index AND p2.type = 1
+    JOIN entities e ON e.id = p2.entity_id
+    WHERE p1.entity_id = word_id(p_word) AND p1.type = 1
+      AND e.type_id = canonical_id('Word')
+      AND p2.entity_id <> p1.entity_id
+$$;
