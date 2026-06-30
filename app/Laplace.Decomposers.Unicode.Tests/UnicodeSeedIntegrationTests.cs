@@ -69,7 +69,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         
         
         
-        CodepointPerfcache.LoadDefault();
+        CodepointPerfcache.Load(ResolvePerfcacheBlob());
         IntentStage.ResetContentBank();
 
         var writer = new NpgsqlSubstrateWriter(_ds);
@@ -92,7 +92,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         
         long resolvable = await ScalarLong(
             @"SELECT count(*) FROM laplace.entities e
-              WHERE e.type_id = laplace.canonical_id('substrate/type/Codepoint/v1')
+              WHERE e.type_id = laplace.canonical_id('Codepoint')
                 AND e.tier = 0
                 AND laplace.codepoint_for_id(e.id) IS NOT NULL");
         Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");
@@ -118,6 +118,34 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");
         double x = r.GetDouble(0), y = r.GetDouble(1), z = r.GetDouble(2), m = r.GetDouble(3);
         Assert.InRange(Math.Sqrt(x * x + y * y + z * z + m * m), 1.0 - 1e-9, 1.0 + 1e-9);
+    }
+
+    private static string ResolvePerfcacheBlob()
+    {
+        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
+        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
+        foreach (var root in new[] { "/opt/laplace/share/laplace", AppContext.BaseDirectory })
+        {
+            var dir = new DirectoryInfo(root);
+            while (dir is not null)
+            {
+                foreach (var build in dir.EnumerateDirectories("build*"))
+                {
+                    var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache*.bin",
+                        SearchOption.AllDirectories).OrderBy(f => f).LastOrDefault();
+                    if (hit is not null) return hit;
+                }
+                if (root != AppContext.BaseDirectory) break;
+                dir = dir.Parent;
+            }
+        }
+        var installed = Directory.Exists("/opt/laplace/share/laplace")
+            ? Directory.EnumerateFiles("/opt/laplace/share/laplace", "laplace_t0_perfcache*.bin")
+                .OrderBy(f => f).LastOrDefault()
+            : null;
+        if (installed is not null) return installed;
+        throw new InvalidOperationException(
+            "perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
     private async Task<long> ScalarLong(string sql, params (string, object)[] ps)
