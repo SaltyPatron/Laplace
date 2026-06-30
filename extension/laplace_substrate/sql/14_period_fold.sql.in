@@ -494,9 +494,9 @@ BEGIN
         ALTER COLUMN witness_count SET NOT NULL,
         ALTER COLUMN last_observed_at SET NOT NULL;
     ALTER TABLE consensus_next ADD PRIMARY KEY (id);
-    EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
     ALTER TABLE consensus RENAME TO consensus_retired;
     ALTER TABLE consensus_next RENAME TO consensus;
+    EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus_retired', 'laplace_substrate');
     EXECUTE format('ALTER EXTENSION %I ADD TABLE consensus', 'laplace_substrate');
     DROP TABLE consensus_retired;
 
