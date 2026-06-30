@@ -57,13 +57,13 @@ BEGIN
     INSERT INTO canonical_names (id, name)
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
     ON CONFLICT DO NOTHING;
-    PERFORM register_canonical('substrate/type/IS_A/v1');
-    PERFORM register_canonical('substrate/type/CAUSES/v1');
-    PERFORM register_canonical('substrate/type/IS_ANTONYM_OF/v1');
-    PERFORM register_canonical('substrate/type/HAS_DEFINITION/v1');
-    PERFORM register_canonical('substrate/type/IS_SYNONYM_OF/v1');
-    PERFORM register_canonical('substrate/type/IS_TRANSLATION_OF/v1');
-    PERFORM register_canonical('substrate/type/HAS_LANGUAGE/v1');
+    PERFORM register_canonical('IS_A');
+    PERFORM register_canonical('CAUSES');
+    PERFORM register_canonical('IS_ANTONYM_OF');
+    PERFORM register_canonical('HAS_DEFINITION');
+    PERFORM register_canonical('IS_SYNONYM_OF');
+    PERFORM register_canonical('IS_TRANSLATION_OF');
+    PERFORM register_canonical('HAS_LANGUAGE');
 
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
