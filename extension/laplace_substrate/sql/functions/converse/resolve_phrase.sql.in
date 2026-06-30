@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION resolve_phrase(p_phrase text)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_resolve_phrase'
+    LANGUAGE C STABLE STRICT;

@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_is_a_yes_reply(
+        p_path bytea[], p_types bytea[], p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'Yes — ' || realize_path(p_path, p_types, p_lang)
+$$;

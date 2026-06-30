@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION create_walk_staging(p_partitions integer)
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    p integer;
+BEGIN
+    IF p_partitions < 1 OR p_partitions > 64 THEN
+        RAISE EXCEPTION 'create_walk_staging: partitions must be 1..64';
+    END IF;
+    FOR p IN 0 .. p_partitions - 1 LOOP
+        EXECUTE format($t$
+            CREATE UNLOGGED TABLE IF NOT EXISTS %I (
+                subject_id  bytea       NOT NULL,
+                type_id     bytea       NOT NULL,
+                context_id  bytea,
+                phi         bigint      NOT NULL,
+                n_vertices  int         NOT NULL,
+                games_total bigint      NOT NULL,
+                last_ts     timestamptz NOT NULL,
+                walk        bytea       NOT NULL
+            )$t$, 'consensus_walk_staging_' || p);
+    END LOOP;
+END;
+$$;

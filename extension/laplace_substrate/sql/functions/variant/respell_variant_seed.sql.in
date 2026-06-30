@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION respell_variant_seed(p_modality text, p_node_type text)
+    RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.id
+    FROM canonical_names n
+    JOIN entities e ON e.type_id = n.id
+    JOIN physicalities p ON p.entity_id = e.id AND p.type = 1
+      AND p.trajectory IS NOT NULL
+    WHERE n.name = 'substrate/type/grammar/' || p_modality || '/' || p_node_type || '/v1'
+    ORDER BY public.laplace_hash128_blake3(e.id || convert_to(p_modality || '/' || p_node_type, 'UTF8'))
+    LIMIT 1
+$$;

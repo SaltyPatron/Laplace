@@ -1,0 +1,5 @@
+CREATE OR REPLACE VIEW v_entities_highway AS
+SELECT e.*,
+       laplace_highway_popcount(e.highway_mask) AS highway_density
+FROM entities e
+WHERE e.highway_mask IS NOT NULL;

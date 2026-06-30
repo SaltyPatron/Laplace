@@ -18,6 +18,7 @@ if(WIN32)
         src/recall_route.c
         src/perfcache.c
         src/content_resolve.c
+        src/descent_probe.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -44,10 +45,15 @@ set(EXT_NAME    laplace_substrate)
 # makes `ALTER EXTENSION laplace_substrate UPDATE` usable: a SQL edit yields a new version, and the
 # deploy applies the (idempotent) upgrade body in place — no reseed. A fixed version would make every
 # update a forbidden same-version no-op (the reason SQL changes used to require fresh_db).
-file(GLOB _ext_sql_sources CONFIGURE_DEPENDS
+file(GLOB_RECURSE _ext_sql_sources CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.sql.in
     ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/*.sql.in)
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*/*.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*/*/*.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/inference/*.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/*.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade)
 list(SORT _ext_sql_sources)
 set(_ext_sql_hashes "")
 foreach(_f ${_ext_sql_sources})
@@ -107,47 +113,25 @@ configure_file(
     @ONLY
 )
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SqlManifest.cmake)
+laplace_write_sql_chain(
+    "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/install_chain.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql")
+set(_install_deps ${SQL_CHAIN_DEPS})
+laplace_write_sql_chain(
+    "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/upgrade_chain.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql")
+set(_upgrade_deps ${SQL_CHAIN_DEPS})
+
 set(EXT_SQL_MODULES
     sql/laplace_substrate.sql.in
     sql/laplace_substrate_upgrade.sql.in
-    sql/01_schema.sql.in
-    sql/02_entities.sql.in
-    sql/03_physicalities.sql.in
-    sql/04_attestations.sql.in
-    sql/05_indexes.sql.in
-    sql/06_glicko2.sql.in
-    sql/07_cascade.sql.in
-    sql/08_sp_trajectory_ops.sql.in
-    sql/09_brin_tier_ops.sql.in
-    sql/10_bootstrap.sql.in
-    sql/11_entities_exist_bitmap.sql.in
-    sql/12_consensus_schema.sql.in
-    sql/13_mu_law.sql.in
-    sql/14_period_fold.sql.in
-    sql/15_readback.sql.in
-    sql/16_inspect.sql.in
-    sql/17_consensus_reads.sql.in
-    sql/18_ops_surface.sql.in
-    sql/19_relation_law.sql.in
-    sql/20_converse.sql.in
-    sql/21_seed.sql.in
-    sql/22_cascade_surface.sql.in
-    sql/23_structural_surface.sql.in
-    sql/24_identity_health.sql.in
-    sql/25_intent_preflight.sql.in
-    sql/26_generation.sql.in
-    sql/27_apply_batch.sql.in
-    sql/28_apply_batch_merge.sql.in
-    sql/29_consensus_expand.sql.in
-    sql/30_realize_branches.sql.in
-    sql/31_consensus_reads.sql.in
-    sql/32_lexical_reads.sql.in
-    sql/33_taxonomy_expand.sql.in
-    sql/34_contrast_expand.sql.in
-    sql/35_variant_expand.sql.in
-    sql/36_recall_responses.sql.in
-    sql/37_corpus_expand.sql.in
-    sql/38_geometry_expand.sql.in
+    sql/manifest.install
+    sql/manifest.upgrade
+    ${_install_deps}
+    ${_upgrade_deps}
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

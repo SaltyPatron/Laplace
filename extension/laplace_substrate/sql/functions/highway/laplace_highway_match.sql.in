@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION laplace_highway_match(mask bytea, band_mask bytea)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT mask IS NOT NULL
+       AND band_mask IS NOT NULL
+       AND (mask & band_mask) <> '\x00000000000000000000000000000000000000000000000000000000000000000000'::bytea
+$$;

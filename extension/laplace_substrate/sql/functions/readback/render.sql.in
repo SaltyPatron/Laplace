@@ -1,0 +1,20 @@
+CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(
+        (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
+        (SELECT chr(@extschema@.codepoint_for_id(p_id))
+         FROM @extschema@.entities e
+         WHERE e.id = p_id AND e.tier = 0),
+        -- substrate-native name: follow the highest-consensus HAS_NAME_ALIAS to a
+        -- codepoint-walk content entity and reconstruct it (so senses/types render as
+        -- their human name, not the raw key). The alias relation is used by id; the
+        -- name renders from its own codepoints — no canonical_names dependency, no cycle.
+        render_text((SELECT c.object_id FROM @extschema@.consensus c
+                     WHERE c.subject_id = p_id
+                       AND c.type_id = @extschema@.relation_type_id('HAS_NAME_ALIAS')
+                     ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
+                     LIMIT 1)),
+        render_text(p_id),
+        encode(p_id, 'hex') || '…')
+$$;

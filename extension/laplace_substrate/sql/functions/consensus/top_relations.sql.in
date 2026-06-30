@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
+    RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.type_id, c.object_id,
+           c.eff_mu, c.witness_count
+    FROM v_consensus_resolved c
+    WHERE c.object_id IS NOT NULL AND (p_type IS NULL OR c.type_id = p_type)
+    ORDER BY relation_rank_resolved(c.type_id) * (c.eff_mu_raw / 1e9) DESC
+    LIMIT p_limit
+$$;

@@ -73,12 +73,17 @@ if "%SKIP_APP%"=="0" (
 
 echo.
 echo ===== PHASE 7 — PERF CACHE =====
-cmake --build build-win --target laplace_t0_perfcache || exit /b 1
+cmake --build build-win --target laplace_t0_perfcache laplace_highway_perfcache || exit /b 1
 if not exist "%LAPLACE_PERFCACHE_BIN%" (
   echo ERROR: perf-cache blob missing at %LAPLACE_PERFCACHE_BIN%
   exit /b 1
 )
-for %%F in ("%LAPLACE_PERFCACHE_BIN%") do echo perfcache ready: %%~zF bytes — %%F
+if not exist "%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin" (
+  echo ERROR: highway perfcache blob missing at build-win\core\perfcache\laplace_highway_perfcache.bin
+  exit /b 1
+)
+for %%F in ("%LAPLACE_PERFCACHE_BIN%") do echo T0 perfcache ready: %%~zF bytes — %%F
+for %%F in ("%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin") do echo highway perfcache ready: %%~zF bytes — %%F
 
 echo.
 echo ===== REBUILD-ALL COMPLETE =====

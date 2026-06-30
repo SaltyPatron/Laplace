@@ -1,0 +1,28 @@
+CREATE OR REPLACE FUNCTION entity_relation_plane(
+        p_vocab bytea[], p_rel_names text[], p_degree_cap int DEFAULT 48)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         t(tid) AS (SELECT relation_type_id(n) FROM unnest(p_rel_names) AS n),
+         edges AS MATERIALIZED (
+             
+             
+             
+             
+             SELECT c.subject_id, c.object_id,
+                    (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9 AS w
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN t           ON t.tid = c.type_id
+             JOIN v vo        ON vo.id = c.object_id   
+                                                       
+         ),
+         capped AS (
+             SELECT e.subject_id, e.object_id, e.w,
+                    row_number() OVER (PARTITION BY e.subject_id
+                                       ORDER BY abs(e.w) DESC, e.object_id) AS rn
+             FROM edges e
+         )
+    SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
+$$;

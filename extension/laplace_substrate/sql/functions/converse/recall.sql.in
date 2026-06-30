@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION recall(p_prompt text, p_context bytea DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_recall';

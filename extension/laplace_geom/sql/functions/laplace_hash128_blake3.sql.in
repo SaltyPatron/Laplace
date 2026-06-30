@@ -1,0 +1,4 @@
+CREATE FUNCTION laplace_hash128_blake3(data bytea)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hash128_blake3'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

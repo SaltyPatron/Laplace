@@ -1,0 +1,19 @@
+# Install order — one object per file.
+functions/laplace_geom_version.sql.in
+functions/laplace_hash128_blake3.sql.in
+functions/laplace_hash128_merkle.sql.in
+functions/laplace_hilbert_encode.sql.in
+functions/laplace_hilbert_decode.sql.in
+functions/laplace_mantissa_pack.sql.in
+functions/laplace_mantissa_unpack.sql.in
+functions/laplace_trajectory_constituents.sql.in
+functions/laplace_trajectory_constituent_ids.sql.in
+functions/laplace_vertex_atom.sql.in
+functions/laplace_vertex_tier.sql.in
+functions/laplace_distance_4d.sql.in
+functions/laplace_angular_distance_4d.sql.in
+functions/laplace_dwithin_4d.sql.in
+functions/laplace_centroid_4d.sql.in
+functions/laplace_radius_origin.sql.in
+functions/laplace_frechet_4d.sql.in
+functions/laplace_hausdorff_4d.sql.in

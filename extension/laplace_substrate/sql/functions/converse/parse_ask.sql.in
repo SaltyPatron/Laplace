@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION parse_ask(p_prompt text)
+    RETURNS TABLE(ask_kind text, phrase text, phrase2 text, type_name text)
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_parse_ask';

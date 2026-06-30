@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL;

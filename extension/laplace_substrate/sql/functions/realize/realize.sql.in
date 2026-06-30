@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(
+        _realize_synset_lemma(p_id, p_lang),
+        NULLIF(render_text(p_id, 24), ''),
+        _realize_translation(p_id, p_lang),
+        _realize_has_name(p_id, p_lang),
+        _realize_canonical(p_id),
+        _realize_defines(p_id))
+$$;

@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION laplace_entity_attestations(
+    p_subject bytea, p_min_eff_mu_raw bigint DEFAULT 0)
+RETURNS TABLE(type_id bytea, object_id bytea, eff_mu_raw bigint, eff_mu numeric, witnesses bigint)
+LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT c.type_id, c.object_id,
+           eff_mu(c.rating, c.rd),
+           eff_mu_display(c.rating, c.rd),
+           c.witness_count
+    FROM consensus c
+    WHERE c.subject_id = p_subject
+      AND c.object_id IS NOT NULL
+      AND eff_mu(c.rating, c.rd) >= p_min_eff_mu_raw
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+$$;

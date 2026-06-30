@@ -1,0 +1,44 @@
+CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
+    RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $sn$
+DECLARE
+    v_id    bytea;
+    v_coord geometry;
+    v_traj  geometry;
+BEGIN
+    SELECT p.entity_id, p.coord, p.trajectory
+      INTO v_id, v_coord, v_traj
+    FROM physicalities p
+    JOIN prompt_state(p_word) s ON p.entity_id = s.id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+    -- geometry is source-free; order by id for determinism (was p.source_id)
+    ORDER BY s.ord, p.id
+    LIMIT 1;
+    IF v_id IS NULL THEN RETURN; END IF;
+
+    RETURN QUERY
+    WITH knn AS (
+        SELECT p.entity_id, p.coord, p.trajectory
+        FROM physicalities p
+        WHERE p.type = 1
+        ORDER BY p.coord <<->> v_coord
+        LIMIT GREATEST(p_k * 20, 200)),
+    dedup AS (
+        SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,
+               public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
+        FROM knn k
+        ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
+    nearest AS (
+        SELECT entity_id, trajectory, geo
+        FROM dedup
+        WHERE entity_id <> v_id
+        ORDER BY geo
+        LIMIT p_k)
+    SELECT render_text(t.entity_id, 24), t.geo,
+           CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
+                THEN public.laplace_frechet_4d(t.trajectory, v_traj) END
+    FROM nearest t
+    ORDER BY t.geo;
+END;
+$sn$;

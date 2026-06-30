@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION period_phi_mixed(p_subject bytea, p_type bytea, p_object bytea)
+    RETURNS bigint LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+BEGIN
+    RAISE EXCEPTION 'accumulation invariant violated: relation (% —[%]→ %) observed with mixed φ within one period',
+        render(p_subject), render(p_type), COALESCE(render(p_object), '∅');
+END;
+$$;

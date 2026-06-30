@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION trajectory_cooccurrence(p_window int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, cnt bigint, subject_total bigint)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    
+    
+    
+    WITH pairs AS (
+        SELECT s.subject_id, s.object_id, sum(s.cnt) AS cnt
+        FROM cooccurrence_scan(p_window) s
+        GROUP BY s.subject_id, s.object_id
+    )
+    SELECT p.subject_id, p.object_id, p.cnt::bigint,
+           sum(p.cnt) OVER (PARTITION BY p.subject_id)::bigint
+    FROM pairs p
+$$;

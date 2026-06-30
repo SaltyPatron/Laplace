@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION entity_physicality_coord(p_entity bytea)
+    RETURNS geometry
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT p.coord
+    FROM physicalities p
+    WHERE p.entity_id = p_entity AND p.type = 1 AND p.coord IS NOT NULL
+    LIMIT 1
+$$;

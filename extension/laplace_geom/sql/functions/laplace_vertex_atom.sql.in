@@ -1,0 +1,3 @@
+CREATE FUNCTION @extschema@.laplace_vertex_atom(flags bigint) RETURNS integer
+    AS 'MODULE_PATHNAME', 'pg_laplace_vertex_atom'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

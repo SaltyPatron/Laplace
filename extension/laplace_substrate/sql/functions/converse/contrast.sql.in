@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
+                                    p_limit int DEFAULT 80)
+    RETURNS TABLE(holder text, type text, fact text, mu numeric)
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_contrast';

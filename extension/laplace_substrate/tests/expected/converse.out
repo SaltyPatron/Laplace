@@ -24,6 +24,7 @@ SELECT word_id('') IS NULL AS empty_is_null;
 
 DO $$
 DECLARE
+    rel_meta bytea := entity_type_id('RelationType');
     type_t   bytea := laplace_hash128_blake3('Type');
     src      bytea := laplace_hash128_blake3('test/converse/source');
     w_dog    bytea := word_id('dog');
@@ -53,9 +54,10 @@ DECLARE
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
-           (k_sense, 0, type_t, src), (k_senseof, 0, type_t, src), (k_def, 0, type_t, src),
-           (k_syn, 0, type_t, src),
-           (k_causes, 0, type_t, src), (k_anto, 0, type_t, src),
+           (k_sense, 0, rel_meta, src), (k_senseof, 0, rel_meta, src), (k_def, 0, rel_meta, src),
+           (k_syn, 0, rel_meta, src), (k_member, 0, rel_meta, src), (k_lang, 0, rel_meta, src),
+           (k_isa, 0, rel_meta, src),
+           (k_causes, 0, rel_meta, src), (k_anto, 0, rel_meta, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
            (w_c, 0, type_t, src),
            (sense1, 0, type_t, src), (synset1, 0, type_t, src),
@@ -107,7 +109,7 @@ SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORD
  what | f
  is   | f
  a    | f
- Dog  | t
+ Dog  | f
 (4 rows)
 
 SELECT resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
@@ -134,6 +136,12 @@ SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
  t
 (1 row)
 
+SELECT word_id('dog') = ANY(lexical_peers(word_id('dog'))) AS peer_includes_self;
+ peer_includes_self 
+--------------------
+ t
+(1 row)
+
 SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
  dog_senses 
 ------------
@@ -150,8 +158,7 @@ SELECT synonym FROM synonyms(word_id('dog'));
  synonym 
 ---------
  p
- h
-(2 rows)
+(1 row)
 
 SELECT translation, language FROM translations(word_id('dog')) ORDER BY translation;
  translation |   language   
@@ -169,8 +176,7 @@ SELECT reply FROM recall('synonyms of dog');
  reply 
 -------
  p
- h
-(2 rows)
+(1 row)
 
 SELECT reply FROM recall('translate dog');
       reply       
@@ -193,8 +199,7 @@ SELECT reply FROM recall('translate h');
 SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
  word 
 ------
- Dog
-(1 row)
+(0 rows)
 
 SELECT support,
        object_id = laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en

@@ -1,0 +1,35 @@
+CREATE OR REPLACE FUNCTION grapheme_floor_vocab(p_size int DEFAULT 512, p_words int DEFAULT 50000)
+    RETURNS TABLE(entity_id bytea, surface text, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    
+    
+    
+    
+    WITH t AS (
+        SELECT p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier = 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id LIMIT p_words
+    ),
+    g AS (
+        SELECT tc.entity_id, tc.run_length
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+    ),
+    agg AS (
+        
+        
+        SELECT g.entity_id, sum(GREATEST(g.run_length,1))::bigint AS cnt
+        FROM g JOIN entities e ON e.id = g.entity_id AND e.tier <= 1
+        GROUP BY g.entity_id
+    ),
+    named AS (
+        SELECT a.entity_id, render_text(a.entity_id, 8) AS s, a.cnt
+        FROM agg a ORDER BY a.cnt DESC LIMIT p_size * 2
+    )
+    SELECT n.entity_id, n.s, n.cnt
+    FROM named n
+    WHERE char_length(n.s) = 1 AND NOT is_all_whitespace(n.s)
+    ORDER BY n.cnt DESC LIMIT p_size
+$$;

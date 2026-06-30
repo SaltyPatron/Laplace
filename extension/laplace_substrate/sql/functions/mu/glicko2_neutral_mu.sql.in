@@ -1,0 +1,3 @@
+CREATE OR REPLACE FUNCTION glicko2_neutral_mu() RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_neutral_mu'
+    LANGUAGE C LAPLACE_IMMUTABLE;

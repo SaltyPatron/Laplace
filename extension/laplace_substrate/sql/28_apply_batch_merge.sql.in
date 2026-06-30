@@ -1,6 +1,1 @@
--- Retired: merge logic lives in apply_batch.c (C SPI). See 27_apply_batch.sql.in.
--- Drop orphaned plpgsql helpers from the bad migration (no-op on fresh installs).
-
-DROP FUNCTION IF EXISTS _apply_batch_merge_entities(regclass);
-DROP FUNCTION IF EXISTS _apply_batch_merge_physicalities(regclass);
-DROP FUNCTION IF EXISTS _apply_batch_merge_attestations(regclass);
+-- Retired: merge logic lives in apply_batch.c (C SPI). See 27_apply_batch.sql.in. -- Drop orphaned plpgsql helpers from the bad migration (no-op on fresh installs).  DROP FUNCTION IF EXISTS _apply_batch_merge_entities(regclass); DROP FUNCTION IF EXISTS _apply_batch_merge_physicalities(regclass); DROP FUNCTION IF EXISTS _apply_batch_merge_attestations(regclass);

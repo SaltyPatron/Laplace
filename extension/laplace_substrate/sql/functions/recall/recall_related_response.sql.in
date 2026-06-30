@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_related_response(p_topic bytea, p_type_name text)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT replace(f.fact, '%s', label(p_topic)), f.eff_mu, f.witnesses
+    FROM related(p_topic, relation_type_id(p_type_name), word_language(p_topic)) f
+$$;

@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION corpus_trajectory_probe()
+    RETURNS TABLE(rows bigint, max_us bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*)::int8,
+           COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::int8, 0)
+    FROM physicalities
+    WHERE type = 1 AND trajectory IS NOT NULL
+$$;

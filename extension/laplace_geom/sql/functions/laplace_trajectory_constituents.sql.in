@@ -1,0 +1,8 @@
+CREATE FUNCTION @extschema@.laplace_trajectory_constituents(traj geometry,
+        OUT ordinal    integer,
+        OUT entity_id  bytea,
+        OUT run_length integer,
+        OUT flags      bigint)
+    RETURNS SETOF record
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_constituents'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT ROWS 16;

@@ -1,0 +1,27 @@
+CREATE OR REPLACE FUNCTION substrate_counts()
+    RETURNS TABLE(metric text, value bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'entities',                 count(*) FROM @extschema@.entities
+    UNION ALL
+    SELECT 'entities/codepoint (T0)',  count(*) FROM @extschema@.entities
+        WHERE type_id = @extschema@.entity_type_id('Codepoint')
+          AND tier = 0
+    UNION ALL
+    SELECT 'entities/compositional (T1-T4)', count(*) FROM @extschema@.entities e
+        WHERE e.tier BETWEEN 1 AND 4
+          AND e.type_id = ANY(@extschema@.compositional_type_ids())
+    UNION ALL
+    -- Anchors are identified by type_id (NOT a content-composition tier), never by tier.
+    -- Anchors sit at Word tier (2) with a meta-type type_id; tier is composition depth only.
+    SELECT 'entities/vocabulary (by type_id)', count(*) FROM @extschema@.entities e
+        WHERE e.type_id <> ALL(@extschema@.compositional_type_ids())
+    UNION ALL
+    SELECT 'physicalities',            count(*) FROM @extschema@.physicalities
+    UNION ALL
+    SELECT 'physicalities/content',    count(*) FROM @extschema@.physicalities WHERE type = 1
+    UNION ALL
+    SELECT 'attestations (evidence)',  count(*) FROM @extschema@.attestations
+    UNION ALL
+    SELECT 'consensus (relations)',    count(*) FROM @extschema@.consensus
+$$;

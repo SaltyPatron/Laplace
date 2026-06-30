@@ -137,6 +137,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private async Task<ApplyResult> ApplyManyCoreAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct)
     {
+        Dictionary<(Hash128 S, Hash128 K, Hash128? O), Acc>? commitBatchAcc = null;
+
         bool boundary = false;
         foreach (var c in changes)
         {
@@ -147,9 +149,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 boundary = true;
                 continue;
             }
-            foreach (var a in c.Attestations) Accumulate(a);
+            if (_stageAsWalks && !_persistEvidence)
+            {
+                foreach (var a in c.Attestations)
+                    MergeAttestationInto(ref commitBatchAcc, a);
+            }
+            else
+            {
+                foreach (var a in c.Attestations) Accumulate(a);
+            }
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
                 foreach (var w in c.TestimonyWalks) BufferWalk(w);
+        }
+
+        if (commitBatchAcc is not null)
+        {
+            foreach (var acc in commitBatchAcc.Values)
+                BufferWalkCore(ConvertPartialToWalk(acc));
         }
 
         if (_walkBuffered >= WalkFlushRows)
@@ -159,7 +175,46 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
 
-        return await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
+        var result = await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
+
+        // Stream the walk journal to staging with each evidence commit — do not hold walks in RAM
+        // until MaterializeConsensusAsync.
+        if (_stageAsWalks && _walkBuffered > 0)
+            await FlushWalksAsync(ct);
+
+        return result;
+    }
+
+    private void MergeAttestationInto(
+        ref Dictionary<(Hash128 S, Hash128 K, Hash128? O), Acc>? batch, AttestationRow a)
+    {
+        batch ??= new Dictionary<(Hash128, Hash128, Hash128?), Acc>();
+        var key = (a.SubjectId, a.TypeId, a.ObjectId);
+        if (!batch.TryGetValue(key, out var acc))
+        {
+            acc = new Acc
+            {
+                Subject = a.SubjectId,
+                Type = a.TypeId,
+                Object = a.ObjectId,
+                PhiFp1e9 = a.OpponentRdFp1e9,
+                Games = a.ObservationCount,
+                SumScoreFp1e9 = a.SumScoreFp1e9
+                    ?? checked(a.ScoreFp1e9 * a.ObservationCount),
+                MaxTsUnixUs = a.LastObservedAtUnixUs,
+            };
+            batch[key] = acc;
+            Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
+            return;
+        }
+        if (acc.PhiFp1e9 != a.OpponentRdFp1e9)
+            throw new InvalidOperationException(
+                $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same commit");
+        acc.Games = checked(acc.Games + a.ObservationCount);
+        acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
+            + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
+        if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
+        Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
     
@@ -703,8 +758,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             if (_stageAsWalks && !_terminalFold)
                 _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
             string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
-            bool resumable = !_stageAsWalks
-                && Environment.GetEnvironmentVariable("LAPLACE_FOLD_RESUMABLE") == "1";
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await using var conn = await _ds.OpenConnectionAsync(ct);
             conn.Notice += (_, e) =>
@@ -731,9 +784,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 await using var fin = conn.CreateCommand();
                 fin.Transaction = tx;
                 fin.CommandTimeout = 0;
-                fin.CommandText = resumable
-                    ? "CALL laplace.finish_consensus_fold_steps(NULL)"
-                    : "SELECT laplace.finish_consensus_fold()";
+                fin.CommandText = "SELECT laplace.finish_consensus_fold()";
                 long n = (long)(await fin.ExecuteScalarAsync(ct) ?? 0L);
                 await tx.CommitAsync(ct);
                 Interlocked.Add(ref _foldedRelations, n);

@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(type_id bytea, object_id bytea, rating bigint, rd bigint,
+                  volatility bigint, witness_count bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
+    FROM consensus c
+    WHERE c.subject_id = p_id
+    -- rank-weighted: salient out-edges surface above scaffolding so the LIMIT keeps meaning.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
+    LIMIT p_limit
+$$;

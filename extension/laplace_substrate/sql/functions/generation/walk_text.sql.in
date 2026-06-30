@@ -1,0 +1,27 @@
+CREATE OR REPLACE FUNCTION walk_text(
+        p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
+        p_seed bigint DEFAULT NULL)
+    RETURNS TABLE(step int, entity text, stride_used int)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    WITH ctx AS (
+        SELECT array_agg(id ORDER BY ord) AS ids
+        FROM prompt_state(p_prompt) WHERE id IS NOT NULL
+    )
+    
+    
+    
+    
+    
+    
+    SELECT g.step,
+           render_text(g.entity, 64) || COALESCE(render_text(g.sep_entity, 8), ''),
+           g.stride_used
+    FROM ctx, walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
+                              COALESCE(p_seed,
+                                  ('x' || encode(substring(
+                                       public.laplace_hash128_blake3(convert_to(p_prompt, 'UTF8'))
+                                       for 8), 'hex'))::bit(64)::bigint)) g
+    WHERE ctx.ids IS NOT NULL
+$$;

@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION laplace_eff_mu(
+    p_subject bytea, p_type bytea, p_object bytea)
+RETURNS bigint
+LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT eff_mu(c.rating, c.rd)
+    FROM consensus c
+    WHERE c.subject_id = p_subject
+      AND c.type_id    = p_type
+      AND c.object_id  = p_object
+    LIMIT 1
+$$;

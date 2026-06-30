@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT CASE
+        WHEN p_source IS NULL THEN
+            (SELECT count(*) FROM @extschema@.physicalities p WHERE p.type = 1)
+        ELSE
+            (SELECT count(DISTINCT p.entity_id)
+             FROM @extschema@.physicalities p
+             JOIN @extschema@.attestations a ON a.subject_id = p.entity_id
+             WHERE p.type = 1 AND a.source_id = p_source)
+    END
+$$;

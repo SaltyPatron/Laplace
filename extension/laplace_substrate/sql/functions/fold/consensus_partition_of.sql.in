@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION consensus_partition_of(
+        p_subject bytea, p_type bytea, p_object bytea, p_nparts integer)
+    RETURNS integer LANGUAGE sql IMMUTABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT mod(x::numeric
+               + CASE WHEN x < 0 THEN 18446744073709551616::numeric ELSE 0::numeric END,
+               p_nparts::numeric)::integer
+    
+    FROM (SELECT hash128_lo(p_subject) # hash128_lo(p_type) #
+                 COALESCE(hash128_lo(p_object), 0::bigint) AS x) t;
+$$;

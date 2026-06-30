@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION entity_curve(p_entity bytea) RETURNS geometry
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT word_curve(p_entity)
+$$;

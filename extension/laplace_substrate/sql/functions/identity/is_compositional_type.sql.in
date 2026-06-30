@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT p_type_id = ANY(@extschema@.compositional_type_ids());
+$$;

@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION consensus_export_relations(p_type_id bytea)
+    RETURNS TABLE(subject_id bytea, object_id bytea, rating bigint, witness_count bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.object_id, c.rating, c.witness_count
+    FROM consensus c
+    WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
+$$;

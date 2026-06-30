@@ -1,7 +1,8 @@
 @echo off
 setlocal
 if "%~2"=="" (
-    echo usage: refresh-substrate-module.cmd ^<NN_module.sql.in^> ^<database^>
+    echo usage: refresh-substrate-module.cmd ^<path/to/object.sql.in^> ^<database^>
+    echo example: refresh-substrate-module.cmd views/v_entities.sql.in laplace
     exit /b 2
 )
 call "%~dp0env.cmd"

@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION multi_source_entity_count()
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*) FROM (
+        SELECT a.subject_id FROM @extschema@.attestations a
+        GROUP BY a.subject_id
+        HAVING count(DISTINCT a.source_id) > 1) t
+$$;

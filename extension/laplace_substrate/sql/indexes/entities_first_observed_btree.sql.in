@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS entities_first_observed_btree ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;

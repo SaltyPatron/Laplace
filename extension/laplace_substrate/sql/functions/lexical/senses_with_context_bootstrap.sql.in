@@ -1,0 +1,22 @@
+CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
+    RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
+                  score numeric)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.object_id, ss.object_id,
+           eff_mu_display(s.rating, s.rd),
+           s.witness_count + ss.witness_count,
+           round(((eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd)
+             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
+                         WHERE c.subject_id = ANY (p_context) AND c.object_id = ss.object_id
+                           AND NOT refuted(c.rating, c.rd)), 0)
+             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
+                         WHERE c.subject_id = ss.object_id AND c.object_id = ANY (p_context)
+                           AND NOT refuted(c.rating, c.rd)), 0)) / 1e9)::numeric, 3)
+    FROM consensus s
+    JOIN consensus ss ON ss.subject_id = s.object_id
+                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
+    WHERE s.subject_id = p_word
+      AND s.type_id = relation_type_id('HAS_SENSE')
+    ORDER BY 5 DESC
+$$;

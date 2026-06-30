@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION laplace_score_inverse(score bigint, m double precision)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_score_inverse'
+    LANGUAGE C IMMUTABLE STRICT;

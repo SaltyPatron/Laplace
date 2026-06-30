@@ -1,0 +1,2 @@
+CREATE OR REPLACE FUNCTION relation_rank_resolved(p_type_id bytea) RETURNS float8
+    LANGUAGE c STABLE STRICT AS 'MODULE_PATHNAME', 'pg_relation_rank_resolved';

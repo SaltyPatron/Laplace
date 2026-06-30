@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION generate(
+        p_prompt text, p_steps int DEFAULT 40, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 12,
+        p_seed bigint DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    SELECT btrim(string_agg(entity, '' ORDER BY step))
+    FROM walk_text(p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed)
+$$;

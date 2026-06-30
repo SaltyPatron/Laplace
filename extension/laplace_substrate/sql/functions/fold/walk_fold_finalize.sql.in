@@ -1,0 +1,20 @@
+CREATE OR REPLACE FUNCTION walk_fold_finalize()
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    rel record;
+BEGIN
+    IF to_regclass(current_schema() || '.consensus_next') IS NULL THEN
+        RAISE EXCEPTION 'walk_fold_finalize: consensus_next missing — prepare did not run or was rolled back';
+    END IF;
+    FOR rel IN
+        SELECT c.relname
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_walk_staging_\d+$'
+    LOOP
+        EXECUTE format('DROP TABLE %I', rel.relname);
+    END LOOP;
+    PERFORM consensus_fold_swap();
+END;
+$$;

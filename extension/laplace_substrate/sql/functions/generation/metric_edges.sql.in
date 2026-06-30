@@ -1,0 +1,43 @@
+CREATE OR REPLACE FUNCTION metric_edges(
+        p_vocab bytea[], p_metric text DEFAULT 'frechet', p_k int DEFAULT 16, p_probe int DEFAULT 64)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v AS (
+        
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS id, p.coord, p.trajectory
+        FROM physicalities p
+        JOIN unnest(p_vocab) AS u(id) ON u.id = p.entity_id
+        WHERE p.type = 1
+        ORDER BY p.entity_id, p.id
+    ),
+    cand AS (
+        
+        SELECT a.id AS aid, b.id AS bid, a.trajectory AS at, b.trajectory AS bt,
+               laplace_angular_distance_4d(a.coord, b.coord) AS ang
+        FROM v a JOIN v b ON a.id <> b.id
+    ),
+    pruned AS (
+        SELECT aid, bid, at, bt, ang,
+               row_number() OVER (PARTITION BY aid ORDER BY ang) AS rn
+        FROM cand
+    ),
+    refined AS (
+        
+        SELECT aid, bid,
+            CASE p_metric
+                WHEN 'angular'   THEN ang
+                WHEN 'frechet'   THEN coalesce(laplace_frechet_4d(at, bt), ang)
+                WHEN 'hausdorff' THEN coalesce(laplace_hausdorff_4d(at, bt), ang)
+                ELSE ang
+            END AS d
+        FROM pruned
+        WHERE rn <= GREATEST(p_probe, p_k)
+    ),
+    topk AS (
+        SELECT aid, bid, d,
+               row_number() OVER (PARTITION BY aid ORDER BY d) AS rn
+        FROM refined
+    )
+    SELECT aid, bid, d FROM topk WHERE rn <= p_k
+$$;

@@ -1,0 +1,42 @@
+CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    
+    
+    
+    
+    
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    t AS (
+        
+        
+        
+        
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS wid, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier = 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT p_words
+    ),
+    g AS (
+        
+        
+        
+        
+        SELECT t.wid, tc.ordinal AS ord, gs.i AS sub, tc.entity_id AS ch
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) gs(i)
+    ),
+    bg AS (
+        SELECT ch AS cur, lead(ch, p_gap) OVER (PARTITION BY wid ORDER BY ord, sub) AS nxt FROM g
+    ),
+    cnt AS (
+        SELECT cur, nxt, count(*)::float8 AS c
+        FROM bg WHERE nxt IS NOT NULL GROUP BY cur, nxt
+    )
+    SELECT b.cur, b.nxt, b.c
+    FROM cnt b
+    JOIN v vs ON vs.id = b.cur
+    JOIN v vo ON vo.id = b.nxt
+$$;

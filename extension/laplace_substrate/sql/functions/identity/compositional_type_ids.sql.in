@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION compositional_type_ids()
+RETURNS bytea[]
+LANGUAGE sql
+IMMUTABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT ARRAY[
+        public.laplace_hash128_blake3('Codepoint'::bytea),
+        public.laplace_hash128_blake3('Grapheme'::bytea),
+        public.laplace_hash128_blake3('Word'::bytea),
+        public.laplace_hash128_blake3('Sentence'::bytea),
+        public.laplace_hash128_blake3('Document'::bytea)
+    ];
+$$;

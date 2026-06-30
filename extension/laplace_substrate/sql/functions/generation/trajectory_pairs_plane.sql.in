@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION trajectory_pairs_plane(p_vocab bytea[], p_max_gap int DEFAULT 8)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
+    SELECT t.subject_id, t.object_id,
+           sum( (t.cnt::float8 / NULLIF(t.subject_total, 0)) / t.gap )::float8 AS w
+    FROM trajectory_pairs t
+    JOIN v vs ON vs.id = t.subject_id
+    JOIN v vo ON vo.id = t.object_id
+    WHERE t.gap <= p_max_gap
+    GROUP BY t.subject_id, t.object_id
+$$;

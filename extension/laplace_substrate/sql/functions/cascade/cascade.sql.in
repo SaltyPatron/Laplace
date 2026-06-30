@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION cascade(p_x text, p_y text, p_max_depth int DEFAULT 7)
+    RETURNS TABLE(chain text, cost double precision)
+    LANGUAGE C STABLE STRICT PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_cascade';

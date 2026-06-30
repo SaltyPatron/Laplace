@@ -1,0 +1,25 @@
+CREATE OR REPLACE FUNCTION create_period_staging(p_partitions integer DEFAULT 1)
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    k integer;
+BEGIN
+    IF p_partitions < 1 OR p_partitions > 64 THEN
+        RAISE EXCEPTION 'create_period_staging: % partitions out of range 1..64', p_partitions;
+    END IF;
+    PERFORM drop_period_staging();
+    FOR k IN 0 .. p_partitions - 1 LOOP
+        EXECUTE format(
+            'CREATE UNLOGGED TABLE %I (
+                 subject_id bytea  NOT NULL,
+                 type_id    bytea  NOT NULL,
+                 object_id  bytea,
+                 phi        bigint NOT NULL,
+                 games      bigint NOT NULL,
+                 sum_score  bigint NOT NULL,
+                 last_ts    timestamptz NOT NULL
+             )',
+            'consensus_period_staging_' || k);
+    END LOOP;
+END;
+$$;

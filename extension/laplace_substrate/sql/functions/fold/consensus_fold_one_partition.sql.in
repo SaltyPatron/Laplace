@@ -1,0 +1,96 @@
+CREATE OR REPLACE FUNCTION consensus_fold_one_partition(
+        p integer, nparts integer, fresh boolean, lane text)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    tabs    text[] := '{}';
+    eps     int[]  := '{}';
+    parts   text := '';
+    seed    text := '';
+    q       text;
+    rel     record;
+    n_round bigint;
+BEGIN
+    FOR rel IN
+        SELECT c.relname,
+               substring(c.relname FROM 'consensus_period_staging_e(\d{4})_')::int AS epoch
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ format('^consensus_period_staging_e\d{4}_%s$', p)
+        ORDER BY c.relname
+    LOOP
+        tabs := tabs || rel.relname;
+        eps  := eps  || rel.epoch;
+        IF parts <> '' THEN parts := parts || ' UNION ALL '; END IF;
+        parts := parts || format(
+            'SELECT subject_id, type_id, object_id, %s::int AS ord, phi, games, sum_score, last_ts FROM %I',
+            rel.epoch, rel.relname);
+    END LOOP;
+    IF tabs = '{}' THEN
+        RETURN 0;
+    END IF;
+
+    IF lane = 'engine' THEN
+        RETURN consensus_fold_partition(tabs, eps, p, nparts, NOT fresh);
+    END IF;
+
+    IF NOT fresh THEN
+        seed := format(
+            'UNION ALL '
+            'SELECT c.subject_id, c.type_id, c.object_id, 0 AS ord, true AS is_seed, '
+            '       c.rating AS v1, c.rd AS v2, c.volatility AS v3, '
+            '       0::bigint AS phi, c.witness_count AS games, 0::bigint AS sum_score, '
+            '       c.last_observed_at AS last_ts '
+            'FROM consensus c '
+            'WHERE consensus_partition_of(c.subject_id, c.type_id, c.object_id, %s) = %s',
+            nparts, p);
+    END IF;
+
+    
+    
+    
+    
+    
+    
+    
+    q := format($q$
+        INSERT INTO consensus_next
+        WITH staged AS (%s),
+        partial AS (
+            SELECT subject_id, type_id, object_id,
+                   CASE WHEN min(phi) <> max(phi)
+                        THEN period_phi_mixed(subject_id, type_id, object_id)
+                        ELSE min(phi) END AS phi,
+                   sum(games)::bigint     AS games,
+                   sum(sum_score)::bigint AS sum_score,
+                   max(last_ts)           AS last_ts
+            FROM staged
+            GROUP BY subject_id, type_id, object_id
+        ),
+        united AS (
+            SELECT subject_id, type_id, object_id, 1 AS ord, false AS is_seed,
+                   0::bigint AS v1, 0::bigint AS v2, 0::bigint AS v3,
+                   phi, games, sum_score, last_ts
+            FROM partial
+            %s
+        ),
+        folded AS (
+            SELECT subject_id, type_id, object_id,
+                   consensus_fold(is_seed, v1, v2, v3, phi, games, sum_score,
+                                  glicko2_tau() ORDER BY ord) AS f,
+                   max(last_ts) AS last_ts
+            FROM united
+            GROUP BY subject_id, type_id, object_id
+        )
+        SELECT consensus_id(subject_id, type_id, object_id) AS id,
+               subject_id, type_id, object_id,
+               (f).rating, (f).rd, (f).volatility, (f).witness_count,
+               last_ts AS last_observed_at
+        FROM folded
+    $q$, parts, seed);
+
+    EXECUTE q;
+    GET DIAGNOSTICS n_round = ROW_COUNT;
+    RETURN n_round;
+END;
+$$;

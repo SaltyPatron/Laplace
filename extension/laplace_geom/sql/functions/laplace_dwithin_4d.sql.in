@@ -1,0 +1,4 @@
+CREATE FUNCTION @extschema@.laplace_dwithin_4d(a geometry, b geometry, eps double precision)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_dwithin_4d'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

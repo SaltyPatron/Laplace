@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION recall_context_exclude(p_prompt text, p_topic bytea)
+    RETURNS bytea[]
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(array_agg(ps.id), ARRAY[]::bytea[])
+    FROM prompt_state(p_prompt) ps
+    WHERE ps.id <> p_topic
+$$;

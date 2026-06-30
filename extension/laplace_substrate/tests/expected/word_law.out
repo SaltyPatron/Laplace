@@ -25,16 +25,16 @@ SELECT word_id('') IS NULL AS empty_is_null;
 (1 row)
 
 WITH ids AS (
-    SELECT laplace_hash128_blake3(convert_to('e', 'UTF8'))           AS e_id,
+    SELECT laplace_hash128_blake3(convert_to('q', 'UTF8'))           AS q_id,
            laplace_hash128_blake3(convert_to(U&'\0301', 'UTF8'))     AS acc_id,
            laplace_hash128_blake3(convert_to('x', 'UTF8'))           AS x_id
 )
-SELECT word_id('e' || U&'\0301' || 'x')
+SELECT word_id('q' || U&'\0301' || 'x')
            = laplace_hash128_blake3('\x01'::bytea
-                 || laplace_hash128_blake3('\x01'::bytea || e_id || acc_id)
+                 || laplace_hash128_blake3('\x01'::bytea || q_id || acc_id)
                  || x_id)                                            AS grapheme_law_nested,
-       word_id('e' || U&'\0301' || 'x')
-           <> laplace_hash128_blake3('\x01'::bytea || e_id || acc_id || x_id)
+       word_id('q' || U&'\0301' || 'x')
+           <> laplace_hash128_blake3('\x01'::bytea || q_id || acc_id || x_id)
                                                                      AS grapheme_law_not_flat
 FROM ids;
  grapheme_law_nested | grapheme_law_not_flat 
@@ -71,10 +71,10 @@ SELECT render(laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 'A'
 (1 row)
 
 SELECT is_all_whitespace('   ')        AS ascii_spaces_ws,
-       is_all_whitespace(U&'\3000')    AS ideographic_space_ws,  -- CJK
+       is_all_whitespace(U&'\3000')    AS ideographic_space_ws,  
        is_all_whitespace(U&'\00A0')    AS nbsp_ws,
        is_all_whitespace(U&'\2003')    AS em_space_ws,
-       NOT is_all_whitespace(U&'\200B') AS zwsp_is_not_ws,        -- FORMAT, not WS
+       NOT is_all_whitespace(U&'\200B') AS zwsp_is_not_ws,        
        NOT is_all_whitespace('a b')    AS mixed_is_not_ws,
        NOT is_all_whitespace('')       AS empty_is_not_ws;
  ascii_spaces_ws | ideographic_space_ws | nbsp_ws | em_space_ws | zwsp_is_not_ws | mixed_is_not_ws | empty_is_not_ws 

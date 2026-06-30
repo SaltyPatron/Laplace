@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION entity_type_counts()
+    RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT @extschema@.render(e.type_id), e.type_id, e.tier, count(*)
+    FROM @extschema@.entities e
+    GROUP BY e.type_id, e.tier
+    ORDER BY count(*) DESC
+$$;

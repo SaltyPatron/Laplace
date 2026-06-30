@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION translation_sources(p_object bytea)
+    RETURNS TABLE(subject_id bytea)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id
+    FROM consensus c
+    WHERE c.type_id = relation_type_id('IS_TRANSLATION_OF')
+      AND c.object_id = p_object
+      AND NOT refuted(c.rating, c.rd)
+$$;

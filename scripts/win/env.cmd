@@ -28,6 +28,8 @@ rem Ingest worker counts (file decompose, commit pool, apply partitions) are res
 rem from CpuTopology in managed code — do NOT set LAPLACE_INGEST_WORKERS / LAPLACE_DECOMPOSE_WORKERS
 rem in scripts unless you are deliberately overriding detection for a one-off experiment.
 if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
+rem One Hilbert-sorted bulk apply_batch per commit (compose still parallel on P-cores).
+if not defined LAPLACE_APPLY_PARTITIONS set "LAPLACE_APPLY_PARTITIONS=1"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"

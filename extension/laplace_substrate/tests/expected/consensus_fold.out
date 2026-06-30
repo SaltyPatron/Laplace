@@ -4,8 +4,6 @@ CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
---
---
 BEGIN;
 SET search_path = laplace, public;
 DO $$
@@ -76,8 +74,8 @@ BEGIN
         PERFORM set_config('laplace.fold_lane', lane, true);
         DELETE FROM consensus WHERE subject_id IN (sA, sB, sC, sD, sE);
 
-        -- fresh path: A/B/D single-epoch (merge-lane parity); E across two
-        -- epochs (the period-rule pin)
+        
+        
         PERFORM create_period_staging(2, 1);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
                        period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
@@ -132,8 +130,8 @@ BEGIN
             RAISE EXCEPTION 'FAIL(%): terminal fold did not consume its staging', lane;
         END IF;
 
-        -- incremental path (a LATER deposit = a new period on the seed): A
-        -- advances by exactly one period; C is brand new; B passes through.
+        
+        
         PERFORM create_period_staging(2, 3);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,1,$5,$6)',
                        period_staging_table(3, consensus_partition_of(sA, rel, oA, 2)))
@@ -181,7 +179,7 @@ BEGIN
                laplace_hash128_blake3(convert_to('test/fold/spill/s' || i, 'UTF8')) AS s,
                laplace_hash128_blake3(convert_to('test/fold/spill/o' || i, 'UTF8')) AS o
         FROM generate_series(1, 3000) i;
-    DELETE FROM consensus;  -- both lanes run the fresh path on exactly 3000
+    DELETE FROM consensus;  
 
     FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
         PERFORM set_config('laplace.fold_lane', lane, true);
@@ -549,8 +547,8 @@ BEGIN
                            period_staging_table(1, 0)) USING sX, rel, oX, ts;
             n := finish_consensus_fold();
         EXCEPTION WHEN data_exception OR raise_exception THEN
-            refused := true; -- the refusal is the pass (sql lane raises P0001
-                             -- via period_phi_mixed; engine lane data_exception)
+            refused := true; 
+                             
         END;
         IF NOT refused THEN
             RAISE EXCEPTION 'FAIL(%): mixed-phi staging folded without refusing', lane;

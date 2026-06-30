@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON physicalities USING btree (entity_id);

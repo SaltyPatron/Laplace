@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION consensus_id(
+    p_subject bytea, p_type bytea, p_object bytea)
+    RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT public.laplace_hash128_blake3(
+        p_subject || p_type
+        || COALESCE(p_object, '\x00000000000000000000000000000000'::bytea))
+$$;

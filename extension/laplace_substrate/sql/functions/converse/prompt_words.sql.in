@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION prompt_words(p_text text)
+    RETURNS TABLE(ord int, word text, id bytea)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    
+    
+    
+    SELECT ws.ord, ws.word,
+           (SELECT e.id FROM entities e WHERE e.id = ws.id)
+    FROM word_segment(p_text) ws
+    ORDER BY ws.ord
+$$;

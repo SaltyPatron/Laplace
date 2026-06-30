@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION cooccurrence_scan(p_max_gap int)
+    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_cooccurrence_scan'
+    LANGUAGE C STRICT VOLATILE;

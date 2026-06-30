@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION word_id(p_text text)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

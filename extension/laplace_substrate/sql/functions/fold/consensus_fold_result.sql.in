@@ -1,0 +1,27 @@
+DO $do$
+BEGIN
+    IF to_regprocedure(
+        'consensus_fold(boolean,bigint,bigint,bigint,bigint,bigint,bigint,bigint)') IS NOT NULL
+    THEN
+        RETURN;
+    END IF;
+    EXECUTE 'DROP FUNCTION IF EXISTS consensus_fold_step('
+         || 'internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)';
+    EXECUTE 'DROP FUNCTION IF EXISTS consensus_fold_final(internal)';
+    EXECUTE 'DROP TYPE IF EXISTS consensus_fold_result';
+    EXECUTE $c$ CREATE TYPE consensus_fold_result AS (
+        rating bigint, rd bigint, volatility bigint, witness_count bigint) $c$;
+    EXECUTE $c$ CREATE FUNCTION consensus_fold_step(
+            internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
+        RETURNS internal LANGUAGE C PARALLEL RESTRICTED
+        AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_step' $c$;
+    EXECUTE $c$ CREATE FUNCTION consensus_fold_final(internal)
+        RETURNS consensus_fold_result LANGUAGE C PARALLEL RESTRICTED
+        AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_final' $c$;
+    EXECUTE $c$ CREATE AGGREGATE consensus_fold(
+            boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
+        SFUNC     = consensus_fold_step,
+        STYPE     = internal,
+        FINALFUNC = consensus_fold_final
+    ) $c$;
+END $do$;

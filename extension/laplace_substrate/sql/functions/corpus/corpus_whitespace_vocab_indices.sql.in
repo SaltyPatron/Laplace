@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
+    RETURNS TABLE(vocab_idx int)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT (v.ord::int4 - 1) AS vocab_idx
+    FROM unnest(p_vocab) WITH ORDINALITY v(id, ord),
+    LATERAL (SELECT render_text_fast(v.id, 8) AS s) r
+    WHERE is_all_whitespace(r.s)
+$$;

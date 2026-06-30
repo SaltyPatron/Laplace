@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
+           || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'\u2192 '
+                         || COALESCE(realize(g.entity_id, word_language(p_topic)),
+                                     label(g.entity_id)), '' ORDER BY g.step),
+           min(g.eff_mu), NULL::bigint
+    FROM walk_strongest(p_topic, NULL::bytea, 6) g
+    HAVING count(*) > 0
+$$;

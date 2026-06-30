@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION corpus_word_vocab(p_size int, p_trajs int DEFAULT 400000)
+    RETURNS TABLE(surface text, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+        FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT p_trajs
+    ),
+    w AS (
+        SELECT tc.entity_id AS id, count(*) AS c
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
+        GROUP BY tc.entity_id
+    ),
+    
+    
+    
+    cand AS (SELECT id, c, render_text(id, 80) AS s FROM w ORDER BY c DESC LIMIT p_size * 4)
+    SELECT s, c FROM cand
+    WHERE s ~ '^[A-Za-z][A-Za-z''.-]*$'
+    ORDER BY c DESC LIMIT p_size
+$$;

@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION foundry_crawl_neighbors(
+    p_subject bytea,
+    p_limit   int,
+    p_types   bytea[] DEFAULT NULL)
+    RETURNS TABLE(object_id bytea, tier smallint, rating bigint, rd bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id, e.tier, c.rating, c.rd
+    FROM consensus c
+    JOIN entities e ON e.id = c.object_id
+    WHERE c.subject_id = p_subject
+      AND c.object_id IS NOT NULL
+      AND (p_types IS NULL OR c.type_id = ANY (p_types))
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT p_limit
+$$;

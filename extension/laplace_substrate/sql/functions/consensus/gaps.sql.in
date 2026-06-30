@@ -1,0 +1,15 @@
+CREATE OR REPLACE FUNCTION gaps(p_word bytea)
+    RETURNS TABLE(missing_arena text)
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (
+        SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
+    ), expected(name) AS (SELECT unnest(ARRAY[
+        'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
+        'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
+    SELECT e.name FROM expected e
+    WHERE NOT EXISTS (
+        SELECT 1 FROM consensus c JOIN subj s ON c.subject_id = s.id
+        WHERE c.type_id = relation_type_id(e.name)
+          AND NOT refuted(c.rating, c.rd))
+$$;

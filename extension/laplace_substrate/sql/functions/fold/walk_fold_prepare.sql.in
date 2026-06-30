@@ -1,0 +1,37 @@
+CREATE OR REPLACE FUNCTION walk_fold_prepare(OUT nwalk integer, OUT fresh boolean)
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    nflat integer;
+BEGIN
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nwalk
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_walk_staging_\d+$';
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nflat
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$';
+    IF nwalk IS NULL THEN
+        RAISE EXCEPTION 'walk_fold_prepare: no walk journal staged';
+    END IF;
+    IF nflat IS NOT NULL THEN
+        RAISE EXCEPTION 'walk_fold_prepare: both walk and flat journals staged — fold one shape at a time';
+    END IF;
+    SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
+    IF to_regclass(current_schema() || '.consensus_next') IS NOT NULL THEN
+        EXECUTE 'DROP TABLE consensus_next';
+    END IF;
+    CREATE TABLE consensus_next (
+        id               bytea,
+        subject_id       bytea,
+        type_id          bytea,
+        object_id        bytea,
+        rating           bigint,
+        rd               bigint,
+        volatility       bigint,
+        witness_count    bigint,
+        last_observed_at timestamptz
+    );
+END;
+$$;

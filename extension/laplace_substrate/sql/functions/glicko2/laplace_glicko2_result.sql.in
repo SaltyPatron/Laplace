@@ -1,0 +1,8 @@
+DO $idem$ BEGIN
+    CREATE TYPE laplace_glicko2_result AS (
+        rating     bigint,
+        rd         bigint,
+        volatility bigint
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $idem$;

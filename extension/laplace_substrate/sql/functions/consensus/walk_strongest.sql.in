@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION walk_strongest(
+    p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
+    RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_strongest'
+    LANGUAGE C STABLE;

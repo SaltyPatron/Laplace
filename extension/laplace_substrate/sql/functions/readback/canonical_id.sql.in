@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION canonical_id(p_name text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE STRICT AS $$
+    SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'))
+$$;

@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION walk_continuations(
+        p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
+        p_seed bigint DEFAULT NULL)
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
+    LANGUAGE C VOLATILE;

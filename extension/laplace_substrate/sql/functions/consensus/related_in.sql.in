@@ -1,0 +1,23 @@
+CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
+                                      p_limit int DEFAULT 10)
+    RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (
+        SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
+    ), top AS (
+        SELECT cc.subject_id, cc.rating, cc.rd, cc.witness_count
+        FROM subj s CROSS JOIN LATERAL (
+            SELECT c.subject_id, c.rating, c.rd, c.witness_count
+            FROM consensus c
+            WHERE c.object_id = s.id AND c.type_id = p_type
+              AND NOT refuted(c.rating, c.rd)
+            ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit
+        ) cc
+    )
+    SELECT realize(t.subject_id, COALESCE(p_lang, word_language(p_word))),
+           eff_mu_display(t.rating, t.rd), t.witness_count
+    FROM top t
+    ORDER BY eff_mu(t.rating, t.rd) DESC
+    LIMIT p_limit
+$$;

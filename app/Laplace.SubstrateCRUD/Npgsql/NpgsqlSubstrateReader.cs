@@ -152,6 +152,19 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             throw new ArgumentException("ids and parents must be the same length");
         if (ids.Count == 0) return Array.Empty<byte>();
 
+        bool allProven = true;
+        for (int i = 0; i < ids.Count; i++)
+        {
+            if (!_proven.ContainsKey(ids[i])) { allProven = false; break; }
+        }
+        if (allProven)
+        {
+            var allBm = new byte[(ids.Count + 7) / 8];
+            for (int i = 0; i < ids.Count; i++)
+                allBm[i >> 3] |= (byte)(1 << (i & 7));
+            return allBm;
+        }
+
         var byteaArray = new byte[ids.Count][];
         for (int i = 0; i < ids.Count; i++) byteaArray[i] = ids[i].ToBytes();
         var parentArray = new int[parents.Count];

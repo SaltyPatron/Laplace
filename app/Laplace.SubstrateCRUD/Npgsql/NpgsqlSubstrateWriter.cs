@@ -12,8 +12,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// The client (this writer's caller) already holds every content id, geometry and
 /// tier — laplace_core did the heavy compose during Transform. So ApplyManyAsync
 /// does NOTHING heavy: it streams the batch in ONCE (a binary COPY of the native,
-/// already-computed entity / physicality / attestation tuples into three UNLOGGED
-/// staging tables) and then calls the single SPI function laplace_apply_batch once.
+/// already-computed entity / physicality / attestation tuples into session temp staging)
+/// and then calls the single SPI function laplace_apply_batch once.
 /// That one call does the entire light set-based merge inside the native extension:
 /// id anti-join append (no ON CONFLICT — the staged set is pre-filtered novel by merkle
 /// descent) and the attestation observation-count fold. Skipped-at-merge counts in the
@@ -26,9 +26,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 {
     private readonly NpgsqlDataSource _ds;
-    private readonly NpgsqlSubstrateReader _reader;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
     private readonly int _applyPartitions;
+    private readonly bool _bulkNovelApply;
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
@@ -37,9 +37,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         int? applyPartitions = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
-        _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
-        _ = bulkFreshSource;
+        // Bulk merge skips the id anti-join only when the caller explicitly opts in
+        // (fresh-source ingest after compose-time descent). IsBulkFreshBypass affects compose
+        // only — never the writer merge lane; leaking it here caused PK violations on re-apply.
+        _bulkNovelApply = bulkFreshSource;
         _applyPartitions = applyPartitions ?? IngestTopology.Current.ApplyPartitions;
     }
 
@@ -287,13 +289,20 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await using (var guc = conn.CreateCommand())
             {
                 guc.Transaction = tx;
-                guc.CommandText = "SET LOCAL session_replication_role = replica";
+                guc.CommandText =
+                    "SET LOCAL session_replication_role = replica; "
+                    + "SET LOCAL synchronous_commit = off; "
+                    + "SET LOCAL work_mem = '256MB'; "
+                    + "SET LOCAL jit = off"
+                    + (_bulkNovelApply ? "; SET LOCAL laplace_substrate.ingest_bulk_novel = on" : "");
                 await guc.ExecuteNonQueryAsync(ct);
             }
             rt++;
 
-            // Unique prefix per (connection, partition): the temp tables are session-local, and
-            // a distinct partition index keeps even same-thread reuse disjoint.
+            // One COPY into session temp staging + one laplace_apply_batch call. The SPI merge
+            // does set-based id anti-join (entities/physicalities) and attestation fold in a
+            // single round trip — never blind INSERT into laplace.* (that hit PK on re-apply).
+            // When _bulkNovelApply, ingest_bulk_novel skips the anti-join (descent proved novelty).
             string prefix = $"_lab_{Environment.CurrentManagedThreadId:x}_{partitionIndex:x}_";
 
             if (entCount > 0)

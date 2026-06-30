@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON physicalities USING gist (coord gist_geometry_ops_nd);

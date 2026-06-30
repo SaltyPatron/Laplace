@@ -88,8 +88,8 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/highway_manifest.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/relation_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/pos_law.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_relation_types.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/21_seed_pos.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/seed_pos.sql.in
     ${LAPLACE_HIGHWAY_BIN}
 )
 add_custom_command(

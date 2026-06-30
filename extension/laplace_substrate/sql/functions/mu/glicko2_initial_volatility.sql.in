@@ -1,0 +1,2 @@
+CREATE OR REPLACE FUNCTION glicko2_initial_volatility() RETURNS bigint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 60000000::bigint $$;

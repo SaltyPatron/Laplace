@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON physicalities USING btree (hilbert_index);

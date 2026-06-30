@@ -1,0 +1,49 @@
+CREATE OR REPLACE FUNCTION label(p_id bytea)
+    RETURNS text
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(
+        -- Entities content-addressed from an opaque join key (e.g. WordNet senses, keyed by
+        -- lemma%ss_type:lex_filenum:lex_id for VerbNet/SemLink/CILI convergence) carry a
+        -- human-readable display name as HAS_NAME_ALIAS. Prefer it over the raw key so a sense
+        -- never surfaces as "sherlock%1:18:00" — this reads the deposited alias, it does not
+        -- re-parse the key at render time.
+        (SELECT render_text(c.object_id)
+         FROM consensus c
+         WHERE c.subject_id = p_id
+           AND c.type_id = relation_type_id('HAS_NAME_ALIAS')
+         ORDER BY eff_mu(c.rating, c.rd) DESC
+         LIMIT 1),
+        -- strip substrate wrappers and vocabulary paths so types, POS, morphology, languages,
+        -- and relation entities resolve to clean, usable names via label().
+        NULLIF(NULLIF(
+            regexp_replace(
+            regexp_replace(
+                regexp_replace(
+                    regexp_replace(
+                        regexp_replace(
+                            regexp_replace(
+                                regexp_replace(
+                                    regexp_replace(render(p_id),
+                                        '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
+                                    '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
+                                '^source/file/(.+)/v1$', '\1'),
+                            '^repo:(.+)/v1$', '\1'),
+                        '^language:([a-z]{3})$', '\1'),
+                    '^ud/feature/(.+)$', '\1'),
+                '^tiny-codes/concept/(.+)/v1$', '\1'),
+            -- opaque join keys (ILI concept ids "i90107", synset offsets "00006150-n") are NOT names;
+            -- null them so the HAS_DEFINITION fallback below renders the concept's gloss, not a hash-like id.
+            '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', ''),
+            ''), encode(p_id, 'hex') || '…'),
+        -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
+        -- (ISO-639 stores it there). NO type:hash / hash-ellipsis fallback after this: a genuinely
+        -- unnamed entity returns NULL (loud), never the "POS:6ea49d29" placeholder that masked the
+        -- unfinished name links. The chain-completing, language-scoped resolver is realize(id, lang).
+        (SELECT render_text(c.object_id)
+         FROM consensus c
+         WHERE c.subject_id = p_id
+           AND c.type_id = relation_type_id('HAS_DEFINITION')
+         ORDER BY eff_mu(c.rating, c.rd) DESC
+         LIMIT 1))
+$$;

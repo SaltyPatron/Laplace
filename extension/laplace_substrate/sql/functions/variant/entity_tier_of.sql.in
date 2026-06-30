@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION entity_tier_of(p_entity bytea)
+    RETURNS int
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT tier FROM entities WHERE id = p_entity
+$$;

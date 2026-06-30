@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION attestations_present_ordinals(p_ids bytea[])
+    RETURNS TABLE(idx int)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
+    INNER JOIN attestations t ON t.id = u.id
+$$;

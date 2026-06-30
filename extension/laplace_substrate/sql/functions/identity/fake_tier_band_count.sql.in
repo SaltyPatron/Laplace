@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION fake_tier_band_count()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT count(*)::bigint FROM @extschema@.entities WHERE tier IN (247, 248, 250);
+$$;

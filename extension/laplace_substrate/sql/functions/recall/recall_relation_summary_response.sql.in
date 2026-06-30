@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION recall_relation_summary_response(p_topic bytea, p_topic2 bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT CASE WHEN rs.relation IS NOT NULL
+                THEN rs.relation || '  [' || rs.verdict || ']'
+                ELSE rs.verdict END,
+           rs.mu, rs.usage
+    FROM relation_summary(p_topic, p_topic2) rs
+$$;

@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION consensus_export_relations_mu(p_type_id bytea)
+    RETURNS TABLE(subject_id bytea, object_id bytea, eff_mu_fp bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.object_id, eff_mu(c.rating, c.rd)
+    FROM consensus c
+    WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
+$$;

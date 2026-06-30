@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION entity_facets(p_id bytea)
+    RETURNS TABLE(tier smallint, type_id bytea)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.tier, e.type_id FROM entities e WHERE e.id = p_id
+$$;

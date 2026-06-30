@@ -1,0 +1,31 @@
+CREATE OR REPLACE FUNCTION laplace_attention_centroid(
+    p_entity   bytea,
+    p_band_mask bytea)
+RETURNS TABLE(cx float8, cy float8, cz float8, cm float8, total_weight float8)
+LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
+    WITH band_types AS MATERIALIZED (
+        SELECT e.id FROM entities e
+        WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+    ),
+    attended AS (
+        SELECT c.object_id, eff_mu(c.rating, c.rd)::float8 AS w
+        FROM consensus c
+        JOIN band_types bt ON bt.id = c.type_id
+        WHERE c.subject_id = p_entity
+          AND c.object_id IS NOT NULL
+          AND eff_mu(c.rating, c.rd) > 0
+    ),
+    weighted AS (
+        SELECT p.coord, a.w
+        FROM attended a
+        JOIN physicalities p ON p.entity_id = a.object_id AND p.type = 1
+        WHERE p.coord IS NOT NULL
+    )
+    SELECT
+        SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0),
+        SUM(ST_Y(coord) * w) / NULLIF(SUM(w), 0),
+        SUM(ST_Z(coord) * w) / NULLIF(SUM(w), 0),
+        SUM(ST_M(coord) * w) / NULLIF(SUM(w), 0),
+        SUM(w)
+    FROM weighted
+$$;

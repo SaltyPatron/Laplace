@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION laplace_nearest_entity(
+    p_cx float8, p_cy float8, p_cz float8, p_cm float8,
+    p_k integer DEFAULT 1, p_band_mask bytea DEFAULT NULL)
+RETURNS TABLE(entity_id bytea, distance float8)
+LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
+    SELECT p.entity_id,
+           laplace_l2_sq(p.coord,
+               public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm)::geometry) AS dist
+    FROM physicalities p
+    JOIN entities e ON e.id = p.entity_id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+      AND (p_band_mask IS NULL OR laplace_highway_match(e.highway_mask, p_band_mask))
+    ORDER BY p.coord <<->> public.ST_SetSRID(
+        public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry
+    LIMIT p_k
+$$;

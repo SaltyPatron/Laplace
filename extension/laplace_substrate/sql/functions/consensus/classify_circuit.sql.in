@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION classify_circuit(p_pairs bytea[])
+    RETURNS TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    WITH pairs AS (
+        SELECT substring(p FROM 1 FOR 16)  AS subj,
+               substring(p FROM 17 FOR 16) AS obj
+        FROM unnest(p_pairs) AS p
+        WHERE octet_length(p) = 32
+    ),
+    ranked AS (
+        SELECT pr.subj, pr.obj, c.type_id,
+               eff_mu_display(c.rating, c.rd) AS emu,
+               c.witness_count                AS w,
+               row_number() OVER (
+                   PARTITION BY pr.subj, pr.obj
+                   ORDER BY eff_mu(c.rating, c.rd) DESC) AS rn
+        FROM pairs pr
+        JOIN consensus c
+          ON c.subject_id = pr.subj AND c.object_id = pr.obj
+    )
+    SELECT subj, obj, type_id, emu, w
+    FROM ranked
+    WHERE rn = 1
+$$;

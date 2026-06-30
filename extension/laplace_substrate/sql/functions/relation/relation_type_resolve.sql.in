@@ -1,0 +1,2 @@
+CREATE OR REPLACE FUNCTION relation_type_resolve(p_surface text) RETURNS bytea
+    LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_resolve';

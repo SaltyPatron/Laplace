@@ -1,0 +1,42 @@
+CREATE OR REPLACE FUNCTION relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    g int;
+BEGIN
+    IF p_family = 'consensus' THEN
+        RETURN QUERY
+        SELECT c.subject_id, c.object_id,
+               (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+        FROM consensus c
+        WHERE c.type_id = relation_type_id(p_name) AND c.object_id IS NOT NULL;
+        RETURN;
+    END IF;
+
+    IF p_family <> 'traj' THEN
+        RAISE EXCEPTION 'relation_plane: unknown family % (consensus | traj)', p_family;
+    END IF;
+
+    g := CASE p_name
+             WHEN 'next'   THEN 1
+             WHEN 'gap'    THEN COALESCE(p_arg, 1)
+             WHEN 'window' THEN COALESCE(p_arg, 4)
+             ELSE NULL
+         END;
+    IF g IS NULL THEN
+        RAISE EXCEPTION 'relation_plane: unknown traj plane % (next | gap | window)', p_name;
+    END IF;
+
+    IF p_name = 'window' THEN
+        RETURN QUERY
+        SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+        FROM trajectory_cooccurrence(g) t;
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+    FROM trajectory_cooccurrence_by_stride(g) t WHERE t.gap = g;
+END;
+$$;

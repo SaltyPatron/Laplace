@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION eff_mu_display(p_rating bigint, p_rd bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT round((@extschema@.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3)
+$$;

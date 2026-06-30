@@ -1,0 +1,22 @@
+CREATE OR REPLACE FUNCTION _realize_synset_lemma(p_id bytea, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT q.s FROM (
+        SELECT render_text(hs.subject_id, 24) AS s,
+               (lang.object_id IS NOT NULL) AS lp,
+               eff_mu(hs.rating, hs.rd) AS mu
+        FROM consensus io
+        JOIN consensus hs ON hs.object_id = io.subject_id
+          AND hs.type_id = relation_type_id('HAS_SENSE')
+        LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
+          AND lang.type_id = relation_type_id('HAS_LANGUAGE')
+          AND lang.object_id = p_lang
+        WHERE io.object_id = p_id
+          AND io.type_id = relation_type_id('IS_SENSE_OF')
+          AND NOT refuted(io.rating, io.rd)
+    ) q
+    WHERE q.s IS NOT NULL AND q.s <> ''
+    ORDER BY q.lp DESC, q.mu DESC
+    LIMIT 1
+$$;

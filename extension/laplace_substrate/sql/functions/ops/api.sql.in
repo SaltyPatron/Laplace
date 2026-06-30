@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
+    RETURNS TABLE(name text, args text, returns text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT p.proname::text,
+           pg_get_function_arguments(p.oid),
+           pg_get_function_result(p.oid)
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = current_schema()
+      AND (p_like IS NULL OR p.proname ILIKE '%'||p_like||'%')
+    ORDER BY p.proname
+$$;

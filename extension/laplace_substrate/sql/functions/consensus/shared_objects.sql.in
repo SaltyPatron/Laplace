@@ -1,0 +1,17 @@
+CREATE OR REPLACE FUNCTION shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
+                                     p_limit int DEFAULT 40)
+    RETURNS TABLE(object_id bytea, support int, total_mu numeric)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id,
+           count(DISTINCT c.subject_id)::int,
+           round((sum(eff_mu(c.rating, c.rd)) / 1e9)::numeric, 3)
+    FROM consensus c
+    WHERE c.subject_id = ANY (p_subjects)
+      AND c.object_id IS NOT NULL
+      AND NOT refuted(c.rating, c.rd)
+      AND (p_type IS NULL OR c.type_id = p_type)
+    GROUP BY c.object_id
+    ORDER BY count(DISTINCT c.subject_id) DESC, sum(eff_mu(c.rating, c.rd)) DESC
+    LIMIT p_limit
+$$;

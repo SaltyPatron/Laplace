@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION stream_stats(
+        OUT sequences bigint, OUT positions bigint, OUT distinct_entities int,
+        OUT separators bigint, OUT trajectories bigint, OUT last_witnessed timestamptz)
+    AS 'MODULE_PATHNAME', 'pg_laplace_stream_stats'
+    LANGUAGE C VOLATILE;

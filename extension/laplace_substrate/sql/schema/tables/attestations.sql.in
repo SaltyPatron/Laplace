@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS attestations (
+    id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),
+    subject_id        bytea         NOT NULL REFERENCES entities(id),
+    type_id           bytea         NOT NULL REFERENCES entities(id),
+    object_id         bytea                  REFERENCES entities(id),
+    source_id         bytea         NOT NULL REFERENCES entities(id),
+    context_id        bytea                  REFERENCES entities(id),
+    outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
+    last_observed_at  timestamptz   NOT NULL,
+    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
+    highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
+);

@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION physicality_count(p_entity bytea)
+    RETURNS bigint
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*)::bigint FROM physicalities pp WHERE pp.entity_id = p_entity
+$$;

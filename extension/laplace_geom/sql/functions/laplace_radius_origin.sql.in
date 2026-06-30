@@ -1,0 +1,4 @@
+CREATE FUNCTION @extschema@.laplace_radius_origin(p geometry)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_radius_origin'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

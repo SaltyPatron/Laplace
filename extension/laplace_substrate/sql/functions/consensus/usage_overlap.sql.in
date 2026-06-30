@@ -1,0 +1,17 @@
+CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
+    RETURNS bigint
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH xn(n) AS (
+        SELECT object_id FROM consensus
+         WHERE subject_id = p_x AND type_id = relation_type_id('PRECEDES')
+        UNION SELECT subject_id FROM consensus
+         WHERE object_id = p_x AND type_id = relation_type_id('PRECEDES')
+    ), yn(n) AS (
+        SELECT object_id FROM consensus
+         WHERE subject_id = p_y AND type_id = relation_type_id('PRECEDES')
+        UNION SELECT subject_id FROM consensus
+         WHERE object_id = p_y AND type_id = relation_type_id('PRECEDES')
+    )
+    SELECT count(*)::bigint FROM xn JOIN yn USING (n)
+$$;

@@ -1,0 +1,27 @@
+DO $do$
+DECLARE
+    obj text;
+BEGIN
+    FOREACH obj IN ARRAY ARRAY[
+        'TABLE @extschema@.content_pairs',
+        'PROCEDURE @extschema@.rebuild_content_index(int)',
+        'PROCEDURE @extschema@.rebuild_content_index_deep()',
+        'PROCEDURE @extschema@.rebuild_content_pairs(int)']
+    LOOP
+        BEGIN
+            EXECUTE format('ALTER EXTENSION %I DROP %s', 'laplace_substrate', obj);
+        EXCEPTION WHEN OTHERS THEN
+            NULL;  
+        END;
+    END LOOP;
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_pairs';
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_index';
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.constituency_edge';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index(int)';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index_deep()';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_pairs(int)';
+    
+    
+    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.entity_trajectory_plane(bytea[], int, int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.cooccurrence_scan(int, bytea[])';
+END $do$;

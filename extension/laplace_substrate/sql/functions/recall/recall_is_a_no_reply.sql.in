@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'No witnessed IS_A path from "'
+           || COALESCE(realize(p_from, p_lang), label(p_from))
+           || '" to "'
+           || COALESCE(realize(p_to, p_lang), label(p_to)) || '".'
+$$;

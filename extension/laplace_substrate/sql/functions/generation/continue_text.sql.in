@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION continue_text(
+        p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
+        p_spread double precision DEFAULT 0.6, p_breadth int DEFAULT 8,
+        p_stop text[] DEFAULT '{}', p_boost double precision DEFAULT 0,
+        p_require_pos boolean DEFAULT true)
+    RETURNS TABLE(step int, entity text, mu numeric)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    SELECT g.step, g.entity, NULL::numeric AS mu
+    FROM walk_text(p_prompt, p_steps, GREATEST(p_window, 1), p_spread, p_breadth) g
+$$;

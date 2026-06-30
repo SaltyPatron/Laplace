@@ -80,13 +80,6 @@ public sealed class ContentBatch : IDisposable
         }
         rootId = e.Tree.GetNode(e.Tree.NaturalUnitIndex()).Id;
         _reader.CacheRoot(key, rootId);
-
-        // Bounded auto-flush: keep the resident native tier-tree set small even when a single builder
-        // emits hundreds of thousands of distinct content units. The probe is async; this is a rare,
-        // coarse-grained checkpoint (every MaxBufferedNodes nodes) so the synchronous wait is cheap and
-        // — with ConfigureAwait(false) inside ProbeAndEmitAsync — cannot deadlock on a captured context.
-        if (_bufferedNodes >= MaxBufferedNodes)
-            ProbeAndEmitAsync(CancellationToken.None).GetAwaiter().GetResult();
         return true;
     }
 

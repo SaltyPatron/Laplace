@@ -43,6 +43,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
@@ -111,6 +112,31 @@ staged_att_has_overlap(const char *stage_att)
     }
 }
 
+static void
+probe_stage_tables(const char *stage_ent, const char *stage_phys, const char *stage_att,
+                   bool *has_ent, bool *has_phys, bool *has_att)
+{
+    int rc = SPI_execute(psprintf(
+        "SELECT to_regclass('%s') IS NOT NULL, "
+        "       to_regclass('%s') IS NOT NULL, "
+        "       to_regclass('%s') IS NOT NULL",
+        stage_ent, stage_phys, stage_att), true, 1);
+
+    *has_ent = *has_phys = *has_att = false;
+    if (rc == SPI_OK_SELECT && SPI_processed == 1)
+    {
+        bool isnull;
+        Datum d;
+
+        d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+        *has_ent = !isnull && DatumGetBool(d);
+        d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &isnull);
+        *has_phys = !isnull && DatumGetBool(d);
+        d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 3, &isnull);
+        *has_att = !isnull && DatumGetBool(d);
+    }
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_apply_batch);
 
 Datum
@@ -146,81 +172,102 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("laplace_apply_batch: SPI_connect failed")));
 
+    {
+        bool has_ent = false, has_phys = false, has_att = false;
+        const char *bulk = GetConfigOption("laplace_substrate.ingest_bulk_novel", true, false);
+        bool bulk_novel = bulk && (pg_strcasecmp(bulk, "on") == 0
+                                   || pg_strcasecmp(bulk, "true") == 0);
+
+        probe_stage_tables(stage_ent, stage_phys, stage_att, &has_ent, &has_phys, &has_att);
+
+        if (bulk_novel)
+        {
+            if (has_ent)
+                ent_ins = spi_exec_count(psprintf(
+                    "INSERT INTO laplace.entities "
+                    "  (id, tier, type_id, first_observed_by, created_at) "
+                    "SELECT DISTINCT ON (s.id) s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
+                    "FROM %s s", stage_ent));
+            if (has_phys)
+                phys_ins = spi_exec_count(psprintf(
+                    "INSERT INTO laplace.physicalities "
+                    "  (id, entity_id, type, coord, hilbert_index, trajectory, "
+                    "   n_constituents, alignment_residual, source_dim, observed_at) "
+                    "SELECT DISTINCT ON (s.id) s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
+                    "       s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
+                    "FROM %s s ORDER BY s.id, s.hilbert_index", stage_phys));
+            if (has_att)
+                att_ins = spi_exec_count(psprintf(
+                    "INSERT INTO laplace.attestations "
+                    "  (id, subject_id, type_id, object_id, source_id, context_id, "
+                    "   outcome, last_observed_at, observation_count, highway_mask) "
+                    "SELECT DISTINCT ON (s.id) s.id, s.subject_id, s.type_id, s.object_id, s.source_id, "
+                    "       s.context_id, s.outcome, s.last_observed_at, s.observation_count, "
+                    "       s.highway_mask FROM %s s", stage_att));
+            SPI_finish();
+            values[0] = Int64GetDatum(ent_ins);
+            values[1] = Int64GetDatum(phys_ins);
+            values[2] = Int64GetDatum(att_ins);
+            values[3] = Int64GetDatum(0);
+            values[4] = Int64GetDatum(0);
+            values[5] = Int64GetDatum(0);
+            tuple = heap_form_tuple(tupdesc, values, nulls);
+            PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+        }
+
     /*
      * Caller (NpgsqlSubstrateWriter) sets LOCAL session_replication_role = replica on the
      * transaction before invoking this function — do not mutate GUCs here.
      */
 
     /*
-     * (1) entities — one set-based DISTINCT ON + id anti-join INSERT (BLAKE3 ids thrash
-     * the PK btree by design; still one planner/executor pass, no temp materialization).
+     * (1) entities — one set-based anti-join INSERT (writer stages only populated tables).
      */
-    if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_ent),
-                    true, 1) == SPI_OK_SELECT && SPI_processed == 1)
+    if (has_ent)
     {
-        bool isnull;
-        bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
-                                                  SPI_tuptable->tupdesc, 1, &isnull));
-        if (!isnull && present)
-        {
-            int64 staged = 0;
+        int64 staged = 0;
 
-            spi_staged_insert_pair(psprintf(
-                "WITH dedup AS ("
-                "  SELECT DISTINCT ON (s.id) "
-                "         s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
-                "  FROM %s s ORDER BY s.id"
-                "), ins AS ("
-                "  INSERT INTO laplace.entities "
-                "    (id, tier, type_id, first_observed_by, created_at) "
-                "  SELECT d.id, d.tier, d.type_id, d.first_observed_by, d.created_at "
-                "  FROM dedup d "
-                "  WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = d.id) "
-                "  RETURNING 1"
-                ") "
-                "SELECT (SELECT count(*)::bigint FROM dedup), "
-                "       (SELECT count(*)::bigint FROM ins)",
-                stage_ent), &staged, &ent_ins);
-            if (staged > ent_ins) ent_skip = staged - ent_ins;
-        }
+        spi_staged_insert_pair(psprintf(
+            "WITH ins AS ("
+            "  INSERT INTO laplace.entities "
+            "    (id, tier, type_id, first_observed_by, created_at) "
+            "  SELECT DISTINCT ON (s.id) s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
+            "  FROM %s s "
+            "  LEFT JOIN laplace.entities e ON e.id = s.id "
+            "  WHERE e.id IS NULL "
+            "  RETURNING 1"
+            ") "
+            "SELECT (SELECT count(*)::bigint FROM %s), "
+            "       (SELECT count(*)::bigint FROM ins)",
+            stage_ent, stage_ent), &staged, &ent_ins);
+        if (staged > ent_ins) ent_skip = staged - ent_ins;
     }
 
     /*
      * (2) physicalities — same single-pass merge; final rows sorted by hilbert_index so
      * the hilbert btree/GiST see locality-preserving append order (collisions OK).
      */
-    if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_phys),
-                    true, 1) == SPI_OK_SELECT && SPI_processed == 1)
+    if (has_phys)
     {
-        bool isnull;
-        bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
-                                                  SPI_tuptable->tupdesc, 1, &isnull));
-        if (!isnull && present)
-        {
-            int64 staged = 0;
+        int64 staged = 0;
 
-            spi_staged_insert_pair(psprintf(
-                "WITH dedup AS ("
-                "  SELECT DISTINCT ON (s.id) "
-                "         s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
-                "         s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
-                "  FROM %s s ORDER BY s.id"
-                "), ins AS ("
-                "  INSERT INTO laplace.physicalities "
-                "    (id, entity_id, type, coord, hilbert_index, trajectory, "
-                "     n_constituents, alignment_residual, source_dim, observed_at) "
-                "  SELECT d.id, d.entity_id, d.type, d.coord, d.hilbert_index, d.trajectory, "
-                "         d.n_constituents, d.alignment_residual, d.source_dim, d.observed_at "
-                "  FROM dedup d "
-                "  WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id = d.id) "
-                "  ORDER BY d.hilbert_index "
-                "  RETURNING 1"
-                ") "
-                "SELECT (SELECT count(*)::bigint FROM dedup), "
-                "       (SELECT count(*)::bigint FROM ins)",
-                stage_phys), &staged, &phys_ins);
-            if (staged > phys_ins) phys_skip = staged - phys_ins;
-        }
+        spi_staged_insert_pair(psprintf(
+            "WITH ins AS ("
+            "  INSERT INTO laplace.physicalities "
+            "    (id, entity_id, type, coord, hilbert_index, trajectory, "
+            "     n_constituents, alignment_residual, source_dim, observed_at) "
+            "  SELECT DISTINCT ON (s.id) s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
+            "         s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
+            "  FROM %s s "
+            "  LEFT JOIN laplace.physicalities p ON p.id = s.id "
+            "  WHERE p.id IS NULL "
+            "  ORDER BY s.id, s.hilbert_index "
+            "  RETURNING 1"
+            ") "
+            "SELECT (SELECT count(*)::bigint FROM %s), "
+            "       (SELECT count(*)::bigint FROM ins)",
+            stage_phys, stage_phys), &staged, &phys_ins);
+        if (staged > phys_ins) phys_skip = staged - phys_ins;
     }
 
     /*
@@ -229,14 +276,8 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
      * (greatest) under FOR UPDATE SKIP LOCKED so a re-observation is summed.
      * Both halves read the SAME staging once (de-duplicated to a per-id total).
      */
-    if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_att),
-                    true, 1) == SPI_OK_SELECT && SPI_processed == 1)
+    if (has_att)
     {
-        bool isnull;
-        bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
-                                                  SPI_tuptable->tupdesc, 1, &isnull));
-        if (!isnull && present)
-        {
             /*
              * Fold FIRST, then insert the novel ids. The fold's EXISTS predicate must
              * see only the ids the substrate held BEFORE this batch — running the novel
@@ -252,12 +293,12 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                     "         sum(s.observation_count)::bigint AS games, "
                     "         max(s.last_observed_at)          AS ts "
                     "  FROM %s s "
-                    "  WHERE EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
+                    "  INNER JOIN laplace.attestations a ON a.id = s.id "
                     "  GROUP BY s.id "
                     "), locked AS MATERIALIZED ("
                     "  SELECT a.id FROM laplace.attestations a "
-                    "  WHERE a.id IN (SELECT id FROM d) "
-                    "  ORDER BY a.id FOR UPDATE SKIP LOCKED "
+                    "  INNER JOIN d ON d.id = a.id "
+                    "  FOR UPDATE OF a SKIP LOCKED "
                     ") "
                     "UPDATE laplace.attestations a SET "
                     "  observation_count = a.observation_count + d.games, "
@@ -271,15 +312,28 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 "INSERT INTO laplace.attestations "
                 "  (id, subject_id, type_id, object_id, source_id, context_id, "
                 "   outcome, last_observed_at, observation_count, highway_mask) "
-                "SELECT DISTINCT ON (s.id) "
-                "       s.id, s.subject_id, s.type_id, s.object_id, s.source_id, "
+                "SELECT s.id, s.subject_id, s.type_id, s.object_id, s.source_id, "
                 "       s.context_id, s.outcome, s.last_observed_at, s.observation_count, "
                 "       s.highway_mask "
-                "FROM %s s "
-                "WHERE NOT EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
-                "ORDER BY s.id", stage_att));
-        }
+                "FROM ("
+                "  SELECT s.id, "
+                "         (array_agg(s.subject_id ORDER BY s.last_observed_at DESC))[1] AS subject_id, "
+                "         (array_agg(s.type_id ORDER BY s.last_observed_at DESC))[1] AS type_id, "
+                "         (array_agg(s.object_id ORDER BY s.last_observed_at DESC))[1] AS object_id, "
+                "         (array_agg(s.source_id ORDER BY s.last_observed_at DESC))[1] AS source_id, "
+                "         (array_agg(s.context_id ORDER BY s.last_observed_at DESC))[1] AS context_id, "
+                "         (array_agg(s.outcome ORDER BY s.last_observed_at DESC))[1] AS outcome, "
+                "         max(s.last_observed_at) AS last_observed_at, "
+                "         sum(s.observation_count)::bigint AS observation_count, "
+                "         (array_agg(s.highway_mask ORDER BY s.last_observed_at DESC))[1] AS highway_mask "
+                "  FROM %s s GROUP BY s.id"
+                ") s "
+                "LEFT JOIN laplace.attestations a ON a.id = s.id "
+                "WHERE a.id IS NULL",
+                stage_att));
     }
+
+    } /* stage presence + bulk/normal */
 
     SPI_finish();
 

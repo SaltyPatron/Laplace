@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT p.entity_id
+    FROM physicalities p
+    JOIN prompt_state(p_text) s ON p.entity_id = s.id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+    LIMIT 1
+$$;

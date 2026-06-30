@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS physicalities (
+    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
+    entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    type               smallint         NOT NULL,
+    coord              geometry(PointZM)    NOT NULL,
+    hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
+    trajectory         geometry(GeometryZM),
+    radius_origin      double precision GENERATED ALWAYS AS (
+        sqrt(ST_X(coord)^2 + ST_Y(coord)^2 + ST_Z(coord)^2 + ST_M(coord)^2)
+    ) STORED,
+    n_constituents     integer          NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
+    alignment_residual double precision,
+    source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
+    observed_at        timestamptz      NOT NULL DEFAULT now()
+    -- No (entity_id, type) natural key: a physicality is keyed by its content-addressed id
+    -- (BLAKE3 of entity_id|type|coord|trajectory). Under bit-perfect determinism id = f(entity,type),
+    -- so the id PK already enforces one-per-content; a divergent geometry across compose paths is a
+    -- determinism BUG to catch in a test, not to silently collapse with a relational unique. Dedup is
+    -- the hash. "Building block" content is the same tree => same id => one physicality, referenced by
+    -- id in other trajectories (no separate BuildingBlock row).
+);
+
+SELECT pg_extension_config_dump('physicalities', '');

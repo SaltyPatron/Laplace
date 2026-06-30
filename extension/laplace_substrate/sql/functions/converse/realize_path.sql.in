@@ -1,0 +1,12 @@
+CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
+                                        p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT string_agg(
+               CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
+                    ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
+                         || COALESCE(realize(p_path[i], p_lang), '?')
+               END, '' ORDER BY i)
+    FROM generate_subscripts(p_path, 1) AS i
+$$;

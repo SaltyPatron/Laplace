@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION consensus_stats()
+    RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
+                  avg_witnesses numeric, max_witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT a.cnt, c.cnt,
+           round(a.cnt::numeric / NULLIF(c.cnt, 0), 3),
+           c.avg_w, c.max_w
+    FROM (SELECT count(*)::bigint AS cnt FROM attestations) a,
+         (SELECT count(*)::bigint AS cnt,
+                 round(avg(witness_count), 3) AS avg_w,
+                 max(witness_count)::bigint AS max_w
+          FROM consensus) c
+$$;

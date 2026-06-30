@@ -1,9 +1,2 @@
 #include "sqldefines.h"
-
-#include "01_meta.sql.in"
-#include "02_hash128.sql.in"
-#include "03_hash128_ops.sql.in"
-#include "04_hilbert.sql.in"
-#include "05_mantissa.sql.in"
-#include "06_st_4d.sql.in"
-#include "07_s3_opclass.sql.in"
+#include "generated/install_chain.sql.in"

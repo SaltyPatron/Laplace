@@ -1,0 +1,8 @@
+DO $idem$ BEGIN
+    CREATE TYPE intent_preflight_result AS (
+        entity_exists bytea,
+        phys_exists   bytea,
+        att_exists    bytea
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $idem$;

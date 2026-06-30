@@ -1,0 +1,7 @@
+CREATE OR REPLACE FUNCTION recall_languages_response(p_topic bytea)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT lc.reply, lc.eff_mu, lc.witnesses
+    FROM language_coverage(p_topic) lc
+$$;

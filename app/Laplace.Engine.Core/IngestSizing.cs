@@ -47,7 +47,7 @@ public static class IngestSizing
         int derivedCommit = batch * applyPartitions * ApplyWavesPerCommit;
         int commit = commitRowsOverride ?? Math.Clamp(derivedCommit, 50_000, 500_000);
 
-        int maxIntents = Math.Max(1, Math.Min(MaxIntentsPerCommitCap, batch / 256));
+        int maxIntents = ResolveMaxIntentsPerCommit(batch, commit, commitRowsOverride);
 
         int decomposeChan = Math.Max(8, applyPartitions * 4 + fileWorkers);
 
@@ -76,6 +76,25 @@ public static class IngestSizing
     /// </summary>
     public static int ResolveProbeChunk(int recordBatchSize, int fileWorkers = 1) =>
         Math.Clamp(recordBatchSize / Math.Max(1, fileWorkers * 8), 32, 256);
+
+    /// <summary>
+    /// Bounds native compose heaps buffered before a commit without forcing tiny commits on
+    /// large <paramref name="commitRowBudget"/> sources (WordNet 250k). OMW OOM at ~26×2048 intents.
+    /// </summary>
+    public static int ResolveMaxIntentsPerCommit(
+        int recordBatch, int commitRowBudget, int? commitRowsOverride = null)
+    {
+        int budget = commitRowsOverride ?? commitRowBudget;
+        if (budget <= 0)
+            return Math.Max(1, recordBatch);
+
+        int estRowsPerIntent = Math.Max(1, recordBatch * 8);
+        int byRowBudget = Math.Max(1, budget / estRowsPerIntent);
+        int heapCap = budget >= 100_000
+            ? Math.Clamp(budget / 25_000, MaxIntentsPerCommitCap, 48)
+            : MaxIntentsPerCommitCap;
+        return Math.Max(1, Math.Min(byRowBudget, heapCap));
+    }
 
     public static void LogPlan(Plan plan)
     {
