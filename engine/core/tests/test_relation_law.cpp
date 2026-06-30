@@ -15,10 +15,13 @@ hash128_t hash_path(const char* path) {
     return h;
 }
 
-hash128_t type_id(const char* name) {
-    char path[128];
-    std::snprintf(path, sizeof(path), "substrate/type/%s/v1", name);
-    return hash_path(path);
+// Relation type ids are content-addressed: blake3(utf8 canonical name bytes).
+// Must match relation_law.c type_id_from_canonical and RelationTypeRegistry.RelationTypeId in C#.
+hash128_t relation_type_id(const char* canonical_name) {
+    hash128_t h;
+    hash128_blake3(reinterpret_cast<const uint8_t*>(canonical_name),
+                   std::strlen(canonical_name), &h);
+    return h;
 }
 
 }  
@@ -84,8 +87,8 @@ TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
     uint8_t flip = 1;
     ASSERT_EQ(0, laplace_relation_resolve_deprel(
         "nsubj", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t dep_nsubj  = type_id("DEP_NSUBJ");
-    hash128_t depends_on = type_id("DEPENDS_ON");
+    hash128_t dep_nsubj  = relation_type_id("DEP_NSUBJ");
+    hash128_t depends_on = relation_type_id("DEPENDS_ON");
     EXPECT_TRUE(hash128_equals(&dep_nsubj, &tid));
     EXPECT_TRUE(hash128_equals(&depends_on, &parent_id));
     // Deprels sit at the grammatical-glue floor: relation_types.toml [dynamic.deprel] rank =
@@ -96,7 +99,7 @@ TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
 
     ASSERT_EQ(0, laplace_relation_resolve_deprel(
         "nsubj:pass", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t dep_nsubj_pass = type_id("DEP_NSUBJ_PASS");
+    hash128_t dep_nsubj_pass = relation_type_id("DEP_NSUBJ_PASS");
     EXPECT_TRUE(hash128_equals(&dep_nsubj_pass, &tid));
     EXPECT_TRUE(hash128_equals(&dep_nsubj, &parent_id));
 }
@@ -108,8 +111,8 @@ TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
     uint8_t flip = 1;
     ASSERT_EQ(0, laplace_relation_resolve_feature(
         "Number", &tid, &rank, &sym, &flip, &parent_id));
-    hash128_t feat_number = type_id("FEAT_NUMBER");
-    hash128_t has_feature = type_id("HAS_FEATURE");
+    hash128_t feat_number = relation_type_id("FEAT_NUMBER");
+    hash128_t has_feature = relation_type_id("HAS_FEATURE");
     EXPECT_TRUE(hash128_equals(&feat_number, &tid));
     EXPECT_TRUE(hash128_equals(&has_feature, &parent_id));
 }
@@ -123,7 +126,7 @@ TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {
 
 TEST(LaplaceAttestationEngine, ResolvedScored_PositiveAboveHalf) {
     hash128_t subj = hash_path("s");
-    hash128_t type = type_id("REL");
+    hash128_t type = relation_type_id("REL");
     hash128_t obj  = hash_path("o");
     hash128_t src  = hash_path("src");
 
@@ -137,7 +140,7 @@ TEST(LaplaceAttestationEngine, ResolvedScored_PositiveAboveHalf) {
 
 TEST(LaplaceAttestationEngine, ResolvedScored_NegativeBelowHalf) {
     hash128_t subj = hash_path("s");
-    hash128_t type = type_id("REL");
+    hash128_t type = relation_type_id("REL");
     hash128_t obj  = hash_path("o");
     hash128_t src  = hash_path("src");
 
@@ -154,7 +157,7 @@ TEST(LaplaceAttestationEngine, WitnessPhi_TrustedTighterThanCrank) {
 
 TEST(LaplaceAttestationEngine, Aggregated_OutcomeFromNetScore) {
     hash128_t subj = hash_path("s");
-    hash128_t type = type_id("PRECEDES");
+    hash128_t type = relation_type_id("PRECEDES");
     hash128_t obj  = hash_path("o");
     hash128_t src  = hash_path("src");
 
@@ -178,8 +181,8 @@ TEST(LaplaceAttestationEngine, Aggregated_OutcomeFromNetScore) {
 }
 
 TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
-    hash128_t type = type_id("PRECEDES");
-    hash128_t sym  = type_id("IS_SYNONYM_OF");
+    hash128_t type = relation_type_id("PRECEDES");
+    hash128_t sym  = relation_type_id("IS_SYNONYM_OF");
     hash128_t src  = hash_path("src");
 
     laplace_attestation_aggregated_cell_t cells[4];
@@ -245,7 +248,7 @@ TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
     for (size_t i = 0; i < n; ++i) {
         const char* name = laplace_relation_manifest_canonical(i);
         ASSERT_NE(nullptr, name);
-        hash128_t tid = type_id(name);
+        hash128_t tid = relation_type_id(name);
         const laplace_relation_def_t* def = nullptr;
         ASSERT_EQ(0, laplace_relation_lookup(&tid, &def)) << "miss for " << name;
         ASSERT_NE(nullptr, def);
@@ -256,20 +259,20 @@ TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
 }
 
 TEST(LaplaceRelationLaw, ReverseLookupMissReturnsError) {
-    hash128_t bogus = type_id("NOT_A_REAL_RELATION_ZZZ");
+    hash128_t bogus = relation_type_id("NOT_A_REAL_RELATION_ZZZ");
     const laplace_relation_def_t* def = reinterpret_cast<const laplace_relation_def_t*>(0x1);
     EXPECT_EQ(-1, laplace_relation_lookup(&bogus, &def));
 }
 
 TEST(LaplaceRelationLaw, ReverseLookupRejectsNullArgs) {
     const laplace_relation_def_t* def = nullptr;
-    hash128_t tid = type_id("IS_A");
+    hash128_t tid = relation_type_id("IS_A");
     EXPECT_EQ(-1, laplace_relation_lookup(nullptr, &def));
     EXPECT_EQ(-1, laplace_relation_lookup(&tid, nullptr));
 }
 
 TEST(LaplaceRelationLaw, ReverseLookupCarriesDefFields) {
-    hash128_t isa = type_id("IS_A");
+    hash128_t isa = relation_type_id("IS_A");
     const laplace_relation_def_t* def = nullptr;
     ASSERT_EQ(0, laplace_relation_lookup(&isa, &def));
     ASSERT_NE(nullptr, def);
@@ -281,7 +284,7 @@ TEST(LaplaceRelationLaw, ReverseLookupCarriesDefFields) {
 // through laplace_relation_lookup. A symmetric relation must canonicalize (a,b) and (b,a) to the
 // same staged id — proving the bucket lookup feeds attestation_orient_resolved correctly.
 TEST(LaplaceAttestationEngine, ResolvedSymmetricOrientsViaLookup) {
-    hash128_t sym = type_id("IS_SYNONYM_OF");                      // symmetric in the manifest
+    hash128_t sym = relation_type_id("IS_SYNONYM_OF");             // symmetric in the manifest
     hash128_t src = hash_path("src");
     hash128_t a = hash_path("e/a"), b = hash_path("e/b");
     laplace_attestation_staged_t ab, ba;
