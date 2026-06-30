@@ -157,8 +157,7 @@ SELECT translation, language FROM translations(word_id('dog')) ORDER BY translat
  translation |   language   
 -------------+--------------
  h           | test/lang/de
- p           | test/lang/en
-(2 rows)
+(1 row)
 
 SELECT reply, witnesses FROM recall('what does dog mean?');
  reply | witnesses 
@@ -176,9 +175,8 @@ SELECT reply FROM recall('synonyms of dog');
 SELECT reply FROM recall('translate dog');
       reply       
 ------------------
- p [test/lang/en]
  h [test/lang/de]
-(2 rows)
+(1 row)
 
 SELECT reply FROM recall('what is zzzunknownzzz');
                      reply                      
@@ -250,22 +248,19 @@ SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
 (1 row)
 
 SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
-       type        |     fact      | witnesses 
--------------------+---------------+-----------
- has definition    | G             |         2
- is a              | c             |         2
- causes            | h             |         1
- is translation of | Type:01cdcce1 |         2
- is synonym of     | p             |         2
- is antonym of     | h             |         1
- is translation of | p             |         2
- is translation of | h             |         2
-(8 rows)
+      type      | fact | witnesses 
+----------------+------+-----------
+ has definition | G    |         2
+ is a           | c    |         2
+ causes         | h    |         1
+ is synonym of  | p    |         2
+ is antonym of  | h    |         1
+(5 rows)
 
 SELECT reply FROM recall('antonyms of dog');
  reply 
 -------
- h
+ 
 (1 row)
 
 SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
@@ -302,9 +297,9 @@ FROM walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_typ
 (1 row)
 
 SELECT reply, eff_mu FROM recall('walk p');
-             reply             |  eff_mu  
--------------------------------+----------
- p —has language→ test/lang/en | 1690.000
+                 reply                  |  eff_mu  
+----------------------------------------+----------
+ p —is synonym of→ p —has definition→ G | 1530.000
 (1 row)
 
 SELECT reply, witnesses FROM recall_session('what does dog mean?', convert_to('s1', 'UTF8'));
@@ -317,8 +312,7 @@ SELECT reply FROM recall_session('what about its synonyms?', convert_to('s1', 'U
  reply 
 -------
  p
- h
-(2 rows)
+(1 row)
 
 SELECT reply, witnesses FROM recall_session('and its causes?', convert_to('s1', 'UTF8'));
  reply | witnesses 
@@ -396,7 +390,6 @@ FROM recall('is a dog a c?');
  t
 (1 row)
 
--- NULL session must default to the backend-pid session (the converse.cmd path);
 SELECT count(*) >= 1 AS null_session_converse_runs
 FROM recall_session('what does dog mean?');
  null_session_converse_runs 

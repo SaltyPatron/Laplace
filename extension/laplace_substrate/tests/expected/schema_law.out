@@ -95,7 +95,6 @@ WHERE n.nspname = 'laplace'
  t
 (1 row)
 
--- Retirement pin: T0 renders come from the perfcache (codepoint_for_id), never
 SELECT count(*) = 0 AS no_codepoint_render_shadow
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
