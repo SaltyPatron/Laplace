@@ -301,13 +301,19 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: start API service
-        run: sudo systemctl start laplace-api
+      - name: restore API service
+        if: always() && !cancelled()
+        run: |
+          sudo systemctl start laplace-api
+          sleep 3
+          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
+            sudo journalctl -u laplace-api -n 40 --no-pager
+            exit 1
+          }
 
       - name: endpoint health + tests
+        if: success()
         run: |
-          sleep 3
-          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"'
           curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
           if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.skip_seed }}" != "true" ]; then
             curl -fsS http://127.0.0.1:5187/health/ready

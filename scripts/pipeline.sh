@@ -166,6 +166,26 @@ phase_perfcache_guc() {
   echo "perfcache_path -> $bin"
 }
 
+phase_api_env() {
+  echo "===== PHASE — API ENV ====="
+  local env_file="$LAPLACE_INSTALL_PREFIX/app/laplace-api.env"
+  local bin example
+  bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+  test -n "$bin" || { echo "::error::perfcache blob missing for API env"; exit 1; }
+  example="$ROOT/deploy/linux/laplace-api.env.example"
+  if [[ ! -f "$env_file" ]]; then
+    install -m 0640 -o laplace-runner -g laplace-runner "$example" "$env_file" 2>/dev/null \
+      || cp "$example" "$env_file"
+    echo "created $env_file from example"
+  fi
+  if grep -q '^LAPLACE_PERFCACHE_BIN=' "$env_file"; then
+    sed -i "s|^LAPLACE_PERFCACHE_BIN=.*|LAPLACE_PERFCACHE_BIN=$bin|" "$env_file"
+  else
+    printf '\nLAPLACE_PERFCACHE_BIN=%s\n' "$bin" >> "$env_file"
+  fi
+  echo "LAPLACE_PERFCACHE_BIN -> $bin"
+}
+
 phase_publish() {
   echo "===== PHASE — PUBLISH API + SPA ====="
   bash "$ROOT/deploy/linux/deploy.sh"
@@ -184,6 +204,7 @@ phase_provision() {
   phase_migrate
   phase_sync_extension
   phase_perfcache_guc
+  phase_api_env
 }
 
 # ----- execute -----
