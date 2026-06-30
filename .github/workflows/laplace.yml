@@ -265,6 +265,11 @@ jobs:
 
       - name: dotnet test (engine bindings + substrate integration)
         run: |
+          bin=$(find "$GITHUB_WORKSPACE/build" "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" \
+            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
+          export LAPLACE_PERFCACHE_BIN="$bin"
+          echo "LAPLACE_PERFCACHE_BIN=$bin"
           cd app
           # Throughput gates (Tier=perf) need a clean DB; skip on the live seeded substrate.
           filter='--filter Tier!=perf'
