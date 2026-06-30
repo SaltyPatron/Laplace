@@ -266,6 +266,8 @@ jobs:
       - name: dotnet test (engine bindings + substrate integration)
         run: |
           cd app
+          # Throughput gates (Tier=perf) need a clean DB; skip on the live seeded substrate.
+          filter='--filter Tier!=perf'
           for proj in \
             Laplace.Engine.Core.Tests \
             Laplace.Engine.Dynamics.Tests \
@@ -282,7 +284,7 @@ jobs:
             Laplace.Decomposers.PropBank.Tests \
             Laplace.Decomposers.OpenSubtitles.Tests; do
             echo "::group::dotnet test $proj"
-            dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal
+            dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal $filter
             echo "::endgroup::"
           done
 
@@ -317,4 +319,4 @@ jobs:
               --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
             echo
           fi
-          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --nologo --verbosity minimal
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --nologo --verbosity minimal --filter 'Tier!=perf'

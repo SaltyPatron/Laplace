@@ -206,15 +206,23 @@ public sealed class StructuredGrammarIngestTests
             await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
             var witness = new NullGrammarWitness("tsv");
 
+            // Both legs go through the sequential pipeline directly so batch boundaries and
+            // within-batch witness dedup are identical — the entity counts are directly comparable.
+            // IngestFileAsync routes null-reader to the parallel workers (correct for production),
+            // but the parallel path produces variable-sized partial batches whose per-batch dedup
+            // gives a different total row count than the sequential path, making a raw count
+            // comparison meaningless. The invariant under test is: absent-bitmap ≡ no-reader in
+            // the sequential pipeline, not parallel ≡ sequential.
             var baseline = new List<SubstrateChange>();
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+            await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null))
+                batchLabelPrefix: "test", reportUnits: null,
+                containmentReader: null))
                 baseline.Add(change);
 
             var absent = new UniformReader(present: false);
             var changes = new List<SubstrateChange>();
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+            await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
                 path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null,
                 containmentReader: absent))

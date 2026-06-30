@@ -261,6 +261,54 @@ int laplace_grammar_row_iter_parse_row(laplace_grammar_row_iter_t* it,
     return laplace_grammar_parse_with(it->parser, row_utf8, row_len, it->recipe, out_ast);
 }
 
+int laplace_grammar_row_iter_feed_parsed(laplace_grammar_row_iter_t* it,
+                                          const uint8_t* chunk, size_t len,
+                                          laplace_parsed_row_t** out_rows, size_t* out_count) {
+    if (!it || !out_rows || !out_count) return -1;
+    *out_rows = NULL;
+    *out_count = 0;
+    if (it->oom) return -3;
+    int finalize = (chunk == NULL || len == 0);
+    if (chunk && len > 0)
+        if (append_carry(it, chunk, len) != 0) return -3;
+
+    laplace_raw_row_t* raw = NULL;
+    size_t raw_n = 0;
+    int rc = use_grammar_row_framing(it)
+        ? split_carry_records(it, finalize, &raw, &raw_n)
+        : split_carry_lines(it, finalize, &raw, &raw_n);
+    if (rc != 0) return rc;
+    if (raw_n == 0) return 0;
+
+    laplace_parsed_row_t* rows =
+        (laplace_parsed_row_t*)calloc(raw_n, sizeof(*rows));
+    if (!rows) {
+        laplace_grammar_row_iter_free_lines(raw, raw_n);
+        it->oom = 1;
+        return -3;
+    }
+
+    size_t out_n = 0;
+    for (size_t i = 0; i < raw_n; i++) {
+        laplace_ast_t* ast = NULL;
+        int r = laplace_grammar_row_iter_parse_row(
+            it, raw[i].row_utf8, raw[i].row_len, &ast);
+        if (r == 0 && ast) {
+            rows[out_n].ast      = ast;
+            rows[out_n].row_utf8 = raw[i].row_utf8;
+            rows[out_n].row_len  = raw[i].row_len;
+            out_n++;
+        } else {
+            free(raw[i].row_utf8);
+        }
+    }
+    free(raw);
+
+    *out_rows  = rows;
+    *out_count = out_n;
+    return 0;
+}
+
 int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
                                   const uint8_t* chunk, size_t len,
                                   laplace_parsed_row_t** out_rows, size_t* out_count) {

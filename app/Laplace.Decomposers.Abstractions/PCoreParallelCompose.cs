@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Channels;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -6,7 +7,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// P-CORE-PINNED PARALLEL COMPOSE for single-enumerator decomposers (CILI etc.).
+/// P-CORE-PINNED PARALLEL COMPOSE for single-enumerator decomposers.
 ///
 /// A serial DecomposeAsync is compute-bound on ONE thread; the per-record compose (content-id
 /// derivation = BLAKE3 over canonical bytes + attestation assembly) is a pure function over the
@@ -26,6 +27,32 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class PCoreParallelCompose
 {
+    /// <summary>
+    /// Grammar spine overload: drives <paramref name="handler"/> on each record using a fresh-bypass
+    /// compose (no descent probes). Owns CreateDeferredUnit / DrainInto / WalkWitness lifecycle.
+    /// </summary>
+    public static IAsyncEnumerable<SubstrateChange> RunAsync<TRecord>(
+        IAsyncEnumerable<TRecord> records,
+        IIngestRecordHandler<TRecord> handler,
+        IngestBatchConfig config,
+        int workerCount,
+        CancellationToken ct = default)
+    {
+        int batchNum = -1;
+        return RunAsync(
+            records,
+            workerCount,
+            config.BatchSize,
+            () => config.NewBuilder(Interlocked.Increment(ref batchNum)),
+            (builder, record) =>
+            {
+                using var unit = handler.CreateDeferredUnit(record);
+                var root = unit.DrainInto(builder, config.WitnessWeight, null);
+                handler.WalkWitness(record, root, builder, unit);
+            },
+            ct);
+    }
+
     /// <summary>
     /// Stream <paramref name="records"/> through <paramref name="workerCount"/> P-core-pinned
     /// compose workers. <paramref name="compose"/> writes one record's rows into a worker-local
@@ -86,6 +113,7 @@ public static class PCoreParallelCompose
         var workerDone = new CountdownEvent(workerCount);
         for (int w = 0; w < workerCount; w++)
         {
+            int wId = w;
             workers[w] = new Thread(() =>
             {
                 CpuTopology.RequirePerformanceCorePin();
@@ -133,7 +161,7 @@ public static class PCoreParallelCompose
                     if (workerDone.Signal())
                         output.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
                 }
-            }) { IsBackground = true, Name = $"cili-compose-pcore-{w}" };
+            }) { IsBackground = true, Name = $"ingest-pcore-{wId}" };
             workers[w].Start();
         }
 

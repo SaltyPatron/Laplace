@@ -167,18 +167,31 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
                 if (read <= 0) { eof = true; read = 0; }
                 ct.ThrowIfCancellationRequested();
 
-                foreach (byte[] lineUtf8 in StructuredGrammarIngest.FeedRawLinesForPipeline(iter, buf, read))
+                if (_acceptRow is null)
                 {
-                    rowsTotal++;
-                    if (_acceptRow is not null && !_acceptRow(lineUtf8))
-                        continue;
-
-                    if (!StructuredGrammarIngest.TryParseRowForPipeline(iter, lineUtf8, out IntPtr ast)
-                        || ast == IntPtr.Zero)
-                        continue;
-
-                    yield return new GrammarIngestRecord(
-                        lineUtf8, GrammarAst.Adopt(ast), rowIndex++, rowsTotal);
+                    // No filter: one native call per chunk frames AND parses all records together.
+                    foreach (var (lineUtf8, ast) in StructuredGrammarIngest.FeedAndParseForPipeline(iter, buf, read))
+                    {
+                        rowsTotal++;
+                        if (ast == IntPtr.Zero) continue;
+                        yield return new GrammarIngestRecord(
+                            lineUtf8, GrammarAst.Adopt(ast), rowIndex++, rowsTotal);
+                    }
+                }
+                else
+                {
+                    // Filter active: frame first (raw bytes only), reject cheap, parse only accepted.
+                    foreach (byte[] lineUtf8 in StructuredGrammarIngest.FeedRawLinesForPipeline(iter, buf, read))
+                    {
+                        rowsTotal++;
+                        if (!_acceptRow(lineUtf8))
+                            continue;
+                        if (!StructuredGrammarIngest.TryParseRowForPipeline(iter, lineUtf8, out IntPtr ast)
+                            || ast == IntPtr.Zero)
+                            continue;
+                        yield return new GrammarIngestRecord(
+                            lineUtf8, GrammarAst.Adopt(ast), rowIndex++, rowsTotal);
+                    }
                 }
             }
         }

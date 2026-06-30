@@ -60,7 +60,8 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             reportUnits: null,
             acceptRow: acceptRow,
             maxInputUnits: options.MaxInputUnits,
-            containmentReader: context.Reader,
+            // Lean lexical corpus: descent probes on a warm DB stall compose (same gate as ConceptNet).
+            containmentReader: null,
             ct: ct))
         {
             if (!options.DryRun) yield return change;

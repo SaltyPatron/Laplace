@@ -131,10 +131,12 @@ if /i "%INGEST_STEP%"=="conceptnet" (
 )
 if /i "%INGEST_STEP%"=="wiktionary" (
   if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
+  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\Wiktionary"
 )
 if /i "%INGEST_STEP%"=="wiktionary-en" (
   if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
+  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
   set "INGEST_LANGS=--langs en"
   set "INGEST_CLI_SOURCE=wiktionary"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\Wiktionary"

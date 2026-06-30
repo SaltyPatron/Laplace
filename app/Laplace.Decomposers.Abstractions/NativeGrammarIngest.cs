@@ -210,9 +210,14 @@ public static unsafe class NativeGrammarIngest
     /// Lean triple sources (ConceptNet, Atomic2020) emit mostly novel term content; synchronous
     /// exist probes on a warm DB stall the sole compose thread for no meaningful skip rate.
     /// </summary>
+    /// <summary>
+    /// Lean lexical/triple sources emit mostly novel content; synchronous descent probes on a warm
+    /// DB stall compose for near-zero skip rate (same gate as ConceptNet/Atomic2020).
+    /// </summary>
     internal static bool ShouldExistProbe(EtlSource src) =>
         !string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal)
-        && !string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal);
+        && !string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal)
+        && !string.Equals(src.Name, "WiktionaryDecomposer", StringComparison.Ordinal);
 
     private static int ResolveWitnessKind(EtlSource src)
     {

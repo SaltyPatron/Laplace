@@ -28,10 +28,52 @@ public static class StructuredGrammarIngest
     {
         if (IntentStage.IsBulkFreshBypass)
             containmentReader = null;
+
+        // No containment reader: each worker's stage deduplicates within its own batch via
+        // the per-stage witness set (intent_stage_witness_record). Across batches the DB
+        // anti-join (apply_batch DISTINCT ON + NOT EXISTS) deduplicates without ON CONFLICT.
+        // The native content stage and intent_stage are per-instance with no global mutable
+        // state, so P-core-pinned workers compose into independent stages concurrently.
+        // With a reader: sequential pipeline uses the descent probe to filter novel entities
+        // before compose — no parallel path here, probe results are per-batch sequential.
+        if (containmentReader is null)
+            return IngestFileParallelAsync(
+                filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
+                batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
+                maxInputUnits, recordFraming, ct);
+
         return IngestFileViaPipelineAsync(
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
             batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
             maxInputUnits, containmentReader, recordFraming, ct);
+    }
+
+    private static IAsyncEnumerable<SubstrateChange> IngestFileParallelAsync(
+        string filePath, string modalityId, Hash128 sourceId,
+        IGrammarWitness witness, int batchSize, double witnessWeight,
+        string batchLabelPrefix, Action<long>? reportUnits,
+        Hash128? contextId, int commitEpoch,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow, long maxInputUnits,
+        GrammarRecordFraming recordFraming, CancellationToken ct)
+    {
+        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
+        var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
+        var config = new IngestBatchConfig
+        {
+            SourceId = sourceId,
+            BatchLabelPrefix = batchLabelPrefix,
+            BatchSize = batchSize,
+            WitnessWeight = witnessWeight,
+            CommitEpoch = commitEpoch,
+            ContainmentReader = null,
+            ReportUnits = reportUnits,
+            MaxInputUnits = maxInputUnits,
+        };
+        var records = maxInputUnits > 0
+            ? stream.RecordsAsync(ct).Take((int)Math.Min(maxInputUnits, int.MaxValue))
+            : stream.RecordsAsync(ct);
+        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
+        return PCoreParallelCompose.RunAsync(records, handler, config, workers, ct);
     }
 
     /// <summary>Ingest one file using record framing from the manifest row.</summary>
@@ -75,6 +117,38 @@ public static class StructuredGrammarIngest
     {
         var rows = FeedRawLines(iter, buf, read);
         return rows.ConvertAll(r => r.LineUtf8);
+    }
+
+    /// <summary>
+    /// Single-pass: frame records from <paramref name="buf"/> AND parse each, returning bytes+AST
+    /// together. Eliminates the per-record re-parse that two-pass (FeedRawLines + ParseRow) required.
+    /// Pass <paramref name="read"/>=0 at end-of-stream to flush the final partial record.
+    /// </summary>
+    internal static unsafe List<(byte[] LineUtf8, IntPtr Ast)> FeedAndParseForPipeline(
+        IntPtr iter, byte[] buf, int read)
+    {
+        var result = new List<(byte[], IntPtr)>();
+        NativeInterop.ParsedRowNative* nativeRows = null;
+        nuint rowCount = 0;
+        fixed (byte* p = buf)
+        {
+            byte* chunk = read > 0 ? p : null;
+            nuint chunkLen = (nuint)Math.Max(read, 0);
+            if (NativeInterop.GrammarRowIterFeedParsed(iter, chunk, chunkLen, &nativeRows, &rowCount) != 0)
+                return result;
+
+            for (nuint ri = 0; ri < rowCount; ri++)
+            {
+                var row = nativeRows[ri];
+                int rowLen = (int)row.RowLen.ToUInt64();
+                var lineUtf8 = new ReadOnlySpan<byte>(row.RowUtf8.ToPointer(), rowLen).ToArray();
+                result.Add((lineUtf8, row.Ast));
+                nativeRows[ri].Ast = IntPtr.Zero;
+            }
+            if (nativeRows != null)
+                NativeInterop.GrammarRowIterFreeRows(nativeRows, rowCount);
+        }
+        return result;
     }
 
     public static IAsyncEnumerable<SubstrateChange> IngestFileViaPipelineAsync(
