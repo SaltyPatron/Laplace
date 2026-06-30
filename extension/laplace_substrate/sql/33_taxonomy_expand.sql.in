@@ -33,8 +33,8 @@ CREATE OR REPLACE FUNCTION consensus_taxonomy_edges(p_subject bytea, p_types byt
       AND c.object_id IS NOT NULL
       AND NOT refuted(c.rating, c.rd)
       AND NOT EXISTS (
-          SELECT 1 FROM canonical_names n
-          WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%')
+          SELECT 1 FROM entities et
+          WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
 $$;
 
 CREATE OR REPLACE FUNCTION translation_sources(p_object bytea)

@@ -22,11 +22,11 @@ static void hash_canonical(const char* s, hash128_t* out) {
 static hash128_t tier_type_id(uint8_t tier) {
     hash128_t id;
     switch (tier) {
-        case 0: hash_canonical("substrate/type/Codepoint/v1", &id); break;
-        case 1: hash_canonical("substrate/type/Grapheme/v1", &id); break;
-        case 2: hash_canonical("substrate/type/Word/v1", &id); break;
-        case 3: hash_canonical("substrate/type/Sentence/v1", &id); break;
-        default: hash_canonical("substrate/type/Document/v1", &id); break;
+        case 0: hash_canonical("Codepoint", &id); break;
+        case 1: hash_canonical("Grapheme", &id); break;
+        case 2: hash_canonical("Word", &id); break;
+        case 3: hash_canonical("Sentence", &id); break;
+        default: hash_canonical("Document", &id); break;
     }
     return id;
 }

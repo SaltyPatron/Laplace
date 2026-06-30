@@ -18,7 +18,7 @@ public class ConsensusAccumulatingWriterTests
 
     private async Task<Hash128> EnsureScaffoldAsync(params Hash128[] ids)
     {
-        var typeId = Hash128.OfCanonical("substrate/type/FoldingTestFixture/v1");
+        var typeId = Hash128.OfCanonical("FoldingTestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
           + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");

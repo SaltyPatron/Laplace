@@ -59,7 +59,7 @@ int  highway_table_is_loaded(void);
 
 /* ── Lookups ──────────────────────────────────────────────────────────────── */
 
-/* Look up by type_id (blake3("substrate/type/{canonical}/v1")).
+/* Look up by type_id (blake3(canonical_name)).
  * Returns 0 on hit; fills *out_bit_pos / *out_rank / *out_band (NULLs ok).
  * Returns -1 if not loaded or not found. */
 int highway_table_relation_by_hash(const hash128_t* type_id,

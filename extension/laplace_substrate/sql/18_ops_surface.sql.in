@@ -1,6 +1,11 @@
 CREATE OR REPLACE FUNCTION relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
-    SELECT @extschema@.canonical_id('substrate/type/' || p_name || '/v1')
+    SELECT @extschema@.canonical_id(p_name)
+$$;
+
+CREATE OR REPLACE FUNCTION entity_type_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT @extschema@.canonical_id(p_name)
 $$;
 
 
@@ -67,28 +72,17 @@ CREATE OR REPLACE FUNCTION substrate_counts()
     SELECT 'entities',                 count(*) FROM @extschema@.entities
     UNION ALL
     SELECT 'entities/codepoint (T0)',  count(*) FROM @extschema@.entities
-        WHERE type_id = @extschema@.canonical_id('substrate/type/Codepoint/v1')
+        WHERE type_id = @extschema@.entity_type_id('Codepoint')
           AND tier = 0
     UNION ALL
     SELECT 'entities/compositional (T1-T4)', count(*) FROM @extschema@.entities e
         WHERE e.tier BETWEEN 1 AND 4
-          AND e.type_id = ANY(ARRAY[
-              @extschema@.canonical_id('substrate/type/Grapheme/v1'),
-              @extschema@.canonical_id('substrate/type/Word/v1'),
-              @extschema@.canonical_id('substrate/type/Sentence/v1'),
-              @extschema@.canonical_id('substrate/type/Document/v1')
-          ])
+          AND e.type_id = ANY(@extschema@.compositional_type_ids())
     UNION ALL
     -- Anchors are identified by type_id (NOT a content-composition tier), never by tier.
     -- Anchors sit at Word tier (2) with a meta-type type_id; tier is composition depth only.
     SELECT 'entities/vocabulary (by type_id)', count(*) FROM @extschema@.entities e
-        WHERE e.type_id <> ALL(ARRAY[
-              @extschema@.canonical_id('substrate/type/Codepoint/v1'),
-              @extschema@.canonical_id('substrate/type/Grapheme/v1'),
-              @extschema@.canonical_id('substrate/type/Word/v1'),
-              @extschema@.canonical_id('substrate/type/Sentence/v1'),
-              @extschema@.canonical_id('substrate/type/Document/v1')
-          ])
+        WHERE e.type_id <> ALL(@extschema@.compositional_type_ids())
     UNION ALL
     SELECT 'physicalities',            count(*) FROM @extschema@.physicalities
     UNION ALL
@@ -153,13 +147,7 @@ CREATE OR REPLACE FUNCTION consensus_tier_distribution()
     SELECT e.tier, count(*)
     FROM @extschema@.consensus c JOIN @extschema@.entities e ON e.id = c.subject_id
     WHERE c.object_id IS NOT NULL
-      AND e.type_id = ANY(ARRAY[
-          @extschema@.canonical_id('substrate/type/Codepoint/v1'),
-          @extschema@.canonical_id('substrate/type/Grapheme/v1'),
-          @extschema@.canonical_id('substrate/type/Word/v1'),
-          @extschema@.canonical_id('substrate/type/Sentence/v1'),
-          @extschema@.canonical_id('substrate/type/Document/v1')
-      ])
+      AND e.type_id = ANY(@extschema@.compositional_type_ids())
     GROUP BY e.tier ORDER BY e.tier
 $$;
 

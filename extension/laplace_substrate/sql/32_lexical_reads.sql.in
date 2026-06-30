@@ -5,8 +5,7 @@ CREATE OR REPLACE FUNCTION type_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/type/(.+)/v1$', '\1'),
-                         '_', ' '))
+    SELECT lower(replace(render(p_type), '_', ' '))
 $$;
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea)

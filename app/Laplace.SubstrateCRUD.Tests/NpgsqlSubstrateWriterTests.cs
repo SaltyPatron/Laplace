@@ -343,7 +343,7 @@ public class NpgsqlSubstrateWriterTests
 
     private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)
     {
-        var typeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
+        var typeId = Hash128.OfCanonical("TestFixture");
         await using var cmdType = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
           + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
@@ -362,7 +362,7 @@ public class NpgsqlSubstrateWriterTests
     private async Task<Hash128> EnsureTestRelationTypeAsync(Hash128 source, string name)
     {
         var typeId = Hash128.OfCanonical($"substrate/type/{name}/v1");
-        var relTypeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
+        var relTypeId = Hash128.OfCanonical("TestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
           + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");

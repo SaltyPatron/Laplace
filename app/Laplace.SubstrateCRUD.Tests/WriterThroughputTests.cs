@@ -21,9 +21,9 @@ public sealed class WriterThroughputTests
     private static readonly Hash128 ThroughputSrc =
         Hash128.OfCanonical("substrate/source/test/throughput/v1");
     private static readonly Hash128 ThroughputTypeId =
-        Hash128.OfCanonical("substrate/type/ThroughputFixture/v1");
+        Hash128.OfCanonical("ThroughputFixture");
     private static readonly Hash128 RelTypeId =
-        Hash128.OfCanonical("substrate/type/ThroughputRelation/v1");
+        Hash128.OfCanonical("ThroughputRelation");
 
     public WriterThroughputTests(LocalPgFixture pg)
     {

@@ -32,7 +32,7 @@ static struct {
     const laplace_highway_rel_rec_t* records;     /* points into mmap */
     const laplace_mask256_t*         band_masks;  /* points into mmap */
     const char*                      strings;     /* points into mmap */
-    /* Computed at load time: type_id for each relation (blake3("substrate/type/{name}/v1")) */
+    /* Computed at load time: type_id for each relation (blake3(canonical_name)) */
     hash128_t type_id_cache[LAPLACE_HIGHWAY_REL_COUNT];
     /* Open-addressing hash table: type_id.lo & MASK → record ordinal, -1 = empty */
     int16_t   hash_bucket[HIGHWAY_BUCKET_SIZE];

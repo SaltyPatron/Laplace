@@ -29,7 +29,7 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
     hash128_t source_id;
     hash128_blake3(reinterpret_cast<const uint8_t*>("test/source"), 11, &source_id);
     hash128_t type_meta;
-    hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &type_meta);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &type_meta);
 
     laplace_compose_result_t* result = nullptr;
     ASSERT_EQ(laplace_grammar_compose(
@@ -63,7 +63,7 @@ TEST(GrammarCompose, OmwRowsAsanRepro) {
     std::memset(&cfg, 0, sizeof(cfg));
     cfg.modality_id = "tsv";
     hash128_blake3(reinterpret_cast<const uint8_t*>("omw/source"), 10, &cfg.source_id);
-    hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &cfg.type_meta_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &cfg.type_meta_id);
     cfg.witness_weight    = 1.0;
     cfg.trust_weight      = 1.0;
     cfg.now_unix_us       = 0;

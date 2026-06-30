@@ -84,12 +84,11 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
             var names = new List<string>
             {
                 "substrate/atomic/none/v1",
-                "substrate/type/Atomic_Marker/v1",
-                "substrate/type/Atomic_Split/v1",
+                "Atomic_Marker",
+                "Atomic_Split",
             };
             foreach (var name in Relations.Select(r => r.Type).Distinct())
             {
-                names.Add($"substrate/type/{name}/v1");
                 names.Add(VocabularyNames.RelationType(
                     RelationTypeRegistry.Resolve(name).Canonical));
             }
