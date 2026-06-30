@@ -13,5 +13,9 @@ namespace Laplace.Ingestion.Tests;
 internal static class TestModuleInit
 {
     [ModuleInitializer]
-    internal static void Init() => CodepointPerfcache.LoadDefault();
+    internal static void Init()
+    {
+        CodepointPerfcache.LoadDefault();
+        HighwayPerfcache.LoadDefault();
+    }
 }

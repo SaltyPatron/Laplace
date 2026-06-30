@@ -7,6 +7,11 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
+/// <summary>
+/// Write-path throughput gates (200k rows/sec). Tagged <c>Tier=perf</c> — excluded from CI
+/// (<c>--filter Tier!=perf</c>) because they run against the live seeded substrate.
+/// </summary>
+[Trait("Tier", "perf")]
 [Collection("substrate-pg")]
 public sealed class WriterThroughputTests
 {

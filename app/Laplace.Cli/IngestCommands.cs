@@ -118,12 +118,27 @@ internal static class IngestCommands
 
         // Hybrid topology: worker counts and P-core pinning are resolved once in IngestTopology.EnsureReady().
         CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
 
         // Make the bespoke witnesses of the already-grammar-conforming sources available to the
         // generic EtlDecomposer (the parity oracle path); harmless for sources still on old classes.
         EtlWitnessRegistrations.RegisterAll();
 
         string sourceKey = cli.Source.ToLowerInvariant();
+
+        // Wiktionary: bespoke file resolution (one corpus, not *.json* glob) + witness; manifest row
+        // is the parity oracle only — do not route live ingest through generic EtlDecomposer.
+        if (sourceKey == "wiktionary")
+            return await IngestViaRunnerAsync(
+                new WiktionaryDecomposer(),
+                IngestDataPaths.Resolve("wiktionary", cli.Path), skipLayerCheck: false, cli);
+
+        // OMW: file-level parallelism across many .tab wordnet files via OMWGrammarIngest.
+        // EtlDecomposer processes files sequentially; OMWDecomposer fans them across file workers.
+        if (sourceKey == "omw")
+            return await IngestViaRunnerAsync(
+                new OMWDecomposer(),
+                IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli);
 
         // Manifest-driven generic path: every complete EtlManifest row drives ONE EtlDecomposer.
         if (EtlManifest.IsRoutable(sourceKey))
@@ -176,6 +191,7 @@ internal static class IngestCommands
         long start = EnvLong("LAPLACE_OMW_PROBE_START", 0, min: 0);
         long max = EnvLong("LAPLACE_OMW_PROBE_MAX", 0, min: 0);
         CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
 
         Console.Error.WriteLine($"omw-probe: scanning {wns} start_row={start} max_rows={(max > 0 ? max.ToString() : "all")}");
         var fail = await OmwComposeProbe.ScanFirstFailureAsync(wns, cli.LangOverride, start, max);
@@ -205,6 +221,7 @@ internal static class IngestCommands
                         + $"path: {modelDir}");
 
         CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
 
         
         
@@ -480,6 +497,7 @@ internal static class IngestCommands
         bool skipSourceCompletion = false)
     {
         CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
 
         LanguageReference.EnsureLoaded();
         var topo = IngestTopology.EnsureReady();

@@ -344,6 +344,10 @@ public static unsafe partial class NativeInterop
     public static partial int GrammarRowIterFeed(
         IntPtr iter, byte* chunk, nuint len, ParsedRowNative** outRows, nuint* outCount);
 
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_feed_parsed")]
+    public static partial int GrammarRowIterFeedParsed(
+        IntPtr iter, byte* chunk, nuint len, ParsedRowNative** outRows, nuint* outCount);
+
     [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_feed_lines")]
     public static partial int GrammarRowIterFeedLines(
         IntPtr iter, byte* chunk, nuint len, RawRowNative** outRows, nuint* outCount);

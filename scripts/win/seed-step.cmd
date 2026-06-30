@@ -86,6 +86,7 @@ exit /b %ERRORLEVEL%
 :run_ingest_wikt_commit
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
+if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="

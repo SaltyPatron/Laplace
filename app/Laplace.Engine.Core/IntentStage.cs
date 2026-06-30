@@ -79,15 +79,12 @@ public sealed class IntentStage : SafeHandle
         if (tier < 0 || tier > 255) throw new ArgumentOutOfRangeException(nameof(tier));
         unsafe
         {
-            lock (LaplaceCoreGate.Native)
-            {
-                int rc;
-                if (firstObservedBy is Hash128 fob)
-                    rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, &fob);
-                else
-                    rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, null);
-                if (rc != 0) throw new InvalidOperationException("intent_stage_add_entity failed");
-            }
+            int rc;
+            if (firstObservedBy is Hash128 fob)
+                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, &fob);
+            else
+                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, null);
+            if (rc != 0) throw new InvalidOperationException("intent_stage_add_entity failed");
         }
     }
 
@@ -119,14 +116,11 @@ public sealed class IntentStage : SafeHandle
                 int sdNull = sourceDim          is null ? 1 : 0;
                 double arVal = alignmentResidual ?? 0.0;
                 int    sdVal = sourceDim          ?? 0;
-                lock (LaplaceCoreGate.Native)
-                {
-                    int rc = NativeInterop.IntentStageAddPhysicality(
-                        handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
-                        nVerts == 0 ? null : pTraj, nVerts, nConstituents,
-                        arNull, arVal, sdNull, sdVal, observedAtUnixUs);
-                    if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
-                }
+                int rc = NativeInterop.IntentStageAddPhysicality(
+                    handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
+                    nVerts == 0 ? null : pTraj, nVerts, nConstituents,
+                    arNull, arVal, sdNull, sdVal, observedAtUnixUs);
+                if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
             }
         }
     }
@@ -148,19 +142,16 @@ public sealed class IntentStage : SafeHandle
         if (outcome is < 0 or > 2) throw new ArgumentOutOfRangeException(nameof(outcome));
         unsafe
         {
-            lock (LaplaceCoreGate.Native)
-            {
-                Hash128 obj = objectId ?? default;
-                Hash128 ctx = contextId ?? default;
-                Hash128* objPtr = objectId is null ? null : &obj;
-                Hash128* ctxPtr = contextId is null ? null : &ctx;
-                Mask256 mask = highwayMask;
-                byte* maskPtr = mask.IsZero ? null : (byte*)&mask;
-                int rc = NativeInterop.IntentStageAddAttestation(
-                    handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
-                    outcome, lastObservedAtUnixUs, observationCount, maskPtr);
-                if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
-            }
+            Hash128 obj = objectId ?? default;
+            Hash128 ctx = contextId ?? default;
+            Hash128* objPtr = objectId is null ? null : &obj;
+            Hash128* ctxPtr = contextId is null ? null : &ctx;
+            Mask256 mask = highwayMask;
+            byte* maskPtr = mask.IsZero ? null : (byte*)&mask;
+            int rc = NativeInterop.IntentStageAddAttestation(
+                handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
+                outcome, lastObservedAtUnixUs, observationCount, maskPtr);
+            if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
         }
     }
 
@@ -242,20 +233,17 @@ public sealed class IntentStage : SafeHandle
 
         unsafe
         {
-            lock (LaplaceCoreGate.Native)
+            Hash128 src = sourceId;
+            Hash128 root = default;
+            fixed (byte* utf8 = canonical)
             {
-                Hash128 src = sourceId;
-                Hash128 root = default;
-                fixed (byte* utf8 = canonical)
-                {
-                    int rc = NativeInterop.ContentWitnessBatchAdd(
-                        handle, utf8, (nuint)canonical.Length, &src, &root);
-                    if (rc == -3) throw new InvalidOperationException(
-                        "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-                    if (rc != 0) return false;
-                    rootId = root;
-                    return true;
-                }
+                int rc = NativeInterop.ContentWitnessBatchAdd(
+                    handle, utf8, (nuint)canonical.Length, &src, &root);
+                if (rc == -3) throw new InvalidOperationException(
+                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0) return false;
+                rootId = root;
+                return true;
             }
         }
     }
@@ -271,18 +259,15 @@ public sealed class IntentStage : SafeHandle
         if (canonical.IsEmpty) return null;
         unsafe
         {
-            lock (LaplaceCoreGate.Native)
+            IntPtr treePtr = IntPtr.Zero;
+            fixed (byte* p = canonical)
             {
-                IntPtr treePtr = IntPtr.Zero;
-                fixed (byte* p = canonical)
-                {
-                    int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
-                    if (rc == -3) throw new InvalidOperationException(
-                        "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-                    if (rc != 0 || treePtr == IntPtr.Zero) return null;
-                }
-                return TierTree.FromExistingHandle(treePtr);
+                int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
+                if (rc == -3) throw new InvalidOperationException(
+                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0 || treePtr == IntPtr.Zero) return null;
             }
+            return TierTree.FromExistingHandle(treePtr);
         }
     }
 
@@ -300,30 +285,27 @@ public sealed class IntentStage : SafeHandle
         ThrowIfDisposed();
         unsafe
         {
-            lock (LaplaceCoreGate.Native)
+            Hash128 src = sourceId;
+            Hash128 root = default;
+            int rc;
+            if (existingBitmap.IsEmpty)
             {
-                Hash128 src = sourceId;
-                Hash128 root = default;
-                int rc;
-                if (existingBitmap.IsEmpty)
+                rc = NativeInterop.ContentWitnessEmitTree(
+                    handle, tree.DangerousNativeHandle, &src, null, 0, &root);
+            }
+            else
+            {
+                fixed (byte* bm = existingBitmap)
                 {
                     rc = NativeInterop.ContentWitnessEmitTree(
-                        handle, tree.DangerousNativeHandle, &src, null, 0, &root);
+                        handle, tree.DangerousNativeHandle, &src, bm, (nuint)tree.NodeCount, &root);
                 }
-                else
-                {
-                    fixed (byte* bm = existingBitmap)
-                    {
-                        rc = NativeInterop.ContentWitnessEmitTree(
-                            handle, tree.DangerousNativeHandle, &src, bm, (nuint)tree.NodeCount, &root);
-                    }
-                }
-                if (rc == -3) throw new InvalidOperationException(
-                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
-                if (rc != 0) return false;
-                rootId = root;
-                return true;
             }
+            if (rc == -3) throw new InvalidOperationException(
+                "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+            if (rc != 0) return false;
+            rootId = root;
+            return true;
         }
     }
 
