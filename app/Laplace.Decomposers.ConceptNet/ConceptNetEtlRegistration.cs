@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.Decomposers.ConceptNet;
@@ -10,6 +11,9 @@ namespace Laplace.Decomposers.ConceptNet;
 /// </summary>
 public static class ConceptNetEtlRegistration
 {
+    [ModuleInitializer]
+    internal static void Init() => NativeGrammarIngest.RegisterType<ConceptNetDecomposer>();
+
     public static void Register() =>
         EtlWitnessFactory.Register(
             "ConceptNetDecomposer",

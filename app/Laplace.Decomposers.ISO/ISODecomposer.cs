@@ -36,24 +36,13 @@ public sealed class ISODecomposer : IDecomposer{
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Language");
-        boot.AddType("ISO639Code");
-        boot.AddType("LanguageVariant");
-        boot.AddRelationType("IS_LANGUAGE_CODE");
-        boot.AddRelationType("HAS_ISO639_1_CODE");
-        boot.AddRelationType("USES_SCRIPT");
-        boot.AddRelationType("MEMBER_OF_MACROLANGUAGE");
-        boot.AddRelationType("HAS_ISO639_2_CODE");
-        boot.AddRelationType("HAS_LANGUAGE_SCOPE");
-        boot.AddRelationType("HAS_LANGUAGE_TYPE");
-        boot.AddRelationType("HAS_VARIANT_OF");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_NAME_ALIAS");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Language", "ISO639Code", "LanguageVariant"],
+            relationNodeNames: ["IS_LANGUAGE_CODE", "HAS_ISO639_1_CODE", "USES_SCRIPT",
+                "MEMBER_OF_MACROLANGUAGE", "HAS_ISO639_2_CODE", "HAS_LANGUAGE_SCOPE",
+                "HAS_LANGUAGE_TYPE", "HAS_VARIANT_OF", "HAS_DEFINITION", "HAS_NAME_ALIAS"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

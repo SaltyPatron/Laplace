@@ -7,6 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ConceptNet;
 
+[UsesNativeIngest(RequiresEnvOpt = true)]
 public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
@@ -53,16 +54,12 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_LANGUAGE");
-        boot.AddRelationType("HAS_POS");
-        boot.AddRelationType("CORRESPONDS_TO");
+        var relTypes = new List<string>(["HAS_EXAMPLE", "HAS_LANGUAGE", "HAS_POS", "CORRESPONDS_TO"]);
         foreach (var typeName in RelMap.Values)
-            boot.AddRelationType(RelationTypeRegistry.Resolve(typeName).Canonical);
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            LanguageNames.TryAdd(n, 0);
+            relTypes.Add(RelationTypeRegistry.Resolve(typeName).Canonical);
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            relationNodeNames: relTypes,
+            readbackNames: LanguageNames, ct: ct);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

@@ -27,7 +27,7 @@ WHERE id IN (
 );
 
 SELECT relation_type_id('IS_A')
-       = laplace_hash128_blake3('substrate/type/IS_A/v1'::bytea) AS relation_type_path_law;
+       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
 
 SELECT relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
 

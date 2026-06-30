@@ -80,16 +80,10 @@ public sealed class StackDecomposer : IDecomposer
         }
     }
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("CALLS");
-        boot.AddRelationType("DEFINES");
-        boot.AddRelationType("REFERENCES");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            relationNodeNames: ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

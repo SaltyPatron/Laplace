@@ -40,3 +40,6 @@
 #include "37_corpus_expand.sql.in"
 #include "38_geometry_expand.sql.in"
 #include "39_highway.sql.in"
+#include "40_views.sql.in"
+#include "41_analysis.sql.in"
+#include "42_inference_engine.sql.in"

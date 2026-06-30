@@ -24,18 +24,10 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider{
     internal static void TrackLanguage(string? langInput) =>
         VocabularyNames.TrackLanguage(LanguageNames, langInput);
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("IS_SYNONYM_OF");
-        boot.AddRelationType("HAS_LANGUAGE");
-        boot.AddRelationType("HAS_POS");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            LanguageNames.TryAdd(n, 0);
-    }
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            relationNodeNames: ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS"],
+            readbackNames: LanguageNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

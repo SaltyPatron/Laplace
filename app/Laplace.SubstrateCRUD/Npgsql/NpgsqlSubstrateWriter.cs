@@ -357,7 +357,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             IntentStageTable.Entities      => 4,
             IntentStageTable.Physicalities => 11,
-            _                              => 9,
+            _                              => 10,
         };
 
         string stageName = $"{prefix}{tableName}";

@@ -17,19 +17,11 @@ public sealed class AudioDecomposer : IDecomposer
     public int     LayerOrder   => 12;
     public Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Audio_Sample");
-        boot.AddType("Audio_Frame");
-        boot.AddType("Audio_Track");
-        boot.AddType("Voice");
-        boot.AddRelationType("IS_AT_SAMPLE");
-        boot.AddRelationType("HAS_FREQUENCY_PEAK");
-        boot.AddRelationType("HAS_VOICE");
-        boot.AddRelationType("TRANSCRIBES_AS");
-        return context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Audio_Sample", "Audio_Frame", "Audio_Track", "Voice"],
+            relationNodeNames: ["IS_AT_SAMPLE", "HAS_FREQUENCY_PEAK", "HAS_VOICE", "TRANSCRIBES_AS"],
+            ct: ct);
 
 #pragma warning disable CS1998
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

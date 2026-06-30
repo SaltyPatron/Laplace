@@ -11,17 +11,35 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static unsafe class NativeGrammarIngest
 {
+    // Populated by RegisterType<T>() at startup (called from each decomposer assembly's ModuleInitializer
+    // or static constructor). Maps class name → attribute. Avoids string-matching in CanUseNative.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, UsesNativeIngestAttribute>
+        s_attrs = new(StringComparer.Ordinal);
+
+    /// <summary>Register a decomposer class that carries <see cref="UsesNativeIngestAttribute"/>.
+    /// Call once per assembly, typically from a <see cref="System.Runtime.CompilerServices.ModuleInitializerAttribute"/>.</summary>
+    public static void RegisterType<T>() where T : class
+    {
+        var attr = typeof(T).GetCustomAttributes(typeof(UsesNativeIngestAttribute), false)
+                            .OfType<UsesNativeIngestAttribute>().FirstOrDefault();
+        if (attr is not null) s_attrs[typeof(T).Name] = attr;
+    }
+
     public static bool CanUseNative(in EtlSource src, DecomposerOptions? options = null)
     {
-        if (string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal))
+        // Check [UsesNativeIngest] attribute registered by the decomposer assembly.
+        if (s_attrs.TryGetValue(src.Name, out var attr))
         {
-            if (options?.Languages?.IsActive == true) return false;
-            // Opt in with LAPLACE_INGEST_NATIVE=1 for A/B or debugging; default is C# pipeline.
-            return string.Equals(
-                Environment.GetEnvironmentVariable("LAPLACE_INGEST_NATIVE"), "1", StringComparison.Ordinal);
-        }
-        if (string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal))
+            if (attr.RequiresEnvOpt)
+            {
+                if (options?.Languages?.IsActive == true) return false;
+                return string.Equals(
+                    Environment.GetEnvironmentVariable("LAPLACE_INGEST_NATIVE"), "1",
+                    StringComparison.Ordinal);
+            }
             return true;
+        }
+
         // IliSynset anchor fields now resolve natively (etl_anchor.c lp_resolve_synset_anchor),
         // bit-identically to ResolveSynsetAnchor (AnchorResolverParityTests). SenseKey/FrameCategory
         // still EMIT their anchor entity via SenseAnchor.Emit/CategoryAnchor.Emit, which the native

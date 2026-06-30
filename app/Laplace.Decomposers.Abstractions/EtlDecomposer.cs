@@ -44,14 +44,10 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(_src.SourceId, _src.Name, _src.TrustClassId);
-        foreach (var rel in BootstrapRelationNames())
-            boot.AddRelationType(rel);
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-
         var langs = LanguageNamesBySource.GetOrAdd(_src.Name, _ => new(StringComparer.Ordinal));
-        foreach (var n in boot.CanonicalNames)
-            langs.TryAdd(n, 0);
+        await SourceVocabularyBootstrap.RegisterAsync(context, _src.SourceId, _src.Name, _src.TrustClassId,
+            relationNodeNames: BootstrapRelationNames(),
+            readbackNames: langs, ct: ct);
     }
 
     private IEnumerable<string> BootstrapRelationNames()

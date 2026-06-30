@@ -249,7 +249,7 @@ public sealed class PropBankDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == PropBankDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
-            e.Id == Hash128.OfCanonical("substrate/type/PropBank_Roleset/v1"));
+            e.Id == EntityTypeRegistry.Id("PropBank_Roleset"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == PropBankDecomposer.Source

@@ -46,37 +46,18 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("Codepoint");
-        boot.AddType("UcdClassifier");
-        boot.AddType("OrdinalContext");
-        boot.AddRelationType("HAS_GENERAL_CATEGORY");
-        boot.AddRelationType("HAS_COMBINING_CLASS");
-        boot.AddRelationType("HAS_SCRIPT");
-        boot.AddRelationType("HAS_BLOCK");
-        boot.AddRelationType("HAS_UPPERCASE_MAPPING");
-        boot.AddRelationType("HAS_LOWERCASE_MAPPING");
-        boot.AddRelationType("CANONICAL_DECOMPOSES_TO");
-        boot.AddRelationType("HAS_TITLECASE_MAPPING");
-        boot.AddRelationType("COMPATIBILITY_DECOMPOSES_TO");
-        boot.AddRelationType("HAS_NUMERIC_VALUE");
-        boot.AddRelationType("HAS_BIDI_CLASS");
-        boot.AddRelationType("HAS_MIRROR");
-        boot.AddRelationType("HAS_AGE");
-        boot.AddRelationType("HAS_NAME");
-        boot.AddRelationType("HAS_LINE_BREAK");
-        boot.AddRelationType("HAS_EAST_ASIAN_WIDTH");
-        boot.AddRelationType("HAS_JOINING_TYPE");
-        boot.AddRelationType("HAS_NUMERIC_TYPE");
-        boot.AddRelationType("HAS_NAME_ALIAS");
-        boot.AddRelationType("CONFUSABLE_WITH");
-        boot.AddRelationType("HAS_EMOJI_PROPERTY");
-        boot.AddRelationType("DECODES_TO");
-        boot.AddRelationType("HAS_UTF8_ROLE");
-        boot.AddType("Byte");
-        boot.AddType("Utf8Role");
-        boot.AddType("CharacterEncoding");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Codepoint", "UcdClassifier", "OrdinalContext",
+                "Byte", "Utf8Role", "CharacterEncoding"],
+            relationNodeNames: ["HAS_GENERAL_CATEGORY", "HAS_COMBINING_CLASS", "HAS_SCRIPT",
+                "HAS_BLOCK", "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",
+                "CANONICAL_DECOMPOSES_TO", "HAS_TITLECASE_MAPPING",
+                "COMPATIBILITY_DECOMPOSES_TO", "HAS_NUMERIC_VALUE", "HAS_BIDI_CLASS",
+                "HAS_MIRROR", "HAS_AGE", "HAS_NAME", "HAS_LINE_BREAK",
+                "HAS_EAST_ASIAN_WIDTH", "HAS_JOINING_TYPE", "HAS_NUMERIC_TYPE",
+                "HAS_NAME_ALIAS", "CONFUSABLE_WITH", "HAS_EMOJI_PROPERTY",
+                "DECODES_TO", "HAS_UTF8_ROLE"],
+            ct: ct);
 
         EnsureUcdProperties(context);
         var ucdClassifierTypeId = EntityTypeRegistry.UcdClassifier;

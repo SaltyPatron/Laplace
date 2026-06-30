@@ -7,7 +7,7 @@ public static class ByteAtoms
     public const byte First = 0x80;
     public const int Count = 128;
 
-    public static readonly Hash128 TypeId = Hash128.OfCanonical("substrate/type/Byte/v1");
+    public static readonly Hash128 TypeId = Hash128.Blake3("Byte"u8);
 
     private static readonly double[] Coords = ComputeCoords();
     private static readonly Hilbert128[] Hilberts = ComputeHilberts();

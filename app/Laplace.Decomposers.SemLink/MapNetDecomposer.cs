@@ -21,14 +21,11 @@ public sealed class MapNetDecomposer : IDecomposer, IIngestInventoryProvider
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("FrameNet_Frame");
-        boot.AddType("FrameNet_LU");
-        boot.AddRelationType("CORRESPONDS_TO");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["FrameNet_Frame", "FrameNet_LU"],
+            relationNodeNames: ["CORRESPONDS_TO"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

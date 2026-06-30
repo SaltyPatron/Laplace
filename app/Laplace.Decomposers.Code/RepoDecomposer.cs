@@ -49,16 +49,11 @@ public sealed class RepoDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("RepoRoot");
-        boot.AddType("SourceFile");
-        boot.AddRelationType("CONTAINS");
-        boot.AddRelationType("CALLS");
-        boot.AddRelationType("DEFINES");
-        boot.AddRelationType("REFERENCES");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_DEFINITION");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
+        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["RepoRoot", "SourceFile"],
+            relationNodeNames: ["CONTAINS", "CALLS", "DEFINES", "REFERENCES",
+                "HAS_EXAMPLE", "HAS_DEFINITION"],
+            ct: ct);
         _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 

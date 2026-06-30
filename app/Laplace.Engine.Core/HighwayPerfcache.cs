@@ -1,7 +1,29 @@
+using System.Text;
+
 namespace Laplace.Engine.Core;
 
 public static unsafe class HighwayPerfcache
 {
+    /// <summary>Returns the content-addressed hash for a highway node (POS tag, relation type, entity
+    /// type name, etc.). Equivalent to <c>blake3(utf8_bytes)</c> — the canonical identity for any
+    /// entity whose identity IS its surface content. Must match <c>highway_table.c</c> and
+    /// <c>EntityTypeRegistry.Id()</c>.</summary>
+    public static Hash128 NodeHash(ReadOnlySpan<byte> utf8) => Hash128.Blake3(utf8);
+
+    /// <inheritdoc cref="NodeHash(ReadOnlySpan{byte})"/>
+    public static Hash128 NodeHash(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        int maxBytes = Encoding.UTF8.GetMaxByteCount(name.Length);
+        if (maxBytes <= 256)
+        {
+            Span<byte> buf = stackalloc byte[maxBytes];
+            int n = Encoding.UTF8.GetBytes(name, buf);
+            return Hash128.Blake3(buf.Slice(0, n));
+        }
+        return Hash128.Blake3(Encoding.UTF8.GetBytes(name));
+    }
+
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);

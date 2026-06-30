@@ -13,7 +13,7 @@ SELECT word_id('') IS NULL AS empty_is_null;
 
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    type_t   bytea := laplace_hash128_blake3('Type');
     src      bytea := laplace_hash128_blake3('test/converse/source');
     w_dog    bytea := word_id('dog');
     w_p      bytea := word_id('p');

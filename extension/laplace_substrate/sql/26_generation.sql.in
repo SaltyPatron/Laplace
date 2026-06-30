@@ -324,6 +324,45 @@ $$;
 
 
 
+-- consensus_layer_plane_masked: band-mask variant of consensus_layer_plane.
+-- Replaces the rank float window [lo, hi] with a highway band mask filter.
+-- p_band_mask: 32-byte bytea from HighwayPerfcache.BandMask(band).ToByteArray().
+-- Uses entities.highway_mask to pre-filter matching type_ids once (MATERIALIZED),
+-- then the consensus join operates on a small set, not full type enumeration.
+-- Each band produces a DISTINCT operator role (equivalence/taxonomic/causal/associative).
+CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
+        p_vocab bytea[], p_band_mask bytea, p_degree_cap int DEFAULT 48)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, layer_rank double precision)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         band_types AS MATERIALIZED (
+             SELECT e.id, relation_rank_resolved(e.id) AS rank
+             FROM entities e
+             WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+         ),
+         edges AS MATERIALIZED (
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
+                    bt.rank
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN v vo        ON vo.id = c.object_id
+             JOIN band_types bt ON bt.id = c.type_id
+             WHERE bt.rank IS NOT NULL
+         ),
+         ranked AS (
+             SELECT e.subject_id, e.object_id,
+                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, e.rank AS rk
+             FROM edges e
+         ),
+         capped AS (
+             SELECT r.subject_id, r.object_id, r.w, r.rk,
+                    row_number() OVER (PARTITION BY r.subject_id ORDER BY r.rk * r.w DESC, r.object_id) AS rn
+             FROM ranked r
+         )
+    SELECT c.subject_id, c.object_id, c.w, c.rk FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
 -- p_types: when non-null, read ONLY those relation types — uses consensus_type_subject_btree
 -- (type_id, subject_id) to scan just the needed edges instead of every out-edge (~122x fewer rows
 -- in practice). relation_rank_resolved() is resolved once per DISTINCT type and joined, not called

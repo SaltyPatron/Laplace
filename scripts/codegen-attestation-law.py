@@ -407,10 +407,9 @@ static int cmp_str(const char* a, const char* b) {{
 
 static int type_id_from_canonical(const char* canonical_name, hash128_t* out_type_id) {{
     if (!canonical_name || !out_type_id) return -1;
-    char path[256];
-    int n = snprintf(path, sizeof(path), "substrate/type/%s/v1", canonical_name);
-    if (n <= 0 || (size_t)n >= sizeof(path)) return -1;
-    hash128_blake3((const uint8_t*)path, (size_t)n, out_type_id);
+    /* Content-addressed: entity hash = blake3(canonical_name_utf8_bytes).
+     * Must match highway_table.c type_id_for_canonical and EntityTypeRegistry.Id() in C#. */
+    hash128_blake3((const uint8_t*)canonical_name, strlen(canonical_name), out_type_id);
     return 0;
 }}
 
@@ -584,9 +583,9 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     )
 
     
-    seed_names = sorted({f"substrate/type/{n}/v1" for n in canon_names})
+    seed_names = sorted({n for n in canon_names})
     for a in aliases:
-        seed_names.append(f"substrate/type/{a['surface']}/v1")
+        seed_names.append(a['surface'])
     seed_names = sorted(set(seed_names))
     sql_lines = [
         "INSERT INTO canonical_names (id, name)",

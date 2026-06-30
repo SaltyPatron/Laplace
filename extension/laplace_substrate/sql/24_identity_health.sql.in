@@ -27,11 +27,11 @@ IMMUTABLE
 SET search_path = @extschema@, public
 AS $$
     SELECT ARRAY[
-        public.laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea),
-        public.laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea),
-        public.laplace_hash128_blake3('substrate/type/Word/v1'::bytea),
-        public.laplace_hash128_blake3('substrate/type/Sentence/v1'::bytea),
-        public.laplace_hash128_blake3('substrate/type/Document/v1'::bytea)
+        public.laplace_hash128_blake3('Codepoint'::bytea),
+        public.laplace_hash128_blake3('Grapheme'::bytea),
+        public.laplace_hash128_blake3('Word'::bytea),
+        public.laplace_hash128_blake3('Sentence'::bytea),
+        public.laplace_hash128_blake3('Document'::bytea)
     ];
 $$;
 

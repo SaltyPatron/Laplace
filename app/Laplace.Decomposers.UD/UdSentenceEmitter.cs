@@ -12,13 +12,6 @@ public sealed class UdSentenceEmitContext
     private static readonly Hash128 FeatureTypeId = EntityTypeRegistry.UdFeature;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
-    private static readonly ConcurrentDictionary<(string Name, string Value), Hash128> FeatValueIdMemo =
-        new();
-
-    private static Hash128 FeatValueId(string name, string value) =>
-        FeatValueIdMemo.GetOrAdd((name, value), static k =>
-            VocabularyNames.UdFeatureValueId(k.Name, k.Value));
-
     internal readonly Dictionary<Hash128, Hash128> RootByCanonical = new();
     internal Hash128?[] FormId = [];
     internal Dictionary<string, Hash128> RefToForm = new(StringComparer.Ordinal);
@@ -70,11 +63,9 @@ public sealed class UdSentenceEmitContext
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
-                string xposName = $"substrate/pos/xpos/{tok.Xpos}/v1";
-                Hash128 xposId = Hash128.OfCanonical(xposName);
-                canonicalNames.TryAdd(xposName, 0);
-                VocabularyAnchor.Emit(b, xposId, PosReference.PosTypeId, tok.Xpos, sourceId,
-                    TC.AcademicCurated, seenEntBatch);
+                // Content-addressed: xpos entity id = blake3(utf8(tok.Xpos)); HAS_NAME_ALIAS handles legibility.
+                Hash128 xposId = HighwayNodeEmitter.Emit(b, tok.Xpos, PosReference.PosTypeId,
+                    sourceId, TC.AcademicCurated, seenEntBatch);
                 b.AddAttestation(NativeAttestation.Categorical(
                     form, "HAS_XPOS", xposId, sourceId, langId, TC.AcademicCurated));
             }
@@ -83,9 +74,9 @@ public sealed class UdSentenceEmitContext
             {
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
-                Hash128 valId = FeatValueId(fName, fVal);
-                VocabularyAnchor.Emit(b, valId, FeatureTypeId, $"{fName}={fVal}", sourceId,
-                    SourceTrust.AcademicCurated, seenEntBatch);
+                // Content-addressed: feature value entity id = blake3(utf8("{name}={val}")).
+                Hash128 valId = HighwayNodeEmitter.Emit(b, $"{fName}={fVal}", FeatureTypeId,
+                    sourceId, SourceTrust.AcademicCurated, seenEntBatch);
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), sourceId,
                     seenEntBatch, seenAttBatch, canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);

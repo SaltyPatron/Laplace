@@ -41,16 +41,11 @@ public sealed class CILIDecomposer : IDecomposer
         lock (_namesLock) _names.Add(name);
     }
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("WordNet_Synset");
-        boot.AddRelationType("IS_TYPED_AS");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_NAME_ALIAS");
-        boot.AddRelationType("HAS_SYNSET_KEY");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["WordNet_Synset"],
+            relationNodeNames: ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_SYNSET_KEY"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

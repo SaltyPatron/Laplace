@@ -37,15 +37,11 @@ public sealed class RecipeDecomposer : IDecomposer
     public int     LayerOrder   => 5;
     public Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(_source, _sourceName, TrustClass);
-        boot.AddType("Model_Recipe");
-        boot.AddType("Scalar");
-        boot.AddRelationType("HAS_HIDDEN_SIZE");
-        boot.AddRelationType("HAS_NUM_LAYERS");
-        return context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, _source, _sourceName, TrustClass,
+            typeNodeNames: ["Model_Recipe", "Scalar"],
+            relationNodeNames: ["HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

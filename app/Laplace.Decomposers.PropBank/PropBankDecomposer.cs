@@ -43,24 +43,12 @@ public sealed class PropBankDecomposer : IDecomposer{
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("PropBank_Roleset");
-        boot.AddType("VerbNet_Class");
-        boot.AddType("FrameNet_Frame");
-        boot.AddType("Ordinal");
-        boot.AddRelationType("HAS_SENSE");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_SEMANTIC_ROLE");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("CORRESPONDS_TO");
-        boot.AddRelationType("ROLE_CORRESPONDS_TO");
-        boot.AddRelationType("HAS_FEATURE");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            _canonicalNames.TryAdd(n, 0);
-    }
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["PropBank_Roleset", "VerbNet_Class", "FrameNet_Frame", "Ordinal"],
+            relationNodeNames: ["HAS_SENSE", "HAS_DEFINITION", "HAS_SEMANTIC_ROLE", "HAS_EXAMPLE",
+                "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_FEATURE"],
+            readbackNames: _canonicalNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

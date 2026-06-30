@@ -25,38 +25,16 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddRelationType("HAS_POS");
-        boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_ETYMOLOGY");
-        boot.AddRelationType("HAS_HYPERNYM");
-        boot.AddRelationType("HAS_HYPONYM");
-        boot.AddRelationType("IS_PART_OF");
-        boot.AddRelationType("IS_SYNONYM_OF");
-        boot.AddRelationType("IS_ANTONYM_OF");
-        boot.AddRelationType("DERIVATIONALLY_RELATED");
-        boot.AddRelationType("RELATED_TO");
-        boot.AddRelationType("IS_COORDINATE_TERM_WITH");
-        boot.AddRelationType("HAS_USAGE_REGISTER");
-        boot.AddRelationType("HAS_PART");
-        boot.AddRelationType("HAS_VARIANT_OF");
-        boot.AddRelationType("TRANSCRIBES_AS");
-        boot.AddRelationType("IS_TRANSLATION_OF");
-        boot.AddRelationType("ETYMOLOGICALLY_DERIVED_FROM");
-        boot.AddRelationType("BORROWED_FROM");
-        boot.AddRelationType("INHERITED_FROM");
-        boot.AddRelationType("ETYMOLOGICALLY_RELATED_TO");
-        boot.AddRelationType("DERIVED_FROM");
-        boot.AddRelationType("FORM_OF");
-        boot.AddRelationType("HAS_FEATURE");
-        boot.AddRelationType("MANNER_OF");
-        await context.Writer.ApplyAsync(boot.Build(), ct);
-        foreach (var n in boot.CanonicalNames)
-            VocabularyNames.TryAdd(n, 0);
-    }
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            relationNodeNames: ["HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_ETYMOLOGY",
+                "HAS_HYPERNYM", "HAS_HYPONYM", "IS_PART_OF", "IS_SYNONYM_OF", "IS_ANTONYM_OF",
+                "DERIVATIONALLY_RELATED", "RELATED_TO", "IS_COORDINATE_TERM_WITH",
+                "HAS_USAGE_REGISTER", "HAS_PART", "HAS_VARIANT_OF", "TRANSCRIBES_AS",
+                "IS_TRANSLATION_OF", "ETYMOLOGICALLY_DERIVED_FROM", "BORROWED_FROM",
+                "INHERITED_FROM", "ETYMOLOGICALLY_RELATED_TO", "DERIVED_FROM",
+                "FORM_OF", "HAS_FEATURE", "MANNER_OF"],
+            readbackNames: VocabularyNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

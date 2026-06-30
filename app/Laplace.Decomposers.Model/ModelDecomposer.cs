@@ -109,37 +109,15 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         }
     }
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-
-        boot.AddType("Model_Recipe");
-        boot.AddType("Model_Tokenizer");
-        boot.AddType("Scalar");
-        boot.AddType("Architecture");
-        boot.AddType("Ngram");
-        boot.AddType("Model_Layer");
-
-        boot.AddType("Model_Circuit");
-
-        boot.AddRelationType("MERGES_WITH");
-        boot.AddRelationType("SIMILAR_TO");
-        boot.AddRelationType("ATTENDS");
-        boot.AddRelationType("OV_RELATES");
-        boot.AddRelationType("COMPLETES_TO");
-        boot.AddRelationType("CONTINUES_TO");
-        boot.AddRelationType("ENCODES");
-        boot.AddRelationType("TOKEN_MAPS_TO");
-        boot.AddRelationType("HAS_HIDDEN_SIZE");
-        boot.AddRelationType("HAS_NUM_LAYERS");
-        boot.AddRelationType("HAS_NUM_HEADS");
-        boot.AddRelationType("HAS_NUM_KV_HEADS");
-        boot.AddRelationType("HAS_INTERMEDIATE_SIZE");
-        boot.AddRelationType("HAS_VOCAB_SIZE");
-        boot.AddRelationType("IS_A");
-
-        return context.Writer.ApplyAsync(boot.Build(), ct);
-    }
+    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+            typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
+                "Ngram", "Model_Layer", "Model_Circuit"],
+            relationNodeNames: ["MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
+                "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO",
+                "HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS", "HAS_NUM_HEADS", "HAS_NUM_KV_HEADS",
+                "HAS_INTERMEDIATE_SIZE", "HAS_VOCAB_SIZE", "IS_A"],
+            ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,
