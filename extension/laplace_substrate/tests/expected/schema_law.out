@@ -5,7 +5,6 @@ ERROR:  extension "laplace_geom" already exists
 CREATE EXTENSION laplace_substrate;
 ERROR:  extension "laplace_substrate" already exists
 SET search_path TO laplace, public;
--- Column law: no legacy type column (ContentRoundtrip refactor).
 SELECT count(*) = 0 AS no_legacy_type_column
 FROM information_schema.columns
 WHERE table_schema = 'laplace'
@@ -97,7 +96,6 @@ WHERE n.nspname = 'laplace'
 (1 row)
 
 -- Retirement pin: T0 renders come from the perfcache (codepoint_for_id), never
--- a shadow table. The 1.1M-row codepoint_render table must not reappear.
 SELECT count(*) = 0 AS no_codepoint_render_shadow
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace

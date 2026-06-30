@@ -47,9 +47,9 @@ BEGIN
         (sent, 3, type_t, src), (sent2, 3, type_t, src), (doc, 4, type_t, src);
 
     
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-space'), sp, src, 1,
+    VALUES (laplace_hash128_blake3('test/corpus/phys-space'), sp, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -58,9 +58,9 @@ BEGIN
             2, now());
 
     
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence'), sent, src, 1,
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence'), sent, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -74,9 +74,9 @@ BEGIN
             7, now());
 
     
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-doc'), doc, src, 1,
+    VALUES (laplace_hash128_blake3('test/corpus/phys-doc'), doc, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -84,9 +84,9 @@ BEGIN
             1, now());
 
     
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence2'), sent2, src, 1,
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence2'), sent2, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -143,7 +143,7 @@ BEGIN
 
     
     INSERT INTO entities (id, tier, type_id, first_observed_by)
-    VALUES (relation_type_id('COMPLETES_TO'), 0, type_t, src)
+    VALUES (relation_type_id('COMPLETES_TO'), 0, entity_type_id('RelationType'), src)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
@@ -160,9 +160,9 @@ BEGIN
     
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (sent3, 3, type_t, src);
-    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, src, 1,
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[

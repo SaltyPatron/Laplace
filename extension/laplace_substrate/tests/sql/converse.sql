@@ -13,6 +13,7 @@ SELECT word_id('') IS NULL AS empty_is_null;
 
 DO $$
 DECLARE
+    rel_meta bytea := entity_type_id('RelationType');
     type_t   bytea := laplace_hash128_blake3('Type');
     src      bytea := laplace_hash128_blake3('test/converse/source');
     w_dog    bytea := word_id('dog');
@@ -42,9 +43,10 @@ DECLARE
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
-           (k_sense, 0, type_t, src), (k_senseof, 0, type_t, src), (k_def, 0, type_t, src),
-           (k_syn, 0, type_t, src),
-           (k_causes, 0, type_t, src), (k_anto, 0, type_t, src),
+           (k_sense, 0, rel_meta, src), (k_senseof, 0, rel_meta, src), (k_def, 0, rel_meta, src),
+           (k_syn, 0, rel_meta, src), (k_member, 0, rel_meta, src), (k_lang, 0, rel_meta, src),
+           (k_isa, 0, rel_meta, src),
+           (k_causes, 0, rel_meta, src), (k_anto, 0, rel_meta, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
            (w_c, 0, type_t, src),
            (sense1, 0, type_t, src), (synset1, 0, type_t, src),
