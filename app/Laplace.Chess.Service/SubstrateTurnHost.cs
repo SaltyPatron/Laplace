@@ -105,9 +105,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
     {
         if (edges.Count == 0) return;
 
-        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/selfplay/game")
-            .EnableDeferredContent(_reader);
-
+        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/selfplay/game");
         // The self-play mover is the substrate itself — every move is PLAYED_BY the Laplace player, under
         // the self-play source (low trust: high-temp exploration, not authoritative play).
         ChessVocabulary.EmitPlayer(b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId);

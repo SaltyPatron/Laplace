@@ -1,4 +1,3 @@
-# Upgrade order — synced from manifest.install
 schema/laplace_substrate_version.sql.in
 schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in

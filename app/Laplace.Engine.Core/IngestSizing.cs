@@ -71,11 +71,11 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Pending probe units each hold a full native compose-probe heap. Scale down with parallel
-    /// file workers so total in-flight probes ≈ batch size, not batch × workers × 512.
+    /// Pending probe units each hold a full native compose-probe heap. One round-trip covers all
+    /// tiers (T0 perfcache + bulk join + Merkle walk in PG); scale chunk with record batch size.
     /// </summary>
     public static int ResolveProbeChunk(int recordBatchSize, int fileWorkers = 1) =>
-        Math.Clamp(recordBatchSize / Math.Max(1, fileWorkers * 8), 32, 256);
+        Math.Clamp(recordBatchSize / Math.Max(1, Math.Min(fileWorkers, 4)), 128, 2048);
 
     /// <summary>
     /// Bounds native compose heaps buffered before a commit without forcing tiny commits on

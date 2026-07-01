@@ -1,5 +1,6 @@
 set(LAPLACE_DYNAMICS_TEST_SOURCES
     test_init.cpp
+    test_toolchain.cpp
     test_procrustes.cpp
     test_eigenmaps.cpp
     test_gram_schmidt.cpp

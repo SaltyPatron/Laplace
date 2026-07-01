@@ -81,8 +81,7 @@ if(WIN32)
         lwgeom_static
         "${LAPLACE_PG_LIBDIR}/postgres.lib"
     )
-    return()
-endif()
+else()
 
 set(EXT_NAME    laplace_geom)
 set(EXT_VERSION ${PROJECT_VERSION})
@@ -167,6 +166,15 @@ target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
 )
 
+endif()
+
+if(NOT EXT_NAME)
+    set(EXT_NAME laplace_geom)
+endif()
+if(NOT EXT_VERSION)
+    set(EXT_VERSION ${PROJECT_VERSION})
+endif()
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
@@ -200,12 +208,13 @@ add_custom_command(
     DEPENDS ${EXT_SQL_MODULES}
             ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND ${LAPLACE_SQLPP} -traditional-cpp -w -P -Upixel -Ubool
+    COMMAND ${LAPLACE_SQLPP} ${LAPLACE_SQLPP_FLAGS}
             -I${CMAKE_CURRENT_SOURCE_DIR}/sql
             -I${CMAKE_CURRENT_BINARY_DIR}/sql
+            -I${CMAKE_CURRENT_BINARY_DIR}/sql/generated
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}.sql.in
             > ${EXT_TMP_SQL}
-    COMMAND bash -c "grep -v '^#' ${EXT_TMP_SQL} \
+    COMMAND ${BASH} -c "grep -v '^#' ${EXT_TMP_SQL} \
             | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
             | perl -lpe \"s'\@extschema\@\\\\.''g\" \
             > ${EXT_BUILT_SQL}"
@@ -217,6 +226,7 @@ add_custom_command(
 add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
+if(NOT WIN32)
 install(TARGETS ${EXT_NAME}
     LIBRARY
         DESTINATION ${LAPLACE_EXT_LIBDIR}
@@ -229,6 +239,8 @@ install(FILES
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
-if(BUILD_TESTING)
+endif()
+
+if(BUILD_TESTING AND NOT WIN32)
     add_subdirectory(tests)
 endif()

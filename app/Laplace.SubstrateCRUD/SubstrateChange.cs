@@ -26,10 +26,6 @@ public sealed record SubstrateChange(
 
 
 
-
-
-
-
 public sealed record TestimonyWalkRow(
     Hash128   Subject,
     Hash128   TypeId,

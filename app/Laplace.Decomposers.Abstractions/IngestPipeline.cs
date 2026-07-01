@@ -74,7 +74,7 @@ public sealed class IngestBatchConfig
     public long MaxInputUnits { get; init; }
 
     /// <summary>When false, the builder does not route content through <see cref="ContentBatch"/> (multi-tree handlers emit directly).</summary>
-    public bool EnableDeferredContentOnBuilder { get; init; } = true;
+    public bool EnableDeferredContentOnBuilder { get; init; } = false;
 
     public int? EntityCapacity { get; init; }
     public int? PhysicalityCapacity { get; init; }
@@ -87,13 +87,12 @@ public sealed class IngestBatchConfig
             physicalityCapacity: PhysicalityCapacity ?? BatchSize,
             attestationCapacity: AttestationCapacity ?? BatchSize * 4)
             .SetCommitEpoch(CommitEpoch);
-        if (EnableDeferredContentOnBuilder)
-            b.EnableDeferredContent(EffectiveReader);
+        if (EnableDeferredContentOnBuilder && ContainmentReader is not null)
+            b.EnableDeferredContent(ContainmentReader);
         return b;
     }
 
-    internal ISubstrateReader? EffectiveReader =>
-        IntentStage.IsBulkFreshBypass ? null : ContainmentReader;
+    internal ISubstrateReader? EffectiveReader => ContainmentReader;
 
     public IngestBatchConfig WithMaxInputUnits(long max) =>
         new()
@@ -120,16 +119,36 @@ public sealed class IngestBatchConfig
 /// </summary>
 public static class IngestBatchPipeline
 {
+    /// <summary>Cold-path reader: every probe returns absent without DB I/O.</summary>
+    internal sealed class AllAbsentSubstrateReader : ISubstrateReader
+    {
+        internal static readonly AllAbsentSubstrateReader Instance = new();
+
+        public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
+        public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
+        public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default) =>
+            Task.FromResult(0L);
+
+        public Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default) =>
+            Task.FromResult(new byte[(candidates.Count + 7) / 8]);
+
+        public Task<byte[]> ContentDescentBitmapAsync(
+            IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default) =>
+            Task.FromResult(new byte[(ids.Count + 7) / 8]);
+    }
+
     public static async IAsyncEnumerable<SubstrateChange> RunAsync<TRecord>(
         IRecordStream<TRecord> stream,
         IIngestRecordHandler<TRecord> handler,
         IngestBatchConfig config,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var reader = config.EffectiveReader;
-        var pending = reader is not null
-            ? new List<(TRecord Record, IIngestDeferredUnit Unit)>(config.ProbeChunkSize)
-            : null;
+        var reader = config.EffectiveReader ?? AllAbsentSubstrateReader.Instance;
+        var pending = new List<TRecord>(config.ProbeChunkSize);
 
         var state = new BatchState(config.NewBuilder(0));
         long rowsTotal = 0;
@@ -150,33 +169,13 @@ public static class IngestBatchPipeline
                 yield break;
             }
 
-            if (reader is null)
+            pending.Add(record);
+            if (pending.Count >= config.ProbeChunkSize)
             {
-                using (var unit = handler.CreateDeferredUnit(record))
-                {
-                    var root = unit.DrainInto(state.Builder, config.WitnessWeight, null);
-                    handler.WalkWitness(record, root, state.Builder, unit);
-                }
-                state.AddUnits(units);
-                unitsConsumed += units;
+                await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
+                    yield return change;
             }
-            else if (!IntentStage.IsBulkFreshBypass
-                     && await handler.TryTrunkShortcircuitAsync(
-                         record, state.Builder, reader, config.WitnessWeight, ct).ConfigureAwait(false))
-            {
-                state.AddUnits(units);
-                unitsConsumed += units;
-            }
-            else
-            {
-                pending!.Add((record, handler.CreateDeferredUnit(record)));
-                if (pending.Count >= config.ProbeChunkSize)
-                {
-                    await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
-                        yield return change;
-                }
-                unitsConsumed += units;
-            }
+            unitsConsumed += units;
 
             config.ReportUnits?.Invoke(rowsTotal);
 
@@ -187,9 +186,9 @@ public static class IngestBatchPipeline
             }
         }
 
-        if (pending is { Count: > 0 })
+        if (pending.Count > 0)
         {
-            await foreach (var change in FlushPending(pending, handler, reader!, state, config, ct))
+            await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
                 yield return change;
         }
 
@@ -253,63 +252,30 @@ public static class IngestBatchPipeline
     }
 
     private static async IAsyncEnumerable<SubstrateChange> FlushPending<TRecord>(
-        List<(TRecord Record, IIngestDeferredUnit Unit)>? pending,
+        List<TRecord> pending,
         IIngestRecordHandler<TRecord> handler,
-        ISubstrateReader? reader,
+        ISubstrateReader reader,
         BatchState state,
         IngestBatchConfig config,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        if (pending is not { Count: > 0 } || reader is null) yield break;
+        if (pending.Count == 0) yield break;
 
-        var flatTrees = new List<TierTree?>();
-        var treeRanges = new List<(int Start, int Count)>(pending.Count);
-        foreach (var (_, unit) in pending)
+        var batch = pending.ToList();
+        pending.Clear();
+
+        var drained = await IngestDescentFlush.ProbeAndDrainAsync(
+            batch, handler, reader, state.Builder, config, ct).ConfigureAwait(false);
+
+        foreach (var (_, units) in drained)
         {
-            if (unit is IMultiTreeIngestDeferredUnit multi)
-            {
-                var trees = multi.AllProbeTrees;
-                treeRanges.Add((flatTrees.Count, trees.Count));
-                flatTrees.AddRange(trees);
-            }
-            else
-            {
-                treeRanges.Add((flatTrees.Count, 1));
-                flatTrees.Add(unit.TreeForBatchProbe);
-            }
-        }
-
-        byte[]?[] flatBitmaps = await TierTreeContainmentProbe
-            .ProbeBatchNodeEmitBitmapsAsync(flatTrees, reader, ct).ConfigureAwait(false);
-
-        for (int i = 0; i < pending.Count; i++)
-        {
-            var (record, unit) = pending[i];
-            var (start, count) = treeRanges[i];
-            try
-            {
-                Hash128 root = unit is IMultiTreeIngestDeferredUnit multi
-                    ? multi.DrainInto(state.Builder, config.WitnessWeight, flatBitmaps.AsSpan(start, count))
-                    : unit.DrainInto(state.Builder, config.WitnessWeight,
-                        count > 0 ? flatBitmaps[start] : null);
-                handler.WalkWitness(record, root, state.Builder, unit);
-                if (root != default)
-                    reader.MarkProven([root]);
-            }
-            finally
-            {
-                unit.Dispose();
-            }
-
-            state.AddUnits(handler.UnitsPerRecord(record));
-
+            state.AddUnits(units);
             if (state.InBatch >= config.BatchSize)
             {
                 yield return await state.YieldBatchAsync(ct);
                 state.ResetBuilder(config.NewBuilder(state.BatchNumber));
             }
         }
-        pending.Clear();
     }
 
     private sealed class BatchState(SubstrateChangeBuilder builder)

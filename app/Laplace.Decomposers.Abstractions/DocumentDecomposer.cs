@@ -31,7 +31,6 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
         if (options.DryRun) yield break;
 
         ISubstrateReader? reader = context.Reader;
-        if (IntentStage.IsBulkFreshBypass) reader = null;
 
         int batchSize = options.BatchSize > 1 ? options.BatchSize : 32;
 

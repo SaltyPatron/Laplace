@@ -11,7 +11,7 @@ public sealed class IngestSizingTests
         // 8 P-cores, 6 file workers, 8 apply partitions (explicit override path)
         var plan = IngestSizing.Resolve(8, 6, 8);
         Assert.Equal(2048, plan.RecordBatchSize);
-        Assert.Equal(42, plan.ProbeChunkSize); // 2048 / (6*8)
+        Assert.Equal(512, plan.ProbeChunkSize); // 2048 / min(6,4), clamp [128,2048]
         Assert.Equal(50_000, plan.CommitRows);
         Assert.Equal(3, plan.MaxIntentsPerCommit);
         Assert.Equal(38, plan.DecomposeChannelCapacity);

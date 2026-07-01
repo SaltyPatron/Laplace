@@ -42,7 +42,8 @@ public sealed class FakeTabIngestDecomposerTests
         await foreach (var change in decomposer.DecomposeAsync(ctx, DecomposerOptions.Default))
             changes.Add(change);
 
-        Assert.True(reader.DescentProbeCalls > 0);
+        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present rows");
+        Assert.Equal(0, reader.DescentProbeCalls);
         Assert.Equal(0, ContentEntityCount(changes));
     }
 

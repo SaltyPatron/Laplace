@@ -22,6 +22,9 @@ internal static class CliRuntime
                 s += ";Include Error Detail=true";
             if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
                 s += ";Search Path=laplace,public";
+            if (!s.Contains("Command Timeout", StringComparison.OrdinalIgnoreCase)
+                && !s.Contains("Timeout", StringComparison.OrdinalIgnoreCase))
+                s += ";Command Timeout=0";
             return s;
         }
     }

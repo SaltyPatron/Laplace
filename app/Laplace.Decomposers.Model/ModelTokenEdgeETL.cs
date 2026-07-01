@@ -176,6 +176,10 @@ public sealed class ModelTokenEdgeETL
         var Vt = new float[(long)kmax * d];
         var Ac = CenteredCopyF(Af, n, d);   // anisotropy denoise: strip the common-mode before SVD (Af untouched)
         int rc = RunSvd(Ac, n, d, kmax, U, S, Vt, out int rank);
+        if (rc == -2)
+            throw new InvalidOperationException(
+                "tensor_svd_truncate rc=-2: MKL/LAPACK unavailable in laplace_synthesis — "
+                + "rebuild with setvars and -DLAPLACE_SYNTHESIS_REQUIRE_MKL=ON.");
         if (rc != 0) { _log.LogWarning("phase=edges: tensor_svd_truncate rc={Rc}; skipping similarity", rc); yield break; }
         if (rank < 2) { _log.LogWarning("phase=edges: SVD rank {R}<2; skipping similarity", rank); yield break; }
 

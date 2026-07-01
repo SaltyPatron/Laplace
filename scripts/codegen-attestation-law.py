@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "engine/manifest"
 OUT_CORE = ROOT / "engine/core"
-OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/21_seed_relation_types.sql.in"
+OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/seed_relation_types.sql.in"
 
 
 def parse_simple_toml(path: Path) -> dict:
@@ -721,7 +721,7 @@ def emit_pos_law(pos: dict) -> None:
 
     
     pos_seeds = [f"substrate/pos/{u}/v1" for u in upos_list]
-    pos_frag = OUT_SEED_FRAG.parent / "21_seed_pos.sql.in"
+    pos_frag = OUT_SEED_FRAG.parent / "seed_pos.sql.in"
     sql = [
         "INSERT INTO canonical_names (id, name)",
         "SELECT canonical_id(v.name), v.name",

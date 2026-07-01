@@ -88,21 +88,34 @@ public sealed class ChessPgnDecomposer : IDecomposer
         var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
         EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo);
 
-        var clocks = PgnClocks.SecondsRemaining(gameText, moves.Count);
+        int moveCount = moves.Count;
+        var clockTokens = PgnClocks.ClockTokens(gameText, moveCount);
+        var clocks = clockTokens is not null
+            ? clockTokens.Select(t =>
+            {
+                var p = t.Split(':');
+                return int.Parse(p[0]) * 3600 + int.Parse(p[1]) * 60
+                    + double.Parse(p[2], System.Globalization.CultureInfo.InvariantCulture);
+            }).ToArray()
+            : Array.Empty<double>();
         double medianDrop = PgnClocks.MedianDrop(clocks);
-        var evals = PgnEvals.Centipawns(gameText, moves.Count);
+        var evalTokens = PgnEvals.EvalTokens(gameText, moveCount);
+        var evals = evalTokens is not null
+            ? evalTokens.Select(PgnEvals.ParseToken).ToArray()
+            : PgnEvals.Centipawns(gameText, moveCount);
+
+        EmitGameOpeningMeta(b, gameId, gameText, moves, modality);
+
         AppendGame(b, modality, walk.Mainline, result,
-                   whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId, evals);
+                   whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId,
+                   evals, clockTokens, evalTokens);
 
         if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_VARIATIONS"), "1", StringComparison.Ordinal))
             AppendVariations(b, modality, walk.AllPlies, whiteElo, blackElo, whitePlayer, blackPlayer);
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
-        // Deferred-content skip ON: chess openings/positions repeat massively across games, so the probe
-        // lets repeated content stage once instead of re-emitting every occurrence. Serial enumeration
-        // keeps the probe's connection use bounded.
-        => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn").EnableDeferredContent(ctx.Reader);
+        => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn");
 
     /// <summary>
     /// Stream a PGN file game-by-game: read lines, accumulate from one <c>[Event </c> tag to the next,
@@ -162,6 +175,30 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, gameId, src);
     }
 
+    /// <summary>Game-level opening/ECO/motif from PGN headers + classifier.</summary>
+    private static void EmitGameOpeningMeta(
+        SubstrateChangeBuilder b, Hash128 gameId, string gameText,
+        IReadOnlyList<string> sans, ChessModality modality)
+    {
+        var src = ChessVocabulary.PgnSourceId;
+        string ecoHeader = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
+        if (ecoHeader.Length > 0)
+            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", ecoHeader, PgnWitnessWeight, src);
+
+        string openingHeader = ChessCanonical.OpeningName(PgnGames.TagStr(gameText, "Opening")) ?? "";
+        if (openingHeader.Length > 0)
+            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", openingHeader, PgnWitnessWeight, src);
+
+        var classified = OpeningClassifier.Classify(sans, modality);
+        if (classified.Eco is { } eco && eco != ecoHeader)
+            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
+        if (classified.Name is { } name && name != openingHeader)
+            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", name, PgnWitnessWeight, src);
+
+        if (ChessMotifs.Detect(sans) is { } motif)
+            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", motif, PgnWitnessWeight, src);
+    }
+
     /// <summary>Game → metadata-value content edge (skips empty/"?"/"-" placeholders).</summary>
     private static void Meta(SubstrateChangeBuilder b, Hash128 game, string rel, string value, Hash128 src)
     {
@@ -192,12 +229,14 @@ public sealed class ChessPgnDecomposer : IDecomposer
     private static void AppendGame(
         SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> plies,
         GameOutcome result, int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
-        double[] clocks, double medianDrop, Hash128 gameId, int[]? evals)
+        double[] clocks, double medianDrop, Hash128 gameId, int[]? evals,
+        string[]? clockTokens, string[]? evalTokens)
     {
         bool mate = plies.Count > 0 && plies[^1].San.IndexOf('#') >= 0;
         int? winner = result.IsDraw ? null : result.Winner;
         const long evalGames = 2;
         const double evalWeight = 0.55;
+        const double metaWeight = PgnWitnessWeight;
 
         var state = m.Initial();
         for (int ply = 0; ply < plies.Count; ply++)
@@ -221,6 +260,19 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 moveChoiceGames: moveChoiceGames,
                 contextId: gameId,
                 ply: ply + 1);
+
+            if (clockTokens is not null && ply < clockTokens.Length)
+            {
+                ChessGraph.AppendClock(b, fromKey, clockTokens[ply], metaWeight,
+                    ChessVocabulary.PgnSourceId, gameId);
+                if (clocks.Length > 0)
+                    ChessGraph.AppendThinkClass(b, fromKey, ChessCanonical.ThinkClass(tf), metaWeight,
+                        ChessVocabulary.PgnSourceId, gameId);
+            }
+
+            if (evalTokens is not null && ply < evalTokens.Length)
+                ChessGraph.AppendEvalToken(b, fromKey, evalTokens[ply], metaWeight,
+                    ChessVocabulary.EvalPgnSourceId, gameId);
 
             if (evals is not null && ply < evals.Length)
             {

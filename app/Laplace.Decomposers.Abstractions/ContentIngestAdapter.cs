@@ -46,19 +46,23 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
         {
             get
             {
-                _tree ??= IntentStage.BuildContentTree(_canonical);
+                if (_tree is null)
+                    _tree = IntentStage.BuildContentTree(_canonical);
                 return _tree;
             }
         }
 
-        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
-            TreeForBatchProbe is null
-                ? Task.FromResult<byte[]?>(null)
-                : TierTreeContainmentProbe.ProbeNodeEmitBitmapAsync(TreeForBatchProbe, reader, ct);
+        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct)
+        {
+            if (TreeForBatchProbe is null)
+                return Task.FromResult<byte[]?>(null);
+            return TierTreeContainmentProbe.ProbeNodeEmitBitmapAsync(_tree!, reader, ct);
+        }
 
         public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
         {
-            _tree ??= IntentStage.BuildContentTree(_canonical);
+            if (_tree is null)
+                _tree = IntentStage.BuildContentTree(_canonical);
             if (_tree is null) return default;
             builder.ContentStage.EmitContentTree(
                 _tree, _sourceId, descentBitmap ?? ReadOnlySpan<byte>.Empty, out var rootId);

@@ -41,7 +41,7 @@ public sealed class UdIngestPipelineTests
     { }
 
     Assert.Equal(ExpectedDescentProbeChunks(sentenceCount, sentenceCount), reader.DescentProbeCalls);
-    Assert.True(reader.FlatProbeCalls >= 1, "tier01 flat probe should run for content trees");
+    Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN + tier1 flat completion");
   }
 
   [Fact]

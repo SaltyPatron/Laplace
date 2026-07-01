@@ -43,9 +43,9 @@ public sealed class IngestBatchPipelineTests
             changes.Add(change);
 
         Assert.Equal(ExpectedDescentProbeChunks(rowCount, probeChunk), reader.DescentProbeCalls);
-        Assert.True(reader.MaxFlatCandidates <= totalTier01,
-            $"max flat candidates {reader.MaxFlatCandidates} should be batched tier01-only (<= {totalTier01}), not all nodes ({totalNodes})");
-        Assert.Equal(1, reader.FlatProbeCalls);
+        Assert.True(reader.FlatCandidateCounts.Count >= 1);
+        Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
+        Assert.True(reader.FlatProbeCalls >= 2, "root bulk IN then tier1 flat completion");
         Assert.True(ContentEntityCount(changes) > 0);
     }
 
@@ -66,7 +66,7 @@ public sealed class IngestBatchPipelineTests
         { }
 
         Assert.Equal(1, reader.DescentProbeCalls);
-        Assert.Equal(1, reader.FlatProbeCalls);
+        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN + tier1 flat completion");
     }
 
     [Fact]
@@ -88,7 +88,8 @@ public sealed class IngestBatchPipelineTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
             changes.Add(c);
 
-        Assert.Equal(ExpectedDescentProbeChunks(records.Count, 1024), reader.DescentProbeCalls);
+        Assert.Equal(1, reader.FlatProbeCalls);
+        Assert.Equal(0, reader.DescentProbeCalls);
         Assert.Equal(0, ContentEntityCount(changes));
         Assert.Equal(records.Count, changes.Sum(x => x.Metadata.InputUnitsConsumed));
     }
@@ -159,8 +160,8 @@ public sealed class IngestBatchPipelineTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
             changes.Add(c);
 
-        Assert.True(reader.Tier01FlatCalls > 0, "tier 0/1 nodes must be flat-probed");
-        Assert.True(reader.DescentCalls > 0, "T2+ trunks must still descent-probe");
+        Assert.True(reader.Tier01FlatCalls >= 1, "tier 1 nodes flat-probed after root gate");
+        Assert.True(reader.DescentCalls > 0, "T2+ trunks descent-probe after compose");
         var baseline = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig()))

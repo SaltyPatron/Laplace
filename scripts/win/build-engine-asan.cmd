@@ -45,6 +45,8 @@ cmake -B build-win-asan -S engine -G Ninja ^
   -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON ^
   -DBLAKE3_SIMD_TYPE=none ^
   -DBUILD_TESTING=ON ^
+  -DLAPLACE_REQUIRE_MKL=ON ^
+  -DLAPLACE_SYNTHESIS_REQUIRE_MKL=ON ^
   "-DLAPLACE_UCD_PATH=D:/Data/Ingest/UCD/Public/UCD/latest" ^
   "-DLAPLACE_UCDXML_ZIP=D:/Data/Ingest/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip" ^
   "-DLAPLACE_DUCET_FILE=D:/Data/Ingest/UCD/Public/UCD/latest/uca/allkeys.txt" ^

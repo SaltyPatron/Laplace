@@ -381,8 +381,8 @@ build-cutechess/
 /engine/core/src/generated/.attestation-law-stamp
 /engine/core/include/laplace/core/relation_law.h
 /engine/core/include/laplace/core/pos_law.h
-/extension/laplace_substrate/sql/generated/21_seed_relation_types.sql.in
-/extension/laplace_substrate/sql/generated/21_seed_pos.sql.in
+/extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
+/extension/laplace_substrate/sql/generated/seed_pos.sql.in
 
 app/Laplace.Endpoints.OpenAICompat/wwwroot/
 web/node_modules/

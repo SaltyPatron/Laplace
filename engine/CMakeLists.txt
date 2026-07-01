@@ -12,16 +12,11 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
-    add_compile_options(
-        -Wall -Wextra
-        /fp:precise
-    )
+    add_compile_options(-Wall -Wextra)
+    set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma-)
 else()
-    add_compile_options(
-        -Wall -Wextra -Wpedantic
-        -fno-fast-math
-        -ffp-contract=off
-    )
+    add_compile_options(-Wall -Wextra -Wpedantic)
+    set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma)
 endif()
 
 set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)")
@@ -32,11 +27,21 @@ if(WIN32)
     elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
         add_compile_options(/arch:AVX512)
     endif()
+    if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+        add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
+    else()
+        add_compile_definitions(LAPLACE_MKL_CBWR_AVX2=1)
+    endif()
 else()
     if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
         add_compile_options(-march=haswell)
     elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
         add_compile_options(-march=sapphirerapids)
+    endif()
+    if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+        add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
+    else()
+        add_compile_definitions(LAPLACE_MKL_CBWR_AVX2=1)
     endif()
 endif()
 
@@ -173,3 +178,14 @@ add_subdirectory(dynamics)
 add_subdirectory(synthesis)
 
 add_subdirectory(core/tools/ucd_tables_emit)
+
+foreach(_laplace_engine_target IN ITEMS
+        laplace_core laplace_core_static
+        laplace_dynamics laplace_dynamics_static
+        laplace_synthesis
+        laplace_core_tests laplace_dynamics_tests laplace_synthesis_tests)
+    if(TARGET ${_laplace_engine_target})
+        target_compile_options(${_laplace_engine_target} PRIVATE ${LAPLACE_ENGINE_FP_FLAGS})
+    endif()
+endforeach()
+unset(_laplace_engine_target)

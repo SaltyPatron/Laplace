@@ -21,7 +21,6 @@ public static class TierTreeDescent
 
         for (int j = 0; j < n; j++)
         {
-            if (tree.GetNode((uint)j).Tier < 2) continue;
             treeIdxToFlat[j] = ids.Count;
             ids.Add(tree.GetNode((uint)j).Id);
         }
@@ -92,13 +91,10 @@ public static class TierTreeDescent
 
         if (treeIdxToFlat is null)
         {
-            int g = 0;
             for (int j = 0; j < n; j++)
             {
-                if (tree.GetNode((uint)j).Tier < 2) continue;
-                if (g < descentBits && (descentBm[g >> 3] & (1 << (g & 7))) != 0)
+                if (j < descentBits && (descentBm[j >> 3] & (1 << (j & 7))) != 0)
                     bm[j >> 3] |= (byte)(1 << (j & 7));
-                g++;
             }
         }
         else
@@ -139,7 +135,6 @@ public static class TierTreeDescent
 
             for (int j = 0; j < n; j++)
             {
-                if (tree.GetNode((uint)j).Tier < 2) continue;
                 treeIdxToFlat[j] = ids.Count;
                 ids.Add(tree.GetNode((uint)j).Id);
             }
@@ -187,6 +182,27 @@ public static class TierTreeDescent
                     perTreeEmitBm[t][j >> 3] |= (byte)(1 << (j & 7));
                 else
                     unresolvedTier0.Add((t, j));
+            }
+        }
+    }
+
+    /// <summary>Tier 0 (scalar codepoint) ids for a flat DB existence probe.</summary>
+    public static void BuildBatchTier0Probe(
+        IReadOnlyList<TierTree> trees,
+        out List<Hash128> ids,
+        out List<(int TreeIndex, int NodeIndex)> placements)
+    {
+        ids = new List<Hash128>();
+        placements = new List<(int, int)>();
+        for (int t = 0; t < trees.Count; t++)
+        {
+            var tree = trees[t];
+            int n = tree.NodeCount;
+            for (int j = 0; j < n; j++)
+            {
+                if (tree.GetNode((uint)j).Tier != 0) continue;
+                placements.Add((t, j));
+                ids.Add(tree.GetNode((uint)j).Id);
             }
         }
     }
@@ -292,27 +308,21 @@ public static class TierTreeDescent
                 : NodeEmitBitmap(tree, descentBm, treeIdxToFlat[t]);
         }
 
-        BuildBatchTier0PerfcachePresent(probeTrees, perTreeBm, out var unresolvedTier0);
+        if (ids.Count > 0) reader.MarkProven(ids);
+
+        BuildBatchTier0Probe(probeTrees, out var tier0Ids, out var tier0Placements);
+        if (tier0Ids.Count > 0)
+        {
+            byte[] tier0Bm = await reader.EntitiesExistBitmapAsync(tier0Ids, ct).ConfigureAwait(false);
+            ApplyBatchTier01Present(perTreeBm, tier0Placements, tier0Bm);
+        }
 
         BuildBatchTier1Probe(probeTrees, out var tier1Ids, out var tier1Placements);
-
-        var dbIds = new List<Hash128>(tier1Ids.Count + unresolvedTier0.Count);
-        var dbPlacements = new List<(int TreeIndex, int NodeIndex)>(tier1Placements.Count + unresolvedTier0.Count);
-        dbPlacements.AddRange(tier1Placements);
-        dbIds.AddRange(tier1Ids);
-        foreach (var (t, j) in unresolvedTier0)
+        if (tier1Ids.Count > 0)
         {
-            dbPlacements.Add((t, j));
-            dbIds.Add(probeTrees[t].GetNode((uint)j).Id);
+            byte[] tier1Bm = await reader.EntitiesExistBitmapAsync(tier1Ids, ct).ConfigureAwait(false);
+            ApplyBatchTier01Present(perTreeBm, tier1Placements, tier1Bm);
         }
-
-        if (dbIds.Count > 0)
-        {
-            byte[] flat = await reader.EntitiesExistBitmapAsync(dbIds, ct).ConfigureAwait(false);
-            ApplyBatchTier01Present(perTreeBm, dbPlacements, flat);
-        }
-
-        if (ids.Count > 0) reader.MarkProven(ids);
 
         for (int t = 0; t < probeTrees.Count; t++)
             results[probeIndices[t]] = perTreeBm[t];

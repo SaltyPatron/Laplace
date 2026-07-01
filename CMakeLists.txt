@@ -96,6 +96,7 @@ if(NOT LAPLACE_SQLPP)
         "Install via 'apt install build-essential' (already in bootstrap_build_environment).")
 endif()
 message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
+set(LAPLACE_SQLPP_FLAGS -traditional-cpp -w -P -Upixel -Ubool)
 
 set(LAPLACE_INSTALL_DIR_PERMS
     OWNER_READ OWNER_WRITE OWNER_EXECUTE

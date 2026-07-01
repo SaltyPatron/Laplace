@@ -1,5 +1,6 @@
 set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_version.cpp
+    test_toolchain.cpp
     test_recipe.cpp
     test_arch_template.cpp
     test_feature_extractor.cpp

@@ -126,6 +126,51 @@ public static class ChessGraph
             observationCount: games));
     }
 
+    /// <summary>Per-ply clock reading on the from-position (content-addressed <c>H:MM:SS</c>).</summary>
+    public static void AppendClock(
+        SubstrateChangeBuilder b, string fromKey, string canonicalClock, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, canonicalClock, sourceId) is not { } cid) return;
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        b.AddAttestation(NativeAttestation.Categorical(
+            from.Position.Id, "HAS_CLOCK", cid, sourceId, contextId, witnessWeight));
+    }
+
+    /// <summary>Raw PGN eval token on the from-position (distinct from aggregated HAS_EVAL).</summary>
+    public static void AppendEvalToken(
+        SubstrateChangeBuilder b, string fromKey, string evalToken, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, evalToken, sourceId) is not { } tid) return;
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        b.AddAttestation(NativeAttestation.Categorical(
+            from.Position.Id, "HAS_EVAL_TOKEN", tid, sourceId, contextId, witnessWeight));
+    }
+
+    /// <summary>Think-time class on the from-position (<c>rushed</c>|<c>normal</c>|<c>deep</c>).</summary>
+    public static void AppendThinkClass(
+        SubstrateChangeBuilder b, string fromKey, string thinkClass, double witnessWeight,
+        Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        b.AddAttestation(NativeAttestation.Categorical(
+            from.Position.Id, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
+    }
+
+    /// <summary>Game-level categorical metadata (opening, ECO, motif) via content entities.</summary>
+    public static void AppendGameMeta(
+        SubstrateChangeBuilder b, Hash128 gameId, string relation, string canonicalValue,
+        double witnessWeight, Hash128 sourceId)
+    {
+        if (ContentEmitter.Emit(b, canonicalValue, sourceId) is not { } vid) return;
+        b.AddAttestation(NativeAttestation.Categorical(gameId, relation, vid, sourceId, null, witnessWeight));
+    }
+
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);

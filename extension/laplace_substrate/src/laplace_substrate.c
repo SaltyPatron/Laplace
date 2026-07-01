@@ -712,7 +712,6 @@ void _PG_init(void);
 void
 _PG_init(void)
 {
-    (void)laplace_dynamics_init();
     
 
 
@@ -720,4 +719,17 @@ _PG_init(void)
 
     laplace_corpus_guc_init();
     laplace_substrate_perfcache_init();
+
+    {
+        const int rc = laplace_runtime_init(LAPLACE_RUNTIME_HOST_PG,
+                                            laplace_substrate_native_mkl_threads());
+        if (rc == -2)
+            ereport(FATAL,
+                    (errmsg("laplace_substrate: MKL required but unavailable (laplace_runtime_init rc=-2)"),
+                     errhint("Deploy laplace_dynamics with MKL; check dynamic_library_path.")));
+        if (rc != 0)
+            ereport(FATAL,
+                    (errmsg("laplace_substrate: laplace_runtime_init failed (rc=%d)", rc),
+                     errhint("Verify oneAPI MKL CBWR / AVX2 build flags.")));
+    }
 }

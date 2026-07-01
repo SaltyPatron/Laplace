@@ -89,9 +89,8 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             ? null
             : static line => line.Length > 0 && line[0] != (byte)'#';
 
-        // Lean triple sources skip compose-time exist probes — they block the hot path on a warm DB.
-        ISubstrateReader? composeReader = NativeGrammarIngest.ShouldExistProbe(_src)
-            ? _containmentReader : null;
+        // Always pass the live reader — existence gate runs before compose for every source.
+        ISubstrateReader? composeReader = _containmentReader;
 
         foreach (var file in files)
         {

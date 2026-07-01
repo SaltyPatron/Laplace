@@ -43,8 +43,10 @@ public sealed class IngestPipelineWrongPatternTests
         { }
 
         Assert.Equal(ExpectedDescentProbeChunks(rowCount, probeChunk), reader.DescentProbeCalls);
-        Assert.True(reader.MaxFlatCandidates <= totalTier01,
-            $"max flat candidates {reader.MaxFlatCandidates} vs batched tier01 total {totalTier01} (all-node total {totalNodes})");
+        Assert.True(reader.FlatCandidateCounts.Count >= 1);
+        Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
+        Assert.True(reader.MaxFlatCandidates > rowCount,
+            "tier1 flat batch is separate from per-row root bulk IN");
     }
 
     /// <summary>
@@ -85,7 +87,8 @@ public sealed class IngestPipelineWrongPatternTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
             changes.Add(c);
 
-        Assert.Equal(1, reader.DescentProbeCalls);
+        Assert.Equal(1, reader.FlatProbeCalls);
+        Assert.Equal(0, reader.DescentProbeCalls);
         Assert.Equal(0, ContentEntityCount(changes));
     }
 

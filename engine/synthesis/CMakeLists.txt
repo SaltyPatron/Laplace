@@ -1,5 +1,6 @@
 set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/version.h
+    include/laplace/synthesis/init.h
     include/laplace/synthesis/recipe.h
     include/laplace/synthesis/arch_template.h
     include/laplace/synthesis/feature_extractor.h
@@ -14,6 +15,7 @@ set(LAPLACE_SYNTHESIS_HEADERS
 )
 
 set(LAPLACE_SYNTHESIS_SOURCES
+    src/init.cpp
     src/version.cpp
     src/recipe.cpp
     src/arch_template.cpp

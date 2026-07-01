@@ -358,6 +358,110 @@ static int probe_one_row(const laplace_compose_result_t* compose,
     return 0;
 }
 
+static int bitmap_all_absent(const uint8_t* bm, size_t bits) {
+    if (!bm || bits == 0) return 1;
+    size_t nbytes = (bits + 7) / 8;
+    for (size_t i = 0; i < nbytes; ++i)
+        if (bm[i] != 0) return 0;
+    return 1;
+}
+
+static int root_gate_and_compose(laplace_etl_session_t* sess, intent_stage_t* stage,
+                                 etl_pending_row_t* pending, size_t* pending_n,
+                                 laplace_etl_exist_probe_fn probe, void* probe_ctx,
+                                 size_t* rows_emitted) {
+    size_t n = *pending_n;
+    if (n == 0 || !probe) return 0;
+
+    hash128_t* roots = (hash128_t*)malloc(n * sizeof(hash128_t));
+    int32_t*   root_slot = (int32_t*)malloc(n * sizeof(int32_t));
+    if (!roots || !root_slot) {
+        free(roots);
+        free(root_slot);
+        return -1;
+    }
+    size_t n_roots = 0;
+    for (size_t i = 0; i < n; ++i) {
+        root_slot[i] = -1;
+        hash128_t root_id;
+        uint8_t   tier = 0;
+        if (laplace_grammar_compose_row_root(pending[i].line, pending[i].line_len, pending[i].ast,
+                                             sess->cfg.modality_id, &root_id, &tier) != 0)
+            continue;
+        root_slot[i] = (int32_t)n_roots;
+        roots[n_roots++] = root_id;
+    }
+
+    uint8_t* root_bm = NULL;
+    if (n_roots > 0) {
+        root_bm = (uint8_t*)calloc((n_roots + 7) / 8, 1);
+        if (!root_bm) {
+            free(roots);
+            free(root_slot);
+            return -1;
+        }
+        if (probe(probe_ctx, roots, NULL, n_roots, root_bm, n_roots) != 0) {
+            free(root_bm);
+            free(roots);
+            free(root_slot);
+            return -1;
+        }
+    }
+
+    size_t write = 0;
+    for (size_t i = 0; i < n; ++i) {
+        int present = 0;
+        if (root_slot[i] >= 0) {
+            int32_t k = root_slot[i];
+            if (k >= 0 && (size_t)k < n_roots
+                && (root_bm[k >> 3] & (1u << (k & 7u))) != 0)
+                present = 1;
+        }
+        if (present) {
+            if (witness_row(stage, &sess->cfg, sess->ili_map, pending[i].line, pending[i].line_len,
+                            pending[i].ast) != 0) {
+                free(root_bm);
+                free(roots);
+                free(root_slot);
+                return -1;
+            }
+            free(pending[i].line);
+            laplace_ast_free(pending[i].ast);
+            pending[i].line = NULL;
+            pending[i].ast = NULL;
+            pending[i].compose = NULL;
+            (*rows_emitted)++;
+            sess->total.rows_compose_skipped++;
+            sess->total.rows_emitted++;
+            continue;
+        }
+
+        if (pending[i].compose == NULL) {
+            laplace_compose_result_t* compose = NULL;
+            if (laplace_grammar_compose_probe(
+                    pending[i].line, pending[i].line_len, pending[i].ast, sess->cfg.modality_id,
+                    sess->cfg.source_id, sess->cfg.type_meta_id, &compose) != 0
+                || !compose) {
+                free(pending[i].line);
+                laplace_ast_free(pending[i].ast);
+                pending[i].line = NULL;
+                pending[i].ast = NULL;
+                continue;
+            }
+            pending[i].compose = compose;
+        }
+
+        if (write != i) pending[write] = pending[i];
+        ++write;
+    }
+
+    free(root_bm);
+    free(roots);
+    free(root_slot);
+    *pending_n = write;
+    return 0;
+}
+
 static int probe_pending(etl_pending_row_t* pending, size_t n, laplace_etl_exist_probe_fn probe,
                          void* probe_ctx, uint8_t** per_row_bitmaps) {
     if (!probe || n == 0) return 0;
@@ -397,10 +501,18 @@ static int drain_pending_row(intent_stage_t* stage, const laplace_etl_config_t* 
             }
         }
     }
-    if (!all_present
-        && laplace_grammar_compose_materialize_phys(
-               pr->compose, pr->line, pr->line_len, pr->ast, cfg->modality_id) != 0)
-        return -1;
+    if (!all_present) {
+        if (bitmap_all_absent(bitmap, bitmap_bits)) {
+            if (pr->compose) laplace_compose_result_free(pr->compose);
+            pr->compose = NULL;
+            if (laplace_grammar_compose(pr->line, pr->line_len, pr->ast, cfg->modality_id,
+                                        cfg->source_id, cfg->type_meta_id, &pr->compose) != 0
+                || !pr->compose)
+                return -1;
+        } else if (laplace_grammar_compose_materialize_phys(
+                       pr->compose, pr->line, pr->line_len, pr->ast, cfg->modality_id) != 0)
+            return -1;
+    }
     if (laplace_compose_drain_into_stage(
             pr->compose, stage, &cfg->source_id, cfg->now_unix_us, cfg->witness_weight, bitmap,
             bitmap_bits) != 0)
@@ -417,7 +529,9 @@ static int flush_pending(laplace_etl_session_t* sess, intent_stage_t* stage,
     uint8_t** bitmaps = (uint8_t**)calloc(*pending_n, sizeof(uint8_t*));
     if (!bitmaps) return -1;
 
-    int rc = probe_pending(pending, *pending_n, probe, probe_ctx, bitmaps);
+    int rc = root_gate_and_compose(sess, stage, pending, pending_n, probe, probe_ctx, rows_emitted);
+    if (rc == 0 && *pending_n > 0)
+        rc = probe_pending(pending, *pending_n, probe, probe_ctx, bitmaps);
     if (rc == 0) {
         for (size_t i = 0; i < *pending_n; ++i) {
             size_t ec = laplace_compose_entity_count(pending[i].compose);
@@ -471,19 +585,12 @@ static int process_row(laplace_etl_session_t* sess, intent_stage_t* stage,
     }
 
     laplace_compose_result_t* compose = NULL;
-    if (laplace_grammar_compose_probe(line, line_len, ast, sess->cfg.modality_id, sess->cfg.source_id,
-                                      sess->cfg.type_meta_id, &compose) != 0 || !compose) {
-        laplace_ast_free(ast);
-        return 0;
-    }
-
     if (probe) {
         etl_pending_row_t* pr = &pending[*pending_n];
-        pr->compose = compose;
+        pr->compose = NULL;
         pr->ast = ast;
         pr->line = (uint8_t*)malloc(line_len);
         if (!pr->line) {
-            laplace_compose_result_free(compose);
             laplace_ast_free(ast);
             return -1;
         }
@@ -500,6 +607,18 @@ static int process_row(laplace_etl_session_t* sess, intent_stage_t* stage,
         return 0;
     }
 
+    if (laplace_grammar_compose_probe(line, line_len, ast, sess->cfg.modality_id, sess->cfg.source_id,
+                                      sess->cfg.type_meta_id, &compose) != 0 || !compose) {
+        laplace_ast_free(ast);
+        return 0;
+    }
+
+    if (laplace_grammar_compose_materialize_phys(compose, line, line_len, ast, sess->cfg.modality_id)
+        != 0) {
+        laplace_compose_result_free(compose);
+        laplace_ast_free(ast);
+        return -1;
+    }
     size_t bits = 0;
     if (laplace_compose_drain_into_stage(compose, stage, &sess->cfg.source_id, sess->cfg.now_unix_us,
                                          sess->cfg.witness_weight, NULL, bits) != 0) {
