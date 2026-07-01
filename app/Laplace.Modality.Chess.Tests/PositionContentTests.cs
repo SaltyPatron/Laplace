@@ -86,6 +86,37 @@ public sealed class PositionContentTests
         }
     }
 
+    private static int OutpostCount(string fen)
+    {
+        var prev = Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", "1");
+            var s = Surface(fen);
+            int i = s.IndexOf(" outpost:", StringComparison.Ordinal) + " outpost:".Length;
+            int j = i;
+            while (j < s.Length && char.IsDigit(s[j])) j++;
+            return int.Parse(s[i..j]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", prev);
+        }
+    }
+
+    [Theory]
+    // Black knight on d5, pawn-defended from behind (e6), unblocked ahead: a real outpost.
+    [InlineData("7k/8/4p3/3n4/8/8/8/4K3 b - - 0 1", 1)]
+    // Same knight, no supporting pawn at all: not an outpost.
+    [InlineData("7k/8/8/3n4/8/8/8/4K3 b - - 0 1", 0)]
+    // Same-rank "support" must NOT count: a pawn beside the knight (not behind it) never defends it.
+    [InlineData("7k/8/8/2pn4/8/8/8/4K3 b - - 0 1", 0)]
+    // Black BISHOP outpost, no white bishop on the board at all: previously miscounted as 0
+    // because CountOutposts(white:false) looked up the WBishop bitboard instead of BBishop.
+    [InlineData("7k/8/4p3/3b4/8/8/8/4K3 b - - 0 1", 1)]
+    public void CountOutposts_MatchesColorAndSupportRank(string fen, int expected)
+        => Assert.Equal(expected, OutpostCount(fen));
+
     [Fact]
     public void Surface_DefaultOmitsFeatureTokens()
         => Assert.DoesNotContain(" mob:", Surface(ChessModality.StartFen));

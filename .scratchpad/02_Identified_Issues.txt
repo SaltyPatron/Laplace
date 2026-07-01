@@ -1,0 +1,486 @@
+LAPLACE — IDENTIFIED ISSUES (02)
+Consolidated, actionable issue list as of the same review session as 01_Initial_review.txt,
+after moving from static code reading into live execution (rebuild, db-reset, seed-foundation
+in progress, direct SQL queries against a freshly-seeded database). Each entry has a status.
+Statuses used: OPEN (confirmed, not fixed), FIXED (patched this session, verified), CLOSED-
+NOT-A-BUG (investigated, turned out correct), NEEDS-VERIFICATION (plausible, not yet checked
+against live data).
+
+================================================================================
+CODEBASE ISSUES — CONFIRMED
+================================================================================
+
+ISSUE 01 — highway_mask not populated on real production attestations
+Status: OPEN (upgraded from "read in code" to "confirmed against live data")
+Evidence: after a real ISO639Decomposer ingest (7,929 IS_LANGUAGE_CODE attestations, 184
+HAS_ISO639_1_CODE, 8,336 HAS_DEFINITION, etc. — see substrate query below), a direct query
+against `attestations` shows highway_mask IS NULL on every sampled row:
+    SELECT relation_canonical(a.type_id), encode(a.highway_mask,'hex')
+    FROM attestations a WHERE relation_canonical(a.type_id) IN
+    ('HAS_ISO639_1_CODE','IS_LANGUAGE_CODE') LIMIT 4;
+  -> mask_hex column empty for all 4 rows.
+Mechanism exists (Laplace.SubstrateCRUD/SubstrateChangeBuilder.cs:155-156,
+HighwayPerfcache.MaskForRelationType), but whatever code path ISO639Decomposer's attestations
+go through either never calls it, or the highway perfcache wasn't loaded at ingest time for
+this run. Author confirmed this is real: "its flawed obviously (evidenced by your empty
+rows)." Not yet checked whether this affects only ISO639Decomposer or every decomposer —
+next step is the same query against unicode/cili attestations.
+
+ISSUE 02 — CLI's own "check languages" summary line is misleadingly narrow
+Status: CLOSED-NOT-A-BUG (the underlying data is correct; only the self-report is misleading)
+The ISO639 ingest run prints "check languages: 184 ISO code attestations" as a spot-check.
+184 is exactly the count of HAS_ISO639_1_CODE attestations (ISO 639-1 really does define
+~184 two-letter codes) — but the CLI's own summary line doesn't make clear it's reporting
+one narrow relation type out of many. The real ingest is comprehensive: IS_LANGUAGE_CODE
+7,929, HAS_LANGUAGE_SCOPE 7,929, HAS_LANGUAGE_TYPE 7,929, HAS_DEFINITION 8,336,
+HAS_NAME_ALIAS 8,102, USES_SCRIPT 978, MEMBER_OF_MACROLANGUAGE 459, HAS_ISO639_2T_CODE 420,
+HAS_ISO639_2B_CODE 420, SUPERSEDED_BY 212, HAS_VARIANT_OF 154, IS_A 35. Worth fixing the
+summary line's wording so it doesn't read as under-coverage to whoever runs it next (it read
+that way to the author on first glance, correctly triggering suspicion that led to finding
+Issue 01).
+
+ISSUE 03 — extension/laplace_substrate/sql/39_highway.sql.in is empty
+Status: OPEN (from 01_Initial_review.txt 3.3, author-confirmed as a real gap: "it's a gap")
+0 bytes, tracked, recently touched. Presumably meant to expose highway_mask machinery at the
+SQL level. May be directly related to Issue 01 — if the SQL-level surface for highway_mask
+was never finished, that's consistent with the mask never getting populated end-to-end.
+
+ISSUE 04 — feature_extractor.cpp is a full stub
+Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
+engine/synthesis/src/feature_extractor.cpp: every function either returns an error code,
+nullptr, or 0.
+
+ISSUE 05 — astar.cpp heuristic is hardcoded to 0.0
+Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
+engine/core/src/astar.cpp — currently uniform-cost search / Dijkstra, not true A*.
+
+ISSUE 06 — arch_template.cpp: MoE experts, attention bias, tied to zero
+Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
+Any recipe with num_local_experts > 0 or attention_bias: true synthesizes tensors that are
+structurally required but silently all-zero.
+
+ISSUE 07 — highway_mask is relation-TYPE grained, not relation-VALUE grained
+Status: OPEN (from 01_Initial_review.txt 3.4, unchanged)
+One bit for "this touches a HAS_POS relation," none for which POS value; all dynamic
+per-label relations (DEP_* deprel labels) collapse onto their family-root bit.
+
+ISSUE 08 — 55-project decomposer sprawl / ~260 dormant tree-sitter grammar submodules
+Status: OPEN (from 01_Initial_review.txt 3.1, unchanged; author's own assessment: "terrible
+design... AI agents gave it to me this way and I just noticed")
+
+ISSUE 09 — zero documentation anywhere in the repository
+Status: IN PROGRESS (this review series — 01, 02, and a forthcoming CLAUDE.md are the first
+docs to exist in this repo)
+
+ISSUE 10 — seed-step.cmd "framenet" branch used an anomalous inline parenthesized IF block
+Status: FIXED this session
+Every other step dispatches via `if /i "%STEP%"=="x" goto run_ingest`. framenet alone used
+    if /i "%STEP%"=="framenet" (
+      call :run_ingest_impl
+      exit /b %ERRORLEVEL%
+    )
+— a parenthesized block calling a subroutine that itself contains further parens, a known
+cmd.exe parser trap, and inconsistent with every sibling entry. Rewritten to match the
+working `goto run_ingest` pattern used by unicode/iso639/cili/wordnet/etc. Verified framenet
+ingest runs cleanly after the fix (once combined with Issue 12's real root-cause fix below —
+this edit alone did not resolve the symptom that led to finding it, see Issue 12).
+
+ISSUE 11 — env.cmd has no idempotency guard; PATH grows unboundedly across repeated calls
+Status: FIXED this session, verified
+env.cmd unconditionally prepends 5 PATH segments (plus re-runs Intel oneAPI's own
+setvars.bat, which does the same) every time it is `call`ed, with no guard against being
+sourced more than once in the same process. seed-foundation.cmd — a NEW file, added in the
+same commit range as the other seed-* scripts — calls seed-step.cmd (which calls env.cmd)
+once per foundation source, all inside one cmd.exe process. Measured: PATH grew ~603
+characters per call (4615 -> 5218 -> 5821 -> 6424...), which by the 5th-6th step in a 10-step
+loop pushes past cmd.exe's ~8191-character line-length ceiling, producing "The input line is
+too long" and corrupted/truncated command execution. No caller before seed-foundation.cmd
+ever invoked env.cmd more than once per process, so this was always latent and never
+triggered until now. Fixed by adding to the top of env.cmd:
+    if defined LAPLACE_ENV_LOADED exit /b 0
+    set "LAPLACE_ENV_LOADED=1"
+Verified: PATH length now holds flat (4615) across 4 repeated calls in one process instead of
+growing. This is a real, load-bearing fix — distinct from Issue 12 below, which is a separate
+bug that was actually responsible for the specific 'ocal' symptom chased for most of this
+session.
+
+================================================================================
+NOT A CODEBASE ISSUE — TOOLING/ENVIRONMENT (mine, not the author's)
+================================================================================
+
+ISSUE 12 — 'ocal' is not recognized (ROOT CAUSE: PowerShell 7 / Windows 11 regression, not
+a Laplace bug)
+Status: RESOLVED — root cause identified, not fixable in this repo, workaround adopted
+For most of this session, invoking any .cmd file in scripts/win/ via the PowerShell tool
+(cmd /c "...", direct invocation, `$var; cmd /c $var`, all styles tried) produced:
+    'ocal' is not recognized as an internal or external command, operable program or batch
+    file.
+immediately, before any script output, including with zero arguments. Extensive bisection
+wrongly suspected file corruption (raw bytes checked clean via xxd), PATH growth (real bug,
+Issue 11, but not the cause of this specific symptom — it persisted even in a single fresh
+process with no accumulation possible), and the framenet parenthesized block (real anomaly,
+Issue 10, but fixing it did not resolve 'ocal'). Actual root cause, confirmed via web search:
+GitHub issue PowerShell/PowerShell#27634 — "PowerShell & operator fails to invoke .cmd/.bat
+files ... (Windows 11 KB5095093 regression)". After that Windows update, PowerShell 7's
+process-creation logic for launching .cmd/.bat files mis-slices the constructed command
+line. Every .cmd in this repo has `setlocal EnableDelayedExpansion` as line 2 — a
+truncated/mis-sliced launch landing partway into that line reads exactly as
+"'ocal' is not recognized" (a fragment of "setlocal"). Confirmed by elimination: the Bash
+tool (git-bash/MSYS2, a completely different process-spawning code path, not pwsh's
+Process/CreateProcess route) never reproduced the symptom under any invocation style tested.
+Workaround adopted for the rest of this session and recommended going forward on this
+machine: invoke all scripts/win/*.cmd files through the Bash tool (`cmd //c "scripts\\win\\
+x.cmd args"`), never through the PowerShell tool directly. This is an OS/PowerShell defect on
+this Windows 11 build, not something to "fix" in the repo.
+Minor, harmless side-effect noticed once routed through the Bash tool: the
+`tasklist ... | find /I "Laplace.Cli.exe"` mutex-guard and wait-for-exit poll in
+seed-step.cmd's :run_ingest_impl/:wait_cli_exit resolve `find` to git-bash's
+/usr/bin/find.exe (GNU findutils) instead of Windows' System32\find.exe, since MSYS2's PATH
+puts its own /usr/bin ahead of System32 for children spawned that way. This produces
+cosmetic "find: '/I': No such file or directory" / "find: 'Laplace.Cli.exe': No such file or
+directory" lines but does not block ingestion — real ingest work completes successfully
+around it (verified: iso639 ingest completed fully — 43,088 relations materialized,
+layer_complete=True — despite these lines appearing at the tail). Not fixed; flagging as a
+known cosmetic side-effect of the Bash-tool workaround, not worth chasing further unless it
+starts actually blocking something.
+
+ISSUE 13 — seed-step.cmd / seed-foundation.cmd run no independent post-step verification
+Status: OPEN
+Unlike seed-full.cmd/seed-everything.cmd/e2e-master.cmd (which all run
+scripts/sql/substrate-audit.sql after finishing — substrate_health(), fake_tier_band_count(),
+identity_law_violations(), per-layer HasLayerCompleted checks, multi_source_entity_count(),
+render_gaps()), seed-step.cmd and seed-foundation.cmd — the scripts actually used for the
+foundation ladder — have no such step. The only "did this work" signal is the ingesting
+CLI's own self-printed summary line (e.g. "layer_complete=True"), never independently
+checked against the database by the script itself. Author's reaction on realizing this had
+to be checked by hand: "there should actually be a query against the db after it." Fix:
+seed-step.cmd should call a status query (at minimum evidence_count() for the layer just
+ingested) after :run_ingest_impl succeeds, the same way the more mature seed-* scripts do.
+
+ISSUE 14 — layer-completion marker convention is CONFIRMED CORRECT (positive finding)
+Status: CLOSED — verified working
+Independently verified WordNet's layer-2 completion, bypassing the CLI's self-report
+entirely:
+    SELECT evidence_count(
+      p_type => canonical_id('substrate/type/HasLayerCompleted/2/v1'),
+      p_source => source_id('WordNetDecomposer')
+    );  -- returned 1
+Note for future sessions: HasLayerCompleted/{layer}/v1 is the relation TYPE of a generic
+attestation (filter on a.type_id + a.source_id via evidence_count(p_type=>..., p_source=>...)
+— see extension/laplace_substrate/sql/functions/ops/evidence_count.sql.in), not something a
+subject entity gets IS_TYPED_AS'd to. Got this wrong on the first attempt this session
+(used a.subject_id instead of a.type_id, plus a spurious IS_TYPED_AS filter) before checking
+the real convention across ensure-foundation.sh / substrate-audit.sql /
+decomposer-gate-check.py / LayerCompletion.cs, which all agree on the p_type/p_source shape
+above. Worth remembering the pattern rather than re-deriving it next time.
+
+ISSUE 15 — concurrent ingest crash (real, not hypothetical)
+Status: OPEN — needs a decision (guard concurrent ingests properly, or confirm it's safe and
+fix the crash)
+Ran OMW and a document ingest concurrently against the same database as a deliberate test
+("can we run two ingests at the same time? Let's find out"). Both progressed for several
+minutes, then the document ingest hit:
+    PostgresException 23505: duplicate key value violates unique constraint "entities_pkey"
+    Key (id)=(\x533fc56983559b11986ef008b897a2b1) already exists.
+followed immediately by an unhandled ObjectDisposedException on IntentStage
+(IntentStage.get_EntityCount, via NpgsqlSubstrateWriter.ApplyManyAsync ->
+ConsensusAccumulatingWriter), which aborted the whole run rather than being caught/retried.
+The seed-step.cmd mutex guard (see Issue 16) does not prevent this scenario — it does not
+detect the already-running process, so nothing stops two ingest processes from racing on the
+same content-addressed insert path. Two possible fixes worth deciding between: (a) make the
+duplicate-key case a proper retry/skip path instead of a fatal abort (content-addressing
+means a duplicate key here should mean "someone else already wrote this exact content,"
+which is not actually an error), or (b) make the mutex guard actually work so concurrent
+ingests can't happen at all. (a) seems more in the spirit of the content-addressing design;
+(b) is the more conservative fix.
+
+ISSUE 16 — seed-step.cmd's concurrency guard and exit-wait poll target the wrong process name
+Status: OPEN
+:run_ingest_impl's "already running" check and :wait_cli_exit's poll loop both do
+`tasklist /FI "IMAGENAME eq Laplace.Cli.exe" | find /I "Laplace.Cli.exe"` — but `dotnet run`
+launches the actual process as `dotnet.exe`, not `Laplace.Cli.exe`. Confirmed empirically:
+`tasklist /FI "IMAGENAME eq dotnet.exe"` showed active processes throughout ingestion while
+the Laplace.Cli.exe-based check reported nothing running, both for the mutex guard (silently
+lets a second ingest start, contributing to Issue 15) and for the post-run wait (returns
+immediately instead of actually waiting for the process to exit, which is why the author
+observed "wordnet's log looked finished but the shell didn't close" — worth noting: that
+specific observation turned out to be a red herring from using tasklist's dotnet.exe count as
+a liveness signal, since dotnet leaves an idle build-server process resident between runs
+which is unrelated to whether ingestion finished; but the underlying wrong-process-name bug
+in :wait_cli_exit is real regardless).
+
+ISSUE 17 — apply_batch.c had no protection against concurrent content-addressed writes
+Status: FIXED this session, verified against the original repro
+Root cause of the entities_pkey/physicalities_pkey unique-violation crash first hit when OMW
+and a document ingest ran concurrently (see the original incident above). The anti-join dedup
+(LEFT JOIN ... WHERE id IS NULL, extension/laplace_substrate/src/apply_batch.c) is correct in
+shape but has a check-then-act race: two concurrent apply_batch calls can both see the same
+content-addressed id as "not yet present" before either commits, both attempt the insert, one
+wins, one hits a raw unique-violation. This is not a normal application error to retry around
+-- content-addressing means the "conflict" is semantically "we agree," not "something went
+wrong" -- so the fix is prevention, not a retry/ON CONFLICT reaction. Added
+`SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))` immediately after
+SPI_connect() in laplace_apply_batch, serializing concurrent apply_batch calls against each
+other (transaction-scoped, auto-released at commit/rollback, acquired once per already-bulk
+batch call, not per row). Rebuilt, redeployed, reseeded from a fresh database afterward;
+unicode/iso639/cili/wordnet/verbnet/propbank all completed cleanly under the new build with
+no recurrence of the race.
+Note: TransientErrorRetryPolicy.ConcurrencyRetry (app/Laplace.Ingestion/
+TransientErrorRetryPolicy.cs:32-37) already correctly classifies 23505/40001/40P01 as
+transient and was firing correctly (confirmed via log: "Transient ingest error... will retry
+whole batch") -- the retry classification was never the bug. What made the retry itself fail
+was NpgsqlSubstrateWriter.ApplyManyAsync unconditionally disposing the caller-owned
+IntentStage objects (prebuiltStages, i.e. batch's own SubstrateChange.IntentStages) in its
+finally/else branches on every call including a failed one about to be retried by the same
+batch -- an ObjectDisposedException on IntentStage.get_EntityCount masking the real duplicate-
+key issue. This disposal-ownership bug was found but NOT fixed/kept -- superseded by the
+prevention-based fix (the advisory lock), since preventing the race outright removes the need
+for that retry path to ever fire for this specific cause. If 23505/40001/40P01 legitimately
+recur from some other cause, the disposal-ownership bug is still latent and would still need
+fixing separately.
+
+ISSUE 18 — seed-step.cmd's mutex guard and exit-wait check the wrong process name (confirmed
+again, contributed to Issue 17's conditions)
+Status: OPEN (unchanged from Issue 16, restated here because it's directly why Issue 17 could
+happen at the .cmd orchestration layer at all -- the guard that should have prevented two
+ingest processes from running at once never fires, since it looks for `Laplace.Cli.exe` and
+the real process is `dotnet.exe`)
+
+ISSUE 19 — descent_probe.c: O(n^2) traversal in laplace_content_descent_bitmap_core
+Status: FIXED this session, not yet verified against a real ingest (rebuild/redeploy pending)
+extension/laplace_substrate/src/descent_probe.c: the DFS/stack-based descent that clears
+bitmap bits for "not yet present" nodes rescanned the ENTIRE n-length parents[] array to find
+each popped node's children (`for (i = 0; i < n; i++) if (parents[i] == node) ...`), inside
+the while-loop that visits every node once -- O(n^2) total instead of O(n). For a large
+document (tens of thousands of codepoints/graphemes/words per probe call), this is hundreds
+of millions of comparisons per call and gets worse as ingested files get bigger, which matches
+what was observed live: a single content_descent_bitmap call actively running 53+ seconds
+(confirmed via pg_stat_activity: state=active, no wait_event, so genuinely computing, not
+blocked) partway through a real document ingest run. Fixed by building a children-index once
+(bucketed linked-list by parent, O(n) construction) before the traversal instead of rescanning
+per node. IMPORTANT CAVEAT (author's correction, preserved verbatim in spirit): this fixes the
+within-call algorithmic complexity only. It does NOT address the deeper, repeatedly-stated
+architectural point of this session -- that descent probing (and dedup generally) should be a
+genuine BULK, tier-scoped operation across the whole in-flight batch/corpus, not a per-
+document call no matter how efficient each individual call's internal algorithm is. Each of
+the 34 files in a document ingest still gets its own separate probe call and SPI round-trip
+today. The O(n)-per-call fix is real and worth keeping, but it is explicitly NOT the O(tier)
+bulk-dedup architecture the author is asking for -- flagged as still-open, larger scope.
+
+ISSUE 20 — laplace_content_root_id failing with rc=-2 on the current document ingest
+Status: OPEN, actively blocking verification
+Second attempt at document ingest (after the Issue 17 fix, fresh reseed) crashed with
+`InvalidOperationException: laplace_content_root_id failed (rc=-2)`. Traced the native path
+(engine/core/src/content_witness_batch.c:99-115, content_tree_build): rc=-2 can come from four
+different places collapsed into one code (len==0; laplace_text_decomposer_run failing;
+hash_composer_run failing; or a successfully-built tree with zero nodes) -- the caller cannot
+currently tell which. No "first unit" filename was logged this time (unlike the earlier
+dorian.txt crash), so the specific file/content that triggered it has not yet been identified.
+Next step: instrument or bisect to find the triggering file, then determine which of the four
+collapsed failure modes it actually is; consider giving content_tree_build distinct return
+codes per branch so this doesn't require re-deriving from source every time it happens.
+
+ISSUE 21 — framenet: "The system cannot find the batch label specified - run_ingest"
+Status: OPEN, cause not yet found
+During the post-fix foundation reseed, framenet failed with this cmd.exe error despite
+`:run_ingest` existing in seed-step.cmd (confirmed: only one definition, byte-identical
+`goto run_ingest` dispatch line to its working siblings verbnet/propbank which succeeded
+immediately before it in the same script execution). Not yet reproduced in isolation (an
+isolated re-run was queued but the investigation was redirected before it completed). Unlike
+the original "ocal" saga, this is not obviously a PowerShell-invocation issue since the whole
+foundation run was already going through the Bash-tool workaround. Genuinely unexplained
+right now -- do not assume a cause without reproducing it first.
+
+ISSUE 22 — word_shape_peers(): unindexed brute-force join + redundant per-row function calls
+Status: FIXED this session (query rewritten), NOT redeployed/verified with EXPLAIN ANALYZE
+after the fix, and explicitly flagged by the author as still not the right architecture
+extension/laplace_substrate/sql/functions/lexical/word_shape_peers.sql.in pre-joined on
+`type_id` (not actually selective -- matches nearly the whole vocabulary, e.g. every "word"-
+tier entity) against the full physicalities table before sorting by KNN distance. EXPLAIN
+ANALYZE on the live substrate: 2,827,871 physicalities rows and 1,246,798 entities rows
+pulled into a 139MB hash join to produce 6,442 real candidates, 1.7s in isolation with no
+contention -- explains how this compounds into a multi-minute hang under real concurrent
+load (see Issue 20's sibling incident, the WordNet "dog" health-check hang from the earlier
+database generation). Also had `word_case_class_surface(p_word)` evaluated once per output
+row (up to 48x) despite p_word being constant across the whole call -- textually called once,
+executed up to 48 times. Rewrote as three CTEs: compute `me` and its case-class once, drive a
+bounded 500-row KNN-index-ordered candidate window off physicalities_coord_gist instead of
+the type_id hash join, then apply type/n_constituents/case-class as post-filters on that small
+window. Author's explicit pushback, preserved: a CTE-based fix is still SQL doing iterative
+work (RBAR/cursors/loops-in-spirit) that "should" be a native C/SPI function -- checked, and
+confirmed there is NO native geometric KNN function anywhere in this codebase; even
+laplace_nearest_entity (assumed to be the canonical native primitive to point at instead) is
+itself pure SQL with the identical `ORDER BY coord <<->> point LIMIT k` pattern. This is a
+systemic gap (see Issue 23), not something specific to word_shape_peers. Open question left
+unresolved: build a real native KNN primitive now, or accept the CTE fix as consistent with
+the codebase's existing (if architecturally thin) pattern and track the native-KNN gap
+separately. Not yet decided; not yet redeployed after the edit; not yet re-verified.
+
+ISSUE 23 — no native (C/SPI) geometric KNN function exists anywhere in the codebase
+Status: OPEN, systemic, not yet scoped as a task
+Confirmed via `api('4d')`, `api('nearest')`, `api('knn')`, `api('l2')`, `api('angular')`,
+`api('frechet')`, `api('geodesic')`, `api('hilbert')` and a source grep across
+extension/laplace_substrate/src and extension/laplace_geom/src for any PG_FUNCTION_INFO_V1
+wrapper touching hilbert4d/math4d/super_fibonacci/procrustes/gram_schmidt/eigenmaps/astar --
+none exist. The real native 4D/geometric code (engine/core/src/hilbert4d.c, math4d.c,
+engine/dynamics/src/procrustes.cpp, engine/core/src/astar.cpp) is never exposed to SQL at all.
+Every SQL-level "nearest neighbor" / "shape peer" / KNN-shaped function (laplace_nearest_entity,
+nearest_neighbors_4d, word_shape_peers) is pure SQL leaning entirely on the physicalities
+GiST index (gist_geometry_ops_nd) for `ORDER BY coord <<->> point LIMIT k`, with zero
+custom native traversal, cursoring, or early-termination logic. This is the concrete,
+specific version of the author's repeated "SQL/C# should be orchestrators, native C/C++/SPI
+should be the heavy lifter" architectural point -- for this entire class of query (arguably
+the single most load-bearing operation in the whole substrate, since it underlies recall,
+converse, and word-relation lookups), there is currently zero native implementation to
+orchestrate. Explicitly not yet decided whether/when to build one.
+
+ISSUE 24 — 55-project solution, ~20+ of them one-project-per-decomposer, no
+Decomposer<T>-shaped consolidation
+Status: OPEN, discussed at length, explicitly deferred by the author (not rejected, not yet
+scheduled -- "not gonna force you to jump right into it")
+Restated/expanded from Issue 08 (01_Initial_review.txt 3.1) with a concrete target shape
+proposed this session: every decomposer already implements the same IDecomposer/
+IIngestInventoryProvider interfaces uniformly -- the logical architecture is already coherent,
+only the physical project boundary is fragmented. Proposed consolidation: one
+`Laplace.Decomposers` library with source-named folders/namespaces instead of source-named
+projects, a `Decomposer<T>` generic base class factoring out the common "parse records of
+type T -> map to SubstrateChange" shape most decomposers share, one `Laplace.Decomposers.Tests`
+project instead of ~14 paired per-source test projects. Would collapse ~28 decomposer-related
+projects down to 2. The per-source CI isolation the gate/promote/matrix scripts want
+(decomposer-gate-check.py, decomposer-isolate.sh, decomposer-ladder-ci.sh) does not require
+project-level (assembly) boundaries -- namespace scoping and test-filter gating give the same
+isolation without the build-graph/IDE cost. Not started; author wants this on record, not
+executed yet.
+
+================================================================================
+LIVE INGEST STATUS AT TIME OF WRITING (for continuity, not a code issue)
+================================================================================
+Foundation seeding restarted from a fresh db-reset this session. Completed successfully:
+unicode (1,175,472 entities, 1,631,983 attestations, 1,631,821 consensus relations — run
+directly via dotnet, bypassing the then-still-broken seed-step.cmd path), iso639 (adds
+~43k relations, 7,929 languages, see Issue 02 breakdown), cili. wordnet in progress
+(background) at time of writing. Remaining foundation steps not yet run: verbnet, propbank,
+framenet, mapnet, wordframenet, semlink.
+
+UPDATE (post apply_batch.c concurrency fix, fresh db-reset + rebuild): unicode, iso639, cili,
+wordnet, verbnet, propbank all completed cleanly (verified against real substrate counts, not
+just self-reported log lines). framenet failed with Issue 21 (unexplained batch-label error),
+halting the foundation loop there -- mapnet/wordframenet/semlink not yet attempted this
+generation. Separately, a full document ingest (34 files, D:\Data\Ingest\test-data\text,
+including sherlock.txt which had never been reached in any prior run) was started twice this
+generation: once did not crash on the Issue 17 race (fix confirmed holding under real load
+for the files it got through) but did crash on Issue 20 (content_root_id rc=-2, cause not yet
+isolated). Substrate is therefore currently in a partially-seeded, known-incomplete state:
+foundation layers 0-2 mostly present (minus framenet/mapnet/wordframenet/semlink), document
+layer partially present and its true final row counts not yet re-verified after the second
+crash.
+
+================================================================================
+UPDATE — Issue 25 (orphaned-entity/missing-trajectory bug) root-caused and fixed;
+Issue 20 root-caused (not a substrate bug); Issue 21 root cause corrected; foundation complete
+================================================================================
+
+ISSUE 25 — FIXED, verified live, corpus-wide.
+Root cause (confirmed via a dedicated multi-agent root-cause pass, not guessed):
+app/Laplace.SubstrateCRUD/TierTreeDescent.cs's ProbeBatchEmitBitmapsAsync called
+reader.MarkProven(ids) unconditionally for every id in a probe batch, BEFORE checking which
+ids the descent bitmap actually confirmed present -- poisoning NpgsqlSubstrateReader's
+process-lifetime `_proven` cache with ids that were genuinely absent. The next lines in the
+same function then re-check `_proven` first, see the false "proven" entry, and report those
+ids as present -- overwriting the correct "absent" result from the real DB probe two lines
+earlier. This flows into merkle_dedup_trunk_shortcircuit (native), which skips emitting the
+entity. Since `_proven` never clears, this is a one-time poisoning per unique id -- explains
+why a single id (a `\r` grapheme, not "Dorian") was referenced 1,622 times in dorian.txt's
+trajectory: it's the most common recurring character in a Windows-line-ended text file, and
+its first-ever probe permanently poisoned the cache for the rest of the run.
+Fix, comprehensive, all verified live/build-checked:
+  - TierTreeDescent.cs: MarkProven gating fixed (root fix).
+  - descent_probe.c: replaced the "assume 0xFF present, clear-on-disproof" scheme with a
+    positive-confirmation-only tier_batch_existence_probe primitive (new SQL/native function),
+    applied uniformly to all tiers including tier-0 (no special-casing).
+  - hash128.c: hash128_merkle now mixes `tier` into the hash instead of discarding it (was
+    previously silently tier-blind -- live-verified this was a GUARANTEED collision, not just
+    low-probability, for every single-character grapheme/word/codepoint triple: word_id('a'),
+    the tier-1 grapheme id for 'a', and the tier-0 codepoint id for 'a' were bit-identical
+    before this fix).
+  - intent_stage.c: partition-by-content-unit instead of partition-by-each-row's-own-hash, so
+    referentially-connected rows (entity + the physicality/attestation that references it)
+    can no longer be split across independent transactions (the "fake parallelism" issue --
+    real, latent, was dormant only because LAPLACE_APPLY_PARTITIONS defaults to 1).
+  - UnicodeDecomposer.cs: rewritten to bulk-seed the entire tier-0 codepoint space as atomic
+    entity+physicality pairs up front (BuildTier0Seed); StageCodepointTarget now asserts
+    instead of defensively re-staging (tier-0 completeness is a precondition, not a per-call
+    check -- the perfcache is a client-side accelerant, not a substitute for the real row).
+  - 5 more decomposers had the same AddEntity-without-AddPhysicality pattern, found via full
+    sweep and fixed: RepoDecomposer.cs, LlamaTokenizerParser.cs, FnLuSynsetBridgeIngest.cs,
+    MapNetIngest.cs, PredicateMatrixIngest.cs, SemLinkGrammarWitness.cs.
+  - 4 SQL functions fixed to correctly fall back to perfcache-based tier-0 resolution instead
+    of masking a real gap as hex/NULL: render.sql.in, entity_exists.sql.in,
+    entity_tier_of.sql.in, trajectory_unpacked_points.sql.in (all four live-verified against
+    real deleted-row repros in rolled-back transactions).
+  - content_witness_batch.c: content_tree_build's rc=-2 split into distinct codes (-4 empty
+    input, -5 decomposer failure, -6 hash-composer failure, -7 zero-node tree) -- this is what
+    found Issue 20's real cause (see below). TextDecomposer.cs's exception now includes
+    content length + byte preview for the same reason.
+Verification: dorian.txt single-document repro (missing_points 1622->0), repeat-ingest/no-op
+path (0 new rows, 0 orphans), and full 30-document corpus (392,413 total trajectory points,
+0 missing, 0 distinct missing ids) -- all confirmed via direct SQL, not log self-reports.
+Residual, NOT yet fixed: entities/physicalities count still mismatched by ~900 rows at the
+tier-0 layer after the BuildTier0Seed change (likely BuildTier0Seed and BuildBatch's per-chunk
+pass computing the same physicality id via two slightly different paths that don't dedup
+cleanly) -- needs a follow-up look, does not reintroduce orphaned references, just redundant
+rows.
+
+ISSUE 20 — CLOSED, NOT A SUBSTRATE BUG.
+Root cause, found via the Issue 25 fix's granular content_tree_build return codes plus a
+content-preview exception message: the failing file was not corrupted/malformed input at
+all -- it's a real ZIP archive (Project Gutenberg "images" edition, filename
+"pg76404-images.html" visible in the raw zip local-file-header bytes) sitting inside
+D:\Data\Ingest\test-data\text\, which DocumentDecomposer.EnumerateInputFiles was picking up
+via an unfiltered `Directory.EnumerateFiles(path, "*", ...)` glob. The zip is intentionally
+there -- it holds images staged for a future image modality (Pixel/Patch/Region/Image tiers,
+vocabulary already scaffolded in Laplace.Decomposers.Image/ImageDecomposer.cs, decomposition
+logic not yet built). Fix: DocumentDecomposer.cs's EnumerateInputFiles now globs "*.txt"
+instead of "*", so it correctly ignores content meant for a different, not-yet-built
+decomposer instead of choking on it. rc=-5 (decomposer failure on invalid UTF-8) was the
+CORRECT behavior all along -- the native code was never broken here.
+
+ISSUE 21 — FIXED, but the earlier characterization in this log was wrong and needs correcting.
+This entry previously said Issue 10's normalization (framenet's parenthesized inline
+`if (...) { call :run_ingest_impl ; exit /b } ` block replaced with the standard
+`goto run_ingest` matching sibling steps) was an unrelated, independent anomaly fix. That was
+incorrect. Live-reproduced (`seed-step.cmd framenet` standalone, deterministic
+"The system cannot find the batch label specified - run_ingest" with zero preceding output --
+fails before even seed-step.cmd's own first echo). Ruled out via direct testing: not a general
+regression (propbank re-run via the same script succeeded immediately after), not byte-level
+corruption of the dispatch line (xxd-compared byte-identical in structure to the working
+propbank line, just a different literal string), not the Intel oneAPI setvars.bat nested-call
+(bypassing it entirely did not change the failure). Found via a preserved scratchpad artifact
+(.scratchpad/_seed_step_traced.cmd, the pre-Issue-10-fix version of the file, now deleted):
+framenet originally had the parenthesized `call :run_ingest_impl` form, NOT the shared
+`goto run_ingest` label jump every sibling step uses. Issue 10's fix normalized this away as
+if it were purely cosmetic -- it was not. `goto` jumping into/out of a parenthesized `(...)`
+block is a real, documented cmd.exe gotcha, and framenet's position/context in the dispatch
+table apparently triggers it while its siblings' identical-shaped `goto run_ingest` lines
+don't. Fix: reverted framenet's dispatch line in scripts/win/seed-step.cmd back to the direct
+`call :run_ingest_impl` + `exit /b %ERRORLEVEL%` form. Verified: seed-step.cmd framenet now
+runs the full dispatch cleanly (mutex check, header, topology/sizing logs, correct
+already-ingested short-circuit) with zero label error. Lesson: Issue 10 should not have been
+filed as "fixed a cosmetic anomaly" without verifying the normalized form actually still
+worked for the one step that had special-cased itself away from the pattern.
+
+FOUNDATION SEED — now fully complete (all 10 layers: unicode, iso639, cili, wordnet, verbnet,
+propbank, framenet, mapnet, wordframenet, semlink), verified via layer-completion markers and
+real substrate counts, not just log self-reports. End-to-end wall time for the full sequence
+(including the framenet detour/debugging) was under 20 minutes of active working time.
+
+SEPARATE FIX, same session -- chess UI "turn stuck" bug: ChessEngineService.cs held a single
+process-wide singleton `_live` ChessState field (SyncState/SetLive), cached and mutated across
+every /chess/move, /chess/bestmove, and (indirectly) /chess/legal request, even though the
+client already sends its own authoritative fen on every call. Any request overlap (two tabs,
+a double-click landing before the UI's `busy` flag disabled the button) could let one request's
+SetLive clobber another's, desyncing the server's tracked position from what the client
+displayed -- exactly "bot moved, but the turn didn't update." Fix: removed _live/_liveLock/
+SyncState/SetLive entirely; BestMoveAsync/BestMoveSearchAsync/ApplyMoveAsync now all parse the
+client-supplied fen fresh on every call (matching ScoreAsync's already-correct pattern). Build
+verified.

@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION lexical_peers(p_word bytea)
         SELECT unnest(word_case_variant_ids(p_word)) AS id
     ),
     shape AS (
-        SELECT unnest(word_shape_peers(p_word, 0.02::double precision)) AS id
+        SELECT unnest(word_shape_peers_fast(p_word, 0.02::double precision)) AS id
     ),
     merged AS (
         SELECT p_word AS id

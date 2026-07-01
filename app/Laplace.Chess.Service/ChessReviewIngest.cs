@@ -57,28 +57,17 @@ public static class ChessReviewIngest
             foreach (var w in reviewed.Worst)
             {
                 if (w.MoveNo != moveNo || w.White != white || w.Played != uci) continue;
+                // A blunder is a move-quality judgment, not game-outcome evidence — it must not
+                // write to OutcomeType/OutcomeObject, the same (subject,type,object) pair real
+                // game results use (ChessGraph.AppendMoveEdge's Outcome() helper). Doing so used
+                // to fold synthetic "Loss" evidence onto a position regardless of what the game
+                // actually resulted in. MOVE_QUALITY below is the correctly-scoped signal for this.
                 if (MoveQuality.FromReviewTag(w.Tag) is { } q)
                     ChessGraph.AppendMoveQuality(b, fromKey, q, QualityGames, ReviewWitnessWeight, src, gameId);
-                if (w.CpLoss >= ChessGameReview.BlunderCp)
-                    EmitBlunderOutcome(b, fromKey, src, gameId);
             }
 
             state = m.Apply(state, mv.Value);
             ply++;
         }
-    }
-
-    private static void EmitBlunderOutcome(SubstrateChangeBuilder b, string fromKey, Hash128 src, Hash128 gameId)
-    {
-        long games = 1;
-        long sum = ChessGraph.ScoreFp1e9(PlyOutcome.Loss) * games;
-        var composed = ChessCompose.Position(fromKey);
-        foreach (var s in composed.Substructures)
-            b.AddAttestation(NativeAttestation.Aggregated(
-                s.Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject,
-                src, gameId, games, sum, ReviewWitnessWeight));
-        b.AddAttestation(NativeAttestation.Aggregated(
-            composed.Position.Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject,
-            src, gameId, games, sum, ReviewWitnessWeight));
     }
 }

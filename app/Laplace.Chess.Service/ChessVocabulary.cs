@@ -80,7 +80,10 @@ public static class ChessVocabulary
     public static readonly Hash128 ConceptType = EntityTypeRegistry.Id("Chess_Concept");
     public static readonly Hash128 ExplainsType = EntityTypeRegistry.Id("EXPLAINS");
     public static readonly Hash128 IsExampleOfType = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
-    public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("DEFINES");
+    // Reuses the manifest's existing HAS_DEFINITION relation (same one WordNet/Wiktionary glosses
+    // use) rather than minting a chess-only "DEFINES" duplicate, so a chess term's definition and
+    // a dictionary gloss for the same content-addressed term land on the same relation type.
+    public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("HAS_DEFINITION");
 
     public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
     => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
@@ -91,12 +94,14 @@ public static class ChessVocabulary
 
     public static readonly Hash128 LaplacePlayerId = PlayerId("Laplace");
 
-    public static Hash128 EmitPlayer(SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId)
+    public static Hash128 EmitPlayer(
+        SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
+        double witnessWeight = SourceTrust.AcademicCurated)
     {
         b.AddEntity(playerId, EntityTier.Word, PlayerType, sourceId);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
             b.AddAttestation(NativeAttestation.Categorical(
-                playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.AcademicCurated));
+                playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, witnessWeight));
         return playerId;
     }
 

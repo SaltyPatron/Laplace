@@ -1,0 +1,368 @@
+LAPLACE — CHESS SUBSYSTEM AUDIT (03)
+Scope: every chess-related file in the repo (excluding the vendored external/cutechess
+submodule's own internals, audited only as a black box via a real build+run). Four parallel
+sub-agents each read one layer in full; several of the highest-value findings below were
+independently re-verified this session against LIVE execution (a real cutechess-cli build from
+the vendored submodule, a real Stockfish-vs-Stockfish match, real generated PGN, and full
+`dotnet test` runs) rather than taken on the strength of static reading alone — flagged
+"SELF-VERIFIED" where that happened. Companion documents: 01_Initial_review.txt (whole-repo
+architecture), 02_Identified_Issues.txt (whole-repo live-execution issue tracker, same
+statuses/conventions reused here: OPEN / FIXED / CLOSED-NOT-A-BUG / NEEDS-VERIFICATION).
+
+Why chess matters here, restated from CLAUDE.md: `attestations.outcome CHECK IN (0,1,2)` and
+this repo's `PlyOutcome {Loss=0,Draw=1,Win=2}` are bit-for-bit the same encoding on purpose,
+and Glicko-2 (literal chess rating math) scores epistemic confidence for every fact in the
+substrate. Chess is the one domain where the fold's convergence to ground truth is objectively
+checkable — which makes bugs in chess's own evidence pipeline unusually consequential: they
+don't just mis-score a chess fact, they're evidence the whole consensus mechanism can be fooled.
+
+================================================================================
+PART 1 — INVENTORY (what exists)
+================================================================================
+Five layers, all present and non-trivial:
+  1. Core engine (`app/Laplace.Modality.Chess/`): real bitboard board representation, move
+     generation, make/unmake, Zobrist hashing, SAN parse/generate, an iterative-deepening
+     alpha-beta search with TT/quiescence/killers, and a tapered PeSTO-style evaluation.
+  2. Substrate integration (`app/Laplace.Chess.Service/`, excl. Lab/Cutechess/Lichess):
+     canonicalization, PGN/openings decomposers, game review, motif tagging, the
+     chess-specific relation-type vocabulary, self-play-to-substrate host.
+  3. Lab/ops orchestration (ChessLabEvent/Job/Paths/Runners/Service, CutechessRunner,
+     LichessBot): drives real cutechess-cli tournaments and a Lichess bot.
+  4. External surfaces: a UCI protocol wrapper (`Laplace.Chess.Uci`), CLI commands
+     (`Laplace.Cli/ChessCommands.cs`), an HTTP API (`EndpointMappings.Chess.cs`), and a real
+     React chessboard UI (`web/src/chess/*.tsx`).
+  5. Build/tooling: a tree-sitter PGN grammar (wired into `grammar_registry.c`, one of the 37
+     live grammars out of ~300 vendored — see 01_Initial_review.txt 3.1), a vendored cutechess
+     submodule with a Windows build script, and deploy secrets for a lichess bot token.
+
+Live test signal, all real `dotnet test` runs performed this session (not read from CI logs):
+  - `Laplace.Modality.Chess.Tests`: 91/91 passed (2m27s — genuinely expensive, includes perft
+    depth 5-6 with millions of nodes, not padding).
+  - `Laplace.Chess.Service.Tests`: 85/85 passed (969ms).
+  - `Laplace.Chess.Uci.Tests`: 8/8 passed (3s).
+  184/184 chess-related unit tests pass, 0 failures, across all three .NET test projects.
+
+SELF-VERIFIED this session: built `cutechess-cli.exe` for real from the vendored
+`external/cutechess` submodule (v1.5.1-2-ge471973a) against the user's real Qt 6.8.3
+(msvc2022_64) and VS2026 install, using the repo's own `scripts/win/build-cutechess.cmd`
+unmodified — it worked on the first try (133/133 objects built, linked cleanly). Then ran a
+real 2-game Stockfish-vs-Stockfish match (`D:\stockfish\stockfish-windows-x86-64-avx2.exe`,
+Stockfish 18) through that binary, producing real PGN output analyzed below (Issue 01).
+
+================================================================================
+PART 2 — CONFIRMED CORRECT / GENUINELY WORKING (positive findings)
+================================================================================
+  - Move generation/rules engine is verified correct against the industry-standard benchmark:
+    perft on startpos depth 1-6 (20/400/8902/197281/4865609/119060324) and the Kiwipete +
+    positions 3-6 torture suite (castling-through-check, en-passant discovered check, pinned
+    promotion) all match published reference values, live, this session.
+  - Outcome encoding traced end-to-end with no inversion/off-by-one found anywhere: PlyOutcome
+    enum -> GameOutcome.ForMover -> ChessModality checkmate-winner computation -> MatchRunner /
+    ModalityEngine.PlayGameAsync edge recording -> ChessGraph.AppendMoveEdge -> ChessPgnWriter's
+    "1-0"/"0-1"/"1/2-1/2" tags. Cross-checked at every hop by two independent agents; both found
+    it internally consistent. `ChessGameReviewTests.ReviewGameText_FoolsMate_BlackWins` is a
+    real discriminating test (asserts Winner==1 on an actual Black-wins PGN) that would catch a
+    perspective bug, and passes.
+  - Content-addressing for chess positions is genuinely, non-trivially canonical, not naive FEN
+    hashing: `ChessModality.CanonicalKey`/`CanonicalEp` (ChessModality.cs:22-40) only includes
+    the en-passant right in the position key when it's actually legally exploitable (replays the
+    capture and checks for a resulting check), avoiding spurious position splits. Runs through
+    the same BLAKE3/Merkle primitives as the rest of the substrate.
+  - Chess is a first-class citizen of the shared substrate, not a side pipeline: both
+    decomposers route through the same NativeAttestation/SubstrateChangeBuilder/IDecomposer
+    abstractions as WordNet/ConceptNet/FrameNet/etc.
+  - Search.cs/Evaluation.cs is a real, non-trivial alpha-beta engine (TT with bound flags,
+    quiescence, killer moves, MVV ordering, tapered PeSTO eval, mate-distance scoring) — verified
+    live to find a real mate-in-1, a forced mate-in-2, decline a bait pawn via quiescence, and
+    win a hanging queen. This is meant to actually play, not just replay/parse games.
+  - San.cs/ChessPgnWriter.cs verified via a full 45-ply real-game SAN replay ending in an actual
+    checkmate that ChessModality independently agrees is checkmate.
+  - UCI wrapper is a thin, correct pass-through to the real engine (no duplicated chess logic),
+    and its protocol framing (uciok/readyok/bestmove/info lines, mate/cp scoring, promotion
+    UCI-notation) is correctly formed.
+  - Web UI (`ChessView.tsx`, `ChessLabView.tsx`) is real, functioning React backed by real API
+    calls (drag/click-to-move, promotion modal, eval bar, live SSE job streaming) — not a stub.
+    No XSS risk (no `dangerouslySetInnerHTML`, all text auto-escaped by React).
+  - No shell-injection risk anywhere in the process-spawning code: `CutechessRunner.cs` builds
+    its command via `ProcessStartInfo.ArgumentList` (not a shell string) and none of its
+    interpolated values are attacker-controlled at that call site; `ChessCommands.cs` has no
+    `Process.Start` calls at all and correctly redacts connection strings/tokens before logging.
+  - The vendored PGN tree-sitter grammar is genuinely wired (`grammar_registry.c:45,90,137`,
+    ext "pgn"->"pgn") and genuinely exercised by real, non-trivial tests (`PgnGamesTests.cs`) —
+    NAG alignment, variation-skipping, comment alignment, tag parsing all pass.
+  - No TODO/FIXME/NotImplementedException/stub found anywhere in the core engine module.
+
+================================================================================
+PART 3 — ISSUES FOUND (numbered, severity-tagged, most consequential first)
+================================================================================
+
+ISSUE C01 — cutechess-cli's real self-play PGN format is silently unparseable by this
+codebase's own eval/clock extractors, for exactly the ground-truth verification loop CLAUDE.md
+calls out as chess's whole reason for architectural importance
+Status: OPEN — SELF-VERIFIED against a real generated PGN, not inferred from reading tests
+`app/Laplace.Chess.Service/PgnEvals.cs:8` and `PgnClocks.cs:7` both hardcode a regex that ONLY
+matches the lichess-standard bracketed annotation format: `\[%eval\s+([^\]]+)\]` and
+`\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]`. Every test fixture for these two files
+(`PgnGamesTests.cs:144,182`, `PgnClocksTests.cs:8-10`) uses that exact bracketed format, so the
+test suite never exercises anything else. I built the real vendored cutechess-cli
+(scripts/win/build-cutechess.cmd, unmodified, first try) against the user's real Qt 6.8.3 + real
+Stockfish 18 binary and ran an actual 2-game match with `-pgnout`. The real output comments look
+like `{+0.48/17 0.13s}` (eval/depth/time-spent) — no `[%eval ...]` wrapper, no `[%clk ...]`
+wrapper at all, ever (confirmed by grepping the entire cutechess C++ source tree for `%eval`/
+`%clk`: zero matches — it never emits that format under any settings). `CutechessRunner.cs:61`
+invokes the exact same cutechess-cli binary with `-pgnout`, so any local self-play tournament run
+through this repo's own lab layer produces PGN in this bare format. `ChessPgnDecomposer.cs:77-90`
+feeds that PGN straight into `PgnClocks.ClockTokens`/`PgnEvals.EvalTokens`, both of which will
+match zero times and return null for every such game — per-move engine-strength evaluation and
+clock/time-pressure signal (`HAS_EVAL`, `HAS_CLOCK`, `HAS_EVAL_TOKEN`, `HAS_THINK_CLASS`,
+`MOVE_QUALITY`'s think-factor input) is silently dropped for the entire local cutechess-produced
+corpus. Only Lichess-fetched games (which genuinely export in `[%eval]`/`[%clk]` format) get this
+signal. Given Issue C03 below (the lab layer has no automated ingestion path at all — a human
+must manually run `laplace ingest chess <path>` on lab output), this bug would fire silently on
+literally every real invocation of the one automated path that exists.
+Fix shape (not yet done): add a second regex branch recognizing cutechess-cli's bare
+`{[+-]?\d+\.\d+/\d+ [\d.]+s}` comment format, or normalize cutechess's PGN comments to the
+lichess bracketed convention at the point CutechessRunner writes them out.
+
+ISSUE C02 — chess's entire relation-type vocabulary (~25 types) is absent from
+engine/manifest/relation_types.toml, which structurally guarantees highway_mask is permanently
+zero for every chess attestation, forever — not a propagation bug, a registration gap
+Status: OPEN — SELF-VERIFIED by direct grep, independently confirmed by a second agent's
+separate trace through HighwayPerfcache.MaskForRelationType
+Grepped `engine/manifest/relation_types.toml` (1252 lines) for all of MOVE, OUTCOME, PLAYED_BY,
+HAS_RATING, OPENING_NAME, HAS_ECO, HAS_WHITE, HAS_BLACK, HAS_EVENT, ON_DATE,
+HAS_TIME_CONTROL, HAS_TC_CLASS, HAS_TERMINATION, HAS_RESULT, GAME_AT, GAME_AT_PLY, HAS_EVAL,
+MOVE_QUALITY, HAS_CLOCK, HAS_EVAL_TOKEN, HAS_THINK_CLASS, GAME_HAS_OPENING, GAME_HAS_ECO,
+GAME_HAS_MOTIF, EXPLAINS, IS_EXAMPLE_OF — zero matches for every one of them (only "DEFINES"
+incidentally exists, generically, not chess-specific). These ~25 relation types are instead
+minted purely as `EntityTypeRegistry.Id("...")` (ChessVocabulary.cs:15-83) — a raw
+`Hash128.Blake3(name)` (HighwayPerfcache.NodeHash, HighwayPerfcache.cs:7-20) with no
+corresponding entry ever generated into `laplace_highway_perfcache.bin`. Traced the consequence
+precisely: `SubstrateChangeBuilder.AddAttestation` calls
+`HighwayPerfcache.MaskForRelationType(row.TypeId)` (HighwayPerfcache.cs:100-111), which returns
+`Mask256.Zero` whenever the native `HighwayTableRelationByHash` lookup misses (rc != 1) — and it
+will always miss for these hashes, by construction, since the perfcache is compiled from the
+manifest file that never mentions them. This is a stronger, more precisely-diagnosed instance of
+02_Identified_Issues.txt's Issue 01 (highway_mask NULL on ISO639 attestations, cause left open
+there as "either the code path never calls it, or the perfcache wasn't loaded") — for chess,
+the cause is not ambiguous: there is no entry to find, period, regardless of ingestion code
+correctness or perfcache load timing. Same root mechanism likely explains Issue 01 too, worth
+checking whether ISO639's relation types are similarly absent from the manifest.
+Secondary consequence, not yet independently verified: `EntityTypeRegistry.cs` mints ~30 other
+non-chess relation/entity type names the same way (Codepoint, Grapheme, Word, WordNetSynset,
+VerbNetClass, etc.), so this "raw-hash mint bypasses the curated manifest" pattern is likely
+repo-wide, not a chess-specific oversight — chess is simply where this session happened to
+trace it to ground.
+Open question: does highway_mask matter for CORRECTNESS of chess recall/search (would a chess
+fact fail to be found at all) or only for acceleration (an optimization the manifest's own SQL
+comments suggest it's meant for)? Not verified this session — flagged, not answered.
+
+ISSUE C03 — the chess "lab" (cutechess tournaments, Lichess bot) has no automated path into the
+substrate at all; the one ingestion endpoint that claims to do this is a stub that misreports
+its own effect
+Status: OPEN
+`EndpointMappings.Chess.cs`'s `/chess/lab/jobs/{jobId}/ingest` endpoint returns
+`{ queued = true, path, hint = "laplace ingest chess \"{path}\"" }` — it performs zero ingestion;
+it only checks the artifact file exists and hands back a CLI command string for a HUMAN to run
+manually. `queued: true` is actively misleading — nothing is queued anywhere. Separately,
+`LichessBot.PlayGameAsync` (LichessBot.cs:120-181) streams a game to completion and logs
+"game finished" but contains no code anywhere that records the final outcome, let alone attests
+it — unlike `ChessEngineService.RunSelfPlayAsync`/`RunStrongSelfPlayAsync`, which do call
+`_host.LearnGameAsync` to write real self-play results via `ConsensusAccumulatingWriter`. That
+self-play writer path is invoked only from `Laplace.Cli/ChessCommands.cs`, a completely separate
+call path from `ChessLabService`/the lab HTTP API. Net effect: cutechess tournament results and
+lichess bot games currently have no automatic route into `attestations`/`consensus` at all —
+only CLI-driven self-play does. Combined with Issue C01, even the manual `laplace ingest chess`
+escape hatch silently drops eval/clock signal for cutechess-sourced PGN specifically.
+
+ISSUE C04 — chess HTTP API surface is entirely unauthenticated, unlike the sibling billing
+endpoints in the same file family, and combines with a real path-traversal write primitive
+Status: OPEN (security)
+Every route in `EndpointMappings.Chess.cs` (`/chess/new`, `/chess/legal`, `/chess/move`,
+`/chess/bestmove`, `/chess/train/start|stop`, all `/chess/lab/*`) has zero
+`.RequireAuthorization()`/tenant-resolution, whereas every route in the sibling
+`EndpointMappings.Billing.cs` in the same assembly explicitly threads an `ITenantResolver`
+through. `Program.cs` registers no global auth middleware. Concretely reachable consequences:
+an unauthenticated caller can (a) start unbounded background self-play/train jobs (CPU
+exhaustion), (b) launch arbitrary cutechess-cli tournaments (external process spawn), and (c)
+exploit `ChessLabRunners.cs:155-158`'s `RunLichessFetchAsync`, which builds
+`Path.Combine(LabDir, jobId, $"{user}_{site}.pgn")` from an unsanitized `user` value taken
+directly from the job's public `Config` dict (`/chess/lab/start` request body) — unlike
+`ChessGameFetcher.DefaultOut`'s own `Sanitize()` (alnum/-/_ only), this call path never
+sanitizes `user`, and `Path.Combine` will honor a rooted/`..`-laden value, giving an
+unauthenticated caller an arbitrary-file-write primitive on top of zero auth.
+Fix shape: gate `/chess/*` behind the same auth mechanism as `/v1/billing/*`; reuse
+`ChessGameFetcher.Sanitize()` (or equivalent) on `user`/`site` before path construction in
+`ChessLabRunners.cs`.
+
+ISSUE C05 — a real, live-looking Lichess bot API token sits unencrypted on disk
+Status: OPEN, informational (not a git leak — confirmed never committed, correctly gitignored)
+`deploy/secrets/lichess.env:4` contains a token in Lichess's real issuance format (`lip_` +
+~20 random chars), not an obvious placeholder. `git log --all` / `git ls-files` confirm it was
+never committed; `.gitignore:344` (`secrets/`) covers it. The token's own header comment
+declares broad scopes (`board:play, bot:play, engine:read/write, tournament:write,
+team:read/write`, etc.). Recommend treating as sensitive (rotate if this machine/repo state is
+ever shared) — flagged here because it exists, not because it's mishandled by git.
+
+ISSUE C06 — CountOutposts (feature-token extraction) has two real correctness bugs, plus a
+matching test-design gap that explains why they shipped unnoticed
+Status: OPEN (correctness bug), scope-limited to the `LAPLACE_CHESS_REKEY=1` opt-in feature-token
+path (not the default position-identity/repetition path)
+`PositionContent.cs:100`: `bb.Of(white ? Piece.WKnight : Piece.BKnight) | bb.Of(white ?
+Piece.WBishop : Piece.WBishop)` — the bishop half of the ternary has both branches identical
+(`Piece.WBishop` regardless of color), so Black's outpost-candidate computation ORs in White's
+bishop bitboard instead of Black's. `PositionContent.cs:108-109`: the "is this outpost square
+defended by a pawn" check tests `RankMask(r)` (the SAME rank as the piece) instead of the rank
+BEHIND it — pawns never defend same-rank squares, so this branch is effectively always false for
+genuine pawn support. `PositionContent.cs:107` has a third, related dead ternary (both branches
+byte-identical) suggesting the color-conditional logic here was never finished. Why this shipped:
+`PositionContentTests.cs:70-87` (`Surface_Rekey_AddsFeatureTokens_WhenEnabled`) only asserts the
+`outpost:`/`mob:`/`open:`/`kzone:` TOKENS ARE PRESENT in the output string, never that their
+VALUES are correct — the exact shape of test gap that would hide these three bugs.
+
+ISSUE C07 — self-play player-name claims get the same trust weight as curated academic corpora
+(hardcoded, not source-conditional)
+Status: OPEN (correctness bug / consensus-poisoning vector)
+`ChessVocabulary.EmitPlayer` (ChessVocabulary.cs:94-101) hardcodes
+`SourceTrust.AcademicCurated` (0.85) for every `HAS_NAME_ALIAS` attestation it writes,
+regardless of the actual `sourceId`/trust-class its caller is otherwise using. This is correct
+for `ChessPgnDecomposer.EmitPlayer` (real PGN corpora, AcademicCurated is the right trust class)
+but the SAME helper is also called from `SubstrateTurnHost.LearnGameAsync` for self-play games,
+whose own `SelfPlayTrustClass = "ResponseContent"` implies a much lower trust weight (~0.20 per
+`WitnessConstants.cs:37`) — so the player-name claim ("this game was played by 'Laplace'") is
+attested at curated-corpus confidence even for self-play, silently decoupled from the trust
+class the rest of that same code path correctly uses for every other attestation in the game.
+
+ISSUE C08 — move-quality judgment ("this move was a blunder") is written as game-OUTCOME
+evidence, folding into the same consensus node as real win/loss/draw results
+Status: OPEN (correctness bug)
+`ChessReviewIngest.cs:62-83` (`EmitBlunderOutcome`) writes a `PlyOutcome.Loss` (score 0)
+attestation on the OutcomeType/OutcomeObject subject/object pair for the pre-blunder position,
+purely because a blunder was detected there — using the exact same (subject, type, object)
+triple that `ChessGraph.AppendMoveEdge` uses for real, game-result-derived outcome evidence.
+Because `SubstrateChangeBuilder.AddAttestation` folds same-(subject,type,object) attestations
+into one consensus sum irrespective of the semantic difference between "this move was
+tactically bad" and "this game/position resulted in a loss," this injects synthetic "Loss"
+evidence for positions that may have been objectively fine or even winning before the blunder,
+independent of the game's actual result.
+
+ISSUE C09 — opening-book ingestion systematically pulls sharp/winning theoretical lines toward
+"drawish," amplified by self-play's own decisive-game overweighting — a real, traceable
+consensus-poisoning risk analogous to CLAUDE.md's flagged UserPrompt concern, via a different
+source
+Status: OPEN
+`ChessOpeningsDecomposer.cs:73-90` attests `PlyOutcome.Draw` (score 0.5) for every position on
+every book line, with `games` defaulting to 4 (env-tunable 1-64) and weight 0.7. Because chess
+positions are content-addressed identically regardless of source, this "book says drawish"
+evidence folds into the exact same consensus node as real self-play/PGN results for that FEN,
+for every source — systematically dragging genuinely sharp/winning book lines toward neutral.
+Compounding: `SubstrateTurnHost.cs:99-102` gives every move edge in a NON-adjudicated (i.e.
+genuinely decisive) self-play game 3x the games/witness weight of a drawn/adjudicated one
+(`CheckmateGames=3`) — so whichever bias direction a given self-play engine pairing produces
+(e.g. a consistently stronger White config) gets amplified 3x relative to book-line dilution,
+compounding rather than offsetting it.
+
+ISSUE C10 — UciEngine.cs: `stop` is unimplemented and architecturally unreachable; unbounded
+`go depth N` is a real hang risk exercised by this repo's own tooling; malformed FEN crashes the
+whole engine process
+Status: OPEN (correctness bug)
+`UciEngine.cs:19-58`'s command switch has no `stop` case at all (falls to a silent no-op
+`default`), and `Program.cs`'s read loop is fully synchronous (blocks to completion on each
+`Handle()` call before reading the next line) — so even implementing `stop` as a flag wouldn't
+help without a background-thread search model; a GUI's stop can never interrupt an in-flight
+search today. Separately, `ParseGo`'s `depth N` branch (`UciEngine.cs:99-100`) sets no
+`MaxTimeMs` override, defaulting to `int.MaxValue`, and `Search.Think` has no external
+cancellation hook (only its own internal deadline check) — and this exact code path is what
+`CutechessRunner.cs:58` drives in production (`tc=inf/depth={depth}`, i.e., no time control at
+all), so a deep search on a complex position can hang indefinitely with no recovery but killing
+the process. Also, `SetPosition`/`Board.FromFen` throws on malformed FEN with no try/catch
+anywhere in `Handle()`, so one bad `position fen ...` line kills the whole engine process. None
+of the 3 are covered by `UciEngineTests.cs`'s 8 tests (test-weakness, distinct finding).
+
+ISSUE C11 — ChessMotifs.cs implies broad tactical-motif coverage but is two hardcoded SAN
+sequences
+Status: OPEN (stub-incomplete)
+`ChessMotifs.cs:5-10` matches exactly two literal/prefix SAN sequences (Scholar's Mate, Fried
+Liver) — not a real fork/pin/skewer/discovered-attack detector. The relation type it feeds,
+`GAME_HAS_MOTIF`, implies far more than exists behind it.
+
+ISSUE C12 — CutechessRunner silently reports "Completed" on a run that produced zero parseable
+result lines
+Status: OPEN (correctness bug, minor)
+Output parsing is regex-based against cutechess-cli's exact current wording
+("Score of ... : W - D - L", "Elo difference: X"). Exit code IS checked (only `Completed` on
+`ExitCode==0`), but a zero-exit run whose stdout format didn't match either regex (localization,
+a cutechess version bump) still reports `Completed` with no metrics — a silent partial-failure
+mode with no "did we actually see a score line" assertion.
+
+ISSUE C13 — Zobrist hashing and the authoritative threefold-repetition check are two
+independent, non-unified position-identity systems
+Status: OPEN (architecture-mismatch, not a bug — both are independently correct for their scope)
+`Zobrist.cs` correctly powers the search's transposition table and in-search repetition-path
+avoidance (`Search.cs:99-100`). The AUTHORITATIVE game-ending threefold-repetition check
+(`ChessModality.IsThreefold`, ChessModality.cs:91-99) uses a completely separate string key
+(`PositionContent.Surface`) instead. Both work (verified via a passing constructed-repetition
+test), but this is the same "two parallel systems doing the same conceptual job" pattern flagged
+repeatedly elsewhere in this repo (01_Initial_review.txt 3.1/3.7) — a future change to one
+position-identity notion (e.g. adding a rule variant) could easily update only one of the two.
+
+ISSUE C14 — ply-cap-adjudicated self-play games are recorded as a draw for every edge, even from
+decisively winning positions
+Status: OPEN (data-fidelity, not a bug — a modeling simplification worth flagging)
+`ModalityEngine.PlayGameAsync` (ModalityEngine.cs:203-225): `terminal ?? GameOutcome.Draw` — any
+game that hits `maxPlies` without reaching a real `Terminal()` result is recorded as fully drawn
+for Glicko-2 purposes for every ply, regardless of how lopsided the actual position was when
+truncated. `SelfPlayEngineTests.cs:90-97` is aware of the distinction in its own assertions but
+the underlying simplification stands, and would dilute/mislabel consensus signal at scale for
+any self-play games that get cut off rather than played to conclusion.
+
+ISSUE C15 — test-weakness cluster (does not individually block anything, listed together)
+Status: OPEN
+  - `web/e2e/chess.spec.ts`: the "lab" test clicks Start, sleeps 2s (arbitrary timeout, not a
+    state/event wait), clicks Stop, and asserts NOTHING about whether the job actually started,
+    produced events, or transitioned state — would pass even if `/chess/lab/start` silently
+    failed.
+  - `ChessTactics.cs` (the EPD/tactics-suite solver used by the CLI and lab runners) has zero
+    dedicated unit tests anywhere in `Laplace.Modality.Chess.Tests`.
+  - `ChessProvenanceTests.cs` only asserts a trust-class constant equals a hand-typed literal —
+    exercises no real weighting and would not have caught Issue C07.
+  - `CutechessRunnerTests.cs` is a single happy-path regex test; `RunAsync` itself (the actual
+    `Process` invocation, exit-code/kill handling) is never exercised, only a pure string-parsing
+    helper.
+  - Chess decomposers (`ChessOpeningsDecomposer`/`ChessPgnDecomposer`) implement `IDecomposer`
+    but not `IIngestInventoryProvider`, unlike 13+ sibling decomposers — a minor feature-parity
+    gap versus the established pattern (`IngestRunner.cs:511-513` special-cases the interface).
+
+ISSUE C16 — assorted minor findings, grouped
+Status: OPEN, low severity, listed for completeness
+  - `CutechessRunner.cs:56` hardcodes the Stockfish calibration opponent to `UCI_Elo 2000` with
+    no job-config knob to change it.
+  - `ChessLabRunners.cs:33-34`'s bias `mode` switch (`"fold"|"edge"|"off"`) silently degrades to
+    no bias for BOTH `"off"` and any unrecognized/mistyped string (case-sensitive match), with
+    no validation/log of a bad value.
+  - `ChessLabRunners.cs:118,132`: a job's `Artifacts` dict entry for `games.pgn` is only
+    registered after the tournament loop completes — a mid-run crash leaves a partial PGN file
+    on disk with no artifact record pointing at it.
+  - `LichessBot.cs`: fixed 10s reconnect backoff (no exponential backoff, no 429/Retry-After
+    handling, unlike `ChessGameFetcher`'s own retry logic which does this correctly), and an
+    `HttpClient` with `Timeout = InfiniteTimeSpan` — a hung Lichess connection has no client-side
+    timeout safety net. No daily-game or opponent-rating cap beyond a variant/speed allow-list.
+
+================================================================================
+PART 4 — OPEN QUESTIONS FOR THE NEXT PASS
+================================================================================
+  1. Is highway_mask (Issue C02) load-bearing for CORRECTNESS of recall/A* graph search, or
+     purely an acceleration structure? Not verified this session.
+  2. Is the "raw EntityTypeRegistry.Id hash mint bypasses relation_types.toml" pattern
+     (Issue C02) actually repo-wide (WordNet/VerbNet/etc. relation types too), or is chess an
+     outlier? `EntityTypeRegistry.cs` itself suggests repo-wide, but not independently confirmed
+     against each of those decomposers' actual ingestion code.
+  3. Does 02_Identified_Issues.txt's Issue 01 (highway_mask NULL on live ISO639 attestations)
+     share this same root cause (relation type never in the manifest) rather than the
+     load-timing/code-path ambiguity that issue currently lists as unresolved? Worth checking
+     whether ISO639's relation types appear in relation_types.toml the same way this session
+     checked chess's.
+  4. Decide a fix for Issue C01 (cutechess PGN format mismatch) before relying on any local
+     self-play tournament's eval/clock-derived attestations for anything.
+  5. Decide whether the lab layer (Issue C03/C04) should get wired into automatic ingestion +
+     auth before it's exposed beyond a single trusted operator's own machine.

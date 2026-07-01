@@ -1,0 +1,71 @@
+ENGINEERING RULESET — how the substrate must be built and touched
+====================================================================
+Companion to 05_Substrate_Invariants.txt (which is "what must be true about the data/model").
+This doc is process: how code that touches the substrate must be written, grounded in real
+defects found and fixed this session, plus a full-codebase function-surface survey (2026-07-01,
+264 SQL function files / ~305 total functions+views across the extension).
+
+Rule #1: SQL/C# orchestrate; native C/C++/SPI does the heavy lifting.
+    - RBAR, per-row correlated subqueries, and CTE-chained logic belong in native code with
+      explicit sequenced SPI calls and bound parameters — not raw SQL switch/if trees.
+    - Grounded in: define_fast/word_shape_peers_fast native rewrites of the define()/senses()/
+      lexical_peers()/word_shape_peers() SQL chain — recall() went 48.7s -> ~470ms (~100x).
+
+Rule #2: A SQL function body containing a CTE (WITH clause) can never be inlined by Postgres's
+SQL-function inliner, regardless of STABLE/PARALLEL SAFE. This is a hard Postgres rule, not a
+tuning issue — verified against Postgres's own inlining documentation.
+    - Any function meant to be called from inside another function's hot path must avoid WITH,
+      or be moved to native C.
+    - Survey found 45+ CTE-bearing function files blocking inlining across the codebase —
+      systemic, not isolated. Not yet fully audited/triaged by priority; see open items below.
+
+Rule #3: Reduce result volume as early as possible in the query sequence; avoid cartesians.
+    - Pre-filter on the most selective predicate before joining/computing on broad, low-
+      selectivity columns. Grounded in: word_shape_peers's original cost was pre-joining on
+      type_id (matches most of the vocabulary, not selective) before the KNN window narrowed
+      anything — moving type_id to a post-filter on a bounded KNN result fixed it.
+
+Rule #4: A GiST KNN `ORDER BY coord <<->> point LIMIT k` comparison point must be a genuine
+bound parameter or literal.
+    - A value derived from a correlated CTE reference (e.g. `me.coord` from an outer CTE) is
+      NOT eligible for index-ordered KNN scanning and silently falls back to a full hash-join
+      + sort — no error, no warning, just a query that's 100x slower with no visible cause.
+      This was the dominant root cause of the original 48s recall() query.
+    - Verify index usage via EXPLAIN; never assume a KNN-shaped query is actually using the
+      KNN index just because the operator is present in the SQL text.
+
+Rule #5: Batch, don't RBAR.
+    - Compute/dedupe in bulk (client-side, or via `unnest(...) WITH ORDINALITY` array-based
+      SPI batching), then write pure records once. No per-row correlated subquery re-executed
+      per output row (senses_with_context.sql.in's pre-fix pattern was exactly this — fixed
+      via two set-based CTEs with GROUP BY). No per-candidate SPI round trip as the default
+      shape when a single array-based query will do.
+    - Caveat, also grounded in measurement: batching isn't free lunch by itself — batching
+      word_shape_peers_fast's per-candidate geometric checks into array queries barely moved
+      timing (461ms vs 482ms) once the real bottleneck (Rule #4) was already fixed. Don't
+      batch as a reflex; profile first, confirm the batch actually removes the dominant cost.
+
+Rule #6: No duplicate/overlapping logic without a documented reason it isn't consolidated.
+    - Survey found four wrappers around the same "get a definition" semantic (define(),
+      define_fast(), recall_define_response(), recall_fallback_gloss()), and the
+      `NOT refuted()` consensus-filter predicate reimplemented inline across 20+ functions
+      instead of a shared view/helper. Every reimplementation is a place the OR-bug class
+      (Rule #1 in 05_Substrate_Invariants.txt) or a future correctness fix can silently miss
+      one of the copies.
+    - This is the concrete first target for the "foundational set of functions/views" ask:
+      a shared view layer (candidates identified by survey: v_consensus_unrefuted,
+      v_word_senses) that every consumer joins against instead of re-deriving. NOT YET BUILT —
+      scope/priority to be confirmed before starting, since it touches ~20+ call sites.
+
+Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
+chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
+variants that break the greppable pattern.
+
+Open items surfaced by the 2026-07-01 survey, not yet actioned:
+    - materialize_period_partition / materialize_period_partition_fresh differ only by whether
+      the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized
+      function.
+    - Full audit for other instances of the Rule #1 (05_Substrate_Invariants.txt) OR-combined
+      order-sensitive/order-insensitive metric bug: survey did one pass, found no other
+      confirmed instance, but explicitly flagged this as not exhaustive.
+    - Shared view layer (see Rule #6) not yet started.

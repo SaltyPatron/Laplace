@@ -12,22 +12,6 @@ bitmap_set(uint8_t *bm, int pos)
     bm[pos >> 3] |= (uint8_t)(1u << (pos & 7u));
 }
 
-static inline void
-bitmap_clear(uint8_t *bm, int pos)
-{
-    bm[pos >> 3] &= (uint8_t)~(1u << (pos & 7u));
-}
-
-static Datum
-bytea16_datum(const uint8_t id[16])
-{
-    bytea *b = (bytea *) palloc(VARHDRSZ + 16);
-
-    SET_VARSIZE(b, VARHDRSZ + 16);
-    memcpy(VARDATA(b), id, 16);
-    return PointerGetDatum(b);
-}
-
 static int
 spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
                           uint8_t *bm, int candidate_count)
@@ -53,8 +37,24 @@ spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
     return SPI_OK_SELECT;
 }
 
-int
-laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+/*
+ * Shared batch-presence core used by both laplace_entities_present_bitmap()
+ * and laplace_tier_batch_existence_probe(). `bm` is assumed pre-zeroed by
+ * the caller (palloc0'd result buffer) -- this function only ever SETS bits
+ * for ids it can positively confirm present, via:
+ *   1. a perfcache fast-path lookup (tier-0 codepoints resolve without a
+ *      DB round-trip at all), applied uniformly to every candidate
+ *      regardless of what tier it's actually at -- codepoint ids simply
+ *      won't match for tier>0 candidates, so this is a pure accelerant,
+ *      never a special case; then
+ *   2. exactly one SPI batch query for everything the perfcache fast path
+ *      didn't resolve.
+ * No default-present assumption, no tree-walk, no short-circuiting based on
+ * an unconfirmed guess -- a bit is 1 iff this function actually confirmed
+ * that id has a committed entities row.
+ */
+static int
+batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
     Datum      *elems;
     bool       *nulls;
@@ -70,14 +70,14 @@ laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate
     int         spi_rc;
 
     if (candidate_count <= 0)
-        return 0;
+        return SPI_OK_SELECT;
 
     deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &elems, &nulls, &nelems);
     if (nelems != candidate_count)
     {
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("entities_present_bitmap: array length mismatch")));
+                 errmsg("batch_presence_core: array length mismatch")));
     }
 
     remap = (int *) palloc(sizeof(int) * candidate_count);
@@ -115,7 +115,7 @@ laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate
         pfree(probe_elems);
         pfree(elems);
         pfree(nulls);
-        return 0;
+        return SPI_OK_SELECT;
     }
 
     probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
@@ -145,116 +145,14 @@ laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate
     return spi_rc;
 }
 
-void
-laplace_content_descent_bitmap_core(
-    const uint8_t *ids16,
-    const int32_t *parents,
-    int n,
-    uint8_t *bm)
+int
+laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
-    bool *entity_present;
-    bool *visited;
-    int  *stack;
-    int   sp;
-    int   i;
+    return batch_presence_core(ids_array, bm, candidate_count);
+}
 
-    if (n <= 0)
-        return;
-
-    entity_present = (bool *) palloc0(sizeof(bool) * n);
-    visited = (bool *) palloc0(sizeof(bool) * n);
-    stack = (int *) palloc(sizeof(int) * n);
-
-    {
-        Datum      *probe_elems;
-        int        *remap;
-        int         probe_n = 0;
-        int         j;
-        ArrayType  *probe_array;
-        uint8_t    *sub_bm;
-        Oid         argtypes[1];
-        Datum       args[1];
-
-        remap = (int *) palloc(sizeof(int) * n);
-        probe_elems = (Datum *) palloc(sizeof(Datum) * n);
-
-        for (i = 0; i < n; i++)
-        {
-            if (laplace_perfcache_ready())
-            {
-                uint32_t cp;
-
-                if (laplace_perfcache_codepoint_for_id(ids16 + (size_t) i * 16, &cp))
-                {
-                    entity_present[i] = true;
-                    continue;
-                }
-            }
-            remap[probe_n] = i;
-            probe_elems[probe_n++] = bytea16_datum(ids16 + (size_t) i * 16);
-        }
-
-        if (probe_n > 0)
-        {
-            probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
-            sub_bm = (uint8_t *) palloc0((probe_n + 7) / 8);
-            argtypes[0] = BYTEAARRAYOID;
-            args[0] = PointerGetDatum(probe_array);
-
-            if (SPI_connect() == SPI_OK_CONNECT)
-            {
-                if (spi_mark_present_ordinals(
-                        "SELECT idx FROM laplace.entities_present_ordinals($1)",
-                        1, argtypes, args, sub_bm, probe_n) == SPI_OK_SELECT)
-                {
-                    for (j = 0; j < probe_n; j++)
-                    {
-                        if ((sub_bm[j >> 3] & (1u << (j & 7u))) != 0)
-                            entity_present[remap[j]] = true;
-                    }
-                }
-                SPI_finish();
-            }
-
-            for (j = 0; j < probe_n; j++)
-                pfree(DatumGetPointer(probe_elems[j]));
-            pfree(sub_bm);
-            pfree(probe_array);
-        }
-
-        pfree(remap);
-        pfree(probe_elems);
-    }
-
-    sp = 0;
-    for (i = 0; i < n; i++)
-    {
-        if (parents[i] >= 0)
-            continue;
-        stack[sp++] = i;
-    }
-
-    while (sp > 0)
-    {
-        int node = stack[--sp];
-
-        if (visited[node])
-            continue;
-        visited[node] = true;
-
-        if (entity_present[node])
-            continue;
-
-        bitmap_clear(bm, node);
-
-        for (i = 0; i < n; i++)
-        {
-            if (parents[i] == node)
-                stack[sp++] = i;
-        }
-    }
-
-    pfree(entity_present);
-    pfree(visited);
-    pfree(stack);
+int
+laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    return batch_presence_core(ids_array, bm, candidate_count);
 }

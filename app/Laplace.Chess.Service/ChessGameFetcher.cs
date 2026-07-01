@@ -129,6 +129,6 @@ public static class ChessGameFetcher
         return n;
     }
 
-    private static string Sanitize(string s)
+    internal static string Sanitize(string s)
         => new(s.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
 }

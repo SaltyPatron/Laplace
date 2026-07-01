@@ -28,6 +28,7 @@ probes/attestations_present_ordinals.sql.in
 probes/table_present_ordinals.sql.in
 probes/entities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
+probes/tier_batch_existence_probe.sql.in
 probes/drop_content_descent_novel_ordinals.sql.in
 functions/glicko2/laplace_glicko2_result.sql.in
 functions/glicko2/laplace_glicko2_sfunc.sql.in
@@ -183,6 +184,7 @@ functions/lexical/word_case_map_surface.sql.in
 functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/word_case_class_surface.sql.in
 functions/lexical/word_shape_peers.sql.in
+functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/lexical_peers.sql.in
 functions/lexical/senses.sql.in
 functions/lexical/senses_with_context.sql.in
@@ -279,6 +281,7 @@ functions/recall/recall_related_response.sql.in
 functions/recall/recall_related_in_response.sql.in
 functions/recall/recall_relation_summary_response.sql.in
 functions/recall/recall_walk_response.sql.in
+functions/recall/define_fast.sql.in
 functions/recall/recall_fallback_gloss.sql.in
 functions/recall/recall_fallback_walk.sql.in
 functions/recall/recall_is_a_yes_reply.sql.in

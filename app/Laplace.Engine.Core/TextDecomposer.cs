@@ -62,8 +62,15 @@ public static class TextDecomposer
                     int rc = NativeInterop.ContentRootId(p, (nuint)utf8.Length, &id);
                     if (rc == -3) throw new InvalidOperationException(
                         "laplace_content_root_id: perfcache not loaded — call CodepointPerfcache.LoadDefault() first");
-                    if (rc != 0) throw new InvalidOperationException(
-                        $"laplace_content_root_id failed (rc={rc})");
+                    if (rc != 0)
+                    {
+                        int previewLen = Math.Min(utf8.Length, 80);
+                        string preview = Encoding.UTF8.GetString(utf8.Slice(0, previewLen))
+                            .Replace("\r", "\\r").Replace("\n", "\\n");
+                        throw new InvalidOperationException(
+                            $"laplace_content_root_id failed (rc={rc}, len={utf8.Length}, " +
+                            $"preview=\"{preview}\")");
+                    }
                 }
             }
         }

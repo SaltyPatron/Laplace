@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -77,6 +78,26 @@ public sealed class RepoDecomposer : IDecomposer
         var b = NewBuilder(0, reader);
         int inBatch = 0, bn = 0;
         b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
+        // RepoRoot is a real Document-tier (content) entity, not an abstract classifier -- it
+        // must be minted with a matching physicality in the same write, same as any other
+        // content-tier entity. Derive its coordinate deterministically from its own canonical
+        // path text via the standard text-geometry pipeline (same machinery used for every
+        // other piece of textual content), rather than leaving it geometry-less.
+        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
+                out _, out _, out double repoCx, out double repoCy, out double repoCz, out double repoCm))
+        {
+            Span<double> repoCoord = stackalloc double[4] { repoCx, repoCy, repoCz, repoCm };
+            Hash128 repoPhysId = PhysicalityId.Compute(
+                repoId, PhysicalityType.Content, repoCx, repoCy, repoCz, repoCm,
+                ReadOnlySpan<double>.Empty);
+            b.AddPhysicality(new PhysicalityRow(
+                Id: repoPhysId, EntityId: repoId, SourceId: Source,
+                Type: PhysicalityType.Content,
+                CoordX: repoCx, CoordY: repoCy, CoordZ: repoCz, CoordM: repoCm,
+                HilbertIndex: Hilbert128.Encode(repoCoord),
+                TrajectoryXyzm: null, NConstituents: 0,
+                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+        }
 
         char sep = Path.DirectorySeparatorChar;
         string[] skipSegs = { $"{sep}obj{sep}", $"{sep}bin{sep}", $"{sep}.git{sep}", $"{sep}node_modules{sep}" };

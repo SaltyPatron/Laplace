@@ -96,7 +96,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
                    evals, clockTokens, evalTokens);
 
         if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_VARIATIONS"), "1", StringComparison.Ordinal))
-            AppendVariations(b, modality, walk.AllPlies, whiteElo, blackElo, whitePlayer, blackPlayer);
+            AppendVariations(b, modality, walk.AllPlies, whitePlayer, blackPlayer);
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
@@ -217,16 +217,24 @@ public sealed class ChessPgnDecomposer : IDecomposer
             var next = m.Apply(state, mv.Value);
             string fromKey = m.StateKey(state);
 
-            long games = EloGames(mover == 0 ? blackElo : whiteElo);
-            if (mate && winner == mover) games += games / 2;
+            // Witness count stays a flat, ELO-independent "1 occurrence" — a player's Elo is a
+            // separate, timestamped fact (Rating() below emits it as its own HAS_RATING
+            // attestation, context-scoped to this game), not a multiplier smuggled into the
+            // Glicko-2 fold's witness dimension. Elo and Glicko-2 are different rating systems;
+            // conflating a raw Elo number into "how many games this counts as" was never a
+            // meaningful unit conversion.
+            long games = 1;
+            if (mate && winner == mover) games += 1;
+            // Think-time (tf) stays out of the witness count too, same reasoning as Elo above —
+            // it's independently attested via HAS_CLOCK/HAS_THINK_CLASS below, not folded into
+            // Glicko-2 evidence weight. moveChoiceGames is omitted so AppendMoveEdge defaults it
+            // to `games`.
             double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-            long moveChoiceGames = Math.Max(1, (long)Math.Round(EloGames(mover == 0 ? whiteElo : blackElo) * tf));
 
             ChessGraph.AppendMoveEdge(
                 b, fromKey, m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
                 sourceId: ChessVocabulary.PgnSourceId,
                 moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
-                moveChoiceGames: moveChoiceGames,
                 contextId: gameId,
                 ply: ply + 1);
 
@@ -259,7 +267,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
     private static void AppendVariations(
     SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
-    int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
+    Hash128? whitePlayer, Hash128? blackPlayer)
     {
         const double varWeight = 0.35;
         var mainState = m.Initial();
@@ -273,9 +281,8 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 if (!inVar) { varState = CloneState(m, mainState); inVar = true; }
                 if (TryPlay(m, ref varState, plyStream.San, out var fromKey, out var toKey, out int mover))
                 {
-                    long games = Math.Max(1, EloGames(mover == 0 ? blackElo : whiteElo) / 2);
                     ChessGraph.AppendMoveEdge(
-                        b, fromKey, toKey, PlyOutcome.Draw, games, varWeight,
+                        b, fromKey, toKey, PlyOutcome.Draw, games: 1, varWeight,
                         sourceId: ChessVocabulary.PgnSourceId,
                         moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
                         contextId: null);
@@ -306,9 +313,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
         return true;
     }
 
-    private static long EloGames(int elo)
-    => elo <= 0 ? 3 : Math.Clamp((long)Math.Round((elo - 600) / 200.0), 1, 12);
-
     private static (int White, int Black) ParseElos(string game)
         => (PgnGames.TagInt(game, "WhiteElo"), PgnGames.TagInt(game, "BlackElo"));
 
@@ -322,8 +326,11 @@ public sealed class ChessPgnDecomposer : IDecomposer
         ChessVocabulary.EmitPlayer(b, canonicalId, name, ChessVocabulary.PgnSourceId);
         var legacyId = ChessVocabulary.LegacyPlayerId(name);
         if (legacyId != canonicalId)
+            // CORRESPONDS_TO is the manifest's existing symmetric cross-naming-alignment relation
+            // (rank=equivalence) — reused here instead of a chess-only "SAME_AS" so this gets a
+            // real highway_mask bit instead of hashing to a relation type the manifest never saw.
             b.AddAttestation(NativeAttestation.Categorical(
-                canonicalId, "SAME_AS", legacyId, ChessVocabulary.PgnSourceId, null, PgnWitnessWeight));
+                canonicalId, "CORRESPONDS_TO", legacyId, ChessVocabulary.PgnSourceId, null, PgnWitnessWeight));
         return canonicalId;
     }
 

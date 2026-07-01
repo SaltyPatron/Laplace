@@ -131,6 +131,25 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("laplace_apply_batch: SPI_connect failed")));
 
+    /*
+     * Serialize concurrent apply_batch calls against each other. Entity/physicality ids are
+     * content-addressed (deterministic hash of content), so two concurrent decomposers can
+     * independently compute the same "novel" id for the same content and both pass the
+     * anti-join dedup check (LEFT JOIN ... WHERE id IS NULL) before either has committed --
+     * a classic check-then-act race that surfaces as a raw entities_pkey/physicalities_pkey
+     * unique violation. Taking this lock makes apply_batch calls mutually exclusive so the
+     * second caller's anti-join always sees the first caller's committed rows and correctly
+     * dedupes instead of racing. This is prevention, not retry-after-collision: the lock is
+     * transaction-scoped (auto-released at commit/rollback) and acquired once per (already
+     * bulk) apply_batch call, not per row, so it does not serialize the CPU-bound decompose/
+     * compose work upstream of this -- only the final bulk write.
+     */
+    if (SPI_execute("SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))",
+                     true, 0) != SPI_OK_SELECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("laplace_apply_batch: failed to acquire write serialization lock")));
+
     {
         bool has_ent = false, has_phys = false, has_att = false;
         const char *bulk = GetConfigOption("laplace_substrate.ingest_bulk_novel", true, false);

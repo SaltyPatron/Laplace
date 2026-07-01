@@ -41,8 +41,10 @@ public sealed class Search
     private bool _aborted;
     private ChessMove _rootBestMove;
     private readonly Stopwatch _sw = new();
+    private CancellationToken _ct;
 
-    private bool TimeUp() => (_nodes & 2047) == 0 && _sw.ElapsedMilliseconds >= _deadlineMs && _rootBestMove != default;
+    private bool TimeUp() => (_nodes & 2047) == 0 && _rootBestMove != default
+        && (_sw.ElapsedMilliseconds >= _deadlineMs || _ct.IsCancellationRequested);
 
     private readonly EvalTerm _terms;
     private readonly IRootBias? _rootBias;
@@ -61,12 +63,13 @@ public sealed class Search
         _ttMask = (1UL << bits) - 1;
     }
 
-    public Result Think(Board board, Limits limits)
+    public Result Think(Board board, Limits limits, CancellationToken ct = default)
     {
         _nodes = 0;
         _maxNodes = limits.MaxNodes;
         _deadlineMs = limits.MaxTimeMs;
         _aborted = false;
+        _ct = ct;
         _sw.Restart();
         Array.Clear(_tt, 0, _tt.Length);
 

@@ -61,7 +61,7 @@ internal static class MapNetIngest
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, synId.Value);
+            StageCorrespondsTo(batch, seen, frame, FrameTypeId, synId.Value);
 
             if (++count >= batchSize)
             {
@@ -187,15 +187,18 @@ internal static class MapNetIngest
     private static void StageCorrespondsTo(
         SubstrateChangeBuilder b,
         HashSet<(Hash128 Subject, Hash128 Object)> seen,
-        Hash128? subjectId,
+        string subjectKey,
         Hash128 subjectType,
         Hash128 synId)
     {
+        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
+        // content (entity + physicality) via the real tiered content pipeline. Using
+        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
+        // entity minted with no matching physicality.
+        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, MapNetDecomposer.Source, TC.AcademicCurated);
         if (subjectId is null) return;
         if (!seen.Add((subjectId.Value, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Word, subjectType, MapNetDecomposer.Source));
-        CategoryAnchor.AttestCategory(b, subjectId.Value, subjectType, MapNetDecomposer.Source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
             subjectId.Value, "CORRESPONDS_TO", synId, MapNetDecomposer.Source, TC.AcademicCurated));
     }

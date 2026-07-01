@@ -4,6 +4,12 @@ namespace Laplace.Chess.Service;
 
 internal static partial class PgnClocks
 {
+    // Deliberately lichess-only: cutechess-cli's own comments carry per-move TIME SPENT
+    // ("0.13s" in "{+0.48/17 0.13s}"), not remaining clock time — a different quantity than
+    // what this file models (SecondsRemaining/ThinkFactor diff consecutive remaining-clock
+    // readings). Reconstructing a synthetic remaining-clock series from spent-time + the PGN's
+    // TimeControl tag is possible but not done here; see PgnEvals.CutechessEvalRegex for the eval
+    // half of this same format, which IS handled.
     [GeneratedRegex(@"\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]")]
     private static partial Regex ClkRegex();
 

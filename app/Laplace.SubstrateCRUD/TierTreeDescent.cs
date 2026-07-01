@@ -233,6 +233,44 @@ public static class TierTreeDescent
         }
     }
 
+    /// <summary>
+    /// Uniform tier-by-tier, trunk-to-leaf, breadth-first batch existence
+    /// probe, applied identically to every tier (including tier 0 -- no
+    /// special-casing). For each tier, from the highest tier present in the
+    /// batch down to 0:
+    ///   1. Collect every not-yet-resolved node at that tier, across every
+    ///      tree in the batch, into one flat candidate list.
+    ///   2. Batch-check all of them in ONE round-trip
+    ///      (<see cref="ISubstrateReader.TierBatchExistenceProbeAsync"/>).
+    ///   3. For every id the round's bitmap actually confirmed present,
+    ///      mark its emit-bit AND mark its whole subtree "resolved" --
+    ///      children of a confirmed-present node are guaranteed present too
+    ///      by the content-addressing invariant (same content => same hash;
+    ///      an atomically-committed parent implies every committed child),
+    ///      so they are never enumerated, never queried, and never
+    ///      probed again in a later round.
+    ///
+    /// On a fresh DB this naturally degenerates to "everything absent, full
+    /// descent" -- the same total cost as an unconditional insert. On a DB
+    /// that already has the content, the top-tier (root) check short-
+    /// circuits almost immediately. This is the actual efficiency win, not
+    /// skipping checks for any particular tier.
+    ///
+    /// This replaces the previous scheme, which ran exactly one flat probe
+    /// covering every tier at once (no short-circuiting at all, so no
+    /// efficiency win from content-addressing) and then called
+    /// reader.MarkProven() on the ENTIRE unfiltered candidate list --
+    /// including ids that same call's own bitmap had just proven absent.
+    /// That unconditional MarkProven() call was a real, live-reproduced
+    /// cache self-poisoning bug (see dorian.txt repro in
+    /// .scratchpad/02_Identified_Issues.txt): NpgsqlSubstrateReader's
+    /// process-lifetime `_proven` cache would then falsely report those
+    /// ids as existing for the rest of the ingest run, so a common
+    /// grapheme/word's real entities row would never actually get written,
+    /// while its parent's trajectory kept referencing that id anyway. Here,
+    /// MarkProven is only ever called with the subset of a round's
+    /// candidates that round's own bitmap positively confirmed present.
+    /// </summary>
     public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
     {
@@ -253,38 +291,92 @@ public static class TierTreeDescent
 
         if (probeTrees.Count == 0) return results;
 
-        BuildBatchProbe(probeTrees, out var ids, out var parents, out var treeIdxToFlat);
-        byte[]? descentBm = ids.Count > 0
-            ? await reader.ContentDescentBitmapAsync(ids, parents, ct).ConfigureAwait(false)
-            : null;
-
-        var perTreeBm = new byte[probeTrees.Count][];
-        for (int t = 0; t < probeTrees.Count; t++)
+        int treeCount = probeTrees.Count;
+        var perTreeBm = new byte[treeCount][];
+        // resolved[t][j]: node j of tree t either was itself confirmed
+        // present, or is a descendant of a node confirmed present in an
+        // earlier (higher-tier) round -- either way its subtree is fully
+        // covered by the content-addressing guarantee and must never be
+        // enumerated as a probe candidate again.
+        var resolved = new bool[treeCount][];
+        int maxTier = 0;
+        for (int t = 0; t < treeCount; t++)
         {
-            var tree = probeTrees[t];
-            perTreeBm[t] = descentBm is null
-                ? new byte[(tree.NodeCount + 7) / 8]
-                : NodeEmitBitmap(tree, descentBm, treeIdxToFlat[t]);
+            int nodeCount = probeTrees[t].NodeCount;
+            perTreeBm[t] = new byte[(nodeCount + 7) / 8];
+            resolved[t] = new bool[nodeCount];
+            for (int j = 0; j < nodeCount; j++)
+                maxTier = Math.Max(maxTier, probeTrees[t].GetNode((uint)j).Tier);
         }
 
-        if (ids.Count > 0) reader.MarkProven(ids);
-
-        BuildBatchTier0Probe(probeTrees, out var tier0Ids, out var tier0Placements);
-        if (tier0Ids.Count > 0)
+        for (int tier = maxTier; tier >= 0; tier--)
         {
-            byte[] tier0Bm = await reader.EntitiesExistBitmapAsync(tier0Ids, ct).ConfigureAwait(false);
-            ApplyBatchTier01Present(perTreeBm, tier0Placements, tier0Bm);
+            var ids = new List<Hash128>();
+            var placements = new List<(int TreeIndex, int NodeIndex)>();
+            for (int t = 0; t < treeCount; t++)
+            {
+                var tree = probeTrees[t];
+                int nodeCount = tree.NodeCount;
+                for (int j = 0; j < nodeCount; j++)
+                {
+                    if (resolved[t][j]) continue;
+                    if (tree.GetNode((uint)j).Tier != tier) continue;
+                    ids.Add(tree.GetNode((uint)j).Id);
+                    placements.Add((t, j));
+                }
+            }
+            if (ids.Count == 0) continue;
+
+            byte[] bm = await reader.TierBatchExistenceProbeAsync(ids, ct).ConfigureAwait(false);
+            long bits = (long)bm.Length * 8;
+
+            var confirmedPresent = new List<Hash128>();
+            for (int k = 0; k < placements.Count; k++)
+            {
+                if (k >= bits || (bm[k >> 3] & (1 << (k & 7))) == 0) continue;
+                var (t, j) = placements[k];
+                perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                resolved[t][j] = true;
+                confirmedPresent.Add(ids[k]);
+                MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
+            }
+
+            // Only the ids THIS round's real query positively confirmed
+            // present are ever marked proven -- never the round's whole,
+            // unfiltered candidate list (that was the bug).
+            if (confirmedPresent.Count > 0) reader.MarkProven(confirmedPresent);
         }
 
-        BuildBatchTier1Probe(probeTrees, out var tier1Ids, out var tier1Placements);
-        if (tier1Ids.Count > 0)
-        {
-            byte[] tier1Bm = await reader.EntitiesExistBitmapAsync(tier1Ids, ct).ConfigureAwait(false);
-            ApplyBatchTier01Present(perTreeBm, tier1Placements, tier1Bm);
-        }
-
-        for (int t = 0; t < probeTrees.Count; t++)
+        for (int t = 0; t < treeCount; t++)
             results[probeIndices[t]] = perTreeBm[t];
         return results;
+    }
+
+    /// <summary>
+    /// Marks every descendant of <paramref name="nodeIdx"/> (a node just
+    /// confirmed present) as resolved+present, without querying or
+    /// enumerating them individually. Uses the tree's own contiguous
+    /// child-range storage (FirstChildIdx/ChildCount) rather than a
+    /// parent-pointer search, so each node is visited by exactly one
+    /// covering walk for the whole probe -- total cost is O(subtree size),
+    /// and O(n) summed across every call for one tree, not O(n^2).
+    /// </summary>
+    private static void MarkSubtreeResolvedPresent(TierTree tree, byte[] emitBm, bool[] resolved, uint nodeIdx)
+    {
+        var stack = new Stack<uint>();
+        stack.Push(nodeIdx);
+        while (stack.Count > 0)
+        {
+            uint idx = stack.Pop();
+            var node = tree.GetNode(idx);
+            for (uint c = 0; c < node.ChildCount; c++)
+            {
+                uint childIdx = node.FirstChildIdx + c;
+                if (resolved[childIdx]) continue;
+                resolved[childIdx] = true;
+                emitBm[childIdx >> 3] |= (byte)(1 << (int)(childIdx & 7));
+                stack.Push(childIdx);
+            }
+        }
     }
 }

@@ -2,5 +2,12 @@ CREATE OR REPLACE FUNCTION entity_tier_of(p_entity bytea)
     RETURNS int
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT tier FROM entities WHERE id = p_entity
+    -- Fall back to the perfcache-backed codepoint lookup before giving up: a valid
+    -- tier-0 codepoint is tier 0 whether or not it has been given its own entities
+    -- row yet. Only genuinely unresolvable ids (neither a real row nor a valid
+    -- codepoint) should surface as NULL here.
+    SELECT COALESCE(
+        (SELECT tier FROM entities WHERE id = p_entity),
+        CASE WHEN codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
+    )
 $$;

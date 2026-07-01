@@ -1,0 +1,304 @@
+LAPLACE — INITIAL REVIEW (01)
+Scope: first-pass reconstruction of the invention from the repo as it exists today, plus a
+candid list of where the implementation falls short of that invention. Written from a cold
+read (no prior familiarity, no memory), corrected in-line several times by the author during
+the review. Flagged corrections are called out explicitly below because they were the most
+information-dense parts of the conversation.
+
+STATUS: this document is the static-reading pass. See 02_Identified_Issues.txt for the
+live-execution follow-up (real rebuild/deploy/seed run, direct SQL verification against a
+freshly-seeded database, and issue statuses — several items below have since moved from
+"read in code" to "confirmed against live data," one item below (39_highway.sql.in / the
+highway_mask gap) turned out to be worse than initially scoped, and two real bugs were found
+and fixed in scripts/win/ that aren't mentioned below because they postdate this document.
+
+================================================================================
+PART 1 — THE INVENTION (as best reconstructed)
+================================================================================
+
+One-line version: an alternative computational substrate for machine "knowledge" and
+"reasoning" that replaces the two primitives modern ML is built on — GEMM (similarity /
+transformation via matrix multiply) and nearest-neighbor search (relevance via distance in a
+trained embedding space) — with graph search (A*) over a confidence-scored evidence graph
+(Glicko-2), and a deterministic, lossless, content-addressed identity system standing in for
+what would otherwise be a trained embedding. Zero GPU code anywhere in engine/ or
+extension/ is not an oversight, it's a consequence: nothing in the core design needs one.
+
+1.1 Content addressing is the foundation
+  - Every entity id is a BLAKE3 hash of canonical content (hash128_t, 16 bytes). Same content
+    -> same tree -> same id -> one shared row, referenced by every occurrence. This is stated
+    directly in generated SQL: "'Building block' content is the same tree => same id => one
+    physicality" (extension/laplace_substrate/laplace_substrate.sql.i:46).
+  - Canonical names are namespaced strings ("substrate/pos/NOUN/v1", "language:eng",
+    "ud/feature/Case=Nom", "tokenizer/vocab/..") hashed to produce ids, with a reverse table
+    (canonical_names) for readback. render()/label() (extension/laplace_substrate/sql/
+    functions/readback/render.sql.in, .../converse/label.sql.in) walk this back to text.
+
+1.2 Attestations are the atomic unit; relation TYPE is the real "modality"
+  - Table `attestations`: (subject_id, type_id, object_id, source_id, context_id, outcome,
+    observation_count, highway_mask). Every fact from every source — WordNet, ConceptNet,
+    a chess game result, a user chat prompt, a probed neural network — reduces to this same
+    5-tuple shape.
+  - `type_id` (the relation — HAS_POS, IS_A, CAUSES, ATTENDS, ...) is the true differentiator
+    of "kind of knowledge," not the ingestion source or original data format ("modality" in
+    the colloquial ML sense — text/image/audio/code — is NOT how this system carves the
+    world; author confirmed this directly and it corrected an early wrong assumption in this
+    review). ~150 canonical relation types + alias table + dynamic families (DEP_*, EDEP_*,
+    FEAT_*) live in engine/manifest/relation_types.toml.
+  - Every relation type carries a salience `rank` (13 bands: mandate=1.0 down to
+    probationary=0.05) that weights both live read-time confidence (eff_mu * rank) and
+    GGUF export-plane weighting — one number doing both jobs.
+
+1.3 Consensus: Glicko-2 repurposed from chess ratings to epistemic confidence
+  - Table `consensus`: (subject_id, type_id, object_id, rating, rd, volatility,
+    witness_count) — literal Glicko-2 fields. `eff_mu = rating - 2*rd` is the conservative
+    confidence estimate used everywhere claims get ranked.
+  - The tell: `attestations.outcome CHECK IN (0,1,2)` and Laplace.Modality's
+    `PlyOutcome { Loss=0, Draw=1, Win=2 }` are bit-for-bit the same enum. A chess game
+    result and a WordNet hypernym claim are, to this system, literally the same kind of
+    evidence event feeding the same rating update. Chess is not a bolted-on demo; it is the
+    domain where the fold's convergence to ground truth can actually be checked, because
+    chess results are objectively verifiable and semantic claims mostly aren't.
+
+1.4 Retrieval/reasoning is graph search, not vector similarity
+  - astar.cpp: plain priority-queue A*/Dijkstra over hash128_t nodes, scalar accumulated
+    cost. No linear algebra. Heuristic is currently `h = 0.0` (see Part 3 — this makes it
+    uniform-cost search, not true A*, today).
+  - The live serving path confirms this is the real mechanism, not a demo: the OpenAI-
+    compatible chat endpoint (Laplace.Endpoints.OpenAICompat/SubstrateClient.cs:53) calls
+    `laplace.recall(...)` directly against Postgres. TurnWitness.cs only loads
+    CodepointPerfcache — no GGUF model is loaded in the request path. `recall_*_response`
+    SQL functions (recall_define_response, recall_walk_response, recall_translate_response,
+    recall_fallback_walk, ...) intent-route to templated, consensus-backed answers, falling
+    back to graph walks (walk_text, continue_text, variant_walk) when there's no direct hit.
+    `ConverseRow(Reply, EffectiveMu, Witnesses)` returns the confidence score and evidence
+    count as part of the API contract — "explainability" is a literal field, not a metaphor,
+    and is billed as its own line item (ExplainabilityBilling.cs).
+
+1.5 Geometry is identity and lossless serialization, NOT a semantic embedding
+  (This section required two corrections from the author during the review; both are
+  preserved because they were the highest-value moments of the conversation.)
+  - CORRECTED CLAIM #1: I initially described the S^3/Hilbert coordinate system as "the move
+    that replaces nearest-neighbor." This is wrong and was corrected directly. Evidence:
+    unicode_seed.cpp:250-264 — super_fibonacci(CP_COUNT, ...) generates ONE fixed uniform
+    point set on S^3 indexed purely by array position; each codepoint's coord is
+    `sf[uca_rank[cp]]`, i.e. the point at the index equal to that codepoint's UCA (Unicode
+    Collation Algorithm / DUCET) sort rank. Proximity on the sphere encodes adjacency in
+    Unicode's canonical sort order ONLY — nothing about meaning. It is a rank-to-point lookup,
+    not a trained or content-derived embedding.
+  - CORRECTED CLAIM #2 (refines #1): the actual purpose of physicalities.coord/trajectory is
+    a lossless, deduplicating, content-addressed structural SERIALIZATION, not identity-by-
+    similarity. Proof: Laplace.Cli/ContentRoundtrip.cs — `trajectory` is a PostGIS
+    GeometryZM storing an ORDERED sequence of a composed entity's children's coordinates,
+    unmodified (not pooled/averaged the way a real embedding would be). A recursive SQL CTE
+    (`laplace_trajectory_constituent_ids(trajectory)`) walks a document entity down through
+    sentence -> word -> grapheme -> codepoint purely by decoding geometry, and reconstructs
+    the ORIGINAL BYTES exactly by looking up leaf coordinates in the T0 perfcache's
+    hash->codepoint table. Nothing is thrown away in the "compression" — compactness comes
+    entirely from content-addressed dedup (same building block, one shared row, referenced
+    many times) and indexing, never from discarding information. This is the structural
+    opposite of a trained embedding, which is lossy BY DESIGN (that's what buys similarity
+    generalization). Determinism of the identity system is not just assumed — it's pinned
+    (perfcache header carries ucd_version, uca_version, and a ucd_hash of the exact UCD/DUCET
+    source files) and continuously verified (CMake target
+    laplace_verify_perfcache_determinism regenerates the T0 blob and byte-diffs it against a
+    reference every build).
+  - mantissa.c is a THIRD, unrelated reuse of the same geometry columns, not a refinement of
+    the above: laplace_slot_to_fp/laplace_fp_to_slot force a double's sign+exponent into a
+    fixed always-valid pattern (biased exponent 0x3FF) and use the 52-bit mantissa as a raw
+    integer register. mantissa_pack smuggles a full 128-bit hash id + flags/ordinal/run-
+    length across the 4 doubles of one PointZM vertex (~212 usable bits/point).
+    laplace_testimony_pack_walk packs a whole sequence of (object_id, score, game_count)
+    triples into consecutive trajectory vertices, tagged LAPLACE_VFLAG_TESTIMONY. Net effect:
+    the same `coord geometry(PointZM)` column holds at least two semantically unrelated
+    payload types (real S^3 identity position, vs. an opaque packed evidence log), distin-
+    guished only by a flag bit hidden inside a mantissa. See Part 3 for the legibility cost
+    of this.
+
+1.6 Index reuse: every stock Postgres access method is pointed at a job it wasn't built for
+  - GiST (`physicalities_coord_gist ... gist_geometry_ops_nd`, R-tree family): nominally
+    spatial proximity; also transparently range-indexes whatever numeric ranges a mantissa-
+    packed testimony vertex happens to produce.
+  - B-tree on `hilbert_index`: linearizes 4D via a space-filling curve so "nearby in 4D"
+    becomes "adjacent rows" — O(log n) range scans instead of true multi-dimensional search.
+  - GIN (`physicalities_constituents_gin ... gin (laplace_trajectory_constituent_ids
+    (trajectory))`): an inverted index — the machinery behind full-text search / JSONB
+    containment — built over the DECODED CONTENTS of a geometry column, answering "does
+    entity X contain constituent Y" (a graph containment question) without an edges table.
+  - BRIN (`entities_tier_brin`, `physicalities_observed_brin`, etc.): exploits the fact that
+    an append-only ingest pipeline naturally inserts rows in roughly sorted physical order
+    (tier, then time), giving near-free block-range summaries. Comment: "BRIN tier banding
+    for ingest validation and tier-distribution reads at scale."
+  - `consensus_eff_mu_btree`: B-tree on the expression `(rating - 2*rd) DESC` — the derived
+    Glicko-2 confidence score IS the index key.
+
+1.7 The bidirectional bridge to real transformer weights ("Mold a Model")
+  - SYNTHESIS direction (attestations -> new model, engine/synthesis + Laplace.Cli
+    FoundryCommands): arch_template.cpp builds a standard HF/Llama tensor manifest; shapes
+    (hidden_size, n_heads, n_layers, intermediate_size, ...) come from a target config.json
+    parsed by recipe.cpp — the substrate supplies VALUES, not shape.
+      * embed_tokens.weight / lm_head.weight: materialize_token_axis — row = per-token
+        Glicko-2 confidence x that token's coordinate in a spectral (eigenmaps-derived, not
+        fully traced) basis of the attestation graph.
+      * q_proj / k_proj: materialize_interior_binary_uniform, from a `binary_gram` Gram
+        matrix built via real MKL cblas_dgemm from WEIGHTED PAIRWISE ATTESTATION EDGES
+        (compute_substrate_gram). Q/K are the one pair of weights built from genuinely
+        pairwise relational structure, matching how attention (Q.K^T) is inherently pairwise.
+      * v_proj / o_proj / gate_proj / up_proj / down_proj: materialize_interior_uniform,
+        from a `unary_gram` built from each token's own confidence-weighted basis vector —
+        no pairwise edges, structurally simpler than Q/K.
+      * norms: a single clamped scalar (0.5..2.0) broadcast across all hidden dims — see
+        Part 3, this is the least-developed materializer.
+      * All of this is deterministic closed-form construction. No gradient descent, no loss
+        function, no stochastic init.
+  - DECOMPOSITION direction (real model -> attestations, Laplace.Decomposers.Model,
+    ~3,400 lines: SafetensorsContainerParser, WeightTensorETL, TensorRoleClassifier,
+    ModelTokenEdgeETL, LlamaTokenizerParser): parses a real HF model's tokenizer.json,
+    safetensors weights, and config; gives each tokenizer vocab entry its own content-
+    addressed entity and attests `tokenizerEntity --TOKEN_MAPS_TO--> realEntity`. A "token"
+    is therefore not a first-class unit of meaning — it's a source-specific surface artifact
+    of one particular tokenizer, related by an ordinary attestation to whatever real
+    substrate entity it decodes to (same move as everything else: no special-casing by
+    format). engine/synthesis/qk_pairs_threshold.cpp and engine/dynamics/ffn_edges.cpp run
+    genuine transformer math (real dot-product attention scores; real SwiGLU:
+    silu(gate.E)*up.E then down, L2-normalized, projected through the unembedding — this is
+    the "logit lens" / FFN-as-key-value-memory interpretability technique, implemented
+    natively) to discover which token pairs a REAL model's weights encode strongly. Inferred
+    (not line-by-line confirmed in ModelTokenEdgeETL.cs) that these become fresh attestations
+    with the model itself as `source_id` — i.e. a trained neural network becomes a witness on
+    equal epistemic footing with WordNet, scored by the same consensus fold.
+  - This closes the loop: the same native QK/FFN math either extracts structure out of an
+    existing model into the substrate, or builds structure from the substrate into a new
+    model's weights.
+
+================================================================================
+PART 2 — WHAT IS ACTUALLY WORKING (not just theorized)
+================================================================================
+  - Full clean/build/deploy pipeline (scripts/win/rebuild-all.cmd) ran to completion (exit 0)
+    during this review: engine (core/dynamics/synthesis) + extension (laplace_geom,
+    laplace_substrate) + full 55-project .NET solution + both perfcache blobs.
+  - Content roundtrip is real and testable: ContentRoundtrip.ReconstructAsync demonstrably
+    reconstructs original bytes from nothing but a document entity id + the T0 perfcache.
+  - Determinism of the foundational identity layer (T0/Unicode) is not aspirational — it is a
+    standing CI gate (laplace_verify_perfcache_determinism), with the exact source data
+    version-pinned and hashed into the blob header.
+  - The relation-type governance layer (relation_types.toml -> generated C law + highway
+    perfcache) is a single source of truth consumed identically by SQL, native C, and C#,
+    with an explicit alias/family/rank system — this is a genuinely coherent piece of design.
+  - A real, curated Windows build/seed pipeline exists (scripts/win/*.cmd) with idempotent,
+    layer-tracked foundation seeding (ensure-foundation.sh's `layer_ok` check via a
+    HasLayerCompleted marker fact) — re-running seeding does not redo completed work.
+
+================================================================================
+PART 3 — WHERE THE IMPLEMENTATION IS FLAWED (as the author framed this task)
+================================================================================
+
+3.1 Structural bloat / accreted-by-agent sprawl
+  - 55 .NET projects total; 28 of them are decomposer prod+test pairs for what is
+    conceptually one shape of work repeated 14 times (parse an external resource, emit facts
+    in the shared vocabulary). Author's own assessment, unprompted: "that's absolutely
+    terrible design... AI agents gave it to me this way and I just noticed." Scripts exist
+    (decomposer-isolate.sh, decomposer-gates.json, decomposer-promote.sh,
+    decomposer-ladder-ci.sh) suggesting per-source CI gating was the intent — but that goal
+    does not require project-level (assembly) isolation; folder/namespace isolation with
+    test-filter gating would achieve the same governance without 28 build boundaries.
+  - grammar_registry.c wires up only 37 of the ~300 vendored tree-sitter grammar submodules
+    (.gitmodules lists the full ~300; GRAMMARS[]/EXTS[] in grammar_registry.c uses 37,
+    including "pgn" for chess notation). ~260 submodules are vendored and currently dormant.
+    Same shape of bloat as the decomposer sprawl, opposite mechanism (vendor-everything vs.
+    scaffold-everything).
+
+3.2 Legibility / documentation debt
+  - Zero README.md or CLAUDE.md anywhere in the repository at the time of this review.
+    extension/laplace_substrate/docs/ exists as a directory and is completely empty. The
+    entire architecture — including the parts that surprised the author himself — is only
+    discoverable by reading code.
+  - Schema fields are semantically overloaded with nothing in the DDL to warn a reader:
+    `physicalities.coord geometry(PointZM)` and `physicalities.trajectory
+    geometry(GeometryZM)` hold at minimum two unrelated payload kinds (real S^3 identity
+    position vs. mantissa-packed evidence log) distinguished only by a flag bit buried in a
+    mantissa. This review misread it as "the embedding space" on first pass and needed two
+    separate corrections from the author to land on the actual design. A future reader
+    (human or agent) without this conversation's context will very likely make the same
+    mistake, silently, in ways that could produce working-but-wrong code (e.g. writing a
+    kNN-style query against `coord` expecting semantic proximity).
+
+3.3 Confirmed incomplete / stubbed code
+  - extension/laplace_substrate/sql/39_highway.sql.in is 0 bytes — tracked, recently
+    modified, presumably meant to expose highway_mask machinery at the SQL level, currently
+    empty. Author confirmed this is a real gap ("it's a gap").
+  - engine/synthesis/src/feature_extractor.cpp is a full stub: every function either returns
+    an error code, nullptr, or 0 (`feature_extractor_load` returns nullptr unconditionally;
+    `feature_extractor_extract` always returns -1). Whatever this was meant to feed is not
+    currently fed by this file.
+  - engine/core/src/astar.cpp has `h = 0.0` hardcoded — this is uniform-cost search /
+    Dijkstra today, not A*. The heuristic function that would make it A* (and presumably
+    speed up recall/generate_walk substantially) does not exist yet.
+  - arch_template.cpp's tensor materializer: MoE expert weights, `shared_expert_gate`, and
+    attention biases are all listed as tensor specs but fall through the name-matching logic
+    in `arch_template_materialize_tensor` to a plain `memset` zero. Any target recipe with
+    `num_local_experts > 0` or `attention_bias: true` would synthesize a model with
+    structurally-required tensors that are silently all-zero.
+  - `materialize_norm` (the layernorm/RMSNorm weight materializer) is a single scalar
+    (clamped `norm_aggregate` in [0.5, 2.0], default 1.0) broadcast across every dimension —
+    by a wide margin the least substrate-derived of the five materializers described in 1.7.
+
+3.4 Granularity loss vs. likely original intent
+  - `highway_mask` (256-bit, on both `entities` and `attestations`) is a bitmask over the 153
+    canonical relation TYPES only (one bit for "this touches a HAS_POS relation," none for
+    which POS value). All dynamic per-label relations (DEP_* deprel labels, UD features)
+    collapse onto their single family-root bit (e.g. every DEP_nsubj/DEP_obj/... sets only
+    bit 20, DEPENDS_ON) — no fine-grained POS-value or deprel-label bitmask exists anywhere
+    in the codebase despite the author's expectation, on being asked directly, that one did.
+
+3.5 Unresolved from this session (needs author follow-up, not guessed at)
+  - The author stated twice that Laplace.Decomposers.Abstractions' DocumentDecomposer /
+    UserPromptContent "uses UserPrompt incorrectly as the relation type." Every call site
+    found during this review (UserPromptContent.cs:14-16, DocumentDecomposer.cs:17,
+    ChessVocabulary.cs:29/39/41, ContentIngestAdapter.cs) uses "UserPrompt" correctly as a
+    `source`/`trust_class` canonical name, never in a `type_id` position. This was not
+    located. Needs a direct file:line pointer or a fresh targeted search next pass.
+
+3.6 A risk worth naming explicitly, not just a bug
+  - `DocumentDecomposer`/`UserPromptContent` fold live end-user chat input into the
+    substrate through the same content-witnessing pipeline as curated corpora, with a
+    real, nonzero trust weight (`SourceTrust.UserPrompt = 0.30`, `RelationTypeRank
+    .Associative * SourceTrust.UserPrompt`). This means arbitrary user-typed text becomes a
+    genuine, Glicko-2-folded witness in the same consensus system that WordNet/ConceptNet
+    contribute to. No rate-limiting, quarantine period, decay, or anomaly detection on this
+    specific source was observed during this review (that does not mean none exists — it
+    means none was found by this pass). Given the substrate feeds both live answers (recall)
+    and future model synthesis, an unmonitored low-trust-but-nonzero self-ingestion loop is a
+    plausible consensus-poisoning / prompt-injection-at-a-distance surface and is worth a
+    dedicated look before this path is exposed broadly.
+
+3.7 Process signal, not a code defect
+  - git log shows a large number of "Manual user commit to clear stage" commits
+    interleaved with substantive work. Combined with the author's own "AI agents gave it to
+    me this way and I just noticed," this is consistent with iterative agent-driven
+    development without a standing architectural review step — which is the most plausible
+    root cause of 3.1 and 3.2 (bloat and missing docs are exactly what accretes when many
+    locally-reasonable agent decisions are never rolled up into a whole-system view).
+
+3.8 Verification caveat for this document itself
+  - This review is based on reading code and one successful rebuild-all.cmd run (exit 0). It
+    does NOT include a run of the native test suites (ctest), the .NET test suites (dotnet
+    test), or pg_regress, and therefore does not certify current functional correctness
+    beyond what static reading + one successful build can show. Db-reset and
+    seed-foundation had not yet been executed at the time this document was written.
+
+================================================================================
+PART 4 — OPEN QUESTIONS FOR THE NEXT PASS
+================================================================================
+  1. Where exactly is "UserPrompt" misused as a relation type? (3.5)
+  2. What, if anything, guards against consensus poisoning via the UserPrompt source over
+     time? (3.6)
+  3. Is `token_basis` in arch_template.cpp actually sourced from eigenmaps.cpp? This link was
+     inferred, not traced call-site to call-site.
+  4. Does ModelTokenEdgeETL.cs actually call qk_pairs_threshold/ffn_edges and emit
+     attestations with the source model as source_id, as inferred in 1.7? Not yet read
+     directly.
+  5. What was 39_highway.sql.in supposed to contain, and is anything currently broken by its
+     absence, or is it purely dead weight pending implementation?
+  6. Is the A* `h = 0.0` heuristic a known TODO, or was a heuristic removed/never finished?
+  7. Full test suite status (ctest / dotnet test / pg_regress) — not yet run this session.

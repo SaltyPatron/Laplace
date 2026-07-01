@@ -1,0 +1,15 @@
+-- One round of the tier-by-tier, trunk-to-leaf batch existence probe.
+--
+-- Takes exactly the candidate ids the C# orchestrator (TierTreeDescent.cs)
+-- needs checked for the current tier/round -- already filtered to exclude
+-- descendants of nodes proven present in an earlier (higher-tier) round,
+-- per the content-addressing guarantee that a present node's whole subtree
+-- is present too. Returns a bitmap with a bit set iff that id was
+-- positively confirmed present (perfcache codepoint match, or a real
+-- committed entities row) -- never a default-present assumption. See
+-- laplace_tier_batch_existence_probe() / batch_presence_core() in
+-- descent_probe.c.
+CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe'
+    LANGUAGE C STABLE;

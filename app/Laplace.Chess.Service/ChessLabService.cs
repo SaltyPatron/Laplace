@@ -10,10 +10,25 @@ public sealed class ChessLabService
     private readonly ILogger _log;
     private readonly ConcurrentDictionary<string, JobSlot> _jobs = new();
 
+    // The /chess/lab/* HTTP surface has no request-level auth (see EndpointMappings.Chess.cs) —
+    // this cap is the actual mitigation against an unbounded number of concurrent cutechess/
+    // Stockfish process spawns or self-play jobs, independent of caller identity.
+    private static readonly int MaxConcurrentJobs =
+        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CHESS_LAB_MAX_CONCURRENT"), out var n) && n > 0
+            ? n : 4;
+
     public ChessLabService(ILogger? log = null) => _log = log ?? NullLogger.Instance;
 
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null)
     {
+        int running = 0;
+        foreach (var s in _jobs.Values)
+            if (Snapshot(s).State == ChessLabJobState.Running && ++running >= MaxConcurrentJobs)
+            {
+                _log.LogWarning("chess lab job rejected: {Max} jobs already running", MaxConcurrentJobs);
+                return null;
+            }
+
         var id = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
         var job = new ChessLabJob(

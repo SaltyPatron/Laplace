@@ -250,10 +250,22 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_entities_exist_bitmap);
-
-Datum
-pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
+/*
+ * Shared validation + SPI-wrapped invocation for the flat batch-presence
+ * primitives (entities_exist_bitmap, tier_batch_existence_probe). Both are
+ * driven by the exact same underlying batch_presence_core() in
+ * descent_probe.c (perfcache fast-path + one SPI batch query) -- a bit in
+ * the returned bitmap is set iff that id was POSITIVELY confirmed to have a
+ * committed entities row. Nothing here ever assumes presence by default.
+ * The two SQL entry points exist separately (rather than one function under
+ * two names) so ingest-descent call sites are self-documenting about *why*
+ * they're calling it -- tier_batch_existence_probe denotes one round of the
+ * C#-driven tier-by-tier trunk-to-leaf probe (TierTreeDescent.cs), while
+ * entities_exist_bitmap is the general-purpose "do these ids exist" check.
+ */
+static Datum
+presence_bitmap_datum(FunctionCallInfo fcinfo, const char* label,
+                       int (*probe)(ArrayType*, uint8_t*, int))
 {
     ArrayType*  ids_array;
     int         candidate_count;
@@ -264,24 +276,24 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR,
             (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-             errmsg("entities_exist_bitmap: ids array must not be NULL")));
+             errmsg("%s: ids array must not be NULL", label)));
 
     ids_array = PG_GETARG_ARRAYTYPE_P(0);
 
     if (ARR_NDIM(ids_array) > 1)
         ereport(ERROR,
             (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-             errmsg("entities_exist_bitmap: ids array must be 1-dimensional")));
+             errmsg("%s: ids array must be 1-dimensional", label)));
 
     if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
-             errmsg("entities_exist_bitmap: ids array element type must be bytea")));
+             errmsg("%s: ids array element type must be bytea", label)));
 
     if (ARR_HASNULL(ids_array))
         ereport(ERROR,
             (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-             errmsg("entities_exist_bitmap: ids array must not contain NULL")));
+             errmsg("%s: ids array must not contain NULL", label)));
 
     candidate_count = ARR_NDIM(ids_array) == 0
                       ? 0
@@ -301,23 +313,68 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("entities_exist_bitmap: SPI_connect failed")));
+             errmsg("%s: SPI_connect failed", label)));
 
     {
-        int rc = laplace_entities_present_bitmap(ids_array, bm, candidate_count);
+        int rc = probe(ids_array, bm, candidate_count);
 
         SPI_finish();
         if (rc != SPI_OK_SELECT)
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("entities_exist_bitmap: bulk probe failed (rc=%d)", rc)));
+                     errmsg("%s: bulk probe failed (rc=%d)", label, rc)));
     }
 
     PG_RETURN_BYTEA_P(result);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_entities_exist_bitmap);
+
+Datum
+pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum(fcinfo, "entities_exist_bitmap",
+                                  laplace_entities_present_bitmap);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_tier_batch_existence_probe);
+
+Datum
+pg_laplace_tier_batch_existence_probe(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum(fcinfo, "tier_batch_existence_probe",
+                                  laplace_tier_batch_existence_probe);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
 
+/*
+ * Legacy/back-compat entry point (content_descent_bitmap(ids, parents)).
+ *
+ * The real trunk-to-leaf, tier-by-tier descent algorithm is now driven
+ * entirely by the C# orchestrator (TierTreeDescent.cs), which calls
+ * tier_batch_existence_probe() once per tier/round with only the
+ * candidates that round actually needs to check -- already filtered to
+ * exclude descendants of nodes proven present in an earlier round, per the
+ * content-addressing guarantee that a present node's whole subtree is
+ * present too. This function is kept only so callers that still pass a
+ * flat (ids, parents) pair in one shot keep working; `parents` is
+ * validated for shape and otherwise UNUSED -- there is no tree-walk, no
+ * default-present assumption, and no shortcircuiting here anymore. This
+ * replaces the previous laplace_content_descent_bitmap_core()
+ * implementation, which memset the whole bitmap to 0xFF ("assume every id
+ * present") and only ever cleared bits it could positively disprove,
+ * stopping descent at the first node it (correctly or incorrectly)
+ * believed present -- that "assume-present, clear-on-disproof,
+ * single-shortcircuit-per-branch" scheme is exactly the shape of bug that
+ * independently existed on the C# side (TierTreeDescent.cs's previously
+ * unconditional MarkProven() call); neither should ever assume presence
+ * without a real, positive confirmation. Every bit returned here is set
+ * iff a real batch presence query (or perfcache codepoint match) actually
+ * confirmed that id has a committed entities row -- identical semantics to
+ * tier_batch_existence_probe / entities_exist_bitmap, since all three
+ * ultimately call the same batch_presence_core().
+ */
 Datum
 pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
 {
@@ -325,18 +382,6 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     ArrayType*  par_array;
     int         candidate_count;
     int         parent_count;
-    int         bitmap_bytes;
-    bytea*      result;
-    uint8*      bm;
-    Datum      *id_elems;
-    Datum      *par_elems;
-    bool       *id_nulls;
-    bool       *par_nulls;
-    int         id_nelems;
-    int         par_nelems;
-    uint8      *flat_ids;
-    int32      *flat_parents;
-    int         i;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR,
@@ -346,22 +391,14 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     ids_array = PG_GETARG_ARRAYTYPE_P(0);
     par_array = PG_GETARG_ARRAYTYPE_P(1);
 
-    if (ARR_NDIM(ids_array) > 1 || ARR_NDIM(par_array) > 1)
+    if (ARR_NDIM(par_array) > 1)
         ereport(ERROR,
             (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-             errmsg("content_descent_bitmap: arrays must be 1-dimensional")));
-    if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
-        ereport(ERROR,
-            (errcode(ERRCODE_DATATYPE_MISMATCH),
-             errmsg("content_descent_bitmap: ids element type must be bytea")));
+             errmsg("content_descent_bitmap: parents array must be 1-dimensional")));
     if (ARR_ELEMTYPE(par_array) != INT4OID)
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
              errmsg("content_descent_bitmap: parents element type must be int4")));
-    if (ARR_HASNULL(ids_array) || ARR_HASNULL(par_array))
-        ereport(ERROR,
-            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-             errmsg("content_descent_bitmap: arrays must not contain NULL")));
 
     candidate_count = ARR_NDIM(ids_array) == 0
                       ? 0 : ArrayGetNItems(ARR_NDIM(ids_array), ARR_DIMS(ids_array));
@@ -373,57 +410,8 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
              errmsg("content_descent_bitmap: ids and parents length mismatch (%d vs %d)",
                     candidate_count, parent_count)));
 
-    bitmap_bytes = (candidate_count + 7) / 8;
-    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
-    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
-    bm = (uint8*) VARDATA(result);
-    if (bitmap_bytes > 0)
-        memset(bm, 0xFF, bitmap_bytes);
-
-    if (candidate_count == 0)
-        PG_RETURN_BYTEA_P(result);
-
-    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i',
-                      &id_elems, &id_nulls, &id_nelems);
-    deconstruct_array(par_array, INT4OID, sizeof(int32), true, 'i',
-                      &par_elems, &par_nulls, &par_nelems);
-    if (id_nelems != candidate_count || par_nelems != candidate_count)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("content_descent_bitmap: deconstruct length mismatch")));
-
-    flat_ids = (uint8 *) palloc((size_t) candidate_count * 16);
-    flat_parents = (int32 *) palloc(sizeof(int32) * candidate_count);
-    for (i = 0; i < candidate_count; i++)
-    {
-        bytea *b;
-
-        if (id_nulls[i] || par_nulls[i])
-            ereport(ERROR,
-                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                     errmsg("content_descent_bitmap: arrays must not contain NULL")));
-        b = DatumGetByteaPP(id_elems[i]);
-        if (VARSIZE_ANY_EXHDR(b) != 16)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                     errmsg("content_descent_bitmap: id length must be 16")));
-        memcpy(flat_ids + (size_t) i * 16, VARDATA_ANY(b), 16);
-        flat_parents[i] = DatumGetInt32(par_elems[i]);
-    }
-
-    laplace_content_descent_bitmap_core(flat_ids, flat_parents, candidate_count, bm);
-
-    pfree(flat_ids);
-    pfree(flat_parents);
-    pfree(id_elems);
-    pfree(id_nulls);
-    pfree(par_elems);
-    pfree(par_nulls);
-
-    if (bitmap_bytes > 0 && (candidate_count & 7) != 0)
-        bm[bitmap_bytes - 1] &= (uint8)((1u << (candidate_count & 7)) - 1);
-
-    PG_RETURN_BYTEA_P(result);
+    return presence_bitmap_datum(fcinfo, "content_descent_bitmap",
+                                  laplace_tier_batch_existence_probe);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_intent_preflight);

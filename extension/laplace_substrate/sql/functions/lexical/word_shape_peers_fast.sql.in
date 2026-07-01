@@ -1,0 +1,12 @@
+-- Native replacement for word_shape_peers()'s KNN stage (see recall.c:
+-- word_shape_peers_fast_impl for the full rationale). The original CTE-based
+-- query's `ORDER BY p2.coord <<->> me.coord LIMIT 500`, with me.coord as a
+-- correlated CTE reference rather than a bound parameter, was not eligible
+-- for GiST KNN index-ordered scanning and fell back to a ~785K-row hash
+-- join + top-N heapsort. This does the same job as two explicitly sequenced
+-- SPI calls (fetch the anchor point, then a genuine bound-parameter KNN
+-- scan), restoring real index usage.
+CREATE OR REPLACE FUNCTION word_shape_peers_fast(p_word bytea, p_frechet_max double precision DEFAULT 0.02)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_shape_peers_fast'
+    LANGUAGE C STABLE STRICT;

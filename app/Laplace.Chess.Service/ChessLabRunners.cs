@@ -155,7 +155,12 @@ public static class ChessLabRunners
         string user = Config(slot.Job.Config, "user", "");
         string site = Config(slot.Job.Config, "site", "lichess");
         int? max = int.TryParse(Config(slot.Job.Config, "max", ""), out var m) ? m : null;
-        var outPath = Path.Combine(LabDir, slot.Job.Id, $"{user}_{site}.pgn");
+        // user/site come straight from the public /chess/lab/start request body, unsanitized —
+        // Path.Combine would otherwise honor a rooted or ".."-laden value here, letting an
+        // unauthenticated caller redirect this write to an arbitrary filesystem location. Sanitize
+        // only for the path; FetchAsync below still gets the real user/site for the API call.
+        var outPath = Path.Combine(
+            LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
         int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
             msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);

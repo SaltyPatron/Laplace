@@ -2,5 +2,9 @@ CREATE OR REPLACE FUNCTION entity_exists(p_id bytea)
     RETURNS boolean
     LANGUAGE sql STABLE PARALLEL SAFE STRICT
     SET search_path = @extschema@, public AS $$
+    -- A valid tier-0 codepoint is real via the perfcache alone (see codepoint_for_id());
+    -- it must resolve true here even before/without its own entities row being written,
+    -- so callers can't mistake "orphaned tier-0" for "genuinely missing".
     SELECT EXISTS (SELECT 1 FROM entities e WHERE e.id = p_id)
+        OR codepoint_for_id(p_id) IS NOT NULL
 $$;
