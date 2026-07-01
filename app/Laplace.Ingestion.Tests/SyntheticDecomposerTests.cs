@@ -69,7 +69,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             [EnumeratorCancellation] CancellationToken ct = default)
         {
             var children = new Hash128[3];
-            var seed     = new byte[12];
+            var seed = new byte[12];
             for (int i = 0; i < _unitCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -170,13 +170,13 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            BatchSize              = 4,
+            BatchSize = 4,
         };
 
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(10, result.UnitsAttempted);
         Assert.Equal(10, result.UnitsApplied);
-        Assert.Equal(0,  result.UnitsFailed);
+        Assert.Equal(0, result.UnitsFailed);
         Assert.True(result.EntitiesInserted >= 40);
     }
 
@@ -191,7 +191,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            BatchSize              = 4,
+            BatchSize = 4,
         };
 
         var first = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
@@ -217,7 +217,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            BatchSize              = 8,
+            BatchSize = 8,
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -249,12 +249,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.True(result.AttestationsInserted >= 3);
     }
 
-    /// <summary>
-    /// Simulates OMW-style parallel file workers (N Task.Run producers, shared vocabulary entity
-    /// across files) combined with parallel commit workers. Correctness relies on commit-layer
-    /// idempotency (entity ON CONFLICT DO NOTHING + attestation observation_count UPDATE), not
-    /// compose-time bitmap probes seeing sibling workers' uncommitted rows.
-    /// </summary>
     [Fact]
     public async Task ParallelFileDecomposeAndCommit_ConvergesWithSharedVocabulary()
     {
@@ -274,7 +268,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(48, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
-        // 1 shared grapheme-like entity + 8 files * 6 batches * 1 unique entity each = 49
+
         Assert.Equal(49, result.EntitiesInserted);
     }
 
@@ -290,13 +284,13 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            ParallelWorkers        = 4,
-            BatchSize              = 4,
+            ParallelWorkers = 4,
+            BatchSize = 4,
         };
 
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(40, result.UnitsApplied);
-        Assert.Equal(0,  result.UnitsFailed);
+        Assert.Equal(0, result.UnitsFailed);
         Assert.Equal(41, result.EntitiesInserted);
     }
 
@@ -498,7 +492,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 var uniq = Hash128.Blake3(seed);
                 var builder = new SubstrateChangeBuilder(SourceId, $"ov-{i}")
                     .AddEntity(_shared, 0, BootstrapIntentBuilder.SourceTypeId)
-                    .AddEntity(uniq,    0, BootstrapIntentBuilder.SourceTypeId);
+                    .AddEntity(uniq, 0, BootstrapIntentBuilder.SourceTypeId);
                 yield return builder.Build();
                 await Task.Yield();
             }
@@ -513,11 +507,11 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     [Fact]
     public async Task HighLayerSource_IngestsWithoutOrderingPrereq()
     {
-        // The substrate is a content-addressed DAG: identity is content and references are forward
-        // references that resolve whenever the referenced content lands, so there is NO ingest-order
-        // dependency. The old layer-ordering check (which threw LayerOrderingViolationException) was
-        // deliberately removed — see the comment in IngestRunner.RunAsync ("procedural thinking that
-        // contradicts the DAG"). A high-layer source must therefore run to completion without throwing.
+
+
+
+
+
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
@@ -583,7 +577,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
         {
             if (_refCount++ == 0)
             {
-                await RunAdminAsync("dropdb",   $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+                await RunAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
                 await RunAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
             }
 
@@ -624,8 +618,10 @@ public sealed class LocalPgFixture : IAsyncLifetime
     {
         var psi = new System.Diagnostics.ProcessStartInfo
         {
-            FileName = ResolvePgTool(program), Arguments = args,
-            RedirectStandardError = true, RedirectStandardOutput = true,
+            FileName = ResolvePgTool(program),
+            Arguments = args,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
             UseShellExecute = false,
         };
         if (PgPassword is not null) psi.Environment["PGPASSWORD"] = PgPassword;

@@ -118,7 +118,7 @@ public sealed class WriterThroughputTests
         for (int i = 0; i < totalRows; i++)
         {
             Hash128 subj = Id(seedBase + i);
-            Hash128 obj  = Id(seedBase + totalRows + i);
+            Hash128 obj = Id(seedBase + totalRows + i);
             attStage.AddAttestation(
                 Id(40_000_000 + i), subj, RelTypeId, obj, ThroughputSrc, null,
                 (short)AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1L);

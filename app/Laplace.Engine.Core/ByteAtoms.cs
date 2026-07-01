@@ -47,12 +47,12 @@ public static class ByteAtoms
     public static string Utf8Role(byte b) => b switch
     {
         >= 0x80 and <= 0xBF => "continuation",
-        0xC0 or 0xC1        => "invalid",
+        0xC0 or 0xC1 => "invalid",
         >= 0xC2 and <= 0xDF => "lead2",
         >= 0xE0 and <= 0xEF => "lead3",
         >= 0xF0 and <= 0xF4 => "lead4",
-        >= 0xF5             => "invalid",
-        _                   => "ascii",
+        >= 0xF5 => "invalid",
+        _ => "ascii",
     };
 
     public static readonly ushort[] Cp1252High = new ushort[32]

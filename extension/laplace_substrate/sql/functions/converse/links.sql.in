@@ -7,9 +7,9 @@ CREATE OR REPLACE FUNCTION links(p_word text)
            (eff_mu(c.rating, c.rd))::float8 / 1e9 AS strength
     FROM consensus c
     WHERE c.subject_id = word_id(p_word)
-    -- rank-weighted: order by relation salience × strength so semantically meaningful links
-    -- (IS_A/HAS_DEFINITION/SYNONYM) surface above grammatical scaffolding (HAS_LANGUAGE/HAS_POS/
-    -- PRECEDES). The returned `strength` column is unchanged (raw eff_mu); only the order changes.
+    
+    
+    
     ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC,
              strength DESC, relation
 $$;

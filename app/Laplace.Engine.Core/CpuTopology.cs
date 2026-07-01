@@ -8,15 +8,10 @@ namespace Laplace.Engine.Core;
 
 
 
-/// <summary>
 
-/// Hybrid CPU topology for ingest worker defaults. Detects physical P-cores vs HT siblings vs
 
-/// E-cores via GetSystemCpuSetInformation (Windows) or sysfs (Linux). CPU-bound workers scale to
 
-/// physical P-core count; I/O-bound workers scale to E-core count. No env vars.
 
-/// </summary>
 
 public static class CpuTopology
 
@@ -32,13 +27,11 @@ public static class CpuTopology
 
 
 
-    /// <summary>All logical processors on P-cores including HT siblings (informational).</summary>
 
     public static int PerformanceLogicalProcessorCount => Pools.PrimaryPLogicalCount;
 
 
 
-    /// <summary>Primary (non-SMT) logical processor index per physical P-core — worker pin targets.</summary>
 
     public static IReadOnlyList<int> PerformanceCoreCpuIndices
 
@@ -60,7 +53,6 @@ public static class CpuTopology
 
 
 
-    /// <summary>E-core logical processor global indices for I/O-bound worker pinning.</summary>
 
     public static IReadOnlyList<int> EfficientCoreCpuIndices
 
@@ -128,7 +120,6 @@ public static class CpuTopology
 
 
 
-    /// <summary>Ingest commit-consumer pool — E-core LPs on hybrid, else logical minus headroom.</summary>
 
     public static int ResolveIngestCommitWorkers(int headroom = 1)
 
@@ -144,13 +135,11 @@ public static class CpuTopology
 
 
 
-    /// <inheritdoc cref="ResolveIngestCommitWorkers"/>
 
     public static int ResolveIoBoundWorkers(int headroom = 1) => ResolveIngestCommitWorkers(headroom);
 
 
 
-    /// <summary>Native apply_batch fan-out — one lane per physical P-core.</summary>
 
     public static int ResolveApplyPartitions() => Math.Max(1, PerformanceCoreCount);
 
@@ -220,13 +209,11 @@ public static class CpuTopology
 
 
 
-    /// <summary>Pin CPU-bound worker to one physical P-core (round-robin).</summary>
 
     public static void PinWorkerThread(int workerIndex) => PinWorkerThreadCore(workerIndex, cpuBound: true);
 
 
 
-    /// <summary>Pin I/O-bound worker to one E-core (round-robin).</summary>
 
     public static void PinIoWorkerThread(int workerIndex) => PinWorkerThreadCore(workerIndex, cpuBound: false);
 
@@ -288,7 +275,8 @@ public static class CpuTopology
 
                 }
 
-            }) { IsBackground = true, Name = $"laplace-pcore-{w}" };
+            })
+            { IsBackground = true, Name = $"laplace-pcore-{w}" };
 
             threads[w].Start();
 
@@ -336,7 +324,8 @@ public static class CpuTopology
 
                 catch (Exception ex) { errors[idx] = ex; }
 
-            }) { IsBackground = true, Name = $"laplace-pcore-async-{idx}" };
+            })
+            { IsBackground = true, Name = $"laplace-pcore-async-{idx}" };
 
             threads[idx].Start();
 
@@ -382,7 +371,8 @@ public static class CpuTopology
 
             catch (Exception ex) { tcs.SetException(ex); }
 
-        }) { IsBackground = true, Name = threadName };
+        })
+        { IsBackground = true, Name = threadName };
 
         thread.Start();
 
@@ -490,7 +480,7 @@ public static class CpuTopology
 
         }
 
-        catch { /* best-effort */ }
+        catch { }
 
 
 
@@ -522,7 +512,7 @@ public static class CpuTopology
 
 
 
-    // ---- Windows GetSystemCpuSetInformation (Intel + Microsoft recommended) ----
+
 
 
 
@@ -628,7 +618,7 @@ public static class CpuTopology
 
 
 
-        // Primary physical P-core: highest EfficiencyClass, one LP per (Group, CoreIndex).
+
 
         var primaryP = entries
 
@@ -644,7 +634,7 @@ public static class CpuTopology
 
 
 
-        // E-cores: lower efficiency class than P.
+
 
         var eCores = entries
 
@@ -660,7 +650,7 @@ public static class CpuTopology
 
 
 
-        // Non-hybrid: all entries share one class — treat each CoreIndex group as one physical core.
+
 
         if (!hybrid)
 
@@ -718,7 +708,7 @@ public static class CpuTopology
 
 
 
-    // ---- Windows GLPIEX fallback: one LP (lowest bit) per physical core ----
+
 
 
 
@@ -830,7 +820,7 @@ public static class CpuTopology
 
             {
 
-                // LP-count heuristic when EfficiencyClass is zero on all cores.
+
 
                 offset = 0;
 
@@ -962,7 +952,7 @@ public static class CpuTopology
 
 
 
-    // ---- Linux sysfs: cpu_core / cpu_atom, dedupe HT via core_id ----
+
 
 
 
@@ -1096,7 +1086,7 @@ public static class CpuTopology
 
 
 
-    // ---- Affinity / CPU Sets ----
+
 
 
 

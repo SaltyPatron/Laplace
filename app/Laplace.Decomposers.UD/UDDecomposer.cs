@@ -14,9 +14,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "UDDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "UDDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);

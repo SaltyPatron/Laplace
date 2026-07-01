@@ -60,8 +60,8 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
 
-        // Record this in-language sentence id so the links pass can keep IS_TRANSLATION_OF
-        // in-language. No-op when no language filter is active (_allowedIds is null).
+
+
         _allowedIds?.Add(id);
     }
 

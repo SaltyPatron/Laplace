@@ -6,29 +6,29 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// Generic, architecture-agnostic recipe deposit (the "Mold-A-Model" spec — see
-// docs/invention/recipe-schema.md). Unlike LlamaRecipeExtractor (hardcoded HF config keys), this
-// parses a laplace.recipe document, content-addresses it (recipeId = Blake3(canonical JSON)), and
-// deposits a Model_Recipe entity. The full operator array lives in the canonical JSON (returned by
-// model_recipes() via the entity's canonical name); a few hparams are also emitted as queryable
-// scalar attestations. The recipe is a modality: it is stored content, not a C# class.
+
+
+
+
+
+
 public sealed class RecipeExtractor
 {
     public sealed class RecipeInfo
     {
         public required Hash128 RecipeEntityId { get; init; }
-        public required string  Name           { get; init; }
-        public required string  Structure      { get; init; }
-        public required string  HiddenSize     { get; init; }   // int or "auto"
-        public required int     NumLayers      { get; init; }
-        public required byte[]  CanonicalJson  { get; init; }
+        public required string Name { get; init; }
+        public required string Structure { get; init; }
+        public required string HiddenSize { get; init; }
+        public required int NumLayers { get; init; }
+        public required byte[] CanonicalJson { get; init; }
     }
 
     public static RecipeInfo Parse(string recipeJsonPath)
         => ParseText(File.ReadAllText(recipeJsonPath), recipeJsonPath);
 
-    // Parse a recipe document already in memory (used by RecipeSynthesizer on ingest, where the
-    // recipe is built from the manifest and never touches disk). `origin` is only for diagnostics.
+
+
     public static RecipeInfo ParseText(string recipeJson, string origin = "(in-memory)")
     {
         using var doc = JsonDocument.Parse(recipeJson);
@@ -61,11 +61,11 @@ public sealed class RecipeExtractor
         return new RecipeInfo
         {
             RecipeEntityId = recipeId,
-            Name           = name,
-            Structure      = structure,
-            HiddenSize     = hiddenSize,
-            NumLayers      = numLayers,
-            CanonicalJson  = canonical,
+            Name = name,
+            Structure = structure,
+            HiddenSize = hiddenSize,
+            NumLayers = numLayers,
+            CanonicalJson = canonical,
         };
     }
 
@@ -90,13 +90,13 @@ public sealed class RecipeExtractor
         }
 
         AddScalar(hasHiddenSizeTypeId, recipe.HiddenSize);
-        AddScalar(hasNumLayersTypeId,  recipe.NumLayers.ToString());
+        AddScalar(hasNumLayersTypeId, recipe.NumLayers.ToString());
 
         return b.Build();
     }
 
-    // The canonical name registered for the recipe entity — this is what model_recipes() returns as
-    // recipe_json, and the id == Blake3(this) so the canonical_names join resolves.
+
+
     public static string CanonicalName(RecipeInfo recipe) =>
         Encoding.UTF8.GetString(recipe.CanonicalJson);
 
@@ -109,8 +109,8 @@ public sealed class RecipeExtractor
         return ms.ToArray();
     }
 
-    // Deterministic canonicalization: object keys sorted (Ordinal), arrays preserved in order,
-    // scalars verbatim. Same logical recipe → same bytes → same content-addressed id.
+
+
     private static void WriteCanonical(JsonElement el, Utf8JsonWriter w)
     {
         switch (el.ValueKind)

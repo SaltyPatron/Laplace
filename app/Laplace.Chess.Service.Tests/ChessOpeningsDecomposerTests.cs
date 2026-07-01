@@ -61,16 +61,16 @@ public sealed class ChessOpeningsDecomposerTests
         int total = 0, resolved = 0;
         var failures = new List<string>();
         foreach (var file in Directory.EnumerateFiles(OpeningsDir, "*.tsv"))
-        foreach (var line in File.ReadLines(file, Encoding.UTF8))
-        {
-            if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
-            total++;
-            var sans = ChessOpeningsDecomposer.ExtractSans(row.Movetext);
-            if (sans.Count > 0 && TryReplay(sans))
-                resolved++;
-            else if (failures.Count < 10)
-                failures.Add($"{row.Eco} {row.Name}: {row.Movetext}");
-        }
+            foreach (var line in File.ReadLines(file, Encoding.UTF8))
+            {
+                if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
+                total++;
+                var sans = ChessOpeningsDecomposer.ExtractSans(row.Movetext);
+                if (sans.Count > 0 && TryReplay(sans))
+                    resolved++;
+                else if (failures.Count < 10)
+                    failures.Add($"{row.Eco} {row.Name}: {row.Movetext}");
+            }
 
         Assert.True(total > 2000, $"expected the full ECO book (~3700 lines), got {total}");
         Assert.True(resolved == total,

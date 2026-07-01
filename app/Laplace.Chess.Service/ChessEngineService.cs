@@ -19,12 +19,6 @@ public sealed record ChessTrainStatus(
     bool Running, long Games, int White, int Black, int Draws, int Adjudicated,
     string LastOutcome, double Temperature, double Weight, int MaxPlies);
 
-/// <summary>
-/// The chess bot as a long-lived service: plays moves on demand and runs self-play training in the
-/// background, all over the live substrate (online incremental fold per game). Shared by the CLI and
-/// the web host. The substrate database is <c>LAPLACE_CHESS_DB</c> (falls back to <c>LAPLACE_DB</c>),
-/// so chess training need not pollute the main substrate.
-/// </summary>
 public sealed class ChessEngineService : IAsyncDisposable
 {
     private readonly string _connString;
@@ -60,7 +54,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             ?? Environment.GetEnvironmentVariable("LAPLACE_DB")
             ?? throw new InvalidOperationException(
                 "Chess requires LAPLACE_CHESS_DB or LAPLACE_DB (Npgsql connection string).");
-        // register_canonicals() inserts into unqualified canonical_names (lives in laplace schema).
+
         if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
             s += ";Include Error Detail=true";
         if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
@@ -70,11 +64,11 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public string NewGameFen() => ChessModality.StartFen;
 
-    // The authoritative game state, carried WITH its repetition history across the stateless per-FEN
-    // endpoints. Play is one game at a time, so a single live state suffices: each move advances it, and
-    // the incoming FEN re-syncs it (a mismatch — new game, jump, undo — rebuilds fresh from that FEN,
-    // degrading to the old stateless behavior). Without this, FromFen reset the history every call, so
-    // threefold repetition / 50-move / stalemate never fired and the bot could shuffle forever.
+
+
+
+
+
     private ChessState? _live;
     private readonly object _liveLock = new();
 
@@ -116,9 +110,9 @@ public sealed class ChessEngineService : IAsyncDisposable
         finally { _initGate.Release(); }
     }
 
-    // The self-play host bypasses the IDecomposer ingest path, so it registers its declared type/relation
-    // names into canonical_names itself — otherwise its types (Chess_Position, …) aren't queryable by name
-    // and render only via the slow HAS_NAME_ALIAS traversal. Mirrors IngestCommands.RegisterDynamicCanonicalsAsync.
+
+
+
     private static async Task RegisterCanonicalsAsync(
         NpgsqlDataSource ds, IReadOnlyCollection<string> names, CancellationToken ct)
     {
@@ -145,10 +139,10 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<IReadOnlyList<ChessMoveScore>> ScoreAsync(string fen, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        // Scoring is READ-ONLY: never touch the live game state. (SyncState mutates _live on a FEN
-        // mismatch; the UI's constant legal-move refresh racing the bot's move via SyncState here was
-        // clobbering _live to a stale position → the bot then scored the wrong side. Only ApplyMove /
-        // BestMove advance the authoritative game.) Repetition history is irrelevant to move scoring.
+
+
+
+
         var state = _modality!.FromFen(fen);
         var cands = await engine.ScoreMovesAsync(state, ct);
         return cands
@@ -167,27 +161,23 @@ public sealed class ChessEngineService : IAsyncDisposable
         var cands = await engine.ScoreMovesAsync(state, ct);
         var chosen = ModalityEngine<ChessState, ChessMove>.Select(cands, temperature, Rng());
         var next = chosen.Next;
-        SetLive(next); // advance the authoritative game so the bot's move enters the repetition history
+        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessBestMove(chosen.Action.ToUci(), next.Board.ToFen(), chosen.EffMu / 1e9,
             chosen.Rated, status != "ongoing", status);
     }
 
-    // ---- THE unified engine: one move-selection pipeline used by BOTH competitive play (web/UCI) and the
-    // learner (strong self-play), so the engine that plays is the engine that learns. It is the ~2105-Elo
-    // alpha-beta Search with: PeSTO leaf eval BLENDED with the substrate-LEARNED PST (the +31 config), plus
-    // the substructure-fold substrate prior at the root (+24). The old depth-1 ModalityEngine path
-    // (BestMoveAsync / ScoreMovesAsync) stays only for /chess/legal analysis. ----
+
+
+
+
+
     private SubstructureFoldBias? _foldBias;
     private bool _learnedTried;
-    private int[][]? _lpMg, _lpEg;   // PeSTO + learned-PST leaf tables (null = pure PeSTO until the substrate has data)
+    private int[][]? _lpMg, _lpEg;
 
-    /// <summary>The fold root-bias (live substrate read, cached instance).</summary>
     private SubstructureFoldBias FoldBias() => _foldBias ??= new SubstructureFoldBias(_ds!);
 
-    /// <summary>The PeSTO+learned-PST leaf tables (scale 1 — the measured-best blend), built from the substrate
-    /// once and cached. Falls back to pure PeSTO (null) when the substrate is empty or the read fails, so it
-    /// can never break move selection. <paramref name="refresh"/> rebuilds it (self-play, as learning advances).</summary>
     private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
     {
         if (refresh) _learnedTried = false;
@@ -198,7 +188,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         return (_lpMg, _lpEg);
     }
 
-    /// <summary>Build the full unified engine: alpha-beta + PeSTO⊕learned-PST leaf + (optional) fold root prior.</summary>
     private Search BuildEngine(bool substrate, int ttBits = 20)
     {
         var (mg, eg) = LearnedPstBlend();
@@ -218,28 +207,21 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
 
         var next = _modality.Apply(state, mv);
-        SetLive(next); // the bot's move enters the authoritative game's repetition history
+        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        // EffMu carries the search score in centipawns (side-to-move relative); Rated = substrate prior used.
+
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate, status != "ongoing", status);
     }
 
-    /// <summary>
-    /// STRONG self-play — the unified engine plays itself (alpha-beta + PeSTO⊕learned-PST + fold prior),
-    /// records each ply, and learns the finished game weighted by HOW it ended (checkmate &gt; flag). This
-    /// replaces the depth-1 ModalityEngine self-play so the LEARNER IS THE PLAYER: every training game is a
-    /// real ~2105-strength game, not a depth-1 sketch. Opening plies are randomized for diversity; the
-    /// learned-PST blend is refreshed every report interval as the substrate improves.
-    /// </summary>
     public async Task RunStrongSelfPlayAsync(
-        int games, int depth, int maxPlies, int openingPlies, int reportEvery,
-        Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
+    int games, int depth, int maxPlies, int openingPlies, int reportEvery,
+    Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         await EngineAsync(ct);
         var rng = new Random();
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
-            // Fresh Search per game (its TT/killers are stateful); refresh the learned blend periodically.
+
             bool refresh = (g - 1) % Math.Max(1, reportEvery) == 0;
             var (mg, eg) = LearnedPstBlend(refresh);
             var search = new Search(EvalTerm.All, FoldBias(), ttBits: 18, mgPst: mg, egPst: eg);
@@ -253,7 +235,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 if (plies >= maxPlies) { adjudicated = true; break; }
                 var legal = _modality.LegalActions(state);
                 ChessMove mv = plies < openingPlies
-                    ? legal[rng.Next(legal.Count)]                                   // random opening for diversity
+                    ? legal[rng.Next(legal.Count)]
                     : search.Think(state.Board, new Search.Limits(MaxDepth: depth)).BestMove ?? legal[rng.Next(legal.Count)];
                 int mover = _modality.SideToMove(state);
                 var next = _modality.Apply(state, mv);
@@ -285,15 +267,13 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (mv is null)
             return new ChessApplyResult(fen, false, "illegal move", Legal: false);
         var next = _modality.Apply(state, mv.Value);
-        SetLive(next); // record the human move in the authoritative game's repetition history
+        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true);
     }
 
-    // ---- training ----
 
-    /// <summary>Start background self-play. <paramref name="maxGames"/> ≤ 0 runs until stopped;
-    /// &gt; 0 plays exactly that many games then stops.</summary>
+
     public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
     {
         lock (_statLock)
@@ -323,10 +303,9 @@ public sealed class ChessEngineService : IAsyncDisposable
                 _lastOutcome, _trainTemp, _trainWeight, _trainMaxPlies);
     }
 
-    /// <summary>Bounded self-play (CLI): play N games, learn each online, report every R games.</summary>
     public async Task RunSelfPlayAsync(
-        int games, double temperature, int maxPlies, int reportEvery,
-        Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
+    int games, double temperature, int maxPlies, int reportEvery,
+    Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
         var rng = new Random();

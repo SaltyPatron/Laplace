@@ -14,7 +14,7 @@ internal sealed class StripeBillingOptions
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
     public bool Bypass { get; set; }
 
-    
+
     public bool SkipSignatureVerification { get; set; }
 }
 

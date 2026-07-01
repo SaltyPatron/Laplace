@@ -27,14 +27,14 @@ public static unsafe class HashComposer
         }
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
     public static (Hash128 Id, Hilbert128 Hilbert) ComposeNode(
         byte tier,
         ReadOnlySpan<Hash128> childIds,

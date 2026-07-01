@@ -6,14 +6,14 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed class BootstrapIntentBuilder
 {
     private readonly Hash128 _sourceId;
-    private readonly string  _sourceName;
+    private readonly string _sourceName;
     private readonly Hash128 _trustClassId;
     private readonly Hash128 _substrateCanonicalTypeId;
     private readonly Hash128 _sourceCanonicalSource;
     private readonly SubstrateChangeBuilder _inner;
 
-    public static readonly Hash128 SourceTypeId        = EntityTypeRegistry.Id("Source");
-    public static readonly Hash128 TypeMetaTypeId      = EntityTypeRegistry.Id("Type");
+    public static readonly Hash128 SourceTypeId = EntityTypeRegistry.Id("Source");
+    public static readonly Hash128 TypeMetaTypeId = EntityTypeRegistry.Id("Type");
     public static readonly Hash128 RelationTypeMetaTypeId = EntityTypeRegistry.Id("RelationType");
     public static readonly Hash128 HasTrustClassTypeId = EntityTypeRegistry.Id("HAS_TRUST_CLASS");
 
@@ -30,11 +30,11 @@ public sealed class BootstrapIntentBuilder
         _inner.AddEntity(sourceId, EntityTier.Word, SourceTypeId, sourceId);
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public IReadOnlyCollection<string> CanonicalNames => _canonicalNames;
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
@@ -43,9 +43,9 @@ public sealed class BootstrapIntentBuilder
         var id = EntityTypeRegistry.Id(canonicalTypeName);
         _canonicalNames.Add(canonicalTypeName);
         _inner.AddEntity(id, EntityTier.Word, TypeMetaTypeId, _sourceId);
-        // Substrate-native legibility: name the entity type via a codepoint-walk content entity +
-        // HAS_NAME_ALIAS, so even unregistered types (e.g. WordNet_Sense) render from their own
-        // codepoints instead of a bare hash. See render() COALESCE in 15_readback.sql.in.
+
+
+
         if (ContentWitnessBatch.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
             _inner.AddAttestation(NativeAttestation.Categorical(
                 id, "HAS_NAME_ALIAS", nameId, _sourceId, null, SourceTrust.SubstrateMandate));
@@ -84,8 +84,8 @@ public sealed class BootstrapIntentBuilder
     {
         AddTrustClassAttestation();
         RelationTypeRegistry.SeedCanonical(_inner, _sourceId);
-        
-        
+
+
         PosReference.SeedCanonical(_inner, _sourceId);
         return _inner.Build();
     }

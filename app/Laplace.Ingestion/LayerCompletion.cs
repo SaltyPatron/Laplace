@@ -6,8 +6,8 @@ namespace Laplace.Ingestion;
 
 public static class LayerCompletion
 {
-    // OfCanonical is correct here: layer-completion markers are system-internal, namespace-unique
-    // ordinal markers with no surface content. They are NOT in the highway relation manifest.
+
+
     public static Hash128 RelationTypeId(int layerOrder) =>
         Hash128.OfCanonical($"substrate/type/HasLayerCompleted/{layerOrder}/v1");
 

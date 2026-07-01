@@ -19,7 +19,7 @@ goto parse
 :run
 set "ANYFAIL="
 set "MATCHED="
-rem Delayed expansion eats ! inside Tier!=perf — assign once with caret escape, expand via variable.
+
 set "XUNIT_TIER_EXCLUDE=Tier^!=perf"
 for %%P in (
   Laplace.Engine.Core.Tests

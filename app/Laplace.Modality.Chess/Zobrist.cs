@@ -1,21 +1,15 @@
 namespace Laplace.Modality.Chess;
 
-/// <summary>
-/// Zobrist hashing of a <see cref="Board"/> position — the transposition-table key for
-/// <see cref="Search"/>. Keys are generated once from a FIXED seed (deterministic across runs, so search
-/// and its tests are reproducible). The hash folds piece placement, side to move, castling rights, and
-/// the en-passant file. Pure C#, no DB/native.
-/// </summary>
 public static class Zobrist
 {
-    private static readonly ulong[,] PieceKeys = new ulong[13, 64]; // [(sbyte)piece + 6][bit 0..63]
+    private static readonly ulong[,] PieceKeys = new ulong[13, 64];
     private static readonly ulong[] CastleKeys = new ulong[16];
     private static readonly ulong[] EpFileKeys = new ulong[8];
     private static readonly ulong SideKey;
 
     static Zobrist()
     {
-        // splitmix64 from a fixed seed → a fixed, reproducible key set.
+
         ulong s = 0x9E3779B97F4A7C15UL;
         ulong Next()
         {

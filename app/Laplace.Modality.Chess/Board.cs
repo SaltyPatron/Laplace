@@ -147,19 +147,35 @@ public sealed class Board
 
     public static Piece CharToPiece(char c) => c switch
     {
-        'P' => Piece.WPawn, 'N' => Piece.WKnight, 'B' => Piece.WBishop,
-        'R' => Piece.WRook, 'Q' => Piece.WQueen, 'K' => Piece.WKing,
-        'p' => Piece.BPawn, 'n' => Piece.BKnight, 'b' => Piece.BBishop,
-        'r' => Piece.BRook, 'q' => Piece.BQueen, 'k' => Piece.BKing,
+        'P' => Piece.WPawn,
+        'N' => Piece.WKnight,
+        'B' => Piece.WBishop,
+        'R' => Piece.WRook,
+        'Q' => Piece.WQueen,
+        'K' => Piece.WKing,
+        'p' => Piece.BPawn,
+        'n' => Piece.BKnight,
+        'b' => Piece.BBishop,
+        'r' => Piece.BRook,
+        'q' => Piece.BQueen,
+        'k' => Piece.BKing,
         _ => throw new FormatException($"Invalid piece char: {c}"),
     };
 
     public static char PieceToChar(Piece p) => p switch
     {
-        Piece.WPawn => 'P', Piece.WKnight => 'N', Piece.WBishop => 'B',
-        Piece.WRook => 'R', Piece.WQueen => 'Q', Piece.WKing => 'K',
-        Piece.BPawn => 'p', Piece.BKnight => 'n', Piece.BBishop => 'b',
-        Piece.BRook => 'r', Piece.BQueen => 'q', Piece.BKing => 'k',
+        Piece.WPawn => 'P',
+        Piece.WKnight => 'N',
+        Piece.WBishop => 'B',
+        Piece.WRook => 'R',
+        Piece.WQueen => 'Q',
+        Piece.WKing => 'K',
+        Piece.BPawn => 'p',
+        Piece.BKnight => 'n',
+        Piece.BBishop => 'b',
+        Piece.BRook => 'r',
+        Piece.BQueen => 'q',
+        Piece.BKing => 'k',
         _ => '.',
     };
 

@@ -11,8 +11,8 @@ public class TypeIdLawTests
         @"Hash128\.OfCanonical\s*\(\s*""substrate/type/",
         RegexOptions.Compiled);
 
-    // All OfCanonical("substrate/type/...") literal-string usages are banned.
-    // Compound/interpolated namespace keys (substrate/type/grammar/...) are exempt by the regex.
+
+
     private static readonly HashSet<string> AllowedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
@@ -95,7 +95,7 @@ public class TypeIdLawTests
     [InlineData("FrameNet_Frame")]
     public void EntityTypeRegistry_IsContentAddressed(string name)
     {
-        // Entity type identity is blake3(utf8_bytes(name)) — no namespace prefix
+
         var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
         Assert.Equal(expected, EntityTypeRegistry.Id(name));
     }
@@ -105,9 +105,9 @@ public class TypeIdLawTests
     {
         var repoRoot = FindRepoRoot();
         var cliDir = Path.Combine(repoRoot, "app", "Laplace.Cli");
-        // Generation moved out of Program.cs into QueryCommands; scan the whole CLI so the invariant
-        // survives that refactor — the CLI drives generation via laplace.walk_text, never the
-        // deprecated laplace.generate(.
+
+
+
         var sb = new System.Text.StringBuilder();
         foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
             sb.Append(File.ReadAllText(f));

@@ -5,9 +5,9 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane(
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
-             -- keep type_id; resolve rank ONCE per distinct type below, not per-edge.
-             -- relation_rank_resolved does an SPI IS_A-inheritance walk, so the former
-             -- per-edge call was the hot cost (mirrors the consensus_type_plane fix).
+             
+             
+             
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id
              FROM v
              JOIN consensus c ON c.subject_id = v.id

@@ -1,14 +1,14 @@
 namespace Laplace.Decomposers.Abstractions;
 
 public sealed record DecomposerOptions(
-    int                       BatchSize,
-    bool                      DryRun,
-    IReadOnlySet<string>?     IncludeFilter,
-    IReadOnlySet<string>?     ExcludeFilter,
-    LanguageFilter?           Languages = null,
-    
-    bool                      EmitCrossLanguageLinks = true,
-    long                      MaxInputUnits = 0)
+    int BatchSize,
+    bool DryRun,
+    IReadOnlySet<string>? IncludeFilter,
+    IReadOnlySet<string>? ExcludeFilter,
+    LanguageFilter? Languages = null,
+
+    bool EmitCrossLanguageLinks = true,
+    long MaxInputUnits = 0)
 {
     public static DecomposerOptions Default { get; } =
         new(BatchSize: 1, DryRun: false, IncludeFilter: null, ExcludeFilter: null);

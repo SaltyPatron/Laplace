@@ -4,33 +4,33 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
-// The read-side, architecture-agnostic descriptor parsed from a Mold-A-Model recipe
-// (docs/invention/recipe-schema.md). Export fetches the recipe_json from laplace.model_recipes()
-// and parses it into this typed form, which drives the generic tensor manifest + per-head operator
-// materialize. This replaces the hardcoded ArchitectureProfile classes on the synthesis path.
 
-// One operator: a relation head (Type set), a metric head (Metric set), or a structural op
-// (trajectory / unary / coord / spectral) identified by Op alone.
+
+
+
+
+
+
 public sealed record OperatorSpec(string Op, string? Type, string? Metric)
 {
     public static OperatorSpec FromJson(JsonElement e)
     {
         string op = e.TryGetProperty("op", out var o) ? o.GetString() ?? "" : "";
-        string? type   = e.TryGetProperty("type", out var t) ? t.GetString() : null;
+        string? type = e.TryGetProperty("type", out var t) ? t.GetString() : null;
         string? metric = e.TryGetProperty("metric", out var m) ? m.GetString() : null;
         if (string.IsNullOrEmpty(op))
             throw new InvalidOperationException($"operator missing 'op': {e}");
         return new OperatorSpec(op, type, metric);
     }
 
-    // Stable key for grouping / per-operator factoring and provenance.
+
     public string Key => Op switch
     {
-        "relation"  => $"relation:{Type}",
-        "metric"    => $"metric:{Metric}",
+        "relation" => $"relation:{Type}",
+        "metric" => $"metric:{Metric}",
         "attribute" => $"attribute:{Type}",
-        "syntax"    => $"syntax:{Type}",
-        _           => Op,
+        "syntax" => $"syntax:{Type}",
+        _ => Op,
     };
 }
 
@@ -43,7 +43,7 @@ public sealed record RecipeDescriptor(
     Hash128 RecipeId,
     string Name,
     string Structure,
-    string HiddenSize,            // "auto" or an int as string
+    string HiddenSize,
     int IntermediateSize,
     int NumLayers,
     bool Rope,
@@ -53,14 +53,14 @@ public sealed record RecipeDescriptor(
     OperatorSpec LmHead,
     IReadOnlyList<LayerSpec> Layers,
     VocabSpec Vocab,
-    IReadOnlyList<string> Attributes,   // word→category type relations folded into the embed (HAS_POS, …)
-    string Compile,                     // "continuation" (prefix→next readout) | "full" (all heads active)
+    IReadOnlyList<string> Attributes,
+    string Compile,
     byte[] CanonicalJson)
 {
     public bool HiddenSizeAuto => HiddenSize == "auto";
     public bool ContinuationCompile =>
         string.Equals(Compile, "continuation", StringComparison.OrdinalIgnoreCase);
-    public int  HiddenSizeOr(int fallback) => int.TryParse(HiddenSize, out var v) ? v : fallback;
+    public int HiddenSizeOr(int fallback) => int.TryParse(HiddenSize, out var v) ? v : fallback;
 
     public static RecipeDescriptor Parse(string recipeJson)
     {
@@ -71,19 +71,19 @@ public sealed record RecipeDescriptor(
         if (kind != "laplace.recipe")
             throw new InvalidOperationException($"not a laplace.recipe (kind='{kind}')");
 
-        string name      = Str(root, "name", "recipe");
+        string name = Str(root, "name", "recipe");
         string structure = Str(root, "structure", "dense");
-        string hidden    = root.TryGetProperty("hidden_size", out var hs)
+        string hidden = root.TryGetProperty("hidden_size", out var hs)
             ? (hs.ValueKind == JsonValueKind.Number ? hs.GetInt32().ToString() : hs.GetString() ?? "auto")
             : "auto";
         int hiddenInt = int.TryParse(hidden, out var hv) ? hv : 0;
         int intermediate = Int(root, "intermediate_size",
-            hiddenInt > 0 ? RoundTo64(hiddenInt * 8 / 3) : 1024);   // SwiGLU ~2.67x, rounded to 64
+            hiddenInt > 0 ? RoundTo64(hiddenInt * 8 / 3) : 1024);
         bool rope = root.TryGetProperty("rope", out var rp) && rp.ValueKind == JsonValueKind.True;
-        bool tie  = root.TryGetProperty("tie_embeddings", out var te) && te.ValueKind == JsonValueKind.True;
+        bool tie = root.TryGetProperty("tie_embeddings", out var te) && te.ValueKind == JsonValueKind.True;
         string norm = Str(root, "norm", "rmsnorm");
 
-        var embed  = root.TryGetProperty("embed", out var em) ? OperatorSpec.FromJson(em)
+        var embed = root.TryGetProperty("embed", out var em) ? OperatorSpec.FromJson(em)
                                                               : new OperatorSpec("coord", null, null);
         var lmHead = root.TryGetProperty("lm_head", out var lm) ? OperatorSpec.FromJson(lm)
                                                                 : new OperatorSpec("trajectory", null, null);
@@ -138,9 +138,9 @@ public sealed record RecipeDescriptor(
         if (v.TryGetProperty("seeds", out var se) && se.ValueKind == JsonValueKind.Array)
             foreach (var s in se.EnumerateArray())
                 if (s.GetString() is { } str) seeds.Add(str);
-        int hops   = Int(v, "hops", 2);
+        int hops = Int(v, "hops", 2);
         int fanout = Int(v, "fanout", 30);
-        int size   = Int(v, "size", 1500);
+        int size = Int(v, "size", 1500);
         string? tok = v.TryGetProperty("tokenizer", out var tk) ? tk.GetString() : null;
         return new VocabSpec(source, seeds, hops, fanout, size, tok);
     }

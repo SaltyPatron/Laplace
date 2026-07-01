@@ -9,32 +9,17 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Ingests PGN game files into the substrate. Uses our <c>pgn</c> tree-sitter grammar ONLY to extract
-/// clean structure (ordered <c>san_move</c> tokens + the <c>game_result</c>, free of clocks/comments),
-/// then supplies the chess semantics itself: replay each game through the perft-verified movegen
-/// (<see cref="San.Resolve"/>), compose each position from its substructures, and score the resulting
-/// edges by the game result. The substrate fills with chess positions + rated moves — not PGN-notation
-/// text — so these edges fold into the same graph self-play uses.
-///
-/// <para><b>Stage 1 (this class) STREAMS</b>: it reads each file record-by-record (one game at a time),
-/// never the whole file or its AST in bulk — so peak RAM is O(one game), independent of file size (the
-/// 195 MB+ files ingest on a Pi). Per-game evidence is <b>Elo-weighted by the OPPONENT's rating</b> (the
-/// anti-trap: a result against a strong defender is stronger evidence; Scholar's-Mate win-rate collapses
-/// once weighted by defender Elo). Clock/criticality weighting + game-level dedup-before-compute (the
-/// present-trunk skip) are the native O(tier) write path's job (Track 1), not done here.</para>
-/// </summary>
 public sealed class ChessPgnDecomposer : IDecomposer
 {
-    public Hash128 SourceId     => ChessVocabulary.PgnSourceId;
-    public string  SourceName   => "ChessPgn";
-    public int     LayerOrder   => 20;
+    public Hash128 SourceId => ChessVocabulary.PgnSourceId;
+    public string SourceName => "ChessPgn";
+    public int LayerOrder => 20;
     public Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
-    // NOTE: NO game-level skip. Dedup is STRUCTURAL — a position/move composes deterministically + losslessly
-    // to a content id (g2g3·f1g2 = the fianchetto, the same way [c,a,t] = "cat"), so it is RECORDED ONCE and
-    // WITNESSED every time it's played; the witness count IS the run-length. Skipping a repeated game would
-    // suppress a real witness (and discard that play's provenance). Repetition is the signal, not waste.
+
+
+
+
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
 
@@ -47,7 +32,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var modality = new ChessModality();
-        int batch    = options.BatchSize > 1 ? options.BatchSize : 512;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
 
         await foreach (var change in DecomposerBatch.RunAsync(
             StreamAllGamesAsync(context.EcosystemPath, ct),
@@ -56,7 +41,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
             yield return change;
     }
 
-    // Streams every game text string across all PGN files under the ecosystem path.
+
     private static async IAsyncEnumerable<string> StreamAllGamesAsync(
         string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -117,12 +102,8 @@ public sealed class ChessPgnDecomposer : IDecomposer
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
         => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn");
 
-    /// <summary>
-    /// Stream a PGN file game-by-game: read lines, accumulate from one <c>[Event </c> tag to the next,
-    /// yield each game's text, discard. Peak RAM = O(one game), never the whole file. UTF-8.
-    /// </summary>
     private static async IAsyncEnumerable<string> StreamGamesAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
+    string path, [EnumeratorCancellation] CancellationToken ct)
     {
         using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sb = new StringBuilder(2048);
@@ -140,20 +121,13 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (sb.Length > 0) yield return sb.ToString();
     }
 
-    // Constant witness weight across the whole run → constant φ per relation (the fold/accumulator
-    // invariant). Trust (Elo, confirmed mate) is encoded in the GAME-COUNT, not the weight.
+
+
     private const double PgnWitnessWeight = 0.7;
 
-    /// <summary>Replay one game's SAN moves, emitting edges scored by result. Trust is the Glicko
-    /// observation count: weighted by the OPPONENT (defender) Elo — the anti-trap — and boosted for the
-    /// side that delivered a CONFIRMED mate (terminal <c>#</c>) vs a bare result (resignation/time, the
-    /// opponent's judgment). Aborts on an unresolved move (malformed/illegal token).</summary>
-    /// <summary>Emit the Chess_Game node + its full conventional metadata: white/black player, event, date,
-    /// ECO, time control + class, termination, result, and per-game HAS_RATING (the rating tied to THIS game
-    /// via contextId). Each value is a content entity so identical metadata across games converges.</summary>
     private static void EmitGame(
-        SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
-        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
+    SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
+    Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
     {
         var src = ChessVocabulary.PgnSourceId;
         b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
@@ -161,24 +135,23 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));
 
-        Meta(b, gameId, "HAS_EVENT",       PgnGames.TagStr(gameText, "Event"), src);
-        Meta(b, gameId, "ON_DATE",         PgnGames.TagStr(gameText, "Date"), src);
-        Meta(b, gameId, "HAS_ECO",         PgnGames.TagStr(gameText, "ECO"), src);
+        Meta(b, gameId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src);
+        Meta(b, gameId, "ON_DATE", PgnGames.TagStr(gameText, "Date"), src);
+        Meta(b, gameId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src);
         Meta(b, gameId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src);
-        Meta(b, gameId, "HAS_RESULT",      result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src);
+        Meta(b, gameId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src);
 
         string tc = PgnGames.TagStr(gameText, "TimeControl");
         Meta(b, gameId, "HAS_TIME_CONTROL", tc, src);
-        Meta(b, gameId, "HAS_TC_CLASS",     TcClass(tc), src);
+        Meta(b, gameId, "HAS_TC_CLASS", TcClass(tc), src);
 
         if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, gameId, src);
         if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, gameId, src);
     }
 
-    /// <summary>Game-level opening/ECO/motif from PGN headers + classifier.</summary>
     private static void EmitGameOpeningMeta(
-        SubstrateChangeBuilder b, Hash128 gameId, string gameText,
-        IReadOnlyList<string> sans, ChessModality modality)
+    SubstrateChangeBuilder b, Hash128 gameId, string gameText,
+    IReadOnlyList<string> sans, ChessModality modality)
     {
         var src = ChessVocabulary.PgnSourceId;
         string ecoHeader = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
@@ -199,7 +172,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
             ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", motif, PgnWitnessWeight, src);
     }
 
-    /// <summary>Game → metadata-value content edge (skips empty/"?"/"-" placeholders).</summary>
     private static void Meta(SubstrateChangeBuilder b, Hash128 game, string rel, string value, Hash128 src)
     {
         if (string.IsNullOrWhiteSpace(value) || value == "?" || value == "-" || value == "????.??.??") return;
@@ -207,19 +179,16 @@ public sealed class ChessPgnDecomposer : IDecomposer
             b.AddAttestation(NativeAttestation.Categorical(game, rel, vid, src, null, PgnWitnessWeight));
     }
 
-    /// <summary>Player HAS_RATING (rating value), contextId = the game it applied to (ratings are per-game).</summary>
     private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, Hash128 game, Hash128 src)
     {
         if (ContentEmitter.Emit(b, elo.ToString(), src) is { } rid)
             b.AddAttestation(NativeAttestation.Categorical(player, "HAS_RATING", rid, src, game, PgnWitnessWeight));
     }
 
-    /// <summary>Classify a PGN <c>TimeControl</c> tag into bullet/blitz/rapid/classical by base seconds
-    /// (the move-evidence axis: a blitz move is weaker testimony than a classical one). "" when unknown.</summary>
     internal static string TcClass(string tc)
     {
         if (string.IsNullOrWhiteSpace(tc) || tc == "-") return "";
-        if (tc.Contains('/')) return "classical";                  // "40/7200" tournament form
+        if (tc.Contains('/')) return "classical";
         int plus = tc.IndexOf('+');
         string baseStr = plus >= 0 ? tc[..plus] : tc;
         if (!int.TryParse(baseStr, out int baseSec)) return "";
@@ -288,10 +257,9 @@ public sealed class ChessPgnDecomposer : IDecomposer
         }
     }
 
-    /// <summary>Variation plies: MOVE edges only, no game OUTCOME chain, lower trust, no game context.</summary>
     private static void AppendVariations(
-        SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
-        int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
+    SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
+    int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer)
     {
         const double varWeight = 0.35;
         var mainState = m.Initial();
@@ -338,10 +306,8 @@ public sealed class ChessPgnDecomposer : IDecomposer
         return true;
     }
 
-    /// <summary>Defender Elo → Glicko observation count (1..12): unknown → a neutral middle; rises with
-    /// strength so master games dominate the fold and weak games barely move it.</summary>
     private static long EloGames(int elo)
-        => elo <= 0 ? 3 : Math.Clamp((long)Math.Round((elo - 600) / 200.0), 1, 12);
+    => elo <= 0 ? 3 : Math.Clamp((long)Math.Round((elo - 600) / 200.0), 1, 12);
 
     private static (int White, int Black) ParseElos(string game)
         => (PgnGames.TagInt(game, "WhiteElo"), PgnGames.TagInt(game, "BlackElo"));
@@ -349,9 +315,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
     private static (string White, string Black) ParseNames(string game)
         => (PgnGames.TagStr(game, "White"), PgnGames.TagStr(game, "Black"));
 
-    /// <summary>Mint (dedup) the player entity and bind its display name via HAS_NAME_ALIAS. Returns null
-    /// for unknown players (""/"?"), so no PLAYED_BY is attributed. The rating's EFFECT lands per-move via
-    /// the move-choice observation count; an explicit per-game HAS_RATING is a later refinement.</summary>
     private static Hash128? EmitPlayer(SubstrateChangeBuilder b, string name)
     {
         if (string.IsNullOrWhiteSpace(name) || name == "?") return null;
@@ -371,20 +334,20 @@ public sealed class ChessPgnDecomposer : IDecomposer
         {
             try
             {
-                // Stream-count [Event tags — never read the whole file (the 195 MB+ files would OOM).
+
                 using var r = new StreamReader(f);
                 string? line;
                 while ((line = r.ReadLine()) is not null)
                     if (line.StartsWith("[Event ", StringComparison.Ordinal)) games++;
             }
-            catch { /* skip unreadable */ }
+            catch { }
         }
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
 
-    // The bootstrap's declared type/relation names (Chess_Position, Chess_Player, MOVE, PLAYED_BY, …);
-    // RegisterDynamicCanonicalsAsync auto-adds substrate/source/ChessPgn/v1 from SourceName. So the types
-    // are queryable by name, not only legible via the slow HAS_NAME_ALIAS traversal.
+
+
+
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

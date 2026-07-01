@@ -76,12 +76,12 @@ TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
 }
 
 TEST(LaplaceCoreTextDecomposer, NormalizationFormsConverge) {
-    // NFC and NFD encodings of "é" are the SAME content. text_decomposer_run NFC-normalizes at its
-    // chokepoint, so both decompose identically and resolve to ONE content entity id. This is the
-    // structural basis of cross-source convergence ("same content = same hash"). Replaces the old
-    // DistinctNormalizationFormsStayDistinct, which locked in the pre-NFC, fragmenting behavior.
-    const uint8_t pre[] = {0xC3, 0xA9};        // "é" NFC (U+00E9)
-    const uint8_t dec[] = {0x65, 0xCC, 0x81};  // "é" NFD (e + combining acute U+0301)
+    
+    
+    
+    
+    const uint8_t pre[] = {0xC3, 0xA9};        
+    const uint8_t dec[] = {0x65, 0xCC, 0x81};  
 
     tier_tree_t* a = nullptr;
     tier_tree_t* b = nullptr;
@@ -91,12 +91,12 @@ TEST(LaplaceCoreTextDecomposer, NormalizationFormsConverge) {
     tier_node_view_t la, lb;
     tier_tree_get_node(a, 0, &la);
     tier_tree_get_node(b, 0, &lb);
-    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);  // both normalize to NFC U+00E9
+    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);  
     EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x00E9u, lb.atom);
     tier_tree_free(a);
     tier_tree_free(b);
 
-    // The identity must converge, not just the tree shape.
+    
     hash128_t id_nfc, id_nfd;
     ASSERT_EQ(0, laplace_content_root_id(pre, sizeof(pre), &id_nfc));
     ASSERT_EQ(0, laplace_content_root_id(dec, sizeof(dec), &id_nfd));
@@ -198,9 +198,9 @@ TEST(LaplaceContentRootId, AsciiWordIsFlatMerkleOverCodepointIds) {
 TEST(LaplaceContentRootId, MultiCodepointGraphemeComposesNested) {
     
 
-    // q (U+0071) + combining acute (U+0301) is a multi-codepoint grapheme with NO precomposed form,
-    // so it survives NFC (unlike e + acute, which composes to U+00E9). It must still nest: one
-    // grapheme node holding both codepoints, under the word — not a flat 3-codepoint merkle.
+    
+    
+    
     const uint8_t s[] = {0x71, 0xCC, 0x81, 0x78};
     hash128_t id;
     ASSERT_EQ(0, laplace_content_root_id(s, sizeof(s), &id));

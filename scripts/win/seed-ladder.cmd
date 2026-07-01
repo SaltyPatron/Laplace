@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 if not defined LAPLACE_ROOT call "%~dp0env.cmd"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
-rem File-level decompose fan-out: unset LAPLACE_DECOMPOSE_WORKERS -> IngestParallelism.ResolveFileWorkers (P-core-aware).
+
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
 if not defined LAPLACE_FOLD_WORKERS set "LAPLACE_FOLD_WORKERS=8"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"

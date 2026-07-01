@@ -15,8 +15,8 @@ hash128_t hash_path(const char* path) {
     return h;
 }
 
-// Relation type ids are content-addressed: blake3(utf8 canonical name bytes).
-// Must match relation_law.c type_id_from_canonical and RelationTypeRegistry.RelationTypeId in C#.
+
+
 hash128_t relation_type_id(const char* canonical_name) {
     hash128_t h;
     hash128_blake3(reinterpret_cast<const uint8_t*>(canonical_name),
@@ -91,9 +91,9 @@ TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
     hash128_t depends_on = relation_type_id("DEPENDS_ON");
     EXPECT_TRUE(hash128_equals(&dep_nsubj, &tid));
     EXPECT_TRUE(hash128_equals(&depends_on, &parent_id));
-    // Deprels sit at the grammatical-glue floor: relation_types.toml [dynamic.deprel] rank =
-    // "lexical_glue" (0.18). (Was 0.73/partitive before the salience recalibration; the parent
-    // DEPENDS_ON keeps partitive, checked by id above — the deprel's OWN rank is lexical_glue.)
+    
+    
+    
     EXPECT_DOUBLE_EQ(0.18, rank);
     EXPECT_EQ(0, flip);
 
@@ -236,13 +236,13 @@ TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
     EXPECT_TRUE(hash128_equals(&symed[0].id, &symed[1].id));
 }
 
-// ── Reverse-index (laplace_relation_lookup) ──────────────────────────────────────────────────
-// The O(1) open-addressing bucket replaced the O(n) linear scan. These prove it is a faithful
-// drop-in: every canonical relation resolves back to its own def, misses are rejected, and the
-// def fields it returns are intact. (Isolate + prove, before the chain test below.)
+
+
+
+
 
 TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
-    // Enumerate via the exported manifest functions (the data table itself is not dll-exported).
+    
     size_t n = laplace_relation_manifest_count();
     ASSERT_GT(n, 0u);
     for (size_t i = 0; i < n; ++i) {
@@ -252,8 +252,8 @@ TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
         const laplace_relation_def_t* def = nullptr;
         ASSERT_EQ(0, laplace_relation_lookup(&tid, &def)) << "miss for " << name;
         ASSERT_NE(nullptr, def);
-        // The bucket may land on a different probe slot, but the returned def MUST be the one whose
-        // id actually equals the query — i.e. its canonical name round-trips.
+        
+        
         EXPECT_STREQ(name, def->canonical) << "wrong def for " << name;
     }
 }
@@ -276,15 +276,15 @@ TEST(LaplaceRelationLaw, ReverseLookupCarriesDefFields) {
     const laplace_relation_def_t* def = nullptr;
     ASSERT_EQ(0, laplace_relation_lookup(&isa, &def));
     ASSERT_NE(nullptr, def);
-    EXPECT_DOUBLE_EQ(0.9, def->rank);                              // taxonomic
+    EXPECT_DOUBLE_EQ(0.9, def->rank);                              
     EXPECT_EQ(LAPLACE_REL_SYMMETRY_ASYMMETRIC, def->symmetry);
 }
 
-// Chain: the resolved-attestation path orients subject/object by fetching the relation's symmetry
-// through laplace_relation_lookup. A symmetric relation must canonicalize (a,b) and (b,a) to the
-// same staged id — proving the bucket lookup feeds attestation_orient_resolved correctly.
+
+
+
 TEST(LaplaceAttestationEngine, ResolvedSymmetricOrientsViaLookup) {
-    hash128_t sym = relation_type_id("IS_SYNONYM_OF");             // symmetric in the manifest
+    hash128_t sym = relation_type_id("IS_SYNONYM_OF");             
     hash128_t src = hash_path("src");
     hash128_t a = hash_path("e/a"), b = hash_path("e/b");
     laplace_attestation_staged_t ab, ba;

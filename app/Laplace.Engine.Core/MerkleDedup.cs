@@ -6,8 +6,8 @@ public static unsafe class MerkleDedup
 {
     public static int FilterNovel(
         ReadOnlySpan<Hash128> candidates,
-        ReadOnlySpan<byte>    existingBitmap,
-        Span<Hash128>         outNovel)
+        ReadOnlySpan<byte> existingBitmap,
+        Span<Hash128> outNovel)
     {
         if (outNovel.Length < candidates.Length)
             throw new ArgumentException("outNovel must have capacity >= candidates.Length", nameof(outNovel));
@@ -22,12 +22,12 @@ public static unsafe class MerkleDedup
         nuint outN = 0;
         int rc;
         fixed (Hash128* pCand = candidates)
-        fixed (byte*    pBm   = existingBitmap)
-        fixed (Hash128* pOut  = outNovel)
+        fixed (byte* pBm = existingBitmap)
+        fixed (Hash128* pOut = outNovel)
         {
             rc = NativeInterop.MerkleDedupFilterNovel(
                 pCand, (nuint)candidates.Length,
-                pBm,   (nuint)existingBitmap.Length * 8,
+                pBm, (nuint)existingBitmap.Length * 8,
                 pOut, &outN);
         }
         if (rc != 0) throw new InvalidOperationException("merkle_dedup_filter_novel failed");
@@ -35,9 +35,9 @@ public static unsafe class MerkleDedup
     }
 
     public static int TrunkShortcircuit(
-        TierTree           tree,
+        TierTree tree,
         ReadOnlySpan<byte> existingBitmap,
-        Span<uint>         outNovelIndices)
+        Span<uint> outNovelIndices)
     {
         ArgumentNullException.ThrowIfNull(tree);
         int nodeCount = tree.NodeCount;

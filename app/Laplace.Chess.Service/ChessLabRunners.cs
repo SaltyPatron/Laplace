@@ -27,8 +27,8 @@ public static class ChessLabRunners
         {
             "fold" => new SubstructureFoldBias(ds),
             "edge" => new SubstrateRootBias(ds),
-            "off"  => null,
-            _      => null,
+            "off" => null,
+            _ => null,
         };
         var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias);
         var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All);

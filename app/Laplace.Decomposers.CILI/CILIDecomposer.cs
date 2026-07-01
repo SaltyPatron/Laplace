@@ -6,15 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.CILI;
 
-/// <summary>
-/// Ingests the Collaborative Inter-Lingual Index (CILI) as first-class substrate: every ILI
-/// concept node, its authoritative English definition, and the cross-wordnet-version synset
-/// offset maps. The ILI is the convergence backbone — a synset anchor used by WordNet/OMW/
-/// ConceptNet/SemLink is the content-address of the ILI string (e.g. "i1"), so the concept
-/// entities CILI emits here ARE the same entities those sources attach lemmas/definitions to.
-/// Previously CILI was read only as a runtime offset→ILI lookup and never ingested; this makes
-/// the index — concepts, definitions, and the 9 cross-version maps — first-class with provenance.
-/// </summary>
 public sealed class CILIDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -27,9 +18,9 @@ public sealed class CILIDecomposer : IDecomposer
 
     private const int DefaultBatchSize = 2048;
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "CILIDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "CILIDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
@@ -54,7 +45,7 @@ public sealed class CILIDecomposer : IDecomposer
         int batchSize = options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
         int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
 
-        // ---- Pass 1: ili.ttl — concept nodes + authoritative English definitions ----
+
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
@@ -81,7 +72,7 @@ public sealed class CILIDecomposer : IDecomposer
                 yield return change;
         }
 
-        // ---- Pass 2: ili-map-*.tab — cross-wordnet-version synset offset maps ----
+
         var tabs = Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories)
                             .OrderBy(p => p, StringComparer.Ordinal);
         foreach (var tab in tabs)
@@ -98,7 +89,7 @@ public sealed class CILIDecomposer : IDecomposer
                 yield return change;
         }
 
-        // ---- Pass 3: ili-map-*.ttl — turtle-form cross-version maps ----
+
         var ttlMaps = Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories)
                                .OrderBy(p => p, StringComparer.Ordinal);
         foreach (var ttlMap in ttlMaps)
@@ -126,7 +117,7 @@ public sealed class CILIDecomposer : IDecomposer
             id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
     }
 
-    // Span work is isolated in non-iterator helpers so no ReadOnlySpan<byte> crosses await/yield.
+
 
     private static async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ParseIliMapAsync(
         string tab, string version, [EnumeratorCancellation] CancellationToken ct)
@@ -147,9 +138,9 @@ public sealed class CILIDecomposer : IDecomposer
         ReadOnlySpan<byte> iliSpan = TrimAscii(span[..sep]);
         ReadOnlySpan<byte> rest = span[(sep + 1)..];
         int sep2 = rest.IndexOf((byte)'\t');
-        // Take ONLY the second column. Some ili-map rows carry a trailing 3rd field; the previous
-        // `line[(sep+1)..]` swept it into the synset key (e.g. "01927847-n\t1"), corrupting the
-        // content so those keys never converged with the bare "01927847-n" the wordnets emit.
+
+
+
         ReadOnlySpan<byte> offsetPosSpan = TrimAscii(sep2 >= 0 ? rest[..sep2] : rest);
         if (iliSpan.IsEmpty || offsetPosSpan.IsEmpty || iliSpan[0] != (byte)'i') return false;
         ili = iliSpan.ToArray();

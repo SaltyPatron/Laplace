@@ -3,9 +3,9 @@ using Laplace.Engine.Core;
 namespace Laplace.Modality;
 
 public readonly record struct RecordedEdge(
-    string     SubjectKey,
-    string     ObjectKey,
-    string?    MoveKey,
+    string SubjectKey,
+    string ObjectKey,
+    string? MoveKey,
     PlyOutcome MoverOutcome);
 
 public interface IContentAddresser

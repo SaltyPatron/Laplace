@@ -2,11 +2,11 @@ using Xunit;
 
 namespace Laplace.Decomposers.Model.Tests;
 
-// Test-first coverage for the PARSING layer against real models in the hub (D:\Models\hub via
-// LAPLACE_MODEL_HUB). Reads only safetensors HEADERS + config.json (no weights, no DB), builds the
-// ModelManifest exactly as ModelDecomposer does, and asserts the true structural facts per format:
-// untied/tied embeddings, GQA, Qwen3 per-head q/k norm, DeepSeek MoE+MLA, Phi parallel-block norm.
-// A model that isn't present is skipped (machine-portable); when present, the asserts are real.
+
+
+
+
+
 public class RealModelManifestTests
 {
     private static string HubRoot =>
@@ -32,9 +32,9 @@ public class RealModelManifestTests
     {
         string root = Path.Combine(HubRoot, hubDir);
         if (!Directory.Exists(root)) return null;
-        if (HasModel(root)) return root;                              // flat layout (vision/detection dirs)
+        if (HasModel(root)) return root;
         string snaps = Path.Combine(root, "snapshots");
-        if (Directory.Exists(snaps))                                 // HF snapshot layout
+        if (Directory.Exists(snaps))
             foreach (var d in Directory.GetDirectories(snaps))
                 if (HasModel(d)) return d;
         return null;
@@ -52,14 +52,14 @@ public class RealModelManifestTests
     public void Manifest_MatchesRealModel(Expect e)
     {
         string? dir = ResolveSnapshot(e.HubDir);
-        if (dir is null) return;   // not present on this machine — skip
+        if (dir is null) return;
 
         var cfgResult = ModelConfigReader.Read(Path.Combine(dir, "config.json"));
         var headers = SafetensorsContainerParser.ParseModel(dir);
         var m = TensorRoleClassifier.Build(headers, cfgResult, e.HubDir);
         var c = m.Config;
 
-        // ── config scalars (the "magic numbers" the rest of the pipeline keys off) ──
+
         Assert.Equal(e.ModelType, c.ModelType);
         Assert.Equal(e.Vocab, c.VocabSize);
         Assert.Equal(e.Hidden, c.HiddenSize);
@@ -71,22 +71,22 @@ public class RealModelManifestTests
         Assert.Equal(e.Moe, c.IsMoe);
         Assert.Equal(e.Mla, c.IsMla);
 
-        // ── coverage + embedding/unembedding ──
+
         Assert.Equal(Modality.Text, m.Modality);
         Assert.Equal(Coverage.Full, m.Coverage);
         Assert.NotNull(m.Embedding);
-        Assert.NotNull(m.LmHead);   // explicit (untied) or tied fallback to embedding
+        Assert.NotNull(m.LmHead);
         if (e.Tied)
-            Assert.Equal(m.Embedding, m.LmHead);          // tied → no separate lm_head tensor
+            Assert.Equal(m.Embedding, m.LmHead);
         else
-            Assert.NotEqual(m.Embedding, m.LmHead);       // untied → distinct lm_head
+            Assert.NotEqual(m.Embedding, m.LmHead);
 
-        // ── norm accessors (Track A1) resolve on REAL tensors ──
+
         Assert.NotNull(m.InputNorm(0));
         if (!e.Mla)
-            Assert.NotNull(m.PostAttnNorm(0));            // dense blocks have a post-attn norm
+            Assert.NotNull(m.PostAttnNorm(0));
 
-        // Qwen3 carries per-head q/k RMSNorm — A1 must find them on real tensors.
+
         if (e.ModelType == "qwen3")
         {
             Assert.NotNull(m.QNorm(0));
@@ -98,11 +98,11 @@ public class RealModelManifestTests
             Assert.Null(m.KNorm(0));
         }
 
-        // DeepSeek-V2 uses a low-rank KV latent with its own layernorm.
+
         if (e.Mla)
             Assert.NotNull(m.KvaLatentNorm(0));
 
-        // ── per-layer operator roles for dense (non-MLA) attention ──
+
         if (!e.Mla)
         {
             Assert.NotNull(m.Single(0, TensorRoleKind.AttnQ));
@@ -110,12 +110,12 @@ public class RealModelManifestTests
             Assert.NotNull(m.Single(0, TensorRoleKind.AttnV));
             Assert.NotNull(m.Single(0, TensorRoleKind.AttnO));
         }
-        // Dense MLP present on layer 0 (MoE models still have dense early layers in deepseek_v2).
+
         Assert.NotNull(m.Single(0, TensorRoleKind.MlpDown));
     }
 
-    // Pure vision/detection models have no token vocab — they must never be treated as runnable text
-    // (else ingest would fold attention on a vision tower). No-throw + !TextPlanesRunnable.
+
+
     [Theory]
     [InlineData("DETR-ResNet-101")]
     [InlineData("RT-DETR-v1-R101")]
@@ -130,15 +130,15 @@ public class RealModelManifestTests
             $"{hubDir} (type={m.Config.ModelType}, modality={m.Modality}, coverage={m.Coverage}) must not run text planes");
     }
 
-    // Every format the hub throws at us must PARSE without crashing and yield a defined coverage —
-    // a BERT encoder, a VL model, audio, a reranker. Ingest must DEGRADE (Partial/Unsupported), not throw.
+
+
     [Theory]
-    [InlineData("models--sentence-transformers--all-MiniLM-L6-v2")]   // BERT encoder
-    [InlineData("Florence-2-base")]                                    // vision-language
-    [InlineData("models--Qwen--Qwen3-VL-Embedding-2B")]                // qwen3_vl
-    [InlineData("models--Qwen--Qwen3-Reranker-0.6B")]                  // text reranker
-    [InlineData("models--jinaai--jina-code-embeddings-1.5b")]          // text code-embedding
-    [InlineData("models--nvidia--canary-qwen-2.5b")]                   // audio
+    [InlineData("models--sentence-transformers--all-MiniLM-L6-v2")]
+    [InlineData("Florence-2-base")]
+    [InlineData("models--Qwen--Qwen3-VL-Embedding-2B")]
+    [InlineData("models--Qwen--Qwen3-Reranker-0.6B")]
+    [InlineData("models--jinaai--jina-code-embeddings-1.5b")]
+    [InlineData("models--nvidia--canary-qwen-2.5b")]
     public void AnyFormat_ParsesWithoutCrashing(string hubDir)
     {
         string? dir = ResolveSnapshot(hubDir);

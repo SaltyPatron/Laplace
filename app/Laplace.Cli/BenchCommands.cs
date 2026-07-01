@@ -25,8 +25,8 @@ internal static class BenchCommands
         return pass ? 0 : 1;
     }
 
-    
-    
+
+
     public static async Task<int> ModelBenchCmd(string[] rest)
     {
         var log = ConsoleLoggerProvider.Factory().CreateLogger("model-bench");
@@ -56,9 +56,9 @@ internal static class BenchCommands
         {
             Console.WriteLine(new string('=', 78));
             bool ok;
-            // The FFN/token-bilinear bench is retired: model ingestion no longer materializes
-            // token<->token tensor planes (it stages RELATED_TO edges via ModelTokenEdgeETL and
-            // folds them in SPI). A bench over the new edge path lands with that work.
+
+
+
             await Task.CompletedTask;
             Console.WriteLine($"model-bench: {dir} — bilinear bench retired (edge-ETL bench pending)");
             ok = true;
@@ -78,24 +78,24 @@ internal static class BenchCommands
 
     private static bool IsModelDir(string dir) => SafetensorSnapshotWitness.IsComplete(dir);
 
-    
+
     private static IEnumerable<string> EnumerateHubModels(string hub)
     {
-        
+
         if (IsModelDir(hub)) { yield return hub; yield break; }
 
         foreach (var fam in Directory.GetDirectories(hub, "models--*").OrderBy(f => f, StringComparer.Ordinal))
         {
             var snapsDir = Path.Combine(fam, "snapshots");
             if (!Directory.Exists(snapsDir)) continue;
-            
+
             var snap = Directory.GetDirectories(snapsDir)
                                 .OrderByDescending(Directory.GetLastWriteTimeUtc)
                                 .FirstOrDefault(IsModelDir);
             if (snap != null) yield return snap;
         }
 
-        
+
         foreach (var d in Directory.GetDirectories(hub).OrderBy(f => f, StringComparer.Ordinal))
             if (!Path.GetFileName(d).StartsWith("models--", StringComparison.Ordinal) && IsModelDir(d))
                 yield return d;

@@ -12,8 +12,8 @@ CREATE OR REPLACE FUNCTION substrate_counts()
         WHERE e.tier BETWEEN 1 AND 4
           AND e.type_id = ANY(@extschema@.compositional_type_ids())
     UNION ALL
-    -- Anchors are identified by type_id (NOT a content-composition tier), never by tier.
-    -- Anchors sit at Word tier (2) with a meta-type type_id; tier is composition depth only.
+    
+    
     SELECT 'entities/vocabulary (by type_id)', count(*) FROM @extschema@.entities e
         WHERE e.type_id <> ALL(@extschema@.compositional_type_ids())
     UNION ALL

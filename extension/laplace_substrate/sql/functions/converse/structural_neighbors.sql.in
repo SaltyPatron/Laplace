@@ -12,7 +12,7 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
-    -- geometry is source-free; order by id for determinism (was p.source_id)
+    
     ORDER BY s.ord, p.id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;

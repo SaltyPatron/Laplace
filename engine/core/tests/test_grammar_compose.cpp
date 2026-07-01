@@ -46,19 +46,19 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
     laplace_ast_free(ast);
 }
 
-// ASAN repro for the native compose AV on multilingual free-text (OMW/Wiktionary/Tatoeba).
-// Replays the exact .NET ingest path NATIVELY: the tsv row-iterator frames rows, each row is
-// parsed + composed via laplace_grammar_compose. Under -fsanitize=address this catches the
-// heap overrun at its file:line, instead of the .NET runtime swallowing the 0xC0000005 as a
-// bare "Fatal error". Gated on LAPLACE_OMW_REPRO_DIR so the normal suite is unaffected.
+
+
+
+
+
 TEST(GrammarCompose, OmwRowsAsanRepro) {
     const char* dir = std::getenv("LAPLACE_OMW_REPRO_DIR");
     if (!dir || !*dir) GTEST_SKIP() << "set LAPLACE_OMW_REPRO_DIR to run";
 
-    // Drive the FULL native ETL pipeline (frame -> parse -> compose -> drain) into ONE shared
-    // intent_stage that accumulates across rows/files — the batch accumulation the compose-and-free
-    // repro never stressed. OMW crashes filling the first batch (bulk-fresh: no probe), so feed the
-    // files in order with no existence probe / no accept filter and let it accumulate.
+    
+    
+    
+    
     laplace_etl_config_t cfg;
     std::memset(&cfg, 0, sizeof(cfg));
     cfg.modality_id = "tsv";
@@ -67,7 +67,7 @@ TEST(GrammarCompose, OmwRowsAsanRepro) {
     cfg.witness_weight    = 1.0;
     cfg.trust_weight      = 1.0;
     cfg.now_unix_us       = 0;
-    cfg.witness_kind      = 0;   // compose+drain only (the shared suspect path)
+    cfg.witness_kind      = 0;   
     cfg.edge_rules        = nullptr;
     cfg.edge_rule_count   = 0;
     cfg.context_is_null   = 1;
@@ -89,7 +89,7 @@ TEST(GrammarCompose, OmwRowsAsanRepro) {
     for (auto& fp : files) {
         while (laplace_etl_session_feed_file(
                    sess, fp.string().c_str(), 1u << 20, 0, stage,
-                   nullptr, nullptr, nullptr, nullptr, &stats) == 1) { /* more rows in file */ }
+                   nullptr, nullptr, nullptr, nullptr, &stats) == 1) {  }
     }
     std::fprintf(stderr, "[repro] read=%llu parsed=%llu emitted=%llu ents=%zu phys=%zu (files=%zu)\n",
                  (unsigned long long)stats.rows_read, (unsigned long long)stats.rows_parsed,
@@ -128,10 +128,10 @@ TEST(GrammarCompose, EntityDedupDoesNotInflateCount) {
     laplace_ast_free(ast);
 }
 
-// Cross-source convergence: a JSON scalar value and the same surface decomposed by the
-// content path (WordNet/OMW/VerbNet via ContentWitnessBatch) must resolve to ONE entity.
-// The JSON leaf must adopt laplace_content_root_id of its decoded content. Regression guard
-// for the grammar_compose.cpp json-leaf -> content-root unification.
+
+
+
+
 TEST(GrammarCompose, JsonScalarLeafConvergesWithContentRootId) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
     ASSERT_NE(recipe, nullptr);
@@ -151,7 +151,7 @@ TEST(GrammarCompose, JsonScalarLeafConvergesWithContentRootId) {
         "json", source_id, type_meta, &result), 0);
     ASSERT_NE(result, nullptr);
 
-    // The canonical content id for the surface "New York" (what the content path mints).
+    
     const char* surface = "New York";
     hash128_t expected;
     ASSERT_EQ(laplace_content_root_id(
@@ -171,11 +171,11 @@ TEST(GrammarCompose, JsonScalarLeafConvergesWithContentRootId) {
     laplace_ast_free(ast);
 }
 
-// Regression: deeply nested input must not overflow the native stack. ast_walk is now iterative;
-// the old recursion crashed (uncatchable) on trees thousands deep, and tree-sitter parses
-// iteratively so it readily hands back such trees. 20k deep blows a 1 MiB stack with recursion.
-// Returns true iff the JSON value `surface` (as it appears in `json_src`) composes to an entity whose
-// id equals laplace_content_root_id(surface) — i.e. the JSON path and the content path converge.
+
+
+
+
+
 static bool json_value_converges(const char* json_src, const char* surface) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
     if (!recipe) return false;
@@ -206,15 +206,15 @@ static bool json_value_converges(const char* json_src, const char* surface) {
     return found;
 }
 
-// A2.4 convergence battery: JSON string values must resolve to the SAME entity the content path mints,
-// across ASCII / multiword / CJK / non-ASCII NFC, AND an NFD form must converge to the NFC entity.
-// Guards A1 (json leaf -> content root) together with A2.1 (NFC at the decomposer chokepoint).
+
+
+
 TEST(GrammarCompose, ConvergenceBattery) {
-    EXPECT_TRUE(json_value_converges("{\"k\":\"New York\"}", "New York"));      // multiword ASCII
+    EXPECT_TRUE(json_value_converges("{\"k\":\"New York\"}", "New York"));      
     EXPECT_TRUE(json_value_converges("{\"k\":\"\xE6\x9D\xB1\xE4\xBA\xAC\"}",
-                                     "\xE6\x9D\xB1\xE4\xBA\xAC"));               // 東京 (CJK)
-    EXPECT_TRUE(json_value_converges("{\"k\":\"caf\xC3\xA9\"}", "caf\xC3\xA9")); // café, NFC (U+00E9)
-    // café as NFD (cafe + U+0301 combining acute) must converge to the NFC café content id.
+                                     "\xE6\x9D\xB1\xE4\xBA\xAC"));               
+    EXPECT_TRUE(json_value_converges("{\"k\":\"caf\xC3\xA9\"}", "caf\xC3\xA9")); 
+    
     EXPECT_TRUE(json_value_converges("{\"k\":\"cafe\xCC\x81\"}", "caf\xC3\xA9"))
         << "NFD cafe+U+0301 in JSON did not converge to the NFC café content id";
 }

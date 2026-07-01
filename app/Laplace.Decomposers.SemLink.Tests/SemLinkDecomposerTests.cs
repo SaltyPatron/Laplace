@@ -54,8 +54,8 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Maps_Roleset_To_VerbNet_Class_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var rsId = CategoryAnchor.Id("give.01")!.Value;   
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;    
+        var rsId = CategoryAnchor.Id("give.01")!.Value;
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
         Assert.Contains(atts, a =>
             (a.SubjectId == rsId && a.ObjectId == vnId) ||
             (a.SubjectId == vnId && a.ObjectId == rsId));
@@ -98,8 +98,8 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task Referenced_Concepts_Are_Shared_Content_Anchors_Not_Blobs()
     {
-        
-        
+
+
         var atts = await CollectAttestationsAsync();
         var rs = CategoryAnchor.Id("give.01")!.Value;
         var vn = CategoryAnchor.Id("13.1-1")!.Value;
@@ -183,7 +183,7 @@ public sealed class SemLinkDecomposerTests
 
     private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()
     {
-        // Pipeline emits one top-level pair per compose row — match that shape, not the multi-pair fixture.
+
         const string singlePair =
             """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}}""";
         byte[] utf8 = Encoding.UTF8.GetBytes(singlePair);

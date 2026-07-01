@@ -31,8 +31,8 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     [Fact]
     public async Task HealthReady_WhenSubstrateUnreachable_Returns503AndDoesNotLie()
     {
-        // This factory wires the real SubstrateClient with no DB behind it. Readiness must
-        // report 503 + substrate_reachable=false rather than a hollow "ok". Liveness stays 200.
+
+
         using var live = await _client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, live.StatusCode);
 

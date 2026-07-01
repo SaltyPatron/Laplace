@@ -42,7 +42,7 @@ internal sealed class ExceptionEnvelopeMiddleware
         }
         catch (SubstrateQueryException ex)
         {
-            
+
             _logger.LogError(ex, "Substrate query error.");
             await Results.Json(
                 new ErrorResponse(new ErrorBody("substrate_query_error", "substrate_query_error", ex.Message)),

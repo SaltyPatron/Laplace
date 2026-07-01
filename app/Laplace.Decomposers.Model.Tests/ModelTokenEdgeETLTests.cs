@@ -19,8 +19,8 @@ public class ModelTokenEdgeETLTests
         Directory.CreateDirectory(dir);
         try
         {
-            // 8 tokens, d=4. Two tight clusters: {0,1,2,3} near +x, {4,5,6,7} near +y.
-            // The eigenmap reduction + partner scan must connect within-cluster tokens.
+
+
             int n = 8, d = 4;
             var rows = new (double x, double y)[]
             {
@@ -48,9 +48,17 @@ public class ModelTokenEdgeETLTests
                 ent[i] = Hash128.OfCanonical($"substrate/test/model-edges/tok/{i}");
                 tokens[i] = new LlamaTokenizerParser.TokenRecord
                 {
-                    TokenId = i, RawToken = $"t{i}", CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
-                    EntityId = ent[i], Tier = 2, IsByteLevel = false, Role = TokenRole.None,
-                    ContentX = double.NaN, ContentY = double.NaN, ContentZ = double.NaN, ContentM = double.NaN,
+                    TokenId = i,
+                    RawToken = $"t{i}",
+                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i],
+                    Tier = 2,
+                    IsByteLevel = false,
+                    Role = TokenRole.None,
+                    ContentX = double.NaN,
+                    ContentY = double.NaN,
+                    ContentZ = double.NaN,
+                    ContentM = double.NaN,
                     HasContentCoord = false,
                 };
             }
@@ -61,15 +69,15 @@ public class ModelTokenEdgeETLTests
             await foreach (var c in etl.EmitAsync(commitEpoch: 1)) changes.Add(c);
 
             var atts = changes.SelectMany(c => c.Attestations).ToList();
-            // Reconciliation: the embedding self-similarity plane is SIMILAR_TO (what ModelDecomposer
-            // bootstraps and ArchitectureProfile's SelfSimilarityPath declares), not RELATED_TO.
+
+
             var similarTo = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
 
-            // (1) it staged token<->token SIMILAR_TO edges
+
             Assert.NotEmpty(atts);
             Assert.All(atts, a => Assert.Equal(similarTo, a.TypeId));
 
-            // (2) every endpoint is a content token entity — nothing else
+
             var tokenSet = new HashSet<Hash128>(ent);
             Assert.All(atts, a =>
             {
@@ -77,28 +85,28 @@ public class ModelTokenEdgeETLTests
                 Assert.True(a.ObjectId is { } o && tokenSet.Contains(o));
             });
 
-            // (3) it stores NO geometry and NO new entities (only codepoints surface; tokens
-            //     already exist with content geometry; the model adds edges, nothing else)
+
+
             Assert.Empty(changes.SelectMany(c => c.Physicalities));
             Assert.Empty(changes.SelectMany(c => c.Entities));
 
-            // (4) the learned similarity is real: token0's within-cluster edges {1,2,3}
-            //     must outscore its cross-cluster edges {4..7} — clean separation.
-            //     RELATED_TO is symmetric (endpoints canonicalized), so match either side.
+
+
+
             var t0 = atts.Where(a => a.SubjectId == ent[0] || a.ObjectId == ent[0])
                          .Select(a =>
                          {
                              var other = a.SubjectId == ent[0] ? a.ObjectId!.Value : a.SubjectId;
                              return (idx: Array.IndexOf(ent, other), score: a.SumScoreFp1e9 ?? a.ScoreFp1e9);
                          }).ToList();
-            var same  = t0.Where(p => p.idx is >= 1 and <= 3).Select(p => p.score).ToList();
+            var same = t0.Where(p => p.idx is >= 1 and <= 3).Select(p => p.score).ToList();
             var cross = t0.Where(p => p.idx is >= 4 and <= 7).Select(p => p.score).ToList();
             Assert.NotEmpty(same);
             Assert.NotEmpty(cross);
             Assert.True(same.Min() > cross.Max(),
                 $"within-cluster edges must outscore cross-cluster; same.min={same.Min()} cross.max={cross.Max()}");
 
-            // Symmetric SIMILAR_TO must be canonicalized — no pair emitted in both orders (a→b AND b→a).
+
             var seen = new HashSet<(Hash128, Hash128)>();
             foreach (var a in atts) seen.Add((a.SubjectId, a.ObjectId!.Value));
             foreach (var a in atts)
@@ -114,11 +122,11 @@ public class ModelTokenEdgeETLTests
     [Fact]
     public async Task Fold_NormGain_ShiftsAttendOrdering()
     {
-        // Track A2 known-answer. With identity Q/K, ATTENDS(i→j) = Σ_c γ_c² · e_i,c · e_j,c.
-        // t0=(1,1); t1=(2,0) lives on dim0, t2=(0,2) on dim1. A γ favoring dim0 must make t0→t1
-        // outrank t0→t2, and a γ favoring dim1 must flip it. If the gain were NOT folded the two
-        // would tie regardless of γ — so this proves the fold is applied and on the right axis.
-        var embed = new float[] { 1, 1,  2, 0,  0, 2,  3, 3 };   // 4 tokens (n≥4 required), d=2
+
+
+
+
+        var embed = new float[] { 1, 1, 2, 0, 0, 2, 3, 3 };
 
         var byDim0 = await RunAttend(embed, gamma: new float[] { 2f, 1f });
         var byDim1 = await RunAttend(embed, gamma: new float[] { 1f, 2f });
@@ -129,8 +137,8 @@ public class ModelTokenEdgeETLTests
             $"γ=(1,2) should make t0→t2 outrank t0→t1; got {byDim1[(0, 2)]} vs {byDim1[(0, 1)]}");
     }
 
-    // Run EmitAsync on a 4-token, d=2 toy with identity Q/K and the given input_layernorm gain;
-    // return the ATTENDS score for each (subjectIdx, objectIdx) pair.
+
+
     private static async Task<Dictionary<(int, int), long>> RunAttend(float[] embed, float[] gamma)
     {
         const int n = 4, d = 2;
@@ -153,20 +161,42 @@ public class ModelTokenEdgeETLTests
                 ent[i] = Hash128.OfCanonical($"substrate/test/fold/tok/{i}");
                 tokens[i] = new LlamaTokenizerParser.TokenRecord
                 {
-                    TokenId = i, RawToken = $"t{i}", CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
-                    EntityId = ent[i], Tier = 2, IsByteLevel = false, Role = TokenRole.None,
-                    ContentX = double.NaN, ContentY = double.NaN, ContentZ = double.NaN, ContentM = double.NaN,
+                    TokenId = i,
+                    RawToken = $"t{i}",
+                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i],
+                    Tier = 2,
+                    IsByteLevel = false,
+                    Role = TokenRole.None,
+                    ContentX = double.NaN,
+                    ContentY = double.NaN,
+                    ContentZ = double.NaN,
+                    ContentM = double.NaN,
                     HasContentCoord = false,
                 };
             }
 
             var cfg = new ModelConfig
             {
-                ModelType = "llama", Architecture = "LlamaForCausalLM",
-                VocabSize = n, HiddenSize = d, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
-                HeadDim = d, IntermediateSize = d, NumExperts = 0,
-                TieWordEmbeddings = false, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
-                MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+                ModelType = "llama",
+                Architecture = "LlamaForCausalLM",
+                VocabSize = n,
+                HiddenSize = d,
+                NumLayers = 1,
+                NumHeads = 1,
+                NumKvHeads = 1,
+                HeadDim = d,
+                IntermediateSize = d,
+                NumExperts = 0,
+                TieWordEmbeddings = false,
+                QkNorm = false,
+                RopeTheta = 10000,
+                NormEps = 1e-5,
+                MlaQLoraRank = 0,
+                MlaKvLoraRank = 0,
+                QkRopeHeadDim = 0,
+                QkNopeHeadDim = 0,
+                VHeadDim = 0,
                 RecipeEntityId = Hash128.OfCanonical("substrate/test/fold/recipe"),
                 CanonicalJson = Encoding.UTF8.GetBytes("{}"),
             };
@@ -179,7 +209,11 @@ public class ModelTokenEdgeETLTests
             };
             var manifest = new ModelManifest
             {
-                Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full, ModelName = "fold-model",
+                Config = cfg,
+                Roles = roles,
+                Modality = Modality.Text,
+                Coverage = Coverage.Full,
+                ModelName = "fold-model",
             };
 
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
@@ -203,22 +237,22 @@ public class ModelTokenEdgeETLTests
     [Fact]
     public void SimilarTo_Symmetric_Directional_Planes_Asymmetric()
     {
-        // The dedup gate relies on this contract: SIMILAR_TO is symmetric (canonicalize), the
-        // tensor-calculation planes are directional (keep both orderings).
+
+
         Assert.Equal(RelationTypeRegistry.Symmetry.Symmetric, RelationTypeRegistry.Resolve("SIMILAR_TO").Symmetry);
         Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("ATTENDS").Symmetry);
         Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("OV_RELATES").Symmetry);
     }
 
     [Theory]
-    [InlineData(true)]    // untied (distinct lm_head) → CONTINUES_TO emitted
-    [InlineData(false)]   // tied (no lm_head) → skipped, since E·E ≡ SIMILAR_TO
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task ContinuesTo_EmittedOnlyWhenUntied(bool untied)
     {
         const int n = 6, d = 4;
-        // Distinct embedding vs unembedding (shifted) so the direct path E·W_U is genuinely directional.
-        var embed  = new float[] { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1, 1,1,0,0, 0,0,1,1 };
-        var lmhead = new float[] { 0,1,0,0, 0,0,1,0, 0,0,0,1, 1,0,0,0, 0,1,1,0, 1,0,0,1 };
+
+        var embed = new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1 };
+        var lmhead = new float[] { 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1 };
 
         string dir = Path.Combine(Path.GetTempPath(), "laplace-cont-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -235,20 +269,42 @@ public class ModelTokenEdgeETLTests
                 ent[i] = Hash128.OfCanonical($"substrate/test/cont/tok/{i}");
                 tokens[i] = new LlamaTokenizerParser.TokenRecord
                 {
-                    TokenId = i, RawToken = $"t{i}", CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
-                    EntityId = ent[i], Tier = 2, IsByteLevel = false, Role = TokenRole.None,
-                    ContentX = double.NaN, ContentY = double.NaN, ContentZ = double.NaN, ContentM = double.NaN,
+                    TokenId = i,
+                    RawToken = $"t{i}",
+                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i],
+                    Tier = 2,
+                    IsByteLevel = false,
+                    Role = TokenRole.None,
+                    ContentX = double.NaN,
+                    ContentY = double.NaN,
+                    ContentZ = double.NaN,
+                    ContentM = double.NaN,
                     HasContentCoord = false,
                 };
             }
 
             var cfg = new ModelConfig
             {
-                ModelType = "llama", Architecture = "LlamaForCausalLM",
-                VocabSize = n, HiddenSize = d, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
-                HeadDim = d, IntermediateSize = d, NumExperts = 0,
-                TieWordEmbeddings = !untied, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
-                MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+                ModelType = "llama",
+                Architecture = "LlamaForCausalLM",
+                VocabSize = n,
+                HiddenSize = d,
+                NumLayers = 1,
+                NumHeads = 1,
+                NumKvHeads = 1,
+                HeadDim = d,
+                IntermediateSize = d,
+                NumExperts = 0,
+                TieWordEmbeddings = !untied,
+                QkNorm = false,
+                RopeTheta = 10000,
+                NormEps = 1e-5,
+                MlaQLoraRank = 0,
+                MlaKvLoraRank = 0,
+                QkRopeHeadDim = 0,
+                QkNopeHeadDim = 0,
+                VHeadDim = 0,
                 RecipeEntityId = Hash128.OfCanonical("substrate/test/cont/recipe"),
                 CanonicalJson = Encoding.UTF8.GetBytes("{}"),
             };
@@ -259,7 +315,11 @@ public class ModelTokenEdgeETLTests
             if (untied) roles.Add(new("lm_head.weight", new[] { n, d }, "F32", TensorRoleKind.LmHead, -1, -1));
             var manifest = new ModelManifest
             {
-                Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full, ModelName = "cont-model",
+                Config = cfg,
+                Roles = roles,
+                Modality = Modality.Text,
+                Coverage = Coverage.Full,
+                ModelName = "cont-model",
             };
 
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
@@ -270,7 +330,7 @@ public class ModelTokenEdgeETLTests
                     if (a.TypeId == continuesTo) count++;
 
             if (untied) Assert.True(count > 0, "untied model must emit CONTINUES_TO (LM-head direct path)");
-            else        Assert.Equal(0, count);
+            else Assert.Equal(0, count);
         }
         finally
         {
@@ -282,11 +342,25 @@ public class ModelTokenEdgeETLTests
     {
         var cfg = new ModelConfig
         {
-            ModelType = "llama", Architecture = "LlamaForCausalLM",
-            VocabSize = vocab, HiddenSize = hidden, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
-            HeadDim = hidden, IntermediateSize = hidden, NumExperts = 0,
-            TieWordEmbeddings = false, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
-            MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+            ModelType = "llama",
+            Architecture = "LlamaForCausalLM",
+            VocabSize = vocab,
+            HiddenSize = hidden,
+            NumLayers = 1,
+            NumHeads = 1,
+            NumKvHeads = 1,
+            HeadDim = hidden,
+            IntermediateSize = hidden,
+            NumExperts = 0,
+            TieWordEmbeddings = false,
+            QkNorm = false,
+            RopeTheta = 10000,
+            NormEps = 1e-5,
+            MlaQLoraRank = 0,
+            MlaKvLoraRank = 0,
+            QkRopeHeadDim = 0,
+            QkNopeHeadDim = 0,
+            VHeadDim = 0,
             RecipeEntityId = Hash128.OfCanonical("substrate/test/model-edges/recipe"),
             CanonicalJson = Encoding.UTF8.GetBytes("{}"),
         };
@@ -297,7 +371,10 @@ public class ModelTokenEdgeETLTests
         };
         return new ModelManifest
         {
-            Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full,
+            Config = cfg,
+            Roles = roles,
+            Modality = Modality.Text,
+            Coverage = Coverage.Full,
             ModelName = "toy-model",
         };
     }

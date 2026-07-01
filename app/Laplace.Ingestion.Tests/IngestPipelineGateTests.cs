@@ -11,10 +11,6 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Ingestion.Tests;
 
-/// <summary>
-/// End-to-end pipeline gates: warm re-ingest must scan input at ≥30s/GB (i.e. ≥~35 MiB/s).
-/// Tagged <c>Tier=perf</c> — requires live PostgreSQL + native DLLs on PATH.
-/// </summary>
 [Trait("Tier", "perf")]
 public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {

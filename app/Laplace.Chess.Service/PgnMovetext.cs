@@ -52,23 +52,23 @@ internal static class PgnMovetext
                     ApplyStandalone(all, Text(utf8, node), ref pendingStandalone);
                     break;
                 case "san_move":
-                {
-                    bool inVar = InsideVariation(ast, node);
-                    string raw = Text(utf8, node);
-                    all.Add(new PgnMoveStream(
-                        raw,
-                        inVar ? -1 : mainlinePly,
-                        inVar,
-                        pendingComment,
-                        pendingNag,
-                        pendingStandalone,
-                        ExtractSuffixAnnotation(raw)));
-                    if (!inVar) mainlinePly++;
-                    pendingComment = null;
-                    pendingNag = null;
-                    pendingStandalone = null;
-                    break;
-                }
+                    {
+                        bool inVar = InsideVariation(ast, node);
+                        string raw = Text(utf8, node);
+                        all.Add(new PgnMoveStream(
+                            raw,
+                            inVar ? -1 : mainlinePly,
+                            inVar,
+                            pendingComment,
+                            pendingNag,
+                            pendingStandalone,
+                            ExtractSuffixAnnotation(raw)));
+                        if (!inVar) mainlinePly++;
+                        pendingComment = null;
+                        pendingNag = null;
+                        pendingStandalone = null;
+                        break;
+                    }
                 case "game_result":
                     result = ParseResult(Text(utf8, node));
                     break;

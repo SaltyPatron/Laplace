@@ -11,19 +11,19 @@ public sealed class LlamaRecipeExtractor
     public sealed class RecipeInfo
     {
         public required Hash128 RecipeEntityId { get; init; }
-        public required string  Architecture   { get; init; }
-        public required int     HiddenSize     { get; init; }
-        public required int     NumLayers      { get; init; }
-        public required int     NumHeads       { get; init; }
-        public required int     NumKvHeads     { get; init; }
-        public required int     IntermediateSize { get; init; }
-        public required int     VocabSize      { get; init; }
-        public required string  TorchDtype     { get; init; }
-        public required string  HiddenAct      { get; init; }
-        public required double  RopeTheta      { get; init; }
-        public required double  RmsNormEps     { get; init; }
-        public required string  ModelType      { get; init; }
-        public required byte[]  CanonicalJson  { get; init; }
+        public required string Architecture { get; init; }
+        public required int HiddenSize { get; init; }
+        public required int NumLayers { get; init; }
+        public required int NumHeads { get; init; }
+        public required int NumKvHeads { get; init; }
+        public required int IntermediateSize { get; init; }
+        public required int VocabSize { get; init; }
+        public required string TorchDtype { get; init; }
+        public required string HiddenAct { get; init; }
+        public required double RopeTheta { get; init; }
+        public required double RmsNormEps { get; init; }
+        public required string ModelType { get; init; }
+        public required byte[] CanonicalJson { get; init; }
     }
 
     public static RecipeInfo Parse(string configJsonPath)
@@ -40,36 +40,36 @@ public sealed class LlamaRecipeExtractor
         }
 
         int hiddenSize = GetIntRequired(root, "hidden_size");
-        int numLayers  = GetIntRequired(root, "num_hidden_layers");
-        int numHeads   = GetIntRequired(root, "num_attention_heads");
+        int numLayers = GetIntRequired(root, "num_hidden_layers");
+        int numHeads = GetIntRequired(root, "num_attention_heads");
         int numKvHeads = GetInt(root, "num_key_value_heads", numHeads);
         int intermSize = GetIntRequired(root, "intermediate_size");
-        int vocabSize  = GetIntRequired(root, "vocab_size");
-        string dtype   = root.TryGetProperty("torch_dtype",  out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
-        string act     = root.TryGetProperty("hidden_act",   out var actProp) ? actProp.GetString() ?? "silu" : "silu";
-        double theta   = GetDoubleOr(root, "rope_theta", 10000.0);
-        double rmsEps  = GetDoubleOr(root, "rms_norm_eps", GetDoubleOr(root, "layer_norm_eps", 1e-5));
-        string mtype   = root.TryGetProperty("model_type",   out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
+        int vocabSize = GetIntRequired(root, "vocab_size");
+        string dtype = root.TryGetProperty("torch_dtype", out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
+        string act = root.TryGetProperty("hidden_act", out var actProp) ? actProp.GetString() ?? "silu" : "silu";
+        double theta = GetDoubleOr(root, "rope_theta", 10000.0);
+        double rmsEps = GetDoubleOr(root, "rms_norm_eps", GetDoubleOr(root, "layer_norm_eps", 1e-5));
+        string mtype = root.TryGetProperty("model_type", out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
 
         byte[] canonical = CanonicalizeJson(root);
         var recipeId = Hash128.Blake3(canonical);
 
         return new RecipeInfo
         {
-            RecipeEntityId   = recipeId,
-            Architecture     = arch,
-            HiddenSize       = hiddenSize,
-            NumLayers        = numLayers,
-            NumHeads         = numHeads,
-            NumKvHeads       = numKvHeads,
+            RecipeEntityId = recipeId,
+            Architecture = arch,
+            HiddenSize = hiddenSize,
+            NumLayers = numLayers,
+            NumHeads = numHeads,
+            NumKvHeads = numKvHeads,
             IntermediateSize = intermSize,
-            VocabSize        = vocabSize,
-            TorchDtype       = dtype,
-            HiddenAct        = act,
-            RopeTheta        = theta,
-            RmsNormEps       = rmsEps,
-            ModelType        = mtype,
-            CanonicalJson    = canonical,
+            VocabSize = vocabSize,
+            TorchDtype = dtype,
+            HiddenAct = act,
+            RopeTheta = theta,
+            RmsNormEps = rmsEps,
+            ModelType = mtype,
+            CanonicalJson = canonical,
         };
     }
 
@@ -98,17 +98,17 @@ public sealed class LlamaRecipeExtractor
         void AddScalar(Hash128 typeId, string value)
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
-            var valueId    = Hash128.Blake3(valueBytes);
+            var valueId = Hash128.Blake3(valueBytes);
             b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             AddAttestation(typeId, valueId);
         }
 
-        AddScalar(hasHiddenSizeTypeId,  recipe.HiddenSize.ToString());
-        AddScalar(hasNumLayersTypeId,   recipe.NumLayers.ToString());
-        AddScalar(hasNumHeadsTypeId,    recipe.NumHeads.ToString());
-        AddScalar(hasNumKvHeadsTypeId,  recipe.NumKvHeads.ToString());
-        AddScalar(hasIntermSizeTypeId,  recipe.IntermediateSize.ToString());
-        AddScalar(hasVocabSizeTypeId,   recipe.VocabSize.ToString());
+        AddScalar(hasHiddenSizeTypeId, recipe.HiddenSize.ToString());
+        AddScalar(hasNumLayersTypeId, recipe.NumLayers.ToString());
+        AddScalar(hasNumHeadsTypeId, recipe.NumHeads.ToString());
+        AddScalar(hasNumKvHeadsTypeId, recipe.NumKvHeads.ToString());
+        AddScalar(hasIntermSizeTypeId, recipe.IntermediateSize.ToString());
+        AddScalar(hasVocabSizeTypeId, recipe.VocabSize.ToString());
 
         b.AddEntity(architectureEntityId, EntityTier.Word, EntityTypeRegistry.Architecture, sourceId);
         AddAttestation(isATypeId, architectureEntityId);

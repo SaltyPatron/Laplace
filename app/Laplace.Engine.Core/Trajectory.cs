@@ -46,7 +46,7 @@ public static unsafe class Trajectory
         var xyzm = new double[constituents.Length * 4];
         nuint vertexCount;
         fixed (Hash128* h = constituents)
-        fixed (double*  o = xyzm)
+        fixed (double* o = xyzm)
         {
             int rc = NativeInterop.TrajectoryBuildRle(h, (nuint)constituents.Length, o, &vertexCount);
             if (rc != 0) throw new InvalidOperationException($"trajectory_build_rle returned {rc}");

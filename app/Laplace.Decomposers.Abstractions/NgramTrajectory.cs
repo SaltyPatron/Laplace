@@ -15,7 +15,7 @@ public static class NgramTrajectory
         if (n == 0) throw new ArgumentException("n-gram has no constituents", nameof(constituents));
 
         var childIds = new Hash128[n];
-        var coords   = new double[(long)n * 4];
+        var coords = new double[(long)n * 4];
         for (int i = 0; i < n; i++)
         {
             var c = constituents[i];
@@ -24,26 +24,26 @@ public static class NgramTrajectory
             coords[i * 4 + 2] = c.Z; coords[i * 4 + 3] = c.M;
         }
 
-        Hash128    id    = Hash128.Merkle(tier, childIds);
-        double[]   cen   = Math4d.Centroid(coords);
-        Hilbert128 hb    = Hilbert128.Encode(cen);
-        double[]   traj  = Trajectory.Build(childIds);
-        Hash128    physId = PhysicalityId.Compute(
+        Hash128 id = Hash128.Merkle(tier, childIds);
+        double[] cen = Math4d.Centroid(coords);
+        Hilbert128 hb = Hilbert128.Encode(cen);
+        double[] traj = Trajectory.Build(childIds);
+        Hash128 physId = PhysicalityId.Compute(
             id, PhysicalityType.Content, cen[0], cen[1], cen[2], cen[3], traj);
 
         var entity = new EntityRow(id, tier, typeId, sourceId);
         var phys = new PhysicalityRow(
-            Id:                physId,
-            EntityId:          id,
-            SourceId:          sourceId,
-            Type:              PhysicalityType.Content,
-            CoordX:            cen[0], CoordY: cen[1], CoordZ: cen[2], CoordM: cen[3],
-            HilbertIndex:      hb,
-            TrajectoryXyzm:    traj,
-            NConstituents:     n,
+            Id: physId,
+            EntityId: id,
+            SourceId: sourceId,
+            Type: PhysicalityType.Content,
+            CoordX: cen[0], CoordY: cen[1], CoordZ: cen[2], CoordM: cen[3],
+            HilbertIndex: hb,
+            TrajectoryXyzm: traj,
+            NConstituents: n,
             AlignmentResidual: null,
-            SourceDim:         null,
-            ObservedAtUnixUs:  nowUs);
+            SourceDim: null,
+            ObservedAtUnixUs: nowUs);
         return (id, entity, phys);
     }
 }

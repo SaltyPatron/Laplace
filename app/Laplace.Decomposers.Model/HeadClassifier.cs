@@ -5,29 +5,29 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// A single sampled circuit edge (the strongest pairs are kept for the decoder ring).
+
 public readonly record struct CircuitPair(Hash128 Subject, Hash128 Object, long ScoreFp);
 
-// Identifies the circuit being classified: which plane, and (for attention) which layer/head.
+
 public sealed record CircuitDescriptor(int Layer, int Head, string Plane, string RelationName);
 
-// ── Lane C: the decoder ring ──────────────────────────────────────────────────────────────────
-// A raw circuit (layerL.headH) is just a token→token bilinear field — it has no inherent meaning.
-// To label it, we sample the circuit's strongest pairs and ask the seed substrate what relation
-// those token pairs ALREADY hold (IS_A, SYNONYM, ANTONYM, PART_OF, …). The dominant seed relation
-// across the sample is what the circuit ENCODES. We emit a weighted (circuit, ENCODES, relation)
-// meta-attestation and let Glicko adjudicate — a circuit that genuinely encodes IS_A wins that tie
-// over many heads; a noisy head spreads its votes and stays neutral. Nothing is asserted as fact;
-// the consensus fold decides.
+
+
+
+
+
+
+
+
 public sealed class HeadClassifier
 {
-    public static readonly Hash128 EncodesTypeId      = RelationTypeRegistry.RelationTypeId("ENCODES");
-    // Routed through the centralized minter (behavior-preserving) per the type-id law — see TypeIdLawTests.
+    public static readonly Hash128 EncodesTypeId = RelationTypeRegistry.RelationTypeId("ENCODES");
+
     public static readonly Hash128 ModelCircuitTypeId = EntityTypeRegistry.Id("Model_Circuit");
 
     private readonly ISubstrateReader _reader;
     private readonly Hash128 _source;
-    private readonly string  _modelName;
+    private readonly string _modelName;
     private readonly ILogger _log;
 
     public HeadClassifier(ISubstrateReader reader, Hash128 source, string modelName, ILogger? log = null)
@@ -41,7 +41,7 @@ public sealed class HeadClassifier
     public Hash128 CircuitEntityId(CircuitDescriptor c)
     {
         string layer = c.Layer >= 0 ? $"L{c.Layer}" : "embed";
-        string head  = c.Head  >= 0 ? $".H{c.Head}" : "";
+        string head = c.Head >= 0 ? $".H{c.Head}" : "";
         return Hash128.OfCanonical($"substrate/entity/{_modelName}/circuit/{layer}{head}.{c.Plane}/v1");
     }
 
@@ -67,7 +67,7 @@ public sealed class HeadClassifier
         }
         if (hits.Count == 0) return null;
 
-        // Tally each seed relation type by total eff_mu confidence across the sampled pairs.
+
         var votes = new Dictionary<Hash128, double>();
         double total = 0;
         foreach (var h in hits)
@@ -83,7 +83,7 @@ public sealed class HeadClassifier
         foreach (var (typeId, w) in votes)
             if (w > best) { best = w; winner = typeId; }
 
-        double dominance = best / total;                 // [0,1] how cleanly the circuit votes
+        double dominance = best / total;
         double witnessWeight = SourceTrust.AiModelProbe * dominance;
         var circuit = CircuitEntityId(descriptor);
 

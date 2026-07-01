@@ -19,23 +19,23 @@ public class ConceptAnchorTests
     public void EmitSynset_Runs_AndProducesDecomposedAnchorPlusIsA()
     {
         string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return; 
+        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
 
-        CodepointPerfcache.LoadDefault(); 
+        CodepointPerfcache.LoadDefault();
 
         var source = Hash128.OfCanonical("substrate/source/test/wn-anchor/v1");
         var b = new SubstrateChangeBuilder(source, "test/concept-anchor", null,
             entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
 
-        
+
         Hash128? id = ConceptAnchor.EmitSynset(b, 10676319, 'n', source, SourceTrust.StandardsDerived);
 
-        Assert.NotNull(id);                                       
-        Assert.Equal(id, ConceptAnchor.SynsetId(10676319, 'n'));  
+        Assert.NotNull(id);
+        Assert.Equal(id, ConceptAnchor.SynsetId(10676319, 'n'));
 
-        
-        
-        
+
+
+
         Assert.True(b.ContentStage.EntityCount > 0, "decomposed ILI anchor must stage entities");
 
         var change = b.Build();
@@ -44,27 +44,27 @@ public class ConceptAnchorTests
             a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);
     }
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     [Fact]
     public void Satellite_ResolvesUnderBothPos_AsCollapseDoesNotDrop()
     {
         string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
         string mapPath = Path.Combine(cili, IliMap.MapFileName);
-        if (!File.Exists(mapPath)) return; 
+        if (!File.Exists(mapPath)) return;
 
         CodepointPerfcache.LoadDefault();
 
-        
+
         long satOffset = -1;
         foreach (var line in File.ReadLines(mapPath))
         {
-            var op = line.AsSpan(line.IndexOf('\t') + 1).Trim();   
+            var op = line.AsSpan(line.IndexOf('\t') + 1).Trim();
             int d = op.LastIndexOf('-');
             if (d <= 0) continue;
             var posSpan = op[(d + 1)..];
@@ -73,9 +73,9 @@ public class ConceptAnchorTests
         }
         Assert.True(satOffset > 0, "expected a satellite synset in the CILI map");
 
-        // #3 fix: adjective a/s collapse. A satellite (stored '-s' in pwn) now resolves under BOTH 's'
-        // and the '-a' OMW writes for satellites, to the SAME ILI id — instead of the 'a' lookup silently
-        // dropping it (the bug that lost ~3% of OMW lemmas, incl. i12345's foreign words).
+
+
+
         var asS = ConceptAnchor.SynsetId(satOffset, 's');
         var asA = ConceptAnchor.SynsetId(satOffset, 'a');
         Assert.NotNull(asS);

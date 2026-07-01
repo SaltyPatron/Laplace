@@ -31,7 +31,7 @@ public sealed class OpenSubtitlesDecomposerTests
     }
 
     private static readonly string[] En = { "Hello there.", "What is your name?", "" };
-    private static readonly string[] Es = { "Hola allí.",   "¿Cómo te llamas?",  "" };
+    private static readonly string[] Es = { "Hola allí.", "¿Cómo te llamas?", "" };
 
     [Fact]
     public async Task Pair_Allowlist_Filters_Zips()
@@ -80,7 +80,7 @@ public sealed class OpenSubtitlesDecomposerTests
         using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
         WriteEntry(zip, "OpenSubtitles.en-es.en", En);
         WriteEntry(zip, "OpenSubtitles.en-es.es", Es);
-        WriteEntry(zip, "README",  new[] { "a corpus" });
+        WriteEntry(zip, "README", new[] { "a corpus" });
         WriteEntry(zip, "LICENSE", new[] { "terms" });
         return zipPath;
     }
@@ -110,7 +110,7 @@ public sealed class OpenSubtitlesDecomposerTests
             var translationSubjects = new HashSet<Hash128>();
             var translationObjects = new HashSet<Hash128>();
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
-            Hash128 languageType     = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+            Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
@@ -143,7 +143,7 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.Contains(esId, entities);
 
             Hash128? helloId = ContentEmitter.RootId("Hello there.");
-            Hash128? holaId  = ContentEmitter.RootId("Hola allí.");
+            Hash128? holaId = ContentEmitter.RootId("Hola allí.");
             Assert.NotNull(helloId);
             Assert.NotNull(holaId);
             Assert.Contains(helloId!.Value, translationSubjects);

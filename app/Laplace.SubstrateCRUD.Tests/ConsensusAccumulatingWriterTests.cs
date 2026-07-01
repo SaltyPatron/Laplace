@@ -226,8 +226,8 @@ public class ConsensusAccumulatingWriterTests
         Assert.NotNull(x);
         Assert.NotNull(y);
         Assert.Equal(x!.Value.rating, y!.Value.rating);
-        Assert.Equal(x.Value.rd,     y.Value.rd);
-        Assert.Equal(x.Value.vol,    y.Value.vol);
-        Assert.Equal(x.Value.wc,     y.Value.wc);
+        Assert.Equal(x.Value.rd, y.Value.rd);
+        Assert.Equal(x.Value.vol, y.Value.vol);
+        Assert.Equal(x.Value.wc, y.Value.wc);
     }
 }

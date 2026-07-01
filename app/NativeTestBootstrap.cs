@@ -38,7 +38,7 @@ internal static class NativeTestBootstrap
             var path = Path.Combine(root, "build-win", sub, name + ".dll");
             if (!File.Exists(path)) continue;
             try { NativeLibrary.Load(path); }
-            catch (DllNotFoundException) {  }
+            catch (DllNotFoundException) { }
         }
     }
 }

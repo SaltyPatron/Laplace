@@ -21,28 +21,28 @@ static void set_cili_dir(const std::string& d) {
 #endif
 }
 
-// A NON-NULL probe is the only requirement to make the ETL take the two-phase probe_pending /
-// collect_entity_ids path (the over-write site) instead of the direct drain. Reports "nothing exists".
+
+
 int probe_none(void*, const hash128_t*, const int32_t*, size_t n, uint8_t* out_bitmap, size_t) {
     std::memset(out_bitmap, 0, (n + 7) / 8);
     return 0;
 }
 
-// #7 regression: probe_pending must size its id buffer to the EXACT sum of per-row entity counts, not a
-// fixed n*64 guess. ONE row with ~100 DISTINCT words composes into far more than 64 entities (dedup
-// would collapse repeated chars, so distinct words are used), so with the old guess (cap = 1*64)
-// collect_entity_ids wrote past the allocation. Under -fsanitize=address this fails at the file:line if
-// the buffer is undersized; with the exact-sizing fix it passes.
+
+
+
+
+
 TEST(EtlIngest, ProbePathSizesIdBufferExactly) {
-    // The native ETL field-compose dedups to DISTINCT codepoints (it doesn't tokenize words), so the
-    // field must carry >64 distinct characters to make ONE row's compose exceed the old 64-slot guess.
-    // Use printable ASCII 0x21..0x7E minus the TSV/grammar-special bytes (tab/newline aren't in range).
+    
+    
+    
     std::string field;
     for (int c = 0x21; c <= 0x7E; ++c) {
         if (c == '"' || c == '#' || c == '\\') continue;
         field += static_cast<char>(c);
     }
-    const std::string row = "k\t" + field + "\n";   // ~91 distinct codepoints -> >64 composed entities
+    const std::string row = "k\t" + field + "\n";   
 
     const auto path = std::filesystem::temp_directory_path() / "laplace_etl_probe_overwrite.tab";
     {
@@ -69,10 +69,10 @@ TEST(EtlIngest, ProbePathSizesIdBufferExactly) {
     laplace_etl_stats_t stats;
     std::memset(&stats, 0, sizeof(stats));
 
-    // Non-null probe → the containment-dedup path runs; flush_pending at EOF probes the accumulated row.
+    
     while (laplace_etl_session_feed_file(
                sess, path.string().c_str(), 1u << 20, 0, stage,
-               probe_none, nullptr, nullptr, nullptr, &stats) == 1) { /* drain */ }
+               probe_none, nullptr, nullptr, nullptr, &stats) == 1) {  }
 
     EXPECT_GT(intent_stage_entity_count(stage), 64u)
         << "row must exceed the old 64-slot per-row guess to actually exercise the over-write";
@@ -83,12 +83,12 @@ TEST(EtlIngest, ProbePathSizesIdBufferExactly) {
     std::filesystem::remove(path, ec);
 }
 
-// Feed one FIELD_EDGES row "<synset key>\tdog" with subject_kind = ILI_SYNSET, reading the ILI map from
-// LAPLACE_CILI_DIR (set to `cili_dir`). Returns the staged attestation count.
+
+
 static size_t feed_anchor_field_edge(const std::string& cili_dir) {
     set_cili_dir(cili_dir);
 
-    const std::string row = "30-02244956-v\tdog\n";   // subject = WN synset key, object = content "dog"
+    const std::string row = "30-02244956-v\tdog\n";   
     const auto path = std::filesystem::temp_directory_path() / "laplace_etl_anchor_edge.tab";
     {
         std::ofstream f(path, std::ios::binary);
@@ -121,7 +121,7 @@ static size_t feed_anchor_field_edge(const std::string& cili_dir) {
 
     while (laplace_etl_session_feed_file(
                sess, path.string().c_str(), 1u << 20, 0, stage,
-               nullptr, nullptr, nullptr, nullptr, nullptr) == 1) { /* drain */ }
+               nullptr, nullptr, nullptr, nullptr, nullptr) == 1) {  }
 
     size_t count = intent_stage_attestation_count(stage);
 
@@ -132,10 +132,10 @@ static size_t feed_anchor_field_edge(const std::string& cili_dir) {
     return count;
 }
 
-// The native field-edge witness resolves an ILI-synset anchor field through the session map and emits the
-// edge ONLY when it resolves — the wiring that replaced the old "anchors not native" skip. Same row text
-// both runs (identical compose), so the only thing that can differ is the field-edge witness output:
-// with the map present the anchor resolves and the SENSE_OF edge is staged; without it the edge drops.
+
+
+
+
 TEST(EtlIngest, FieldEdgeAnchorResolvesViaSessionMap) {
     const auto base = std::filesystem::temp_directory_path();
     const auto map_dir   = base / "laplace_etl_anchor_map";
@@ -144,7 +144,7 @@ TEST(EtlIngest, FieldEdgeAnchorResolvesViaSessionMap) {
     std::filesystem::create_directories(empty_dir);
     {
         std::ofstream f(map_dir / "ili-map-pwn30.tab", std::ios::binary);
-        f << "i23456\t02244956-v\n";   // resolves 30-02244956-v -> i23456
+        f << "i23456\t02244956-v\n";   
     }
 
     size_t resolved   = feed_anchor_field_edge(map_dir.string());
@@ -153,10 +153,10 @@ TEST(EtlIngest, FieldEdgeAnchorResolvesViaSessionMap) {
     EXPECT_GT(resolved, unresolved)
         << "the ILI-synset anchor edge must be staged only when the session map resolves the key";
 
-    set_cili_dir("");  // don't leak the env into other tests
+    set_cili_dir("");  
     std::error_code ec;
     std::filesystem::remove_all(map_dir, ec);
     std::filesystem::remove_all(empty_dir, ec);
 }
 
-}  // namespace
+}  

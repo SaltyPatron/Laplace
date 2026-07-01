@@ -4,17 +4,17 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
-// ── Lane A: generic config.json → ModelConfig reader ──────────────────────────────────────────
-// Generalizes LlamaRecipeExtractor (which hardcodes HF Llama keys and THROWS on a missing field)
-// across model_types. It NEVER throws on a recognized-but-incomplete config: it reads what it can,
-// falls back across the common key aliases (n_embd/d_model, n_layer, n_head, …), and returns a
-// (ModelConfig, Modality, Coverage) verdict. The classifier may downgrade Coverage if the inferred
-// tensor anchors don't line up; this reader sets the ceiling from the config alone.
+
+
+
+
+
+
 public static class ModelConfigReader
 {
     public sealed record Result(ModelConfig Config, Modality Modality, Coverage Coverage);
 
-    // model_type values whose front-end has no token vocabulary → at best embedding-plane partial.
+
     private static readonly HashSet<string> VisionTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "clip_vision_model", "vit", "siglip_vision_model", "siglip", "convnext", "dinov2",
@@ -60,29 +60,29 @@ public static class ModelConfigReader
 
             Modality modality = ClassifyModality(modelType, arch);
 
-            int vocab   = FirstInt(root, 0, "vocab_size");
-            int hidden  = FirstInt(root, 0, "hidden_size", "n_embd", "d_model", "model_dim");
-            int layers  = FirstInt(root, 0, "num_hidden_layers", "n_layer", "num_layers", "n_layers");
-            int heads   = FirstInt(root, 0, "num_attention_heads", "n_head", "num_heads");
+            int vocab = FirstInt(root, 0, "vocab_size");
+            int hidden = FirstInt(root, 0, "hidden_size", "n_embd", "d_model", "model_dim");
+            int layers = FirstInt(root, 0, "num_hidden_layers", "n_layer", "num_layers", "n_layers");
+            int heads = FirstInt(root, 0, "num_attention_heads", "n_head", "num_heads");
             int kvHeads = FirstInt(root, heads, "num_key_value_heads", "num_kv_heads", "n_kv_heads");
-            int interm  = FirstInt(root, 0, "intermediate_size", "ffn_dim", "n_inner", "encoder_ffn_dim");
+            int interm = FirstInt(root, 0, "intermediate_size", "ffn_dim", "n_inner", "encoder_ffn_dim");
             int headDim = FirstInt(root, 0, "head_dim", "attention_head_dim");
             if (headDim <= 0 && heads > 0 && hidden > 0) headDim = hidden / heads;
 
             int experts = FirstInt(root, 0, "num_local_experts", "num_experts", "n_routed_experts");
 
-            bool tie    = Bool(root, "tie_word_embeddings", false);
+            bool tie = Bool(root, "tie_word_embeddings", false);
             bool qkNorm = Bool(root, "use_qk_norm", false)
                        || Bool(root, "qk_layernorm", false)
                        || Bool(root, "attention_qk_norm", false);
             double rope = Dbl(root, 10000.0, "rope_theta", "rotary_emb_base");
-            double eps  = Dbl(root, 1e-5, "rms_norm_eps", "layer_norm_eps", "layer_norm_epsilon");
+            double eps = Dbl(root, 1e-5, "rms_norm_eps", "layer_norm_eps", "layer_norm_epsilon");
 
-            int qLora     = FirstInt(root, 0, "q_lora_rank");
-            int kvLora    = FirstInt(root, 0, "kv_lora_rank");
-            int qkRope    = FirstInt(root, 0, "qk_rope_head_dim");
-            int qkNope    = FirstInt(root, 0, "qk_nope_head_dim");
-            int vHeadDim  = FirstInt(root, 0, "v_head_dim");
+            int qLora = FirstInt(root, 0, "q_lora_rank");
+            int kvLora = FirstInt(root, 0, "kv_lora_rank");
+            int qkRope = FirstInt(root, 0, "qk_rope_head_dim");
+            int qkNope = FirstInt(root, 0, "qk_nope_head_dim");
+            int vHeadDim = FirstInt(root, 0, "v_head_dim");
 
             byte[] canonical = CanonicalizeJson(root);
             var recipeId = Hash128.Blake3(canonical);
@@ -119,12 +119,12 @@ public static class ModelConfigReader
 
     private static Coverage VerdictFor(ModelConfig cfg, Modality modality)
     {
-        // Text decoder with all the anchors the magic-number rules need → full decrypt.
+
         bool textAnchored = cfg.VocabSize > 0 && cfg.HiddenSize > 0
                           && cfg.NumLayers > 0 && cfg.NumHeads > 0;
         if (modality == Modality.Text && textAnchored) return Coverage.Full;
 
-        // Recognized non-text modality, or a text config missing anchors → embedding-plane-only.
+
         if (modality is Modality.Vision or Modality.Audio or Modality.Diffusion) return Coverage.Partial;
         if (cfg.HiddenSize > 0 && cfg.VocabSize > 0) return Coverage.Partial;
 
@@ -139,7 +139,7 @@ public static class ModelConfigReader
         if (AudioTypes.Contains(m) || a.Contains("whisper") || a.Contains("wav2vec")) return Modality.Audio;
         if (DiffusionTypes.Contains(m) || a.Contains("unet") || a.Contains("diffusion")) return Modality.Diffusion;
         if (m.Length == 0 && a == "(unknown)") return Modality.Unknown;
-        // Default assumption: a model that declares a vocab is a text model.
+
         return Modality.Text;
     }
 
@@ -163,12 +163,27 @@ public static class ModelConfigReader
     {
         var cfg = new ModelConfig
         {
-            ModelType = mtype, Architecture = arch,
-            VocabSize = 0, HiddenSize = 0, NumLayers = 0, NumHeads = 0, NumKvHeads = 0,
-            HeadDim = 0, IntermediateSize = 0, NumExperts = 0,
-            TieWordEmbeddings = false, QkNorm = false, RopeTheta = 10000.0, NormEps = 1e-5,
-            MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
-            RecipeEntityId = Hash128.Zero, CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+            ModelType = mtype,
+            Architecture = arch,
+            VocabSize = 0,
+            HiddenSize = 0,
+            NumLayers = 0,
+            NumHeads = 0,
+            NumKvHeads = 0,
+            HeadDim = 0,
+            IntermediateSize = 0,
+            NumExperts = 0,
+            TieWordEmbeddings = false,
+            QkNorm = false,
+            RopeTheta = 10000.0,
+            NormEps = 1e-5,
+            MlaQLoraRank = 0,
+            MlaKvLoraRank = 0,
+            QkRopeHeadDim = 0,
+            QkNopeHeadDim = 0,
+            VHeadDim = 0,
+            RecipeEntityId = Hash128.Zero,
+            CanonicalJson = Encoding.UTF8.GetBytes("{}"),
         };
         return new Result(cfg, Modality.Unknown, Coverage.Unsupported);
     }

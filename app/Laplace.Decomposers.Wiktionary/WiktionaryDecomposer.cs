@@ -7,20 +7,21 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider{
+public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
+{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCuratedWithUserInput/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "WiktionaryDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "WiktionaryDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    // Unordered: rows are self-contained; the cross-entry relations (HAS_HYPERNYM, IS_SYNONYM_OF,
-    // IS_TRANSLATION_OF, ETYMOLOGICALLY_DERIVED_FROM) name target lemmas by content-addressed id, so
-    // forward/cross-entry references are legal and N workers can commit batches concurrently.
+
+
+
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
@@ -60,7 +61,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             reportUnits: null,
             acceptRow: acceptRow,
             maxInputUnits: options.MaxInputUnits,
-            // Lean lexical corpus: descent probes on a warm DB stall compose (same gate as ConceptNet).
+
             containmentReader: null,
             ct: ct))
         {
@@ -74,7 +75,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         string? file = ResolveInput(context.EcosystemPath, options.Languages);
         if (file is null) return Task.FromResult<IngestInventory?>(null);
 
-        // Bench slices: never scan a multi-GB file just to log progress totals.
+
         if (options.MaxInputUnits > 0)
             return Task.FromResult(IngestInventory.SingleFile(
                 "jsonl", file, options.MaxInputUnits, ct));
@@ -93,9 +94,9 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
 
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {
-        // An active language filter swaps the full multilingual corpus (raw-wiktextract-data.jsonl)
-        // for the English-only kaikki.org export. Log this explicitly so a filtered run is never
-        // silently a different corpus than an unfiltered one.
+
+
+
         if (langs?.IsActive == true)
         {
             string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");

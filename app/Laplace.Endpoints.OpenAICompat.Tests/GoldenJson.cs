@@ -33,14 +33,14 @@ internal static partial class GoldenJson
     private static string GoldensDir([CallerFilePath] string thisFile = "") =>
         Path.Combine(Path.GetDirectoryName(thisFile)!, "Goldens");
 
-    
+
     public static void Match(string name, string actualJson)
     {
         var node = JsonNode.Parse(actualJson);
         MatchNode(name, node);
     }
 
-    
+
     public static void MatchNode(string name, JsonNode? node)
     {
         Normalize(node);
@@ -69,11 +69,11 @@ internal static partial class GoldenJson
             File.Delete(actualPath);
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     private static void Normalize(JsonNode? node)
     {
         switch (node)

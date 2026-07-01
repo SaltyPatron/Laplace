@@ -10,7 +10,7 @@ public static class LanguageReference
 
     public static bool IsLoaded => Volatile.Read(ref _canon) != null;
     public static long ResolveMisses => Interlocked.Read(ref _resolveMisses);
-    public static int  AliasCount => _canon?.Count ?? 0;
+    public static int AliasCount => _canon?.Count ?? 0;
 
     public static string DefaultDir =>
         Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d
@@ -81,12 +81,12 @@ public static class LanguageReference
             Name(p[6], id);
         });
 
-        // ISO 639-2: "biblio|termino|alpha2|EnglishName|FrenchName". 639-3 uses the TERMINOLOGIC code
-        // (deu, fra), so the row's canonical is its termino if known, else its biblio. A 639-2-ONLY
-        // code — collective (ber = Berber, cel = Celtic, …) or special — has no 639-3 equivalent; make
-        // it its OWN canonical so sources that use it (Tatoeba 'ber' = 693k rows) resolve instead of
-        // collapsing to 'und'. Also binds the bibliographic alias (ger→deu, fre→fra), which the old
-        // code dropped because p[0] wasn't in the 639-3 map.
+
+
+
+
+
+
         ForEachRow(Path.Combine(dir, "ISO-639-2_utf-8.txt"), sep: '|', skipHeader: false, p =>
         {
             if (p.Length < 5) return;
@@ -96,7 +96,7 @@ public static class LanguageReference
             string canon =
                 (termino.Length == 3 && map.TryGetValue(termino, out var ct)) ? ct
                 : map.TryGetValue(biblio, out var cb) ? cb
-                : biblio;                              // 639-2-only (collective/special): self-canonical
+                : biblio;
             Code(biblio, canon);
             Code(termino, canon);
             Code(p[2], canon);
@@ -174,10 +174,10 @@ public static class LanguageReference
             string val = line[(c + 1)..].Trim();
             switch (key)
             {
-                case "Type":            type = val.ToLowerInvariant(); break;
-                case "Subtag":          subtag = val; break;
+                case "Type": type = val.ToLowerInvariant(); break;
+                case "Subtag": subtag = val; break;
                 case "Preferred-Value": preferred = val; break;
-                case "Description":     descs.Add(val); break;
+                case "Description": descs.Add(val); break;
             }
         }
         Flush();

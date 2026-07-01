@@ -1,8 +1,8 @@
 @echo off
-rem Pipeline ingest benchmark — OPT-IN ONLY. Never auto-runs full corpora.
-rem Measures dedup-once path (trunk descent + anti-join merge). Default slice: 50k units.
-rem Usage: bench-ingest.cmd --confirm <source> [options]
-rem Sources: conceptnet | wiktionary | wiktionary-en | ud
+
+
+
+
 
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"

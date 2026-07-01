@@ -18,7 +18,8 @@ public sealed class WiktionaryInventoryTests
 
             var dec = new WiktionaryDecomposer();
             var opts = DecomposerOptions.ForWitness("WiktionaryDecomposer", languageOverride: LanguageFilter.FromSpec("en"))
-                with { MaxInputUnits = 50_000 };
+                with
+            { MaxInputUnits = 50_000 };
             var inv = await dec.DescribeInputAsync(new TempContext(dir), opts);
 
             Assert.NotNull(inv);
@@ -45,7 +46,8 @@ public sealed class WiktionaryInventoryTests
 
             var dec = new WiktionaryDecomposer();
             var opts = DecomposerOptions.ForWitness("WiktionaryDecomposer", languageOverride: LanguageFilter.FromSpec("en"))
-                with { MaxInputUnits = 1 };
+                with
+            { MaxInputUnits = 1 };
             var inv = await dec.DescribeInputAsync(new TempContext(dir), opts);
 
             Assert.NotNull(inv);
@@ -84,7 +86,7 @@ public sealed class WiktionaryInventoryTests
 
     private static void TryDeleteDir(string dir)
     {
-        try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+        try { Directory.Delete(dir, recursive: true); } catch { }
     }
 
     private sealed class TempContext(string ecosystemPath) : IDecomposerContext

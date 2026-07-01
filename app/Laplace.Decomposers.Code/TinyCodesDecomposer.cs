@@ -25,29 +25,29 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
     private static readonly Hash128 CodeConceptTypeId = EntityTypeRegistry.CodeConcept;
 
-    
-    
+
+
     private static readonly Dictionary<string, string?> LangModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["python"]     = "python",
+            ["python"] = "python",
             ["javascript"] = "javascript",
             ["typescript"] = "typescript",
-            ["ruby"]       = "ruby",
-            ["julia"]      = "julia",
-            ["rust"]       = "rust",
-            ["c++"]        = "cpp",
-            ["bash"]       = "bash",
-            ["java"]       = "java",
-            ["c#"]         = "c-sharp",
-            ["go"]         = "go",
-            ["sql"]        = "sql",
-            ["cypher"]     = null,
+            ["ruby"] = "ruby",
+            ["julia"] = "julia",
+            ["rust"] = "rust",
+            ["c++"] = "cpp",
+            ["bash"] = "bash",
+            ["java"] = "java",
+            ["c#"] = "c-sharp",
+            ["go"] = "go",
+            ["sql"] = "sql",
+            ["cypher"] = null,
         };
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "TinyCodesDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "TinyCodesDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
@@ -101,7 +101,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 catch { continue; }
                 if (codeBytes.Length == 0) continue;
 
-                ImmutableArray<EntityRow>      ents;
+                ImmutableArray<EntityRow> ents;
                 ImmutableArray<PhysicalityRow> phys;
                 ImmutableArray<AttestationRow> atts;
                 Hash128 codeRootId;
@@ -122,26 +122,26 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 foreach (var p in phys) b.AddPhysicality(p);
                 foreach (var a in atts) b.AddAttestation(a);
 
-                
-                // The concept/task key is CONTENT, not a synthetic nameless id: emit its surface via the
-                // shared CategoryAnchor (ContentEmitter + IS_TYPED_AS CodeConcept), exactly like CILI's
-                // HAS_SYNSET_KEY treats a synset key as content. This gives the key a Merkle DAG / tiers
-                // / geometry and converges identical task keys across shards, instead of baking the
-                // string into a bare Hash128.OfCanonical("tiny-codes/concept/{key}/v1") vocabulary row.
+
+
+
+
+
+
                 if (!string.IsNullOrEmpty(conceptKey)
                     && CategoryAnchor.Emit(b, conceptKey, CodeConceptTypeId, Source, SourceTrust.StructuredCorpus) is { } conceptId)
                 {
                     b.AddAttestation(NativeAttestation.Categorical(
-                        conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
+                        conceptId, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
                     b.AddAttestation(NativeAttestation.Categorical(
-                        codeRootId, "HAS_DEFINITION", conceptId,  Source, SourceTrust.StructuredCorpus));
+                        codeRootId, "HAS_DEFINITION", conceptId, Source, SourceTrust.StructuredCorpus));
                 }
 
-                
-                
-                
-                
-                
+
+
+
+
+
                 if (!string.IsNullOrWhiteSpace(prompt))
                 {
                     foreach (var kw in ExtractKeywords(prompt))
@@ -188,8 +188,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
     private static IEnumerable<string> ExtractKeywords(string prompt)
     {
-        
-        
+
+
         int count = 0;
         foreach (var raw in prompt.Split(
             new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_' },
@@ -198,7 +198,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
             if (count >= 20) break;
             if (raw.Length < 4) continue;
             var w = raw.ToLowerInvariant();
-            
+
             var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
             if (!StopWords.Contains(w) && !StopWords.Contains(stem))
             {
@@ -215,8 +215,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
         if (slash > 0) lang = lang[..slash];
         lang = lang.Trim();
         if (LangModality.TryGetValue(lang, out var m)) return m;
-        
-        
+
+
         if (lang.Contains("cypher", StringComparison.OrdinalIgnoreCase)) return null;
         if (lang.Contains("sql", StringComparison.OrdinalIgnoreCase)) return "sql";
         return null;
@@ -229,12 +229,12 @@ public sealed class TinyCodesDecomposer : IDecomposer
         await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
 
         DataField[] fields = reader.Schema.GetDataFields();
-        
-        
-        DataField? taskField   = FindField(fields, "task_id");
-        DataField? langField   = FindField(fields, "programming_language");
+
+
+        DataField? taskField = FindField(fields, "task_id");
+        DataField? langField = FindField(fields, "programming_language");
         DataField? promptField = FindField(fields, "prompt");
-        DataField? respField   = FindField(fields, "response");
+        DataField? respField = FindField(fields, "response");
         string fileStem = Path.GetFileNameWithoutExtension(path);
         long rowBase = 0;
         if (promptField is null || respField is null || (taskField is null && langField is null))
@@ -250,21 +250,21 @@ public sealed class TinyCodesDecomposer : IDecomposer
             int count = (int)rgr.RowCount;
 
             string[]? taskIds = null;
-            string[]? langs   = null;
-            string[] prompts  = new string[count];
-            string[] resps    = new string[count];
+            string[]? langs = null;
+            string[] prompts = new string[count];
+            string[] resps = new string[count];
 
             if (taskField is not null)
                 await rgr.ReadAsync(taskField, taskIds = new string[count]);
             if (langField is not null)
                 await rgr.ReadAsync(langField, langs = new string[count]);
             await rgr.ReadAsync(promptField, prompts);
-            await rgr.ReadAsync(respField,   resps);
+            await rgr.ReadAsync(respField, resps);
 
             for (int i = 0; i < count; i++)
             {
                 string? lang = langs?[i];
-                string? key  = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
+                string? key = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
                 yield return (key, lang, prompts[i], resps[i]);
             }
             rowBase += count;

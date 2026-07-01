@@ -7,13 +7,14 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : IDecomposer{
-    // Each unit's rows are self-contained. VerbNet owns its classes (it emits + types them); the
-    // IS_A parent-class edge, MEMBER_OF_VERBNET_CLASS lemma membership, and the WordNet-sense
-    // CORRESPONDS_TO edge resolve by content-addressed
-    // id against entities owned by VerbNet (the parent class, in another batch) and WordNet (the
-    // sense, in another source). With the per-batch referential EXISTS pre-check gone these
-    // cross-batch / cross-source anchors are legal, so N workers can commit batches concurrently.
+public sealed class VerbNetDecomposer : IDecomposer
+{
+
+
+
+
+
+
 
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");
@@ -21,15 +22,15 @@ public sealed class VerbNetDecomposer : IDecomposer{
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
-    // WordNet_Sense correspondence targets are now anchored by content-addressed id (CategoryAnchor.Id)
-    // and typed by the WordNet decomposer, so no WordNet_Sense type id is referenced here.
+
+
 
     internal static string NumericClassId(string classId) =>
         SourceEntityIdConventions.NumericVerbNetClassId(classId);
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "VerbNetDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "VerbNetDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private const long EstimatedClasses = 329L;
@@ -81,24 +82,24 @@ public sealed class VerbNetDecomposer : IDecomposer{
         string? classId = el.GetAttribute("ID");
         if (string.IsNullOrEmpty(classId)) return;
 
-        
-        
+
+
         Hash128? classAnchor = CategoryAnchor.Emit(b, NumericClassId(classId), ClassTypeId, Source, TC.AcademicCurated);
         if (classAnchor is null) return;
         Hash128 classEntity = classAnchor.Value;
 
-        // The class anchors on the numeric id (13.1) for SemLink/PropBank convergence; surface the
-        // full VerbNet class id (give-13.1) as the display name so it never renders as a bare "13.1".
+
+
         if (ContentEmitter.Emit(b, classId, Source) is { } classNameId)
             b.AddAttestation(NativeAttestation.Categorical(
                 classEntity, "HAS_NAME_ALIAS", classNameId, Source, TC.AcademicCurated));
 
         if (parentClassId is not null)
         {
-            // The parent class is itself a VerbNet class; its own EmitClass call writes and types its
-            // entity row (this same batch for an enclosing class, or another batch for a top-level
-            // parent). We only need its content-addressed id to anchor the IS_A edge — pre-emitting a
-            // typed anchor here was solely to satisfy the deleted referential EXISTS pre-check.
+
+
+
+
             Hash128? parentAnchor = CategoryAnchor.Id(NumericClassId(parentClassId));
             if (parentAnchor is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -173,10 +174,10 @@ public sealed class VerbNetDecomposer : IDecomposer{
                         contextId: classEntity));
             }
 
-            // SEMANTICS: the logical predicate decomposition (e.g. take_in(Goal, Theme)) — the real
-            // meaning of the frame, previously dropped for just the DESCRIPTION string. The verb class
-            // ENTAILS each predicate; each predicate HAS_SEMANTIC_ROLE its thematic-role arguments
-            // (content-keyed by bare role name so they converge with the class's HAS_THEMATIC_ROLE roles).
+
+
+
+
             foreach (XmlNode semNode in frame.GetElementsByTagName("SEMANTICS"))
             {
                 if (semNode is not XmlElement sem) continue;

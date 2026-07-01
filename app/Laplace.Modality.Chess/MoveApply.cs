@@ -113,9 +113,9 @@ public static class MoveApply
     {
         switch (sq)
         {
-            case 4:  b.Castle &= ~(CastleRights.WhiteKing | CastleRights.WhiteQueen); break;
-            case 0:  b.Castle &= ~CastleRights.WhiteQueen; break;
-            case 7:  b.Castle &= ~CastleRights.WhiteKing; break;
+            case 4: b.Castle &= ~(CastleRights.WhiteKing | CastleRights.WhiteQueen); break;
+            case 0: b.Castle &= ~CastleRights.WhiteQueen; break;
+            case 7: b.Castle &= ~CastleRights.WhiteKing; break;
             case 116: b.Castle &= ~(CastleRights.BlackKing | CastleRights.BlackQueen); break;
             case 112: b.Castle &= ~CastleRights.BlackQueen; break;
             case 119: b.Castle &= ~CastleRights.BlackKing; break;

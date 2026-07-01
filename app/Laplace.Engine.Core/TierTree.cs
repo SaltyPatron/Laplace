@@ -117,7 +117,7 @@ public sealed class TierTree : SafeHandle
     public uint CollapseIndex(uint idx)
     {
         ThrowIfDisposed();
-        for (;;)
+        for (; ; )
         {
             var node = GetNode(idx);
             if (node.Tier <= 1 || node.ChildCount != 1) break;

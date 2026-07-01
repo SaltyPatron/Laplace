@@ -7,9 +7,9 @@ CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 
            a.outcome, a.observation_count
     FROM attestations a
     WHERE a.subject_id = p_id
-    -- rank-weighted: semantically salient relations (HAS_DEFINITION/IS_A/…) surface above
-    -- grammatical scaffolding (HAS_LANGUAGE/HAS_POS/PRECEDES) regardless of raw witness volume,
-    -- so the LIMIT cut keeps the meaningful edges. Witness count / outcome break ties within a rank.
+    
+    
+    
     ORDER BY relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;

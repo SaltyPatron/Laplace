@@ -9,17 +9,17 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal interface ISubstrateClient
 {
-    
+
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 
-    
+
     IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
-        int steps          = 32,
-        int maxOrder       = 5,
+        int steps = 32,
+        int maxOrder = 5,
         double temperature = 0.7,
-        int topK           = 10,
+        int topK = 10,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct);
@@ -39,6 +39,6 @@ internal interface ISubstrateClient
 
     Task<ReadinessResponse> ReadinessAsync(CancellationToken ct);
 
-    // Two-level embedding for one input: S³ FORM coordinate + (optional) Glicko-2 MEANING neighbours.
+
     Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct);
 }

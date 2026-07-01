@@ -6,12 +6,12 @@ internal static class CoreEndpoints
 {
     public static void MapCoreEndpoints(this WebApplication app)
     {
-        // Liveness: the process is up and serving. Cheap, no DB — for the orchestrator's restart signal.
+
         app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "F-scaffold")))
             .WithTags("core").Produces<HealthResponse>();
 
-        // Readiness: the substrate is reachable, seeded, and perfcache-loaded. 503 until all hold,
-        // so a load balancer / deploy gate won't route traffic to (or bless) a hollow stack.
+
+
         app.MapGet("/health/ready", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
             var report = await substrate.ReadinessAsync(ct);
@@ -27,7 +27,7 @@ internal static class CoreEndpoints
             new ModelInfo("laplace-converse-001", "model", 0, "laplace"),
             new ModelInfo("laplace-completions-001", "model", 0, "laplace"),
             new ModelInfo("laplace-code-001", "model", 0, "laplace"),
-            // Two-level embeddings: form = S³ geometry vector; meaning = Glicko-2 salient neighbours.
+
             new ModelInfo("laplace-embed-form-001", "model", 0, "laplace"),
             new ModelInfo("laplace-embed-meaning-001", "model", 0, "laplace")
         ]))).WithTags("core").Produces<ModelList>();

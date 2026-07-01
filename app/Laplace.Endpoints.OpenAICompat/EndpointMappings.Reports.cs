@@ -6,7 +6,7 @@ internal static class ReportEndpoints
 {
     public static void MapReportEndpoints(this WebApplication app)
     {
-        
+
         app.MapGet("/v1/evidence/{target}", async (string target, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(target))
@@ -133,12 +133,12 @@ internal static class ReportEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     private static async Task<IResult> RunGatedReportAsync(
         HttpRequest request,
         IBillingOrchestrator billing,

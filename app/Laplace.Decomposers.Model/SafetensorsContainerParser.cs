@@ -6,17 +6,17 @@ public sealed class SafetensorsContainerParser
 {
     public sealed class TensorReference
     {
-        public required string   Name        { get; init; }
-        public required string   Dtype       { get; init; }
-        public required int[]    Shape       { get; init; }
-        public required long     DataStart   { get; init; }
-        public required long     DataEnd     { get; init; }
-        public required long     HeaderBytes { get; init; }
+        public required string Name { get; init; }
+        public required string Dtype { get; init; }
+        public required int[] Shape { get; init; }
+        public required long DataStart { get; init; }
+        public required long DataEnd { get; init; }
+        public required long HeaderBytes { get; init; }
         public string FilePath { get; set; } = "";
 
         public long AbsoluteDataStart => HeaderBytes + DataStart;
-        public long AbsoluteDataEnd   => HeaderBytes + DataEnd;
-        public long DataLength        => DataEnd - DataStart;
+        public long AbsoluteDataEnd => HeaderBytes + DataEnd;
+        public long DataLength => DataEnd - DataStart;
     }
 
     public static IReadOnlyList<TensorReference> ParseModel(string modelDir)
@@ -86,15 +86,15 @@ public sealed class SafetensorsContainerParser
 
             var offsets = entry.GetProperty("data_offsets");
             long dataStart = offsets[0].GetInt64();
-            long dataEnd   = offsets[1].GetInt64();
+            long dataEnd = offsets[1].GetInt64();
 
             refs.Add(new TensorReference
             {
-                Name        = prop.Name,
-                Dtype       = dtype,
-                Shape       = shape,
-                DataStart   = dataStart,
-                DataEnd     = dataEnd,
+                Name = prop.Name,
+                Dtype = dtype,
+                Shape = shape,
+                DataStart = dataStart,
+                DataEnd = dataEnd,
                 HeaderBytes = headerBytes,
             });
         }

@@ -9,7 +9,7 @@ public class QkPairsThresholdParityTests
     {
         double t = sum + term;
         if (Math.Abs(sum) >= Math.Abs(term)) c += (sum - t) + term;
-        else                                 c += (term - t) + sum;
+        else c += (term - t) + sum;
         sum = t;
     }
 
@@ -58,7 +58,7 @@ public class QkPairsThresholdParityTests
     public unsafe void MatchesManagedReference_Bitwise(double floor)
     {
         const int vocab = 64, dModel = 16, headDim = 8;
-        var e  = Rand(vocab * dModel, 1);
+        var e = Rand(vocab * dModel, 1);
         var wq = Rand(headDim * dModel, 2);
         var wk = Rand(headDim * dModel, 3);
 
@@ -118,12 +118,12 @@ public class QkPairsThresholdParityTests
     {
         const int vocab = 200, dModel = 24, headDim = 12, nHeads = 8, nKv = 2;
         const int queriesPerKv = nHeads / nKv;
-        var e  = Rand(vocab * dModel, 21);
+        var e = Rand(vocab * dModel, 21);
         var wq = Rand(nHeads * headDim * dModel, 22);
-        var wk = Rand(nKv    * headDim * dModel, 23);
+        var wk = Rand(nKv * headDim * dModel, 23);
 
         var qCache = new double[(long)vocab * nHeads * headDim];
-        var kCache = new double[(long)vocab * nKv    * headDim];
+        var kCache = new double[(long)vocab * nKv * headDim];
         fixed (float* ep = e) fixed (float* qp = wq) fixed (float* kp = wk)
         fixed (double* qc = qCache) fixed (double* kc = kCache)
         {
@@ -136,7 +136,7 @@ public class QkPairsThresholdParityTests
             int kvHead = head / queriesPerKv;
             var wqHead = new float[headDim * dModel];
             var wkHead = new float[headDim * dModel];
-            Array.Copy(wq, (long)head   * headDim * dModel, wqHead, 0, headDim * dModel);
+            Array.Copy(wq, (long)head * headDim * dModel, wqHead, 0, headDim * dModel);
             Array.Copy(wk, (long)kvHead * headDim * dModel, wkHead, 0, headDim * dModel);
 
             var a = new QkPairF64[vocab * vocab];

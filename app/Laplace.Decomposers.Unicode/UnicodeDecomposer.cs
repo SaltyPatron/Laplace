@@ -6,13 +6,14 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
-public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
-    
-    
-    
-    public static readonly Hash128 Source     = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
+public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
+{
+
+
+
+    public static readonly Hash128 Source = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
-    
+
     public static readonly Hash128 CodepointType = EntityTypeRegistry.Codepoint;
 
     private static readonly Hash128[] CombiningClassIds = BuildCombiningClassIds();
@@ -36,12 +37,12 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
     public UnicodeDecomposer(string? ucdxmlZip = null, string? ducet = null)
     {
         _ucdxmlZip = ucdxmlZip;
-        _ducet     = ducet;
+        _ducet = ducet;
     }
 
-    public Hash128 SourceId    => Source;
-    public string  SourceName  => "UnicodeDecomposer";
-    public int     LayerOrder  => 0;
+    public Hash128 SourceId => Source;
+    public string SourceName => "UnicodeDecomposer";
+    public int LayerOrder => 0;
     public Hash128 TrustClassId => TrustClass;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -230,18 +231,18 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
             var ucd = _ucd;
             if (ucd is null) return Array.Empty<string>();
             var names = new List<string>(2048);
-            foreach (var n in ucd.CategoryEntityIds.Keys)   names.Add($"unicode/category/{n}/v1");
-            foreach (var n in ucd.ScriptEntityIds.Keys)     names.Add($"unicode/script/{n}/v1");
-            foreach (var n in ucd.BlockEntityIds.Keys)      names.Add($"unicode/block/{n}/v1");
-            foreach (var n in ucd.BidiClassEntityIds.Keys)  names.Add($"unicode/bidi_class/{n}/v1");
-            foreach (var n in ucd.AgeEntityIds.Keys)        names.Add($"unicode/age/{n}/v1");
-            foreach (var n in ucd.EmojiPropEntityIds.Keys)  names.Add($"unicode/emoji/{n}/v1");
-            foreach (var v in ucd.NumericEntityIds.Keys)    names.Add($"unicode/numeric/{v}/v1");
-            foreach (var v in ucd.LineBreakEntityIds.Keys)        names.Add($"unicode/line_break/{v}/v1");
-            foreach (var v in ucd.EastAsianWidthEntityIds.Keys)   names.Add($"unicode/east_asian_width/{v}/v1");
-            foreach (var v in ucd.JoiningTypeEntityIds.Keys)      names.Add($"unicode/joining_type/{v}/v1");
-            foreach (var v in ucd.NumericTypeEntityIds.Keys)      names.Add($"unicode/numeric_type/{v}/v1");
-            for (int cc = 1; cc <= 254; cc++)               names.Add($"unicode/combining_class/{cc}/v1");
+            foreach (var n in ucd.CategoryEntityIds.Keys) names.Add($"unicode/category/{n}/v1");
+            foreach (var n in ucd.ScriptEntityIds.Keys) names.Add($"unicode/script/{n}/v1");
+            foreach (var n in ucd.BlockEntityIds.Keys) names.Add($"unicode/block/{n}/v1");
+            foreach (var n in ucd.BidiClassEntityIds.Keys) names.Add($"unicode/bidi_class/{n}/v1");
+            foreach (var n in ucd.AgeEntityIds.Keys) names.Add($"unicode/age/{n}/v1");
+            foreach (var n in ucd.EmojiPropEntityIds.Keys) names.Add($"unicode/emoji/{n}/v1");
+            foreach (var v in ucd.NumericEntityIds.Keys) names.Add($"unicode/numeric/{v}/v1");
+            foreach (var v in ucd.LineBreakEntityIds.Keys) names.Add($"unicode/line_break/{v}/v1");
+            foreach (var v in ucd.EastAsianWidthEntityIds.Keys) names.Add($"unicode/east_asian_width/{v}/v1");
+            foreach (var v in ucd.JoiningTypeEntityIds.Keys) names.Add($"unicode/joining_type/{v}/v1");
+            foreach (var v in ucd.NumericTypeEntityIds.Keys) names.Add($"unicode/numeric_type/{v}/v1");
+            for (int cc = 1; cc <= 254; cc++) names.Add($"unicode/combining_class/{cc}/v1");
             names.Add("Byte");
             names.Add("substrate/encoding/ISO-8859-1/v1");
             names.Add("substrate/encoding/windows-1252/v1");
@@ -258,7 +259,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
         int n = end - start;
         var b = new SubstrateChangeBuilder(
             Source, $"codepoints/U+{start:X4}..U+{(end - 1):X4}", null,
-            entityCapacity:      n * 4,
+            entityCapacity: n * 4,
             physicalityCapacity: n,
             attestationCapacity: n * 12)
             .SetCommitEpoch(commitEpoch);
@@ -289,7 +290,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
 
             uint ucp = (uint)cp;
 
-            // The codepoint's official Unicode name (e.g. "LATIN CAPITAL LETTER A") as searchable content.
+
             string? name = ucd.Name[cp];
             if (name != null)
             {
@@ -447,8 +448,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
     private void EnsureUcdProperties(IDecomposerContext context)
     {
         if (_ucd is not null) return;
-        
-        
+
+
         string ucdDir = Path.Combine(context.EcosystemPath, "ucd");
         _ucd = UcdProperties.Load(ucdDir);
     }
@@ -457,7 +458,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
     {
         string baseDir = context.EcosystemPath;
         string xml = _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.nounihan.flat.zip");
-        string duc = _ducet    ?? Path.Combine(baseDir, "uca", "allkeys.txt");
+        string duc = _ducet ?? Path.Combine(baseDir, "uca", "allkeys.txt");
         return (xml, duc);
     }
 }

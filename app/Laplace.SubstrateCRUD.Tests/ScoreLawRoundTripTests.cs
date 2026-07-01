@@ -18,7 +18,7 @@ public class ScoreLawRoundTripTests
     }
 
     private const long PhiModel = 30_000_000_000L;
-    private const long PhiWeak  = 350_000_000_000L;
+    private const long PhiWeak = 350_000_000_000L;
     private const double ArenaM = 0.02;
 
     private static long ForwardSumFp(double v, double m, long games)

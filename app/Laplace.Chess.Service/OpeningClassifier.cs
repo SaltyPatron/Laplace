@@ -58,13 +58,13 @@ public static class OpeningClassifier
         var list = new List<(string, string, List<string>)>();
         if (!Directory.Exists(path) && !File.Exists(path)) return list;
         foreach (var file in OpeningSeedFiles(path))
-        foreach (var line in File.ReadLines(file))
-        {
-            if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
-            var sans = ChessOpeningsDecomposer.ExtractSans(row.Movetext);
-            if (sans.Count == 0) continue;
-            list.Add((row.Eco, row.Name, sans));
-        }
+            foreach (var line in File.ReadLines(file))
+            {
+                if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
+                var sans = ChessOpeningsDecomposer.ExtractSans(row.Movetext);
+                if (sans.Count == 0) continue;
+                list.Add((row.Eco, row.Name, sans));
+            }
         return list.OrderByDescending(x => x.Item3.Count).ToList();
     }
 

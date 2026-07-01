@@ -49,7 +49,9 @@ public sealed class SelfPlayEngineTests
                 var id = ConsensusKeys.EdgeId(_addr.Address(e.SubjectKey), _moveType, _addr.Address(e.ObjectKey));
                 long score = e.MoverOutcome switch
                 {
-                    PlyOutcome.Win => 1_000_000_000L, PlyOutcome.Draw => 500_000_000L, _ => 0L
+                    PlyOutcome.Win => 1_000_000_000L,
+                    PlyOutcome.Draw => 500_000_000L,
+                    _ => 0L
                 };
                 _edges.AddOrUpdate(id, (1, score), (_, a) => (a.games + 1, a.sumScore + score));
             }

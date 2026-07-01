@@ -6,23 +6,23 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// Ingests a single Mold-A-Model recipe JSON (the simulated UI POST — see docs/invention/recipe-schema.md)
-// into the substrate as a content-addressed Model_Recipe entity, so export can fetch it via
-// laplace.model_recipes() / --recipe-from. The recipe is stored content, never read from disk at export.
+
+
+
 public sealed class RecipeDecomposer : IDecomposer
 {
-    // A recipe is a user-curated Mold-A-Model artifact (composed in the UI). Must be a
-    // pre-registered trust class (see extension bootstrap) or referential integrity rejects it.
+
+
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
 
     private static readonly Hash128 HasHiddenSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
-    private static readonly Hash128 HasNumLayersTypeId  = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
+    private static readonly Hash128 HasNumLayersTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
 
     private readonly string _recipePath;
     private readonly RecipeExtractor.RecipeInfo _recipe;
     private readonly Hash128 _source;
-    private readonly string  _sourceName;
+    private readonly string _sourceName;
 
     public RecipeDecomposer(string recipePath)
     {
@@ -32,9 +32,9 @@ public sealed class RecipeDecomposer : IDecomposer
         _source = Hash128.OfCanonical($"substrate/source/recipe/{_recipe.Name}/v1");
     }
 
-    public Hash128 SourceId     => _source;
-    public string  SourceName   => _sourceName;
-    public int     LayerOrder   => 5;
+    public Hash128 SourceId => _source;
+    public string SourceName => _sourceName;
+    public int LayerOrder => 5;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
@@ -60,8 +60,8 @@ public sealed class RecipeDecomposer : IDecomposer
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1);
 
-    // Registered into canonical_names by IngestCommands.RegisterDynamicCanonicalsAsync. The recipe
-    // entity's id == Blake3(canonical JSON), so this name resolves it in model_recipes().
+
+
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new[]
     {
         RecipeExtractor.CanonicalName(_recipe),

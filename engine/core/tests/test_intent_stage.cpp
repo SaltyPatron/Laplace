@@ -513,7 +513,7 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     intent_stage_free(s);
 }
 
-// Helper: walk one table's emitted blob, collect (id.lo) of every row.
+
 static void collect_ids_lo(const intent_stage_t* s, intent_stage_table_t table,
                            std::vector<uint64_t>& out) {
     const size_t need = intent_stage_emit_copy_binary(s, table, nullptr, 0);
@@ -523,13 +523,13 @@ static void collect_ids_lo(const intent_stage_t* s, intent_stage_table_t table,
     const uint8_t* end = buf.data() + buf.size() - kTrailer;
     while (p + 2 <= end) {
         const uint16_t cols = read_be16(p);
-        if (cols == 0xffff) break;     // trailer
+        if (cols == 0xffff) break;     
         p += 2;
-        // field 1 = id (16 bytes). id.lo is bytes [8..16).
+        
         const uint32_t f1 = read_be32(p); p += 4;
         ASSERT_EQ(16u, f1);
         uint64_t lo = 0;
-        std::memcpy(&lo, p + 8, 8);     // little-endian struct layout, matches partition router
+        std::memcpy(&lo, p + 8, 8);     
         out.push_back(lo);
         p += 16;
         for (uint16_t c = 1; c < cols; ++c) {
@@ -578,7 +578,7 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
         total_phys += intent_stage_physicality_count(parts[k]);
         total_att  += intent_stage_attestation_count(parts[k]);
 
-        // Disjointness: entities/attestations route by id.lo % N; physicalities by Hilbert range.
+        
         for (auto table : {INTENT_STAGE_TABLE_ENTITIES,
                            INTENT_STAGE_TABLE_ATTESTATIONS}) {
             std::vector<uint64_t> los;
@@ -587,7 +587,7 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
                 EXPECT_EQ(k, (size_t)(lo % kN)) << "row landed in wrong partition";
         }
     }
-    // Conservation: no row lost or duplicated.
+    
     EXPECT_EQ(kEnt,  total_ent);
     EXPECT_EQ(kPhys, total_phys);
     EXPECT_EQ(kAtt,  total_att);

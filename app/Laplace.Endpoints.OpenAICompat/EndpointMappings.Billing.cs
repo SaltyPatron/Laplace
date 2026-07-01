@@ -471,21 +471,21 @@ internal static class BillingEndpoints
     private static QuoteNextStep NextStep(BillingQuote quote, string note) =>
         new(new ExecuteHeader("X-Laplace-Quote-Id", quote.QuoteId), note);
 
-    
-    
-    
-    
-    
+
+
+
+
+
     private static async Task<string> ResolveTenantAsync(string? payloadTenant, HttpRequest request, ITenantResolver resolver, CancellationToken ct) =>
         string.IsNullOrWhiteSpace(payloadTenant)
             ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
             : payloadTenant.Trim();
 
-    
-    
-    
-    
-    
+
+
+
+
+
     private static async Task<(BillingQuote? quote, IResult? error)> CreateMeteredQuoteAsync(
         IBillingOrchestrator billing, string tenant, string serviceId, long billableUnits, CancellationToken ct)
     {

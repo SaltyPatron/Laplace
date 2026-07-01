@@ -9,8 +9,8 @@ if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
 del /q "%DEPLOY%\lib\*.stale~*" 2>nul
 
-rem PostGIS model: extension SQL + .control are build artifacts from CMake (manifest.install → cpp → .sql).
-rem Deploy copies them into share/extension; CREATE EXTENSION runs the script once.
+
+
 cmake --build build-win-ext --target laplace_geom_sql laplace_substrate_sql || exit /b 1
 
 set "GEOM_DIR=%LAPLACE_ROOT%\build-win-ext\laplace_geom"
@@ -39,7 +39,7 @@ copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\lapl
 copy /y "build-win\core\perfcache\laplace_highway_perfcache.bin" "%DEPLOY%\share\laplace_highway_perfcache.bin" >nul || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
-rem laplace_substrate links laplace_dynamics (MKL/TBB) + laplace_core (libxml2) — PG backends load from deploy lib only
+
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.2.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" || exit /b 1
 call :swapcopy "%PGBIN%\libxml2.dll" || exit /b 1

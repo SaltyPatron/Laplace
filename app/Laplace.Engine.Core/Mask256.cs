@@ -34,8 +34,8 @@ public readonly record struct Mask256(ulong W0, ulong W1, ulong W2, ulong W3)
     public byte[] ToByteArray()
     {
         var buf = new byte[32];
-        BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(0, 8),  W0);
-        BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(8, 8),  W1);
+        BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(0, 8), W0);
+        BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(8, 8), W1);
         BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(16, 8), W2);
         BinaryPrimitives.WriteUInt64LittleEndian(buf.AsSpan(24, 8), W3);
         return buf;

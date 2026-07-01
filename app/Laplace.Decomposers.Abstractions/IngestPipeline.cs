@@ -4,24 +4,18 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Stage 1 output — one logical record per yield. Tree-sitter / parser stops here.</summary>
 public interface IRecordStream<TRecord>
 {
     IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default);
 }
 
-/// <summary>Multi-file tier: yields (file label, record) without loading entire files.</summary>
 public interface IMultiFileRecordStream<TRecord>
 {
     IAsyncEnumerable<(string FileLabel, TRecord Record)> RecordsAsync(CancellationToken ct = default);
 }
 
-/// <summary>
-/// One deferrable ingest unit. Probe runs before materialize; drain applies the descent bitmap.
-/// </summary>
 public interface IIngestDeferredUnit : IDisposable
 {
-    /// <summary>Build tree if needed; used by batched descent merge. Do not dispose before drain.</summary>
     TierTree? TreeForBatchProbe { get; }
 
     Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct = default);
@@ -29,21 +23,14 @@ public interface IIngestDeferredUnit : IDisposable
     Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap);
 }
 
-/// <summary>
-/// Deferred unit with multiple content trees per record (e.g. UD sentences). FlushPending merges all
-/// trees across pending units into one batched descent probe.
-/// </summary>
 public interface IMultiTreeIngestDeferredUnit : IIngestDeferredUnit
 {
-  IReadOnlyList<TierTree?> AllProbeTrees { get; }
+    IReadOnlyList<TierTree?> AllProbeTrees { get; }
 
-  Hash128 DrainInto(
-      SubstrateChangeBuilder builder, double witnessWeight, ReadOnlySpan<byte[]?> perTreeBitmaps);
+    Hash128 DrainInto(
+        SubstrateChangeBuilder builder, double witnessWeight, ReadOnlySpan<byte[]?> perTreeBitmaps);
 }
 
-/// <summary>
-/// Source-specific connector: grammar witness, content mapping, trunk shortcircuit — Stage 2 only.
-/// </summary>
 public interface IIngestRecordHandler<TRecord>
 {
     ValueTask<bool> TryTrunkShortcircuitAsync(
@@ -60,7 +47,6 @@ public interface IIngestRecordHandler<TRecord>
     long UnitsPerRecord(TRecord record) => 1;
 }
 
-/// <summary>Batch/probe tuning for <see cref="IngestBatchPipeline"/>.</summary>
 public sealed class IngestBatchConfig
 {
     public required Hash128 SourceId { get; init; }
@@ -73,7 +59,6 @@ public sealed class IngestBatchConfig
     public Action<long>? ReportUnits { get; init; }
     public long MaxInputUnits { get; init; }
 
-    /// <summary>When false, the builder does not route content through <see cref="ContentBatch"/> (multi-tree handlers emit directly).</summary>
     public bool EnableDeferredContentOnBuilder { get; init; } = false;
 
     public int? EntityCapacity { get; init; }
@@ -113,13 +98,8 @@ public sealed class IngestBatchConfig
         };
 }
 
-/// <summary>
-/// Generic Stage 2 ingest: stream records → batch N → O(tier) descent probe → drain novel only → bulk stage.
-/// Source-specific code plugs in via <see cref="IRecordStream{TRecord}"/> + <see cref="IIngestRecordHandler{TRecord}"/>.
-/// </summary>
 public static class IngestBatchPipeline
 {
-    /// <summary>Cold-path reader: every probe returns absent without DB I/O.</summary>
     internal sealed class AllAbsentSubstrateReader : ISubstrateReader
     {
         internal static readonly AllAbsentSubstrateReader Instance = new();
@@ -196,15 +176,12 @@ public static class IngestBatchPipeline
             yield return await state.BuildRemainingAsync(ct);
     }
 
-    /// <summary>
-    /// Multi-file tier: stream files sequentially; each file gets its own handler/config via factories.
-    /// </summary>
     public static async IAsyncEnumerable<SubstrateChange> RunMultiFileAsync<TRecord>(
-        IMultiFileRecordStream<TRecord> stream,
-        Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
-        Func<string, IngestBatchConfig> configFactory,
-        long maxTotalUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    IMultiFileRecordStream<TRecord> stream,
+    Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
+    Func<string, IngestBatchConfig> configFactory,
+    long maxTotalUnits = 0,
+    [EnumeratorCancellation] CancellationToken ct = default)
     {
         string? currentLabel = null;
         IIngestRecordHandler<TRecord>? handler = null;

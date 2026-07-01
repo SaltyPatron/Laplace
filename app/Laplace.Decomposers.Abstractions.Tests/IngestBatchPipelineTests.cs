@@ -6,11 +6,6 @@ using static Laplace.Decomposers.Abstractions.Tests.IngestPipelineTestHelpers;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Proves the generic ingest pipeline invariants from docs/ingestion-write-path-architecture.md §8:
-/// batch probe amortization, present/absent bitmap behavior, tier01 completion, compose-after-probe,
-/// incremental record streaming, multi-file tier batching.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class IngestBatchPipelineTests
 {
@@ -221,10 +216,6 @@ public sealed class IngestBatchPipelineTests
             $"stream adapter must read in small chunks (max read {stream.MaxReadChunk}), not slurp the whole file");
     }
 
-    /// <summary>
-    /// RunMultiFileAsync buffers records per file label before handing off to RunAsync — honest
-    /// limitation until file-scoped handlers can stream without an intermediate list.
-    /// </summary>
     [Fact]
     public async Task MultiFileTier_ProcessesPerFileBatches()
     {

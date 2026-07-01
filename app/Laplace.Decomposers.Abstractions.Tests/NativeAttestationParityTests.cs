@@ -21,7 +21,7 @@ public class NativeAttestationParityTests
     public void RelationResolve_HasUposAliasMatchesHasPos()
     {
         var upos = RelationTypeRegistry.Resolve("HAS_UPOS");
-        var pos  = RelationTypeRegistry.Resolve("HAS_POS");
+        var pos = RelationTypeRegistry.Resolve("HAS_POS");
         Assert.Equal(pos.Id, upos.Id);
         Assert.Equal("HAS_POS", upos.Canonical);
     }
@@ -30,7 +30,7 @@ public class NativeAttestationParityTests
     public void RelationResolve_FlipHypernymMatchesIsA()
     {
         var hyper = RelationTypeRegistry.Resolve("HAS_HYPONYM");
-        var isa   = RelationTypeRegistry.Resolve("IS_A");
+        var isa = RelationTypeRegistry.Resolve("IS_A");
         Assert.Equal(isa.Id, hyper.Id);
         Assert.True(hyper.Flip);
     }
@@ -39,14 +39,14 @@ public class NativeAttestationParityTests
     public void PosAttest_MatchesCanonicalResolve_AndAliasCollapses()
     {
         Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
-        Hash128 src  = Hash128.OfCanonical("substrate/test/src/v1");
+        Hash128 src = Hash128.OfCanonical("substrate/test/src/v1");
 
         var b = new SubstrateChangeBuilder(src, "test/pos-attest", null);
         PosReference.Attest(b, form, "NOUN", PosReference.PosTagset.Upos, src, null, SourceTrust.AcademicCurated);
         var change = b.Build();
 
-        
-        
+
+
         Assert.Empty(change.Entities);
         var att = Assert.Single(change.Attestations);
         var expected = NativeAttestation.Categorical(
@@ -59,19 +59,19 @@ public class NativeAttestationParityTests
     public void PosAttest_ProbationaryTag_EmitsThePosEntityInBatch()
     {
         Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
-        Hash128 src  = Hash128.OfCanonical("substrate/test/src/v1");
+        Hash128 src = Hash128.OfCanonical("substrate/test/src/v1");
 
         var b = new SubstrateChangeBuilder(src, "test/pos-probationary", null);
         var posId = PosReference.Attest(b, form, "IDIO", PosReference.PosTagset.FrameNet,
             src, null, SourceTrust.AcademicCurated);
         var change = b.Build();
 
-        
-        
+
+
         Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1"), posId);
-        // The probationary POS entity is emitted, plus its substrate-native HAS_NAME_ALIAS name (a
-        // content-walk of the tag), so assert the POS entity + the form→HAS_POS edge are present rather
-        // than that they are the only rows in the batch.
+
+
+
         Assert.Contains(change.Entities, e => e.Id == posId && e.TypeId == PosReference.PosTypeId);
         Assert.Contains(change.Attestations, att => att.ObjectId == posId && att.SubjectId == form);
     }
@@ -110,11 +110,11 @@ public class NativeAttestationParityTests
 
         var relType = H("type/v1");
 
-        var obj  = H("object/v1");
+        var obj = H("object/v1");
 
-        var src  = H("source/v1");
+        var src = H("source/v1");
 
-        var ctx  = H("context/v1");
+        var ctx = H("context/v1");
 
 
 
@@ -176,7 +176,7 @@ public class NativeAttestationParityTests
 
         var subj = H("s"); var relType = H("k"); var obj = H("o");
 
-        var src  = H("src"); var ctx = H("ctx");
+        var src = H("src"); var ctx = H("ctx");
 
 
 
@@ -322,7 +322,7 @@ public class NativeAttestationParityTests
 
         Assert.Equal(Glicko2.FpScale, confirm.ScoreFp1e9);
 
-        Assert.Equal(0L,              refute.ScoreFp1e9);
+        Assert.Equal(0L, refute.ScoreFp1e9);
 
     }
 
@@ -356,9 +356,9 @@ public class NativeAttestationParityTests
 
         var type = H("k");
 
-        var obj  = H("o");
+        var obj = H("o");
 
-        var src  = H("src");
+        var src = H("src");
 
 
 

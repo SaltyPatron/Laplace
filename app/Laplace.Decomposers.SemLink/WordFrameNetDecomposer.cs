@@ -12,9 +12,9 @@ public sealed class WordFrameNetDecomposer : IDecomposer, IIngestInventoryProvid
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "WordFrameNetDecomposer";
-    public int     LayerOrder   => 3;
+    public Hash128 SourceId => Source;
+    public string SourceName => "WordFrameNetDecomposer";
+    public int LayerOrder => 3;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>

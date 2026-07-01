@@ -81,7 +81,7 @@ public sealed class EvaluationTests
     {
         var b = Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
         int withMat = Evaluation.Evaluate(b, EvalTerm.All);
-        int noMat   = Evaluation.Evaluate(b, EvalTerm.All & ~EvalTerm.Material);
+        int noMat = Evaluation.Evaluate(b, EvalTerm.All & ~EvalTerm.Material);
         Assert.True(withMat > 800, $"with material the queen shows: {withMat}");
         Assert.True(noMat < withMat - 800, $"without material the queen value is gone: {noMat}");
     }

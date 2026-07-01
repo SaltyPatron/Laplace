@@ -165,7 +165,7 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "format_writer_free")]
     internal static partial void FormatWriterFree(IntPtr w);
 
-    
+
     [LibraryImport(Library, EntryPoint = "feature_extractor_load",
         StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr FeatureExtractorLoad(string extractorName);
@@ -184,32 +184,32 @@ public static partial class NativeInterop
 [StructLayout(LayoutKind.Sequential)]
 public struct QkPairF64
 {
-    public uint   QueryIdx;
-    public uint   KeyIdx;
+    public uint QueryIdx;
+    public uint KeyIdx;
     public double Score;
 }
 
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct TensorSpec
 {
-    public byte*  Name;
-    public ulong  Rank;
+    public byte* Name;
+    public ulong Rank;
     public fixed ulong Shape[8];
-    public int    Dtype;
+    public int Dtype;
 }
 
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct SubstrateView
 {
     public double* PerTokenConsensus;
-    public nuint   Vocab;
-    public int*    PerPairRows;
-    public int*    PerPairCols;
+    public nuint Vocab;
+    public int* PerPairRows;
+    public int* PerPairCols;
     public double* PerPairVals;
-    public nuint   PerPairNnz;
-    public double  NormAggregate;
+    public nuint PerPairNnz;
+    public double NormAggregate;
     public double* TokenBasis;
-    public nuint   BasisDim;
+    public nuint BasisDim;
     public double* UnaryGram;
     public double* BinaryGram;
 }

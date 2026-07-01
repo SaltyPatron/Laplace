@@ -12,18 +12,18 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 internal static class CopyBlobValidator
 {
-    
-    
+
+
     public static readonly bool Enabled =
         Environment.GetEnvironmentVariable("LAPLACE_COPY_VALIDATE") == "1";
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     public static void Checkpoint(IntentStage stage, string phase)
     {
         if (!Enabled) return;
@@ -43,11 +43,11 @@ internal static class CopyBlobValidator
         }
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public static void Validate(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
     {
         if (ptr == IntPtr.Zero || len <= 0) return;
@@ -57,12 +57,12 @@ internal static class CopyBlobValidator
             new ReadOnlySpan<byte>((void*)ptr, checked((int)len)).CopyTo(blob);
         }
 
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
         long off = 0;
         int row = 0;
         while (off < len)
@@ -83,7 +83,7 @@ internal static class CopyBlobValidator
                         $"truncated length prefix at field {f}");
                 int flen = (blob[off] << 24) | (blob[off + 1] << 16) | (blob[off + 2] << 8) | blob[off + 3];
                 off += 4;
-                if (flen == -1) continue;          
+                if (flen == -1) continue;
                 if (flen < 0 || off + flen > len)
                     FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
                         $"field {f} length {flen} overruns blob (off={off}, len={len})");
@@ -116,9 +116,9 @@ internal static class CopyBlobValidator
             ascii.Append(c >= 0x20 && c < 0x7F ? (char)c : '.');
         }
 
-        
-        
-        
+
+
+
         var strideReport = new StringBuilder();
         if (tableName == "entities")
         {
@@ -131,8 +131,8 @@ internal static class CopyBlobValidator
             $"expected {expected} fields. Hex window (rowStart marked [>..<]):\n{sb}\nASCII: {ascii}{strideReport}");
     }
 
-    
-    
+
+
     private static string DescribeEntityStride(byte[] blob, long failOffset)
     {
         var sb = new StringBuilder();
@@ -160,15 +160,15 @@ internal static class CopyBlobValidator
                 }
                 return sb.ToString();
             }
-            
-            
-            
-            
-            
-            int lId   = ReadLen(blob, rowStart + 2);
+
+
+
+
+
+            int lId = ReadLen(blob, rowStart + 2);
             int lTier = ReadLen(blob, rowStart + 2 + 4 + 16);
             int lType = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2);
-            int lFob  = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2 + 4 + 16);
+            int lFob = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2 + 4 + 16);
             bool ok = lId == 16 && lTier == 2 && lType == 16 && (lFob == 16 || lFob == -1);
             if (!ok)
             {

@@ -15,8 +15,8 @@ public class RelationTypeRegistryTests
         Assert.Equal(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_UPOS").Id);
         Assert.Equal(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_POS").Id);
         Assert.NotEqual(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_LEX_CATEGORY").Id);
-        // HAS_LEX_CATEGORY is now a registered canonical (manifest: associative, parent HAS_DOMAIN_TOPIC),
-        // no longer an unregistered/probationary surface — but still distinct from the POS family.
+
+
         Assert.Equal(RelationTypeRank.Associative, RelationTypeRegistry.Resolve("HAS_LEX_CATEGORY").Rank);
     }
 
@@ -69,9 +69,9 @@ public class RelationTypeRegistryTests
     [Fact]
     public void SeedEnhancedDeprel_SubtypedRel_StagesParentChain()
     {
-        // SeedDynamic now emits a substrate-native HAS_NAME_ALIAS for the type name (content witness),
-        // matching SeedCanonical — so the T0 perfcache must be loaded and the type-name codepoint walk
-        // needs room beyond the bare entity + IS_A chain.
+
+
+
         CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(Hash128.OfCanonical("src"), "test/edep", null,
             entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
@@ -94,9 +94,9 @@ public class RelationTypeRegistryTests
         }
     }
 
-    
-    
-    
+
+
+
     [Fact]
     public void TensorRoleArenas_Purged_FallToProbationary()
     {
@@ -110,7 +110,7 @@ public class RelationTypeRegistryTests
     public void DistinctRelations_StayDistinct()
     {
         Assert.NotEqual(RelationTypeRegistry.Resolve("IS_SYNONYM_OF").Id, RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id);
-        Assert.NotEqual(RelationTypeRegistry.Resolve("IS_A").Id,         RelationTypeRegistry.Resolve("HAS_PART").Id);
+        Assert.NotEqual(RelationTypeRegistry.Resolve("IS_A").Id, RelationTypeRegistry.Resolve("HAS_PART").Id);
         Assert.NotEqual(RelationTypeRegistry.Resolve("IS_ANTONYM_OF").Id, RelationTypeRegistry.Resolve("IS_SYNONYM_OF").Id);
     }
 
@@ -133,7 +133,7 @@ public class RelationTypeRegistryTests
     {
         Hash128 animal = Hash128.OfCanonical("e/animal"), dog = Hash128.OfCanonical("e/dog");
         var flipped = NativeAttestation.Categorical(animal, "HAS_HYPONYM", dog, Hash128.OfCanonical("src"), null, 1.0);
-        var direct  = NativeAttestation.Categorical(dog,    "IS_A",        animal, Hash128.OfCanonical("src"), null, 1.0);
+        var direct = NativeAttestation.Categorical(dog, "IS_A", animal, Hash128.OfCanonical("src"), null, 1.0);
         Assert.Equal(dog, flipped.SubjectId);
         Assert.Equal(animal, flipped.ObjectId);
         Assert.Equal(direct.Id, flipped.Id);

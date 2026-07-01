@@ -10,33 +10,33 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed class TextEntityBuilder
 {
     public static readonly Hash128 CodepointTypeId = EntityTypeRegistry.Codepoint;
-    public static readonly Hash128 GraphemeTypeId  = EntityTypeRegistry.Grapheme;
-    public static readonly Hash128 WordTypeId      = EntityTypeRegistry.Word;
-    public static readonly Hash128 SentenceTypeId  = EntityTypeRegistry.Sentence;
-    public static readonly Hash128 DocumentTypeId  = EntityTypeRegistry.Document;
+    public static readonly Hash128 GraphemeTypeId = EntityTypeRegistry.Grapheme;
+    public static readonly Hash128 WordTypeId = EntityTypeRegistry.Word;
+    public static readonly Hash128 SentenceTypeId = EntityTypeRegistry.Sentence;
+    public static readonly Hash128 DocumentTypeId = EntityTypeRegistry.Document;
 
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
-    private const byte WordTier     = 2;
+    private const byte WordTier = 2;
     private const byte SentenceTier = 3;
 
-    private readonly TierTree  _tree;
-    private readonly Hash128   _sourceId;
-    private readonly byte[]?   _existingBitmap;
+    private readonly TierTree _tree;
+    private readonly Hash128 _sourceId;
+    private readonly byte[]? _existingBitmap;
     private readonly HashSet<Hash128> _emittedIds = new();
 
-    private readonly ImmutableArray<EntityRow>.Builder       _entities;
-    private readonly ImmutableArray<PhysicalityRow>.Builder  _physicalities;
+    private readonly ImmutableArray<EntityRow>.Builder _entities;
+    private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
 
     public TextEntityBuilder(TierTree tree, Hash128 sourceId, byte[]? existingBitmap = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
-        _tree           = tree;
-        _sourceId       = sourceId;
+        _tree = tree;
+        _sourceId = sourceId;
         _existingBitmap = existingBitmap;
-        int n           = tree.NodeCount;
-        _entities       = ImmutableArray.CreateBuilder<EntityRow>(n);
-        _physicalities  = ImmutableArray.CreateBuilder<PhysicalityRow>(n);
+        int n = tree.NodeCount;
+        _entities = ImmutableArray.CreateBuilder<EntityRow>(n);
+        _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(n);
     }
 
     public (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build()
@@ -84,15 +84,15 @@ public sealed class TextEntityBuilder
             var childFlags = new ulong[node.ChildCount];
             for (uint ci = 0; ci < node.ChildCount; ci++)
             {
-                
-                
+
+
                 var child = _tree.GetNode(_tree.CollapseIndex(node.FirstChildIdx + ci));
                 childIds[ci] = child.Id;
                 childFlags[ci] = Trajectory.VertexFlags(
                     child.Tier, hasAtom: child.Tier == 0, atom: child.Atom);
             }
             trajectoryXyzm = Trajectory.Build(childIds, childFlags);
-            nConstituents  = (int)node.ChildCount;
+            nConstituents = (int)node.ChildCount;
         }
 
         double cx, cy, cz, cm;
@@ -104,20 +104,20 @@ public sealed class TextEntityBuilder
             trajectoryXyzm ?? ReadOnlySpan<double>.Empty);
 
         _physicalities.Add(new PhysicalityRow(
-            Id:                physId,
-            EntityId:          node.Id,
-            SourceId:          _sourceId,
-            Type:              PhysicalityType.Content,
-            CoordX:            cx,
-            CoordY:            cy,
-            CoordZ:            cz,
-            CoordM:            cm,
-            HilbertIndex:      node.Hilbert,
-            TrajectoryXyzm:    trajectoryXyzm,
-            NConstituents:     nConstituents,
+            Id: physId,
+            EntityId: node.Id,
+            SourceId: _sourceId,
+            Type: PhysicalityType.Content,
+            CoordX: cx,
+            CoordY: cy,
+            CoordZ: cz,
+            CoordM: cm,
+            HilbertIndex: node.Hilbert,
+            TrajectoryXyzm: trajectoryXyzm,
+            NConstituents: nConstituents,
             AlignmentResidual: null,
-            SourceDim:         null,
-            ObservedAtUnixUs:  nowUs));
+            SourceDim: null,
+            ObservedAtUnixUs: nowUs));
     }
 
     private static Hash128 TierTypeId(byte tier) => tier switch
@@ -167,8 +167,8 @@ public sealed class TextEntityBuilder
         }
         catch (InvalidOperationException)
         {
-            
-            
+
+
             if (!CodepointPerfcache.IsLoaded) throw;
             rootId = default; rootTier = 0;
             cx = cy = cz = cm = double.NaN;
@@ -281,9 +281,9 @@ public sealed class TextEntityBuilder
 
         if (precedes.Count == 0) return ImmutableArray<AttestationRow>.Empty;
 
-        
-        
-        
+
+
+
         var contextId = tree.GetNode(tree.NaturalUnitIndex()).Id;
         var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
         foreach (var (pair, count) in precedes)

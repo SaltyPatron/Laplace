@@ -3,9 +3,9 @@ setlocal
 call "%~dp0env.cmd"
 set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1"
 
-rem Derive PG parallelism from the real P-core count. Hybrid CPU: keep parallel workers on the fast
-rem P-cores (8 on a 14900KS), OFF the slow E-cores, and leave headroom for the client ingest pools
-rem (compose/decompose/commit) and the interactive user. Falls back to 8 if the CLI isn't built yet.
+
+
+
 set "PCORES=8"
 pushd "%LAPLACE_ROOT%\app" >nul 2>&1
 for /f "usebackq delims=" %%i in (`dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --p-cores 2^>nul`) do set "PCORES=%%i"

@@ -66,7 +66,8 @@ public class BootstrapIntentBuilderTests
     [Fact]
     public void Build_IsDeterministicAcrossRebuilds()
     {
-        BootstrapIntentBuilder Make() {
+        BootstrapIntentBuilder Make()
+        {
             var b = new BootstrapIntentBuilder(SourceId, "DetTest", TrustClassId);
             b.AddType("DetTest_Foo");
             b.AddRelationType("DET_TEST_TYPE");
@@ -83,9 +84,9 @@ public class BootstrapIntentBuilderTests
     [Fact]
     public void CanonicalIdConventions_AreContentAddressed()
     {
-        Assert.Equal(TypeHash("Source"),        BootstrapIntentBuilder.SourceTypeId);
-        Assert.Equal(TypeHash("Type"),          BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Equal(TypeHash("RelationType"),  BootstrapIntentBuilder.RelationTypeMetaTypeId);
+        Assert.Equal(TypeHash("Source"), BootstrapIntentBuilder.SourceTypeId);
+        Assert.Equal(TypeHash("Type"), BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Equal(TypeHash("RelationType"), BootstrapIntentBuilder.RelationTypeMetaTypeId);
         Assert.Equal(TypeHash("HAS_TRUST_CLASS"), BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }

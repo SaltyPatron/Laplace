@@ -149,13 +149,13 @@ public class NpgsqlSubstrateWriterTests
     [Fact]
     public async Task ApplyAsync_PhysicalitiesSameEntityType_DistinctIds_CoexistAndDedupById()
     {
-        // Current design (extension/laplace_substrate/sql/03_physicalities.sql.in:15): there is
-        // deliberately NO (entity_id, type) natural key — "Dedup is the hash." A physicality is keyed
-        // by its content-addressed id (BLAKE3 of entity_id|type|coord|trajectory). So two rows with the
-        // same (entity_id, type) but DIFFERENT coords have DIFFERENT ids and both persist; the apply
-        // never raises 23505 (no natural-key unique to violate). Re-applying the SAME ids is idempotent
-        // via the id anti-join. (Replaces a stale regression test that asserted a natural-key collapse
-        // for a constraint that was removed.)
+
+
+
+
+
+
+
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/phys-natkey");
         var typeId = await EnsureTestTypeAsync(src);
@@ -172,14 +172,14 @@ public class NpgsqlSubstrateWriterTests
             SourceDim: null,
             ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
-        // Two physicalities, same (entity_id, type) but different id, in ONE apply — both persist.
+
         var change = new SubstrateChangeBuilder(src, "phys-natkey-unit")
             .AddEntity(entId, 0, typeId)
             .AddPhysicality(Phys(9101, 0.10))
             .AddPhysicality(Phys(9102, 0.99))
             .Build();
 
-        var result = await writer.ApplyAsync(change);   // no 23505: there is no natural-key unique
+        var result = await writer.ApplyAsync(change);
         Assert.Equal(2, result.PhysicalitiesInserted);
 
         await using var cnt = _pg.DataSource.CreateCommand(
@@ -187,7 +187,7 @@ public class NpgsqlSubstrateWriterTests
         cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, entId.ToBytes());
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // Re-apply the SAME two ids: 0 inserted (id anti-join is the dedup), still no throw, still 2 rows.
+
         var reapplySame = new SubstrateChangeBuilder(src, "phys-natkey-reapply-same")
             .AddPhysicality(Phys(9101, 0.10))
             .AddPhysicality(Phys(9102, 0.99))
@@ -196,7 +196,7 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal(0, same.PhysicalitiesInserted);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // A THIRD distinct id (distinct coord) is a distinct physicality — it persists.
+
         var third = new SubstrateChangeBuilder(src, "phys-natkey-third")
             .AddPhysicality(Phys(9103, 0.55))
             .Build();
@@ -208,10 +208,10 @@ public class NpgsqlSubstrateWriterTests
     [Fact]
     public async Task ApplyAsync_AcceptsForwardReference_NoPreCheck()
     {
-        // Referential integrity is no longer pre-checked per batch. Identity is content-addressed
-        // and the tier DAG is acyclic, so a "forward" reference to a not-yet-deposited subject is
-        // legal — the apply succeeds and writes the rows (FK/triggers disabled via replica role;
-        // the referent lands with the identical id later, and reconstruction proves soundness).
+
+
+
+
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/forwardref");
         var typeId = await EnsureTestTypeAsync(src);
@@ -261,11 +261,11 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal((byte)0b00000101, bitmap[0]);
     }
 
-    // AppendThenFinalize_DedupesEntities_SumsAttestationObservations was deleted with
-    // SubstrateStagingMerge: there is no longer a deferred append/finalize lane. AppendAsync
-    // now routes to ApplyManyAsync (the one COPY + laplace_apply_batch call) so a batch goes
-    // live on its own commit; the attestation observation-count fold is covered by
-    // ApplyAsync_ReobservedAttestation_AccumulatesGames below.
+
+
+
+
+
 
     [Fact]
     public async Task ApplyAsync_ReobservedAttestation_AccumulatesGames()
@@ -328,13 +328,13 @@ public class NpgsqlSubstrateWriterTests
 
         var result = await writer.ApplyManyAsync(batch);
         Assert.True(result.EntitiesInserted > 0);
-        // PER-CONTENT-ID PARALLEL APPLY: the batch is split natively by id.lo % N into N disjoint
-        // partitions, each committed on its OWN connection (GUC + up to 3 COPY + 1 apply). Round
-        // trips are therefore O(partitions), NOT O(rows) — the merge is still one set-based apply
-        // per partition, never per-row. Bound by the per-partition envelope so the contract still
-        // proves "no per-row DB work" while permitting the deliberate parallel fan-out.
+
+
+
+
+
         int parts = Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16);
-        int perPartitionCalls = 5; // GUC + 3 COPY + apply, upper bound
+        int perPartitionCalls = 5;
         int budget = parts * perPartitionCalls;
         Assert.True(result.RoundTrips <= budget,
             $"coalesced batch should be O(partitions) DB calls (<= {budget} for {parts} partitions), "

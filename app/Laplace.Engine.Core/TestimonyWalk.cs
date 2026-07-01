@@ -11,11 +11,11 @@ namespace Laplace.Engine.Core;
 
 public static class TestimonyWalk
 {
-    
+
     public static byte[] Pack(ReadOnlySpan<Hash128> objects, ReadOnlySpan<long> scoresFp1e9)
         => Pack(objects, scoresFp1e9, ReadOnlySpan<ushort>.Empty);
 
-    
+
     public static unsafe byte[] Pack(
         ReadOnlySpan<Hash128> objects, ReadOnlySpan<long> scoresFp1e9, ReadOnlySpan<ushort> games)
     {

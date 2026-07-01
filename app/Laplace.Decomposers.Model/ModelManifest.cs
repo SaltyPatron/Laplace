@@ -2,121 +2,121 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
-// ── Lane A: the frozen contract every other lane consumes ─────────────────────────────────────
-// A ModelManifest is the shape-inferred, modality-agnostic description of a model on disk: the
-// config scalars (ModelConfig) plus the list of weight tensors, each tagged with the STRUCTURAL
-// role inferred from its shape ("the magic number"). Meaning is never assumed from a tensor's
-// name — name/block-order is only a tiebreak. Lanes B (circuit orchestration), C (decoder ring),
-// and D (recipe synthesis) all read this and nothing else about the raw weights.
 
-// What a tensor structurally is. Family comes from shape; the exact member (Q vs O when H*hd==d)
-// is a name/block-order tiebreak resolved by the classifier.
+
+
+
+
+
+
+
+
 public enum TensorRoleKind
 {
     Unknown = 0,
 
-    Norm,            // [d] 1-D scale (rmsnorm / layernorm weight)
-    Bias,            // [d] or [out] 1-D additive bias
-    Embedding,       // [V, d] input token table
-    LmHead,          // [V, d] output unembedding (untied, or name lm_head|output)
+    Norm,
+    Bias,
+    Embedding,
+    LmHead,
 
-    AttnQ,           // [H*hd, d]
-    AttnK,           // [Hkv*hd, d]
-    AttnV,           // [Hkv*hd, d]
-    AttnO,           // [d, H*hd]
+    AttnQ,
+    AttnK,
+    AttnV,
+    AttnO,
 
-    MlpGate,         // [I, d]
-    MlpUp,           // [I, d]
-    MlpDown,         // [d, I]
+    MlpGate,
+    MlpUp,
+    MlpDown,
 
-    // MoE: an expert stack has first dim == E (num_experts).
-    MoeRouter,       // [E, d] gate/router logits
-    MoeExpertGate,   // [E, I, d]
-    MoeExpertUp,     // [E, I, d]
-    MoeExpertDown,   // [E, d, I]
-    MoeExpert,       // [E, *] expert stack, member undetermined
 
-    // MLA (DeepSeek-V2/V3): low-rank latent attention projections.
-    MlaQDown,        // q_a_proj          [q_lora_rank, d]
-    MlaQUp,          // q_b_proj          [H*qk_head_dim, q_lora_rank]
-    MlaKvDown,       // kv_a_proj_with_mqa [kv_lora_rank + qk_rope_head_dim, d]
-    MlaKvUp,         // kv_b_proj         [H*(qk_nope_head_dim+v_head_dim), kv_lora_rank]
+    MoeRouter,
+    MoeExpertGate,
+    MoeExpertUp,
+    MoeExpertDown,
+    MoeExpert,
 
-    Conv,            // >=3-D [out,in,kh,kw] — vision/audio, out of token scope
+
+    MlaQDown,
+    MlaQUp,
+    MlaKvDown,
+    MlaKvUp,
+
+    Conv,
 }
 
-// The product surface for a model. Determines which circuit planes can run.
+
 public enum Modality
 {
-    Text = 0,        // has a token vocab + embedding table — full decrypt
-    Vision,          // patch/conv front-end, no token vocab
-    Audio,           // waveform/mel front-end, no token vocab
-    Diffusion,       // denoiser, no token vocab
+    Text = 0,
+    Vision,
+    Audio,
+    Diffusion,
     Unknown,
 }
 
-// How much of the model the pipeline can faithfully decrypt.
+
 public enum Coverage
 {
-    Full = 0,        // text model, all anchors present — every plane runs
-    Partial,         // recognized but incomplete (e.g. vision tower) — embedding-plane only, never throw
-    Unsupported,     // could not classify — deposit recipe scalars only, never throw
+    Full = 0,
+    Partial,
+    Unsupported,
 }
 
-// One classified tensor.
+
 public sealed record TensorRole(
     string Name,
     int[] Shape,
     string Dtype,
     TensorRoleKind Kind,
-    int LayerIndex,      // -1 when not layer-scoped
-    int ExpertIndex)     // -1 when not an MoE expert slice
+    int LayerIndex,
+    int ExpertIndex)
 {
     public bool IsLayerScoped => LayerIndex >= 0;
-    public bool IsAttention   => Kind is TensorRoleKind.AttnQ or TensorRoleKind.AttnK
+    public bool IsAttention => Kind is TensorRoleKind.AttnQ or TensorRoleKind.AttnK
                                        or TensorRoleKind.AttnV or TensorRoleKind.AttnO;
-    public bool IsMlp         => Kind is TensorRoleKind.MlpGate or TensorRoleKind.MlpUp
+    public bool IsMlp => Kind is TensorRoleKind.MlpGate or TensorRoleKind.MlpUp
                                        or TensorRoleKind.MlpDown;
 }
 
-// Config scalars, generalized across model_type. Fields that a given architecture does not declare
-// are left at their neutral default (0 / false); consumers must tolerate that. This is never the
-// place a missing field throws — see ModelConfigReader and the Coverage verdict.
+
+
+
 public sealed record ModelConfig
 {
-    public required string ModelType    { get; init; }
+    public required string ModelType { get; init; }
     public required string Architecture { get; init; }
 
-    public required int VocabSize        { get; init; }
-    public required int HiddenSize       { get; init; }   // d
-    public required int NumLayers        { get; init; }
-    public required int NumHeads         { get; init; }   // H
-    public required int NumKvHeads       { get; init; }   // Hkv
-    public required int HeadDim          { get; init; }   // hd
-    public required int IntermediateSize { get; init; }   // I
-    public required int NumExperts       { get; init; }   // E (0 = dense)
+    public required int VocabSize { get; init; }
+    public required int HiddenSize { get; init; }
+    public required int NumLayers { get; init; }
+    public required int NumHeads { get; init; }
+    public required int NumKvHeads { get; init; }
+    public required int HeadDim { get; init; }
+    public required int IntermediateSize { get; init; }
+    public required int NumExperts { get; init; }
 
-    public required bool   TieWordEmbeddings { get; init; }
-    public required bool   QkNorm            { get; init; }
-    public required double RopeTheta         { get; init; }
-    public required double NormEps           { get; init; }
+    public required bool TieWordEmbeddings { get; init; }
+    public required bool QkNorm { get; init; }
+    public required double RopeTheta { get; init; }
+    public required double NormEps { get; init; }
 
-    // MLA latent ranks (0 when the model is not MLA).
-    public required int MlaQLoraRank   { get; init; }
-    public required int MlaKvLoraRank  { get; init; }
-    public required int QkRopeHeadDim  { get; init; }
-    public required int QkNopeHeadDim  { get; init; }
-    public required int VHeadDim       { get; init; }
+
+    public required int MlaQLoraRank { get; init; }
+    public required int MlaKvLoraRank { get; init; }
+    public required int QkRopeHeadDim { get; init; }
+    public required int QkNopeHeadDim { get; init; }
+    public required int VHeadDim { get; init; }
 
     public required Hash128 RecipeEntityId { get; init; }
-    public required byte[]  CanonicalJson  { get; init; }
+    public required byte[] CanonicalJson { get; init; }
 
     public bool IsMoe => NumExperts > 0;
     public bool IsMla => MlaKvLoraRank > 0 || MlaQLoraRank > 0;
 
-    // Derived anchor dims used by the magic-number rules.
-    public int AttnDim   => NumHeads   * HeadDim;   // H*hd
-    public int KvDim     => NumKvHeads * HeadDim;   // Hkv*hd
+
+    public int AttnDim => NumHeads * HeadDim;
+    public int KvDim => NumKvHeads * HeadDim;
 }
 
 public sealed class ModelManifest
@@ -129,11 +129,11 @@ public sealed class ModelManifest
 
     public bool TextPlanesRunnable => Coverage == Coverage.Full && Modality == Modality.Text;
 
-    // The input embedding table, if one was classified.
+
     public TensorRole? Embedding =>
         Roles.FirstOrDefault(r => r.Kind == TensorRoleKind.Embedding);
 
-    // The output unembedding: explicit LmHead, else (tied) the embedding table.
+
     public TensorRole? LmHead =>
         Roles.FirstOrDefault(r => r.Kind == TensorRoleKind.LmHead) ?? Embedding;
 
@@ -153,47 +153,47 @@ public sealed class ModelManifest
     public TensorRole? Single(int layer, TensorRoleKind kind) =>
         Roles.FirstOrDefault(r => r.LayerIndex == layer && r.Kind == kind);
 
-    // ── Norm sub-role accessors (Track A1) ─────────────────────────────────────────────────────
-    // TensorRoleKind.Norm is a single shape-inferred kind ([d] 1-D scale). A transformer block has
-    // more than one: input_layernorm (precedes Q/K/V), post_attention_layernorm (precedes gate/up),
-    // and — depending on the family — Qwen3 per-head q_norm/k_norm and MLA latent q_a/kv_a norms.
-    // They are distinguishable ONLY by tensor name; name is the sanctioned tiebreak among same-shape
-    // tensors (see TensorRoleClassifier doctrine). Every accessor returns null when absent, and the
-    // caller treats null as identity (no scaling) — these never throw. Folding the diagonal gain γ
-    // into the consuming operator is what Track A2 does (W·diag(γ))·x = W·(γ⊙x).
+
+
+
+
+
+
+
+
     private static bool NameHas(TensorRole r, string token) =>
         r.Name.Contains(token, StringComparison.OrdinalIgnoreCase);
-    private static bool IsQkNorm(TensorRole r)   => NameHas(r, "q_norm") || NameHas(r, "k_norm");
-    private static bool IsLatentNorm(TensorRole r)=> NameHas(r, "q_a_layernorm") || NameHas(r, "kv_a_layernorm");
-    private static bool IsPostNorm(TensorRole r)  => NameHas(r, "post_attention") || NameHas(r, "ffn_norm")
+    private static bool IsQkNorm(TensorRole r) => NameHas(r, "q_norm") || NameHas(r, "k_norm");
+    private static bool IsLatentNorm(TensorRole r) => NameHas(r, "q_a_layernorm") || NameHas(r, "kv_a_layernorm");
+    private static bool IsPostNorm(TensorRole r) => NameHas(r, "post_attention") || NameHas(r, "ffn_norm")
                                                    || NameHas(r, "ln_2") || NameHas(r, "post_ln");
 
     private IEnumerable<TensorRole> LayerNorms(int layer) =>
         Roles.Where(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm);
 
-    // Pre-attention norm (scales the residual before Q/K/V). Matches the HF/llama names; falls back
-    // to the layer's sole "plain" norm for parallel-block models (Phi-2: one shared input_layernorm
-    // feeds both attention and MLP).
+
+
+
     public TensorRole? InputNorm(int layer)
     {
         var norms = LayerNorms(layer).ToList();
         var named = norms.FirstOrDefault(r => NameHas(r, "input_layernorm") || NameHas(r, "attention_norm")
                                            || NameHas(r, "ln_1") || NameHas(r, "pre_ln"));
         if (named is not null) return named;
-        // Parallel/single-norm block: the one norm that isn't a q/k, post, or latent norm.
+
         var plain = norms.Where(r => !IsQkNorm(r) && !IsPostNorm(r) && !IsLatentNorm(r)).ToList();
         return plain.Count == 1 ? plain[0] : null;
     }
 
-    // Pre-MLP norm (scales the residual before gate/up). Falls back to InputNorm for parallel blocks.
+
     public TensorRole? PostAttnNorm(int layer) =>
         LayerNorms(layer).FirstOrDefault(IsPostNorm) ?? InputNorm(layer);
 
-    // Qwen3 per-head RMSNorm on the head_dim, applied to Q/K after projection, before RoPE.
+
     public TensorRole? QNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_norm"));
     public TensorRole? KNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "k_norm"));
 
-    // MLA (DeepSeek) latent norms, applied to the down-projected latents before up-projection.
-    public TensorRole? QaLatentNorm(int layer)  => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_a_layernorm"));
+
+    public TensorRole? QaLatentNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_a_layernorm"));
     public TensorRole? KvaLatentNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "kv_a_layernorm"));
 }

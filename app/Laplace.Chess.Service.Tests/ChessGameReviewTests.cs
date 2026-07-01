@@ -93,7 +93,7 @@ public sealed class ChessGameReviewTests
         var g = ChessGameReview.ReviewGameText(FoolsMate, depth: 1)!;
         for (int i = 1; i < g.Worst.Count; i++)
             Assert.True(g.Worst[i - 1].CpLoss >= g.Worst[i].CpLoss,
-                $"Worst[{i-1}].CpLoss={g.Worst[i-1].CpLoss} < Worst[{i}].CpLoss={g.Worst[i].CpLoss}");
+                $"Worst[{i - 1}].CpLoss={g.Worst[i - 1].CpLoss} < Worst[{i}].CpLoss={g.Worst[i].CpLoss}");
     }
 
     [Fact]

@@ -96,9 +96,9 @@ builder.Services.AddOpenTelemetry()
 
 var app = builder.Build();
 
-// Behind a reverse proxy (nginx on Linux, ANCM on IIS) the peer is the proxy on
-// loopback; honor its X-Forwarded-For/-Proto so client IP + scheme are real.
-// Trust only loopback proxies so the headers can't be spoofed by real clients.
+
+
+
 var forwardedHeaders = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto

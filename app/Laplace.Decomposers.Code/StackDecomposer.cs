@@ -28,43 +28,43 @@ public sealed class StackDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    
-    
+
+
     private static readonly Dictionary<string, string?> StackLangToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Python"]     = "python",
-            ["C"]          = "c",
-            ["C++"]        = "cpp",
+            ["Python"] = "python",
+            ["C"] = "c",
+            ["C++"] = "cpp",
             ["JavaScript"] = "javascript",
             ["TypeScript"] = "typescript",
-            ["Rust"]       = "rust",
-            ["Go"]         = "go",
-            ["C#"]         = "c-sharp",
-            ["Shell"]      = "bash",
-            ["Java"]       = "java",
-            ["Ruby"]       = "ruby",
-            ["Julia"]      = "julia",
-            ["Kotlin"]     = "kotlin",
-            ["Swift"]      = "swift",
-            ["PHP"]        = "php",
-            ["SQL"]        = "sql",
-            ["JSON"]       = "json",
-            ["Markdown"]   = "markdown",
-            
+            ["Rust"] = "rust",
+            ["Go"] = "go",
+            ["C#"] = "c-sharp",
+            ["Shell"] = "bash",
+            ["Java"] = "java",
+            ["Ruby"] = "ruby",
+            ["Julia"] = "julia",
+            ["Kotlin"] = "kotlin",
+            ["Swift"] = "swift",
+            ["PHP"] = "php",
+            ["SQL"] = "sql",
+            ["JSON"] = "json",
+            ["Markdown"] = "markdown",
+
             ["TypeScript JSX"] = null,
             ["JavaScript JSX"] = null,
-            ["HTML"]           = null,
-            ["CSS"]            = null,
-            ["SCSS"]           = null,
-            ["Dockerfile"]     = null,
-            ["YAML"]           = null,
-            ["TOML"]           = null,
+            ["HTML"] = null,
+            ["CSS"] = null,
+            ["SCSS"] = null,
+            ["Dockerfile"] = null,
+            ["YAML"] = null,
+            ["TOML"] = null,
         };
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "StackDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "StackDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string>? _langFilter;
@@ -124,7 +124,7 @@ public sealed class StackDecomposer : IDecomposer
                 catch { continue; }
                 if (codeBytes.Length == 0) continue;
 
-                ImmutableArray<EntityRow>      ents;
+                ImmutableArray<EntityRow> ents;
                 ImmutableArray<PhysicalityRow> phys;
                 ImmutableArray<AttestationRow> atts;
                 Hash128 codeRootId;
@@ -144,7 +144,7 @@ public sealed class StackDecomposer : IDecomposer
                 foreach (var p in phys) b.AddPhysicality(p);
                 foreach (var a in atts) b.AddAttestation(a);
 
-                
+
                 if (!string.IsNullOrWhiteSpace(row.Path))
                 {
                     var filename = Path.GetFileNameWithoutExtension(row.Path);
@@ -194,11 +194,11 @@ public sealed class StackDecomposer : IDecomposer
         await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
 
         DataField[] fields = reader.Schema.GetDataFields();
-        DataField? contentField    = FindField(fields, "content");
-        DataField? languageField   = FindField(fields, "language") ?? FindField(fields, "lang");
-        DataField? pathField       = FindField(fields, "path") ?? FindField(fields, "max_stars_repo_path");
-        DataField? vendorField     = FindField(fields, "is_vendor");
-        DataField? generatedField  = FindField(fields, "is_generated");
+        DataField? contentField = FindField(fields, "content");
+        DataField? languageField = FindField(fields, "language") ?? FindField(fields, "lang");
+        DataField? pathField = FindField(fields, "path") ?? FindField(fields, "max_stars_repo_path");
+        DataField? vendorField = FindField(fields, "is_vendor");
+        DataField? generatedField = FindField(fields, "is_generated");
 
         if (contentField is null || languageField is null) yield break;
 
@@ -208,21 +208,21 @@ public sealed class StackDecomposer : IDecomposer
             using var rgr = reader.OpenRowGroupReader(rg);
             int count = (int)rgr.RowCount;
 
-            string[] contents  = new string[count];
+            string[] contents = new string[count];
             string[] languages = new string[count];
-            string[]? paths    = pathField is not null ? new string[count] : null;
-            bool?[]? vendors    = vendorField is not null ? new bool?[count] : null;
-            bool?[]? generated  = generatedField is not null ? new bool?[count] : null;
+            string[]? paths = pathField is not null ? new string[count] : null;
+            bool?[]? vendors = vendorField is not null ? new bool?[count] : null;
+            bool?[]? generated = generatedField is not null ? new bool?[count] : null;
 
-            await rgr.ReadAsync(contentField,  contents);
+            await rgr.ReadAsync(contentField, contents);
             await rgr.ReadAsync(languageField, languages);
-            if (paths    is not null) await rgr.ReadAsync(pathField!,       paths);
-            if (vendors  is not null) await rgr.ReadAsync<bool>(vendorField!,    vendors);
+            if (paths is not null) await rgr.ReadAsync(pathField!, paths);
+            if (vendors is not null) await rgr.ReadAsync<bool>(vendorField!, vendors);
             if (generated is not null) await rgr.ReadAsync<bool>(generatedField!, generated);
 
             for (int i = 0; i < count; i++)
             {
-                if (vendors  is not null && vendors[i] == true)   continue;
+                if (vendors is not null && vendors[i] == true) continue;
                 if (generated is not null && generated[i] == true) continue;
                 yield return new StackRow(
                     contents[i],

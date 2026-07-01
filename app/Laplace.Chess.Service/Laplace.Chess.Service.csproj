@@ -20,8 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The shared chess substrate service: the generic engine + chess modality + the substrate host,
-         used by BOTH the CLI and the web host (no fork). -->
+    
     <ProjectReference Include="..\Laplace.Modality\Laplace.Modality.csproj" />
     <ProjectReference Include="..\Laplace.Modality.Chess\Laplace.Modality.Chess.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />

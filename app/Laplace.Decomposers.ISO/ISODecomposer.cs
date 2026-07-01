@@ -6,9 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : IDecomposer{
-    
-    
+public sealed class ISODecomposer : IDecomposer
+{
+
+
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/ISO639Decomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -27,9 +28,9 @@ public sealed class ISODecomposer : IDecomposer{
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
     private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
-    public Hash128 SourceId    => Source;
-    public string  SourceName  => "ISO639Decomposer";
-    public int     LayerOrder  => 1;
+    public Hash128 SourceId => Source;
+    public string SourceName => "ISO639Decomposer";
+    public int LayerOrder => 1;
     public Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
@@ -52,7 +53,7 @@ public sealed class ISODecomposer : IDecomposer{
         string dataPath = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
         var reader = context.Reader;
 
-        // Reference/print names are CONTENT via ContentWitnessBatch (native in-process bank).
+
         var b = new SubstrateChangeBuilder(
             Source, "iso639-3/all", null,
             entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000);
@@ -79,9 +80,9 @@ public sealed class ISODecomposer : IDecomposer{
                     RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
-            // ISO 639-2 bibliographic (2/B) and terminologic (2/T) codes are distinct channels — they
-            // differ for ~20 languages (ger/deu, fre/fra). Emit each under its own relation so which-is-which
-            // is recoverable; when they coincide both relations simply point at the one shared code entity.
+
+
+
             foreach (var (p2, rel) in new[] { (rec.Part2b, "HAS_ISO639_2B_CODE"), (rec.Part2t, "HAS_ISO639_2T_CODE") })
             {
                 if (p2.Length == 0) continue;
@@ -113,9 +114,9 @@ public sealed class ISODecomposer : IDecomposer{
                 var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
                 if (nameId is { } nid)
                 {
-                    // The reference name ("English") is the language's human-readable display name.
-                    // HAS_NAME_ALIAS makes label() surface "English" instead of the bare ISO code
-                    // "eng"; HAS_DEFINITION keeps it queryable as the language's gloss.
+
+
+
                     b.AddAttestation(NativeAttestation.Categorical(
                         langId, "HAS_NAME_ALIAS", nid, Source, SourceTrust.StandardsDerived));
                     b.AddAttestation(NativeAttestation.Categorical(
@@ -172,7 +173,7 @@ public sealed class ISODecomposer : IDecomposer{
                 var sucId = LanguageEntityId.FromIso639_3(changeTo);
                 b.AddEntity(retId, EntityTier.Word, LanguageTypeId, Source);
                 b.AddEntity(sucId, EntityTier.Word, LanguageTypeId, Source);
-                // Retirement is directional (retired -> successor), not a symmetric variant.
+
                 b.AddAttestation(NativeAttestation.Categorical(
                     retId, "SUPERSEDED_BY", sucId, Source, SourceTrust.StandardsDerived));
             }
@@ -189,8 +190,8 @@ public sealed class ISODecomposer : IDecomposer{
                 var parentId = LanguageReference.Resolve(prefix);
                 if (parentId.Equals(undId)) continue;
                 b.AddEntity(parentId, EntityTier.Word, LanguageTypeId, Source);
-                // A variant can attach under several prefixes (e.g. multiple base tags it may
-                // follow); each is its own HAS_VARIANT_OF edge from the variant to that parent.
+
+
                 b.AddAttestation(NativeAttestation.Categorical(
                     variantId, "HAS_VARIANT_OF", parentId, Source, SourceTrust.StandardsDerived));
             }
@@ -257,12 +258,12 @@ public sealed class ISODecomposer : IDecomposer{
             var parts = line.Split('\t');
             if (parts.Length < 7) continue;
 
-            string id     = parts[0].Trim();
+            string id = parts[0].Trim();
             string part2b = parts[1].Trim();
             string part2t = parts[2].Trim();
-            string part1  = parts[3].Trim();
-            string scope  = parts[4].Trim();
-            string type   = parts[5].Trim();
+            string part1 = parts[3].Trim();
+            string scope = parts[4].Trim();
+            string type = parts[5].Trim();
             string refName = parts[6].Trim();
             if (id.Length != 3) continue;
 

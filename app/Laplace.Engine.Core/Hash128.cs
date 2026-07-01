@@ -74,7 +74,7 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
         return b;
     }
 
-    // Inverse of WriteBytes: reconstruct from the 16-byte raw layout (e.g. a Postgres bytea id).
+
     public static Hash128 FromBytes(ReadOnlySpan<byte> src)
     {
         if (src.Length < 16) throw new ArgumentException("src must hold 16 bytes", nameof(src));
