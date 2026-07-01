@@ -11,6 +11,9 @@
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
 
+#include "laplace/core/relation_law.h"
+#include "laplace/core/glicko2.h"
+
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "perfcache_native.h"
@@ -40,6 +43,149 @@ ensure_edge_plan(void)
             elog(ERROR, "generate walk: SPI_keepplan failed");
         edge_plan = plan;
     }
+}
+
+/*
+ * walk_branches' batched edge fetch -- the native-C-does-the-heavy-lifting
+ * replacement for calling consensus_walk_edges() once per frontier node.
+ * consensus_walk_edges() did real per-call work in SQL: fetch + compute an
+ * unindexed `relation_rank_resolved(type_id) * eff_mu(rating,rd)` sort key
+ * per candidate row + ORDER BY + LIMIT, AND an O(path length) `= ANY(exclude)`
+ * scan per row against a path array that grows every level. Multiplied by an
+ * unbounded, non-deduplicated frontier (see below), a depth=6/breadth=12 walk
+ * on "chess" measured 4+ minutes with no sign of finishing.
+ *
+ * This fetches raw, unranked, unfiltered candidate edges for the ENTIRE
+ * current level's frontier in ONE query (unnest(...) WITH ORDINALITY, same
+ * batching idiom as recall.c's word_shape_peers_fast), then does ranking,
+ * refutation/relation-type filtering, and beam selection entirely in C via
+ * qsort -- SQL never sorts or filters here, it only hands over rows.
+ */
+/*
+ * NOTE: a per-subject CROSS JOIN LATERAL + LIMIT bound (using
+ * consensus_subject_eff_mu_btree) was tried here and reverted -- EXPLAIN
+ * ANALYZE confirmed it correctly used the index (0.98ms for a single-subject
+ * probe), but it did not improve full-walk wall time (45.6s/172,196 nodes vs
+ * a 45.8s/155,157-node baseline -- no real change) and introduced a real
+ * behavior wrinkle: the LATERAL LIMIT pre-filters by raw (rating-2*rd), but
+ * the final beam selection below ranks by relation_rank*eff_mu -- a
+ * different key -- so for high-fan-out subjects it could silently exclude a
+ * true top-beam candidate that didn't make the raw-eff_mu top-N cut. This
+ * batch query only executes once per LEVEL (max_depth times total), not
+ * once per subject, so per-subject row volume was never the dominant cost
+ * at scale -- the real cost is the sheer number of distinct subjects in a
+ * wide frontier (grows with beam^level), which a per-subject LIMIT doesn't
+ * touch. Left unbounded per subject; see .scratchpad/02_Identified_Issues.txt
+ * Issue 28 update for the measurement.
+ */
+static const char *WALK_BATCH_QUERY =
+    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count "
+    "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
+    "JOIN laplace.entities eo ON eo.id = c.object_id "
+    "WHERE c.object_id IS NOT NULL "
+    "  AND ($2::bytea IS NULL OR c.type_id = $2)";
+
+static SPIPlanPtr walk_batch_plan = NULL;
+
+static void
+ensure_walk_batch_plan(void)
+{
+    if (walk_batch_plan == NULL)
+    {
+        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(WALK_BATCH_QUERY, 2, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "walk_branches: SPI_prepare(batch) failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_branches: SPI_keepplan(batch) failed");
+        walk_batch_plan = plan;
+    }
+}
+
+static hash128_t g_relationtype_type_id;
+static bool      g_relationtype_type_id_ready = false;
+
+static void
+ensure_relationtype_type_id(void)
+{
+    int  rc;
+    bool isnull;
+    Datum d;
+
+    if (g_relationtype_type_id_ready)
+        return;
+
+    rc = SPI_execute("SELECT laplace.entity_type_id('RelationType')", true, 1);
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        elog(ERROR, "walk_branches: could not resolve entity_type_id('RelationType')");
+    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull)
+        elog(ERROR, "walk_branches: entity_type_id('RelationType') returned NULL");
+    g_relationtype_type_id = datum_to_hash128(d);
+    g_relationtype_type_id_ready = true;
+}
+
+/*
+ * Same ranking key as consensus_walk_edges' ORDER BY (relation_rank_resolved
+ * * eff_mu), computed natively instead of via a SQL function call per row.
+ * eff_mu here is the SAME simple `rating - 2*rd` used by consensus_walk_edges
+ * (13_mu_law.sql.in's eff_mu()) -- deliberately NOT laplace_effective_mu_fp
+ * (a different, display-oriented formula used elsewhere in this file).
+ * relation_rank_resolved's fast path (the static relation table lookup,
+ * which covers the ~153 canonical types plus family-collapsed dynamic
+ * DEP_ and FEAT_ types) is called directly, zero SQL/FunctionCall overhead.
+ * Its rare SPI-fallback path (a genuinely unknown type_id, not expected in
+ * practice) is deliberately not replicated here -- such a candidate scores
+ * the lowest possible rank so it never wins a beam slot over a resolvable
+ * candidate, rather than duplicating an 8-hop SPI parent-chain walk per row.
+ */
+static double
+walk_relation_rank(hash128_t type_id)
+{
+    const laplace_relation_def_t *def = NULL;
+
+    if (laplace_relation_lookup(&type_id, &def) == 0 && def != NULL)
+        return def->rank;
+    return 0.0;
+}
+
+typedef struct RawEdge
+{
+    int32  idx;
+    Datum  object;
+    Datum  object_type;
+    Datum  rel_type;
+    int64  rating;
+    int64  rd;
+    int64  witnesses;
+} RawEdge;
+
+static int
+raw_edge_cmp_idx(const void *a, const void *b)
+{
+    int32 ia = ((const RawEdge *) a)->idx;
+    int32 ib = ((const RawEdge *) b)->idx;
+    return (ia > ib) - (ia < ib);
+}
+
+typedef struct RankedEdge
+{
+    Datum  object;
+    Datum  rel_type;
+    int64  rating;
+    int64  rd;
+    int64  witnesses;
+    double score;
+} RankedEdge;
+
+static int
+ranked_edge_cmp_score_desc(const void *a, const void *b)
+{
+    double sa = ((const RankedEdge *) a)->score;
+    double sb = ((const RankedEdge *) b)->score;
+    return (sa < sb) - (sa > sb);
 }
 
 
@@ -98,7 +244,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_branches: SPI_connect failed");
-    ensure_edge_plan();
+    ensure_walk_batch_plan();
+    ensure_relationtype_type_id();
 
     cap = 256;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
@@ -112,66 +259,152 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     nodes[0].witnesses = 0;
     n_nodes = 1;
 
-    for (int frontier_start = 0, level = 0; level < max_depth; level++)
+    /*
+     * Global dedup across the whole walk, not just per-path -- the actual
+     * fix for the exponential blowup. The original per-path exclusion array
+     * only stopped a node from revisiting its OWN ancestors; it did nothing
+     * to stop sibling/cousin branches from independently re-discovering and
+     * re-expanding the same popular hub entity, which is exactly what turns
+     * a beam search into an unbounded tree. Once an entity has been placed
+     * anywhere in the walk (necessarily via the best-ranked edge that could
+     * reach it, since edges are processed in score order), a worse/deeper
+     * rediscovery adds no information a beam search should keep.
+     */
     {
-        int frontier_end = n_nodes;
-        if (frontier_start == frontier_end)
-            break;
+        HASHCTL ctl;
+        HTAB   *seen;
+        bool    found;
+        hash128_t root_id = datum_to_hash128(nodes[0].entity);
 
-        for (int f = frontier_start; f < frontier_end; f++)
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = 16;
+        ctl.entrysize = 16;
+        seen = hash_create("walk_branches seen", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
+        hash_search(seen, &root_id, HASH_ENTER, &found);
+
+        for (int frontier_start = 0, level = 0; level < max_depth; level++)
         {
-            ArrayType *path_arr = branch_array(nodes, f, false);
-            Datum  args[4];
-            char   nulls[5] = "    ";
+            int frontier_end = n_nodes;
+            int n_frontier;
+            Datum *frontier_ids;
+            ArrayType *frontier_arr;
+            Datum  args[2];
+            char   nulls[3] = "  ";
             int    rc;
+            RawEdge *raw;
+            int      n_raw;
 
-            args[0] = nodes[f].entity;
+            if (frontier_start == frontier_end)
+                break;
+
+            n_frontier = frontier_end - frontier_start;
+            frontier_ids = (Datum *) palloc(sizeof(Datum) * n_frontier);
+            for (int f = frontier_start; f < frontier_end; f++)
+                frontier_ids[f - frontier_start] = nodes[f].entity;
+            frontier_arr = construct_array(frontier_ids, n_frontier, BYTEAOID, -1, false, TYPALIGN_INT);
+
+            args[0] = PointerGetDatum(frontier_arr);
             args[1] = type_null ? (Datum) 0 : type_datum;
             if (type_null) nulls[1] = 'n';
-            args[2] = Int32GetDatum(beam);
-            args[3] = PointerGetDatum(path_arr);
 
-            rc = SPI_execute_plan(edge_plan, args, nulls, true, beam);
+            rc = SPI_execute_plan(walk_batch_plan, args, nulls, true, 0);
             if (rc != SPI_OK_SELECT)
-                elog(ERROR, "walk_branches: edge query failed: %s",
+                elog(ERROR, "walk_branches: batch edge query failed: %s",
                      SPI_result_code_string(rc));
 
-            for (uint64 r = 0; r < SPI_processed; r++)
+            n_raw = (int) SPI_processed;
+            raw = (RawEdge *) palloc(sizeof(RawEdge) * (n_raw > 0 ? n_raw : 1));
+            for (int r = 0; r < n_raw; r++)
             {
-                HeapTuple  tup = SPI_tuptable->vals[r];
-                TupleDesc  td  = SPI_tuptable->tupdesc;
-                bool       isnull;
-                Datum      obj   = SPI_getbinval(tup, td, 1, &isnull);
-                Datum      etype = SPI_getbinval(tup, td, 2, &isnull);
-                int64      rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-                int64      rd     = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-                int64      wc     = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
-                Datum      mu;
+                HeapTuple tup = SPI_tuptable->vals[r];
+                TupleDesc td  = SPI_tuptable->tupdesc;
+                bool isnull;
 
-                if (n_nodes >= GENERATE_NODE_BUDGET)
-                    ereport(ERROR, (errmsg(
-                        "walk_branches: node budget %d exceeded (beam %d × depth %d) — narrow the walk",
-                        GENERATE_NODE_BUDGET, beam, max_depth)));
-                if (n_nodes == cap)
-                {
-                    cap *= 2;
-                    nodes = (WalkNode *) repalloc(nodes, sizeof(WalkNode) * cap);
-                }
-
-                mu = eff_mu_display_numeric(rating, rd);
-                nodes[n_nodes].parent    = f;
-                nodes[n_nodes].depth     = level + 1;
-                nodes[n_nodes].entity    = copy_bytea_datum(obj);
-                nodes[n_nodes].rel_type      = copy_bytea_datum(etype);
-                nodes[n_nodes].eff_mu    = mu;
-                nodes[n_nodes].path_mu   = DirectFunctionCall2(numeric_add,
-                                                               nodes[f].path_mu, mu);
-                nodes[n_nodes].witnesses = wc;
-                n_nodes++;
+                raw[r].idx         = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
+                raw[r].object      = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
+                raw[r].object_type = copy_bytea_datum(SPI_getbinval(tup, td, 3, &isnull));
+                raw[r].rel_type    = copy_bytea_datum(SPI_getbinval(tup, td, 4, &isnull));
+                raw[r].rating      = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+                raw[r].rd          = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
+                raw[r].witnesses   = DatumGetInt64(SPI_getbinval(tup, td, 7, &isnull));
             }
-            pfree(path_arr);
+            qsort(raw, n_raw, sizeof(RawEdge), raw_edge_cmp_idx);
+
+            for (int r = 0; r < n_raw; )
+            {
+                int   run_start = r;
+                int   f = frontier_start + (raw[r].idx - 1);
+                RankedEdge *cands;
+                int          n_cands = 0;
+
+                while (r < n_raw && raw[r].idx == raw[run_start].idx)
+                    r++;
+
+                cands = (RankedEdge *) palloc(sizeof(RankedEdge) * (r - run_start));
+                for (int j = run_start; j < r; j++)
+                {
+                    hash128_t obj_type_id = datum_to_hash128(raw[j].object_type);
+                    hash128_t rel_type_id;
+                    hash128_t obj_id;
+                    bool      found2;
+
+                    if (raw[j].rating + 2 * raw[j].rd < LAPLACE_GLICKO2_NEUTRAL_MU_FP)
+                        continue; /* refuted */
+                    if (hash128_eq(&obj_type_id, &g_relationtype_type_id))
+                        continue; /* object is itself a RelationType meta-entity */
+                    obj_id = datum_to_hash128(raw[j].object);
+                    hash_search(seen, &obj_id, HASH_FIND, &found2);
+                    if (found2)
+                        continue; /* already placed elsewhere in this walk */
+
+                    rel_type_id = datum_to_hash128(raw[j].rel_type);
+                    cands[n_cands].object    = raw[j].object;
+                    cands[n_cands].rel_type  = raw[j].rel_type;
+                    cands[n_cands].rating    = raw[j].rating;
+                    cands[n_cands].rd        = raw[j].rd;
+                    cands[n_cands].witnesses = raw[j].witnesses;
+                    cands[n_cands].score     = walk_relation_rank(rel_type_id) *
+                                                (double) (raw[j].rating - 2 * raw[j].rd);
+                    n_cands++;
+                }
+                qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
+
+                for (int k = 0; k < n_cands && k < beam; k++)
+                {
+                    Datum mu;
+                    hash128_t obj_id = datum_to_hash128(cands[k].object);
+                    bool found3;
+
+                    if (n_nodes >= GENERATE_NODE_BUDGET)
+                        ereport(ERROR, (errmsg(
+                            "walk_branches: node budget %d exceeded (beam %d × depth %d) — narrow the walk",
+                            GENERATE_NODE_BUDGET, beam, max_depth)));
+                    if (n_nodes == cap)
+                    {
+                        cap *= 2;
+                        nodes = (WalkNode *) repalloc(nodes, sizeof(WalkNode) * cap);
+                    }
+
+                    mu = eff_mu_display_numeric(cands[k].rating, cands[k].rd);
+                    nodes[n_nodes].parent    = f;
+                    nodes[n_nodes].depth     = level + 1;
+                    nodes[n_nodes].entity    = cands[k].object;
+                    nodes[n_nodes].rel_type  = cands[k].rel_type;
+                    nodes[n_nodes].eff_mu    = mu;
+                    nodes[n_nodes].path_mu   = DirectFunctionCall2(numeric_add,
+                                                                   nodes[f].path_mu, mu);
+                    nodes[n_nodes].witnesses = cands[k].witnesses;
+                    n_nodes++;
+
+                    hash_search(seen, &obj_id, HASH_ENTER, &found3);
+                }
+                pfree(cands);
+            }
+            pfree(raw);
+            pfree(frontier_ids);
+
+            frontier_start = frontier_end;
         }
-        frontier_start = frontier_end;
     }
 
     order = (int *) palloc(sizeof(int) * n_nodes);

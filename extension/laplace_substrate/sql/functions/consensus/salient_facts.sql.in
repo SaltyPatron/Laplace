@@ -9,9 +9,8 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
             SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
-            FROM consensus c
+            FROM v_consensus_unrefuted c
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
-              AND NOT refuted(c.rating, c.rd)
               AND EXISTS (
                   SELECT 1 FROM entities et
                   WHERE et.id = c.type_id AND et.type_id = entity_type_id('RelationType'))

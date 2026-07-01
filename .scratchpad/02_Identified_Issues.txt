@@ -484,3 +484,294 @@ displayed -- exactly "bot moved, but the turn didn't update." Fix: removed _live
 SyncState/SetLive entirely; BestMoveAsync/BestMoveSearchAsync/ApplyMoveAsync now all parse the
 client-supplied fen fresh on every call (matching ScoreAsync's already-correct pattern). Build
 verified.
+
+ISSUE 26 -- word_shape_peers()/word_shape_peers_fast() anagram false-positive bug (fixed,
+not yet rebuilt/deployed). Filter was `WHERE k.fr <= p_frechet_max OR k.ang <= 0.115`: fr
+(Frechet, on trajectory) is order-sensitive and correctly discriminating; ang (angular
+distance, on coord/centroid) is mathematically order-INSENSITIVE (centroid = arithmetic mean
+of constituents, and mean is commutative), so ANY anagram pair (verified live: "cat"/"act",
+identical POINT ZM centroid, fr=0.35 correctly above threshold, ang=0) always passed via the
+OR branch regardless of what Frechet said. Confirmed this is a real conceptual gap, not a
+tuning knob, by cross-checking anagrams_of.sql.in -- which already correctly exploits this
+exact centroid/hilbert order-insensitivity for its OWN legitimate purpose (finding anagrams
+via hilbert_index equality), proving the codebase already treats "same parts any order" and
+"similar shape, order matters" as distinct concepts elsewhere. Fix: dropped the OR ang branch
+entirely in both word_shape_peers.sql.in and recall.c's word_shape_peers_fast_impl -- Frechet
+is now the sole admission gate; angular distance remains only as the ORDER BY tie-break among
+already-qualified candidates. Needs rebuild + install-extensions + verification (not done this
+session per explicit instruction -- another agent handling the build).
+
+NEW: .scratchpad/05_Substrate_Invariants.txt and .scratchpad/06_Engineering_Ruleset.txt --
+split out from this file. 05 is substrate axioms (what a collision/bit/equality actually
+certifies -- e.g. Rule #1 formalizes the Issue 26 finding generally). 06 is process/how-to-
+build rules (SQL/C# orchestrate, native does heavy lifting, CTEs block inlining, etc.),
+grounded partly in a full-codebase query-function survey (2026-07-01, ~305 functions/views,
+45+ CTE-blocking files, no shared consensus-filter view layer yet).
+
+ISSUE 27 -- physicalities_constituents_gin defeated by large-array `&&`/`@>` queries (found
+live, fixed via new native function, not yet built/deployed). A single-key GIN probe
+(`laplace_trajectory_constituent_ids(trajectory) @> ARRAY[one_id]`) resolves in ~2ms via
+Bitmap Index Scan regardless of table size -- confirmed live finding entities.id for "chess"
+containing sentences (1226 hits) this way. But the natural second hop (which of ~15,758
+Document entities contain ANY of those 1226 sentence ids, via `&& $1::bytea[]` against the
+same GIN index) made the planner abandon the index for a Parallel Bitmap Heap Scan over every
+Document entity with a per-row recheck filter -- 850ms, 873,366 rows discarded by index
+recheck, for a query that should be sub-millisecond. Confirmed this is a genuine GIN
+cost-estimation defect for large-array multi-key probes, not a bound-parameter/inlining issue
+(retested with a genuine PREPARE'd bytea[] parameter, same bad plan). A SQL-level LATERAL
+rewrite (one correlated single-key probe per frontier element, still expressed as SQL) fared
+worse under concurrent DB load (2+ minutes, had to be killed) -- inconclusive on its own
+merits given the concurrent load, but not worth pursuing regardless since the native fix
+below is strictly better. Fix: new containers_of(entity, max_hops, limit) native function
+(extension/laplace_substrate/src/containers_of.c) -- the reverse of constituents(); walks the
+frontier hop by hop as a tight C loop of SPI_execute_plan calls against ONE SPI_prepare/
+SPI_keepplan'd cached plan (the proven-fast single-key query), never asking the planner to
+cost a large-array probe at all. Code + SQL wrapper (functions/structural/containers_of.sql.in)
++ CMakeLists.txt + both manifests written; NOT built/deployed this session (explicit
+instruction -- another agent handling the build). Also: consider a plain VACUUM ANALYZE on
+physicalities/entities once concurrent ingestion settles -- recent bulk inserts may be
+contributing stale-statistics pressure to the planner's bad cost estimate, independent of
+containers_of() making the estimate moot for this specific access pattern.
+
+ISSUE 28 -- walk_branches() exponential hang, fixed + deployed + verified live. Root cause
+was two compounding defects in generate_walk.c/consensus_walk_edges.sql.in: (1) no
+cross-branch dedup -- consensus_walk_edges() was called once per frontier NODE via SPI,
+each call doing real work in SQL (fetch + compute an unindexed
+`relation_rank_resolved(type_id) * eff_mu(rating,rd)` sort key per row + ORDER BY + LIMIT,
+plus an O(path length) `= ANY(exclude)` scan per row against a path array that grows every
+level) -- so walk_branches('chess', NULL, 6, 12) hung 4+ minutes (killed, still hadn't hit
+the 1,000,000-node GENERATE_NODE_BUDGET safety cap) where depth=4/breadth=8 took ~1s. Fixed
+in generate_walk.c: pg_laplace_walk_branches now fetches the WHOLE current level's candidate
+edges in ONE batched SPI call (unnest($1) WITH ORDINALITY, same idiom as word_shape_peers_fast/
+containers_of), then does refutation filtering, RelationType-object exclusion, Glicko-2 rank
+scoring (relation_rank_resolved's fast in-memory table lookup called directly in C, zero
+SQL/FunctionCall overhead), and beam selection via qsort entirely in C -- SQL only hands over
+rows now. Also added GLOBAL dedup (HTAB keyed by entity hash128_t, seeded with the root
+entity) -- the original per-path exclusion array never stopped sibling/cousin branches from
+independently re-discovering and re-expanding the same popular hub entity, which is what
+actually drove the exponential blowup; global dedup is the real fix, not just the batching.
+This is a deliberate behavior change (a node can now only appear once anywhere in a walk,
+via whichever branch found it first/best, not once per distinct path) -- documented in code,
+not silent. Verified live: depth=4/breadth=8 now 1876 nodes (was 2301 -- dedup correctly
+removing real duplicate revisits) in 682ms; depth=6/breadth=12 now COMPLETES in 45.8s with
+155,157 nodes (was: never completed). Remaining headroom, not yet pursued: consensus has
+consensus_subject_eff_mu_btree, a (subject_id, (rating-2*rd) DESC) WHERE object_id IS NOT
+NULL index built exactly for per-subject top-K retrieval -- the new batch query doesn't use
+it (pulls all edges per subject, ranks/limits in C), so a high-fan-out hub word (e.g. "the",
+5011 witnesses) still ships its full edge list over SPI before being cut down to beam. That's
+~3,400 nodes/sec today vs containers_of's ~45,000/sec -- a real, separate follow-on, not
+chased this session. pg_laplace_walk_strongest was NOT touched -- its single greedy path is
+bounded linearly by max_depth already, not exponential, so the per-step SPI call there isn't
+the same defect class.
+
+ISSUE 28 UPDATE -- Item 1 (per-subject LATERAL fan-out bound) tried and reverted. Rewrote
+WALK_BATCH_QUERY to CROSS JOIN LATERAL (... ORDER BY (rating-2*rd) DESC LIMIT beam*4) per
+subject, exploiting consensus_subject_eff_mu_btree. EXPLAIN ANALYZE confirmed the index scan
+fired correctly (0.98ms for a single-subject probe). But full-walk wall time did NOT improve:
+walk_branches('chess', NULL, 6, 12) measured 45.6s / 172,196 nodes after the change vs the
+45.8s / 155,157-node baseline before it -- no real change, and node count went UP (see below
+for why). Root cause of the non-improvement: this batch query fires once per LEVEL (max_depth
+times total, i.e. 6 times for this test), not once per subject -- per-subject row volume was
+never actually causing redundant round trips, so bounding it doesn't touch the real cost,
+which is the sheer NUMBER of distinct subjects in a wide frontier (grows with beam^level,
+unaffected by a per-subject LIMIT). Also found a real correctness wrinkle the LATERAL version
+introduced (a reason to be glad it was reverted, not just a wash): the LATERAL LIMIT
+pre-filters candidates by raw (rating-2*rd) DESC, but the actual beam-selection ranking in C
+is relation_rank_resolved(type)*eff_mu -- a DIFFERENT key -- so for high-fan-out subjects the
+LATERAL version could silently exclude a true top-beam candidate (high relation_rank, merely
+mediocre raw eff_mu) that never made the raw-eff_mu top-N cut before the real ranking even
+ran. Reverted WALK_BATCH_QUERY back to the unbounded-per-subject form (still batched across
+the whole frontier in one query per level, which IS the real, valid win from this session's
+earlier work) and confirmed live via install-extensions.cmd DLL hot-swap + smoke test
+(walk_branches('chess', NULL, 4, 8) = 1876 nodes, matches the post-dedup baseline exactly).
+The genuinely unresolved question for a future pass: what IS the dominant cost at
+depth=6/breadth=12 scale, if not per-subject row volume? Candidates not yet measured: sheer
+SPI_execute_plan/query-planning overhead repeated per level against a growing unnest() array,
+C-side qsort/HTAB-dedup cost across 155K+ total candidate rows, or repalloc/memory churn from
+the growing WalkNode array. Needs its own profiling pass, not assumed.
+
+ISSUE 29 -- highway_mask C# bug, FIXED and verified. Root cause confirmed:
+app/Laplace.Engine.Core/IntentStage.cs:150 had `byte* maskPtr = mask.IsZero ? null :
+(byte*)&mask;` -- highwayMask's default parameter value IS Mask256.Zero (default), so this
+conflated "caller didn't compute a mask" with "caller computed a mask and it's legitimately
+all-zero" (no relation bands matched) -- both collapsed to a null pointer, which
+engine/core/src/intent_stage.c (~405-409) correctly-but-consequently wrote as SQL NULL
+instead of 32 zero bytes. Fix: always pass the mask pointer (`byte* maskPtr = (byte*)&mask;`)
+-- one line. Verified via a new isolated xunit regression test,
+AddAttestation_DefaultHighwayMaskEmits32ZeroBytesNotNull in
+app/Laplace.Engine.Core.Tests/IntentStageTests.cs, which walks the actual COPY-binary field
+stream (locating highway_mask's ordinal via CopyColumnList) and asserts its length prefix is
+32, not the NULL marker (unchecked((uint)-1)) -- proving the C#-to-native marshal boundary
+now writes a real 32-byte mask for the zero/default case. Chose this over a live DB ingest
+test deliberately: fully isolated (no DB, no risk of racing the other agent's concurrent
+chess PGN ingestion), and more directly targeted at the actual bug (a marshal-boundary
+pointer bug, not a decomposer-logic bug) than an end-to-end ingest would have been. All 8
+tests in IntentStageTests pass. Not yet verified against a live decomposer run producing
+real non-zero highway_mask bits (e.g. re-checking ISO639Decomposer output specifically) --
+that's a natural follow-up once it's safe to coordinate an ingest with the other agent, but
+the isolated test proves the actual code defect is fixed.
+
+ISSUE 30 -- shared v_consensus_unrefuted view, DONE and deployed live. New
+extension/laplace_substrate/sql/views/v_consensus_unrefuted.sql.in (SELECT c.* FROM
+consensus c WHERE NOT refuted(c.rating, c.rd)), added to both manifests alongside the
+existing views section. Mechanically replaced `FROM consensus <alias> ... AND NOT
+refuted(<alias>.rating, <alias>.rd)` with `FROM v_consensus_unrefuted <alias> ...` (refuted
+clause dropped) across 21 files: related_in, walk_completes_floor, shared_objects,
+consensus_walk_edges, related, consensus_subject_edges, salient_facts, consensus_step_edge,
+gaps, consensus_neighbors_undirected (x2), consensus_neighbors_directed,
+translation_sources, synset_gloss, consensus_taxonomy_edges, foundry_vocab_crawl (x3),
+collocates, grapheme_case_target, realize_defines, realize_translation,
+realize_synset_lemma, realize_has_name -- 26 occurrences total across 21 files (some files
+had secondary consensus references for LEFT JOIN lang-tagging that intentionally did NOT
+have their own refuted check and were left untouched). Deliberately did NOT touch
+relate_path.sql.in (RECURSIVE CTE, 4 occurrences), consensus_peer.sql.in (two independent
+refuted checks embedded in JOIN...ON with aliased c/c2), senses_with_context.sql.in, or
+senses_with_context_bootstrap.sql.in -- genuinely different shapes, deferred as a natural
+follow-up. Deployed via build-extensions.cmd --reconfigure (new view file) + direct psql
+application of all 22 objects (sed 's/@extschema@/laplace/g' against the live database,
+bypassing CREATE EXTENSION/ALTER EXTENSION entirely -- same no-data-risk pattern as every
+other fix this session). Verified: consensus_walk_edges/related/salient_facts all return
+correct real results against word_id('chess'); view sanity check confirms
+v_consensus_unrefuted's row count exactly matches raw consensus rows for chess (298 == 298,
+none currently refuted); salient_facts' first post-deploy call measured 8.7s but two
+subsequent calls measured 876ms/447ms -- confirmed cold-cache warming after the redeploy,
+not a real regression from the view swap.
+
+ISSUE 31 -- native incremental consensus fold, BUILT + DEPLOYED + PROVEN CORRECT, but
+deliberately NOT wired into the live call path yet. New
+extension/laplace_substrate/src/consensus_fold_incremental.c
+(pg_laplace_consensus_fold_partition_incremental), SQL wrapper
+functions/fold/consensus_fold_partition_incremental.sql.in, both manifests updated,
+CMakeLists.txt updated. Replaces materialize_period_partition[_fresh].sql.in's PL/pgSQL
+orchestration (GROUP BY merge, LEFT JOIN prior state, UPSERT) with the same
+heap-scan+in-memory-HTAB-merge technique consensus_fold_walks.c already uses for the
+terminal/bulk lane, reusing the SAME native math (consensus_fold_apply_partial ->
+glicko2_fold_uniform_period) and the SAME consensus_id() hash formula
+(blake3(subject||type||object-or-zero), computed natively via hash128_blake3, zero SQL
+round-trips) -- SQL is used only for: reading glicko2_tau() once, one batched
+SELECT ... WHERE id = ANY($1) prior-state read (skipped entirely when p_fresh), one batched
+UPSERT via unnest(...) arrays, and the final DROP TABLE. Correctness verified byte-for-byte
+against the OLD PL/pgSQL path on a synthetic, isolated (word_id('cat'), IS_A, word_id('act'))
+test triple (confirmed zero pre-existing consensus rows for that key before testing, deleted
+after) -- both the fresh path (materialize_period_partition_fresh vs
+consensus_fold_partition_incremental(..., true)) and the incremental/UPSERT path
+(materialize_period_partition vs consensus_fold_partition_incremental(..., false)) produced
+EXACTLY matching (rating, rd, volatility, witness_count) -- 993523429438961/213966596252/
+16727931424/5 for fresh, 1053861628682412/209026398686/61376840704/12 for incremental. No
+real/production consensus data was touched at any point (synthetic row deleted after each
+test). Deliberately did NOT touch app/Laplace.SubstrateCRUD/Npgsql/ConsensusAccumulatingWriter.cs's
+ChainFoldAsync call site (still calls the old materialize_period_partition[_fresh]) -- per
+the plan's explicit gate, this is the live path ChessEngineService.cs's concurrent ingestion
+is actively using right now (persistEvidence: true, stageAsWalks: false), and flipping it
+needs coordination this session can't do unilaterally. Both old and new functions are now
+deployed side by side; old PL/pgSQL functions NOT deleted yet (per plan: only delete once
+verification passes AND the call site is actually switched). Next step for whoever picks
+this up: coordinate a maintenance window (or at minimum confirm no ChainFoldAsync call is
+in-flight), change the two mat.CommandText lines in ChainFoldAsync from
+"SELECT laplace.materialize_period_partition[_fresh]($1)" to
+"SELECT laplace.consensus_fold_partition_incremental($1, <fresh bool>)", verify one real
+ingest still produces sane consensus rows, then delete materialize_period_partition[_fresh]
+.sql.in + their manifest entries.
+
+ISSUE 32 -- SIMD angular_distance batch kernel, BUILT + TESTED + DEPLOYED, real but modest
+end-to-end win (documented honestly, not oversold). Profiling gate (per plan) run first:
+isolated the frechet+angular batch SPI sub-call in word_shape_peers_fast_impl (500 real
+candidates around word_id('chess')) at 2.535ms total vs a 0.089ms no-math control query
+(same row scan, zero function calls) -- math was ~96.5% of THAT sub-call, clearing the >=10%
+gate by a wide margin. Added math4d_angular_distance_batch to engine/core/src/math4d.c /
+math4d.h: runtime-CPUID-gated AVX2 kernel (one _mm256_mul_pd + _mm256_hadd_pd-based
+horizontal-sum computing both dot(a,b) and dot(a,a) per candidate in one vector pass, versus
+8 scalar multiplies+7 adds previously), dispatch resolved once via a cached function pointer
+(mirrors the lazy SPI-plan-init pattern already used elsewhere), scalar fallback always
+compiled and reachable if AVX2 isn't available. Deliberately did NOT vectorize
+math4d_frechet (variable-length DP recurrence, doesn't batch across candidates the same way
+-- different-shaped problem, out of scope this pass per the plan). Rewrote
+word_shape_peers_fast_impl's batch step in recall.c: frechet stays SQL-computed
+(public.laplace_frechet_4d via SPI, unchanged), angular distance's raw inputs are now
+extracted via ST_X/Y/Z/M (laplace_substrate doesn't link liblwgeom, so this is the real
+Datum-to-double boundary, not a shortcut) and the actual distance math runs natively via
+math4d_angular_distance_batch -- zero SQL function-call round-trips for the angular
+computation itself. Verified: all 46 pre-existing LaplaceCoreMath4d native tests still pass
+(no regression), cat/act anagram fix (Issue 26) still holds post-rebuild, real shape-peer
+results for 'chess'/'king' unchanged in shape, word_shape_peers_fast/lexical_peers timing
+~78-80ms warm (same ballpark as the pre-SIMD baseline, arguably marginally better -- not a
+dramatic win). Honest finding: the 96.5%-math sub-call is itself only a small slice
+(~2.5ms) of the ~80ms end-to-end word_shape_peers_fast call, which is dominated by the
+initial GiST KNN candidate fetch and other steps, not this specific computation -- so
+while the SIMD kernel itself is real, correct, and a legitimate speedup for the geometric
+math specifically, its END-TO-END impact on this particular call site is modest. The
+profiling gate correctly identified where the math dominates ITS OWN sub-call, which is a
+different question from where the math dominates the WHOLE function -- worth remembering
+for any future "should we SIMD this" decision: profile the actual call site's total wall
+time contribution, not just the isolated sub-call, before expecting a large end-to-end win.
+Two unrelated, pre-existing native test failures noted in passing (not caused by this
+session's work, not chased): LaplaceCoreIntentStage.PartitionRoutesEveryRowDisjointByIdLo,
+LaplaceContentRootId.RejectsEmptyAndNull.
+
+ISSUE 32 -- laplace_attestation_aggregated_add: argument-order swap silently corrupts every
+native grammar-compose PRECEDES attestation (games <-> witness_weight <-> sum_score rotated)
+Status: OPEN -- root-caused this session, code fix is one line, DATA REPAIR NEEDED; verified
+live against the production substrate, blast radius fully scoped.
+The bug: engine/core/src/attestation_engine.c:539-541 forwards its parameters to
+laplace_attestation_aggregated_build in the WRONG ORDER. The add() wrapper's own signature is
+(..., context_is_null, games, sum_score_fp1e9, witness_weight, now_unix_us) but build()'s is
+(..., context_is_null, witness_weight, games, sum_score_fp1e9, now_unix_us). The forwarding
+call passes (games, sum_score_fp1e9, witness_weight, now) positionally into
+(witness_weight, games, sum_score_fp1e9, now). C's implicit int64<->double conversions make
+this compile without a single warning. Net effect per attestation:
+  - observation_count = sum_score_fp1e9 = real_games * 1e9  (billion-fold inflated)
+  - sum_score_fp1e9   = (int64)witness_weight = 0           (every weight < 1.0 truncates)
+  - sum_score(0) < games*half  =>  outcome = REFUTE (0), unconditionally
+  - witness_weight    = (double)games  => witness_phi computed from e.g. 3272.0, not 0.x
+So every sequence observation ingested through this path is recorded as REFUTING evidence
+with a billion-scaled count and a garbage opponent-RD. Verified live: all 11,770
+SemLinkDecomposer PRECEDES attestations have outcome=0 and observation_count in exact 1e9
+multiples (min 1000000000, max 3272000000000); every other source's observation_count max
+is <= 143,840 (ChessOpenings). Sum across SemLink rows: 32,043,000,479,337 "observations."
+Blast radius: laplace_attestation_aggregated_add has exactly ONE caller in the entire tree --
+engine/core/src/grammar_compose.cpp:1182 (the native grammar-compose PRECEDES emitter). The
+managed path (GrammarEntityBuilder/GrammarRowComposer -> NativeAttestation.Aggregated ->
+laplace_attestation_aggregated_build directly) passes arguments CORRECTLY -- which is why
+UserPrompt/document PRECEDES rows (max obs 6,463) are clean. Only sources ingested via the
+native grammar-compose ETL path are affected; in the current database that is SemLink alone.
+Fix shape: reorder the three arguments at attestation_engine.c:539-541 (one line); rebuild
+engine; then repair data -- delete the 11,770 poisoned SemLink PRECEDES attestation rows
+(and any consensus rows folded from them) and re-ingest the SemLink layer, or accept a
+targeted re-fold. Consider also making build() and add() share one parameter order so this
+class of bug is structurally impossible, and/or a debug assert that witness_weight is in
+[0,1] and games < 1e8 (the fold engine already enforces games < 1<<27 per relation --
+1e9-scaled counts would have tripped it at fold time if these rows ever reached the walk/
+engine fold lane).
+
+ISSUE 33 -- Item 6 (GiST/PostGIS vectorization scoping) CONCLUDED: not worth pursuing,
+premise was wrong. Concrete first-step measurement run per plan: EXPLAIN (ANALYZE, BUFFERS)
+on real KNN <<->> queries against the live ~4.6M-row physicalities table.
+  - A plain `FROM physicalities me, physicalities p2 WHERE me.entity_id = word_id(...) ...
+    ORDER BY p2.coord <<->> me.coord LIMIT k` (k=10/100/500/5000, all four tested): NONE
+    used physicalities_coord_gist -- every one fell back to a full Parallel Seq Scan
+    (939,613 rows) + top-N heapsort, 560-800ms flat regardless of k (dominated by the scan,
+    not k).
+  - The SAME query reshaped as `WITH me AS (... LIMIT 1) SELECT ... ORDER BY p2.coord <<->>
+    me.coord` (the shape word_shape_peers.sql.in's CTE uses, believed earlier this session
+    to be index-eligible): STILL fell back to a full seq scan, 1.6s -- worse, not better.
+  - The SAME query with coord passed as a genuine bound parameter via PREPARE/EXECUTE (the
+    shape word_shape_peers_fast_impl's native SPI call actually uses): correctly used
+    `Index Scan using physicalities_coord_gist`, 50.4ms for the same candidate pool --
+    ~10-30x faster than every non-bound-parameter variant tested.
+  - Conclusion: GiST/PostGIS's own KNN implementation is NOT a bottleneck -- confirmed fast
+    (50ms, real index descent, real GiST internals) when queried the way it needs to be
+    queried. The 560ms-1.6s numbers are the SAME "must be a genuine bound parameter, not a
+    CTE/join column reference" defect already fixed multiple times this session (containers_of
+    Issue 27, word_shape_peers_fast Issue 26 context, walk_branches per-level batching),
+    reproducing again in a fresh ad-hoc query -- not new evidence about PostGIS internals.
+    No fork-patch to gserialized_gist_nd.c and no purpose-built native spatial structure are
+    justified by this data; per the plan's own gate ("only if GiST/PostGIS overhead is a
+    real, measured fraction of query time"), it is not.
+  - Real, smaller follow-up this surfaced: word_shape_peers.sql.in (the original SQL
+    function, superseded by word_shape_peers_fast for the actual hot path per
+    lexical_peers.sql.in) almost certainly still has this exact seq-scan-fallback defect
+    live in its `nearest` CTE today, since nothing in this session's fixes touched that
+    original SQL function's query shape (only its post-KNN filter logic, Issue 26). Low
+    priority since it's not on the hot path, but worth a line in a future cleanup: either
+    fix its CTE shape to use a genuine bound parameter, or delete it now that
+    word_shape_peers_fast fully supersedes it.

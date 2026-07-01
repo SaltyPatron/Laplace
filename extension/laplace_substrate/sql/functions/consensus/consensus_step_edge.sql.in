@@ -5,9 +5,8 @@ CREATE OR REPLACE FUNCTION consensus_step_edge(
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
-    FROM consensus c
-    WHERE NOT refuted(c.rating, c.rd)
-      AND (
+    FROM v_consensus_unrefuted c
+    WHERE (
           (c.subject_id = p_from AND c.object_id = p_to)
           OR (c.subject_id = p_to AND c.object_id = p_from))
     ORDER BY eff_mu(c.rating, c.rd) DESC

@@ -348,6 +348,30 @@ Status: OPEN, low severity, listed for completeness
     `HttpClient` with `Timeout = InfiniteTimeSpan` — a hung Lichess connection has no client-side
     timeout safety net. No daily-game or opponent-rating cap beyond a variant/speed allow-list.
 
+ISSUE C17 — ChessCompose.Position recomputed full tier-2 composition on every call, no memoization
+Status: FIXED this session (bounded in-process cache; see PART 5 for the build-time-perfcache
+follow-up that would make this durable across process restarts, not yet built)
+`ChessCompose.Position(string surface)` (ChessCompose.cs) recomputed the Merkle hash, centroid,
+Hilbert128 encode, trajectory build, and physicality id from scratch on every call, even for a
+position already composed earlier in the same run — real, avoidable cost in a corpus where
+opening/early-game positions and common transpositions recur across many thousands of games.
+Confirmed `SubstrateChangeBuilder.AddEntity`/`AddPhysicality` already dedupe correctly within a
+batch (`_seenEntities`/`_seenPhysicalities` HashSets), so this was pure wasted CPU, not a
+correctness bug — the redundant recomposition was computed then silently discarded. Fixed with a
+bounded `ConcurrentDictionary<string, ChessComposed>` (cap 2,000,000 entries, unbounded would
+risk real memory growth since most middle/endgame positions in a huge corpus are unique one-offs
+unlike the small finite token vocabulary `TokenMemo` already caches at tier-1).
+
+ISSUE C18 — OpeningClassifier.Classify does a full linear scan of every book line per game
+Status: OPEN, not yet fixed
+`OpeningClassifier.Classify` (OpeningClassifier.cs:13-37) does `foreach (var (eco, name,
+lineSans) in _lines!)` — a linear scan over ALL ~3,733 loaded ECO book lines, comparing SAN
+prefixes — for EVERY game ingested, called from `ChessPgnDecomposer.EmitGameOpeningMeta`. This is
+O(games × book_lines × avg_line_length) with no caching/indexing, called once per game in the
+entire corpus. For a mega-ingest (millions of games), this is a significant, unmemoized,
+brute-force cost, worth restructuring into a trie/prefix-map over the book lines (built once at
+`EnsureLoaded()` time) for O(game_length) per-game lookup instead of O(book_lines) per-game scan.
+
 ================================================================================
 PART 4 — OPEN QUESTIONS FOR THE NEXT PASS
 ================================================================================
@@ -366,3 +390,42 @@ PART 4 — OPEN QUESTIONS FOR THE NEXT PASS
      self-play tournament's eval/clock-derived attestations for anything.
   5. Decide whether the lab layer (Issue C03/C04) should get wired into automatic ingestion +
      auth before it's exposed beyond a single trusted operator's own machine.
+
+================================================================================
+PART 5 — PROPOSED: A CHESS PERFCACHE (not yet built, documenting so it isn't lost again)
+================================================================================
+Confirmed via direct search this session (both a narrow `*chess*perfcache*` pattern and a broad
+"perf" grep across the whole repo, including all `.claude/worktrees/*` copies) that this does
+NOT exist anywhere yet — no file, no generator, no code reference. If this was discussed in an
+earlier session, it was never written down anywhere this memory/scratchpad system has access to.
+Recording it now precisely so that stops being true.
+
+The concrete finding that motivates it: `ChessCompose.Position(string surface)`
+(`app/Laplace.Chess.Service/ChessCompose.cs`) recomputes full tier-2 position composition
+(Merkle hash, centroid, Hilbert128 encode, trajectory build, physicality id) from scratch on
+EVERY call, even for a position already composed earlier in the same run. Confirmed
+`SubstrateChangeBuilder.AddEntity`/`AddPhysicality` already dedupe correctly within a batch
+(`_seenEntities`/`_seenPhysicalities` HashSets, SubstrateChangeBuilder.cs:52-68) — so a repeated
+position's freshly-recomputed row gets silently discarded, meaning the redundant work is pure
+wasted CPU, not a correctness bug. Fixed this session with a bounded in-process
+`ConcurrentDictionary<string, ChessComposed>` memo (`PositionMemo`, cap 2,000,000 entries) — but
+that only helps within one process's lifetime. A FRESH ingest run (the normal case — CLI
+invocations are short-lived processes) starts the cache from zero again, re-deriving the exact
+same ~3,733 ECO opening-book positions' full composition every single time, since those specific
+positions recur across effectively every real game ingested.
+
+Proposed real fix, matching the exact pattern already established for T0/highway
+(`scripts/codegen-attestation-law.py` -> `laplace_t0_perfcache.bin` / `laplace_highway_perfcache
+.bin`, both build-time-generated, mmap'd, loaded once at process start via
+`CodepointPerfcache.LoadDefault()`/`HighwayPerfcache.LoadDefault()`): a build-time generator that
+walks the ECO opening book (`openings/*.tsv`, the same ~3,733 lines `ChessOpeningsDecomposer`/
+`OpeningClassifier` already read) and every prefix position reachable from it, computes each
+one's full tier-2 composition once, and bakes the result into a `laplace_chess_perfcache.bin`
+blob loaded once at process start — so every future ingest run (chess.com exports, Lumbras,
+TWIC, self-play) gets the ~3,733 most commonly-recurring (opening-theory) positions pre-computed
+for free instead of re-deriving them per process. Not built this session — scoped here, not
+started. Would need: a new generator step (alongside `codegen-attestation-law.py`, wired into
+`rebuild-all.cmd`), a binary format (can likely reuse `perfcache_format.h`'s existing
+header/record conventions rather than inventing a new one), and a loader
+(`ChessPerfcache.LoadDefault()` mirroring `CodepointPerfcache`/`HighwayPerfcache`'s existing
+shape) that `ChessCompose.Position` checks before falling through to the in-process `PositionMemo`.

@@ -43,10 +43,9 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
                row_number() OVER (PARTITION BY seed.wid ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
         FROM seed_ids si
         CROSS JOIN unnest(si.ids) AS seed(wid)
-        JOIN consensus c ON c.subject_id = seed.wid
+        JOIN v_consensus_unrefuted c ON c.subject_id = seed.wid
             AND c.type_id = relation_type_id('PRECEDES')
             AND c.object_id IS NOT NULL
-            AND NOT refuted(c.rating, c.rd)
         JOIN entities e ON e.id = c.object_id AND e.tier = 2
     ),
     order1_cut AS (
@@ -57,10 +56,9 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
                (o.w * eff_mu(c.rating, c.rd)::numeric / 1000000000)::bigint AS weight,
                row_number() OVER (ORDER BY o.w * eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
         FROM order1_cut o
-        JOIN consensus c ON c.subject_id = o.entity_id
+        JOIN v_consensus_unrefuted c ON c.subject_id = o.entity_id
             AND c.type_id = relation_type_id('PRECEDES')
             AND c.object_id IS NOT NULL
-            AND NOT refuted(c.rating, c.rd)
         JOIN entities e ON e.id = c.object_id AND e.tier = 2
     ),
     order2_cut AS (
@@ -72,10 +70,9 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
                   SELECT entity_id, weight FROM order1_cut
                   UNION ALL SELECT entity_id, weight FROM order2_cut
               ) u GROUP BY entity_id) o
-        JOIN consensus c ON c.subject_id = o.entity_id
+        JOIN v_consensus_unrefuted c ON c.subject_id = o.entity_id
             AND c.type_id = relation_type_id('IS_LEMMA_OF')
             AND c.object_id IS NOT NULL
-            AND NOT refuted(c.rating, c.rd)
         JOIN entities e ON e.id = c.object_id AND e.tier = 2
     ),
     order_closure AS (

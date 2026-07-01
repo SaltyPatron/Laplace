@@ -7,17 +7,15 @@ CREATE OR REPLACE FUNCTION consensus_neighbors_undirected(
     SET search_path = @extschema@, public AS $$
     SELECT nbr, rating, rd FROM (
         SELECT c.object_id AS nbr, c.rating, c.rd
-        FROM consensus c
+        FROM v_consensus_unrefuted c
         WHERE c.subject_id = p_subject
           AND c.object_id IS NOT NULL
           AND c.type_id = ANY (p_types)
-          AND NOT refuted(c.rating, c.rd)
         UNION ALL
         SELECT c.subject_id AS nbr, c.rating, c.rd
-        FROM consensus c
+        FROM v_consensus_unrefuted c
         WHERE c.object_id = p_subject
           AND c.type_id = ANY (p_types)
-          AND NOT refuted(c.rating, c.rd)
     ) e
     ORDER BY eff_mu(rating, rd) DESC
     LIMIT p_limit

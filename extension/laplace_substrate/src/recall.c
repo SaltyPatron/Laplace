@@ -12,6 +12,8 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
+#include "laplace/core/math4d.h"
+
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "recall_route.h"
@@ -958,37 +960,104 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                 ArrayType *traj_array = construct_array(trajarr, n_matched, geom_oid, -1, false, 'i');
                 ArrayType *coord_array = construct_array(coordarr, n_matched, geom_oid, -1, false, 'i');
                 Oid   geom_arr_oid = get_array_type(geom_oid);
-                Oid   gtypes[4] = { geom_arr_oid, geom_arr_oid, geom_oid, geom_oid };
-                Datum gargs[4] = { PointerGetDatum(traj_array), PointerGetDatum(coord_array),
-                                   me_traj, me_coord };
                 int   grc;
                 double *fr_by_pos = (double *) palloc0(sizeof(double) * n_matched);
                 double *ang_by_pos = (double *) palloc0(sizeof(double) * n_matched);
                 bool  *ok_by_pos = (bool *) palloc0(sizeof(bool) * n_matched);
+                bool  *coord_ok = (bool *) palloc0(sizeof(bool) * n_matched);
+                double *cand_xyzm = (double *) palloc0(sizeof(double) * (size_t) n_matched * 4);
+                double me_xyzm[4] = {0, 0, 0, 0};
 
-                grc = SPI_execute_with_args(
-                    "SELECT t.idx, public.laplace_frechet_4d(t.traj, $3), "
-                    "       public.laplace_angular_distance_4d(t.coord, $4) "
-                    "FROM unnest($1, $2) WITH ORDINALITY AS t(traj, coord, idx)",
-                    4, gtypes, gargs, NULL, true, 0);
-                if (grc == SPI_OK_SELECT)
+                /* Frechet stays SQL-computed (order-sensitive, variable-length DP
+                 * recurrence -- doesn't batch across candidates the same way a
+                 * fixed-width angular distance does; deliberately out of scope for
+                 * this pass, see .scratchpad/06_Engineering_Ruleset.txt). */
                 {
-                    for (uint64 r = 0; r < SPI_processed; r++)
-                    {
-                        HeapTuple tup = SPI_tuptable->vals[r];
-                        TupleDesc td  = SPI_tuptable->tupdesc;
-                        bool  in0, in1, in2;
-                        int64 idx = DatumGetInt64(SPI_getbinval(tup, td, 1, &in0));
-                        Datum frd = SPI_getbinval(tup, td, 2, &in1);
-                        Datum angd = SPI_getbinval(tup, td, 3, &in2);
+                    Oid   ftypes[2] = { geom_arr_oid, geom_oid };
+                    Datum fargs[2] = { PointerGetDatum(traj_array), me_traj };
 
-                        if (in0 || idx < 1 || idx > n_matched) continue;
-                        if (in1 || in2) continue;
-                        fr_by_pos[idx - 1] = DatumGetFloat8(frd);
-                        ang_by_pos[idx - 1] = DatumGetFloat8(angd);
-                        ok_by_pos[idx - 1] = true;
+                    grc = SPI_execute_with_args(
+                        "SELECT t.idx, public.laplace_frechet_4d(t.traj, $2) "
+                        "FROM unnest($1) WITH ORDINALITY AS t(traj, idx)",
+                        2, ftypes, fargs, NULL, true, 0);
+                    if (grc == SPI_OK_SELECT)
+                    {
+                        for (uint64 r = 0; r < SPI_processed; r++)
+                        {
+                            HeapTuple tup = SPI_tuptable->vals[r];
+                            TupleDesc td  = SPI_tuptable->tupdesc;
+                            bool  in0, in1;
+                            int64 idx = DatumGetInt64(SPI_getbinval(tup, td, 1, &in0));
+                            Datum frd = SPI_getbinval(tup, td, 2, &in1);
+
+                            if (in0 || idx < 1 || idx > n_matched || in1) continue;
+                            fr_by_pos[idx - 1] = DatumGetFloat8(frd);
+                            ok_by_pos[idx - 1] = true;
+                        }
                     }
                 }
+
+                /* Angular distance: SQL only extracts raw coordinate components
+                 * (no distance math) -- laplace_substrate doesn't link liblwgeom,
+                 * so this is the actual Datum-to-double boundary; the distance
+                 * computation itself is math4d_angular_distance_batch, native,
+                 * AVX2-batched. See engine/core/src/math4d.c. */
+                {
+                    Oid   mtypes[1] = { geom_oid };
+                    Datum margs[1] = { me_coord };
+                    int   mrc;
+
+                    mrc = SPI_execute_with_args(
+                        "SELECT ST_X($1), ST_Y($1), ST_Z($1), ST_M($1)",
+                        1, mtypes, margs, NULL, true, 1);
+                    if (mrc == SPI_OK_SELECT && SPI_processed == 1)
+                    {
+                        HeapTuple tup = SPI_tuptable->vals[0];
+                        TupleDesc td  = SPI_tuptable->tupdesc;
+                        bool i0, i1, i2, i3;
+
+                        me_xyzm[0] = DatumGetFloat8(SPI_getbinval(tup, td, 1, &i0));
+                        me_xyzm[1] = DatumGetFloat8(SPI_getbinval(tup, td, 2, &i1));
+                        me_xyzm[2] = DatumGetFloat8(SPI_getbinval(tup, td, 3, &i2));
+                        me_xyzm[3] = DatumGetFloat8(SPI_getbinval(tup, td, 4, &i3));
+                    }
+                }
+                {
+                    Oid   ctypes[1] = { geom_arr_oid };
+                    Datum cargs2[1] = { PointerGetDatum(coord_array) };
+                    int   crc2;
+
+                    crc2 = SPI_execute_with_args(
+                        "SELECT t.idx, ST_X(t.coord), ST_Y(t.coord), ST_Z(t.coord), ST_M(t.coord) "
+                        "FROM unnest($1) WITH ORDINALITY AS t(coord, idx)",
+                        1, ctypes, cargs2, NULL, true, 0);
+                    if (crc2 == SPI_OK_SELECT)
+                    {
+                        for (uint64 r = 0; r < SPI_processed; r++)
+                        {
+                            HeapTuple tup = SPI_tuptable->vals[r];
+                            TupleDesc td  = SPI_tuptable->tupdesc;
+                            bool  in0, in1, in2, in3, in4;
+                            int64 idx = DatumGetInt64(SPI_getbinval(tup, td, 1, &in0));
+                            Datum xd = SPI_getbinval(tup, td, 2, &in1);
+                            Datum yd = SPI_getbinval(tup, td, 3, &in2);
+                            Datum zd = SPI_getbinval(tup, td, 4, &in3);
+                            Datum wd = SPI_getbinval(tup, td, 5, &in4);
+
+                            if (in0 || idx < 1 || idx > n_matched) continue;
+                            if (in1 || in2 || in3 || in4) continue;
+                            cand_xyzm[(idx - 1) * 4 + 0] = DatumGetFloat8(xd);
+                            cand_xyzm[(idx - 1) * 4 + 1] = DatumGetFloat8(yd);
+                            cand_xyzm[(idx - 1) * 4 + 2] = DatumGetFloat8(zd);
+                            cand_xyzm[(idx - 1) * 4 + 3] = DatumGetFloat8(wd);
+                            coord_ok[idx - 1] = true;
+                        }
+                    }
+                }
+                math4d_angular_distance_batch(cand_xyzm, n_matched, me_xyzm, ang_by_pos);
+                for (int p = 0; p < n_matched; p++)
+                    if (!coord_ok[p])
+                        ok_by_pos[p] = false;
 
                 for (int p = 0; p < n_matched; p++)
                 {

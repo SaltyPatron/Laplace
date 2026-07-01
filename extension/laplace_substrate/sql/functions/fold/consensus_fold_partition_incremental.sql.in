@@ -1,0 +1,12 @@
+-- Native replacement for the incremental fold lane (materialize_period_partition[_fresh]
+-- .sql.in, PL/pgSQL) -- see consensus_fold_incremental.c for the full rationale. Same
+-- contract as the functions it replaces: p_table is a staging table of
+-- (subject_id, type_id, object_id, phi, games, sum_score, last_ts) rows, folded and
+-- UPSERTed directly into the live consensus table (p_fresh=false), or INSERTed with
+-- ON CONFLICT DO NOTHING assuming an empty target (p_fresh=true, mirrors
+-- materialize_period_partition_fresh's cold-start semantics). The staging table is
+-- dropped on success. Returns the number of consensus rows upserted/inserted.
+CREATE OR REPLACE FUNCTION consensus_fold_partition_incremental(p_table text, p_fresh boolean DEFAULT false)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_partition_incremental'
+    LANGUAGE C VOLATILE;

@@ -3,14 +3,13 @@ CREATE OR REPLACE FUNCTION grapheme_case_target(p_grapheme_id bytea, p_map text)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT c.object_id
-    FROM consensus c
+    FROM v_consensus_unrefuted c
     WHERE c.subject_id = p_grapheme_id
       AND c.type_id = CASE p_map
             WHEN 'lower' THEN relation_type_id('HAS_LOWERCASE_MAPPING')
             WHEN 'upper' THEN relation_type_id('HAS_UPPERCASE_MAPPING')
             WHEN 'title' THEN relation_type_id('HAS_TITLECASE_MAPPING')
           END
-      AND NOT refuted(c.rating, c.rd)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1
 $$;

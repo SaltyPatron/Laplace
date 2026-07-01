@@ -1,0 +1,19 @@
+-- The reverse of constituents(): given an entity, walk UP the composition
+-- hierarchy and return every higher-tier entity whose trajectory contains it
+-- (directly at hop=1, or transitively through intermediate tiers at hop>1),
+-- e.g. containers_of(word_id('chess'), 2) returns the sentences containing
+-- "chess" (hop 1) and the documents containing those sentences (hop 2).
+--
+-- Native (see containers_of.c for the full rationale): a single SQL query
+-- checking trajectory containment against a large frontier array defeats
+-- physicalities_constituents_gin's cost estimation and falls back to a full
+-- scan (measured 850ms for a query that should be sub-millisecond). This
+-- drives the walk as a sequence of cached, single-key SPI probes instead,
+-- each of which the GIN index serves in ~2ms regardless of table size.
+CREATE OR REPLACE FUNCTION containers_of(
+    p_entity   bytea,
+    p_max_hops int   DEFAULT 1,
+    p_limit    int   DEFAULT 1000)
+    RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea, hops int)
+    AS 'MODULE_PATHNAME', 'pg_laplace_containers_of'
+    LANGUAGE C STABLE;

@@ -1,0 +1,8 @@
+-- Shared predicate for the ~21 functions that each reimplemented
+-- `NOT refuted(c.rating, c.rd)` inline as a WHERE clause. Not a duplicate of
+-- v_consensus_edges (which additionally requires object_id IS NOT NULL AND
+-- eff_mu_raw > 0 -- a different, stricter filter for a different purpose).
+CREATE OR REPLACE VIEW v_consensus_unrefuted AS
+SELECT c.*
+FROM consensus c
+WHERE NOT refuted(c.rating, c.rd);

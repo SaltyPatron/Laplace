@@ -6,10 +6,9 @@ CREATE OR REPLACE FUNCTION shared_objects(p_subjects bytea[], p_type bytea DEFAU
     SELECT c.object_id,
            count(DISTINCT c.subject_id)::int,
            round((sum(eff_mu(c.rating, c.rd)) / 1e9)::numeric, 3)
-    FROM consensus c
+    FROM v_consensus_unrefuted c
     WHERE c.subject_id = ANY (p_subjects)
       AND c.object_id IS NOT NULL
-      AND NOT refuted(c.rating, c.rd)
       AND (p_type IS NULL OR c.type_id = p_type)
     GROUP BY c.object_id
     ORDER BY count(DISTINCT c.subject_id) DESC, sum(eff_mu(c.rating, c.rd)) DESC

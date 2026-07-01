@@ -43,6 +43,8 @@ if(WIN32)
         src/perfcache.c
         src/content_resolve.c
         src/descent_probe.c
+        src/containers_of.c
+        src/consensus_fold_incremental.c
     )
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME ${EXT_NAME} SUFFIX ".dll"
@@ -80,6 +82,8 @@ else()
         src/recall_route.c
         src/perfcache.c
         src/content_resolve.c
+        src/containers_of.c
+        src/consensus_fold_incremental.c
     )
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES

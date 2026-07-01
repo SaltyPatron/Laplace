@@ -27,9 +27,13 @@ BEGIN
             GROUP BY s.subject_id, s.type_id, s.object_id
         ),
         keyed AS MATERIALIZED (
+            -- No ORDER BY here: this feeds a LEFT JOIN below, whose own output order isn't
+            -- guaranteed to preserve any input sort, and the actual INSERT already does its own
+            -- required "ORDER BY f.cid" right before writing — a sort here was paying full sort
+            -- cost (confirmed via live disk-spill temp files during a 22.5M-row fold) for an
+            -- ordering that gets discarded and redone.
             SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
             FROM merged mm
-            ORDER BY cid   
         )
         INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
