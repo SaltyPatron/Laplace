@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
+    <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(LAPLACE_BUILD_ROOT)\app\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

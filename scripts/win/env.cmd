@@ -8,6 +8,7 @@ set "_LIB="
 for %%D in ("!LIB:;=" "!") do (if not "%%~D"=="" if exist "%%~D\" set "_LIB=!_LIB!%%~D;")
 endlocal & set "LIB=%_LIB%"
 set "LAPLACE_ROOT=%~dp0..\.."
+if not defined LAPLACE_BUILD_ROOT set "LAPLACE_BUILD_ROOT=D:\Data\Builds\Laplace"
 set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
 set "PATH=%PGBIN%;%PATH%"
 set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"

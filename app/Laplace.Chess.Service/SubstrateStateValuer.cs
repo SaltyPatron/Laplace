@@ -1,4 +1,5 @@
 using global::Npgsql;
+using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 
