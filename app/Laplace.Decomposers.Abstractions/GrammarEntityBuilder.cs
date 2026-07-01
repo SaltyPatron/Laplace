@@ -15,32 +15,32 @@ public sealed class GrammarEntityBuilder
 {
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
-    private readonly byte[]     _utf8;
+    private readonly byte[] _utf8;
     private readonly GrammarAst _ast;
-    private readonly Hash128    _sourceId;
-    private readonly string     _modalityId;
-    private readonly IntPtr     _recipe;    
-    private readonly byte[]?    _tagsScm;
+    private readonly Hash128 _sourceId;
+    private readonly string _modalityId;
+    private readonly IntPtr _recipe;
+    private readonly byte[]? _tagsScm;
 
     public GrammarEntityBuilder(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId,
                                 IntPtr recipe = default, byte[]? tagsScm = null)
     {
-        _utf8       = utf8 ?? throw new ArgumentNullException(nameof(utf8));
-        _ast        = ast ?? throw new ArgumentNullException(nameof(ast));
-        _sourceId   = sourceId;
+        _utf8 = utf8 ?? throw new ArgumentNullException(nameof(utf8));
+        _ast = ast ?? throw new ArgumentNullException(nameof(ast));
+        _sourceId = sourceId;
         _modalityId = modalityId ?? throw new ArgumentNullException(nameof(modalityId));
-        _recipe     = recipe;
-        _tagsScm    = tagsScm;
+        _recipe = recipe;
+        _tagsScm = tagsScm;
     }
 
     public static Hash128 GrammarNodeTypeId(string modalityId, string typeName) =>
         Hash128.OfCanonical($"substrate/type/grammar/{modalityId}/{typeName}/v1");
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public IReadOnlyCollection<string> NodeTypeCanonicalNames => _nodeTypeNames;
     private readonly HashSet<string> _nodeTypeNames = new(StringComparer.Ordinal);
 
@@ -56,12 +56,12 @@ public sealed class GrammarEntityBuilder
         (ImmutableArray<EntityRow>.Empty, ImmutableArray<PhysicalityRow>.Empty,
          ImmutableArray<AttestationRow>.Empty, default);
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     public (ImmutableArray<EntityRow> Entities,
             ImmutableArray<PhysicalityRow> Physicalities,
             ImmutableArray<AttestationRow> Attestations,
@@ -77,17 +77,11 @@ public sealed class GrammarEntityBuilder
         }
     }
 
-    /// <summary>
-    /// Reader-driven tier-containment dedup, mirroring the structured/grammar ingest path: compose
-    /// once, probe the composed entity ids via the existing <c>entities_exist_bitmap</c> facility,
-    /// then emit only novel subtrees through <see cref="MerkleDedup.TrunkShortcircuit"/>. PRECEDES
-    /// and tag attestations still flow (they carry new evidence).
-    /// </summary>
     public async Task<(ImmutableArray<EntityRow> Entities,
-                       ImmutableArray<PhysicalityRow> Physicalities,
-                       ImmutableArray<AttestationRow> Attestations,
-                       Hash128 RootId)> BuildAsync(
-        double witnessWeight, ISubstrateReader? containmentReader, CancellationToken ct = default)
+                   ImmutableArray<PhysicalityRow> Physicalities,
+                   ImmutableArray<AttestationRow> Attestations,
+                   Hash128 RootId)> BuildAsync(
+    double witnessWeight, ISubstrateReader? containmentReader, CancellationToken ct = default)
     {
         if (_utf8.Length == 0 || _ast.NodeCount == 0) return Empty;
         if (containmentReader is null) return Build(witnessWeight, null);
@@ -190,11 +184,11 @@ public sealed class GrammarEntityBuilder
         int n = _ast.NodeCount;
         {
             long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-            var entities      = ImmutableArray.CreateBuilder<EntityRow>();
+            var entities = ImmutableArray.CreateBuilder<EntityRow>();
             var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
 
-            
-            
+
+
             bool[]? novelEntity = null;
             HashSet<Hash128>? novelIds = null;
             if (existingBitmap is { Length: > 0 })
@@ -290,11 +284,11 @@ public sealed class GrammarEntityBuilder
         }
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     private ImmutableArray<AttestationRow> BuildSequenceAttestations(
         List<int>?[] childrenOf, Hash128[] compId, bool[] compValid, double witnessWeight)
     {
@@ -325,12 +319,12 @@ public sealed class GrammarEntityBuilder
         return rows.ToImmutable();
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     private ImmutableArray<AttestationRow> BuildTagAttestations(
         LaplaceAstNode[] nodes, Hash128[] compId, bool[] compValid, double witnessWeight)
     {
@@ -352,17 +346,17 @@ public sealed class GrammarEntityBuilder
                 if (!spanId.TryGetValue((c.StartByte, c.EndByte), out var id)) continue;
                 switch (c.Type)
                 {
-                    case TagType.Name:        name    = id; break;
+                    case TagType.Name: name = id; break;
                     case TagType.DefFunction:
                     case TagType.DefType:
-                    case TagType.DefVar:      def     = id; break;
-                    case TagType.RefCall:     refCall = id; break;
-                    case TagType.RefType:     refType = id; break;
+                    case TagType.DefVar: def = id; break;
+                    case TagType.RefCall: refCall = id; break;
+                    case TagType.RefType: refType = id; break;
                 }
             }
             if (name is not { } nm) continue;
-            if (def     is { } d)  rows.Add(NativeAttestation.Categorical(d,  "DEFINES",    nm, _sourceId, null, witnessWeight));
-            if (refCall is { } rc) rows.Add(NativeAttestation.Categorical(rc, "CALLS",      nm, _sourceId, null, witnessWeight));
+            if (def is { } d) rows.Add(NativeAttestation.Categorical(d, "DEFINES", nm, _sourceId, null, witnessWeight));
+            if (refCall is { } rc) rows.Add(NativeAttestation.Categorical(rc, "CALLS", nm, _sourceId, null, witnessWeight));
             if (refType is { } rt) rows.Add(NativeAttestation.Categorical(rt, "REFERENCES", nm, _sourceId, null, witnessWeight));
         }
         return rows.ToImmutable();

@@ -5,9 +5,9 @@ namespace Laplace.Decomposers.Abstractions;
 
 public abstract class RelationTripleDecomposerBase : IDecomposer
 {
-    public abstract Engine.Core.Hash128 SourceId     { get; }
-    public abstract string              SourceName   { get; }
-    public abstract int                 LayerOrder   { get; }
+    public abstract Engine.Core.Hash128 SourceId { get; }
+    public abstract string SourceName { get; }
+    public abstract int LayerOrder { get; }
     public abstract Engine.Core.Hash128 TrustClassId { get; }
 
     public abstract Task InitializeAsync(

@@ -53,7 +53,7 @@ public static class San
 
     public static string ToSan(Board b, ChessMove m)
     {
-        if ((m.Flags & MoveFlags.CastleKing) != 0)  return WithCheckGlyph(b, m, "O-O");
+        if ((m.Flags & MoveFlags.CastleKing) != 0) return WithCheckGlyph(b, m, "O-O");
         if ((m.Flags & MoveFlags.CastleQueen) != 0) return WithCheckGlyph(b, m, "O-O-O");
 
         var legal = MoveGen.Legal(b);
@@ -79,9 +79,9 @@ public static class San
             {
                 bool fileUnique = rivals.All(x => Board.FileOf(x.From) != Board.FileOf(m.From));
                 bool rankUnique = rivals.All(x => Board.RankOf(x.From) != Board.RankOf(m.From));
-                if (fileUnique)      sb.Append((char)('a' + Board.FileOf(m.From)));
+                if (fileUnique) sb.Append((char)('a' + Board.FileOf(m.From)));
                 else if (rankUnique) sb.Append((char)('1' + Board.RankOf(m.From)));
-                else                 sb.Append((char)('a' + Board.FileOf(m.From))).Append((char)('1' + Board.RankOf(m.From)));
+                else sb.Append((char)('a' + Board.FileOf(m.From))).Append((char)('1' + Board.RankOf(m.From)));
             }
             if (isCapture) sb.Append('x');
             sb.Append(dest);
@@ -116,8 +116,12 @@ public static class San
 
     private static Piece PieceFromChar(char c) => char.ToUpperInvariant(c) switch
     {
-        'N' => Piece.WKnight, 'B' => Piece.WBishop, 'R' => Piece.WRook,
-        'Q' => Piece.WQueen,  'K' => Piece.WKing,   'P' => Piece.WPawn,
+        'N' => Piece.WKnight,
+        'B' => Piece.WBishop,
+        'R' => Piece.WRook,
+        'Q' => Piece.WQueen,
+        'K' => Piece.WKing,
+        'P' => Piece.WPawn,
         _ => Piece.Empty,
     };
 }

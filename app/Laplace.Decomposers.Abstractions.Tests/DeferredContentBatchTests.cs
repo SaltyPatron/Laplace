@@ -6,13 +6,13 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-// Locks the decompose-time tier-containment dedup for the CONTENT-TEXT channel as wired into the
-// content-emitting decomposers (WordNet, OMW, ConceptNet, Atomic2020, Tatoeba, OpenSubtitles, UD):
-// SubstrateChangeBuilder.EnableDeferredContent(reader) routes ContentWitnessBatch.TryAppendToBuilder
-// through a per-batch ContentBatch (build the tier tree once, no staging), and BuildAsync runs one
-// entities_exist_bitmap probe and stages only the novel subtrees. reader == null preserves the
-// original one-pass native add byte-for-byte; an all-present probe stages zero rows (idempotent
-// re-ingest); an all-absent probe stages exactly the same as the unfiltered add.
+
+
+
+
+
+
+
 [Collection("GrammarPerfcache")]
 public sealed class DeferredContentBatchTests
 {
@@ -68,7 +68,7 @@ public sealed class DeferredContentBatchTests
         var b = new SubstrateChangeBuilder(Src, "test/present").EnableDeferredContent(reader);
         Assert.NotNull(b.DeferredContent);
 
-        // Append defers: the root is wired immediately for attestations, but nothing is staged yet.
+
         Assert.True(ContentWitnessBatch.TryAppendToBuilder(b, bytes, Src, out var root));
         Assert.NotEqual(default, root);
 
@@ -103,8 +103,8 @@ public sealed class DeferredContentBatchTests
     [Fact]
     public async Task DuplicateContentInBatch_BuildsTreeOnce_StillStages()
     {
-        // The underscored-surface path (WordNet/OMW multiword lemmas) normalizes '_' -> ' ' before
-        // deferring; repeated identical surfaces in one batch dedup to a single tree but still stage.
+
+
         var reader = new FakeReader(present: false);
         var b = new SubstrateChangeBuilder(Src, "test/dup").EnableDeferredContent(reader);
 

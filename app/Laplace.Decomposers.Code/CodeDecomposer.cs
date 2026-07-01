@@ -19,9 +19,9 @@ public sealed class CodeDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "CodeDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "CodeDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
@@ -66,7 +66,7 @@ public sealed class CodeDecomposer : IDecomposer
             }
             catch
             {
-                continue;  
+                continue;
             }
 
             foreach (var e in ents) b.AddEntity(e);
@@ -113,7 +113,7 @@ public sealed class CodeDecomposer : IDecomposer
     {
         string ext = Path.GetExtension(path);
         if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-        // Single source of truth: the native registry's EXTS[] (all 31 compiled grammars).
+
         return ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant());
     }
 

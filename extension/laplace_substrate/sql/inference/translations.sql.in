@@ -1,15 +1,15 @@
--- inference/translations.sql.in
--- Translations are EMERGENT, never stored as direct edges. A word reaches its cross-language
--- equivalents through the shared synset's members whose language differs from the source word
--- — king -> {roi(fra), 王(lzh), ราชา(tha), 국왕(kor), konge(dan), ...}. Ranked by Glicko-2 strength.
+
+
+
+
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    -- Distinct foreign equivalents, one row per surface form (a homograph like rei spans 11
-    -- Romance languages; we show it once with its best-ranked language rather than 11 near-dup
-    -- rows). Excludes the full source language set so neither the English nor a coincidental
-    -- same-spelling homograph reading (king=est) is listed. Dominant sense first.
+    
+    
+    
+    
     WITH src_langs AS (
         SELECT c.object_id AS id FROM consensus c
         WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')

@@ -34,14 +34,14 @@ public static unsafe class Glicko2
 
     public const long ScoreLoss = 0L;
     public const long ScoreDraw = 500_000_000L;
-    public const long ScoreWin  = 1_000_000_000L;
+    public const long ScoreWin = 1_000_000_000L;
 
     public static long EffectiveMuFp1e9(long ratingFp1e9, long rdFp1e9)
     {
         var st = new Glicko2State
         {
             RatingFp1e9 = ratingFp1e9,
-            RdFp1e9     = rdFp1e9,
+            RdFp1e9 = rdFp1e9,
         };
         return NativeInterop.Glicko2EffectiveMu(&st);
     }
@@ -61,7 +61,7 @@ public static unsafe class Glicko2
         }
     }
 
-    
+
     public static Glicko2State AccumulateGames(
         long priorRatingFp1e9,
         long priorRdFp1e9,
@@ -75,8 +75,8 @@ public static unsafe class Glicko2
         if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
         var state = new Glicko2State
         {
-            RatingFp1e9     = priorRatingFp1e9,
-            RdFp1e9         = priorRdFp1e9,
+            RatingFp1e9 = priorRatingFp1e9,
+            RdFp1e9 = priorRdFp1e9,
             VolatilityFp1e9 = priorVolatilityFp1e9,
         };
         long q = sumScoreFp / games;
@@ -89,15 +89,15 @@ public static unsafe class Glicko2
             obs[(int)i] = new Glicko2Observation
             {
                 OpponentRatingFp1e9 = opponentRatingFp1e9,
-                OpponentRdFp1e9     = opponentRdFp1e9,
-                ScoreFp1e9          = q,
+                OpponentRdFp1e9 = opponentRdFp1e9,
+                ScoreFp1e9 = q,
             };
         }
         obs[(int)(games - 1)] = new Glicko2Observation
         {
             OpponentRatingFp1e9 = opponentRatingFp1e9,
-            OpponentRdFp1e9     = opponentRdFp1e9,
-            ScoreFp1e9          = rem,
+            OpponentRdFp1e9 = opponentRdFp1e9,
+            ScoreFp1e9 = rem,
         };
         UpdatePeriod(ref state, obs, tauFp1e9, 0);
         return state;

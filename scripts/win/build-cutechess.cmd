@@ -1,7 +1,7 @@
 @echo off
-rem Build cutechess-cli (the external/cutechess submodule) — our local engine-match gauntlet.
-rem Qt6 is fetched prebuilt via aqtinstall (no Qt account, scriptable); the CLI is built with MSVC+Ninja
-rem through the same VS toolchain the rest of the repo uses. Output: build-cutechess\cutechess-cli.exe.
+
+
+
 setlocal
 call "%~dp0env.cmd"
 
@@ -18,7 +18,7 @@ if not exist "%CC_SRC%\CMakeLists.txt" (
   exit /b 1
 )
 
-rem --- 1. Qt (prebuilt, via aqtinstall) ---
+
 if not exist "%QT_DIR%\lib\cmake\Qt6\Qt6Config.cmake" (
   echo ==== installing Qt %QT_VER% %QT_ARCH% -^> %QT_ROOT% ====
   python -m pip install --user --quiet aqtinstall || exit /b 1
@@ -27,17 +27,17 @@ if not exist "%QT_DIR%\lib\cmake\Qt6\Qt6Config.cmake" (
   echo ==== Qt present: %QT_DIR% ====
 )
 
-rem --- 2. MSVC environment (Ninja needs cl on PATH; force cl so the Intel icx on PATH isn't picked) ---
+
 call "%VCVARS%" || exit /b 1
 
-rem --- 3. Configure the CLI only (no GUI build, no unit tests) ---
+
 echo ==== configuring cutechess (cli) ====
 cmake -S "%CC_SRC%" -B "%CC_BUILD%" -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF ^
   -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
   -DCMAKE_PREFIX_PATH="%QT_DIR%" || exit /b 1
 
-rem --- 4. Build the cli target ---
+
 echo ==== building cutechess-cli ====
 cmake --build "%CC_BUILD%" --target cli || exit /b 1
 

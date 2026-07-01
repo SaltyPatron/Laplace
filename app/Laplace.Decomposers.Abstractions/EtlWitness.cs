@@ -70,9 +70,9 @@ public sealed class EtlWitness : IGrammarWitness
 
         Hash128? resolved = _src.Anchor switch
         {
-            AnchorResolver.SenseKey      => SenseAnchor.Emit(b, key, _src.SourceId, _src.Trust),
+            AnchorResolver.SenseKey => SenseAnchor.Emit(b, key, _src.SourceId, _src.Trust),
             AnchorResolver.FrameCategory => CategoryAnchor.Emit(b, key, EntityTypeRegistry.FrameNetFrame, _src.SourceId, _src.Trust),
-            AnchorResolver.IliSynset     => SourceEntityIdConventions.ResolveSynsetAnchor(key),
+            AnchorResolver.IliSynset => SourceEntityIdConventions.ResolveSynsetAnchor(key),
             _ => null,
         };
         if (resolved is null) return false;

@@ -34,15 +34,23 @@ internal static class CpuTopologyCommands
                 case "--e-core-indices":
                     Console.WriteLine(string.Join(",", CpuTopology.EfficientCoreCpuIndices));
                     return 0;
-                case "--verify-pin":
-                {
-                    bool pinned = CpuTopology.PinCurrentThreadToPerformanceCores();
-                    Console.WriteLine(
-                        $"pin_applied={pinned.ToString().ToLowerInvariant()} "
-                        + $"source={CpuTopology.DetectionSource} "
-                        + $"p_primary_lps=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}]");
-                    return pinned ? 0 : 2;
-                }
+                case "--verify-pin":
+
+                    {
+
+                        bool pinned = CpuTopology.PinCurrentThreadToPerformanceCores();
+
+                        Console.WriteLine(
+
+                            $"pin_applied={pinned.ToString().ToLowerInvariant()} "
+
+                            + $"source={CpuTopology.DetectionSource} "
+
+                            + $"p_primary_lps=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}]");
+
+                        return pinned ? 0 : 2;
+
+                    }
             }
         }
 

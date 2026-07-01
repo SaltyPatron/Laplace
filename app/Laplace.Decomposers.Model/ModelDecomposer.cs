@@ -41,24 +41,24 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     }
 
     public static readonly Hash128 TextTypeId = TextEntityBuilder.WordTypeId;
-    public static readonly Hash128 ModelRecipeTypeId    = EntityTypeRegistry.ModelRecipe;
+    public static readonly Hash128 ModelRecipeTypeId = EntityTypeRegistry.ModelRecipe;
     public static readonly Hash128 ModelTokenizerTypeId = EntityTypeRegistry.ModelTokenizer;
-    public static readonly Hash128 ArchitectureTypeId   = EntityTypeRegistry.Architecture;
-    public static readonly Hash128 ScalarTypeId         = EntityTypeRegistry.Scalar;
-    public static readonly Hash128 NgramTypeId          = EntityTypeRegistry.Ngram;
-    public static readonly Hash128 TokenMapsToTypeId   = RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO");
-    public static readonly Hash128 SimilarToTypeId     = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
-    public static readonly Hash128 AttendsTypeId       = RelationTypeRegistry.RelationTypeId("ATTENDS");
-    public static readonly Hash128 OvRelatesTypeId     = RelationTypeRegistry.RelationTypeId("OV_RELATES");
-    public static readonly Hash128 CompletesToTypeId   = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
+    public static readonly Hash128 ArchitectureTypeId = EntityTypeRegistry.Architecture;
+    public static readonly Hash128 ScalarTypeId = EntityTypeRegistry.Scalar;
+    public static readonly Hash128 NgramTypeId = EntityTypeRegistry.Ngram;
+    public static readonly Hash128 TokenMapsToTypeId = RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO");
+    public static readonly Hash128 SimilarToTypeId = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
+    public static readonly Hash128 AttendsTypeId = RelationTypeRegistry.RelationTypeId("ATTENDS");
+    public static readonly Hash128 OvRelatesTypeId = RelationTypeRegistry.RelationTypeId("OV_RELATES");
+    public static readonly Hash128 CompletesToTypeId = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
 
-    public static readonly Hash128 HasHiddenSizeTypeId  = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
-    public static readonly Hash128 HasNumLayersTypeId   = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
-    public static readonly Hash128 HasNumHeadsTypeId    = RelationTypeRegistry.RelationTypeId("HAS_NUM_HEADS");
-    public static readonly Hash128 HasNumKvHeadsTypeId  = RelationTypeRegistry.RelationTypeId("HAS_NUM_KV_HEADS");
-    public static readonly Hash128 HasIntermSizeTypeId  = RelationTypeRegistry.RelationTypeId("HAS_INTERMEDIATE_SIZE");
-    public static readonly Hash128 HasVocabSizeTypeId   = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
-    public static readonly Hash128 IsATypeId            = RelationTypeRegistry.RelationTypeId("IS_A");
+    public static readonly Hash128 HasHiddenSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
+    public static readonly Hash128 HasNumLayersTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
+    public static readonly Hash128 HasNumHeadsTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_HEADS");
+    public static readonly Hash128 HasNumKvHeadsTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_KV_HEADS");
+    public static readonly Hash128 HasIntermSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_INTERMEDIATE_SIZE");
+    public static readonly Hash128 HasVocabSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
+    public static readonly Hash128 IsATypeId = RelationTypeRegistry.RelationTypeId("IS_A");
 
     private static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
@@ -69,8 +69,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 
     private readonly string _modelDir;
     private readonly Hash128 _source;
-    private readonly string  _sourceName;
-    private readonly bool?   _persistEvidence;
+    private readonly string _sourceName;
+    private readonly bool? _persistEvidence;
 
     public ModelDecomposer(string modelDir, bool? persistEvidence = null)
     {
@@ -79,17 +79,17 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         _persistEvidence = persistEvidence;
     }
 
-    public Hash128 Source       => _source;
-    public Hash128 SourceId     => _source;
-    public string  SourceName   => _sourceName;
-    public int     LayerOrder   => 10;
+    public Hash128 Source => _source;
+    public Hash128 SourceId => _source;
+    public string SourceName => _sourceName;
+    public int LayerOrder => 10;
     public Hash128 TrustClassId => TrustClass;
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
@@ -126,10 +126,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     {
         var log = context.Logger;
         var phaseSw = System.Diagnostics.Stopwatch.StartNew();
-        string configPath    = Path.Combine(_modelDir, "config.json");
+        string configPath = Path.Combine(_modelDir, "config.json");
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
 
-        // ── Lane A: shape-inferred manifest (the frozen contract; never throws) ────────────────
+
         var cfgResult = ModelConfigReader.Read(configPath);
         ModelManifest manifest;
         try
@@ -142,7 +142,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             log.LogWarning("phase=manifest: tensor headers unavailable ({Msg}); recipe-only path", ex.Message);
             manifest = new ModelManifest
             {
-                Config = cfgResult.Config, Roles = Array.Empty<TensorRole>(),
+                Config = cfgResult.Config,
+                Roles = Array.Empty<TensorRole>(),
                 Modality = cfgResult.Modality,
                 Coverage = cfgResult.Coverage == Coverage.Full ? Coverage.Partial : cfgResult.Coverage,
                 ModelName = _sourceName,
@@ -152,8 +153,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             + "(moe={Moe}, mla={Mla})", manifest.Config.ModelType, manifest.Modality, manifest.Coverage,
             manifest.LayerCount, manifest.Roles.Count, manifest.Config.IsMoe, manifest.Config.IsMla);
 
-        // Legacy HF config-scalar deposit (best effort): keeps the existing HAS_* scalars + IS_A
-        // architecture edge for known decoders, but an unknown model_type must never crash ingest.
+
+
         SubstrateChange? legacyRecipe = TryBuildLegacyRecipeChange(configPath, log);
         if (legacyRecipe is { } lr)
             yield return lr;
@@ -219,7 +220,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 
 
         const int finalEpoch = 1;
-        // Lane C decoder ring: cross-reference each circuit's strongest pairs against seed knowledge.
+
         var classifier = new HeadClassifier(context.Reader, Source, _sourceName, log);
         var edges = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log, classifier);
         await foreach (var change in edges.EmitAsync(finalEpoch, ct))
@@ -254,10 +255,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<long?>(n > 0 ? n : null);
     }
 
-    
-    
-    
-    
+
+
+
+
     private long EstimateMatchupUnits()
     {
         string configPath = Path.Combine(_modelDir, "config.json");

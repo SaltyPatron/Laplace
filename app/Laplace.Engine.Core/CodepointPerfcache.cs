@@ -16,7 +16,7 @@ public static unsafe class CodepointPerfcache
                     -2 => "bad magic / unsupported format version",
                     -3 => "record count / size mismatch",
                     -4 => "body CRC mismatch (corrupt blob)",
-                    _  => "unknown error",
+                    _ => "unknown error",
                 };
                 throw new InvalidOperationException(
                     $"codepoint_table_load_perfcache(\"{path}\") failed (rc={rc}): {why}");

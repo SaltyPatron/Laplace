@@ -5,15 +5,16 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
+public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
+{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "SemLinkDecomposer";
-    public int     LayerOrder   => 3;
+    public Hash128 SourceId => Source;
+    public string SourceName => "SemLinkDecomposer";
+    public int LayerOrder => 3;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>

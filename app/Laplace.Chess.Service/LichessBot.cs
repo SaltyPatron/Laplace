@@ -138,18 +138,18 @@ public sealed class LichessBot : IAsyncDisposable
                     moves = state.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime = state.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
                     btime = state.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
-                    winc  = state.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
-                    binc  = state.TryGetProperty("binc", out var bi) ? bi.GetInt32() : 0;
+                    winc = state.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
+                    binc = state.TryGetProperty("binc", out var bi) ? bi.GetInt32() : 0;
                     initialFen = ev.TryGetProperty("initialFen", out var fen) ? fen.GetString() ?? "startpos" : "startpos";
                     if (IsTerminal(state)) break;
                 }
                 else
                 {
-                    moves     = ev.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
-                    wtime     = ev.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
-                    btime     = ev.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
-                    winc      = ev.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
-                    binc      = ev.TryGetProperty("binc", out var bi) ? bi.GetInt32() : 0;
+                    moves = ev.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
+                    wtime = ev.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
+                    btime = ev.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
+                    winc = ev.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
+                    binc = ev.TryGetProperty("binc", out var bi) ? bi.GetInt32() : 0;
                     initialFen = "startpos";
                     if (IsTerminal(ev)) break;
                 }
@@ -162,7 +162,7 @@ public sealed class LichessBot : IAsyncDisposable
                 if (board.WhiteToMove != weAreWhite) continue;
 
                 int myTime = weAreWhite ? wtime : btime;
-                int myInc  = weAreWhite ? winc : binc;
+                int myInc = weAreWhite ? winc : binc;
                 int budgetMs = TimeBudget(myTime, myInc);
 
                 var result = search.Think(board, new Search.Limits(MaxDepth: _depth, MaxTimeMs: budgetMs));

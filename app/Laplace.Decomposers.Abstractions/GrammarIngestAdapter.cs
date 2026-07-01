@@ -3,16 +3,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>One parsed grammar row — Stage 1 output after tree-sitter strip.</summary>
 public readonly record struct GrammarIngestRecord(
     byte[] LineUtf8,
     GrammarAst Ast,
     int RowIndex,
     long RowsTotal);
 
-/// <summary>
-/// Grammar compose handler: probe-before-materialize, witness walk — plugs into <see cref="IngestBatchPipeline"/>.
-/// </summary>
 public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRecord>
 {
     private readonly Hash128 _sourceId;
@@ -42,8 +38,8 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
                 record.LineUtf8, record.Ast, _modalityId, out var rootId, out var tier) || tier < 2)
             return ValueTask.FromResult(false);
 
-        // Never per-row DB: the batched descent probe (ProbeChunkSize) is the only containment
-        // round-trip. Session seen-set hits skip compose for re-emitted trunks (OMW re-ingest).
+
+
         if (!reader.IsProvenPresent(rootId))
             return ValueTask.FromResult(false);
 
@@ -111,12 +107,6 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
     }
 }
 
-/// <summary>
-/// Streams parsed rows from a grammar file without ReadAllBytes.
-/// <see cref="GrammarRecordFraming.Line"/> — one physical line is one record (delimiter/field parse
-/// still comes from the tree-sitter grammar id). <see cref="GrammarRecordFraming.Grammar"/> — the
-/// grammar's <c>row</c> rule frames records (RFC4180 quoted fields may span newlines).
-/// </summary>
 public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
 {
     private readonly string _filePath;
@@ -177,7 +167,7 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
 
                 if (_acceptRow is null)
                 {
-                    // No filter: one native call per chunk frames AND parses all records together.
+
                     foreach (var (lineUtf8, ast) in StructuredGrammarIngest.FeedAndParseForPipeline(iter, buf, read))
                     {
                         rowsTotal++;
@@ -188,7 +178,7 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
                 }
                 else
                 {
-                    // Filter active: frame first (raw bytes only), reject cheap, parse only accepted.
+
                     foreach (byte[] lineUtf8 in StructuredGrammarIngest.FeedRawLinesForPipeline(iter, buf, read))
                     {
                         rowsTotal++;

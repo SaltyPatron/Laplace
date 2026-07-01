@@ -44,7 +44,7 @@ internal interface IBillingEntitlementStore
         DateTimeOffset renewedAt,
         CancellationToken ct);
 
-    
+
     Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct);
 
     Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct);
@@ -287,81 +287,81 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
         using (doc)
         {
-        var root = doc.RootElement;
-        var eventId = StringProperty(root, "id") ?? $"synthetic_{Guid.NewGuid():N}";
-        var eventType = root.TryGetProperty("type", out var typeElement)
-            ? typeElement.GetString() ?? "unknown"
-            : "unknown";
+            var root = doc.RootElement;
+            var eventId = StringProperty(root, "id") ?? $"synthetic_{Guid.NewGuid():N}";
+            var eventType = root.TryGetProperty("type", out var typeElement)
+                ? typeElement.GetString() ?? "unknown"
+                : "unknown";
 
-        if (!await _eventStore.TryBeginAsync(eventId, eventType, ct))
-            return Result(true, verified, true, eventId, eventType, "duplicate", null, null, null, null);
+            if (!await _eventStore.TryBeginAsync(eventId, eventType, ct))
+                return Result(true, verified, true, eventId, eventType, "duplicate", null, null, null, null);
 
-        if (!root.TryGetProperty("data", out var data) || !data.TryGetProperty("object", out var obj))
-        {
-            await _eventStore.CompleteAsync(eventId, "missing_object", ct);
-            return Result(false, verified, false, eventId, eventType, "missing_object", null, null, null, null);
-        }
-
-        var metadata = MetadataContainer(obj);
-        var tenant = Metadata(metadata, "tenant");
-        var serviceId = Metadata(metadata, "service_id");
-        var quoteId = Metadata(metadata, "quote_id");
-        var customerId = StringProperty(obj, "customer") ?? StringProperty(obj, "customer_id");
-        var subscriptionId = StringProperty(obj, "subscription") ?? StringProperty(obj, "id");
-
-        if (string.Equals(eventType, "checkout.session.completed", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(quoteId))
-                await _billing.TryApproveQuoteAsync(quoteId, ct);
-
-            var plan = _catalog.ListPlans()
-                .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
-            if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
+            if (!root.TryGetProperty("data", out var data) || !data.TryGetProperty("object", out var obj))
             {
-                await _entitlements.ActivatePlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
-                await _eventStore.CompleteAsync(eventId, "plan_activated", ct);
-                return Result(true, verified, false, eventId, eventType, "plan_activated", tenant, serviceId, quoteId, plan.PlanId);
+                await _eventStore.CompleteAsync(eventId, "missing_object", ct);
+                return Result(false, verified, false, eventId, eventType, "missing_object", null, null, null, null);
             }
 
-            await _eventStore.CompleteAsync(eventId, "quote_approved", ct);
-            return Result(true, verified, false, eventId, eventType, "quote_approved", tenant, serviceId, quoteId, null);
-        }
+            var metadata = MetadataContainer(obj);
+            var tenant = Metadata(metadata, "tenant");
+            var serviceId = Metadata(metadata, "service_id");
+            var quoteId = Metadata(metadata, "quote_id");
+            var customerId = StringProperty(obj, "customer") ?? StringProperty(obj, "customer_id");
+            var subscriptionId = StringProperty(obj, "subscription") ?? StringProperty(obj, "id");
 
-        if (string.Equals(eventType, "invoice.paid", StringComparison.OrdinalIgnoreCase))
-        {
-            var plan = _catalog.ListPlans()
-                .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
-            if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
+            if (string.Equals(eventType, "checkout.session.completed", StringComparison.OrdinalIgnoreCase))
             {
-                await _entitlements.RenewPlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
-                await _eventStore.CompleteAsync(eventId, "plan_renewed", ct);
-                return Result(true, verified, false, eventId, eventType, "plan_renewed", tenant, serviceId, quoteId, plan.PlanId);
-            }
-        }
+                if (!string.IsNullOrWhiteSpace(quoteId))
+                    await _billing.TryApproveQuoteAsync(quoteId, ct);
 
-        if (string.Equals(eventType, "customer.subscription.deleted", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(subscriptionId) &&
-                await _entitlements.DeactivateSubscriptionAsync(subscriptionId, "canceled", ct) is { } entitlement)
+                var plan = _catalog.ListPlans()
+                    .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
+                if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
+                {
+                    await _entitlements.ActivatePlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
+                    await _eventStore.CompleteAsync(eventId, "plan_activated", ct);
+                    return Result(true, verified, false, eventId, eventType, "plan_activated", tenant, serviceId, quoteId, plan.PlanId);
+                }
+
+                await _eventStore.CompleteAsync(eventId, "quote_approved", ct);
+                return Result(true, verified, false, eventId, eventType, "quote_approved", tenant, serviceId, quoteId, null);
+            }
+
+            if (string.Equals(eventType, "invoice.paid", StringComparison.OrdinalIgnoreCase))
             {
-                await _eventStore.CompleteAsync(eventId, "plan_canceled", ct);
-                return Result(true, verified, false, eventId, eventType, "plan_canceled", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
+                var plan = _catalog.ListPlans()
+                    .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
+                if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
+                {
+                    await _entitlements.RenewPlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
+                    await _eventStore.CompleteAsync(eventId, "plan_renewed", ct);
+                    return Result(true, verified, false, eventId, eventType, "plan_renewed", tenant, serviceId, quoteId, plan.PlanId);
+                }
             }
-        }
 
-        if (string.Equals(eventType, "customer.subscription.updated", StringComparison.OrdinalIgnoreCase))
-        {
-            var subscriptionStatus = StringProperty(obj, "status") ?? "updated";
-            if (subscriptionStatus is "canceled" or "unpaid" or "incomplete_expired" && !string.IsNullOrWhiteSpace(subscriptionId) &&
-                await _entitlements.DeactivateSubscriptionAsync(subscriptionId, subscriptionStatus, ct) is { } entitlement)
+            if (string.Equals(eventType, "customer.subscription.deleted", StringComparison.OrdinalIgnoreCase))
             {
-                await _eventStore.CompleteAsync(eventId, $"plan_{subscriptionStatus}", ct);
-                return Result(true, verified, false, eventId, eventType, $"plan_{subscriptionStatus}", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
+                if (!string.IsNullOrWhiteSpace(subscriptionId) &&
+                    await _entitlements.DeactivateSubscriptionAsync(subscriptionId, "canceled", ct) is { } entitlement)
+                {
+                    await _eventStore.CompleteAsync(eventId, "plan_canceled", ct);
+                    return Result(true, verified, false, eventId, eventType, "plan_canceled", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
+                }
             }
-        }
 
-        await _eventStore.CompleteAsync(eventId, "ignored", ct);
-        return Result(true, verified, false, eventId, eventType, "ignored", tenant, serviceId, quoteId, null);
+            if (string.Equals(eventType, "customer.subscription.updated", StringComparison.OrdinalIgnoreCase))
+            {
+                var subscriptionStatus = StringProperty(obj, "status") ?? "updated";
+                if (subscriptionStatus is "canceled" or "unpaid" or "incomplete_expired" && !string.IsNullOrWhiteSpace(subscriptionId) &&
+                    await _entitlements.DeactivateSubscriptionAsync(subscriptionId, subscriptionStatus, ct) is { } entitlement)
+                {
+                    await _eventStore.CompleteAsync(eventId, $"plan_{subscriptionStatus}", ct);
+                    return Result(true, verified, false, eventId, eventType, $"plan_{subscriptionStatus}", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
+                }
+            }
+
+            await _eventStore.CompleteAsync(eventId, "ignored", ct);
+            return Result(true, verified, false, eventId, eventType, "ignored", tenant, serviceId, quoteId, null);
         }
     }
 

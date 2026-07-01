@@ -11,20 +11,21 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
+public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
+{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 FrameTypeId    = EntityTypeRegistry.FrameNetFrame;
-    private static readonly Hash128 FeTypeId       = EntityTypeRegistry.FrameNetFe;
+    private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
-    // SCHEMA, not content: the four FrameNet coreness levels (Core / Peripheral /
-    // Extra-Thematic / Core-Unexpressed) are a small, fixed, closed enum used only as the
-    // contextId qualifier on HAS_FRAME_ELEMENT edges. They are app/meta Vocabulary with no
-    // geometry by design, so Hash128.OfCanonical (not ContentEmitter) is correct here.
+
+
+
+
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 
@@ -36,34 +37,34 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static readonly Dictionary<string, string> RelationTypes = new(StringComparer.Ordinal)
     {
-        ["Inherits from"]   = "INHERITS_FROM",
-        ["Uses"]            = "FRAME_USES",
-        ["Perspective on"]  = "PERSPECTIVE_ON",
-        ["Subframe of"]     = "HAS_SUBEVENT",
+        ["Inherits from"] = "INHERITS_FROM",
+        ["Uses"] = "FRAME_USES",
+        ["Perspective on"] = "PERSPECTIVE_ON",
+        ["Subframe of"] = "HAS_SUBEVENT",
         ["Is Causative of"] = "CAUSATIVE_OF",
         ["Is Inchoative of"] = "INCHOATIVE_OF",
-        ["Precedes"]        = "PRECEDES",
-        ["See also"]        = "ALSO_SEE",
+        ["Precedes"] = "PRECEDES",
+        ["See also"] = "ALSO_SEE",
     };
 
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "FrameNetDecomposer";
-    public int     LayerOrder   => 3;
+    public Hash128 SourceId => Source;
+    public string SourceName => "FrameNetDecomposer";
+    public int LayerOrder => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    
-    
-    
-    
-    
-    
-    // Each frame/LU/fulltext batch is a self-contained builder; the only out-of-batch (and
-    // out-of-source) references are name-anchor edges (TargetFrame, FE Requires/Excludes,
-    // EVOKES_FRAME) that resolve by content-addressed id wherever the referent lands. The
-    // per-batch referential EXISTS pre-check is gone, so forward/cross-batch anchors are legal
-    // and N workers can commit concurrently.
+
+
+
+
+
+
+
+
+
+
+
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -91,10 +92,10 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        string frameDir    = Path.Combine(context.EcosystemPath, "frame");
-        string luDir       = Path.Combine(context.EcosystemPath, "lu");
+        string frameDir = Path.Combine(context.EcosystemPath, "frame");
+        string luDir = Path.Combine(context.EcosystemPath, "lu");
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
-        int batch    = options.BatchSize > 1 ? options.BatchSize : 4096;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         var uncapped = options with { MaxInputUnits = 0 };
 
         await foreach (var change in DecomposerBatch.RunAsync(
@@ -141,9 +142,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static void ComposeFulltextAnno(FulltextAnno ann, SubstrateChangeBuilder b)
     {
-        var sentId   = ContentEmitter.Emit(b, ann.Sentence, Source);
+        var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
         var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
-        var frameId  = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
+        var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
         if (sentId is not null && targetId is not null && frameId is not null)
             b.AddAttestation(NativeAttestation.Categorical(
                 targetId.Value, "EVOKES_FRAME", frameId.Value,
@@ -168,16 +169,16 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
     {
         long frames = 0, lus = 0;
         string frameDir = Path.Combine(context.EcosystemPath, "frame");
-        string luDir    = Path.Combine(context.EcosystemPath, "lu");
+        string luDir = Path.Combine(context.EcosystemPath, "lu");
         if (Directory.Exists(frameDir)) frames = Directory.EnumerateFiles(frameDir, "*.xml").LongCount();
-        if (Directory.Exists(luDir))    lus    = Directory.EnumerateFiles(luDir, "lu*.xml").LongCount();
+        if (Directory.Exists(luDir)) lus = Directory.EnumerateFiles(luDir, "lu*.xml").LongCount();
         return Task.FromResult<long?>(frames + lus);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    
-    
+
+
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
@@ -191,8 +192,8 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-        
-        
+
+
         CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, SourceTrust.AcademicCurated);
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
@@ -207,15 +208,15 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
         foreach (var lu in frame.LexUnits)
             ContentEmitter.Emit(b, lu.Lemma, Source);
 
-        // Relation targets are frames OWNED by their own frame files; their entity rows land there
-        // under the identical content-addressed id. We only need the id to anchor the attestation
-        // (CategoryAnchor.Id below), not an entity row here — pre-emitting one was purely to satisfy
-        // the deleted referential EXISTS pre-check, so it is removed.
+
+
+
+
     }
 
-    
-    
-    
+
+
+
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
     {
         Hash128? frameAnchor = CategoryAnchor.Id(frame.Name);
@@ -255,7 +256,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
                         Source, SourceTrust.AcademicCurated));
             }
 
-            // FE-to-FE constraints, anchored the same way as HAS_FRAME_ELEMENT (CategoryAnchor by FE name).
+
             foreach (var reqName in fe.Requires)
                 if (CategoryAnchor.Id(reqName) is { } reqId)
                     b.AddAttestation(NativeAttestation.Categorical(
@@ -282,9 +283,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
             if (!RelationTypes.TryGetValue(rel.Type, out var typeName)) continue;
             Hash128? tgt = CategoryAnchor.Id(rel.TargetFrame);
             if (tgt is null) continue;
-            // "X Subframe of Y" means X is a sub-event of the larger frame Y, so the HAS_SUBEVENT
-            // edge runs Y -> X (subject HAS_SUBEVENT object). Every other FrameNet relation keeps
-            // this frame as the subject.
+
+
+
             if (rel.Type == "Subframe of")
                 b.AddAttestation(NativeAttestation.Categorical(
                     tgt.Value, typeName, frameId, Source, SourceTrust.AcademicCurated));
@@ -321,7 +322,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
             if (string.IsNullOrEmpty(feName)) continue;
             string coreType = (string?)fe.Attribute("coreType") ?? "";
             var (feDef, _) = ParseDefRoot((string?)fe.Element(ns + "definition") ?? "");
-            // FE-to-FE structural constraints: <requiresFE>/<excludesFE> name a sibling FE in this frame.
+
             var requires = new List<string>();
             foreach (var rq in fe.Elements(ns + "requiresFE"))
                 if ((string?)rq.Attribute("name") is { Length: > 0 } rn) requires.Add(rn);
@@ -335,7 +336,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
         foreach (var lu in root.Elements(ns + "lexUnit"))
         {
             string? luName = (string?)lu.Attribute("name");
-            string? pos    = (string?)lu.Attribute("POS");
+            string? pos = (string?)lu.Attribute("POS");
             if (string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos)) continue;
             if (!int.TryParse((string?)lu.Attribute("ID"), out int id)) continue;
             string lemma = LemmaOf(luName);

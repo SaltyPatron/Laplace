@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Pure chess engine only — no DB/native, so cutechess can spawn many fast-starting instances. -->
+    
     <ProjectReference Include="..\Laplace.Modality.Chess\Laplace.Modality.Chess.csproj" />
   </ItemGroup>
 

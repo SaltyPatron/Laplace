@@ -17,9 +17,9 @@ public sealed class WiktionaryJsonFilterTests
         LanguageReference.Load(IsoDir);
     }
 
-    // Mirrors the real raw-wiktextract-data.jsonl key order: "translations" (whose
-    // elements carry their own nested lang/lang_code for the TARGET language) is
-    // serialized well before the row's own top-level "lang"/"lang_code" fields.
+
+
+
     private const string RowWithNestedTranslationLangFirst = """
         {"senses":[{"glosses":["a reference work"]}],"pos":"noun","translations":[{"lang":"Abaza","lang_code":"abq","word":"x"}],"word":"dictionary","lang":"French","lang_code":"fr"}
         """;
@@ -45,9 +45,9 @@ public sealed class WiktionaryJsonFilterTests
     [Fact]
     public void MatchesLanguageFilter_RejectsNestedAbazaTranslationCode_WhenFilteredForAbaza()
     {
-        // Sanity check on the inverse: filtering for "abq" (the nested translation
-        // language) must NOT match this row, because the row's own language is fr.
-        // Pre-fix, the depth-unaware scan would have matched on the nested token.
+
+
+
         EnsureLanguageReference();
         byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(RowWithNestedTranslationLangFirst.Trim());
 

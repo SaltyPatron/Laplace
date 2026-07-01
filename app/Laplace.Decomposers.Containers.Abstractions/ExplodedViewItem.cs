@@ -6,12 +6,12 @@ public sealed record Entry(string Path, long Offset, long Length, string? MimeHi
     : ExplodedViewItem(Path);
 
 public sealed record TensorReference(
-    string                Path,
-    string                Dtype,
-    IReadOnlyList<long>   Shape,
-    long                  ByteOffset,
-    long                  ByteLength,
-    string?               Source = null)
+    string Path,
+    string Dtype,
+    IReadOnlyList<long> Shape,
+    long ByteOffset,
+    long ByteLength,
+    string? Source = null)
     : ExplodedViewItem(Path);
 
 public sealed record PythonClassReference(string Path, string Module, string Qualname)

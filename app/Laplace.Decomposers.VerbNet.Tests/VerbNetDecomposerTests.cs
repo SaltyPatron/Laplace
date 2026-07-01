@@ -78,8 +78,8 @@ public sealed class VerbNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
 
-        var lendId  = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
-        
+        var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
+
         var classId = CategoryAnchor.Id(VerbNetDecomposer.NumericClassId("give-13.1"));
         Assert.NotNull(lendId);
         Assert.NotNull(classId);
@@ -89,7 +89,7 @@ public sealed class VerbNetDecomposerTests
         Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
             && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
-        
+
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
             && a.SubjectId == classId!.Value
@@ -109,8 +109,8 @@ public sealed class VerbNetDecomposerTests
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
 
-        
-        
+
+
         var senseId = CategoryAnchor.Id("lend%2:40:00");
         Assert.NotNull(senseId);
         Assert.NotNull(lendId);
@@ -123,8 +123,8 @@ public sealed class VerbNetDecomposerTests
     [Fact]
     public void NormalizeSenseKey_Canonicalizes_To_ThreeFields_And_Strips_Markers()
     {
-        
-        
+
+
         Assert.Equal("give%2:40:03", SourceEntityIdConventions.NormalizeSenseKey("give%2:40:03"));
         Assert.Equal("give%2:40:03", SourceEntityIdConventions.NormalizeSenseKey("give%2:40:03::"));
         Assert.Equal("ache%2:37:06", SourceEntityIdConventions.NormalizeSenseKey("?ache%2:37:06"));

@@ -4,13 +4,9 @@ using Xunit;
 
 namespace Laplace.Chess.Uci.Tests;
 
-/// <summary>
-/// Proves the UCI protocol surface drives the search correctly: handshake, position setup (startpos+moves
-/// and fen), go → a LEGAL bestmove, mate found through the protocol, and quit. Pure C#, no native/DB.
-/// </summary>
 public sealed class UciEngineTests
 {
-    // Run a sequence of commands through one engine; return everything it wrote.
+
     private static string Run(params string[] commands)
     {
         var engine = new UciEngine();
@@ -34,7 +30,7 @@ public sealed class UciEngineTests
     [Fact]
     public void Quit_StopsTheLoop()
     {
-        // After quit, the "go" must never run (no bestmove emitted).
+
         var outp = Run("quit", "go depth 2");
         Assert.DoesNotContain("bestmove", outp);
     }
@@ -45,7 +41,7 @@ public sealed class UciEngineTests
         var outp = Run("position startpos moves e2e4 e7e5 g1f3", "go depth 3");
         string mv = BestMove(outp);
 
-        // Reconstruct the same position and assert the engine's move is legal there.
+
         var b = Board.FromFen(ChessModality.StartFen);
         foreach (var u in new[] { "e2e4", "e7e5", "g1f3" })
             MoveApply.Make(b, MoveGen.Legal(b).First(m => m.ToUci() == u));

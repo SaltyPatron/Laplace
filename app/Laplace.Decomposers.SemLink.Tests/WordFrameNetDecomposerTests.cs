@@ -12,7 +12,7 @@ public sealed class WordFrameNetDecomposerTests
     static WordFrameNetDecomposerTests() => SemLinkTestPerfcache.Load();
 
     private const string MapStyleRow = "Giving\tgive.v\t30-02244956-v";
-    // Native WFN rows carry bare PWN 1.6 offsets (not pwn30 MCR keys).
+
     private const string NativeGiveRow = "give v 01536410-v to transfer possession";
     private const string FourColRow = "Giving\tgive\tv\t01536410-v";
 
@@ -49,8 +49,8 @@ public sealed class WordFrameNetDecomposerTests
         Assert.Equal("fleecy", lemma);
         Assert.Equal("01105125-a", syn);
 
-        // REAL data also carries a pipe-joined "<lemma>|<pos>" layout with a trailing numeric + gloss —
-        // the old regex dropped every one of these silently.
+
+
         Assert.True(FnLuSynsetBridgeIngest.TryParseWfnNativeDataLine(
             "abusive|a 01114176-a 0 by physical or psychological maltreatment",
             out lemma, out pos, out syn));
@@ -58,14 +58,14 @@ public sealed class WordFrameNetDecomposerTests
         Assert.Equal("a", pos);
         Assert.Equal("01114176-a", syn);
 
-        // Multi-word lemmas (common for FrameNet LUs) — the old "(\S+)" lemma group dropped these.
+
         Assert.True(FnLuSynsetBridgeIngest.TryParseWfnNativeDataLine(
             "back and forth r 00114809-r to and fro", out lemma, out pos, out syn));
         Assert.Equal("back_and_forth", lemma);
         Assert.Equal("r", pos);
         Assert.Equal("00114809-r", syn);
 
-        // Satellite-adjective ss-type 's' — the old regex's [avnr] class excluded it outright.
+
         Assert.True(FnLuSynsetBridgeIngest.TryParseWfnNativeDataLine(
             "prepared|a 01771525-s 0 ready beforehand", out lemma, out pos, out syn));
         Assert.Equal("01771525-s", syn);

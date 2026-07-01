@@ -18,10 +18,10 @@ internal sealed record EmbeddingVector(bool Resolved, IReadOnlyList<double> Valu
 
 internal sealed record StructuralNeighbor(string Neighbor, double Geodesic, double? Frechet);
 
-// Laplace embeddings are TWO levels, never one conflated blob:
-//   FORM    = the S³ geometry coordinate (a real dense vector; orthographic/compositional locality).
-//   MEANING = the Glicko-2 consensus neighbourhood (salience-filtered), expressed as ranked neighbours
-//             rather than a dense vector, because meaning is the witnessed relational field, not a point.
+
+
+
+
 internal sealed record EmbeddingForm(double X, double Y, double Z, double M, double Radius, int Constituents);
 
 internal sealed record MeaningNeighbor(string Relation, string ObjectLabel, decimal EffMu, long Witnesses);

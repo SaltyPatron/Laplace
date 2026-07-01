@@ -15,13 +15,13 @@ public static class PosReference
 {
     public static readonly Hash128 PosTypeId = EntityTypeRegistry.Pos;
 
-    
-    
-    
-    
+
+
+
+
     public enum PosTagset { Upos = 0, WordNet = 1, Wiktionary = 2, FrameNet = 3 }
 
-    
+
     public static readonly string[] Canonical = ReadCanonicalFromNative();
 
     private static unsafe string[] ReadCanonicalFromNative()
@@ -44,11 +44,11 @@ public static class PosReference
     public static Hash128 Resolve(string sourceTag, PosTagset tagset, out bool probationary) =>
         NativeAttestation.ResolvePos(sourceTag, tagset, out probationary);
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public static Hash128 Attest(
         SubstrateChangeBuilder b, Hash128 subject, string tag, PosTagset tagset,
         Hash128 sourceId, Hash128? contextId, double sourceTrust,
@@ -59,8 +59,8 @@ public static class PosReference
         if (probationary)
         {
             b.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
-            // A non-UPOS-mappable tag gets its source-tag string as a substrate-native name so it is
-            // legible/walkable instead of a code-table-only island. DB folds the repeat emissions.
+
+
             if (ContentWitnessBatch.Emit(b, tag, sourceId) is { } nameId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     posId, "HAS_NAME_ALIAS", nameId, sourceId, null, sourceTrust));
@@ -72,8 +72,8 @@ public static class PosReference
         return posId;
     }
 
-    
-    
+
+
     public static void SeedCanonical(SubstrateChangeBuilder builder, Hash128 sourceId)
     {
         builder.AddEntity(new EntityRow(PosTypeId, EntityTier.Word,
@@ -82,8 +82,8 @@ public static class PosReference
         {
             Hash128 posId = CanonicalId(tag);
             builder.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
-            // Substrate-native legibility: the UPOS tag name is a codepoint-walk content entity reached
-            // by HAS_NAME_ALIAS, so POS categories render without a canonical_names code-table row.
+
+
             if (ContentWitnessBatch.Emit(builder, tag, sourceId) is { } nameId)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     posId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));

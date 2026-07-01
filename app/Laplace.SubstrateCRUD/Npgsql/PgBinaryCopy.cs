@@ -12,7 +12,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 internal static class PgBinaryCopy
 {
-    
+
     public static readonly byte[] Header =
     {
         0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
@@ -20,18 +20,18 @@ internal static class PgBinaryCopy
         0x00, 0x00, 0x00, 0x00,
     };
 
-    
+
     public static readonly byte[] Trailer = { 0xFF, 0xFF };
 
-    
-    
+
+
     public const long DefaultChunkBytes = 1L << 23;
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public static async Task WriteNativeBlobAsync(
         Stream stream, IntPtr ptr, long len, CancellationToken ct = default)
     {
@@ -87,7 +87,7 @@ internal static class PgBinaryCopy
         }
     }
 
-    
+
     public static int WriteHash(Span<byte> dst, int o, in Hash128 h)
     {
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], 16);
@@ -95,7 +95,7 @@ internal static class PgBinaryCopy
         return o + 20;
     }
 
-    
+
     public static int WriteInt64Field(Span<byte> dst, int o, long v)
     {
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], 8);
@@ -125,17 +125,17 @@ internal sealed class PgCopyRowBuffer
         _filled = PgBinaryCopy.Header.Length;
     }
 
-    
+
     public byte[] Array => _buffer;
 
-    
+
     public int Filled => _filled;
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public async ValueTask EnsureRoomAsync(int rowBytes, CancellationToken ct)
     {
         if (_filled + rowBytes <= _buffer.Length) return;
@@ -147,10 +147,10 @@ internal sealed class PgCopyRowBuffer
         if (rowBytes > _buffer.Length) _buffer = new byte[rowBytes];
     }
 
-    
+
     public void Commit(int newFilled) => _filled = newFilled;
 
-    
+
     public async Task FinalizeAsync(CancellationToken ct)
     {
         await EnsureRoomAsync(2, ct);

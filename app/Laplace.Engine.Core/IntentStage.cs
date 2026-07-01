@@ -5,9 +5,9 @@ namespace Laplace.Engine.Core;
 
 public enum IntentStageTable
 {
-    Entities      = 1,
+    Entities = 1,
     Physicalities = 2,
-    Attestations  = 3,
+    Attestations = 3,
 }
 
 public sealed class IntentStage : SafeHandle
@@ -89,16 +89,16 @@ public sealed class IntentStage : SafeHandle
     }
 
     public void AddPhysicality(
-        Hash128         id,
-        Hash128         entityId,
-        short           physicalityType,
+        Hash128 id,
+        Hash128 entityId,
+        short physicalityType,
         ReadOnlySpan<double> coord,
-        Hilbert128      hilbertIndex,
+        Hilbert128 hilbertIndex,
         ReadOnlySpan<double> trajectoryXyzm,
-        int             nConstituents,
-        double?         alignmentResidual,
-        int?            sourceDim,
-        long            observedAtUnixUs)
+        int nConstituents,
+        double? alignmentResidual,
+        int? sourceDim,
+        long observedAtUnixUs)
     {
         ThrowIfDisposed();
         if (coord.Length < 4) throw new ArgumentException("coord must have 4 elements", nameof(coord));
@@ -110,12 +110,12 @@ public sealed class IntentStage : SafeHandle
         unsafe
         {
             fixed (double* pCoord = coord)
-            fixed (double* pTraj  = trajectoryXyzm)
+            fixed (double* pTraj = trajectoryXyzm)
             {
                 int arNull = alignmentResidual is null ? 1 : 0;
-                int sdNull = sourceDim          is null ? 1 : 0;
+                int sdNull = sourceDim is null ? 1 : 0;
                 double arVal = alignmentResidual ?? 0.0;
-                int    sdVal = sourceDim          ?? 0;
+                int sdVal = sourceDim ?? 0;
                 int rc = NativeInterop.IntentStageAddPhysicality(
                     handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
                     nVerts == 0 ? null : pTraj, nVerts, nConstituents,
@@ -126,16 +126,16 @@ public sealed class IntentStage : SafeHandle
     }
 
     public void AddAttestation(
-        Hash128  id,
-        Hash128  subjectId,
-        Hash128  typeId,
+        Hash128 id,
+        Hash128 subjectId,
+        Hash128 typeId,
         Hash128? objectId,
-        Hash128  sourceId,
+        Hash128 sourceId,
         Hash128? contextId,
-        short    outcome,
-        long     lastObservedAtUnixUs,
-        long     observationCount,
-        Mask256  highwayMask = default)
+        short outcome,
+        long lastObservedAtUnixUs,
+        long observationCount,
+        Mask256 highwayMask = default)
     {
         ThrowIfDisposed();
         if (observationCount < 0) throw new ArgumentOutOfRangeException(nameof(observationCount));
@@ -194,13 +194,13 @@ public sealed class IntentStage : SafeHandle
 
     internal IntPtr DangerousNativeHandle => handle;
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     public static void ResetContentBank()
     {
         lock (LaplaceCoreGate.Native)
@@ -230,12 +230,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>
-    /// Build the content tier tree for a UTF-8 span without emitting anything. The returned tree is
-    /// owned by the caller (dispose it). First half of the two-phase containment path: build once,
-    /// probe <see cref="TierTree.NodeIds"/> against the DB existing-bitmap, then emit only novel
-    /// nodes via <see cref="EmitContentTree"/> — no second decomposition.
-    /// </summary>
     public static TierTree? BuildContentTree(ReadOnlySpan<byte> canonical)
     {
         if (canonical.IsEmpty) return null;
@@ -253,14 +247,8 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>
-    /// Emit a pre-built content tier tree. When <paramref name="existingBitmap"/> is non-empty only
-    /// novel subtrees are staged (MerkleDedup.TrunkShortcircuit, indexed by tree node order); a
-    /// present trunk skips its whole subtree. An empty bitmap emits all nodes. <paramref name="rootId"/>
-    /// always receives the natural-unit root so attestations can be wired even when the subtree is skipped.
-    /// </summary>
     public bool EmitContentTree(
-        TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId)
+    TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId)
     {
         rootId = default;
         ArgumentNullException.ThrowIfNull(tree);
@@ -291,14 +279,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>
-    /// Per-content-id partition: route every staged row into one of <paramref name="partCount"/>
-    /// fresh stages by (row.id.lo % partCount). A given content id lands in exactly one partition,
-    /// so the key space across the returned stages is disjoint — the property that lets N commit
-    /// workers COPY + apply in parallel with no cross-worker id collision (no 23505, no ON CONFLICT,
-    /// no serial lane). The managed code cannot do this split (the native tuple blob is opaque), so
-    /// the row-level routing lives in laplace_core. Each returned stage is owned by the caller.
-    /// </summary>
     public IntentStage[] Partition(int partCount)
     {
         ThrowIfDisposed();

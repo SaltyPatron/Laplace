@@ -11,27 +11,27 @@ namespace Laplace.Decomposers.Unicode;
 
 internal sealed class UcdProperties
 {
-    public static readonly Hash128 RelTypeHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
-    public static readonly Hash128 RelTypeHasCombiningClass   = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
-    public static readonly Hash128 RelTypeHasScript           = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
-    public static readonly Hash128 RelTypeHasBlock            = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
+    public static readonly Hash128 RelTypeHasGeneralCategory = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
+    public static readonly Hash128 RelTypeHasCombiningClass = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
+    public static readonly Hash128 RelTypeHasScript = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
+    public static readonly Hash128 RelTypeHasBlock = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
     public static readonly Hash128 RelTypeHasUppercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_UPPERCASE_MAPPING");
     public static readonly Hash128 RelTypeHasLowercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_LOWERCASE_MAPPING");
     public static readonly Hash128 RelTypeHasTitlecaseMapping = RelationTypeRegistry.RelationTypeId("HAS_TITLECASE_MAPPING");
-    public static readonly Hash128 RelTypeCanonDecomposesTo   = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
-    public static readonly Hash128 RelTypeCompatDecomposesTo  = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
-    public static readonly Hash128 RelTypeHasNumericValue     = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
-    public static readonly Hash128 RelTypeHasBidiClass        = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
-    public static readonly Hash128 RelTypeHasMirror           = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
-    public static readonly Hash128 RelTypeHasAge               = RelationTypeRegistry.RelationTypeId("HAS_AGE");
-    public static readonly Hash128 RelTypeHasNameAlias         = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
-    public static readonly Hash128 RelTypeConfusableWith       = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
-    public static readonly Hash128 RelTypeHasEmojiProperty     = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
-    public static readonly Hash128 RelTypeHasName              = RelationTypeRegistry.RelationTypeId("HAS_NAME");
-    public static readonly Hash128 RelTypeHasLineBreak         = RelationTypeRegistry.RelationTypeId("HAS_LINE_BREAK");
-    public static readonly Hash128 RelTypeHasEastAsianWidth    = RelationTypeRegistry.RelationTypeId("HAS_EAST_ASIAN_WIDTH");
-    public static readonly Hash128 RelTypeHasJoiningType       = RelationTypeRegistry.RelationTypeId("HAS_JOINING_TYPE");
-    public static readonly Hash128 RelTypeHasNumericType       = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_TYPE");
+    public static readonly Hash128 RelTypeCanonDecomposesTo = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
+    public static readonly Hash128 RelTypeCompatDecomposesTo = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
+    public static readonly Hash128 RelTypeHasNumericValue = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
+    public static readonly Hash128 RelTypeHasBidiClass = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
+    public static readonly Hash128 RelTypeHasMirror = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
+    public static readonly Hash128 RelTypeHasAge = RelationTypeRegistry.RelationTypeId("HAS_AGE");
+    public static readonly Hash128 RelTypeHasNameAlias = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
+    public static readonly Hash128 RelTypeConfusableWith = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
+    public static readonly Hash128 RelTypeHasEmojiProperty = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
+    public static readonly Hash128 RelTypeHasName = RelationTypeRegistry.RelationTypeId("HAS_NAME");
+    public static readonly Hash128 RelTypeHasLineBreak = RelationTypeRegistry.RelationTypeId("HAS_LINE_BREAK");
+    public static readonly Hash128 RelTypeHasEastAsianWidth = RelationTypeRegistry.RelationTypeId("HAS_EAST_ASIAN_WIDTH");
+    public static readonly Hash128 RelTypeHasJoiningType = RelationTypeRegistry.RelationTypeId("HAS_JOINING_TYPE");
+    public static readonly Hash128 RelTypeHasNumericType = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_TYPE");
 
     public readonly string?[] Name;
 
@@ -104,49 +104,49 @@ internal sealed class UcdProperties
         (uint S, uint E, string N)[] joiningTypeRanges,
         (uint S, uint E, string N)[] numericTypeRanges)
     {
-        Name             = name;
-        GeneralCategory  = generalCategory;
-        CombiningClass   = combiningClass;
+        Name = name;
+        GeneralCategory = generalCategory;
+        CombiningClass = combiningClass;
         UppercaseMapping = uppercaseMapping;
         LowercaseMapping = lowercaseMapping;
         TitlecaseMapping = titlecaseMapping;
-        CanonDecomp      = canonDecomp;
-        CompatDecomp     = compatDecomp;
-        NumericValue     = numericValue;
-        BidiClass        = bidiClass;
-        BidiMirror       = bidiMirror;
-        EmojiProps       = emojiProps;
-        NameAliases      = nameAliases;
-        Confusables      = confusables;
-        _scriptRanges    = scriptRanges;
-        _blockRanges     = blockRanges;
-        _ageRanges       = ageRanges;
-        _lineBreakRanges   = lineBreakRanges;
-        _eaWidthRanges     = eaWidthRanges;
+        CanonDecomp = canonDecomp;
+        CompatDecomp = compatDecomp;
+        NumericValue = numericValue;
+        BidiClass = bidiClass;
+        BidiMirror = bidiMirror;
+        EmojiProps = emojiProps;
+        NameAliases = nameAliases;
+        Confusables = confusables;
+        _scriptRanges = scriptRanges;
+        _blockRanges = blockRanges;
+        _ageRanges = ageRanges;
+        _lineBreakRanges = lineBreakRanges;
+        _eaWidthRanges = eaWidthRanges;
         _joiningTypeRanges = joiningTypeRanges;
         _numericTypeRanges = numericTypeRanges;
 
         CategoryEntityIds = BuildEntityIds(generalCategory.Where(x => x != null).Distinct()!,
                                            "unicode/category/{0}/v1");
-        ScriptEntityIds   = BuildEntityIds(scriptRanges.Select(r => r.N).Distinct(),
+        ScriptEntityIds = BuildEntityIds(scriptRanges.Select(r => r.N).Distinct(),
                                            "unicode/script/{0}/v1");
-        BlockEntityIds    = BuildEntityIds(blockRanges.Select(r => r.N).Distinct(),
+        BlockEntityIds = BuildEntityIds(blockRanges.Select(r => r.N).Distinct(),
                                            "unicode/block/{0}/v1");
         BidiClassEntityIds = BuildEntityIds(bidiClass.Where(x => x != null).Distinct()!,
                                            "unicode/bidi_class/{0}/v1");
-        AgeEntityIds      = BuildEntityIds(ageRanges.Select(r => r.N).Distinct(),
+        AgeEntityIds = BuildEntityIds(ageRanges.Select(r => r.N).Distinct(),
                                            "unicode/age/{0}/v1");
         EmojiPropEntityIds = BuildEntityIds(EmojiPropNames,
                                            "unicode/emoji/{0}/v1");
-        NumericEntityIds  = BuildEntityIds(numericValue.Where(x => x != null).Distinct()!,
+        NumericEntityIds = BuildEntityIds(numericValue.Where(x => x != null).Distinct()!,
                                            "unicode/numeric/{0}/v1");
-        LineBreakEntityIds      = BuildEntityIds(lineBreakRanges.Select(r => r.N).Distinct(),
+        LineBreakEntityIds = BuildEntityIds(lineBreakRanges.Select(r => r.N).Distinct(),
                                            "unicode/line_break/{0}/v1");
         EastAsianWidthEntityIds = BuildEntityIds(eaWidthRanges.Select(r => r.N).Distinct(),
                                            "unicode/east_asian_width/{0}/v1");
-        JoiningTypeEntityIds    = BuildEntityIds(joiningTypeRanges.Select(r => r.N).Distinct(),
+        JoiningTypeEntityIds = BuildEntityIds(joiningTypeRanges.Select(r => r.N).Distinct(),
                                            "unicode/joining_type/{0}/v1");
-        NumericTypeEntityIds    = BuildEntityIds(numericTypeRanges.Select(r => r.N).Distinct(),
+        NumericTypeEntityIds = BuildEntityIds(numericTypeRanges.Select(r => r.N).Distinct(),
                                            "unicode/numeric_type/{0}/v1");
     }
 
@@ -159,13 +159,13 @@ internal sealed class UcdProperties
         return d;
     }
 
-    public string? ScriptForCodepoint(uint cp)  => RangeLookup(_scriptRanges, cp);
-    public string? BlockForCodepoint(uint cp)   => RangeLookup(_blockRanges, cp);
-    public string? AgeForCodepoint(uint cp)     => RangeLookup(_ageRanges, cp);
-    public string? LineBreakForCodepoint(uint cp)      => RangeLookup(_lineBreakRanges, cp);
+    public string? ScriptForCodepoint(uint cp) => RangeLookup(_scriptRanges, cp);
+    public string? BlockForCodepoint(uint cp) => RangeLookup(_blockRanges, cp);
+    public string? AgeForCodepoint(uint cp) => RangeLookup(_ageRanges, cp);
+    public string? LineBreakForCodepoint(uint cp) => RangeLookup(_lineBreakRanges, cp);
     public string? EastAsianWidthForCodepoint(uint cp) => RangeLookup(_eaWidthRanges, cp);
-    public string? JoiningTypeForCodepoint(uint cp)    => RangeLookup(_joiningTypeRanges, cp);
-    public string? NumericTypeForCodepoint(uint cp)    => RangeLookup(_numericTypeRanges, cp);
+    public string? JoiningTypeForCodepoint(uint cp) => RangeLookup(_joiningTypeRanges, cp);
+    public string? NumericTypeForCodepoint(uint cp) => RangeLookup(_numericTypeRanges, cp);
 
     private static string? RangeLookup((uint S, uint E, string N)[] ranges, uint cp)
     {
@@ -211,18 +211,18 @@ internal sealed class UcdProperties
     public static UcdProperties Load(string ucdDir)
     {
         const int Total = 0x110000;
-        var names    = new string?[Total];
-        var genCat   = new string?[Total];
-        var combCls  = new byte[Total];
+        var names = new string?[Total];
+        var genCat = new string?[Total];
+        var combCls = new byte[Total];
         var upperMap = new uint[Total];
         var lowerMap = new uint[Total];
         var titleMap = new uint[Total];
         var canonDec = new uint[]?[Total];
         var compatDec = new uint[]?[Total];
-        var numeric  = new string?[Total];
-        var bidiCls  = new string?[Total];
-        var bidiMir  = new uint[Total];
-        var emoji    = new byte[Total];
+        var numeric = new string?[Total];
+        var bidiCls = new string?[Total];
+        var bidiMir = new uint[Total];
+        var emoji = new byte[Total];
 
         string udPath = Path.Combine(ucdDir, "UnicodeData.txt");
         Span<Range> ranges = stackalloc Range[15];
@@ -236,8 +236,8 @@ internal sealed class UcdProperties
             if (!uint.TryParse(span[ranges[0]], NumberStyles.HexNumber, null, out uint cp)) continue;
             if (cp >= Total) continue;
 
-            // Field 1 = the official Unicode name. Skip algorithmic "<...>" labels (e.g. "<control>",
-            // "<CJK Ideograph, First>") — those are range placeholders, not real per-codepoint names.
+
+
             if (n > 1)
             {
                 var nameSpan = span[ranges[1]];
@@ -272,7 +272,7 @@ internal sealed class UcdProperties
                 if (targets.Count > 0)
                 {
                     if (compat) compatDec[cp] = targets.ToArray();
-                    else        canonDec[cp]  = targets.ToArray();
+                    else canonDec[cp] = targets.ToArray();
                 }
             }
 
@@ -299,13 +299,13 @@ internal sealed class UcdProperties
         }
 
         var scriptRanges = ParseRangeFile(Path.Combine(ucdDir, "Scripts.txt"));
-        var blockRanges  = ParseRangeFile(Path.Combine(ucdDir, "Blocks.txt"));
-        var ageRanges    = File.Exists(Path.Combine(ucdDir, "DerivedAge.txt"))
+        var blockRanges = ParseRangeFile(Path.Combine(ucdDir, "Blocks.txt"));
+        var ageRanges = File.Exists(Path.Combine(ucdDir, "DerivedAge.txt"))
             ? ParseRangeFile(Path.Combine(ucdDir, "DerivedAge.txt"))
             : Array.Empty<(uint, uint, string)>();
-        // Enumerated character properties (all standard UCD range files; absent → channel simply not emitted).
-        var lineBreakRanges   = OptionalRangeFile(ucdDir, "LineBreak.txt");
-        var eaWidthRanges     = OptionalRangeFile(ucdDir, "EastAsianWidth.txt");
+
+        var lineBreakRanges = OptionalRangeFile(ucdDir, "LineBreak.txt");
+        var eaWidthRanges = OptionalRangeFile(ucdDir, "EastAsianWidth.txt");
         var joiningTypeRanges = OptionalRangeFile(ucdDir, "extracted/DerivedJoiningType.txt", "DerivedJoiningType.txt");
         var numericTypeRanges = OptionalRangeFile(ucdDir, "extracted/DerivedNumericType.txt", "DerivedNumericType.txt");
 
@@ -412,8 +412,8 @@ internal sealed class UcdProperties
             int semi = trimmed.IndexOf(';');
             if (semi < 0) continue;
             var rangePart = trimmed.Slice(0, semi).Trim();
-            var namePart  = trimmed.Slice(semi + 1).Trim();
-            string name   = namePart.ToString().Trim();
+            var namePart = trimmed.Slice(semi + 1).Trim();
+            string name = namePart.ToString().Trim();
 
             int dotdot = rangePart.IndexOf("..");
             uint start, end;

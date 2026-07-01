@@ -23,25 +23,25 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private sealed class Acc
     {
-        public Hash128  Subject;
-        public Hash128  Type;
+        public Hash128 Subject;
+        public Hash128 Type;
         public Hash128? Object;
-        public long     PhiFp1e9;
-        public long     Games;
-        public long     SumScoreFp1e9;
-        public long     MaxTsUnixUs;
+        public long PhiFp1e9;
+        public long Games;
+        public long SumScoreFp1e9;
+        public long MaxTsUnixUs;
     }
 
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
     private readonly bool _terminalFold;
     private readonly bool _stageAsWalks;
-    private int  _periodEpoch;
+    private int _periodEpoch;
     private bool _sweptStale;
     private bool _anyEpochCreated;
     private long _foldedRelations;
-    private int  _epochsStaged;
-    private int  _epochsFolded;
+    private int _epochsStaged;
+    private int _epochsFolded;
     private Task _foldChain = Task.CompletedTask;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
     private readonly object _accumLock = new();
@@ -50,12 +50,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public bool PersistEvidence => _persistEvidence;
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         int? stagingThresholdRelations = null, int? foldWorkers = null,
@@ -72,31 +72,31 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         if (!_persistEvidence)
             _log.LogInformation(
                 "consensus-only deposit: accumulating and folding relations; laplace.attestations writes skipped");
-        
-        
-        
-        
-        // Peak RAM of the in-memory (subject,type,object)->Acc accumulator is bounded by this
-        // threshold (the dict is swapped out to staging when it reaches it). 20M distinct relations
-        // is multiple GB for relation-heavy sources (ConceptNet) — the third measured client-RAM
-        // source after the unbounded compose channel and the batchSize*32 over-alloc. 4M keeps the
-        // working set well under a GB; the native parallel walk fold drains periods concurrently.
-        // (Phase 4 replaces this dict entirely with the walk journal.) Overridable via env.
+
+
+
+
+
+
+
+
+
+
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
                 ? t : 4_000_000);
         _partitions = foldWorkers
             ?? CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 24);
-        
-        
-        
+
+
+
         _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
             ? bl : 12;
-        
-        
-        
-        
-        
+
+
+
+
+
         var lane = Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE");
         _terminalFold = string.Equals(lane, "terminal", StringComparison.OrdinalIgnoreCase)
                      || string.Equals(lane, "bulk", StringComparison.OrdinalIgnoreCase);
@@ -177,8 +177,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
         var result = await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
 
-        // Stream the walk journal to staging with each evidence commit — do not hold walks in RAM
-        // until MaterializeConsensusAsync.
+
+
         if (_stageAsWalks && _walkBuffered > 0)
             await FlushWalksAsync(ct);
 
@@ -217,10 +217,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
-    
-    
-    
-    
+
+
+
+
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
     {
@@ -288,8 +288,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
     {
-        
-        
+
+
         bool anyToStrip = false;
         foreach (var c in changes)
         {
@@ -332,7 +332,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     throw new InvalidOperationException(
                         $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same period");
                 }
-                acc.Games        += a.ObservationCount;
+                acc.Games += a.ObservationCount;
                 acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
                     + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
                 if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
@@ -341,11 +341,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
 
     private const int WalkFlushRows = 65_536;
     private List<TestimonyWalkRow>[]? _walkBuffers;
@@ -386,9 +386,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    
-    
-    
+
+
+
     private async Task FlushWalksLockedAsync(CancellationToken ct)
     {
         if (_walkBuffers is null || _walkBuffered == 0) return;
@@ -422,17 +422,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _walkBuffered = 0;
     }
 
-    
-    
-    
-    
+
+
+
+
     private static async Task WriteWalkRowsAsync(
         Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
     {
-        
-        
-        
-        
+
+
+
+
         const int fixedRowBytes = 2 + 20 * 3 + 12 + 8 + 12 + 12 + 4;
         var copy = new PgCopyRowBuffer(stream);
         foreach (var w in rows)
@@ -461,10 +461,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return o;
     }
 
-    
-    
-    
-    
+
+
+
+
     private int PartitionOf(Acc acc)
         => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
@@ -475,10 +475,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         {
             if (_stageAsWalks)
             {
-                
-                
-                
-                
+
+
+
+
                 ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snap;
                 lock (_accumLock)
                 {
@@ -570,9 +570,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    
-    
-    
+
+
+
     private static TestimonyWalkRow ConvertPartialToWalk(Acc acc)
     {
         long games = acc.Games, sum = acc.SumScoreFp1e9;
@@ -580,8 +580,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         if (rem < 0) { q--; rem += games; }
 
         var objects = new List<Hash128>(2);
-        var scores  = new List<long>(2);
-        var runs    = new List<ushort>(2);
+        var scores = new List<long>(2);
+        var runs = new List<ushort>(2);
         Hash128 obj = acc.Object ?? default;
         AppendRuns(objects, scores, runs, obj, q, games - rem);
         AppendRuns(objects, scores, runs, obj, q + 1, rem);
@@ -663,7 +663,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     }
 
     private const long PgEpochDeltaUs = 946_684_800_000_000L;
-    private const int  MaxRowBytes    = 110;
+    private const int MaxRowBytes = 110;
 
     private static int WriteRow(Span<byte> dst, int o, Acc acc)
     {
@@ -698,18 +698,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await copy.FinalizeAsync(ct);
     }
 
-    /// <summary>
-    /// Online turn-by-turn fold for iterative modalities (e.g. chess self-play). Flushes the
-    /// currently-accumulated edges as one rating period and AWAITS the incremental in-place fold —
-    /// <c>materialize_period_partition</c>, which reads each edge's existing rating as the Glicko-2
-    /// prior and <c>ON CONFLICT DO UPDATE</c>s only the touched edges (then drops its staging table).
-    /// Unlike <see cref="MaterializeConsensusAsync"/> this NEVER runs the full-table rebuild/swap
-    /// (<c>finish_consensus_fold</c> / <c>consensus_fold_swap</c>) or the walk fold, so the updated
-    /// consensus rows are queryable the instant it returns — the immediate, no-drain update. Requires
-    /// the flat incremental lane (stageAsWalks:false, not the terminal/bulk lane) and a seeded source
-    /// (freshSource:false) so existing ratings are carried forward as priors. Returns the cumulative
-    /// folded-relation count.
-    /// </summary>
     public async Task<long> FoldIncrementalAsync(CancellationToken ct = default)
     {
         if (_stageAsWalks)
@@ -722,9 +710,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 + "defers all folding to the full rebuild at MaterializeConsensusAsync");
 
         await FlushPeriodAsync(ct).ConfigureAwait(false);
-        // FlushPeriodAsync chained this period's per-partition materialize_period_partition fold into
-        // _foldChain (and that task awaits all prior chained folds); await it so the touched consensus
-        // edges are updated in place before we return.
+
+
+
         await _foldChain.ConfigureAwait(false);
         return Interlocked.Read(ref _foldedRelations);
     }
@@ -734,10 +722,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await FlushWalksAsync(ct);
         await FlushPeriodAsync(ct);
 
-        
-        
-        
-        
+
+
+
+
         if (_stageAsWalks
             && _partitions > 1
             && (Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine") != "sql"
@@ -748,13 +736,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
         if (_terminalFold || _stageAsWalks)
         {
-            
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
+
             if (_stageAsWalks && !_terminalFold)
                 _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
             string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
@@ -804,12 +792,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return Interlocked.Read(ref _foldedRelations);
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     private async Task<long> ParallelWalkFoldAsync(CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();

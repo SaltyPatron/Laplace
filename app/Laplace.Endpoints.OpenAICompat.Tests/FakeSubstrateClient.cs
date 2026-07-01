@@ -52,10 +52,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
 {
-    private const string WhaleIdHex    = "00112233445566778899aabbccddeeff";
+    private const string WhaleIdHex = "00112233445566778899aabbccddeeff";
     private const string CetaceanIdHex = "ffeeddccbbaa99887766554433221100";
-    private const string IsAIdHex      = "0123456789abcdef0123456789abcdef";
-    private const string WordNetIdHex  = "fedcba9876543210fedcba9876543210";
+    private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
+    private const string WordNetIdHex = "fedcba9876543210fedcba9876543210";
 
     public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
@@ -75,7 +75,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     {
         await Task.CompletedTask;
         yield return new GenerateToken(1, " the", 5);
-        // Sentinel: exercises the mid-stream failure path after the 200 + first token are committed.
+
         if (prompt.Contains("trigger-stream-error", StringComparison.OrdinalIgnoreCase))
             throw new SubstrateUnavailableException("substrate went away mid-walk.", new InvalidOperationException());
         yield return new GenerateToken(2, " whale", 4);

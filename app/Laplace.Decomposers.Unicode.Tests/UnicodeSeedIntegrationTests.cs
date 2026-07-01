@@ -62,13 +62,13 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Seeds_All_Codepoints_FromSource()
     {
-        
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
+
         CodepointPerfcache.Load(ResolvePerfcacheBlob());
         IntentStage.ResetContentBank();
 
@@ -87,9 +87,9 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.True(applied >= TotalCodepoints,
             $"presented {applied:N0} entities, expected at least {TotalCodepoints:N0}");
 
-        
-        
-        
+
+
+
         long resolvable = await ScalarLong(
             @"SELECT count(*) FROM laplace.entities e
               WHERE e.type_id = laplace.canonical_id('Codepoint')
@@ -97,18 +97,18 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
                 AND laplace.codepoint_for_id(e.id) IS NOT NULL");
         Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");
 
-        // The content-physicality count is content_count(NULL): count(*) of type-1 physicalities.
-        // We query it source-free on purpose — physicalities carry NO source (geometry is source-free
-        // by design), so "did the seed create a content physicality for every codepoint" is the total
-        // type-1 count. The source-scoped content_count(source) instead counts ATTESTED codepoints
-        // (it inner-joins attestations), which legitimately excludes unassigned/reserved codepoints
-        // that carry no Unicode properties — source attribution is already covered by `resolvable` above.
+
+
+
+
+
+
         long physCount = await ScalarLong("SELECT laplace.content_count()");
         Assert.True(physCount >= TotalCodepoints,
             $"content physicalities {physCount:N0} < codepoint count {TotalCodepoints:N0}");
 
-        // Geometry is source-free: the content physicality for U+0041 is one row keyed by
-        // (entity_id, type) with no source filter (provenance lives on attestations).
+
+
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT p.x, p.y, p.z, p.m

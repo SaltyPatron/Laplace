@@ -18,7 +18,7 @@ public abstract class BillingStoreContractTests
     private protected abstract IBillingWebhookEventStore WebhookEvents { get; }
     private protected abstract IStripePriceMap PriceMap { get; }
 
-    
+
     protected virtual bool Available => true;
 
     private void RequireStore() =>
@@ -144,7 +144,7 @@ public abstract class BillingStoreContractTests
         var (exhausted, _) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
         Assert.False(exhausted);
 
-        
+
         var renewed = await Entitlements.RenewPlanAsync(tenant, plan, null, null, DateTimeOffset.UtcNow, CancellationToken.None);
         Assert.Equal(subscription, renewed.StripeSubscriptionId);
 

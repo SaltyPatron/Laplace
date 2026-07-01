@@ -10,8 +10,8 @@ internal static class AppComposition
 {
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
-        
-        
+
+
         var authMode = Environment.GetEnvironmentVariable("LAPLACE_AUTH_MODE") ?? "header";
         services.AddSingleton<ITenantResolver>(authMode.ToLowerInvariant() switch
         {
@@ -25,7 +25,7 @@ internal static class AppComposition
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
 
-        // The chess modality engine: plays + trains over the substrate (LAPLACE_CHESS_DB ?? LAPLACE_DB).
+
         var chessWeight = double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CHESS_WEIGHT"), out var w) ? w : 0.5d;
         services.AddSingleton(sp => new ChessEngineService(
             ChessEngineService.ResolveConnString(), chessWeight,
@@ -41,9 +41,9 @@ internal static class AppComposition
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
 
-        
-        
-        
+
+
+
         var billingStore = Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE") ?? "memory";
         if (string.Equals(billingStore, "postgres", StringComparison.OrdinalIgnoreCase))
         {
@@ -74,7 +74,7 @@ internal static class AppComposition
             options.SuccessUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_SUCCESS_URL") ?? "http://localhost:5187/billing/success";
             options.CancelUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_CANCEL_URL") ?? "http://localhost:5187/billing/cancel";
             options.Currency = Environment.GetEnvironmentVariable("LAPLACE_BILLING_CURRENCY") ?? "usd";
-            options.Bypass   = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS"), "true", StringComparison.OrdinalIgnoreCase);
+            options.Bypass = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS"), "true", StringComparison.OrdinalIgnoreCase);
         });
 
         return services;

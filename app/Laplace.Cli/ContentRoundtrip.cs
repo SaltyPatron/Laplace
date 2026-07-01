@@ -38,9 +38,9 @@ internal static class ContentRoundtrip
         await using (var conn = await ds.OpenConnectionAsync(ct))
         await using (var cmd = conn.CreateCommand())
         {
-            // Geometry is source-free: the content trajectory is the content itself (one row
-            // per (entity_id, type)), so reconstruction descends the content DAG with no source
-            // filter — the trajectory constituents ARE the reconstruction.
+
+
+
             cmd.CommandText = @"
                 WITH RECURSIVE tree(id) AS (
                     SELECT @doc

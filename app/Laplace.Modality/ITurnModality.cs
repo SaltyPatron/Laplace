@@ -30,7 +30,7 @@ public enum PlyOutcome
 {
     Loss = 0,
     Draw = 1,
-    Win  = 2,
+    Win = 2,
 }
 
 public static class PlyOutcomeExtensions

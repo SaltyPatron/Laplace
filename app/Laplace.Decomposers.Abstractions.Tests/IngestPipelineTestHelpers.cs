@@ -6,7 +6,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>Test doubles for ingest pipeline probe accounting.</summary>
 internal static class IngestPipelineTestHelpers
 {
     internal static readonly Hash128 TestSource =
@@ -24,7 +23,6 @@ internal static class IngestPipelineTestHelpers
     internal static int ExpectedDescentProbeChunks(int rowCount, int probeChunkSize) =>
         rowCount == 0 ? 0 : (rowCount + probeChunkSize - 1) / probeChunkSize;
 
-    /// <summary>Uniform present/absent for all probe types; counts flat vs descent calls.</summary>
     internal sealed class ProbeTrackingReader : ISubstrateReader
     {
         private readonly bool _present;
@@ -75,10 +73,6 @@ internal static class IngestPipelineTestHelpers
         }
     }
 
-    /// <summary>
-    /// T2+ trunks absent via descent, but tier 0/1 nodes present via flat probe — regression for
-    /// parallel-path bug where tier01 bits were never OR'd into the emit bitmap.
-    /// </summary>
     internal sealed class Tier01PresentReader : ISubstrateReader
     {
         public int Tier01FlatCalls;
@@ -95,7 +89,7 @@ internal static class IngestPipelineTestHelpers
         {
             Interlocked.Increment(ref Tier01FlatCalls);
             var bm = new byte[(candidates.Count + 7) / 8];
-            // Root existence gate uses single-id bulk IN — leave absent so compose + tree probe run.
+
             if (candidates.Count == 1) return Task.FromResult(bm);
             for (int i = 0; i < candidates.Count; i++)
                 bm[i >> 3] |= (byte)(1 << (i & 7));
@@ -106,7 +100,7 @@ internal static class IngestPipelineTestHelpers
             IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)
         {
             Interlocked.Increment(ref DescentCalls);
-            return Task.FromResult(new byte[(ids.Count + 7) / 8]); // all T2+ absent
+            return Task.FromResult(new byte[(ids.Count + 7) / 8]);
         }
     }
 
@@ -145,7 +139,6 @@ internal static class IngestPipelineTestHelpers
         }
     }
 
-    /// <summary>Yields records in small chunks — never buffers the full logical file.</summary>
     internal sealed class ChunkedContentStream : IRecordStream<ContentIngestRecord>
     {
         private readonly IReadOnlyList<ContentIngestRecord> _records;
@@ -178,9 +171,6 @@ internal static class IngestPipelineTestHelpers
         public void MarkReadAllBytes() => SimulatedReadAllBytes = true;
     }
 
-    /// <summary>
-    /// Line-delimited temp file; reads with a tiny FileStream buffer to prove incremental I/O.
-    /// </summary>
     internal sealed class IncrementalLineFileStream : IRecordStream<ContentIngestRecord>, IAsyncDisposable
     {
         private readonly string _path;

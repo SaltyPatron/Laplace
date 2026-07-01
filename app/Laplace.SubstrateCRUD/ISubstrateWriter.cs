@@ -16,30 +16,30 @@ public interface ISubstrateWriter
         foreach (var change in changes)
         {
             var r = await ApplyAsync(change, ct);
-            ea += r.EntitiesAttempted;      ei += r.EntitiesInserted;
+            ea += r.EntitiesAttempted; ei += r.EntitiesInserted;
             pa += r.PhysicalitiesAttempted; pi += r.PhysicalitiesInserted;
-            aa += r.AttestationsAttempted;  ai += r.AttestationsInserted;
-            rt += r.RoundTrips;             wall += r.WallClock;
+            aa += r.AttestationsAttempted; ai += r.AttestationsInserted;
+            rt += r.RoundTrips; wall += r.WallClock;
             es += r.EntitiesSkippedAtMerge; ps += r.PhysicalitiesSkippedAtMerge;
             allShort &= r.TrunkShortcircuitHit;
         }
         return new ApplyResult(ea, ei, pa, pi, aa, ai, rt, wall, allShort, es, ps);
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
 
-    
-    
-    
-    
+
+
+
+
     Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
         => Task.FromResult((0, 0, 0));

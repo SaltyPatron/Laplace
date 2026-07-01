@@ -212,9 +212,9 @@ internal static class QueryCommands
 
     public static async Task<int> WalkAsync(string[] args)
     {
-        int steps  = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
-        int order  = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
-        int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
+        int steps = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
+        int order = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
+        int topk = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
         double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
         bool verbose = Environment.GetEnvironmentVariable("LAPLACE_GEN_VERBOSE") == "1";
 
@@ -256,8 +256,8 @@ internal static class QueryCommands
                 toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0 : r.GetInt32(2)));
         }
         sw.Stop();
-        // entities already carry their substrate-observed separators (walk_text appends sep_entity);
-        // concatenate — never space-join (that's an English assumption).
+
+
         Console.WriteLine(prompt + string.Concat(toks.Select(t => t.entity)));
         if (verbose)
             for (int i = 0; i < toks.Count; i++)
@@ -266,21 +266,21 @@ internal static class QueryCommands
         return 0;
     }
 
-    // Converse and DEPOSIT the result: prompt → native walk → response, with BOTH sides deposited as
-    // content-addressed entities (UserPrompt + Response). The response re-enters the substrate as
-    // citable, reproducible, self-extending content at low trust (the trust hierarchy gates its
-    // influence so the system's own output can't pollute the high-trust corpus or cause collapse).
+
+
+
+
     public static async Task<int> ChatAsync(string[] args)
     {
         string prompt = string.Join(' ', args).Trim();
         if (string.IsNullOrWhiteSpace(prompt))
             return Fail("usage: laplace chat <prompt>");
 
-        CodepointPerfcache.Load(ResolveBlob());   // required by HashComposer for content-witness hashing + coords
+        CodepointPerfcache.Load(ResolveBlob());
 
-        int steps  = EnvInt("LAPLACE_GEN_STEPS", 48, 1);
-        int order  = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
-        int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
+        int steps = EnvInt("LAPLACE_GEN_STEPS", 48, 1);
+        int order = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
+        int topk = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
         double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -290,15 +290,15 @@ internal static class QueryCommands
         await using var acc = new ConsensusAccumulatingWriter(inner, ds);
         var writer = (ISubstrateWriter)acc;
 
-        // ensure the Response source entity exists (idempotent)
+
         await writer.ApplyAsync(ResponseContent.BuildBootstrapChange(), CancellationToken.None);
 
-        // 1. deposit the prompt as a content-addressed UserPrompt (the provenance anchor)
+
         Hash128 promptRoot = Hash128.Zero;
         if (UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(prompt), "chat/prompt", out var pc, out var pr))
         { await writer.ApplyAsync(pc, CancellationToken.None); promptRoot = pr; }
 
-        // 2. generate via the native walk engine; entities carry their substrate-observed separators
+
         var sb = new StringBuilder();
         await using (var cmd = conn.CreateCommand())
         {
@@ -314,7 +314,7 @@ internal static class QueryCommands
         string response = sb.ToString();
         Console.WriteLine(prompt + response);
 
-        // 3. deposit the response as a content-addressed Response (low trust), linked to the prompt
+
         if (response.Length > 0 &&
             ResponseContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(response), "chat/response",
                 promptRoot == Hash128.Zero ? null : promptRoot, out var rc, out var rr))
@@ -328,9 +328,9 @@ internal static class QueryCommands
         return 0;
     }
 
-    
-    
-    
+
+
+
     public static async Task<int> AttestAsync(string[] args)
     {
         if (args.Length < 2)
@@ -348,8 +348,8 @@ internal static class QueryCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
-        
-        
+
+
         CodepointPerfcache.LoadDefault();
         var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
         foreach (var tok in tokens)
@@ -427,12 +427,12 @@ internal static class QueryCommands
             }
         }
         var utf8Input = Encoding.UTF8.GetBytes(text);
-        var wordSeen  = new HashSet<Hash128>();
-        var words     = new List<(Hash128 Id, string Label)>();
+        var wordSeen = new HashSet<Hash128>();
+        var words = new List<(Hash128 Id, string Label)>();
         for (uint i = 0; i < (uint)tree.NodeCount; i++)
         {
             var v = tree.GetNode(i);
-            if (v.Tier != EntityTier.Word) continue; // UAX29 composition depth: only word-level text nodes carry dictionary knowledge
+            if (v.Tier != EntityTier.Word) continue;
             if (!wordSeen.Add(v.Id)) continue;
             words.Add((v.Id, Encoding.UTF8.GetString(utf8Input, (int)v.TextRangeOff, (int)v.TextRangeLen)));
         }
@@ -466,7 +466,7 @@ internal static class QueryCommands
 
         await using (var cmd = conn.CreateCommand())
         {
-            // Geometry is source-free: entity_physicalities no longer carries a source.
+
             cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents "
                             + "FROM laplace.entity_physicalities(@id) p";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -495,8 +495,8 @@ internal static class QueryCommands
             {
                 n++;
                 string relType = r.GetString(0);
-                string obj  = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
-                Console.WriteLine($"    [{relType}] → {obj,-28}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                string obj = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
+                Console.WriteLine($"    [{relType}] → {obj,-28}  μ={r.GetInt64(2) / 1e9:F3} rd={r.GetInt64(3) / 1e9:F3} σ={r.GetInt64(4) / 1e9:F4}"
                     + $"  witnesses={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -514,7 +514,7 @@ internal static class QueryCommands
             while (await r.ReadAsync())
             {
                 n++;
-                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  μ={r.GetInt64(2) / 1e9:F3} rd={r.GetInt64(3) / 1e9:F3} σ={r.GetInt64(4) / 1e9:F4}"
                     + $"  witnesses={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");

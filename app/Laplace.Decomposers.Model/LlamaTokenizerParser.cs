@@ -12,30 +12,30 @@ namespace Laplace.Decomposers.Model;
 [Flags]
 public enum TokenRole : byte
 {
-    None         = 0,
+    None = 0,
     LeadingSpace = 1,
-    ByteLevel    = 2,
-    Special      = 4,
-    Continuation = 8,   
+    ByteLevel = 2,
+    Special = 4,
+    Continuation = 8,
 }
 
 public sealed class LlamaTokenizerParser
 {
     public sealed class TokenRecord
     {
-        public required int      TokenId        { get; init; }
-        public required string   RawToken       { get; init; }
-        public required byte[]   CanonicalBytes { get; init; }
-        public required Hash128  EntityId       { get; init; }
-        public required byte     Tier           { get; init; }
-        public required bool     IsByteLevel    { get; init; }
-        public required TokenRole Role          { get; init; }
+        public required int TokenId { get; init; }
+        public required string RawToken { get; init; }
+        public required byte[] CanonicalBytes { get; init; }
+        public required Hash128 EntityId { get; init; }
+        public required byte Tier { get; init; }
+        public required bool IsByteLevel { get; init; }
+        public required TokenRole Role { get; init; }
 
-        public required double   ContentX       { get; init; }
-        public required double   ContentY       { get; init; }
-        public required double   ContentZ       { get; init; }
-        public required double   ContentM       { get; init; }
-        public required bool     HasContentCoord { get; init; }
+        public required double ContentX { get; init; }
+        public required double ContentY { get; init; }
+        public required double ContentZ { get; init; }
+        public required double ContentM { get; init; }
+        public required bool HasContentCoord { get; init; }
     }
 
     public static IReadOnlyList<TokenRecord> Parse(string tokenizerJsonPath)
@@ -98,17 +98,17 @@ public sealed class LlamaTokenizerParser
 
             records.Add(new TokenRecord
             {
-                TokenId        = tokenId,
-                RawToken       = raw,
+                TokenId = tokenId,
+                RawToken = raw,
                 CanonicalBytes = canonical,
-                EntityId       = entityId,
-                Tier           = tier,
-                IsByteLevel    = role.HasFlag(TokenRole.ByteLevel),
-                Role           = role,
-                ContentX       = cx,
-                ContentY       = cy,
-                ContentZ       = cz,
-                ContentM       = cm,
+                EntityId = entityId,
+                Tier = tier,
+                IsByteLevel = role.HasFlag(TokenRole.ByteLevel),
+                Role = role,
+                ContentX = cx,
+                ContentY = cy,
+                ContentZ = cz,
+                ContentM = cm,
                 HasContentCoord = hasContent,
             });
         }
@@ -143,8 +143,8 @@ public sealed class LlamaTokenizerParser
         }
         catch (InvalidOperationException)
         {
-            
-            
+
+
             if (!CodepointPerfcache.IsLoaded) throw;
             entityId = default;
             tier = 0;
@@ -209,9 +209,9 @@ public sealed class LlamaTokenizerParser
         return rev;
     }
 
-    // GPT-2 byte-level decode: if every char is in the byte-level alphabet, map back to raw bytes
-    // (this is how Ġ / accented / multibyte pieces round-trip; for pure ASCII it is identity).
-    // A leading 0x20 (the Ġ space marker) flags a word-start and is dropped from the canonical form.
+
+
+
     private static bool TryByteLevelDecode(string raw, out byte[] bytes, out bool leadingSpace)
     {
         bytes = Array.Empty<byte>(); leadingSpace = false;
@@ -238,15 +238,15 @@ public sealed class LlamaTokenizerParser
                 return ([b], TokenRole.ByteLevel);
         }
 
-        // GPT-2 byte-level pieces (our native BPE + external gpt2 tokenizers) decode back to bytes.
+
         if (rawToken.Length > 0 && rawToken[0] != '▁' && !rawToken.StartsWith("##", StringComparison.Ordinal)
             && TryByteLevelDecode(rawToken, out byte[] blBytes, out bool blLead) && blBytes.Length > 0)
         {
-            // GPT-2 byte-level decoding succeeds on ANY ASCII piece, so it is the canonicalization
-            // mechanism, not a signal that the token is a raw byte. Reserve TokenRole.ByteLevel for
-            // the explicit <0xNN> form above; here only the leading-space role is meaningful. (This
-            // keeps clean words like "the" in export word/grapheme vocabs — FoundryCommands filters
-            // byte-level tokens out of those.)
+
+
+
+
+
             TokenRole br = blLead ? TokenRole.LeadingSpace : TokenRole.None;
             return (NormalizeNfc(blBytes), br);
         }
@@ -261,8 +261,8 @@ public sealed class LlamaTokenizerParser
         }
         else if (surface.Length > 2 && surface.StartsWith("##", StringComparison.Ordinal))
         {
-            
-            
+
+
             role |= TokenRole.Continuation;
             surface = surface.Substring(2);
         }
@@ -306,7 +306,7 @@ public sealed class LlamaTokenizerParser
         for (int start = 0; start < total; start += batchSize)
         {
             int end = Math.Min(start + batchSize, total);
-            int n   = end - start;
+            int n = end - start;
 
             var b = new SubstrateChangeBuilder(
                 sourceId,
@@ -323,7 +323,7 @@ public sealed class LlamaTokenizerParser
                     && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
                 {
                     foreach (var e in treeEntities) b.AddEntity(e);
-                    foreach (var p in treePhys)    b.AddPhysicality(p);
+                    foreach (var p in treePhys) b.AddPhysicality(p);
                 }
                 else
                 {
@@ -350,7 +350,7 @@ public sealed class LlamaTokenizerParser
             string? left, right;
             if (el.ValueKind == JsonValueKind.String)
             {
-                // Legacy form: "a b" (space-joined).
+
                 string? pair = el.GetString();
                 if (string.IsNullOrEmpty(pair)) continue;
                 int sp = pair!.IndexOf(' ');
@@ -360,7 +360,7 @@ public sealed class LlamaTokenizerParser
             }
             else if (el.ValueKind == JsonValueKind.Array && el.GetArrayLength() == 2)
             {
-                // Modern HF tokenizer form: ["a", "b"].
+
                 left = el[0].GetString();
                 right = el[1].GetString();
             }
@@ -429,9 +429,9 @@ public sealed class LlamaTokenizerParser
         int batchSize = 8192,
         int commitEpoch = 0)
     {
-        
-        
-        
+
+
+
         int total = records.Count;
         for (int start = 0; start < total; start += batchSize)
         {

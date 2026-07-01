@@ -48,16 +48,16 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
         switch (row.Type)
         {
             case OmwType.Lemma:
-                // A lemma lexicalizes the shared ILI synset — the same fact WordNet emits as
-                // lemma IS_SYNONYM_OF synset. IS_SYNONYM_OF (not IS_TRANSLATION_OF) converges OMW lemmas
-                // with WordNet and lets cross-lingual translation EMERGE from two lemmas sharing one
-                // synset, instead of asserting a word is a "translation of" a concept.
+
+
+
+
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, "IS_SYNONYM_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
-                // The synset's ss_type (a/n/v/r/s) is the lemma's POS in this sense. Emit HAS_POS on the
-                // lemma with the WordNet tagset so OMW converges onto the same POS edges WordNet emits.
+
+
                 PosReference.Attest(b, root, row.SsType.ToString(), PosReference.PosTagset.WordNet,
                     OMWDecomposer.Source, null, TC.AcademicCurated);
                 break;

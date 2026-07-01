@@ -1,15 +1,15 @@
--- inference/synonyms.sql.in
--- Same-language synset co-members of a word (king -> {male monarch, Rex, dynast, ...}).
--- Shares the synset traversal in synset_members(); ranked by Glicko-2 conservative strength.
+
+
+
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    -- Same-language co-members, matched against the source word's PRIMARY language only: the
-    -- source lemma is often a cross-language homograph (king = eng AND est "shoe"), and pulling
-    -- in every shared tag would leak Estonian/Finnish co-members (kuningas) as English synonyms.
-    -- word_language() is the dominant reading; explode in synset_members() means a member counts
-    -- iff it actually carries that language. Deduped by surface form, dominant sense first.
+    
+    
+    
+    
+    
     WITH src_lang AS (SELECT word_language(p_word) AS id)
     SELECT t.synonym, t.mu::numeric, t.witnesses
     FROM (

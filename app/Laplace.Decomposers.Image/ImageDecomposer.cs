@@ -12,9 +12,9 @@ public sealed class ImageDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "ImageDecomposer";
-    public int     LayerOrder   => 11;
+    public Hash128 SourceId => Source;
+    public string SourceName => "ImageDecomposer";
+    public int LayerOrder => 11;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>

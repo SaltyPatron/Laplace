@@ -22,7 +22,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         _client = factory.CreateClient();
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Health()
@@ -93,7 +93,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         Assert.True(json.RootElement.GetProperty("paths").TryGetProperty("/v1/chat/completions", out _));
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Chat_InvalidJson()
@@ -209,7 +209,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             messages = new[] { new { role = "user", content = "trigger-stream-error please" } }
         }, quoteId);
 
-        // The 200 + first token are already sent, so the failure must arrive as a data frame, not a 5xx.
+
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var events = await ReadSseAsync(response);
 
@@ -287,7 +287,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.MatchNode("completions-sse", await ReadSseAsync(response));
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Embeddings_MissingInput()
@@ -314,12 +314,12 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("list", json.RootElement.GetProperty("object").GetString());
         var item = json.RootElement.GetProperty("data")[0];
-        // FORM: dense S³ coordinate [x,y,z,m,radius].
+
         Assert.Equal(5, item.GetProperty("embedding").GetArrayLength());
         var lap = item.GetProperty("laplace");
         Assert.True(lap.GetProperty("resolved").GetBoolean());
         Assert.True(lap.TryGetProperty("form", out _));
-        // MEANING: Glicko-2 salient neighbours present and ranked.
+
         Assert.True(lap.GetProperty("meaning").GetArrayLength() > 0);
         Assert.Equal("IS_A", lap.GetProperty("meaning")[0].GetProperty("relation").GetString());
     }
@@ -338,11 +338,11 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var item = json.RootElement.GetProperty("data")[0];
         Assert.Equal(5, item.GetProperty("embedding").GetArrayLength());
-        // form-only model: the meaning level is omitted entirely.
+
         Assert.False(item.GetProperty("laplace").TryGetProperty("meaning", out _));
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Evidence()
@@ -360,7 +360,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("evidence-404", await response.Content.ReadAsStringAsync());
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Audit_NoQuote()
@@ -428,7 +428,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("explain-200", await response.Content.ReadAsStringAsync());
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Billing_Catalog()
@@ -454,7 +454,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("billing-plans", await response.Content.ReadAsStringAsync());
     }
 
-    
+
 
     [Fact]
     public async Task Golden_Preflight()
@@ -576,7 +576,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("usage-200", await usage.Content.ReadAsStringAsync());
     }
 
-    
+
 
     [Fact]
     public async Task Golden_SynthesisQuote()
@@ -656,7 +656,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("recipe-quote-200", await response.Content.ReadAsStringAsync());
     }
 
-    
+
 
     private async Task<string> CreateQuoteAsync(string serviceId, string tenant)
     {
@@ -733,10 +733,10 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         return await _client.SendAsync(request);
     }
 
-    
-    
-    
-    
+
+
+
+
     private static async Task<JsonArray> ReadSseAsync(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync();

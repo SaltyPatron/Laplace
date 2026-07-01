@@ -1,9 +1,9 @@
--- inference/translate_to.sql.in
--- Scoped translation for the recall router: resolve the requested language by ISO code (fra)
--- OR human name (French, via HAS_DEFINITION) against the candidate set of the word's synset
--- members, so "how do you say king in french" answers in French specifically. Members are
--- matched on their full HAS_LANGUAGE set (homographs like roi are French AND Dutch AND ...),
--- and ranked dominant-sense first via sense_mu. p_lang NULL/'' => every cross-language member.
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
                                         p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)

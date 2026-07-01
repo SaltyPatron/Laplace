@@ -19,9 +19,9 @@ public class PCoreParallelComposeTests
         }
     }
 
-    // Each record i contributes a deterministic content-addressed entity id; the union of emitted
-    // entity ids must be EXACTLY {id(i) : i in [0,n)} regardless of worker count — proving the
-    // parallel fan-out loses no record and duplicates none (cross-builder repeats fold by id).
+
+
+
     private static Hash128 EntityIdFor(int i) => Hash128.OfCanonical($"pcore/rec/{i}");
 
     private static async Task<HashSet<Hash128>> ComposeIdsAsync(int n, int workers)

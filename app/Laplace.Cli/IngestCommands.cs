@@ -50,7 +50,7 @@ internal static class IngestCommands
         bool RegisterOnly,
         bool Force = false);
 
-    // Retired: manifest-complete sources route through EtlDecomposer above.
+
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
@@ -116,31 +116,31 @@ internal static class IngestCommands
 
 
 
-        // Hybrid topology: worker counts and P-core pinning are resolved once in IngestTopology.EnsureReady().
+
         CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
-        // Make the bespoke witnesses of the already-grammar-conforming sources available to the
-        // generic EtlDecomposer (the parity oracle path); harmless for sources still on old classes.
+
+
         EtlWitnessRegistrations.RegisterAll();
 
         string sourceKey = cli.Source.ToLowerInvariant();
 
-        // Wiktionary: bespoke file resolution (one corpus, not *.json* glob) + witness; manifest row
-        // is the parity oracle only — do not route live ingest through generic EtlDecomposer.
+
+
         if (sourceKey == "wiktionary")
             return await IngestViaRunnerAsync(
                 new WiktionaryDecomposer(),
                 IngestDataPaths.Resolve("wiktionary", cli.Path), skipLayerCheck: false, cli);
 
-        // OMW: file-level parallelism across many .tab wordnet files via OMWGrammarIngest.
-        // EtlDecomposer processes files sequentially; OMWDecomposer fans them across file workers.
+
+
         if (sourceKey == "omw")
             return await IngestViaRunnerAsync(
                 new OMWDecomposer(),
                 IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli);
 
-        // Manifest-driven generic path: every complete EtlManifest row drives ONE EtlDecomposer.
+
         if (EtlManifest.IsRoutable(sourceKey))
             return await IngestViaRunnerAsync(
                 new EtlDecomposer(EtlManifest.Get(sourceKey)),
@@ -148,36 +148,36 @@ internal static class IngestCommands
 
         return sourceKey switch
         {
-            "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
-            "iso639"   => await IngestISO639Async(cli),
-            "cili"     => await IngestViaRunnerAsync(new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path), skipLayerCheck: false, cli),
-            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
-            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
-            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path), skipLayerCheck: false, cli),
+            "unicode" => await IngestUnicodeViaRunnerAsync(cli),
+            "iso639" => await IngestISO639Async(cli),
+            "cili" => await IngestViaRunnerAsync(new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path), skipLayerCheck: false, cli),
+            "wordnet" => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
+            "ud" => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
+            "tatoeba" => await IngestViaRunnerAsync(new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path), skipLayerCheck: false, cli),
             "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), IngestDataPaths.Resolve("framenet", cli.Path), skipLayerCheck: false, cli),
             "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), IngestDataPaths.Resolve("opensubtitles", cli.Path), skipLayerCheck: false, cli),
-            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  IngestDataPaths.Resolve("verbnet", cli.Path),  skipLayerCheck: false, cli),
+            "verbnet" => await IngestViaRunnerAsync(new VerbNetDecomposer(), IngestDataPaths.Resolve("verbnet", cli.Path), skipLayerCheck: false, cli),
             "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), IngestDataPaths.Resolve("propbank", cli.Path), skipLayerCheck: false, cli),
-            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  IngestDataPaths.Resolve("semlink", cli.Path),  skipLayerCheck: false, cli),
-            "mapnet"   => await IngestViaRunnerAsync(new MapNetDecomposer(),   IngestDataPaths.Resolve("mapnet", cli.Path),   skipLayerCheck: false, cli),
+            "semlink" => await IngestViaRunnerAsync(new SemLinkDecomposer(), IngestDataPaths.Resolve("semlink", cli.Path), skipLayerCheck: false, cli),
+            "mapnet" => await IngestViaRunnerAsync(new MapNetDecomposer(), IngestDataPaths.Resolve("mapnet", cli.Path), skipLayerCheck: false, cli),
             "wordframenet" => await IngestViaRunnerAsync(new WordFrameNetDecomposer(), IngestDataPaths.Resolve("wordframenet", cli.Path), skipLayerCheck: false, cli),
-            "code"       => await IngestCodeAsync(cli),
-            "repo"       => await IngestRepoAsync(cli),
-            "tabular"    => await IngestTabularAsync(cli),
+            "code" => await IngestCodeAsync(cli),
+            "repo" => await IngestRepoAsync(cli),
+            "tabular" => await IngestTabularAsync(cli),
             "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(),
                 IngestDataPaths.Resolve("tiny-codes", cli.Path), skipLayerCheck: true, cli),
-            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),
+            "stack" => await IngestViaRunnerAsync(new StackDecomposer(),
                 IngestDataPaths.Resolve("stack", cli.Path), skipLayerCheck: true, cli),
             "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
-            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), IngestDataPaths.Resolve("image", cli.Path), skipLayerCheck: true, cli),
-            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), IngestDataPaths.Resolve("audio", cli.Path), skipLayerCheck: true, cli),
-            "document"   => await IngestDocumentAsync(cli),
-            "recipe"     => await IngestRecipeAsync(cli),
-            "chess"      => await IngestViaRunnerAsync(
+            "image" => await IngestViaRunnerAsync(new ImageDecomposer(), IngestDataPaths.Resolve("image", cli.Path), skipLayerCheck: true, cli),
+            "audio" => await IngestViaRunnerAsync(new AudioDecomposer(), IngestDataPaths.Resolve("audio", cli.Path), skipLayerCheck: true, cli),
+            "document" => await IngestDocumentAsync(cli),
+            "recipe" => await IngestRecipeAsync(cli),
+            "chess" => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
-            "openings"   => await IngestViaRunnerAsync(
+            "openings" => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
-            "omw-probe"  => await OmwProbeAsync(cli),
+            "omw-probe" => await OmwProbeAsync(cli),
             _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, omw-probe, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
     }
@@ -223,21 +223,21 @@ internal static class IngestCommands
         CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
         var dsb = new NpgsqlDataSourceBuilder(ConnString);
         dsb.ConnectionStringBuilder.CommandTimeout = 0;
         await using var ds = dsb.Build();
 
         var dec = new ModelDecomposer(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
-        
-        
-        
+
+
+
         if (cli.RegisterOnly)
         {
             await RegisterDynamicCanonicalsAsync(ds, dec);
@@ -265,11 +265,11 @@ internal static class IngestCommands
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
-        
-        
-        
-        
-        
+
+
+
+
+
         bool persistEvidenceResolved = ResolvePersistEvidence(cli);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             freshSource: false,
@@ -289,11 +289,14 @@ internal static class IngestCommands
             var result = await runner.RunAsync(
                 dec,
                 BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli)
-                with { DecomposerOptions = DecomposerOptions.ForWitness(
+                with
+                {
+                    DecomposerOptions = DecomposerOptions.ForWitness(
                     dec.SourceName,
                     EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1),
                     cli.LangOverride,
-                    cli.EmitCrossLanguageLinks) },
+                    cli.EmitCrossLanguageLinks)
+                },
                 CancellationToken.None);
             sw.Stop();
 
@@ -311,10 +314,10 @@ internal static class IngestCommands
                 return 1;
             }
 
-            
-            
-            
-            
+
+
+
+
             await RegisterDynamicCanonicalsAsync(ds, dec);
 
             Console.WriteLine(
@@ -468,14 +471,14 @@ internal static class IngestCommands
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
-            SkipSourceCompletion   = skipSourceCompletion,
-            EcosystemPath          = ecosystemPath,
-            BatchSize              = batch,
-            DecomposerOptions      = decoOpts,
-            CommitRows             = commitRows,
-            ParallelWorkers        = workers,
-            Progress               = progress,
-            RetryPolicy                = workers > 1
+            SkipSourceCompletion = skipSourceCompletion,
+            EcosystemPath = ecosystemPath,
+            BatchSize = batch,
+            DecomposerOptions = decoOpts,
+            CommitRows = commitRows,
+            ParallelWorkers = workers,
+            Progress = progress,
+            RetryPolicy = workers > 1
                                             ? TransientErrorRetryPolicy.ConcurrencyRetry
                                             : TransientErrorRetryPolicy.NoRetry,
             AbortOnTransientExhaustion = true,
@@ -530,8 +533,8 @@ internal static class IngestCommands
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
-        
-        
+
+
         await RegisterDynamicCanonicalsAsync(ds, dec);
         Console.WriteLine(
             $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
@@ -606,10 +609,10 @@ internal static class IngestCommands
     {
         await using var conn = await ds.OpenConnectionAsync();
 
-        // Validation is a post-fold diagnostic, not a hot path: on a fresh-DB seed the
-        // counters/render/define helpers scan freshly-written tables with cold caches, which
-        // can exceed Npgsql's 30s default and surface as "Exception while reading from stream".
-        // Every command in this method runs without a timeout (CommandTimeout = 0).
+
+
+
+
         NpgsqlCommand Cmd()
         {
             var c = conn.CreateCommand();
@@ -700,41 +703,41 @@ internal static class IngestCommands
         switch (srcKey)
         {
             case "UnicodeDecomposer":
-            {
-                // Geometry is source-free: the physicality for U+0041 is one row keyed by
-                // (entity_id, type), no source. Provenance ("the Unicode source deposited this")
-                // is counted via attestations, not via a physicality source filter.
-                await using var cmd = Cmd();
-                cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
+                {
+
+
+
+                    await using var cmd = Cmd();
+                    cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
                                            p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
                                     FROM laplace.entity_facets(laplace.canonical_id('A')) f
                                     CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
                                     WHERE p.type = 1";
-                await using var rdr = await cmd.ExecuteReaderAsync();
-                if (await rdr.ReadAsync())
-                {
-                    Console.WriteLine("  check U+0041 'A':");
-                    Console.WriteLine($"    render  : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
-                    Console.WriteLine($"    coord   : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (await rdr.ReadAsync())
+                    {
+                        Console.WriteLine("  check U+0041 'A':");
+                        Console.WriteLine($"    render  : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
+                        Console.WriteLine($"    coord   : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
+                    }
+                    else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
+                    await rdr.CloseAsync();
+                    long uniProv = await EvidenceForSource("UnicodeDecomposer");
+                    Console.WriteLine($"    provenance: {uniProv:N0} UnicodeDecomposer attestations");
+                    break;
                 }
-                else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
-                await rdr.CloseAsync();
-                long uniProv = await EvidenceForSource("UnicodeDecomposer");
-                Console.WriteLine($"    provenance: {uniProv:N0} UnicodeDecomposer attestations");
-                break;
-            }
             case "ISO639Decomposer":
-            {
-                long langs = await RelationEvidence("HAS_ISO639_3_CODE", srcKey)
-                           + await RelationEvidence("HAS_ISO639_1_CODE", srcKey)
-                           + await RelationEvidence("HAS_ISO639_2_CODE", srcKey);
-                Console.WriteLine($"  check languages: {langs:N0} ISO code attestations");
-                break;
-            }
+                {
+                    long langs = await RelationEvidence("HAS_ISO639_3_CODE", srcKey)
+                               + await RelationEvidence("HAS_ISO639_1_CODE", srcKey)
+                               + await RelationEvidence("HAS_ISO639_2_CODE", srcKey);
+                    Console.WriteLine($"  check languages: {langs:N0} ISO code attestations");
+                    break;
+                }
             case "WordNetDecomposer":
-            {
-                await using var cmd = Cmd();
-                cmd.CommandText = @"
+                {
+                    await using var cmd = Cmd();
+                    cmd.CommandText = @"
                     SELECT laplace.word_id('dog') IS NOT NULL AS dog_ok,
                            (SELECT count(*) FROM laplace.senses(laplace.word_id('dog'))) AS sense_n,
                            (SELECT definition FROM laplace.define(laplace.word_id('dog'), 1) LIMIT 1) AS gloss,
@@ -742,20 +745,20 @@ internal static class IngestCommands
                                                   p_source => laplace.source_id('WordNetDecomposer')) AS is_a_n,
                            laplace.evidence_count(p_type => laplace.relation_type_id('HAS_SENSE'),
                                                   p_source => laplace.source_id('WordNetDecomposer')) AS has_sense_n";
-                await using var rdr = await cmd.ExecuteReaderAsync();
-                if (await rdr.ReadAsync())
-                {
-                    bool dogOk = rdr.GetBoolean(0);
-                    long senses = rdr.GetInt64(1);
-                    string? gloss = rdr.IsDBNull(2) ? null : rdr.GetString(2);
-                    long isA = rdr.GetInt64(3);
-                    long hasSense = rdr.GetInt64(4);
-                    Console.WriteLine($"  check wordnet/dog: id_ok={dogOk} senses={senses:N0} IS_A={isA:N0} HAS_SENSE={hasSense:N0}");
-                    if (gloss is not null) Console.WriteLine($"    define  : {gloss}");
-                    if (!dogOk || senses == 0) Console.WriteLine("  FAIL: wordnet lexicon not queryable");
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (await rdr.ReadAsync())
+                    {
+                        bool dogOk = rdr.GetBoolean(0);
+                        long senses = rdr.GetInt64(1);
+                        string? gloss = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+                        long isA = rdr.GetInt64(3);
+                        long hasSense = rdr.GetInt64(4);
+                        Console.WriteLine($"  check wordnet/dog: id_ok={dogOk} senses={senses:N0} IS_A={isA:N0} HAS_SENSE={hasSense:N0}");
+                        if (gloss is not null) Console.WriteLine($"    define  : {gloss}");
+                        if (!dogOk || senses == 0) Console.WriteLine("  FAIL: wordnet lexicon not queryable");
+                    }
+                    break;
                 }
-                break;
-            }
             case "VerbNetDecomposer":
                 Console.WriteLine($"  check verbnet: HAS_VERB_FRAME={await RelationEvidence("HAS_VERB_FRAME", srcKey):N0} "
                                 + $"HAS_THEMATIC_ROLE={await RelationEvidence("HAS_THEMATIC_ROLE", srcKey):N0}");

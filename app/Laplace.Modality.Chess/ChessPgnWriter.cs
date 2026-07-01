@@ -27,7 +27,7 @@ public static class ChessPgnWriter
         for (int i = 0; i < moves.Count; i++)
         {
             if (whiteToMove) { sb.Append(fullmove).Append(". "); }
-            else if (first)  { sb.Append(fullmove).Append("... "); }
+            else if (first) { sb.Append(fullmove).Append("... "); }
             sb.Append(San.ToSan(s.Board, moves[i])).Append(' ');
             s = m.Apply(s, moves[i]);
             if (!whiteToMove) fullmove++;

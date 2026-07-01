@@ -44,7 +44,7 @@ public static class DocumentRouter
                     int le = NextLine(doc, ls);
                     if (IsCloseFence(doc.AsSpan(ls, le - ls), fenceChar, fenceLen))
                     {
-                        codeEnd = ls;        
+                        codeEnd = ls;
                         afterClose = le;
                         break;
                     }
@@ -68,7 +68,7 @@ public static class DocumentRouter
         return spans;
     }
 
-    
+
     private static int NextLine(string doc, int start)
     {
         int nl = doc.IndexOf('\n', start);
@@ -87,7 +87,7 @@ public static class DocumentRouter
         while (p < line.Length && line[p] == c) { run++; p++; }
         if (run < 3) return false;
 
-        
+
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t')) p++;
         int infoStart = p;
         while (p < line.Length && line[p] != ' ' && line[p] != '\t' && line[p] != '\r' && line[p] != '\n') p++;
@@ -103,8 +103,8 @@ public static class DocumentRouter
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t')) p++;
         int run = 0;
         while (p < line.Length && line[p] == fenceChar) { run++; p++; }
-        if (run < openLen) return false;                 
+        if (run < openLen) return false;
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t' || line[p] == '\r' || line[p] == '\n')) p++;
-        return p >= line.Length;                          
+        return p >= line.Length;
     }
 }

@@ -15,9 +15,9 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
 
     public EtlDecomposer(EtlSource src) => _src = src;
 
-    public Hash128 SourceId     => _src.SourceId;
-    public string  SourceName   => _src.Name;
-    public int     LayerOrder   => _src.Layer;
+    public Hash128 SourceId => _src.SourceId;
+    public string SourceName => _src.Name;
+    public int LayerOrder => _src.Layer;
     public Hash128 TrustClassId => _src.TrustClassId;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback

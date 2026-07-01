@@ -11,7 +11,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
 {
     private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 FrameTypeId   = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
 
     public string ModalityId => "json";
 

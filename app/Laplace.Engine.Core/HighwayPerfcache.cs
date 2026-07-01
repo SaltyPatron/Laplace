@@ -32,7 +32,7 @@ public static unsafe class HighwayPerfcache
                     -1 => "open/stat/mmap failure (missing or unreadable file)",
                     -2 => "bad magic / unsupported format version",
                     -3 => "record count / size mismatch",
-                    _  => "unknown error",
+                    _ => "unknown error",
                 };
                 throw new InvalidOperationException(
                     $"highway_table_load(\"{path}\") failed (rc={rc}): {why}");

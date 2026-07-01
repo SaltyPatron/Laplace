@@ -42,8 +42,12 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
             if (!IsEnabled(level)) return;
             string lvl = level switch
             {
-                LogLevel.Trace => "TRC", LogLevel.Debug => "DBG", LogLevel.Information => "INF",
-                LogLevel.Warning => "WRN", LogLevel.Error => "ERR", LogLevel.Critical => "CRT",
+                LogLevel.Trace => "TRC",
+                LogLevel.Debug => "DBG",
+                LogLevel.Information => "INF",
+                LogLevel.Warning => "WRN",
+                LogLevel.Error => "ERR",
+                LogLevel.Critical => "CRT",
                 _ => "???"
             };
             string msg = formatter(state, ex);

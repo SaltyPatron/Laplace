@@ -15,10 +15,10 @@ public static class VocabularyNames
     {
         string ns = tagset switch
         {
-            PosReference.PosTagset.Upos       => "upos",
-            PosReference.PosTagset.WordNet   => "wordnet",
+            PosReference.PosTagset.Upos => "upos",
+            PosReference.PosTagset.WordNet => "wordnet",
             PosReference.PosTagset.Wiktionary => "wiktionary",
-            PosReference.PosTagset.FrameNet  => "framenet",
+            PosReference.PosTagset.FrameNet => "framenet",
             _ => "unknown",
         };
         return $"substrate/pos/probationary/{ns}/{tag}/v1";

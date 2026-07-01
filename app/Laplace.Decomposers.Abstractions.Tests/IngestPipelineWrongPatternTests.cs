@@ -5,17 +5,9 @@ using static Laplace.Decomposers.Abstractions.Tests.IngestPipelineTestHelpers;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Documents anti-patterns from docs/ingestion-write-path-architecture.md §5 and §8.4.
-/// These tests assert the generic pipeline does NOT exhibit the wrong patterns.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class IngestPipelineWrongPatternTests
 {
-    /// <summary>
-    /// WRONG: per-row flat EntitiesExistBitmapAsync over every compose entity id when tree descent
-    /// is available. RIGHT: one ContentDescentBitmapAsync per probe chunk + batched tier01 flat probe.
-    /// </summary>
     [Fact]
     public async Task WrongPattern_FlatProbeOverAllEntityIds_IsNotWhatPipelineDoes()
     {
@@ -49,10 +41,6 @@ public sealed class IngestPipelineWrongPatternTests
             "tier1 flat batch is separate from per-row root bulk IN");
     }
 
-    /// <summary>
-    /// WRONG: mid-decompose ApplyAsync (per-row DB commit). RIGHT: yield SubstrateChange batches
-    /// for bulk COPY/intent-stage apply downstream — proven via FakeTabIngestDecomposer.
-    /// </summary>
     [Fact]
     public async Task WrongPattern_MidDecomposeApplyAsync_IsForbidden()
     {
@@ -72,10 +60,6 @@ public sealed class IngestPipelineWrongPatternTests
         Assert.All(changes, c => Assert.True(c.Metadata.InputUnitsConsumed > 0));
     }
 
-    /// <summary>
-    /// WRONG: compose-before-probe (full materialize_phys then existence check). RIGHT: probe gates
-    /// materialize — present trunk skips phys entirely.
-    /// </summary>
     [Fact]
     public async Task WrongPattern_ComposeBeforeProbe_SkippedWhenAllPresent()
     {

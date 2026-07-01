@@ -3,8 +3,8 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-// ext->modality now resolves through the native registry (the single source of truth, all compiled
-// grammars). ts/java/cu were absent from the old CodeDecomposer dict — proving the coverage fix.
+
+
 public class GrammarModalityByExtTests
 {
     [Theory]

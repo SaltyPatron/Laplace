@@ -15,16 +15,16 @@ public class Glicko2Tests
     public void DefaultPrior_MatchesGlicko1Convention()
     {
         Assert.Equal(1_500L * Glicko2.FpScale, Glicko2.DefaultRatingFp1e9);
-        Assert.Equal(350L * Glicko2.FpScale,   Glicko2.DefaultRdFp1e9);
-        Assert.Equal(60_000_000L,              Glicko2.DefaultVolatilityFp1e9);
+        Assert.Equal(350L * Glicko2.FpScale, Glicko2.DefaultRdFp1e9);
+        Assert.Equal(60_000_000L, Glicko2.DefaultVolatilityFp1e9);
     }
 
     [Fact]
     public void ScoreConstants_MatchGlicko2Convention()
     {
-        Assert.Equal(0L,                       Glicko2.ScoreLoss);
-        Assert.Equal(500_000_000L,             Glicko2.ScoreDraw);
-        Assert.Equal(1_000_000_000L,           Glicko2.ScoreWin);
+        Assert.Equal(0L, Glicko2.ScoreLoss);
+        Assert.Equal(500_000_000L, Glicko2.ScoreDraw);
+        Assert.Equal(1_000_000_000L, Glicko2.ScoreWin);
     }
 
     [Fact]
@@ -48,23 +48,23 @@ public class Glicko2Tests
     {
         var state = new Glicko2State
         {
-            RatingFp1e9          = Glicko2.DefaultRatingFp1e9,
-            RdFp1e9              = Glicko2.DefaultRdFp1e9,
-            VolatilityFp1e9      = Glicko2.DefaultVolatilityFp1e9,
+            RatingFp1e9 = Glicko2.DefaultRatingFp1e9,
+            RdFp1e9 = Glicko2.DefaultRdFp1e9,
+            VolatilityFp1e9 = Glicko2.DefaultVolatilityFp1e9,
             LastObservedAtUnixNs = 0,
-            ObservationCount     = 0,
+            ObservationCount = 0,
         };
         long origRating = state.RatingFp1e9;
-        long origRd     = state.RdFp1e9;
-        long origVol    = state.VolatilityFp1e9;
+        long origRd = state.RdFp1e9;
+        long origVol = state.VolatilityFp1e9;
 
         Glicko2.UpdatePeriod(ref state,
             ReadOnlySpan<Glicko2Observation>.Empty,
             Glicko2.DefaultTauFp1e9, nowUnixNs: 0);
 
         Assert.Equal(origRating, state.RatingFp1e9);
-        Assert.Equal(origRd,     state.RdFp1e9);
-        Assert.Equal(origVol,    state.VolatilityFp1e9);
+        Assert.Equal(origRd, state.RdFp1e9);
+        Assert.Equal(origVol, state.VolatilityFp1e9);
     }
 
     [Fact]
@@ -72,11 +72,11 @@ public class Glicko2Tests
     {
         var state = new Glicko2State
         {
-            RatingFp1e9          = Glicko2.DefaultRatingFp1e9,
-            RdFp1e9              = Glicko2.DefaultRdFp1e9,
-            VolatilityFp1e9      = Glicko2.DefaultVolatilityFp1e9,
+            RatingFp1e9 = Glicko2.DefaultRatingFp1e9,
+            RdFp1e9 = Glicko2.DefaultRdFp1e9,
+            VolatilityFp1e9 = Glicko2.DefaultVolatilityFp1e9,
             LastObservedAtUnixNs = 0,
-            ObservationCount     = 0,
+            ObservationCount = 0,
         };
         var obs = new[] {
             new Glicko2Observation {

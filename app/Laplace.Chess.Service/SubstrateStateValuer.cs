@@ -47,9 +47,9 @@ public sealed class SubstrateStateValuer : IStateValuer
             foreach (var e in perState[i])
             {
                 if (!stats.TryGetValue(e, out var st)) continue;
-                double dev  = st.EffMu - GlickoPriors.NeutralMu;
+                double dev = st.EffMu - GlickoPriors.NeutralMu;
                 double conf = GlickoPriors.InitialRd / (GlickoPriors.InitialRd + st.Rd);
-                double w    = Math.Abs(dev) * conf * st.Witness;
+                double w = Math.Abs(dev) * conf * st.Witness;
                 if (w <= 0d) continue;
                 wsum += w; acc += w * dev;
             }

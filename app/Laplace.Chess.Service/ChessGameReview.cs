@@ -73,7 +73,7 @@ public static class ChessGameReview
             string tag = cpl >= BlunderCp ? "blunder" : cpl >= MistakeCp ? "mistake"
                        : cpl >= InaccuracyCp ? "inaccuracy" : "";
             if (white) { wSum += cpl; wN++; if (cpl >= BlunderCp) wBlunders++; }
-            else       { bSum += cpl; bN++; if (cpl >= BlunderCp) bBlunders++; }
+            else { bSum += cpl; bN++; if (cpl >= BlunderCp) bBlunders++; }
             if (cpl >= InaccuracyCp)
                 worst.Add(new ReviewedMove((plies / 2) + 1, white, played.Value.ToUci(), bestUci, cpl, tag));
 

@@ -37,7 +37,7 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         cmd.Parameters.AddWithValue("start", activatedAt);
         cmd.Parameters.AddWithValue("end", activatedAt.AddMonths(1));
         cmd.Parameters.Add(new NpgsqlParameter("credits", NpgsqlDbType.Jsonb)
-            { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
+        { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
         cmd.Parameters.AddWithValue("customer", (object?)stripeCustomerId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("subscription", (object?)stripeSubscriptionId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
@@ -59,8 +59,8 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         string tenant, BillingPlan plan, string? stripeCustomerId, string? stripeSubscriptionId,
         DateTimeOffset renewedAt, CancellationToken ct)
     {
-        
-        
+
+
         const string sql = """
             INSERT INTO app.billing_entitlements
                 (tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits,
@@ -85,7 +85,7 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         cmd.Parameters.AddWithValue("start", renewedAt);
         cmd.Parameters.AddWithValue("end", renewedAt.AddMonths(1));
         cmd.Parameters.Add(new NpgsqlParameter("credits", NpgsqlDbType.Jsonb)
-            { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
+        { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
         cmd.Parameters.AddWithValue("customer", (object?)stripeCustomerId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("subscription", (object?)stripeSubscriptionId ?? DBNull.Value);
 
@@ -156,9 +156,9 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         if (units <= 0)
             return (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units"));
 
-        
-        
-        
+
+
+
         const string sql = """
             WITH candidate AS (
                 SELECT tenant, plan_id,

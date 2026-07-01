@@ -31,7 +31,7 @@ set "CONTINUE_ON_FAIL="
 
 echo === verify-fk ===
 >> "%LOG%" echo === verify-fk ===
-rem FK probe runs on the fresh regress DB (extension bootstrap only), not the live ingest cluster.
+
 if "%FAIL%"=="0" (
   "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace_regress_substrate -v ON_ERROR_STOP=1 -f scripts\verify-fk.sql >> "%LOG%" 2>&1
   if errorlevel 1 set "FAIL=1"

@@ -8,21 +8,22 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
+public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
+{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
 
-    
-    
+
+
 
     private static readonly Dictionary<string, string> PointerTypes = new()
     {
-        ["!"]  = "IS_ANTONYM_OF",
-        ["@"]  = "HAS_HYPERNYM",
+        ["!"] = "IS_ANTONYM_OF",
+        ["@"] = "HAS_HYPERNYM",
         ["@i"] = "IS_INSTANCE_OF",
-        ["~"]  = "HAS_HYPONYM",
+        ["~"] = "HAS_HYPONYM",
         ["~i"] = "HAS_INSTANCE",
         ["#m"] = "IS_MEMBER_OF",
         ["#s"] = "IS_SUBSTANCE_OF",
@@ -30,20 +31,20 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         ["%m"] = "HAS_MEMBER",
         ["%s"] = "HAS_SUBSTANCE",
         ["%p"] = "HAS_PART",
-        ["="]  = "HAS_ATTRIBUTE",
-        ["+"]  = "DERIVATIONALLY_RELATED",
+        ["="] = "HAS_ATTRIBUTE",
+        ["+"] = "DERIVATIONALLY_RELATED",
         [";c"] = "HAS_DOMAIN_TOPIC",
         ["-c"] = "IS_DOMAIN_TOPIC_MEMBER",
         [";r"] = "HAS_DOMAIN_REGION",
         ["-r"] = "IS_DOMAIN_REGION_MEMBER",
         [";u"] = "HAS_DOMAIN_USAGE",
         ["-u"] = "IS_DOMAIN_USAGE_MEMBER",
-        ["*"]  = "ENTAILS",
-        [">"]  = "CAUSES",
-        ["^"]  = "ALSO_SEE",
-        ["$"]  = "IN_VERB_GROUP_WITH",
-        ["&"]  = "IS_SIMILAR_TO",
-        ["<"]  = "IS_PARTICIPLE_OF",
+        ["*"] = "ENTAILS",
+        [">"] = "CAUSES",
+        ["^"] = "ALSO_SEE",
+        ["$"] = "IN_VERB_GROUP_WITH",
+        ["&"] = "IS_SIMILAR_TO",
+        ["<"] = "IS_PARTICIPLE_OF",
         ["\\"] = "PERTAINS_TO",
     };
 
@@ -63,9 +64,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private const long EstimatedSynsets = 117_700L;
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "WordNetDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "WordNetDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
@@ -99,7 +100,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         ISubstrateReader? reader = context.Reader;
         var frames = await LoadVerbFramesAsync(dictDir, ct);
 
-        // Pass 1: synsets — subject to MaxInputUnits cap (benchmark/sandbox slice)
+
         await foreach (var c in DecomposerBatch.RunAsync(
             ParseAllSynsetsAsync(dictDir, ct),
             (syn, b) => { EmitSynsetEntities(b, syn, frames); EmitSynsetAttestations(b, syn, frames); },
@@ -108,7 +109,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
         if (options.MaxInputUnits > 0) yield break;
 
-        // Passes 2-4 always run to completion (no cap — they are structural, not volume)
+
         var uncapped = options with { MaxInputUnits = 0 };
 
         await foreach (var c in DecomposerBatch.RunAsync(
@@ -191,9 +192,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        
-        
-        
+
+
+
         ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
         foreach (var lemma in syn.Lemmas)
             EmitSurface(b, lemma, Source);
@@ -212,8 +213,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        
-        
+
+
         Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
@@ -274,15 +275,15 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         foreach (var ptr in syn.Pointers)
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
-            // Verb '@' is troponymy ("to dog is a manner of to pursue"), not noun subsumption — emit the
-            // existing MANNER_OF channel so it is not conflated/rendered as "is a pursue".
+
+
             if (syn.SsType == 'v' && ptr.Symbol == "@")
                 typeName = "MANNER_OF";
 
             Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
             if (tgt is null) continue;
-            // Lexical pointer (source word index set): the relation is word-level — attribute it to the
-            // specific source WORD, not the whole synset, so antonymy/derivation surface at the word.
+
+
             Hash128 subject = synId;
             if (ptr.SrcWord > 0 && ptr.SrcWord <= syn.Lemmas.Count)
             {
@@ -299,8 +300,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         EmitSurface(b, s.SenseKey, Source);
         EmitSurface(b, s.Lemma, Source);
 
-        var senseId   = SenseAnchor.IdNormalized(s.SenseKey);
-        var lemmaId   = RootSurface(s.Lemma);
+        var senseId = SenseAnchor.IdNormalized(s.SenseKey);
+        var lemmaId = RootSurface(s.Lemma);
         var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
         if (senseId is null || lemmaId is null || synAnchor is null) return;
 
@@ -328,7 +329,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
-    // Sense key: lemma%ss_type:lex_filenum:lex_id[:head_word:head_id]. Return lex_filenum (00-44) or -1.
+
     private static int ParseLexFilenum(string senseKey)
     {
         int pct = senseKey.IndexOf('%');
@@ -420,11 +421,11 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
     private static async IAsyncEnumerable<WnVerbSentEntry> ParseVerbSentencesAsync(
         string dictDir, [EnumeratorCancellation] CancellationToken ct)
     {
-        string idxPath   = Path.Combine(dictDir, "sentidx.vrb");
+        string idxPath = Path.Combine(dictDir, "sentidx.vrb");
         string sentsPath = Path.Combine(dictDir, "sents.vrb");
         if (!File.Exists(idxPath) || !File.Exists(sentsPath)) yield break;
 
-        var sentences  = await LoadVerbSentencesAsync(sentsPath, ct);
+        var sentences = await LoadVerbSentencesAsync(sentsPath, ct);
         if (sentences.Count == 0) yield break;
         var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
         if (senseIndex.Count == 0) yield break;
@@ -516,9 +517,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             }
             else { def.Append(gloss[i]); i++; }
         }
-        // WordNet glosses use ';' to separate senses/clauses. Split into clean definition units so the
-        // content geometry + co-occurrence (the field the attention/embed dot products read) isn't a
-        // 150-word blob. ';' is the per-source delimiter parameter.
+
+
+
         return (DelimitedContent.Split(def.ToString(), ';'), examples);
     }
 
@@ -540,7 +541,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
         int glossSep = line.IndexOf(" | ", StringComparison.Ordinal);
         string synData = glossSep >= 0 ? line[..glossSep] : line;
-        string gloss   = glossSep >= 0 ? line[(glossSep + 3)..] : "";
+        string gloss = glossSep >= 0 ? line[(glossSep + 3)..] : "";
 
         var parts = synData.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 4) return false;
@@ -565,9 +566,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             string sym = parts[idx++];
             if (!long.TryParse(parts[idx++], out long tgtOffset)) { idx += 2; continue; }
             char tgtPos = parts[idx++][0];
-            // source/target word indices (4 hex SSTT): "0000" = SEMANTIC (synset-to-synset); non-zero =
-            // LEXICAL (word-to-word: antonymy/derivation/pertainymy/participle). Previously skipped, so
-            // every lexical pointer was wrongly emitted at synset level.
+
+
+
             string srcTgt = parts[idx++];
             int srcWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(0, 2), NumberStyles.HexNumber, null, out int sw) ? sw : 0;
             int tgtWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(2, 2), NumberStyles.HexNumber, null, out int tw) ? tw : 0;
@@ -621,7 +622,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             string lemma = senseKey[..pct].Replace('_', ' ');
             char pos = senseKey[pct + 1] switch
             {
-                '1' => 'n', '2' => 'v', '3' => 'a', '4' => 'r', '5' => 's', _ => 'n',
+                '1' => 'n',
+                '2' => 'v',
+                '3' => 'a',
+                '4' => 'r',
+                '5' => 's',
+                _ => 'n',
             };
 
             string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);

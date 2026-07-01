@@ -113,10 +113,6 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         }
     }
 
-    /// <summary>
-    /// When the descent bitmap marks every compose-tree node present, skip
-    /// <c>materialize_phys</c> and entity/physicality drain — PRECEDES + witness only.
-    /// </summary>
     internal static bool IsEntireTreePresent(byte[]? existingBitmap, IntPtr composeOrProbe)
     {
         if (existingBitmap is not { Length: > 0 } || composeOrProbe == IntPtr.Zero)
@@ -146,16 +142,16 @@ public sealed unsafe class GrammarRowComposer : IDisposable
 
     private IntPtr ActiveResult => _compose != IntPtr.Zero ? _compose : _probe;
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
     public Hash128[] EntityIds()
     {
         EnsureProbed();
@@ -170,7 +166,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         return ids;
     }
 
-    
+
     private readonly struct EmitFilter
     {
         private readonly bool[]? _novelEntity;
@@ -185,16 +181,16 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         public bool PhysNovel(Hash128 entityId) => _novelIds is null || _novelIds.Contains(entityId);
     }
 
-    
-    
-    
-    
+
+
+
+
     private EmitFilter ComputeFilter(byte[]? existingBitmap)
     {
         EnsureComposed(existingBitmap);
         if (existingBitmap is not { Length: > 0 }) return default;
         IntPtr treePtr = NativeInterop.ComposeGetTierTree(ActiveResult);
-        if (treePtr == IntPtr.Zero) return default;   
+        if (treePtr == IntPtr.Zero) return default;
         using var tree = TierTree.FromBorrowedHandle(treePtr);
         int nodeCount = tree.NodeCount;
         nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
@@ -222,9 +218,9 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             Hash128 RootId) Materialize(double witnessWeight)
         => Materialize(witnessWeight, existingBitmap: null);
 
-    
-    
-    
+
+
+
     public (ImmutableArray<EntityRow> Entities,
             ImmutableArray<PhysicalityRow> Physicalities,
             ImmutableArray<AttestationRow> Precedes,
@@ -281,26 +277,14 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 precedes.ToImmutable(), NativeInterop.ComposeRootId(ActiveResult));
     }
 
-    /// <summary>
-    /// Drains the native compose result straight into <paramref name="stage"/> (entities +
-    /// physicalities) with no managed <c>EntityRow</c>/<c>PhysicalityRow</c> marshal — the stage's
-    /// native tuple buffers stream directly to COPY. This is the same one-hop path the
-    /// content-witness composer already uses; the grammar composer just emitted managed rows
-    /// instead. PRECEDES bigrams carry Glicko signal the native attestation row can't hold, so
-    /// they are appended to <paramref name="precedesOut"/> as managed <c>AttestationRow</c>s (low
-    /// volume) for the existing consensus path, until the walk-journal fold subsumes them.
-    /// <paramref name="nowUs"/> is threaded in (not read from the clock) so output is reproducible.
-    /// Returns the compose root id. Byte-for-byte identical entity/physicality blobs to
-    /// <see cref="Materialize"/>+re-stage for the same <paramref name="nowUs"/>.
-    /// </summary>
     public Hash128 DrainInto(
-        IntentStage stage, double witnessWeight, long nowUs,
-        ImmutableArray<AttestationRow>.Builder precedesOut)
-        => DrainInto(stage, witnessWeight, nowUs, precedesOut, existingBitmap: null);
+    IntentStage stage, double witnessWeight, long nowUs,
+    ImmutableArray<AttestationRow>.Builder precedesOut)
+    => DrainInto(stage, witnessWeight, nowUs, precedesOut, existingBitmap: null);
 
-    
-    
-    
+
+
+
     public Hash128 DrainInto(
         IntentStage stage, double witnessWeight, long nowUs,
         ImmutableArray<AttestationRow>.Builder precedesOut, byte[]? existingBitmap)
@@ -352,19 +336,12 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         return NativeInterop.ComposeRootId(ActiveResult);
     }
 
-    /// <summary>
-    /// Live drain: writes the compose entities + physicalities straight into
-    /// <see cref="SubstrateChangeBuilder.ContentStage"/> (native, no managed row marshal), deduped
-    /// within the batch via the builder's shared seen-set (so an id also emitted by a witness via
-    /// <see cref="SubstrateChangeBuilder.AddEntity(EntityRow)"/> is staged once). PRECEDES bigrams
-    /// ride as managed attestations through the builder. Returns the compose root id.
-    /// </summary>
     public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight)
-        => DrainInto(builder, witnessWeight, existingBitmap: null);
+    => DrainInto(builder, witnessWeight, existingBitmap: null);
 
-    
-    
-    
+
+
+
     public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? existingBitmap)
     {
         EnsureComposed(existingBitmap);

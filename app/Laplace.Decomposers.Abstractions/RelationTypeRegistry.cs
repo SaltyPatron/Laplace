@@ -176,9 +176,9 @@ public static class RelationTypeRegistry
             if (k.ParentId is { } parent)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.SubstrateMandate));
-        // Substrate-native legibility: each relation type's name is a codepoint-walk content
-        // entity, reached by HAS_NAME_ALIAS — render() reconstructs it from its own codepoints, so
-        // the type never surfaces as a bare hash and needs no canonical_names code-table row.
+
+
+
         foreach (var k in all)
             if (ContentWitnessBatch.Emit(builder, k.Canonical, sourceId) is { } nameId)
                 builder.AddAttestation(NativeAttestation.Categorical(
@@ -190,19 +190,19 @@ public static class RelationTypeRegistry
                                    ConcurrentIdSet seenAttestationsThisRun,
                                    ConcurrentDictionary<string, byte>? readbackNames = null)
     {
-        
-        
-        
-        
-        
-        // Readback name kept only as a render-perf cache; the source of truth is the substrate-native
-        // HAS_NAME_ALIAS emitted below, so render()/realize()/label() reconstruct the name from codepoints
-        // (DEP_DET, FEAT_*, EDEP_* rendered empty before — 0 HAS_NAME_ALIAS, code-table only).
+
+
+
+
+
+
+
+
         VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-        // Parent edge + substrate-native name alias, once per run — emitted even when the type has no
-        // parent, so a parentless dynamic type is still legible and walkable in the DAG.
+
+
         if (seenAttestationsThisRun.Add(k.Id))
         {
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));

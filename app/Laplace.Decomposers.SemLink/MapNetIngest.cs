@@ -6,10 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests MapNet TSV (mapping_frame_synsets.txt, mapping_lus_synsets.txt): FrameNet frame/LU → WordNet synset
-/// bridges in MultiWordNet pos#offset notation, resolved to ILI synsets via CILI.
-/// </summary>
 internal static class MapNetIngest
 {
     private const string FrameMappingFile = "mapping_frame_synsets.txt";

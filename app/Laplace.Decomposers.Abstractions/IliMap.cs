@@ -20,16 +20,16 @@ public sealed class IliMap
 
     private IliMap(Dictionary<long, string> byKey) => _byKey = byKey;
 
-    
+
     public int Count => _byKey.Count;
 
-    
+
     public const string MapFileName = "ili-map-pwn30.tab";
 
-    
-    
-    
-    
+
+
+
+
     public static IliMap Load(string ciliDir) => LoadFile(Path.Combine(ciliDir, MapFileName));
 
     public static IliMap? LoadVersion(string ciliDir, string version)
@@ -66,10 +66,10 @@ public sealed class IliMap
         return (offset << 3) | p;
     }
 
-    
-    
-    
-    
+
+
+
+
     public string? Resolve(long offset, char ssType)
         => _byKey.TryGetValue(Key(offset, ssType), out var ili) ? ili : null;
 }

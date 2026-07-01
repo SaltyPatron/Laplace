@@ -97,12 +97,12 @@ internal static class PredicateMatrixIngest
             if (vnClass is not null && fields.Length > ColFnFe)
             {
                 string vnRole = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColVnRole]).Trim();
-                string fnFe   = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColFnFe]).Trim();
+                string fnFe = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColFnFe]).Trim();
                 if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
                     && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
                 {
                     var vnRoleId = ContentEmitter.Emit(batch, vnRole, SemLinkDecomposer.Source);
-                    var feId     = CategoryAnchor.Emit(batch, fnFe, FeTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
+                    var feId = CategoryAnchor.Emit(batch, fnFe, FeTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
                     if (vnRoleId is { } vr && feId is { } fe
                         && seen.Add((vr, fe)))
                         batch.AddAttestation(NativeAttestation.Categorical(

@@ -50,8 +50,8 @@ public sealed class PropBankDecomposerTests
 </frameset>
 """;
 
-    // Shape mirrors the real top-level AMR-UMR-91-rolesets.xml shipped at the propbank-frames-main/
-    // distribution root (sibling to frames/), not under frames/ itself.
+
+
     private const string TopLevelFramesetXml = """
 <frameset>
   <predicate lemma="be-destined-for">
@@ -88,7 +88,7 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", PropBankDecomposer.Source);
-        var rsId = CategoryAnchor.Id("give.01");   
+        var rsId = CategoryAnchor.Id("give.01");
         Assert.NotNull(rsId);
         Assert.NotNull(giveId);
 
@@ -121,7 +121,7 @@ public sealed class PropBankDecomposerTests
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var rsId = CategoryAnchor.Id("give.01");
 
-        
+
         var vnId = CategoryAnchor.Id(PropBankDecomposer.NumericClassId("give-13.1-1"));
         Assert.NotNull(rsId);
         Assert.NotNull(vnId);
@@ -148,8 +148,8 @@ public sealed class PropBankDecomposerTests
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var rsId = CategoryAnchor.Id("give.01");
 
-        // FrameNet rolelink: class="Giving" (frame), inner="Donor" (FE). Anchor by frame name so it
-        // shares identity with FrameNet decomposer output — NOT routed through NumericClassId.
+
+
         var fnId = CategoryAnchor.Id("Giving");
         Assert.NotNull(rsId);
         Assert.NotNull(fnId);
@@ -186,15 +186,15 @@ public sealed class PropBankDecomposerTests
     [Fact]
     public async Task DecomposeAsync_Includes_TopLevel_Frameset_File_Alongside_FramesDir()
     {
-        // Mirrors the real propbank-frames-main/ distribution layout: most framesets live under
-        // frames/, but a handful (e.g. AMR-UMR-91-rolesets.xml) ship as standalone top-level files
-        // in the distribution root, sibling to frames/, and must still be parsed.
+
+
+
         string root = Path.Combine(Path.GetTempPath(), "pb-test-" + Guid.NewGuid().ToString("N"));
         string dist = Path.Combine(root, "propbank-frames-main");
         Directory.CreateDirectory(Path.Combine(dist, "frames"));
         await File.WriteAllTextAsync(Path.Combine(dist, "frames", "give.xml"), FramesetXml);
         await File.WriteAllTextAsync(Path.Combine(dist, "AMR-UMR-91-rolesets.xml"), TopLevelFramesetXml);
-        // Non-frameset files that legitimately live at the distribution root must not break parsing.
+
         await File.WriteAllTextAsync(Path.Combine(dist, "README.md"), "not xml");
         try
         {
@@ -211,13 +211,13 @@ public sealed class PropBankDecomposerTests
             Assert.NotNull(giveId);
             Assert.NotNull(beDestinedForId);
 
-            // Roleset from frames/give.xml is present (sanity: the frames/ directory still works).
+
             Assert.Contains(atts, a =>
                 a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
                 && a.SubjectId == giveId!.Value && a.ObjectId == CategoryAnchor.Id("give.01")!.Value);
 
-            // Roleset from the top-level AMR-UMR-91-rolesets.xml file is also present — this is the
-            // gap: without scanning the distribution root alongside frames/, this assertion fails.
+
+
             var beDestinedForLemmaId = ContentEmitter.Emit(
                 new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null),
                 "be-destined-for", PropBankDecomposer.Source);

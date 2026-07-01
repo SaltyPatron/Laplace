@@ -5,14 +5,14 @@ namespace Laplace.Modality.Chess;
 [Flags]
 public enum EvalTerm
 {
-    None          = 0,
-    Material      = 1 << 0,
-    Pst           = 1 << 1,
-    BishopPair    = 1 << 2,
-    RookFiles     = 1 << 3,
+    None = 0,
+    Material = 1 << 0,
+    Pst = 1 << 1,
+    BishopPair = 1 << 2,
+    RookFiles = 1 << 3,
     PawnStructure = 1 << 4,
-    Tempo         = 1 << 5,
-    All           = Material | Pst | BishopPair | RookFiles | PawnStructure | Tempo,
+    Tempo = 1 << 5,
+    All = Material | Pst | BishopPair | RookFiles | PawnStructure | Tempo,
 }
 
 public static class Evaluation
@@ -60,7 +60,7 @@ public static class Evaluation
 
         int mg = 0, eg = 0;
         if ((terms & EvalTerm.Material) != 0) { mg += mgMat; eg += egMat; }
-        if ((terms & EvalTerm.Pst) != 0)      { mg += mgPst; eg += egPst; }
+        if ((terms & EvalTerm.Pst) != 0) { mg += mgPst; eg += egPst; }
         int white_cp = TaperedToWhite(mg, eg, phase);
 
         if ((terms & EvalTerm.BishopPair) != 0)
@@ -84,11 +84,11 @@ public static class Evaluation
         return stm;
     }
 
-    private const int BishopPair             = 30;
-    private const int RookOpenFile           = 25;
-    private const int RookSemiOpenFile       = 12;
+    private const int BishopPair = 30;
+    private const int RookOpenFile = 25;
+    private const int RookSemiOpenFile = 12;
     private const int DoubledIsolatedPenalty = 8;
-    private const int Tempo                  = 10;
+    private const int Tempo = 10;
 
     private static int TaperedToWhite(int mg, int eg, int phase)
     {

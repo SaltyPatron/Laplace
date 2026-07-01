@@ -19,35 +19,50 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     internal static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
     {
-        ["RelatedTo"] = "RELATED_TO",      ["FormOf"] = "FORM_OF",
-        ["IsA"] = "IS_A",                  ["PartOf"] = "IS_PART_OF",
-        ["HasA"] = "HAS_A",                ["UsedFor"] = "USED_FOR",
-        ["CapableOf"] = "CAPABLE_OF",      ["AtLocation"] = "AT_LOCATION",
-        ["Causes"] = "CAUSES",             ["HasSubevent"] = "HAS_SUBEVENT",
+        ["RelatedTo"] = "RELATED_TO",
+        ["FormOf"] = "FORM_OF",
+        ["IsA"] = "IS_A",
+        ["PartOf"] = "IS_PART_OF",
+        ["HasA"] = "HAS_A",
+        ["UsedFor"] = "USED_FOR",
+        ["CapableOf"] = "CAPABLE_OF",
+        ["AtLocation"] = "AT_LOCATION",
+        ["Causes"] = "CAUSES",
+        ["HasSubevent"] = "HAS_SUBEVENT",
         ["HasFirstSubevent"] = "HAS_FIRST_SUBEVENT",
-        ["HasLastSubevent"]  = "HAS_LAST_SUBEVENT",
-        ["HasPrerequisite"]  = "HAS_PREREQUISITE",
-        ["HasProperty"]      = "HAS_PROPERTY",
-        ["MotivatedByGoal"]  = "MOTIVATED_BY_GOAL",
-        ["ObstructedBy"] = "OBSTRUCTED_BY", ["Desires"] = "DESIRES",
-        ["CreatedBy"] = "CREATED_BY",       ["Synonym"] = "IS_SYNONYM_OF",
-        ["Antonym"] = "IS_ANTONYM_OF",      ["DistinctFrom"] = "DISTINCT_FROM",
-        ["DerivedFrom"] = "DERIVED_FROM",   ["SymbolOf"] = "SYMBOL_OF",
-        ["DefinedAs"] = "DEFINED_AS",       ["MannerOf"] = "MANNER_OF",
-        ["LocatedNear"] = "LOCATED_NEAR",   ["HasContext"] = "HAS_CONTEXT",
+        ["HasLastSubevent"] = "HAS_LAST_SUBEVENT",
+        ["HasPrerequisite"] = "HAS_PREREQUISITE",
+        ["HasProperty"] = "HAS_PROPERTY",
+        ["MotivatedByGoal"] = "MOTIVATED_BY_GOAL",
+        ["ObstructedBy"] = "OBSTRUCTED_BY",
+        ["Desires"] = "DESIRES",
+        ["CreatedBy"] = "CREATED_BY",
+        ["Synonym"] = "IS_SYNONYM_OF",
+        ["Antonym"] = "IS_ANTONYM_OF",
+        ["DistinctFrom"] = "DISTINCT_FROM",
+        ["DerivedFrom"] = "DERIVED_FROM",
+        ["SymbolOf"] = "SYMBOL_OF",
+        ["DefinedAs"] = "DEFINED_AS",
+        ["MannerOf"] = "MANNER_OF",
+        ["LocatedNear"] = "LOCATED_NEAR",
+        ["HasContext"] = "HAS_CONTEXT",
         ["SimilarTo"] = "SIMILAR_TO",
-        ["EtymologicallyRelatedTo"]   = "ETYMOLOGICALLY_RELATED_TO",
+        ["EtymologicallyRelatedTo"] = "ETYMOLOGICALLY_RELATED_TO",
         ["EtymologicallyDerivedFrom"] = "ETYMOLOGICALLY_DERIVED_FROM",
-        ["CausesDesire"] = "CAUSES_DESIRE", ["MadeOf"] = "MADE_UP_OF",
-        ["ReceivesAction"] = "RECEIVES_ACTION", ["InstanceOf"] = "IS_INSTANCE_OF",
-        ["NotDesires"] = "NOT_DESIRES",     ["NotUsedFor"] = "NOT_USED_FOR",
-        ["NotCapableOf"] = "NOT_CAPABLE_OF", ["NotHasProperty"] = "NOT_HAS_PROPERTY",
+        ["CausesDesire"] = "CAUSES_DESIRE",
+        ["MadeOf"] = "MADE_UP_OF",
+        ["ReceivesAction"] = "RECEIVES_ACTION",
+        ["InstanceOf"] = "IS_INSTANCE_OF",
+        ["NotDesires"] = "NOT_DESIRES",
+        ["NotUsedFor"] = "NOT_USED_FOR",
+        ["NotCapableOf"] = "NOT_CAPABLE_OF",
+        ["NotHasProperty"] = "NOT_HAS_PROPERTY",
         ["Entails"] = "ENTAILS",
     };
 
-    public override Hash128 SourceId     => Source;
-    public override string  SourceName   => "ConceptNetDecomposer";
-    public override int     LayerOrder   => 2;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "ConceptNetDecomposer";
+    public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
@@ -72,8 +87,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        
-        
+
+
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }

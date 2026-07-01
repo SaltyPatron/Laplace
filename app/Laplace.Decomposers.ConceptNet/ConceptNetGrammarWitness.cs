@@ -45,7 +45,7 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
         if (fields.Count < 5) return false;
         relation = Slice(utf8, fields[1]);
         startUri = Slice(utf8, fields[2]);
-        endUri   = Slice(utf8, fields[3]);
+        endUri = Slice(utf8, fields[3]);
         metaJson = Slice(utf8, fields[4]);
         return !relation.IsEmpty && !startUri.IsEmpty && !endUri.IsEmpty;
     }

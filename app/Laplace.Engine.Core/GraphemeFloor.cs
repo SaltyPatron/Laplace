@@ -10,8 +10,8 @@ namespace Laplace.Engine.Core;
 
 public sealed unsafe class GraphemeFloor : IDisposable
 {
-    
-    
+
+
     public TierTree Tree { get; }
 
     public int CpN { get; }
@@ -27,15 +27,15 @@ public sealed unsafe class GraphemeFloor : IDisposable
     {
         Tree = tree;
         _floor = floor;
-        CpN           = checked((int)NativeInterop.GraphemeFloorCpN(floor));
+        CpN = checked((int)NativeInterop.GraphemeFloorCpN(floor));
         GraphFirstIdx = checked((int)NativeInterop.GraphemeFloorGraphFirstIdx(floor));
-        GraphCount    = checked((int)NativeInterop.GraphemeFloorGraphCount(floor));
-        _leafTextOff  = NativeInterop.GraphemeFloorLeafTextOff(floor);
-        _leafTextLen  = NativeInterop.GraphemeFloorLeafTextLen(floor);
-        _cpToGraph    = NativeInterop.GraphemeFloorCpToGraph(floor);
+        GraphCount = checked((int)NativeInterop.GraphemeFloorGraphCount(floor));
+        _leafTextOff = NativeInterop.GraphemeFloorLeafTextOff(floor);
+        _leafTextLen = NativeInterop.GraphemeFloorLeafTextLen(floor);
+        _cpToGraph = NativeInterop.GraphemeFloorCpToGraph(floor);
     }
 
-    
+
     public static GraphemeFloor Build(ReadOnlySpan<byte> utf8)
     {
         IntPtr treeHandle;
@@ -50,29 +50,29 @@ public sealed unsafe class GraphemeFloor : IDisposable
         return new GraphemeFloor(TierTree.FromExistingHandle(treeHandle), floor);
     }
 
-    
+
     public uint LeafByteOffset(int cp) => _leafTextOff[cp];
 
-    
+
     public uint LeafByteLength(int cp) => _leafTextLen[cp];
 
-    
+
     public uint GraphemeOfCodepoint(int cp) => _cpToGraph[cp];
 
-    
+
     public int GraphemeNodeIndex(int g) => GraphFirstIdx + g;
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public bool SpanToGraphemes(uint startByte, uint endByte, out int gStart, out int gEnd)
     {
         gStart = 0; gEnd = 0;
         if (endByte <= startByte || CpN == 0) return false;
         int cpStart = LowerBoundCp(startByte);
-        int cpEnd = LowerBoundCp(endByte); 
+        int cpEnd = LowerBoundCp(endByte);
         if (cpStart >= CpN) return false;
         if (cpEnd <= cpStart) cpEnd = cpStart + 1;
         if (cpEnd > CpN) cpEnd = CpN;
@@ -81,7 +81,7 @@ public sealed unsafe class GraphemeFloor : IDisposable
         return gEnd > gStart;
     }
 
-    
+
     private int LowerBoundCp(uint b)
     {
         int lo = 0, hi = CpN;

@@ -22,12 +22,12 @@ public sealed class SharedContentStageParityTests
     public static readonly TheoryData<string> Cases = new()
     {
         "dog",
-        "̐",               
-        "ç",               
-        "ç",              
-        "श्र",   
-        "ab",                   
-        "A",                    
+        "̐",
+        "ç",
+        "ç",
+        "श्र",
+        "ab",
+        "A",
     };
 
     [Theory]
@@ -63,18 +63,18 @@ public sealed class SharedContentStageParityTests
             $"lanes diverged for '{s}': native={nativeRoot} cs={csRoot} (cs tier {csTier})");
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     [Theory]
     [InlineData("dog", 2)]
     [InlineData("ab", 2)]
     [InlineData("A", 1)]
-    [InlineData("̐", 1)]                
-    [InlineData("\u00e7", 1)]   
-    [InlineData("c\u0327", 1)] 
+    [InlineData("̐", 1)]
+    [InlineData("\u00e7", 1)]
+    [InlineData("c\u0327", 1)]
     public void RootTier_Is_The_Natural_Unit(string s, int expected)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);

@@ -15,16 +15,16 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
     private static readonly Hash128 MarkerTypeId = EntityTypeRegistry.AtomicMarker;
-    private static readonly Hash128 SplitTypeId  = EntityTypeRegistry.AtomicSplit;
+    private static readonly Hash128 SplitTypeId = EntityTypeRegistry.AtomicSplit;
 
-    // SCHEMA, not content: the single absence-sentinel for ATOMIC's literal "none" tail
-    // (a relation with no annotated filler). It is a fixed marker, not a concept, and must
-    // NOT converge with the content word "none" — so it stays app/meta vocabulary (no geometry).
-    private static readonly Hash128 NoneId       = Hash128.OfCanonical("substrate/atomic/none/v1");
 
-    // SCHEMA, not content: the fixed dataset-split enum (train/dev/test). Used only as
-    // attestation contextId (the provenance edge's context), never baked into a content id.
-    // Small, fixed, correctly geometry-free app/meta vocabulary.
+
+
+    private static readonly Hash128 NoneId = Hash128.OfCanonical("substrate/atomic/none/v1");
+
+
+
+
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
     private static readonly (string Rel, string Type)[] Relations =
@@ -44,9 +44,9 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
 
     private static readonly string[] Splits = ["train", "dev", "test"];
 
-    public override Hash128 SourceId     => Source;
-    public override string  SourceName   => "Atomic2020Decomposer";
-    public override int     LayerOrder   => 2;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "Atomic2020Decomposer";
+    public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
 
 

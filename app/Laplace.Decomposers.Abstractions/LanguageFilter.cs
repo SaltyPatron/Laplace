@@ -13,7 +13,7 @@ public sealed class LanguageFilter
 
     public bool IsActive => _canon.Count > 0;
 
-    
+
     public static LanguageFilter? ForSource(string sourceKey)
     {
         string? spec = PerSourceEnv(sourceKey) ?? GlobalEnv();
@@ -46,7 +46,7 @@ public sealed class LanguageFilter
         return c is not null && _canon.Contains(c);
     }
 
-    
+
     public bool MatchesAll(params string?[] rawLangCodes)
     {
         if (!IsActive) return true;
@@ -78,7 +78,7 @@ public sealed class LanguageFilter
         return new string(chars[..n]);
     }
 
-    
+
     public bool MatchesAny(params string?[] rawLangCodes)
     {
         if (!IsActive) return true;
@@ -87,7 +87,7 @@ public sealed class LanguageFilter
         return false;
     }
 
-    
+
     public bool MatchesUdTreebankFile(string conlluFileName)
     {
         if (!IsActive) return true;
@@ -98,7 +98,7 @@ public sealed class LanguageFilter
         return MatchesRaw(baseLang);
     }
 
-    
+
     public bool MatchesLanguagePair(string pairToken)
     {
         if (!IsActive) return true;

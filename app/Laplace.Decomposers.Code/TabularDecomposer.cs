@@ -26,8 +26,8 @@ public sealed class TabularDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 ColumnTypeId  = EntityTypeRegistry.TabularColumn;
-    private static readonly Hash128 ValueTypeId   = EntityTypeRegistry.TabularValue;
+    private static readonly Hash128 ColumnTypeId = EntityTypeRegistry.TabularColumn;
+    private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
     private static readonly Hash128 OutcomeTypeId = EntityTypeRegistry.TabularOutcome;
 
     private static readonly HashSet<string> IdLike =
@@ -35,25 +35,25 @@ public sealed class TabularDecomposer : IDecomposer
 
     private readonly string _targetColumn;
     private readonly string _positiveValue;
-    private readonly int    _numBins;
+    private readonly int _numBins;
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
-        _targetColumn  = targetColumn;
+        _targetColumn = targetColumn;
         _positiveValue = positiveValue;
-        _numBins       = numBins;
+        _numBins = numBins;
     }
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "TabularDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "TabularDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     private Hash128 OutcomeId => Hash128.OfCanonical($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
-    private static Hash128 ColumnId(string col)            => Hash128.OfCanonical($"tabular/column/{col}/v1");
+    private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");
     private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"tabular/value/{col}={tok}/v1");
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -76,7 +76,7 @@ public sealed class TabularDecomposer : IDecomposer
         var files = EnumerateCsv(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        
+
         var rows = new List<Dictionary<string, string>>();
         foreach (var f in files)
         {
@@ -94,13 +94,13 @@ public sealed class TabularDecomposer : IDecomposer
         }
         if (rows.Count == 0) yield break;
 
-        
+
         var featureCols = rows[0].Keys
             .Where(c => !c.Equals(_targetColumn, StringComparison.Ordinal) && !IdLike.Contains(c))
             .ToList();
 
         var isNumeric = new Dictionary<string, bool>(StringComparer.Ordinal);
-        var edges     = new Dictionary<string, double[]>(StringComparer.Ordinal);
+        var edges = new Dictionary<string, double[]>(StringComparer.Ordinal);
         foreach (var c in featureCols)
         {
             var vals = rows.Where(r => r.ContainsKey(c)).Select(r => r[c]).ToList();
@@ -114,7 +114,7 @@ public sealed class TabularDecomposer : IDecomposer
             else isNumeric[c] = false;
         }
 
-        
+
         var lowCard = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in featureCols)
         {
@@ -123,8 +123,8 @@ public sealed class TabularDecomposer : IDecomposer
                 lowCard.Add(c);
         }
 
-        
-        var counts  = new Dictionary<(string Col, string Tok), (long N, long M)>();
+
+        var counts = new Dictionary<(string Col, string Tok), (long N, long M)>();
         var counts2 = new Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)>();
         var rowtoks = new List<(string Col, string Tok)>(featureCols.Count);
         foreach (var rec in rows)
@@ -150,7 +150,7 @@ public sealed class TabularDecomposer : IDecomposer
                 }
         }
 
-        
+
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
@@ -158,9 +158,9 @@ public sealed class TabularDecomposer : IDecomposer
 
         var b = NewBuilder(0, reader);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-        // The outcome's target-column name and positive-value token are content (meaningful surface
-        // strings): emit them via ContentEmitter and link the version-resolving outcome anchor to them
-        // as IS_INSTANCE_OF, so the names get geometry and stay context rather than baked into the id.
+
+
+
         if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
             b.AddAttestation(NativeAttestation.Categorical(
                 OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
@@ -172,9 +172,9 @@ public sealed class TabularDecomposer : IDecomposer
             b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Word, ColumnTypeId, Source));
             _canonicalNames.Add($"tabular/column/{c}/v1");
 
-            // The column NAME is content (a meaningful surface string like "Geography"/"Age"):
-            // emit it via ContentEmitter so it gets a Merkle DAG + tiers + geometry, and link the
-            // version-resolving column anchor to it as IS_INSTANCE_OF (naming is context, not id).
+
+
+
             if (ContentEmitter.Emit(b, c, Source) is { } colNameId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     ColumnId(c), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
@@ -188,7 +188,7 @@ public sealed class TabularDecomposer : IDecomposer
             b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
             _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
 
-            
+
             b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: ColumnId(col),
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
@@ -217,9 +217,9 @@ public sealed class TabularDecomposer : IDecomposer
         foreach (var ((pa, ta, pb, tb), nm) in counts2)
         {
             ct.ThrowIfCancellationRequested();
-            // Structural conjunction anchor: the AND of two value anchors, not a single meaningful
-            // content string. Its constituents (the two columns + their value tokens) already carry
-            // content/geometry from the per-value loop above, so this composite stays an anchor.
+
+
+
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
             _canonicalNames.Add($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");

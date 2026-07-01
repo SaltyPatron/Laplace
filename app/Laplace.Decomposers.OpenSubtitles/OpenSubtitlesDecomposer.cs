@@ -7,7 +7,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider{
+public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider
+{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -28,9 +29,9 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         ("en-zh_CN",  22_394_812L),
     };
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "OpenSubtitlesDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "OpenSubtitlesDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
@@ -296,8 +297,8 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                   .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
-    // Per-worker stages + per-batch dedup (the process-global content bank was deleted) make
-    // concurrent file producers independent and safe -> parallelize across zip files.
+
+
     private static int ResolveDecomposeWorkers() => IngestParallelism.ResolveFileWorkers();
 
     private static List<(string Path, string Stem)> SelectZips(string dir, DecomposerOptions options)

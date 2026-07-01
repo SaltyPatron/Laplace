@@ -10,12 +10,12 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
 {
-    public Hash128 SourceId     => UserPromptContent.Source;
-    
-    
-    
-    public string  SourceName   => "UserPrompt";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => UserPromptContent.Source;
+
+
+
+    public string SourceName => "UserPrompt";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => UserPromptContent.TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)

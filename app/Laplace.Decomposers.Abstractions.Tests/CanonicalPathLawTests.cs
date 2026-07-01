@@ -11,7 +11,7 @@ public class CanonicalPathLawTests
     [InlineData("PRECEDES")]
     public void RelationTypeId_IsContentAddressed(string name)
     {
-        // Relation type identity is blake3(utf8_bytes(name)) — no namespace prefix
+
         var id = RelationTypeRegistry.RelationTypeId(name);
         var expected = Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes(name));
         Assert.Equal(expected, id);

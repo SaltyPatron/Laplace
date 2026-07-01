@@ -21,7 +21,7 @@ public static class TextDecomposer
                             -1 => "null args",
                             -2 => "invalid UTF-8 sequence",
                             -3 => "allocation failure",
-                            _  => $"rc={rc}",
+                            _ => $"rc={rc}",
                         };
                         throw new InvalidOperationException(
                             $"laplace_text_decomposer_run failed: {reason}");

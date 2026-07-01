@@ -14,7 +14,7 @@ public class PerftTests
 
     private static long Perft(string fen, int depth) => Laplace.Modality.Chess.Perft.Run(Board.FromFen(fen), depth);
 
-    // ---- Startpos ----
+
     [Theory]
     [InlineData(1, 20)]
     [InlineData(2, 400)]
@@ -28,7 +28,7 @@ public class PerftTests
     [Fact]
     public void Startpos_d6() => Assert.Equal(119060324L, Perft(Startpos, 6));
 
-    // ---- Kiwipete ----
+
     [Theory]
     [InlineData(1, 48)]
     [InlineData(2, 2039)]
@@ -39,7 +39,7 @@ public class PerftTests
     [Fact]
     public void Kiwipete_d5() => Assert.Equal(193690690L, Perft(Kiwipete, 5));
 
-    // ---- Position 3 ----
+
     [Theory]
     [InlineData(1, 14)]
     [InlineData(2, 191)]
@@ -53,7 +53,7 @@ public class PerftTests
     [Fact]
     public void Pos3_d6() => Assert.Equal(11030083L, Perft(Pos3, 6));
 
-    // ---- Position 4 ----
+
     [Theory]
     [InlineData(1, 6)]
     [InlineData(2, 264)]
@@ -64,7 +64,7 @@ public class PerftTests
     [Fact]
     public void Pos4_d5() => Assert.Equal(15833292L, Perft(Pos4, 5));
 
-    // ---- Position 5 ----
+
     [Theory]
     [InlineData(1, 44)]
     [InlineData(2, 1486)]
@@ -75,7 +75,7 @@ public class PerftTests
     [Fact]
     public void Pos5_d5() => Assert.Equal(89941194L, Perft(Pos5, 5));
 
-    // ---- Position 6 ----
+
     [Theory]
     [InlineData(1, 46)]
     [InlineData(2, 2079)]

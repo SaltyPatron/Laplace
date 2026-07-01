@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 4
            a.outcome, a.observation_count
     FROM attestations a
     WHERE a.object_id = p_id
-    -- rank-weighted: salient relations first so the LIMIT cut keeps meaning over scaffolding.
+    
     ORDER BY relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;

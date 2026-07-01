@@ -170,7 +170,7 @@ public sealed class FrameNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(FrameNetDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", FrameNetDecomposer.Source);
-        var frameId = CategoryAnchor.Id("Giving");   
+        var frameId = CategoryAnchor.Id("Giving");
         Assert.NotNull(giveId);
         Assert.NotNull(frameId);
         Assert.Contains(atts, a =>
@@ -238,14 +238,14 @@ public sealed class FrameNetDecomposerTests
                     if (a.ObjectId is { } o) referenced.Add(o);
                 }
 
-            
-            
+
+
             Assert.Contains(CategoryAnchor.Id("Giving")!.Value, referenced);
             foreach (var target in new[] { "Transfer", "Intentionally_act", "Commerce_scenario" })
                 Assert.Contains(CategoryAnchor.Id(target)!.Value, referenced);
 
-            
-            
+
+
             var idioPos = Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1");
             Assert.Contains(idioPos, referenced);
         }

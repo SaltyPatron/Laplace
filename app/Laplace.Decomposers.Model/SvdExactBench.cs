@@ -10,14 +10,14 @@ public static class SvdExactBench
 
     const double F64ExactTol = 1e-12;
 
-    const float F32Epsilon       = 1.1920929e-07f;
-    const double F32LosslessTol  = 1.0e3 * F32Epsilon;
+    const float F32Epsilon = 1.1920929e-07f;
+    const double F32LosslessTol = 1.0e3 * F32Epsilon;
 
     public static bool Run(string modelDir, string? tensorName = null)
     {
         string name = string.IsNullOrEmpty(tensorName) ? DefaultTensor : tensorName!;
 
-        var refs   = SafetensorsContainerParser.ParseModel(modelDir);
+        var refs = SafetensorsContainerParser.ParseModel(modelDir);
         var refMap = refs.ToDictionary(r => r.Name, r => r);
         if (!refMap.TryGetValue(name, out var tref))
             throw new InvalidOperationException(
@@ -39,8 +39,8 @@ public static class SvdExactBench
 
         float[] A = LoadBF16AsF32(tref);
 
-        var U  = new float[(long)m * k];
-        var S  = new float[k];
+        var U = new float[(long)m * k];
+        var S = new float[k];
         var Vt = new float[(long)k * n];
 
         var sw = Stopwatch.StartNew();
@@ -58,13 +58,13 @@ public static class SvdExactBench
         int r = (int)outRank;
         Console.WriteLine($"  SVD    : rank kept = {r} / {k}  (tol=0 ⇒ full thin-SVD)  in {sw.ElapsedMilliseconds:N0} ms");
 
-        double sumSqA   = 0.0;
+        double sumSqA = 0.0;
         double sumSqErr = 0.0;
-        double maxAbs   = 0.0;
+        double maxAbs = 0.0;
         for (int i = 0; i < m; i++)
         {
-            long uRow  = (long)i * k;
-            long aRow  = (long)i * n;
+            long uRow = (long)i * k;
+            long aRow = (long)i * n;
             for (int j = 0; j < n; j++)
             {
                 double rec = 0.0;
@@ -73,16 +73,16 @@ public static class SvdExactBench
 
                 double a = A[aRow + j];
                 double d = a - rec;
-                sumSqA   += a * a;
+                sumSqA += a * a;
                 sumSqErr += d * d;
                 double ad = Math.Abs(d);
                 if (ad > maxAbs) maxAbs = ad;
             }
         }
 
-        double normA   = Math.Sqrt(sumSqA);
+        double normA = Math.Sqrt(sumSqA);
         double normErr = Math.Sqrt(sumSqErr);
-        double relErr  = normA > 0.0 ? normErr / normA : normErr;
+        double relErr = normA > 0.0 ? normErr / normA : normErr;
         double relInEps = relErr / F32Epsilon;
 
         Console.WriteLine($"  ‖A‖_F            = {normA:E6}");
@@ -90,9 +90,9 @@ public static class SvdExactBench
         Console.WriteLine($"  relative residual = {relErr:E6}   (= {relInEps:F1} × f32 ε)");
         Console.WriteLine($"  max abs residual  = {maxAbs:E6}");
 
-        bool fullRank   = r == k;
+        bool fullRank = r == k;
         bool f32Lossless = fullRank && relErr <= F32LosslessTol;
-        bool f64Exact    = relErr <= F64ExactTol;
+        bool f64Exact = relErr <= F64ExactTol;
 
         Console.WriteLine(f32Lossless
             ? $"  LOSSLESS (f32) — full rank {r}/{k}, residual {relErr:E3} ≤ {F32LosslessTol:E1} (f32 round-off floor)"

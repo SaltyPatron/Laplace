@@ -18,36 +18,36 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(string prompt, byte[]? session, CancellationToken ct)
         => await ConverseTurnsAsync([prompt], session, ct);
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
-        // De-forked from session_topics: recall(prompt, context) answers the latest turn given an
-        // explicit conversational-context id and writes nothing (STABLE, not the VOLATILE recall_session
-        // that appended to the UNLOGGED session_topics table). The context is the prior turn's topic,
-        // resolved once via resolve_topic (cheap resolution, NOT a full recall) — pronoun-aware, so
-        // "what is its size?" still binds to the prior subject. That kills the O(N²): the old path
-        // replayed every prior turn through full recall each request to rebuild ephemeral session state;
-        // here it's one resolve + one recall per request. The durable conversation record is the content
-        // trajectory TurnWitness already writes (prompts are content — decompose/compose/dedup), so the
-        // session needs no replay. recall consumes only the single most-recent context, so the
-        // immediately-prior turn is sufficient; deeper anaphora would come from that content trajectory,
-        // never a replay. The `session` arg is now unused — context derives from the turn sequence itself.
+
+
+
+
+
+
+
+
+
+
+
         const string sql = """
             SELECT reply, eff_mu, witnesses
             FROM laplace.recall(@p, CASE WHEN @prior = '' THEN NULL
@@ -56,7 +56,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         try
         {
             var prompt = userTurns[^1];
-            var prior  = userTurns.Count >= 2 ? userTurns[^2] : "";
+            var prior = userTurns.Count >= 2 ? userTurns[^2] : "";
 
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             await using var cmd = new NpgsqlCommand(sql, conn);
@@ -86,19 +86,19 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         }
     }
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
-        int steps          = 32,
-        int maxOrder       = 5,
+        int steps = 32,
+        int maxOrder = 5,
         double temperature = 0.7,
-        int topK           = 10,
+        int topK = 10,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         const string sql =
@@ -115,11 +115,11 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         while (await reader.ReadAsync(ct))
         {
             var step = reader.GetInt32(0);
-            var tok  = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            var ord  = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+            var tok = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var ord = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
             if (tok.Length == 0) continue;
-            // tok already carries its substrate-observed separator (walk_text appends render_text(sep_entity)).
-            // Never prepend a literal space — that's an English assumption; separators come from the substrate.
+
+
             yield return new GenerateToken(step, tok, ord);
         }
     }
@@ -381,10 +381,10 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         return value is null or DBNull ? null : Convert.ToInt64(value);
     }
 
-    
-    
-    
-    
+
+
+
+
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
         const string resolveSql = """
@@ -549,8 +549,8 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         }
     }
 
-    // FORM = S³ geometry coordinate; MEANING = Glicko-2 salient consensus neighbours (rank-weighted by
-    // consensus_out_readable, so scaffolding stays out of the top). Form and meaning kept separate.
+
+
     public async Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct)
     {
         const string resolveSql = """

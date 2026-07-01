@@ -3,18 +3,18 @@ using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
-// Track 0 (eval harness, Tier-2). Read-only. Measures whether a MODEL-derived relation plane recovers
-// known lexical structure: does the model's edge strength rank true ground-truth pairs above random?
-//
-//   laplace eval ingest-fidelity [relation] [ground-truth] [n]
-//     relation     model plane to score   (default SIMILAR_TO)
-//     ground-truth seed relation for +ves (default IS_SYNONYM_OF)
-//     n            sample size per class  (default 3000)
-//
-// Ground truth is the TWO-HOP synonym join: IS_SYNONYM_OF links a word to its SENSES (the objects are
-// glosses, not sibling words), so two words are synonyms iff they share a sense. Positives are such
-// word↔word pairs, restricted to the model's vocab (endpoints that actually carry a `relation` edge).
-// Negatives are random vocab pairs. Metric: ROC-AUC (P[strength(+) > strength(−)]) + precision@|P|.
+
+
+
+
+
+
+
+
+
+
+
+
 internal static class EvalCommands
 {
     public static async Task<int> RunAsync(string[] args)
@@ -23,8 +23,8 @@ internal static class EvalCommands
             return Fail("usage: laplace eval ingest-fidelity [relation] [ground-truth] [n]");
 
         string relation = args.Length > 1 ? args[1] : "SIMILAR_TO";
-        string gt       = args.Length > 2 ? args[2] : "IS_SYNONYM_OF";
-        int n           = args.Length > 3 && int.TryParse(args[3], out var v) && v > 0 ? v : 3000;
+        string gt = args.Length > 2 ? args[2] : "IS_SYNONYM_OF";
+        int n = args.Length > 3 && int.TryParse(args[3], out var v) && v > 0 ? v : 3000;
 
         await using var ds = NpgsqlDataSource.Create(ConnString);
 
@@ -62,8 +62,8 @@ internal static class EvalCommands
         return outv;
     }
 
-    // Positives: word↔word pairs sharing a seed sense, both endpoints in the model's relation vocab.
-    // Strength = max of both endpoint orderings (symmetric folds may canonicalize either way).
+
+
     private const string PositivesSql = @"
         WITH vocab AS (
           SELECT DISTINCT subject_id AS id FROM laplace.consensus
@@ -85,7 +85,7 @@ internal static class EvalCommands
         LEFT JOIN laplace.consensus c1 ON c1.id = laplace.consensus_id(p.w1, laplace.relation_type_id(@rel), p.w2)
         LEFT JOIN laplace.consensus c2 ON c2.id = laplace.consensus_id(p.w2, laplace.relation_type_id(@rel), p.w1)";
 
-    // Negatives: random vocab pairs (first half of a random permutation paired with the second half).
+
     private const string NegativesSql = @"
         WITH vocab AS (
           SELECT DISTINCT subject_id AS id FROM laplace.consensus
@@ -106,7 +106,7 @@ internal static class EvalCommands
 
     private static double Mean(List<double> xs) => xs.Count == 0 ? 0 : xs.Average();
 
-    // ROC-AUC via the Mann–Whitney rank statistic (ties get average ranks → AUC counts ties as 0.5).
+
     private static double RocAuc(List<double> pos, List<double> neg)
     {
         if (pos.Count == 0 || neg.Count == 0) return double.NaN;
@@ -119,8 +119,8 @@ internal static class EvalCommands
         while (i < n)
         {
             int j = i;
-            while (j < n && all[j].v == all[i].v) j++;     // tie group [i, j)
-            double avgRank = (i + 1 + j) / 2.0;            // average of 1-based ranks i+1 .. j
+            while (j < n && all[j].v == all[i].v) j++;
+            double avgRank = (i + 1 + j) / 2.0;
             for (int k = i; k < j; k++) if (all[k].isPos) rankSumPos += avgRank;
             i = j;
         }
@@ -128,7 +128,7 @@ internal static class EvalCommands
         return u / ((double)pos.Count * neg.Count);
     }
 
-    // Fraction of the strongest |P| pairs (over P∪N) that are true positives.
+
     private static double PrecisionAtK(List<double> pos, List<double> neg)
     {
         int k = pos.Count;
@@ -136,7 +136,7 @@ internal static class EvalCommands
         var all = new List<(double v, bool isPos)>(pos.Count + neg.Count);
         foreach (var v in pos) all.Add((v, true));
         foreach (var v in neg) all.Add((v, false));
-        all.Sort((a, b) => b.v.CompareTo(a.v));            // strongest first
+        all.Sort((a, b) => b.v.CompareTo(a.v));
         int hits = 0;
         for (int t = 0; t < k && t < all.Count; t++) if (all[t].isPos) hits++;
         return (double)hits / k;

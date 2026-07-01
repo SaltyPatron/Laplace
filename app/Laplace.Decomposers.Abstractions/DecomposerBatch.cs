@@ -16,12 +16,12 @@ public static class DecomposerBatch
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        long cap     = options.MaxInputUnits;
+        long cap = options.MaxInputUnits;
         long consumed = 0;
-        int  bn      = 0;
+        int bn = 0;
 
-        var builder  = NewBuilder(sourceId, labelPrefix, bn, batchSize, reader);
-        int  inBatch = 0;
+        var builder = NewBuilder(sourceId, labelPrefix, bn, batchSize, reader);
+        int inBatch = 0;
 
         await foreach (var record in records.WithCancellation(ct))
         {
@@ -39,8 +39,8 @@ public static class DecomposerBatch
                     yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
                     IntentStage.ResetContentBank();
                 }
-                builder  = NewBuilder(sourceId, labelPrefix, ++bn, batchSize, reader);
-                inBatch  = 0;
+                builder = NewBuilder(sourceId, labelPrefix, ++bn, batchSize, reader);
+                inBatch = 0;
             }
         }
 
@@ -54,7 +54,7 @@ public static class DecomposerBatch
     private static SubstrateChangeBuilder NewBuilder(
         Hash128 sourceId, string prefix, int bn, int batchSize, ISubstrateReader? _)
         => new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
-                entityCapacity:      batchSize * 4,
+                entityCapacity: batchSize * 4,
                 physicalityCapacity: batchSize * 2,
                 attestationCapacity: batchSize * 8);
 }

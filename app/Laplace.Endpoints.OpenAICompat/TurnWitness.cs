@@ -121,9 +121,9 @@ internal sealed class TurnWitness : BackgroundService
 
     private async Task<bool> AlreadyWitnessedAsync(Hash128 rootId, CancellationToken ct)
     {
-        // Geometry is source-free: a content physicality is one row per (entity_id, type)
-        // with no source column, so "already witnessed" is simply "the content physicality
-        // exists" (whoever first witnessed it). Provenance per source lives on attestations.
+
+
+
         await using var conn = await _substrate.DataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
             "SELECT 1 FROM laplace.physicalities WHERE entity_id = @e AND type = 1 LIMIT 1", conn);

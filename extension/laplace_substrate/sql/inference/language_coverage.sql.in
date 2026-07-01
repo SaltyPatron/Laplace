@@ -1,6 +1,6 @@
--- inference/language_coverage.sql.in
--- One-line omniglottal coverage summary: across how many (and which) languages a word's
--- synset is witnessed. Returns a single conversational row, or none when nothing is known.
+
+
+
 CREATE OR REPLACE FUNCTION language_coverage(p_word bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

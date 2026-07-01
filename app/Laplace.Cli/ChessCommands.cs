@@ -7,12 +7,6 @@ using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// `laplace chess …` — thin CLI over the shared <see cref="ChessEngineService"/> (same service the web
-/// host drives).
-///   selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]
-///   move &lt;fen&gt;
-/// </summary>
 internal static class ChessCommands
 {
     public static async Task<int> RunAsync(string[] args)
@@ -21,16 +15,16 @@ internal static class ChessCommands
         return args[0] switch
         {
             "selfplay" => await SelfPlayAsync(args[1..]),
-            "move"     => await MoveAsync(args[1..]),
-            "fetch"    => await FetchAsync(args[1..]),
+            "move" => await MoveAsync(args[1..]),
+            "fetch" => await FetchAsync(args[1..]),
             "substrate-test" => await SubstrateTestAsync(args[1..]),
-            "ladder"   => await LadderAsync(args[1..]),
-            "review"   => await ReviewAsync(args[1..]),
+            "ladder" => await LadderAsync(args[1..]),
+            "review" => await ReviewAsync(args[1..]),
             "learned-pst" => await LearnedPstAsync(args[1..]),
             "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
-            "tactics"  => await TacticsAsync(args[1..]),
-            "lichess"  => await LichessAsync(args[1..]),
-            _          => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
+            "tactics" => await TacticsAsync(args[1..]),
+            "lichess" => await LichessAsync(args[1..]),
+            _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
 
@@ -53,11 +47,6 @@ internal static class ChessCommands
         + "  lichess [--token T] [--depth D] [--max-concurrent N] [--substrate] [--speed bullet|blitz|rapid|classical]\n"
         + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
 
-    /// <summary>The real test: pit a search whose root is biased by the substrate against the identical
-    /// pure-classical search, and measure the Elo difference — how much the game graph adds to the
-    /// classical floor. Both play the SAME depth; only the root prior differs. <c>--mode fold</c> uses the
-    /// substructure-fold (generalizes to novel positions); <c>edge</c> uses raw MOVE eff_mu (popularity);
-    /// <c>off</c> is a pure-vs-pure sanity check (should be ≈0). <c>--openings</c> seeds from book lines.</summary>
     private static async Task<int> SubstrateTestAsync(string[] args)
     {
         string mode = ArgStr(args, "--mode", "fold").ToLowerInvariant();
@@ -66,7 +55,7 @@ internal static class ChessCommands
         int maxPlies = ArgInt(args, "--max-plies", 160);
         double cpPerPoint = ArgDouble(args, "--cp-per-point", 8.0);
         int cap = ArgInt(args, "--cap", 150);
-        int concurrency = ArgInt(args, "--concurrency", 16); // 14900KS: 8P+16E — tune vs other load
+        int concurrency = ArgInt(args, "--concurrency", 16);
         bool seedOpenings = HasFlag(args, "--openings");
 
         await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
@@ -74,11 +63,11 @@ internal static class ChessCommands
         {
             "fold" => new SubstructureFoldBias(ds, cpPerPoint, cap),
             "edge" => new SubstrateRootBias(ds, cpPerPoint, cap),
-            "off"  => null,
-            _      => throw new ArgumentException($"unknown --mode '{mode}' (expected fold|edge|off)"),
+            "off" => null,
+            _ => throw new ArgumentException($"unknown --mode '{mode}' (expected fold|edge|off)"),
         };
-        // --learned: ALSO give the guided engine the light learned-PST leaf overlay (Part 9, +31 alone) on top
-        // of the root prior — measures the STACKED corpus lift (fold + learned eval) over pure classical.
+
+
         bool useLearned = HasFlag(args, "--learned");
         int[][]? mg = null, eg = null;
         if (useLearned)
@@ -87,8 +76,8 @@ internal static class ChessCommands
             (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
         }
         var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias, ttBits: 16, mgPst: mg, egPst: eg);
-        var pure   = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null);
-        // Seed from the ALREADY-INGESTED Lichess ECO openings (openings/*.tsv), not a hardcoded list.
+        var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null);
+
         string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
         var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
 
@@ -96,7 +85,7 @@ internal static class ChessCommands
         {
             "fold" => $"substructure-fold prior ({cpPerPoint}cp/pt, cap {cap})",
             "edge" => $"raw MOVE-edge prior ({cpPerPoint}cp/pt, cap {cap})",
-            _      => "NO prior (sanity)",
+            _ => "NO prior (sanity)",
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
         Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, "
@@ -122,8 +111,6 @@ internal static class ChessCommands
 
     private static bool HasFlag(string[] a, string flag) => Array.IndexOf(a, flag) >= 0;
 
-    /// <summary>Game-review over ingested games: per-side ACPL + blunder counts + the "crazy win" triage
-    /// (won despite a blunder — luck vs eval blind-spot). Pure search (no DB).</summary>
     private static Task<int> ReviewAsync(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--"))
@@ -164,8 +151,6 @@ internal static class ChessCommands
 
     private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : (name.Length > 16 ? name[..16] : name);
 
-    /// <summary>Dump the substrate's LEARNED piece-square values (the data-driven PST) as 8x8 grids — what
-    /// the corpus says each piece is worth on each square. Read-only; touches no eval path.</summary>
     private static async Task<int> LearnedPstAsync(string[] args)
     {
         string pieces = ArgStr(args, "--piece", LearnedPst.WhitePieces).ToUpperInvariant();
@@ -192,19 +177,23 @@ internal static class ChessCommands
             var best = sqs.Where(s => s.Witness > 0).OrderByDescending(s => s.DevPoints).FirstOrDefault();
             var worst = sqs.Where(s => s.Witness > 0).OrderBy(s => s.DevPoints).FirstOrDefault();
             if (best.Witness > 0)
-                Console.WriteLine($"    best {(char)('a'+best.File)}{(char)('1'+best.Rank)} {best.DevPoints:+0;-0}  "
-                    + $"worst {(char)('a'+worst.File)}{(char)('1'+worst.Rank)} {worst.DevPoints:+0;-0}");
+                Console.WriteLine($"    best {(char)('a' + best.File)}{(char)('1' + best.Rank)} {best.DevPoints:+0;-0}  "
+                    + $"worst {(char)('a' + worst.File)}{(char)('1' + worst.Rank)} {worst.DevPoints:+0;-0}");
         }
         return 0;
     }
 
     private static string PieceName(char p) => p switch
     {
-        'P' => "Pawn", 'N' => "Knight", 'B' => "Bishop", 'R' => "Rook", 'Q' => "Queen", 'K' => "King", _ => p.ToString(),
+        'P' => "Pawn",
+        'N' => "Knight",
+        'B' => "Bishop",
+        'R' => "Rook",
+        'Q' => "Queen",
+        'K' => "King",
+        _ => p.ToString(),
     };
 
-    /// <summary>Tactics solve-rate over an EPD suite (the second correctness bar). No file ⇒ the built-in
-    /// mate suite (smoke test). Pure search, no DB.</summary>
     private static Task<int> TacticsAsync(string[] args)
     {
         int depth = ArgInt(args, "--depth", 6);
@@ -222,10 +211,6 @@ internal static class ChessCommands
         return Task.FromResult(0);
     }
 
-    /// <summary>The data-driven-eval test: an engine whose leaf PST is the substrate-LEARNED table plays an
-    /// otherwise-identical engine using hand-tuned PeSTO. Same material/structure terms; ONLY the PST differs,
-    /// at EVERY node. Honest measurement of whether the corpus's learned piece-square values can stand in for
-    /// (or beat) PeSTO — the guardrail says validate before trusting, so this is the validation.</summary>
     private static async Task<int> LearnedEvalTestAsync(string[] args)
     {
         int games = ArgInt(args, "--games", 200);
@@ -240,11 +225,11 @@ internal static class ChessCommands
         bool blend = HasFlag(args, "--blend");
         await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
         var (mg, eg) = LearnedPst.BuildTables(ds, scale);
-        // --blend: PeSTO floor + a small learned overlay (the "additive, don't replace" hypothesis).
-        //  default: the learned table REPLACES PeSTO (the wholesale test — known to regress).
+
+
         if (blend) (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
         var learned = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null, ttBits: 16, mgPst: mg, egPst: eg);
-        var pesto   = MatchRunner.SearcherFactory(depth, EvalTerm.All);
+        var pesto = MatchRunner.SearcherFactory(depth, EvalTerm.All);
 
         Console.WriteLine($"learned-eval-test [{(blend ? "blend: PeSTO+learned" : "replace: learned-only")}]: "
             + $"scale {scale}cp/pt vs hand-tuned PeSTO, depth {depth}, "
@@ -258,10 +243,6 @@ internal static class ChessCommands
         return 0;
     }
 
-    /// <summary>Overlay-ablation ladder: for each <see cref="EvalTerm"/>, pit the full eval against the
-    /// eval with ONLY that term removed; the Elo of full-over-minus is that overlay's individual
-    /// contribution. Pure C# (no DB) — the parallel <see cref="MatchRunner"/>. <c>--openings</c> seeds from
-    /// the ingested ECO book so the ablation isn't dominated by random-opening noise.</summary>
     private static Task<int> LadderAsync(string[] args)
     {
         int games = ArgInt(args, "--games", 100);
@@ -282,7 +263,7 @@ internal static class ChessCommands
         Console.WriteLine($"  {"term",-14} {"W-D-L",-12} {"Elo",7}  {"+/-",5}");
         foreach (var t in terms)
         {
-            var full  = MatchRunner.SearcherFactory(depth, EvalTerm.All);
+            var full = MatchRunner.SearcherFactory(depth, EvalTerm.All);
             var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~t);
             var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7, concurrency: concurrency, openingFens: book);
             string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
@@ -316,7 +297,7 @@ internal static class ChessCommands
         }
         else
         {
-            // The unified engine plays itself — the LEARNER IS THE PLAYER (α-β + PeSTO⊕learned-PST + fold).
+
             int depth = ArgInt(args, "--depth", 4);
             int openingPlies = ArgInt(args, "--opening-plies", 6);
             Console.WriteLine($"chess selfplay [STRONG: unified α-β engine, depth {depth}, opening {openingPlies}]: "
@@ -385,9 +366,6 @@ internal static class ChessCommands
         return i >= 0 && i + 1 < a.Length && double.TryParse(a[i + 1], out var v) ? v : def;
     }
 
-    /// <summary>Stream Lichess account events and play rated games using the unified α-β engine.
-    /// Reads the token from <c>--token</c>, <c>LICHESS_API</c>, or <c>deploy\secrets\lichess.env</c>.
-    /// Press Ctrl-C to stop gracefully (finishes in-flight games first).</summary>
     private static async Task<int> LichessAsync(string[] args)
     {
         string? token = LichessBot.ResolveToken(ArgStr(args, "--token", ""));
@@ -402,7 +380,7 @@ internal static class ChessCommands
         int maxConcurrent = ArgInt(args, "--max-concurrent", 4);
         bool substrate = HasFlag(args, "--substrate");
 
-        // Collect accepted speeds (may appear multiple times via different flags).
+
         var speeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < args.Length - 1; i++)
             if (args[i] == "--speed") speeds.Add(args[i + 1].ToLowerInvariant());
@@ -418,7 +396,7 @@ internal static class ChessCommands
                 ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
                 bias = new SubstructureFoldBias(ds);
                 try { (mg, eg) = LearnedPst.BuildTables(ds, 1.0); (mg, eg) = Evaluation.BlendPeStoWith(mg, eg); }
-                catch { /* substrate empty or unreachable — pure PeSTO leaf is fine */ }
+                catch { }
             }
             catch (Exception ex) { Console.WriteLine($"[warn] substrate unavailable ({ex.Message}); running pure classical."); }
         }

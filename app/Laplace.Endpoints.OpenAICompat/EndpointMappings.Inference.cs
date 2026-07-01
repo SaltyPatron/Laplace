@@ -34,11 +34,11 @@ internal static class InferenceEndpoints
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            
-            
-            
-            
-            
+
+
+
+
+
             if (!payload.Model.Contains("converse", StringComparison.OrdinalIgnoreCase))
             {
                 int genSteps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
@@ -99,10 +99,10 @@ internal static class InferenceEndpoints
                     Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count)));
             }
 
-            
-            
-            
-            
+
+
+
+
             var sessionId = DeriveSessionId(payload.Messages);
             var userTurns = payload.Messages
                 .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
@@ -115,8 +115,8 @@ internal static class InferenceEndpoints
                 ? "I hold no consensus about that yet."
                 : string.Join("\n", rows.Select(r => r.Reply));
 
-            
-            
+
+
             turnWitness.Enqueue(userTurns[^1], "prompt");
             if (rows.Count > 0) turnWitness.Enqueue(content, "reply");
 
@@ -131,7 +131,7 @@ internal static class InferenceEndpoints
                     completionId, "chat.completion.chunk", created, payload.Model,
                     [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
 
-                
+
                 for (int i = 0; i < rows.Count; i++)
                 {
                     var line = rows[i].Reply + (i + 1 < rows.Count ? "\n" : "");
@@ -219,7 +219,7 @@ internal static class InferenceEndpoints
                 return Results.Empty;
             }
 
-            
+
             var tokens = new List<GenerateToken>(steps);
             await foreach (var token in substrate.WalkTextStreamAsync(
                 payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
@@ -269,8 +269,8 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            // The dense `embedding` is always the S³ FORM coordinate (the only true vector); the MEANING
-            // level — Glicko-2 salient neighbours — is attached unless a form-only model was requested.
+
+
             bool includeMeaning = !payload.Model.Contains("form", StringComparison.OrdinalIgnoreCase);
 
             var data = new List<EmbeddingData>(inputs.Count);
@@ -282,8 +282,8 @@ internal static class InferenceEndpoints
                     : Array.Empty<double>();
                 data.Add(new EmbeddingData("embedding", i, vector, new EmbeddingProvenance(
                     Input: inputs[i],
-                    // word_id yields a content address for any token; "resolved" means the substrate
-                    // actually holds geometry for it (witnessed), not merely that an address exists.
+
+
                     Resolved: result.Form is not null,
                     EntityId: result.EntityIdHex,
                     Form: result.Form is { } ff
@@ -306,12 +306,12 @@ internal static class InferenceEndpoints
         app.MapReportEndpoints();
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     private static byte[]? DeriveSessionId(IReadOnlyList<ChatMessage>? messages)
     {
         var anchor = messages?.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Content))?.Content;
@@ -324,15 +324,15 @@ internal static class InferenceEndpoints
         stop.ValueKind switch
         {
             JsonValueKind.String => stop.GetString() is { Length: > 0 } s ? [s] : null,
-            JsonValueKind.Array  => stop.EnumerateArray()
+            JsonValueKind.Array => stop.EnumerateArray()
                                         .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : null)
                                         .Where(s => !string.IsNullOrEmpty(s))
                                         .Select(s => s!)
                                         .ToArray() is { Length: > 0 } arr ? arr : null,
-            _                    => null
+            _ => null
         };
 
-    // OpenAI's `input` is a string or an array of strings. Normalize to a trimmed, non-empty list.
+
     private static List<string> ReadEmbeddingInputs(JsonElement? input)
     {
         var list = new List<string>();

@@ -47,11 +47,11 @@ internal static class FoundryExport
             System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0
             ? v : ifUnset;
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal readonly record struct PlaneSpec(string Family, string Name, int? Arg)
     {
         public static PlaneSpec Consensus(string name) => new("consensus", name, null);
@@ -61,9 +61,9 @@ internal static class FoundryExport
         public override string ToString() => Arg is null ? $"{Family}:{Name}" : $"{Family}:{Name}:{Arg}";
     }
 
-    
-    
-    
+
+
+
     internal static async Task<PlaneCoo> ReadRelationPlaneAsync(
         NpgsqlDataSource ds, PlaneSpec spec,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -99,10 +99,10 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
-        
-        
-        
-        
+
+
+
+
         long kept = 0;
         foreach (var row in adj.Values)
         {
@@ -126,12 +126,12 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     internal static async Task<PlaneCoo> ReadConsensusPlaneAsync(
         NpgsqlDataSource ds, string[] relNames,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -149,9 +149,9 @@ internal static class FoundryExport
             cmd.CommandText =
                 "SELECT subject_id, object_id, w FROM laplace.entity_relation_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab,    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = relNames, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+            { Value = relNames, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
             cmd.Parameters.AddWithValue(degreeCap);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -194,11 +194,11 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal static async Task<PlaneCoo> ReadLayerPlaneAsync(
         NpgsqlDataSource ds, double rankLo, double rankHi,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -216,7 +216,7 @@ internal static class FoundryExport
             cmd.CommandText =
                 "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(rankLo);
             cmd.Parameters.AddWithValue(rankHi);
             cmd.Parameters.AddWithValue(degreeCap);
@@ -225,10 +225,10 @@ internal static class FoundryExport
             {
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                
-                
-                
-                
+
+
+
+
                 double w = rdr.GetDouble(2) * rdr.GetDouble(3);
                 if (w == 0.0) continue;
                 foreach (int s in subj)
@@ -265,16 +265,14 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    
-    
-    
-    
-    
-    /// <summary>Band-mask variant of <see cref="ReadLayerPlaneAsync"/> — uses
-    /// <c>consensus_layer_plane_masked</c> instead of the float rank window.</summary>
+
+
+
+
+
     internal static async Task<PlaneCoo> ReadLayerPlaneMaskedAsync(
-        NpgsqlDataSource ds, Mask256 bandMask,
-        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    NpgsqlDataSource ds, Mask256 bandMask,
+    Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = new byte[tokenSlots.Count][];
         int vi = 0;
@@ -289,9 +287,9 @@ internal static class FoundryExport
             cmd.CommandText =
                 "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane_masked($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = bandMask.ToByteArray(), NpgsqlDbType = NpgsqlDbType.Bytea });
+            { Value = bandMask.ToByteArray(), NpgsqlDbType = NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(degreeCap);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -344,7 +342,7 @@ internal static class FoundryExport
         int vi = 0;
         foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
-        
+
         var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
         await using var conn = await ds.OpenConnectionAsync();
         try
@@ -354,7 +352,7 @@ internal static class FoundryExport
             cmd.CommandText =
                 "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(degreeCap);
             cmd.Parameters.Add(new NpgsqlParameter
             {
@@ -390,14 +388,14 @@ internal static class FoundryExport
         var result = new List<TypePlane>(byType.Count);
         foreach (var (tid, entry) in byType)
             result.Add(new TypePlane(tid, entry.Rank, CooFromAdj(entry.Adj, degreeCap)));
-        
+
         result.Sort((a, b) => b.Rank.CompareTo(a.Rank));
         return result;
     }
 
-    // word→category relations (HAS_POS, HAS_SENSE, …) compile to a vocab×vocab plane: tokens that share
-    // the same category object attend to each other. The category entity is not in the recipe vocab, so
-    // entity_relation_plane / consensus_type_plane cannot surface these edges as word↔word heads.
+
+
+
     internal static async Task<PlaneCoo> ReadAttributePlaneAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, string relationType, int degreeCap)
     {
@@ -417,7 +415,7 @@ internal static class FoundryExport
             "WHERE type_id = laplace.relation_type_id($1) AND subject_id = ANY($2)";
         cmd.Parameters.AddWithValue(relationType);
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {
@@ -474,7 +472,7 @@ internal static class FoundryExport
         cmd.CommandTimeout = 600;
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.consensus_adjacency($1, $2)";
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         cmd.Parameters.AddWithValue(degreeCap);
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
@@ -492,13 +490,13 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     internal static async Task<PlaneCoo> ReadMetricEdgesAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
         string metric, int k, int probe, int degreeCap)
@@ -510,10 +508,10 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   
+        cmd.CommandTimeout = 0;
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.metric_edges($1, $2, $3, $4)";
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         cmd.Parameters.AddWithValue(metric);
         cmd.Parameters.AddWithValue(k);
         cmd.Parameters.AddWithValue(probe);
@@ -523,7 +521,7 @@ internal static class FoundryExport
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
             double dist = rdr.GetDouble(2);
-            double w = Math.Exp(-dist);   
+            double w = Math.Exp(-dist);
             if (w == 0.0) continue;
             foreach (int s in subj)
             {
@@ -534,11 +532,11 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal static void ReportMetricHeadFidelity(
         double[] e, int vocab, int dModel, PlaneCoo plane, Factors f, string metric)
     {
@@ -551,7 +549,7 @@ internal static class FoundryExport
         }
         if (nbr.Count == 0 || f.Rank == 0) { Console.WriteLine("  metric-head fidelity: no edges to check"); return; }
         int rank = f.Rank;
-        
+
         var K = new double[(long)vocab * rank];
         for (int o = 0; o < vocab; o++)
             for (int r = 0; r < rank; r++)
@@ -583,17 +581,17 @@ internal static class FoundryExport
                                 .OrderByDescending(o => score[o]).Take(kk).ToHashSet();
             recallSum += (double)want.Count(w => top.Contains(w)) / kk;
 
-            
-            
-            
-            
+
+
+
+
             var dsc = new double[vocab];
             for (int o = 0; o < vocab; o++)
             { double a = 0; for (int d = 0; d < 4 && d < dModel; d++) a += e[(long)s * dModel + d] * e[(long)o * dModel + d]; dsc[o] = a; }
             var dtop = Enumerable.Range(0, vocab).Where(o => o != s).OrderByDescending(o => dsc[o]).Take(kk).ToHashSet();
             directSum += (double)want.Count(w => dtop.Contains(w)) / kk;
 
-            
+
             noiseSum += (double)kk / vocab;
             cnt++;
         }
@@ -604,10 +602,10 @@ internal static class FoundryExport
             + $"[direct = does the rigid frame carry it; factored = does the SVD keep it]");
     }
 
-    
-    
-    
-    
+
+
+
+
     internal static async Task<int> FillCoordAnchorsAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, double[]?[] anchors)
     {
@@ -626,24 +624,24 @@ internal static class FoundryExport
             WHERE p.type = 1 AND p.coord IS NOT NULL
             ORDER BY p.entity_id, p.id";
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
             var a = new[] { rdr.GetDouble(1), rdr.GetDouble(2), rdr.GetDouble(3), rdr.GetDouble(4) };
-            
-            
+
+
             foreach (int s in slots) { anchors[s] = a; filled++; }
         }
         return filled;
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -652,7 +650,7 @@ internal static class FoundryExport
         int vi = 0;
         foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
-        
+
         var adj = new Dictionary<int, List<(int Col, double W)>>[maxGap];
         for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
 
@@ -660,11 +658,11 @@ internal static class FoundryExport
         try
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;   
+            cmd.CommandTimeout = 0;
             cmd.CommandText =
                 "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(maxGap);
             cmd.Parameters.AddWithValue(degreeCap);
             await using var rdr = await cmd.ExecuteReaderAsync();
@@ -695,10 +693,10 @@ internal static class FoundryExport
         return planes;
     }
 
-    
-    
-    
-    
+
+
+
+
     internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int gap = 1)
     {
@@ -709,10 +707,10 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   
+        cmd.CommandTimeout = 0;
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1, 50000, $2)";
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         cmd.Parameters.AddWithValue(gap);
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
@@ -727,13 +725,13 @@ internal static class FoundryExport
                 foreach (int o in obj) row.Add((o, w));
             }
         }
-        return CooFromAdj(adj, 256);   
+        return CooFromAdj(adj, 256);
     }
 
-    
-    
-    
-    
+
+
+
+
     internal static async Task<PlaneCoo> ReadWordOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
         int gap = 1, int trajs = 200000, int cap = 64)
@@ -745,10 +743,10 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   
+        cmd.CommandTimeout = 0;
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
         cmd.Parameters.Add(new NpgsqlParameter
-            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         cmd.Parameters.AddWithValue(trajs);
         cmd.Parameters.AddWithValue(gap);
         await using var rdr = await cmd.ExecuteReaderAsync();
@@ -767,13 +765,13 @@ internal static class FoundryExport
         return CooFromAdj(adj, cap);
     }
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -781,16 +779,16 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
 
-        
-        
-        
+
+
+
         await using (var warm = conn.CreateCommand())
         {
             warm.CommandText = "SELECT laplace.relation_type_id('IS_A')";
             await warm.ExecuteScalarAsync();
         }
 
-        
+
         int corpusMax = EnvInt("LAPLACE_FOUNDRY_CORPUS_MAX", 200_000);
         if (corpusMax > 0)
         {
@@ -800,11 +798,11 @@ internal static class FoundryExport
         }
         try
         {
-            
-            
-            // Direct, vocab-scoped continuation read from content trajectories — NO global
-            // trajectory_pairs cache, NO lazy rebuild / staleness probe / maintenance. word_order
-            // scans a bounded slice of trajectories and emits gap-ordered intra-vocab pairs.
+
+
+
+
+
             var vocab = new byte[tokenSlots.Count][];
             int vi = 0;
             foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
@@ -815,7 +813,7 @@ internal static class FoundryExport
             cmd.CommandText =
                 "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
-                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(trajCap);
             cmd.Parameters.AddWithValue(maxGap);
             await using var rdr = await cmd.ExecuteReaderAsync();
@@ -838,16 +836,16 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
-        // The content trajectories ARE the knowledge (real observed usage). Raw counts preserve the
-        // actual usage flow (incl. the grammatical glue that genuinely follows words); PPMI instead
-        // surfaces context-specific associations by normalizing out each target's global frequency.
-        // Toggle: LAPLACE_FOUNDRY_PPMI=0 keeps the raw usage flow (fluent continuation), =1 (default) PPMI.
+
+
+
+
         if (EnvInt("LAPLACE_FOUNDRY_PPMI", 1) != 0) ApplyPpmi(adj);
         return CooFromAdj(adj, degreeCap);
     }
 
-    // Positive pointwise mutual information over a continuation adjacency.
-    // PMI(s,o) = log( count(s,o)·N / (rowSum[s]·colSum[o]) ); keep only positive (real) associations.
+
+
     private static void ApplyPpmi(Dictionary<int, List<(int Col, double W)>> adj)
     {
         var colSum = new Dictionary<int, double>();
@@ -875,9 +873,9 @@ internal static class FoundryExport
         }
     }
 
-    
-    
-    
+
+
+
     private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
     {
         long kept = 0;
@@ -898,9 +896,9 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    
-    
-    
+
+
+
     internal static PlaneCoo Normalize(PlaneCoo p)
     {
         double max = 0;
@@ -928,14 +926,14 @@ internal static class FoundryExport
 
     internal sealed record BasisStats(int SpectralRank, int ZeroSpectralTokens, double ProcrustesResidual);
 
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
     internal static double[] BuildBasisAffinity(
         int vocab, int dModel, PlaneCoo aff, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
@@ -948,7 +946,7 @@ internal static class FoundryExport
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
             float w = (float)aff.Vals[e];
             A[(long)x * vocab + y] += w;
-            A[(long)y * vocab + x] += w;   
+            A[(long)y * vocab + x] += w;
         }
         var U = new float[(long)vocab * vocab];
         var S = new float[vocab];
@@ -981,18 +979,18 @@ internal static class FoundryExport
         return e2;
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
+
     internal static void FactorAdjacency(
         PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
         bool conditional = false, bool suppressSelf = false, double dehub = 0.0)
@@ -1000,28 +998,28 @@ internal static class FoundryExport
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
         double total = 0;
-        
+
         var ex = new int[adj.Nnz]; var ey = new int[adj.Nnz]; var ew = new double[adj.Nnz]; int en = 0;
         for (long e = 0; e < adj.Nnz; e++)
         {
             int x = adj.Rows[e], y = adj.Cols[e];
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
-            if (suppressSelf && x == y) continue;   
+            if (suppressSelf && x == y) continue;
             double w = adj.Vals[e];
             ex[en] = x; ey[en] = y; ew[en] = w; en++;
             rowSum[x] += w; colSum[y] += w; total += w;
         }
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
+
+
+
+
+
         var sx = new int[en]; var sy = new int[en]; var sv = new double[en]; int sn = 0;
         for (int i = 0; i < en; i++)
         {
@@ -1030,11 +1028,11 @@ internal static class FoundryExport
             {
                 double rs = rowSum[ex[i]];
                 if (rs <= 0) continue;
-                val = Math.Log(ew[i] / rs * vocab);     
-                
-                
-                
-                
+                val = Math.Log(ew[i] / rs * vocab);
+
+
+
+
                 if (dehub != 0.0 && colSum[ey[i]] > 0 && total > 0)
                     val -= dehub * Math.Log(colSum[ey[i]] / total);
             }
@@ -1043,25 +1041,25 @@ internal static class FoundryExport
                 double denom = rowSum[ex[i]] * colSum[ey[i]];
                 if (denom <= 0) continue;
                 val = Math.Log(ew[i] * total / denom);
-                if (val <= 0) continue;                 
+                if (val <= 0) continue;
             }
             if (val == 0) continue;
             sx[sn] = ex[i]; sy[sn] = ey[i]; sv[sn] = val; sn++;
         }
 
-        embed  = new double[(long)vocab * dim];
+        embed = new double[(long)vocab * dim];
         lmHead = new double[(long)vocab * dim];
 
-        
-        
-        
-        
+
+
+
+
         if (vocab <= EnvInt("LAPLACE_FOUNDRY_DENSE_SVD_MAX", 6000))
         {
             var As = new float[(long)vocab * vocab];
             for (int i = 0; i < sn; i++) As[(long)sx[i] * vocab + sy[i]] = (float)sv[i];
-            var U  = new float[(long)vocab * vocab];
-            var S  = new float[vocab];
+            var U = new float[(long)vocab * vocab];
+            var S = new float[vocab];
             var Vt = new float[(long)vocab * vocab];
             nuint outRank = 0; int rc;
             unsafe
@@ -1073,13 +1071,13 @@ internal static class FoundryExport
             if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
             int kk = Math.Min(dim, (int)outRank);
             usedRank = kk;
-            
+
             for (int c = 0; c < kk; c++)
             {
                 double s = Math.Max(0f, S[c]);
                 for (int i = 0; i < vocab; i++)
                 {
-                    embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];
+                    embed[(long)i * dim + c] = (double)U[(long)i * vocab + c];
                     lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;
                 }
             }
@@ -1090,33 +1088,33 @@ internal static class FoundryExport
         }
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal static int FactorSparseRandomized(
         int[] sx, int[] sy, double[] sv, int sn, int vocab, int dim, double[] embed, double[] lmHead)
     {
         int L = Math.Min(vocab, dim + EnvInt("LAPLACE_FOUNDRY_RSVD_OVERSAMPLE", 16));
         int q = EnvInt("LAPLACE_FOUNDRY_RSVD_POWER", 1);
-        
-        var Y  = new double[(long)L * vocab];
+
+        var Y = new double[(long)L * vocab];
         var Om = new double[(long)L * vocab];
         ulong seed = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)vocab ^ ((ulong)dim << 32));
         for (long t = 0; t < (long)L * vocab; t++) Om[t] = Gaussian(ref seed);
-        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);                 
+        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);
         var Z = new double[(long)L * vocab];
         for (int it = 0; it < q; it++)
         {
-            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);    
-            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);   
+            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);
+            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);
         }
-        
-        
-        
-        
-        
+
+
+
+
+
         var G = new double[(long)L * L];
         System.Threading.Tasks.Parallel.For(0, L, i =>
         {
@@ -1137,7 +1135,7 @@ internal static class FoundryExport
         double s0g = Sg.Length > 0 ? Sg[0] : 0;
         int rkQ = 0; while (rkQ < L && Sg[rkQ] > 1e-10 * s0g && Sg[rkQ] > 0) rkQ++;
         rkQ = Math.Max(1, rkQ);
-        var Q = new double[(long)rkQ * vocab];                            
+        var Q = new double[(long)rkQ * vocab];
         System.Threading.Tasks.Parallel.For(0, rkQ, k =>
         {
             double invsq = 1.0 / Math.Sqrt(Sg[k]);
@@ -1149,7 +1147,7 @@ internal static class FoundryExport
                 for (int t = 0; t < vocab; t++) Q[bk + t] += w * Y[bi + t];
             }
         });
-        var B = new double[(long)rkQ * vocab];                            
+        var B = new double[(long)rkQ * vocab];
         SpMatVecQ(sx, sy, sv, sn, Q, B, rkQ, vocab);
         var Bf = new float[(long)rkQ * vocab];
         for (long t = 0; t < (long)rkQ * vocab; t++) Bf[t] = (float)B[t];
@@ -1162,22 +1160,22 @@ internal static class FoundryExport
         }
         if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd band) rc={rc} (rkQ={rkQ}, vocab={vocab})");
         int kk = Math.Min(dim, (int)outRank);
-        
+
         System.Threading.Tasks.Parallel.For(0, vocab, x =>
         {
             for (int c = 0; c < kk; c++)
             {
                 double acc = 0;
                 for (int j = 0; j < rkQ; j++) acc += Q[(long)j * vocab + x] * Ub[(long)j * rkQ + c];
-                embed[(long)x * dim + c]  = acc;
+                embed[(long)x * dim + c] = acc;
                 lmHead[(long)x * dim + c] = (double)Vtb[(long)c * vocab + x] * Math.Max(0f, Sb[c]);
             }
         });
         return kk;
     }
 
-    
-    
+
+
     static void SpMatVec(int[] sx, int[] sy, double[] sv, int sn, double[] M, double[] Outp, int L, int vocab, bool transpose)
     {
         System.Threading.Tasks.Parallel.For(0, L, c =>
@@ -1191,7 +1189,7 @@ internal static class FoundryExport
             }
         });
     }
-    
+
     static void SpMatVecQ(int[] sx, int[] sy, double[] sv, int sn, double[] Q, double[] B, int L, int vocab)
     {
         System.Threading.Tasks.Parallel.For(0, L, c =>
@@ -1201,9 +1199,9 @@ internal static class FoundryExport
         });
     }
 
-    
-    
-    
+
+
+
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
@@ -1216,12 +1214,12 @@ internal static class FoundryExport
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
         if (coordOnly)
         {
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
             Array.Clear(y, 0, y.Length);
             for (int i = 0; i < vocab; i++)
             {
@@ -1244,7 +1242,7 @@ internal static class FoundryExport
                 throw new InvalidOperationException(
                     $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
 
-            
+
             var yt = new double[(long)k * vocab];
             for (int i = 0; i < vocab; i++)
                 for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
@@ -1263,8 +1261,8 @@ internal static class FoundryExport
             if (n2 < 1e-24) zeroSpectral++;
         }
 
-        
-        
+
+
         double resid = double.NaN;
         var fitIdx = new List<int>();
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
@@ -1272,16 +1270,16 @@ internal static class FoundryExport
         bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
         if (coordOnly)
         {
-            
+
         }
         else if (coordDirect && fitIdx.Count > 0)
         {
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
             double cs = EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 1.0);
             for (int i = 0; i < vocab; i++)
             {
@@ -1329,10 +1327,10 @@ internal static class FoundryExport
                             specSq += s * s;
                         }
                     }
-                    
-                    
-                    
-                    
+
+
+
+
                     double scale = anchSq > 0 ? Math.Sqrt(specSq / anchSq) : 1.0;
                     if (EnvInt("LAPLACE_FOUNDRY_PROCRUSTES", 1) != 0)
                         for (int i = 0; i < vocab; i++)
@@ -1346,12 +1344,12 @@ internal static class FoundryExport
         for (int i = 0; i < vocab; i++)
             Array.Copy(y, (long)i * k, e, (long)i * dModel, k);
 
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
         double capFrac = EnvDouble("LAPLACE_FOUNDRY_CAP_FRAC", 0.05);
         int capDims = Math.Max(1, dModel - 1 - k);
         double capScale = Math.Sqrt(capFrac * ((double)k / vocab) / capDims);
@@ -1362,7 +1360,7 @@ internal static class FoundryExport
                 e[(long)i * dModel + d] = Gaussian(ref s) * capScale;
         }
 
-        
+
         for (int i = 0; i < vocab; i++)
         {
             long off = (long)i * dModel;
@@ -1378,8 +1376,8 @@ internal static class FoundryExport
         return e;
     }
 
-    
-    
+
+
     internal static double[] ProjectOperator(double[] e, int vocab, int dModel, PlaneCoo coo)
     {
         var ones = new double[vocab];
@@ -1403,18 +1401,18 @@ internal static class FoundryExport
 
     internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual, double SpectralNorm);
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
+
     internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
@@ -1448,8 +1446,8 @@ internal static class FoundryExport
             }
         }
 
-        
-        
+
+
         double num = 0, den = 0;
         ulong rng = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)d);
         for (int t = 0; t < 512; t++)
@@ -1466,7 +1464,7 @@ internal static class FoundryExport
         return new Factors(left, right, k, d, resid, s0);
     }
 
-    
+
 
     internal static void FillRows(float[] vals, int rows, int cols, Factors f, double scale)
     {
@@ -1492,9 +1490,9 @@ internal static class FoundryExport
                 vals[(long)i * cols + r] = (float)(scale * f.Left[(long)r * f.Dim + i]);
     }
 
-    // Per-head fill: head `headIdx` occupies rows [headIdx*headDim, (headIdx+1)*headDim) and is
-    // filled from ITS OWN operator factor — one distinct attestation-type/metric operator per head
-    // (Mold-A-Model), not top-k of one mashed operator tiled across every head.
+
+
+
     internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
     {
         int baseRow = headIdx * headDim;
@@ -1521,8 +1519,8 @@ internal static class FoundryExport
         }
     }
 
-    // Per-head column fill for o_proj [dModel, nHeads*headDim]: head h's output occupies columns
-    // [h*headDim, (h+1)*headDim) and is projected back by ITS OWN operator (the OV factor).
+
+
     internal static void FillColsHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
     {
         int baseCol = headIdx * headDim;
@@ -1533,11 +1531,11 @@ internal static class FoundryExport
                 vals[(long)i * cols + (baseCol + r)] = (float)(scale * f.Left[(long)r * f.Dim + i]);
     }
 
-    // ---- Context/sequence head (op:"context") ----
-    // q=k=identity (scaled) on the head slice → RoPE + causal mask peak attention on the CURRENT
-    // token (recency), not a uniform prefix mean. v=o=identity passes that token's slice back into
-    // the residual so h[last] ≈ E[last] at lm_head readout — the prefix-conditioning bridge for
-    // source-normalized trajectory bigram. (Uniform q=k=0 was the prefix-mean bug → global attractor.)
+
+
+
+
+
     internal static bool IsContinuationOperator(string opKey) =>
         opKey is "context" or "trajectory" or "relation:PRECEDES";
 
@@ -1557,7 +1555,7 @@ internal static class FoundryExport
         {
             long dst = (long)(baseRow + r) * cols;
             for (int j = 0; j < cols; j++) vals[dst + j] = 0f;
-            if (baseRow + r < cols) vals[dst + (baseRow + r)] = 1f;   // V = the head's slice of the input
+            if (baseRow + r < cols) vals[dst + (baseRow + r)] = 1f;
         }
     }
     internal static void FillColsHeadIdentity(float[] vals, int rows, int cols, int headIdx, int headDim)
@@ -1565,7 +1563,7 @@ internal static class FoundryExport
         int baseCol = headIdx * headDim;
         for (int r = 0; r < headDim && (baseCol + r) < cols; r++)
             for (int i = 0; i < rows; i++)
-                vals[(long)i * cols + (baseCol + r)] = (i == baseCol + r) ? 1f : 0f;   // O maps the slice back
+                vals[(long)i * cols + (baseCol + r)] = (i == baseCol + r) ? 1f : 0f;
     }
 
     internal static void FillHeadIdentityScaled(float[] vals, int rows, int cols, int headIdx, int headDim, float scale)
@@ -1585,11 +1583,11 @@ internal static class FoundryExport
             vals[(long)r * cols + (cols - 1)] = (float)gateCol;
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     internal static void FillCoordHead(float[] vals, int rows, int cols, int headDim, int coordDims, double scale)
     {
         if (headDim <= 0) return;
@@ -1601,7 +1599,7 @@ internal static class FoundryExport
 
     internal static double Silu(double z) => z / (1.0 + Math.Exp(-z));
 
-    
+
 
     internal static byte[] ToBf16Bytes(float[] data)
     {
@@ -1623,7 +1621,7 @@ internal static class FoundryExport
         return o;
     }
 
-    
+
 
     private static ulong SplitMix(ulong x)
     {

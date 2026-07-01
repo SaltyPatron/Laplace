@@ -1,4 +1,4 @@
-# Helpers for manifest.install / manifest.upgrade → generated #include chains.
+
 
 function(laplace_write_sql_chain chain_file manifest_file src_sql_dir)
     if(NOT EXISTS "${manifest_file}")

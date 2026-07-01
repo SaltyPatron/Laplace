@@ -22,10 +22,10 @@ public sealed class IngestRunner
         ILoggerFactory? loggerFactory = null,
         IIngestObservability? observability = null)
     {
-        _writer        = writer ?? throw new ArgumentNullException(nameof(writer));
-        _reader        = reader ?? throw new ArgumentNullException(nameof(reader));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
-        _obs           = observability ?? NoOpObservability.Instance;
+        _obs = observability ?? NoOpObservability.Instance;
     }
 
     public async Task<IngestRunResult> RunAsync(
@@ -43,12 +43,12 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        // No ingest-order dependency. Identity is content-addressed, so a reference to
-        // not-yet-ingested content is a forward reference that resolves when that content lands
-        // (or is already present) — John 3:16 converges whether it arrives before or after the
-        // whole Bible. T0 codepoints come from the perfcache FILE (client-side), not from
-        // "ingesting unicode first". Sources may ingest in any order and concurrently with each
-        // other; the old layer-ordering check was procedural thinking that contradicts the DAG.
+
+
+
+
+
+
 
         if (!options.SkipSourceCompletion
             && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
@@ -100,7 +100,7 @@ public sealed class IngestRunner
             Inventory = inventory,
         };
 
-        int batchSize  = Math.Max(1, options.BatchSize);
+        int batchSize = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
         var topo = IngestTopology.Current;
         var sizing = IngestSizing.Resolve(
@@ -128,18 +128,18 @@ public sealed class IngestRunner
         bool ShouldFlushWithCap(int intents, int rows) =>
             ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
-        // Referential integrity is no longer pre-checked, so every SubstrateChange is a
-        // self-contained, independently-consistent batch and commit order across batches is
-        // irrelevant (the consensus fold is commutative). Multi-worker runs therefore all use the
-        // one bounded N-consumer lane.
+
+
+
+
         bool syncIngest = Environment.GetEnvironmentVariable("LAPLACE_INGEST_SYNC") == "1";
         if (syncIngest)
         {
             CpuTopology.RequirePerformanceCorePin();
-            // Fully synchronous: iterate the decomposer INLINE and apply each batch on the SAME thread —
-            // NO producer Task, so compose and apply never overlap. Diagnostic/mitigation for the native
-            // heap-corruption race (producer composing into laplace_core while a consumer applies into it
-            // concurrently). Opt-in via LAPLACE_INGEST_SYNC=1; the default channel path is unchanged.
+
+
+
+
             var sbatch = new List<SubstrateChange>(batchSize);
             int sbatchRows = 0;
             await foreach (var intent in decomposer
@@ -171,7 +171,7 @@ public sealed class IngestRunner
         }
         else
         {
-            // Single commit consumer; parallelism inside NpgsqlSubstrateWriter.ApplyManyAsync.
+
             int channelCap = sizing.DecomposeChannelCapacity;
             long rowBudget = sizing.RowBudget;
             long bufferedRows = 0;
@@ -244,17 +244,17 @@ public sealed class IngestRunner
                 await ProcessBatchAsync(batch, decomposer, options, rng,
                                         counters, failures, log, ct);
 
-            
+
             await producer;
         }
 
-        unitsAttempted        = counters.UnitsAttempted;
-        unitsApplied          = counters.UnitsApplied;
-        unitsFailed           = counters.UnitsFailed;
-        entitiesInserted      = counters.EntitiesInserted;
+        unitsAttempted = counters.UnitsAttempted;
+        unitsApplied = counters.UnitsApplied;
+        unitsFailed = counters.UnitsFailed;
+        entitiesInserted = counters.EntitiesInserted;
         physicalitiesInserted = counters.PhysicalitiesInserted;
-        attestationsInserted  = counters.AttestationsInserted;
-        totalRoundTrips       = counters.RoundTrips;
+        attestationsInserted = counters.AttestationsInserted;
+        totalRoundTrips = counters.RoundTrips;
 
         if (!options.SkipSourceCompletion
             && counters.UnitsFailed == 0
@@ -277,11 +277,11 @@ public sealed class IngestRunner
             TotalRoundTrips: totalRoundTrips,
             WallClock: sw.Elapsed,
             Failures: failures);
-        // Anti-false-green: a source that reports input (units or files) but applied ZERO units did not
-        // ingest — it's a grammar/format mismatch the pipeline silently swallowed (the ConceptNet /
-        // Atomic2020 no-op: 0 rows parsed, status reported ok). Re-runs of an already-seeded source still
-        // APPLY their units (dedup happens at the DB via ON CONFLICT), so UnitsApplied stays > 0 — this
-        // only fires on a genuine "consumed nothing from a non-empty source".
+
+
+
+
+
         long declaredInput = inventory?.TotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
@@ -401,9 +401,9 @@ public sealed class IngestRunner
     {
         if (batch.Count == 0) return;
 
-        // Count whole units, not partitioned sub-changes: the parallel path splits one unit's rows
-        // across lanes, and only its representative sub-change has CountsAsUnit=true (whole units
-        // elsewhere default to true, so unitCount == batch.Count on the non-parallel path).
+
+
+
         int unitCount = 0;
         foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
         Interlocked.Add(ref counters._unitsAttempted, unitCount);
@@ -421,11 +421,11 @@ public sealed class IngestRunner
                 }
                 var apply = await _writer.ApplyManyAsync(batch, ct);
 
-                Interlocked.Add(ref counters._unitsApplied,           unitCount);
-                Interlocked.Add(ref counters._entitiesInserted,       apply.EntitiesInserted);
-                Interlocked.Add(ref counters._physicalitiesInserted,  apply.PhysicalitiesInserted);
-                Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
-                Interlocked.Add(ref counters._roundTrips,             apply.RoundTrips);
+                Interlocked.Add(ref counters._unitsApplied, unitCount);
+                Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);
+                Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
+                Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
+                Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
 
                 long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
@@ -589,14 +589,14 @@ public sealed class IngestRunner
         public long InputUnitsComposed => Interlocked.Read(ref _inputUnitsComposed);
         public int FilesDone => Volatile.Read(ref _filesDone);
         public string? CurrentFile => Volatile.Read(ref _currentFile);
-        public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
-        public long UnitsProduced         => Interlocked.Read(ref _unitsProduced);
-        public long UnitsApplied          => Interlocked.Read(ref _unitsApplied);
-        public long UnitsFailed           => Interlocked.Read(ref _unitsFailed);
-        public long EntitiesInserted      => Interlocked.Read(ref _entitiesInserted);
+        public long UnitsAttempted => Interlocked.Read(ref _unitsAttempted);
+        public long UnitsProduced => Interlocked.Read(ref _unitsProduced);
+        public long UnitsApplied => Interlocked.Read(ref _unitsApplied);
+        public long UnitsFailed => Interlocked.Read(ref _unitsFailed);
+        public long EntitiesInserted => Interlocked.Read(ref _entitiesInserted);
         public long PhysicalitiesInserted => Interlocked.Read(ref _physicalitiesInserted);
-        public long AttestationsInserted  => Interlocked.Read(ref _attestationsInserted);
-        public long RoundTrips            => Interlocked.Read(ref _roundTrips);
+        public long AttestationsInserted => Interlocked.Read(ref _attestationsInserted);
+        public long RoundTrips => Interlocked.Read(ref _roundTrips);
     }
 
     private sealed record InternalContext(

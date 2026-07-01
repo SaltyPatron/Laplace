@@ -6,11 +6,11 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-// WithCiliDir mutates the process-global LAPLACE_CILI_DIR env var and resets the static IliMap cache.
-// That mutation must not overlap any test that reads the real on-disk CILI map (IliMapTests,
-// ConceptAnchorTests, CrossSourceLinkingTests) or it momentarily repoints them at a temp dir and they
-// observe an empty/foreign map. Joining the GrammarPerfcache collection serializes this class against
-// those readers (xUnit runs a collection's tests without inter-class parallelism); no assertion changes.
+
+
+
+
+
 [Collection("GrammarPerfcache")]
 public class SourceEntityIdConventionsTests
 {
@@ -209,7 +209,7 @@ public class SourceEntityIdConventionsTests
     public void ParseMapNetSynsetKey_Parses_PosHashOffset()
     {
         Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580"));
-        // REAL MapNet format carries a trailing '$' terminator — every actual data row has it.
+
         Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580$"));
         Assert.Equal((1142646L, 'v'), SourceEntityIdConventions.ParseMapNetSynsetKey("v#01142646$"));
         Assert.Equal((1142646L, 'v'), SourceEntityIdConventions.ParseMapNetSynsetKey("v#01142646"));

@@ -5,7 +5,7 @@ namespace Laplace.Chess.Uci;
 
 public sealed class UciEngine
 {
-    public const string Name   = "Laplace";
+    public const string Name = "Laplace";
     public const string Author = "Laplace";
 
     private Board _board = Board.FromFen(ChessModality.StartFen);
@@ -37,18 +37,18 @@ public sealed class UciEngine
                 return true;
 
             case "go":
-            {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                var result = _search.Think(_board, ParseGo(tok));
-                sw.Stop();
-                string best = result.BestMove?.ToUci()
-                    ?? (MoveGen.Legal(_board) is { Count: > 0 } l ? l[0].ToUci() : "0000");
-                output.WriteLine(
-                    $"info depth {result.Depth} score {ScoreStr(result.Score)} " +
-                    $"nodes {result.Nodes} time {sw.ElapsedMilliseconds} pv {best}");
-                output.WriteLine($"bestmove {best}");
-                return true;
-            }
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var result = _search.Think(_board, ParseGo(tok));
+                    sw.Stop();
+                    string best = result.BestMove?.ToUci()
+                        ?? (MoveGen.Legal(_board) is { Count: > 0 } l ? l[0].ToUci() : "0000");
+                    output.WriteLine(
+                        $"info depth {result.Depth} score {ScoreStr(result.Score)} " +
+                        $"nodes {result.Nodes} time {sw.ElapsedMilliseconds} pv {best}");
+                    output.WriteLine($"bestmove {best}");
+                    return true;
+                }
 
             case "quit":
                 return false;
@@ -61,7 +61,7 @@ public sealed class UciEngine
     private void SetPosition(string[] tok)
     {
         int startIdx = Array.IndexOf(tok, "startpos");
-        int fenIdx   = Array.IndexOf(tok, "fen");
+        int fenIdx = Array.IndexOf(tok, "fen");
         if (startIdx >= 0)
             _board = Board.FromFen(ChessModality.StartFen);
         else if (fenIdx >= 0)
@@ -106,7 +106,7 @@ public sealed class UciEngine
         if (wtime > 0 || btime > 0)
         {
             int myTime = _board.WhiteToMove ? wtime : btime;
-            int myInc  = _board.WhiteToMove ? winc : binc;
+            int myInc = _board.WhiteToMove ? winc : binc;
             int budget = Math.Max(10, Math.Min(myTime - 30, myTime / 30 + (int)(myInc * 0.8)));
             return new Search.Limits(MaxDepth: 64, MaxTimeMs: budget);
         }

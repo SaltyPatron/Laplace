@@ -181,7 +181,7 @@ public static unsafe partial class NativeInterop
         double* trajectoryXyzm, uint trajectoryNVertices,
         int nConstituents,
         int alignmentResidualIsNull, double alignmentResidual,
-        int sourceDimIsNull,         int    sourceDim,
+        int sourceDimIsNull, int sourceDim,
         long observedAtUnixUs);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_add_attestation")]
@@ -218,7 +218,7 @@ public static unsafe partial class NativeInterop
         long tau,
         long nowNs);
 
-    
+
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_lookup_by_id", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr GrammarLookupById(string modalityId);
@@ -244,14 +244,14 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_ast_free")]
     internal static partial void AstFree(IntPtr ast);
 
-    
+
 
     [LibraryImport(Library, EntryPoint = "hash_composer_compose_node")]
     internal static partial void HashComposerComposeNode(
         byte tier, Hash128* childIds, double* childCoords, nuint n,
         Hash128* outId, double* outCoord, Hilbert128* outHb);
 
-    
+
 
     [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_build_owned")]
     internal static partial IntPtr GraphemeFloorBuildOwned(byte* utf8, nuint len, IntPtr* outTree);
@@ -277,7 +277,7 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_free_owned")]
     internal static partial void GraphemeFloorFreeOwned(IntPtr floor);
 
-    
+
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_tags_run")]
     internal static partial int GrammarTagsRun(
@@ -320,8 +320,8 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_root_id")]
     public static partial Hash128 ComposeRootId(IntPtr result);
 
-    
-    
+
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_get_tier_tree")]
     public static partial IntPtr ComposeGetTierTree(IntPtr result);
 
@@ -622,10 +622,10 @@ public static unsafe partial class NativeInterop
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public unsafe delegate int EtlAcceptRowFn(IntPtr ctx, byte* line, nuint len);
 
-    // BLITTABLE: the string fields are IntPtr (pinned/marshalled UTF8 supplied by the caller), NOT
-    // [MarshalAs] string. A managed (string) field makes the struct non-blittable, so the EtlSessionOpen
-    // &cfg / fixed(EdgeRules) path blits the MANAGED layout — a String object reference where native reads
-    // a char* — passing garbage. Native strdups both, so the caller frees its UTF8 after session_open.
+
+
+
+
     [StructLayout(LayoutKind.Sequential)]
     public struct EtlEdgeRuleNative
     {
@@ -633,13 +633,13 @@ public static unsafe partial class NativeInterop
         public ushort ObjectField;
         public byte SubjectKind;
         public byte ObjectKind;
-        public IntPtr RelationSurface;   // UTF8, native strdups
+        public IntPtr RelationSurface;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct EtlConfigNative
     {
-        public IntPtr ModalityId;        // UTF8, native strdups
+        public IntPtr ModalityId;
         public Hash128 SourceId;
         public Hash128 TypeMetaId;
         public double WitnessWeight;
@@ -701,7 +701,7 @@ public static unsafe partial class NativeInterop
         byte* existingBitmap,
         nuint bitmapBits);
 
-    // ── Highway perfcache ──────────────────────────────────────────────────────
+
 
     [LibraryImport(Library, EntryPoint = "highway_table_load", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int HighwayTableLoad(string path);
@@ -712,13 +712,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "highway_table_is_loaded")]
     internal static partial int HighwayTableIsLoaded();
 
-    /// <summary>Look up a relation type by its type-id hash.
-    /// Returns 1 if found; outBitPos/outRank/outBand are only valid on success.</summary>
     [LibraryImport(Library, EntryPoint = "highway_table_relation_by_hash")]
     internal static partial int HighwayTableRelationByHash(
-        Hash128* typeId, byte* outBitPos, float* outRank, byte* outBand);
+    Hash128* typeId, byte* outBitPos, float* outRank, byte* outBand);
 
-    /// <summary>Returns a band mask (32 bytes) for the given band index; 0 on success.</summary>
     [LibraryImport(Library, EntryPoint = "highway_table_band_mask")]
     internal static partial int HighwayTableBandMask(byte band, Mask256* outMask);
 

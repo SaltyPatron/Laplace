@@ -9,14 +9,14 @@ namespace Laplace.Decomposers.Abstractions;
 public static class SourceEntityIdConventions
 {
     private static Lazy<IliMap?> _iliMap = new(LoadIliMap);
-    // Non-default WordNet-version maps (e.g. pwn16 for MapNet/WordFrameNet), loaded on demand & cached.
+
     private static readonly ConcurrentDictionary<string, IliMap?> _versionMaps = new();
 
-    // Synset-anchor resolution telemetry — a miss is a silently-dropped edge (the bug class that hid
-    // the satellite a/s and pwn16 drops). Surfaced at ingest end so drops are never invisible again.
+
+
     private static long _synsetHits;
     private static long _synsetMisses;
-    public static long SynsetHits   => Interlocked.Read(ref _synsetHits);
+    public static long SynsetHits => Interlocked.Read(ref _synsetHits);
     public static long SynsetMisses => Interlocked.Read(ref _synsetMisses);
 
     public static string CiliDirectory() =>
@@ -25,9 +25,6 @@ public static class SourceEntityIdConventions
 
     public static string CiliMapPath() => Path.Combine(CiliDirectory(), IliMap.MapFileName);
 
-    /// <summary>
-    /// WordNet map version for MapNet / WordFrameNet / MultiWordNet bridge sources (PWN 1.6 offsets).
-    /// </summary>
     public const string MultiWordNetWnVersion = "pwn16";
 
     public static void EnsureCiliMapForIngest(ILogger logger, string sourceName)
@@ -83,20 +80,15 @@ public static class SourceEntityIdConventions
         Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT")
         ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data");
 
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     public static string? WordNetIli(long byteOffset, char ssType) => WordNetIli(byteOffset, ssType, "pwn30");
 
-    /// <summary>
-    /// Resolve against a specific WordNet-version ILI map. <paramref name="version"/> "pwn30" (or empty)
-    /// uses the default map; other versions (e.g. "pwn16" for MapNet/WordFrameNet) load on demand.
-    /// Counts hits/misses (<see cref="SynsetHits"/>/<see cref="SynsetMisses"/>) so dropped edges show up.
-    /// </summary>
     public static string? WordNetIli(long byteOffset, char ssType, string version)
     {
         IliMap? map = string.IsNullOrEmpty(version) || version == "pwn30"
@@ -108,15 +100,15 @@ public static class SourceEntityIdConventions
         return ili;
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
     public static string? NormalizeSenseKey(string raw)
     {
         if (string.IsNullOrEmpty(raw)) return null;
@@ -129,10 +121,6 @@ public static class SourceEntityIdConventions
         return $"{lemma}%{fields[0]}:{fields[1]}:{fields[2]}";
     }
 
-    /// <summary>
-    /// Strip the lemma prefix from a VerbNet class id (e.g. <c>give-13.1</c> → <c>13.1</c>).
-    /// Shared by VerbNet, PropBank rolelinks, and SemLink pb-vn2 keys.
-    /// </summary>
     public static string NumericVerbNetClassId(string classId)
     {
         if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
@@ -141,9 +129,6 @@ public static class SourceEntityIdConventions
         return classId;
     }
 
-    /// <summary>
-    /// Strip a Predicate Matrix namespaced token (e.g. <c>id:eng</c> → <c>eng</c>, <c>ili-30-02244956-v</c> → <c>30-02244956-v</c>).
-    /// </summary>
     public static string StripPredicateMatrixNamespace(string raw)
     {
         if (string.IsNullOrEmpty(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
@@ -152,11 +137,6 @@ public static class SourceEntityIdConventions
         return colon >= 0 && colon + 1 < raw.Length ? raw[(colon + 1)..] : raw;
     }
 
-    /// <summary>
-    /// Parse a Predicate Matrix MCR ILI synset key (<c>30-02244956-v</c> or <c>ili-30-02244956-v</c>) to
-    /// WordNet offset + ss_type. When the key carries an MCR version prefix (<c>30-</c>, <c>16-</c>, …),
-    /// <see cref="WnVersion"/> names the matching <c>pwn*</c> ILI map; bare offset-pos keys leave it null.
-    /// </summary>
     public static (long Offset, char SsType, string? WnVersion)? ParseMcrSynsetKey(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
@@ -197,15 +177,9 @@ public static class SourceEntityIdConventions
         _ => null,
     };
 
-    /// <summary>
-    /// Canonical FrameNet LU category key shared by FrameNet ingest and FN→WN bridge sources (MapNet, WordFrameNet).
-    /// </summary>
     public static string FrameNetLuKey(string frame, string luName) =>
-        $"{frame.Trim()}/{luName.Trim()}";
+    $"{frame.Trim()}/{luName.Trim()}";
 
-    /// <summary>
-    /// Parse a MapNet / MultiWordNet synset key (<c>a#00057580</c>, <c>v#01142646</c>) to WordNet offset + ss_type.
-    /// </summary>
     public static (long Offset, char SsType)? ParseMapNetSynsetKey(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
@@ -215,8 +189,8 @@ public static class SourceEntityIdConventions
         if (hash <= 0 || hash + 1 >= s.Length) return null;
         char ssType = s[0];
         if (ssType is not ('n' or 'v' or 'a' or 's' or 'r')) return null;
-        // MapNet offsets carry a trailing '$' terminator (e.g. a#00057580$). Take the digit run after
-        // '#' and stop at any non-digit suffix — otherwise TryParse fails on the '$' and EVERY row drops.
+
+
         var rest = s.AsSpan(hash + 1);
         int n = 0;
         while (n < rest.Length && char.IsDigit(rest[n])) n++;
@@ -224,11 +198,6 @@ public static class SourceEntityIdConventions
         return (offset, ssType);
     }
 
-    /// <summary>
-    /// Resolve a WordNet synset or sense reference to a content-addressed anchor id.
-    /// MCR/Predicate Matrix keys, MapNet pos#offset keys, and WN-RDF tail tokens (<c>107755101-n</c>) → ILI synset (<see cref="ConceptAnchor"/>);
-    /// normalized sense keys → <see cref="SenseAnchor"/>.
-    /// </summary>
     public static Hash128? ResolveSynsetAnchor(string? raw, string version = "pwn30")
     {
         if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
@@ -245,9 +214,6 @@ public static class SourceEntityIdConventions
         return senseKey is null ? null : SenseAnchor.Id(senseKey);
     }
 
-    /// <summary>
-    /// SemLink vn-fn2 keys embed the member lemma after the class (e.g. <c>13.1-1-give</c> → <c>13.1-1</c>).
-    /// </summary>
     public static string VerbNetClassFromSemLinkKey(string key)
     {
         int last = key.LastIndexOf('-');

@@ -14,8 +14,8 @@ public sealed class Search
 
     public sealed record Limits(int MaxDepth = 6, long MaxNodes = long.MaxValue, int MaxTimeMs = int.MaxValue);
 
-    private const int Inf           = 1_000_000;
-    private const int Mate          = 30_000;
+    private const int Inf = 1_000_000;
+    private const int Mate = 30_000;
     private const int MateThreshold = Mate - 1_000;
 
     private const byte FlagExact = 0, FlagLower = 1, FlagUpper = 2;

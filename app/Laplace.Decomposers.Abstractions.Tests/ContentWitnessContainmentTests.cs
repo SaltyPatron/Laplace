@@ -4,12 +4,12 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-// Locks the two-phase content-witness containment path used by UD (and any content/text decomposer):
-// build the content tier tree once, probe its node ids against an existing-bitmap, then emit only the
-// novel subtrees via MerkleDedup.TrunkShortcircuit in the native content emit. An all-present bitmap
-// must stage zero entities; an all-absent (or empty) bitmap must stage exactly the same as the
-// original one-pass add — proving the filter is the only behavioral change (seed-safe: a fresh DB
-// returns all-absent and emits everything).
+
+
+
+
+
+
 [Collection("GrammarPerfcache")]
 public sealed class ContentWitnessContainmentTests
 {
@@ -28,7 +28,7 @@ public sealed class ContentWitnessContainmentTests
         Assert.NotNull(tree);
 
         int n = tree!.NodeCount;
-        // All-present bitmap: every node already in the DB -> the trunk short-circuits the whole tree.
+
         var present = new byte[(n + 7) / 8];
         for (int i = 0; i < n; i++) present[i >> 3] |= (byte)(1 << (i & 7));
 
@@ -47,11 +47,11 @@ public sealed class ContentWitnessContainmentTests
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);
 
-        // Baseline: the original one-pass content witness add.
+
         using var baseline = IntentStage.New(256);
         Assert.True(baseline.TryAddContentWitness(bytes, Src, out var baseRoot));
 
-        // Two-phase with an empty bitmap (== nothing present) must emit identically.
+
         using var tree = IntentStage.BuildContentTree(bytes);
         Assert.NotNull(tree);
         using var filtered = IntentStage.New(256);
@@ -66,8 +66,8 @@ public sealed class ContentWitnessContainmentTests
     [Fact]
     public void PresentLeafGrapheme_SkipsOnlyThatSubtree()
     {
-        // "dog" = d,o,g graphemes under a word root. Mark only the 'd' grapheme present; the word root
-        // and the o/g subtrees stay novel, so emission is a strict subset of the unfiltered count.
+
+
         byte[] bytes = Encoding.UTF8.GetBytes("dog");
 
         using var full = IntentStage.New(256);
@@ -78,7 +78,7 @@ public sealed class ContentWitnessContainmentTests
         Assert.NotNull(tree);
         int n = tree!.NodeCount;
 
-        // Find a tier-1 grapheme node and mark it (and nothing else) present.
+
         var bm = new byte[(n + 7) / 8];
         bool marked = false;
         for (uint i = 0; i < (uint)n; i++)

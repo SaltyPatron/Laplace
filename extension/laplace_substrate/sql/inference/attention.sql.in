@@ -1,10 +1,10 @@
--- inference/attention.sql.in
--- The SQL-transformer attention head. A query word attends over the entities it is
--- consensus-connected to (plus its synset co-members); the attention WEIGHT is the Glicko-2
--- conservative strength eff_mu(rating, rd) — this is what replaces geometric nearest-neighbor,
--- which on the densely-packed 3-sphere is semantically noisy. The S3 position (angular
--- geodesic between the two coords on the glome) is reported alongside as the geometric
--- annotation, fusing the embedding geometry with the consensus attention in one read.
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
     RETURNS TABLE(neighbor text, relation text, attention double precision,
                   geodesic double precision)
@@ -16,8 +16,8 @@ CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
         SELECT c.object_id AS nb, c.type_id, eff_mu(c.rating, c.rd) AS mu
         FROM consensus c
         WHERE c.subject_id = p_word AND c.object_id IS NOT NULL
-          -- exclude the positional/grammatical scaffolding (sequence order, POS, morphology,
-          -- aliasing): those are the substrate's "positional encoding", not semantic attention.
+          
+          
           AND c.type_id NOT IN (relation_type_id('HAS_LANGUAGE'),
                                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                 relation_type_id('PRECEDES'), relation_type_id('FOLLOWS'),

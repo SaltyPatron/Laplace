@@ -26,23 +26,23 @@ public sealed class RepoDecomposer : IDecomposer
     private static readonly Hash128 RepoTypeId = EntityTypeRegistry.RepoRoot;
     private static readonly Hash128 FileTypeId = EntityTypeRegistry.SourceFile;
 
-    // ext->modality is owned by the native registry (GrammarDecomposer.ModalityByExt); this map only
-    // covers extension-less filenames the ext lookup can't reach.
+
+
     private static readonly Dictionary<string, string> FileNameToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["CMakeLists.txt"] = "cmake",
         };
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "RepoDecomposer";
-    public int     LayerOrder   => 2;
+    public Hash128 SourceId => Source;
+    public string SourceName => "RepoDecomposer";
+    public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    
-    
-    
-    
+
+
+
+
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -65,10 +65,10 @@ public sealed class RepoDecomposer : IDecomposer
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) yield break;
 
-        // LOCAL PROVENANCE ANCHOR, not content: the repo root is identified by its absolute on-disk
-        // path, which is machine-specific and must NOT converge across machines (two checkouts of the
-        // same repo on different hosts are different roots). So it stays a geometry-free Vocabulary
-        // anchor (Hash128.OfCanonical), unlike the relative file paths below which ARE content.
+
+
+
+
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.Add(repoCanonical);
         var repoId = Hash128.OfCanonical(repoCanonical);
@@ -103,7 +103,7 @@ public sealed class RepoDecomposer : IDecomposer
             catch { continue; }
             if (bytes.Length == 0) continue;
 
-            ImmutableArray<EntityRow>      ents;
+            ImmutableArray<EntityRow> ents;
             ImmutableArray<PhysicalityRow> phys;
             ImmutableArray<AttestationRow> atts;
             Hash128 codeRootId;
@@ -124,26 +124,26 @@ public sealed class RepoDecomposer : IDecomposer
             foreach (var p in phys) b.AddPhysicality(p);
             foreach (var a in atts) b.AddAttestation(a);
 
-            // The relative file path IS content (a meaningful surface string that converges across
-            // checkouts): emit it via the shared CategoryAnchor (ContentEmitter + IS_TYPED_AS
-            // SourceFile), exactly like CILI treats a synset key, instead of baking it into a nameless
-            // Hash128.OfCanonical("source/file/{relPath}/v1") vocabulary row with no geometry.
+
+
+
+
             string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');
             var filePathAnchor = CategoryAnchor.Emit(b, relPath, FileTypeId, Source, SourceTrust.StructuredCorpus);
             if (filePathAnchor is null) continue;
             Hash128 filePathId = filePathAnchor.Value;
             b.AddAttestation(NativeAttestation.Categorical(
-                repoId,            "CONTAINS",     filePathId, Source, SourceTrust.StructuredCorpus));
+                repoId, "CONTAINS", filePathId, Source, SourceTrust.StructuredCorpus));
             b.AddAttestation(NativeAttestation.Categorical(
-                filePathId,        "HAS_EXAMPLE",  codeRootId, Source, SourceTrust.StructuredCorpus));
+                filePathId, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
             b.AddAttestation(NativeAttestation.Categorical(
-                codeRootId, "HAS_DEFINITION", filePathId,      Source, SourceTrust.StructuredCorpus));
+                codeRootId, "HAS_DEFINITION", filePathId, Source, SourceTrust.StructuredCorpus));
 
-            
+
             var filename = Path.GetFileNameWithoutExtension(file);
             if (!string.IsNullOrEmpty(filename))
             {
-                
+
                 foreach (var seg in filename.Split(new char[] { '_', '-', '.' },
                     StringSplitOptions.RemoveEmptyEntries))
                 {

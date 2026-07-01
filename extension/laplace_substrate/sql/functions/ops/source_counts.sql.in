@@ -9,9 +9,9 @@ CREATE OR REPLACE FUNCTION source_counts()
            COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,
            COALESCE(ct.content, 0)                      AS content
-    -- Geometry is source-free, so the content half is the count of distinct content
-    -- entities each source ATTESTED (provenance on the attestation), not a physicality
-    -- source filter (the column is gone).
+    
+    
+    
     FROM (SELECT a.source_id AS sid, count(*) AS evidence
           FROM @extschema@.attestations a GROUP BY a.source_id) ev
     FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT p.entity_id) AS content

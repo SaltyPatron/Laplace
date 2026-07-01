@@ -42,11 +42,11 @@ public static unsafe class GrammarTags
         }
     }
 
-    
+
 
     private static readonly Dictionary<string, byte[]?> _cache = new();
 
-    
+
     public static byte[]? TagsSource(string modality)
     {
         lock (_cache)
@@ -59,18 +59,18 @@ public static unsafe class GrammarTags
         }
     }
 
-    
+
     private static readonly Dictionary<string, string> _repoSubpath = new(StringComparer.OrdinalIgnoreCase)
     {
         ["typescript"] = "typescript",
-        ["php"]        = "php",
+        ["php"] = "php",
     };
 
     private static string? LocateTagsScm(string modality)
     {
         _repoSubpath.TryGetValue(modality, out var sub);
-        
-        
+
+
         var root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
         if (!string.IsNullOrEmpty(root))
         {

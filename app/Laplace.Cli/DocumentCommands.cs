@@ -5,15 +5,15 @@ using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
-// laplace document <recipe.json> [out-dir]
-//
-// Extracts the provenance record for a synthesized model and writes it to out-dir/provenance.json.
-// The JSON is the CANONICAL SOURCE MATERIAL — every other output format (markdown, html, pdf, csv)
-// is a pure renderer over this file. Renderers never touch the substrate. If a fact is not in the
-// record, it cannot be rendered; that rule forces this extractor to be complete.
-//
-// Recipe path also determines the model dir (the containing directory, i.e. where config.json lives).
-// Out-dir defaults to <model-dir>/laplace-provenance/.
+
+
+
+
+
+
+
+
+
 internal static class DocumentCommands
 {
     public static async Task<int> RunAsync(string[] args)

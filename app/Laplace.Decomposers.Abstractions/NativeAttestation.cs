@@ -139,16 +139,16 @@ public static class NativeAttestation
     public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset) =>
         ResolvePos(tag, tagset, out _);
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset, out bool probationary) =>
         ResolvePosNative(tag, (int)tagset, out probationary);
 
-    
+
     public static AttestationRow PosXpos(
         Hash128 subject, Hash128 xposEntity, Hash128 sourceId, Hash128? contextId,
         double sourceTrust, long observationCount = 1)
@@ -182,11 +182,11 @@ public static class NativeAttestation
         }
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     public static void AggregatedBatch(
         AttestationAggregatedCellNative[] cells, int count,
         Hash128 typeId, Hash128 sourceId, Hash128? contextId, double witnessWeight,
@@ -214,7 +214,7 @@ public static class NativeAttestation
 
     public static AttestationRow Row(in AttestationStagedNative staged) => ToRow(staged);
 
-    
+
     public static void ScoreBatchFp(ReadOnlySpan<float> values, double arenaScale, Span<long> outFp)
     {
         if (values.Length == 0) return;

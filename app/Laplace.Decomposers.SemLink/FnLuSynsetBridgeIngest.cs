@@ -6,10 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Shared TSV ingest for FrameNet LU → WordNet synset bridges (MapNet, WordFrameNet).
-/// Rows: <c>frame\tluName\tsynsetKey</c> or <c>frame\tlemma\tpos\tsynsetKey</c>.
-/// </summary>
 internal static class FnLuSynsetBridgeIngest
 {
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
@@ -73,18 +69,14 @@ internal static class FnLuSynsetBridgeIngest
             yield return batch.SetInputUnitsConsumed(count).Build();
     }
 
-    /// <summary>
-    /// Adimen WFN / XWFN native layout: <c>Frame: Name</c> headers and
-    /// <c>lemma pos offset-pos [gloss]</c> data lines.
-    /// </summary>
     internal static async IAsyncEnumerable<SubstrateChange> StreamWfnNativeAsync(
-        string path,
-        Hash128 source,
-        string labelPrefix,
-        int batchSize,
-        string synsetVersion = "pwn30",
-        long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    string path,
+    Hash128 source,
+    string labelPrefix,
+    int batchSize,
+    string synsetVersion = "pwn30",
+    long maxInputUnits = 0,
+    [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
 
@@ -161,11 +153,11 @@ internal static class FnLuSynsetBridgeIngest
         lemma = "";
         pos = "";
         synRaw = "";
-        // Flat whitespace-delimited row — SPLIT and field-address, never regex an imagined shape.
-        // Two layouts coexist in WFN/XWFN: "<lemma> <pos> <offset>-<ss> [gloss]" (space-delimited,
-        // multi-word lemmas allowed) and "<lemma>|<pos> <offset>-<ss> <n> [gloss]" (pipe-joined
-        // lemma|pos). Anchor on the one structural field — the <digits>-<ss> synset token — and the
-        // pos (token before it) and lemma (the rest) fall out, for either layout and any offset width.
+
+
+
+
+
         var tok = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (tok.Length < 2) return false;
 
@@ -175,7 +167,7 @@ internal static class FnLuSynsetBridgeIngest
         if (syn < 1) return false;
         synRaw = tok[syn];
 
-        string head = tok[syn - 1];   // pos; in the pipe layout it carries the lemma too
+        string head = tok[syn - 1];
         int pipe = head.IndexOf('|');
         if (pipe > 0)
         {
@@ -185,12 +177,11 @@ internal static class FnLuSynsetBridgeIngest
         else
         {
             pos = head;
-            lemma = syn - 1 == 1 ? tok[0] : string.Join('_', tok[..(syn - 1)]);   // multi-word lemma → joined
+            lemma = syn - 1 == 1 ? tok[0] : string.Join('_', tok[..(syn - 1)]);
         }
         return lemma.Length > 0 && pos.Length > 0;
     }
 
-    /// <summary>A WordNet offset-pos synset token: <c>&lt;digits&gt;-&lt;n|v|a|s|r&gt;</c> (any offset width).</summary>
     private static bool IsOffsetPos(string s)
     {
         int dash = s.IndexOf('-');

@@ -1,25 +1,25 @@
--- inference/synset_members.sql.in
--- A word's synset co-members reached through the shared synset: word -> senses -> synset, then
--- the synset's IS_SYNONYM_OF members (both edge directions). synonyms() keeps the SAME-language
--- co-members; translations() keeps the cross-language ones — synonymy and translation are the
--- two halves of one emergent structure, never stored as direct edges.
---
--- A member may be a homograph shared across languages — the codepoints "roi" are simultaneously
--- French, Dutch, Indonesian, Breton, Boro, ... one content-addressed lemma carrying many
--- HAS_LANGUAGE edges. Collapsing it to word_language()'s single arbitrary pick (bor) makes it
--- invisible to a French query, so we EXPLODE each member over its full HAS_LANGUAGE set instead.
--- sense_mu carries the Glicko-2 eff_mu of the SOURCE word's sense that reached the member, so
--- dominant-sense members (king's "a male sovereign", 1154) outrank weaker senses (magnate, 1075).
+
+
+
+
+
+
+
+
+
+
+
+
 DROP FUNCTION IF EXISTS synset_members(bytea);
 CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    -- Exclude named-entity (instance) synsets: a name identical across languages is a name,
-    -- not a translation. WordNet @i (IS_INSTANCE_OF) marks person/place instances (Billie Jean
-    -- King, M.L. King, B.B. King) whose OMW members are the untranslated proper name; @
-    -- (HAS_HYPERNYM) marks real concepts (monarch, magnate). Dropping instance synsets here keeps
-    -- both synonyms() and translations() to lexical equivalents only.
+    
+    
+    
+    
+    
     WITH syn AS (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM senses(p_word) s

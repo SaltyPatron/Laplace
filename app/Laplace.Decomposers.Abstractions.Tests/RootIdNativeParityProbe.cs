@@ -51,11 +51,11 @@ public sealed class RootIdNativeParityProbe
             $"RootId/native-batch root mismatches ({mismatches.Count}):\n" + string.Join("\n", mismatches.Take(10)));
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     [Fact]
     public void Ghost_Is_WordNet_SsType_Misrouted_Through_UposResolver()
     {
@@ -68,7 +68,7 @@ public sealed class RootIdNativeParityProbe
         Assert.False(lawfulProbationary);
         Assert.NotEqual(Convert.ToHexString(misrouted.ToBytes()), Convert.ToHexString(lawful.ToBytes()));
 
-        
+
         foreach (var (ssType, upos) in new[] { ("n", "NOUN"), ("v", "VERB"), ("a", "ADJ"), ("s", "ADJ"), ("r", "ADV") })
         {
             Assert.Equal(
@@ -78,7 +78,7 @@ public sealed class RootIdNativeParityProbe
         }
     }
 
-    
+
     private static IEnumerable<string> SurfacesOf(string line)
     {
         var fields = line.Split(' ');
@@ -91,7 +91,7 @@ public sealed class RootIdNativeParityProbe
         var gloss = line[(bar + 1)..].Trim();
         yield return gloss;
 
-        
+
         int q = gloss.IndexOf('"');
         if (q >= 0)
         {

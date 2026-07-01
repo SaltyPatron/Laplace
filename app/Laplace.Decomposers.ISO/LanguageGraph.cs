@@ -66,7 +66,7 @@ internal static class LanguageGraph
             string val = rawLine[(c + 1)..].Trim();
             switch (key)
             {
-                case "Type":   type = val.ToLowerInvariant(); break;
+                case "Type": type = val.ToLowerInvariant(); break;
                 case "Subtag": subtag = val; break;
                 case "Prefix": prefixes.Add(val); break;
             }
@@ -83,13 +83,13 @@ internal static class LanguageGraph
         using var reader = XmlReader.Create(path, settings);
         var doc = XDocument.Load(reader);
         foreach (var ld in doc.Descendants("languageData"))
-        foreach (var lang in ld.Elements("language"))
-        {
-            string? type = (string?)lang.Attribute("type");
-            string? scripts = (string?)lang.Attribute("scripts");
-            if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(scripts)) continue;
-            var codes = scripts.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (codes.Length > 0) yield return (type!, codes);
-        }
+            foreach (var lang in ld.Elements("language"))
+            {
+                string? type = (string?)lang.Attribute("type");
+                string? scripts = (string?)lang.Attribute("scripts");
+                if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(scripts)) continue;
+                var codes = scripts.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (codes.Length > 0) yield return (type!, codes);
+            }
     }
 }

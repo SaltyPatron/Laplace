@@ -40,9 +40,9 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Equal(Nfc(bytes), rebuilt);
     }
 
-    // The substrate canonicalizes content to NFC at the text-decomposer chokepoint, so a roundtrip
-    // reconstructs the canonical form, not the raw bytes (e.g. Greek oxia U+1F79 → tonos U+03CC).
-    // ASCII/already-NFC input is unchanged.
+
+
+
     private static unsafe byte[] Nfc(byte[] utf8)
     {
         if (utf8.Length == 0) return utf8;

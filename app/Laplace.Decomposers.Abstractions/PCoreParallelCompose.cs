@@ -118,7 +118,8 @@ public static class PCoreParallelCompose
                     if (workerDone.Signal())
                         output.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
                 }
-            }) { IsBackground = true, Name = $"ingest-pcore-{wId}" };
+            })
+            { IsBackground = true, Name = $"ingest-pcore-{wId}" };
             workers[w].Start();
         }
 
@@ -265,7 +266,8 @@ public static class PCoreParallelCompose
                     if (workerDone.Signal())
                         output.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
                 }
-            }) { IsBackground = true, Name = $"ingest-pcore-descent-{wId}" };
+            })
+            { IsBackground = true, Name = $"ingest-pcore-descent-{wId}" };
             workers[w].Start();
         }
 

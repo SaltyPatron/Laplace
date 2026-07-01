@@ -1,10 +1,10 @@
 namespace Laplace.Ingestion;
 
 public sealed record TransientErrorRetryPolicy(
-    int      MaxAttempts,
+    int MaxAttempts,
     TimeSpan InitialDelay,
-    double   BackoffMultiplier,
-    double   JitterFraction,
+    double BackoffMultiplier,
+    double JitterFraction,
     Func<Exception, bool> IsTransient)
 {
     public static TransientErrorRetryPolicy Default { get; } =
@@ -21,14 +21,14 @@ public sealed record TransientErrorRetryPolicy(
             JitterFraction: 0.0,
             IsTransient: static _ => false);
 
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
     public static TransientErrorRetryPolicy ConcurrencyRetry { get; } =
         new(MaxAttempts: 10,
             InitialDelay: TimeSpan.FromMilliseconds(15),
@@ -38,15 +38,15 @@ public sealed record TransientErrorRetryPolicy(
 
     private static bool IsConcurrencyConflict(Exception ex)
     {
-        // 40P01 deadlock_detected, 40001 serialization_failure: classic concurrent-commit conflicts.
-        // 23505 unique_violation: the cross-worker insert race left after removing the promote's
-        // `ON CONFLICT DO NOTHING` (NpgsqlSubstrateWriter.StageAndInsertManyAsync). Two parallel
-        // workers can stage the same novel content-addressed id in overlapping transactions; the
-        // loser's anti-join didn't see the winner's uncommitted row, so its INSERT raises 23505.
-        // Retrying the whole batch is correct and idempotent: on retry the winner's row is committed
-        // and visible, so the anti-join skips the entity/physicality and the attestation preflight
-        // routes the re-observation to the locked observation_count UPDATE (no dup rows, no lost
-        // counts). The set-based anti-join — not this net — is the dedup mechanism.
+
+
+
+
+
+
+
+
+
         for (Exception? e = ex; e is not null; e = e.InnerException)
             if (e is global::Npgsql.PostgresException pg
                 && pg.SqlState is "40P01" or "40001" or "23505")
