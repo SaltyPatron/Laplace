@@ -251,7 +251,8 @@ public sealed class TabularDecomposer : IDecomposer
     // structural anchors with their content attached via IS_INSTANCE_OF. Drain via BuildAsync.
     private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
         new SubstrateChangeBuilder(Source, $"tabular/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384);
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384)
+            .EnableDeferredContent(reader);
 
     private string Tokenize(string col, string v,
                             Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)

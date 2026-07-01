@@ -297,5 +297,6 @@ public sealed class TinyCodesDecomposer : IDecomposer
     // GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
     private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
         new SubstrateChangeBuilder(Source, $"tiny-codes/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096)
+            .EnableDeferredContent(reader);
 }

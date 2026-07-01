@@ -65,5 +65,6 @@ public static class DecomposerBatch
         => new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
                 entityCapacity:      batchSize * 4,
                 physicalityCapacity: batchSize * 2,
-                attestationCapacity: batchSize * 8);
+                attestationCapacity: batchSize * 8)
+            .EnableDeferredContent(reader);
 }
