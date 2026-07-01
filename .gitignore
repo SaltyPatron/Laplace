@@ -361,6 +361,11 @@ Thumbs.db
 
 __pycache__/
 *.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 *.safetensors
 *.gguf
@@ -387,7 +392,10 @@ build-cutechess/
 app/Laplace.Endpoints.OpenAICompat/wwwroot/
 web/node_modules/
 web/dist/
+*.tsbuildinfo
 out/
+
+CMakeUserPresets.json
 
 # real (secret-bearing) deploy env files — only the .example is tracked
 deploy/windows/laplace-api.env
