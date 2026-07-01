@@ -16,7 +16,6 @@ internal readonly struct OpenSubtitlesLinePair
     public required string PairStem { get; init; }
 }
 
-/// <summary>Zip paired-line IO + ContentWitnessBatch attestation (raw subtitle lines, not tabular).</summary>
 internal static class OpenSubtitlesZipIngest
 {
     public static async IAsyncEnumerable<OpenSubtitlesLinePair> ReadZipPairsAsync(
@@ -140,8 +139,6 @@ internal static class OpenSubtitlesZipIngest
             entityCapacity: batch * 4,
             physicalityCapacity: batch * 8,
             attestationCapacity: batch * 4);
-        // Subtitle-line content (TryAppendPair) is deferred and tier-deduped per micro-batch when a
-        // reader is available; the language entities above are plain managed rows.
         b.AddEntity(new EntityRow(langA, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
         b.AddEntity(new EntityRow(langB, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
         return b;

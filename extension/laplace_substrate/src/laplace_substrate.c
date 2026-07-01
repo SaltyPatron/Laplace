@@ -318,17 +318,6 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
 
-/*
- * content_descent_bitmap(ids bytea[], parents int[]) -> bytea
- *
- * The top-down O(tier) containment probe. Same return contract as entities_exist_bitmap (bit i set
- * ⟺ candidate i is PRESENT, LSB-first), but tree-aware: parents[k] is the 0-based index of node k's
- * parent (< 0 = root). The substrate is a content-addressed Merkle DAG, so a present trunk implies
- * its whole subtree is present; the recursive descent only checks nodes under a novel parent and
- * never expands a present trunk's children — O(tier-depth) DB checks, not O(nodes). Drop-in for the
- * flat entities_exist_bitmap; the caller's existing bit-walk and the native content emit consume it
- * unchanged. The bitmap is built here in C so the LSB-first convention lives in one place.
- */
 Datum
 pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
 {
@@ -388,8 +377,6 @@ pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
     result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
     SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
     bm = (uint8*) VARDATA(result);
-    /* start ALL PRESENT; the descent clears the bit of every node it proves novel. Nodes never
-     * visited (under a present trunk) stay present — exactly the containment invariant. */
     if (bitmap_bytes > 0)
         memset(bm, 0xFF, bitmap_bytes);
 

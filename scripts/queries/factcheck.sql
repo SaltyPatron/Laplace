@@ -1,7 +1,3 @@
--- Factual-recall smoke test, built on the substrate's OWN catalog (laplace.api()).
---   Run: psql -h localhost -U postgres -d laplace -f scripts/queries/factcheck.sql
--- Thin/POS-only results = incomplete INGESTION (missing the curated factual core), not a broken
--- architecture. source_counts/arena_counts at the top show which corpora & relational layers loaded.
 \set ON_ERROR_STOP 0
 \timing on
 SET search_path = laplace, public;

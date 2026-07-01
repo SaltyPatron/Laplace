@@ -2,12 +2,6 @@ using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
-/// <summary>
-/// Strength proofs via our own in-process match harness (no cutechess): the search crushes a random
-/// mover (verification bar: beats-random), and a deeper search beats a shallower one (the search
-/// actually adds strength). Bounded game counts/depths keep these fast; the full ablation ladder
-/// (`laplace chess ladder`) runs longer for tight Elo error bars. Pure C#, no native/DB.
-/// </summary>
 public sealed class MatchTests
 {
     [Fact]

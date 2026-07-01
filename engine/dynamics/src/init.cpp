@@ -44,7 +44,8 @@ int resolve_thread_count_from_env() {
 int g_mkl_num_threads = -1;
 int g_runtime_host = -1;
 
-}  // namespace
+}
+
 #endif
 
 extern "C" int laplace_runtime_resolve_thread_count(void) {

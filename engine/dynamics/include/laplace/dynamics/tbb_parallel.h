@@ -30,7 +30,8 @@ void parallel_for(const oneapi::tbb::blocked_range<std::size_t>& range, Body&& b
     });
 }
 
-}  // namespace tbb_ops
-}  // namespace laplace
+}
+
+}
 
 #endif

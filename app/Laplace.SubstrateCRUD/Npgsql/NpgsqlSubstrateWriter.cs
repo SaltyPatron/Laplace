@@ -28,20 +28,14 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
     private readonly int _applyPartitions;
-    private readonly bool _bulkNovelApply;
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
         ILogger<NpgsqlSubstrateWriter>? logger = null,
-        bool bulkFreshSource = false,
         int? applyPartitions = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
-        // Bulk merge skips the id anti-join only when the caller explicitly opts in
-        // (fresh-source ingest after compose-time descent). IsBulkFreshBypass affects compose
-        // only — never the writer merge lane; leaking it here caused PK violations on re-apply.
-        _bulkNovelApply = bulkFreshSource;
         _applyPartitions = applyPartitions ?? IngestTopology.Current.ApplyPartitions;
     }
 
@@ -293,8 +287,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     "SET LOCAL session_replication_role = replica; "
                     + "SET LOCAL synchronous_commit = off; "
                     + "SET LOCAL work_mem = '256MB'; "
-                    + "SET LOCAL jit = off"
-                    + (_bulkNovelApply ? "; SET LOCAL laplace_substrate.ingest_bulk_novel = on" : "");
+                    + "SET LOCAL jit = off";
                 await guc.ExecuteNonQueryAsync(ct);
             }
             rt++;
@@ -302,7 +295,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             // One COPY into session temp staging + one laplace_apply_batch call. The SPI merge
             // does set-based id anti-join (entities/physicalities) and attestation fold in a
             // single round trip — never blind INSERT into laplace.* (that hit PK on re-apply).
-            // When _bulkNovelApply, ingest_bulk_novel skips the anti-join (descent proved novelty).
             string prefix = $"_lab_{Environment.CurrentManagedThreadId:x}_{partitionIndex:x}_";
 
             if (entCount > 0)

@@ -264,8 +264,7 @@ internal static class IngestCommands
 
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var inner = new NpgsqlSubstrateWriter(ds,
-            logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
-            bulkFreshSource: true);
+            logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
         
         
         
@@ -280,7 +279,7 @@ internal static class IngestCommands
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
-        Console.WriteLine("mode: bulk fresh-source apply (attestation existence check skipped — safetensor snapshot is uningested); consensus accumulates at ingest");
+        Console.WriteLine("mode: safetensor snapshot apply (anti-join merge; consensus accumulates at ingest)");
 
         Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
 
@@ -422,7 +421,7 @@ internal static class IngestCommands
 
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
-        IngestCliArgs? cli = null, bool skipSourceCompletion = false, bool bulkFresh = false)
+        IngestCliArgs? cli = null, bool skipSourceCompletion = false)
     {
         IngestTopology.EnsureReady();
         long lastMs = -10_000;
@@ -476,12 +475,6 @@ internal static class IngestCommands
             CommitRows             = commitRows,
             ParallelWorkers        = workers,
             Progress               = progress,
-            BulkFresh              = bulkFresh,
-            
-            
-            
-            
-            
             RetryPolicy                = workers > 1
                                             ? TransientErrorRetryPolicy.ConcurrencyRetry
                                             : TransientErrorRetryPolicy.NoRetry,
@@ -505,12 +498,10 @@ internal static class IngestCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
         bool force = cli?.Force ?? false;
-        bool bulkFresh = IsEnvEnabled("LAPLACE_BULK_FRESH");
-        var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh,
-            applyPartitions: topo.ApplyPartitions);
+        var innerWriter = new NpgsqlSubstrateWriter(ds, applyPartitions: topo.ApplyPartitions);
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
-            freshSource: bulkFresh,
+            freshSource: false,
             persistEvidence: persistEvidence,
             stageAsWalks: !persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
@@ -519,13 +510,12 @@ internal static class IngestCommands
         var runner = new IngestRunner(writer, reader, loggerFactory);
 
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
-            + (persistEvidence ? "" : " (consensus-only, no attestation writes)")
-            + (bulkFresh ? " (bulk-fresh preflight skip)" : ""));
+            + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
             BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
-                skipSourceCompletion || (cli?.Force ?? false), bulkFresh: bulkFresh),
+                skipSourceCompletion || (cli?.Force ?? false)),
             CancellationToken.None);
         sw.Stop();
 

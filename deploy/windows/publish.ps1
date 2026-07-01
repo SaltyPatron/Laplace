@@ -1,10 +1,4 @@
 #requires -Version 7
-<#
-.SYNOPSIS
-  Build the SPA, publish the Laplace API, inject env config into web.config, and
-  sync into the IIS site folder. Does NOT need elevation (file build only) —
-  Install-LaplaceSite.ps1 does the one-time elevated IIS wiring.
-#>
 [CmdletBinding()]
 param(
   [string]$RepoRoot      = (Resolve-Path "$PSScriptRoot\..\.."),
@@ -35,8 +29,6 @@ $wwwroot = Join-Path $stage "wwwroot"
 if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
 New-Item -ItemType Directory $wwwroot | Out-Null
 Copy-Item "$RepoRoot\web\dist\*" $wwwroot -Recurse -Force
-# Belt-and-suspenders: Directory.Build.targets copies these on Build, but make
-# sure the engine + libxml native deps sit next to the published app.
 $natives = @(
   "$RepoRoot\build-win\core\laplace_core.dll",
   "$RepoRoot\build-win\dynamics\laplace_dynamics.dll",
@@ -67,16 +59,10 @@ $xml.Save($webConfig)
 
 Write-Host "==> [5/5] sync staging -> $OutDir" -ForegroundColor Cyan
 New-Item -ItemType Directory $OutDir -Force | Out-Null
-# In-process IIS holds an exclusive lock on the managed app DLL while the worker runs,
-# so a plain /MIR would fail to overwrite it. Drop app_offline.htm first: ANCM detects it,
-# drains + unloads the app, releasing the locks. /XF keeps the mirror from deleting it
-# mid-copy; we remove it last so ANCM restarts the freshly-published app.
 $offline = Join-Path $OutDir "app_offline.htm"
 Set-Content -Path $offline -Value "<h1>Laplace is deploying…</h1>" -Encoding utf8
 Start-Sleep -Seconds 1
-# robocopy /MIR mirrors; exclude the live logs dir + the offline marker. Exit codes <8 are success.
 robocopy $stage $OutDir /MIR /XD logs /XF app_offline.htm /NFL /NDL /NJH /NJS /NP | Out-Null
-# robocopy exit codes 0-7 are success (1 = files copied); >=8 is a real error.
 $rc = $LASTEXITCODE
 Remove-Item $offline -Force -ErrorAction SilentlyContinue
 if ($rc -ge 8) { throw "robocopy failed ($rc)" }

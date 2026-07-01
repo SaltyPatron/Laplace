@@ -1,4 +1,3 @@
-# Wait for PostgreSQL on localhost:5432 (up to 2 min, every 5s). Does not start/stop PG.
 param([int]$TimeoutSec = 120, [int]$IntervalSec = 5)
 $ErrorActionPreference = 'Stop'
 $envScript = Join-Path $PSScriptRoot 'env.cmd'

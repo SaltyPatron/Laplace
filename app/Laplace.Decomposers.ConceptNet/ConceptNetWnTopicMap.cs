@@ -3,13 +3,8 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-/// <summary>
-/// Maps ConceptNet coarse <c>/wn/&lt;topic&gt;</c> labels to representative WordNet synsets
-/// derived from lexicographer-file topics (e.g. <c>animal</c> → <c>noun.animal</c>).
-/// </summary>
 internal static class ConceptNetWnTopicMap
 {
-    // topic|pos → (offset, ss_type); built from WordNet 3.0 lexnames + data.* (head lemma match, else first in file).
     private static readonly Dictionary<string, (long Offset, char Pos)> Map = new(StringComparer.Ordinal)
     {
         ["act|n"] = (34479, 'n'),

@@ -1,4 +1,3 @@
-// Global content-witness dedup bank (reset per ingest run via content_witness_reset).
 #include "laplace/core/content_witness_batch.h"
 
 #include <stdatomic.h>
@@ -249,16 +248,6 @@ int laplace_content_word_segment(
 
 
 
-// The global cross-run dedup bank (g_canon_slots / g_entity_slots) was DELETED. It deduped once
-// across the entire source run -- accumulating every canonical root + entity id in RAM (unbounded
-// for big multilingual sources -> boil-the-ocean) behind one process-global spinlock (so concurrent
-// file workers serialized on it and bought no parallelism). Dedup is now PER-BATCH: within a batch
-// the per-stage witness set (intent_stage_witness_record/_seen) collapses repeats; ACROSS batches
-// the DB deduplicates by content address (the set-based id anti-join in laplace_apply_batch -- no
-// ON CONFLICT). That keeps memory bounded by the batch and lets file chunks compose concurrently
-// with no shared mutable state. content_witness_reset is now a no-op kept only because the ingest
-// runner still calls it per run; the "proven across everything" export and its content_witness_
-// entity_proven probe are gone (they had no callers after the referential pre-check was removed).
 void content_witness_reset(void) { }
 
 static int emit_node(
@@ -316,11 +305,6 @@ static int emit_node(
     return 0;
 }
 
-// Build the content tier tree for a UTF-8 span and hand back the retained handle. The caller owns
-// it and must release it with tier_tree_free. This is the first half of the two-phase containment
-// path: build once, probe the node ids against the DB existing-bitmap, then emit only novel nodes
-// via content_witness_emit_tree — avoiding a second decomposition (the grammar compose path does the
-// same with its retained compose result).
 int content_witness_tree_build(
     const uint8_t* utf8,
     size_t         len,
@@ -329,11 +313,6 @@ int content_witness_tree_build(
     return content_tree_build(utf8, len, out_tree);
 }
 
-// Emit a pre-built content tier tree into the stage. When existing_bitmap is non-NULL, only the
-// novel subtrees (MerkleDedup.TrunkShortcircuit over the tree node order) are emitted — a present
-// trunk skips its whole subtree, exactly like TextEntityBuilder. existing_bitmap == NULL emits all
-// nodes (tier-0 is skipped inside emit_node). out_root_id always receives the natural-unit root id
-// so the caller can wire attestations even when the subtree is skipped.
 int content_witness_emit_tree(
     intent_stage_t*    stage,
     const tier_tree_t* tree,

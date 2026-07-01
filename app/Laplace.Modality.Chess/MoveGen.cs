@@ -1,13 +1,7 @@
 namespace Laplace.Modality.Chess;
 
-/// <summary>
-/// Legal move generation on a 0x88 board using copy-make. Pseudo-legal moves are generated then
-/// filtered by making the move and checking the mover's king is not attacked. Castling legality
-/// (squares not attacked, not in check) is enforced at generation time.
-/// </summary>
 public static class MoveGen
 {
-    // 0x88 offsets.
     private static readonly int[] KnightDeltas;
     private static readonly int[] KingDeltas;
     private static readonly int[] BishopDeltas;
@@ -16,9 +10,6 @@ public static class MoveGen
     private static readonly int[] WPawnCaps;
     private static readonly int[] BPawnCaps;
 
-    // Explicit static constructor (NOT beforefieldinit): guarantees these arrays are fully
-    // initialized and published with a memory barrier before any thread reads them, which matters
-    // when xUnit runs the heavy perft facts in parallel from a cold process.
     static MoveGen()
     {
         KnightDeltas = new[] { 33, 31, 18, 14, -33, -31, -18, -14 };
@@ -30,11 +21,8 @@ public static class MoveGen
         BPawnCaps = new[] { -15, -17 };
     }
 
-    /// <summary>True if <paramref name="sq"/> is attacked by the side given (byWhite = attacker is white).</summary>
     public static bool IsSquareAttacked(Board b, int sq, bool byWhite)
     {
-        // Pawn attacks: a white pawn on s attacks s+15 and s+17 (toward higher ranks).
-        // So sq is attacked by a white pawn located at sq-15 or sq-17.
         if (byWhite)
         {
             int p1 = sq - 17, p2 = sq - 15;
@@ -62,7 +50,6 @@ public static class MoveGen
             if (Board.OnBoard(t) && b.Squares[t] == king) return true;
         }
 
-        // Sliding: bishops/queens on diagonals, rooks/queens on orthogonals.
         Piece bishop = byWhite ? Piece.WBishop : Piece.BBishop;
         Piece rook = byWhite ? Piece.WRook : Piece.BRook;
         Piece queen = byWhite ? Piece.WQueen : Piece.BQueen;
@@ -105,7 +92,6 @@ public static class MoveGen
         return IsSquareAttacked(b, k, byWhite: !whiteKing);
     }
 
-    /// <summary>All fully legal moves for the side to move.</summary>
     public static List<ChessMove> Legal(Board b)
     {
         var pseudo = Pseudo(b);
@@ -114,7 +100,6 @@ public static class MoveGen
         foreach (var m in pseudo)
         {
             var undo = MoveApply.MakeWithUndo(b, m);
-            // After Make, side has flipped; the mover's king must not be attacked.
             if (!InCheck(b, mover))
                 legal.Add(m);
             MoveApply.Unmake(b, m, undo);
@@ -122,7 +107,6 @@ public static class MoveGen
         return legal;
     }
 
-    /// <summary>Pseudo-legal moves (castling already legality-checked for attacks/check).</summary>
     public static List<ChessMove> Pseudo(Board b)
     {
         var moves = new List<ChessMove>(64);
@@ -197,7 +181,6 @@ public static class MoveGen
             else
             {
                 moves.Add(new ChessMove(from, one, Piece.Empty, MoveFlags.None));
-                // double push
                 if (Board.RankOf(from) == startRank)
                 {
                     int two = one + dir;
@@ -207,7 +190,6 @@ public static class MoveGen
             }
         }
 
-        // captures
         foreach (int cd in white ? WPawnCaps : BPawnCaps)
         {
             int to = from + cd;
@@ -241,7 +223,6 @@ public static class MoveGen
 
     private static void GenCastle(Board b, int from, bool white, List<ChessMove> moves)
     {
-        // King must be on its home square and not in check; squares between empty & not attacked.
         bool attackerWhite = !white;
         if (white)
         {

@@ -4,13 +4,8 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class HighwayPerfcache
 {
-    /// <summary>Returns the content-addressed hash for a highway node (POS tag, relation type, entity
-    /// type name, etc.). Equivalent to <c>blake3(utf8_bytes)</c> — the canonical identity for any
-    /// entity whose identity IS its surface content. Must match <c>highway_table.c</c> and
-    /// <c>EntityTypeRegistry.Id()</c>.</summary>
     public static Hash128 NodeHash(ReadOnlySpan<byte> utf8) => Hash128.Blake3(utf8);
 
-    /// <inheritdoc cref="NodeHash(ReadOnlySpan{byte})"/>
     public static Hash128 NodeHash(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -58,7 +53,6 @@ public static unsafe class HighwayPerfcache
     {
         var env = Environment.GetEnvironmentVariable("LAPLACE_HIGHWAY_BIN");
         if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        // Fall back to same env var used for all perfcache files; search build* dirs
         var perfEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
         if (!string.IsNullOrEmpty(perfEnv))
         {
@@ -93,8 +87,6 @@ public static unsafe class HighwayPerfcache
 
     private static bool IsLoadedUnlocked() => NativeInterop.HighwayTableIsLoaded() != 0;
 
-    /// <summary>Returns the 256-bit mask for a given band index (0-12).
-    /// Returns <see cref="Mask256.Zero"/> when the perfcache is not loaded.</summary>
     public static Mask256 BandMask(byte band)
     {
         lock (LaplaceCoreGate.Native)
@@ -105,8 +97,6 @@ public static unsafe class HighwayPerfcache
         }
     }
 
-    /// <summary>Returns a single-bit mask for the relation type identified by <paramref name="typeId"/>,
-    /// or <see cref="Mask256.Zero"/> when not found or perfcache not loaded.</summary>
     public static Mask256 MaskForRelationType(Hash128 typeId)
     {
         lock (LaplaceCoreGate.Native)
@@ -120,8 +110,6 @@ public static unsafe class HighwayPerfcache
         }
     }
 
-    /// <summary>Looks up rank and band for a given type-id.
-    /// Returns false when not found or perfcache not loaded.</summary>
     public static bool TryGetRelation(Hash128 typeId, out byte bitPos, out float rank, out byte band)
     {
         lock (LaplaceCoreGate.Native)

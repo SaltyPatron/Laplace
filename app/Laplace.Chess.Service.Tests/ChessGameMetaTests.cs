@@ -2,11 +2,6 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-/// <summary>
-/// The conventional GAME-metadata tier: time-control classification (the bullet/blitz/rapid/classical
-/// evidence axis) and the content-addressed game id (the same real game → one node, witnessed each time).
-/// Pure logic, no DB.
-/// </summary>
 public sealed class ChessGameMetaTests
 {
     [Theory]
@@ -29,7 +24,7 @@ public sealed class ChessGameMetaTests
     {
         var a = ChessVocabulary.GameId("Carlsen", "Nakamura", "2024.01.01", new[] { "e4", "e5", "Nf3" });
         var b = ChessVocabulary.GameId("Carlsen", "Nakamura", "2024.01.01", new[] { "e4", "e5", "Nf3" });
-        Assert.Equal(a, b);   // same game across DBs → one content node, witnessed twice
+        Assert.Equal(a, b);
     }
 
     [Fact]

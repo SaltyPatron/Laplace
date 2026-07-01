@@ -71,11 +71,6 @@ set(LAPLACE_CORE_SOURCES
     src/etl_witness_conceptnet.c
     src/etl_anchor.c
 )
-
-# ── Attestation-law + highway codegen ───────────────────────────────────────────────────────────
-# relation_law/pos_law (.c/.h) + seed SQL + highway_manifest.h + laplace_highway_perfcache.bin
-# are GENERATED from engine/manifest/*.toml by scripts/codegen-attestation-law.py and are NOT
-# committed.  Edit the generator or the TOML, never these outputs.
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
 set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"
     CACHE FILEPATH "Built highway perf-cache blob (consumed by tests + installed)" FORCE)
@@ -121,8 +116,6 @@ target_link_libraries(laplace_core PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS}
 if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()
-
-# LAPLACE_PERFCACHE_DIR is defined in the codegen section above.
 set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.nounihan.flat.xml")
 set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.bin"
     CACHE FILEPATH "Built T0 codepoint perf-cache blob (consumed by tests + installed)" FORCE)

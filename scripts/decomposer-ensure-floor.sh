@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Ingest floor layers (unicode + iso639) into the current LAPLACE_DBNAME.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

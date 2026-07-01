@@ -1,17 +1,11 @@
 namespace Laplace.Cli;
 
-/// <summary>
-/// Default ingest paths from <c>LAPLACE_DATA_ROOT</c> + witness-manifest relative paths.
-/// Windows standard vault: <c>D:\Data\Ingest</c> (set via <c>env.cmd</c> as INGEST / LAPLACE_DATA_ROOT).
-/// CLI path arguments override these defaults; platform defaults apply when the env is unset.
-/// </summary>
 internal static class IngestDataPaths
 {
     private static string DataRoot =>
         Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT")
         ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data");
 
-    /// <summary>Manifest-relative paths (scripts/win/witness-manifest.json).</summary>
     private static readonly Dictionary<string, string> RelativeByCli = new(StringComparer.OrdinalIgnoreCase)
     {
         ["unicode"]       = "UCD/Public/UCD/latest",

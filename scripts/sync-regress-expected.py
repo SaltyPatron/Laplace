@@ -22,7 +22,6 @@ def scrub(text: str) -> str:
         r"\1, \2, 1,",
         text,
     )
-    # SQL comment lines only (`-- `), not psql table rulers (`---+`).
     text = re.sub(r"^-- [^\n]*\n", "", text, flags=re.M)
     text = re.sub(r"^    -- [^\n]*\n", "    \n", text, flags=re.M)
     return text

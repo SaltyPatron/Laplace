@@ -175,11 +175,7 @@ public sealed class RepoDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // Relative file paths and filename keyword segments route through the SHARED two-phase
-    // containment (EnableDeferredContent); the parsed-code grammar tree is already containment-deduped
-    // inside GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
         new SubstrateChangeBuilder(Source, $"repo/{n}", null,
-            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
-            .EnableDeferredContent(reader);
+            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
 }

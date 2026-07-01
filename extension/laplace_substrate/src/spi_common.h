@@ -196,13 +196,6 @@ spi_render_text(Datum id)
 }
 
 
-/*
- * Copy every row of the current SPI result set into an SRF's tuplestore, column-for-column.
- * The SPI query must project exactly the columns of rsinfo->setDesc (positional, same order/types).
- * Collapses the hand-rolled "for each row { for each col getbinval; putvalues }" loop duplicated
- * across the read-path SRFs. Datums point into SPI memory only for the putvalues call, which
- * materializes them into the tuplestore's own context — safe after laplace_spi_finish.
- */
 static inline void
 spi_emit_all_rows(ReturnSetInfo *rsinfo)
 {

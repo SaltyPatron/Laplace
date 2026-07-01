@@ -3,38 +3,20 @@ using System.Linq;
 
 namespace Laplace.Modality.Chess;
 
-/// <summary>
-/// A root-only guidance hook. Given the root position and its legal moves, returns a centipawn bonus per
-/// move to blend into the search's root scoring. This is the seam where the SUBSTRATE injects its learned
-/// per-position value — probed by content hash (same content = same id = an indexed/cached lookup) — WITHOUT
-/// the search ever touching a database in its hot loop: the bias is computed ONCE, at the root, before the
-/// tree search descends. A null bias is the pure classical engine; a substrate-backed bias is "the brain".
-/// </summary>
 public interface IRootBias
 {
     int[] Bonus(Board root, IReadOnlyList<ChessMove> moves);
 }
 
-/// <summary>
-/// Negamax alpha-beta search with quiescence, iterative deepening, a Zobrist transposition table, and
-/// move ordering (TT move → MVV-LVA captures → killers). Pure C#, no DB/native — it judges leaves with
-/// the classical <see cref="Evaluation"/> (centipawns, side-to-move relative). This is the tactical floor:
-/// it never hangs to a forced mate the depth can see, and quiescence stops it grabbing defended material.
-///
-/// <para>The substrate blends in ABOVE this (opening book, root move ordering by learned eff_mu, the
-/// per-overlay attestations) — read-only, never replacing the deterministic search.</para>
-/// </summary>
 public sealed class Search
 {
     public readonly record struct Result(ChessMove? BestMove, int Score, int Depth, long Nodes);
 
-    /// <param name="MaxDepth">Iterative-deepening ceiling (plies).</param>
-    /// <param name="MaxNodes">Hard node budget; the last fully-completed iteration's move is returned.</param>
     public sealed record Limits(int MaxDepth = 6, long MaxNodes = long.MaxValue, int MaxTimeMs = int.MaxValue);
 
     private const int Inf           = 1_000_000;
     private const int Mate          = 30_000;
-    private const int MateThreshold = Mate - 1_000; // |score| above this ⇒ a forced mate is in hand
+    private const int MateThreshold = Mate - 1_000;
 
     private const byte FlagExact = 0, FlagLower = 1, FlagUpper = 2;
 
@@ -48,7 +30,7 @@ public sealed class Search
         public ChessMove Move;
     }
 
-    private readonly TtEntry[] _tt;                // sized by the ttBits constructor arg
+    private readonly TtEntry[] _tt;
     private readonly ulong _ttMask;
 
     private const int MaxPly = 128;
@@ -60,21 +42,13 @@ public sealed class Search
     private ChessMove _rootBestMove;
     private readonly Stopwatch _sw = new();
 
-    // Poll the clock only every 2048 nodes (cheap), and never abort before depth 1 has produced a root
-    // move — so the search always returns a legal move, even under a near-zero time budget.
     private bool TimeUp() => (_nodes & 2047) == 0 && _sw.ElapsedMilliseconds >= _deadlineMs && _rootBestMove != default;
 
     private readonly EvalTerm _terms;
     private readonly IRootBias? _rootBias;
-    private readonly int[][]? _mgPst;   // substrate-LEARNED piece-square tables (null = PeSTO floor)
+    private readonly int[][]? _mgPst;
     private readonly int[][]? _egPst;
 
-    /// <summary>Create a search whose leaf evaluation uses only the given overlay <paramref name="terms"/>
-    /// (default: all), optionally biased at the root by <paramref name="rootBias"/> (the substrate seam).
-    /// A SUBSET eval is how the ablation ladder measures the raw Elo value of each overlay; the root bias is
-    /// how the substrate's learned per-position value is injected without a DB hit in the hot loop.
-    /// <paramref name="mgPst"/>/<paramref name="egPst"/> swap the leaf eval's PeSTO PST for learned tables
-    /// at EVERY node (the data-driven eval); null keeps PeSTO.</summary>
     public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
         int[][]? mgPst = null, int[][]? egPst = null)
     {
@@ -82,13 +56,11 @@ public sealed class Search
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
-        int bits = Math.Clamp(ttBits, 10, 24); // 1K..16M entries — smaller for many parallel match games
+        int bits = Math.Clamp(ttBits, 10, 24);
         _tt = new TtEntry[1 << bits];
         _ttMask = (1UL << bits) - 1;
     }
 
-    /// <summary>Search <paramref name="board"/> and return the best move + score (mover-relative cp, or a
-    /// mate score). Iterative deepening to <paramref name="limits"/>.MaxDepth.</summary>
     public Result Think(Board board, Limits limits)
     {
         _nodes = 0;
@@ -96,7 +68,7 @@ public sealed class Search
         _deadlineMs = limits.MaxTimeMs;
         _aborted = false;
         _sw.Restart();
-        Array.Clear(_tt, 0, _tt.Length); // deterministic per search
+        Array.Clear(_tt, 0, _tt.Length);
 
         var b = board.Clone();
         ChessMove? best = null;
@@ -107,12 +79,12 @@ public sealed class Search
             ClearKillers();
             _path.Clear();
             int score = Negamax(b, depth, -Inf, Inf, 0);
-            if (_aborted) break;                 // discard the partial iteration, keep the last complete one
+            if (_aborted) break;
             best = _rootBestMove;
             bestScore = score;
             reached = depth;
-            if (Math.Abs(score) >= MateThreshold) break; // mate found — no deeper search needed
-            if (_sw.ElapsedMilliseconds * 2 >= _deadlineMs) break; // next (≈4-5× costlier) depth won't finish
+            if (Math.Abs(score) >= MateThreshold) break;
+            if (_sw.ElapsedMilliseconds * 2 >= _deadlineMs) break;
         }
         return new Result(best, bestScore, reached, _nodes);
     }
@@ -125,7 +97,7 @@ public sealed class Search
         if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b))) return 0;
 
         ulong key = Zobrist.Hash(b);
-        if (ply > 0 && _path.Contains(key)) return 0; // repetition within the line → draw
+        if (ply > 0 && _path.Contains(key)) return 0;
 
         int alphaOrig = alpha;
         ref TtEntry e = ref _tt[key & _ttMask];
@@ -145,11 +117,9 @@ public sealed class Search
 
         var moves = MoveGen.Legal(b);
         if (moves.Count == 0)
-            return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0; // checkmate (mover loses) / stalemate
+            return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0;
 
         Order(b, moves, ttMove, ply);
-        // Substrate root prior (centipawns): computed once, here at the root, by content-hash lookup —
-        // never inside the tree. Aligns with `moves` AFTER ordering. Null for the pure classical engine.
         int[]? rootBonus = (ply == 0 && _rootBias is not null) ? _rootBias.Bonus(b, moves) : null;
 
         _path.Add(key);
@@ -177,9 +147,6 @@ public sealed class Search
         return best;
     }
 
-    // Quiescence: extend the search through forcing captures/promotions until the position is "quiet", so
-    // the static eval is never applied in the middle of a capture exchange. In check, search ALL evasions
-    // (no stand-pat) so a checked side can't wrongly stand on its static score.
     private int Quiesce(Board b, int alpha, int beta, int ply)
     {
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
@@ -197,7 +164,7 @@ public sealed class Search
         if (moves.Count == 0) return inCheck ? -(Mate - ply) : 0;
 
         var considered = inCheck ? moves : moves.Where(m => IsCaptureOrPromo(b, m)).ToList();
-        if (!inCheck && considered.Count == 0) return alpha; // quiet position
+        if (!inCheck && considered.Count == 0) return alpha;
 
         OrderCaptures(b, considered);
         foreach (var m in considered)
@@ -212,9 +179,7 @@ public sealed class Search
         return alpha;
     }
 
-    // ---- move ordering ----
-
-    private static readonly int[] PieceValue = { 0, 100, 320, 330, 500, 900, 20000 }; // index by type 0..6
+    private static readonly int[] PieceValue = { 0, 100, 320, 330, 500, 900, 20000 };
 
     private void Order(Board b, List<ChessMove> moves, ChessMove ttMove, int ply)
     {
@@ -241,14 +206,14 @@ public sealed class Search
     private static int Mvv(Board b, ChessMove m)
     {
         var victim = b.Squares[m.To];
-        int v = victim != Piece.Empty ? PieceValue[Math.Abs((sbyte)victim)] : 100; // ep / promo
+        int v = victim != Piece.Empty ? PieceValue[Math.Abs((sbyte)victim)] : 100;
         return v * 10 - PieceValue[Math.Abs((sbyte)b.Squares[m.From])];
     }
 
     private void RecordKiller(Board b, ChessMove m, int ply)
     {
         if (ply >= MaxPly) return;
-        if (b.Squares[m.To] != Piece.Empty || (m.Flags & MoveFlags.EnPassant) != 0) return; // captures aren't killers
+        if (b.Squares[m.To] != Piece.Empty || (m.Flags & MoveFlags.EnPassant) != 0) return;
         if (_killers[ply, 0] == m) return;
         _killers[ply, 1] = _killers[ply, 0];
         _killers[ply, 0] = m;
@@ -259,7 +224,6 @@ public sealed class Search
     private static bool IsCaptureOrPromo(Board b, ChessMove m)
         => b.Squares[m.To] != Piece.Empty || (m.Flags & (MoveFlags.EnPassant | MoveFlags.Promotion)) != 0;
 
-    // K vs K, or K+single-minor vs K — a hard draw the search should score 0 (no pawns/rooks/queens).
     private static bool IsInsufficientMaterial(Board b)
     {
         int minors = 0;

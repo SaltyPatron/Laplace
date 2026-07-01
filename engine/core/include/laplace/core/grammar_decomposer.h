@@ -51,7 +51,6 @@ typedef struct laplace_grammar_row_iter laplace_grammar_row_iter_t;
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
                                  laplace_grammar_row_iter_t** out);
 
-/** When set, one physical newline is one record (ignores grammar row quoting). */
 void laplace_grammar_row_iter_set_line_framed(laplace_grammar_row_iter_t* it, int on);
 
 typedef struct {
@@ -79,9 +78,6 @@ int laplace_grammar_row_iter_parse_row(laplace_grammar_row_iter_t* it,
 
 void laplace_grammar_row_iter_free_lines(laplace_raw_row_t* rows, size_t count);
 
-/** One-shot: frame records (grammar or line) + parse each, returning parsed rows with ASTs.
- *  Pass chunk=NULL or len=0 to flush the final partial record at end-of-stream.
- *  Caller frees with laplace_grammar_row_iter_free_rows. */
 int laplace_grammar_row_iter_feed_parsed(laplace_grammar_row_iter_t* it,
                                          const uint8_t* chunk, size_t len,
                                          laplace_parsed_row_t** out_rows, size_t* out_count);

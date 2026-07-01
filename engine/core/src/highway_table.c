@@ -17,30 +17,22 @@
 #  include <unistd.h>
 #endif
 
-/* Verify struct sizes match the binary layout written by codegen.
- * These are compile-time assertions and cost nothing at runtime. */
 typedef char _hw_header_size_check [(sizeof(laplace_highway_header_t)  == 128) ? 1 : -1];
 typedef char _hw_rec_size_check    [(sizeof(laplace_highway_rel_rec_t) ==  32) ? 1 : -1];
 typedef char _hw_mask_size_check   [(sizeof(laplace_mask256_t)         ==  32) ? 1 : -1];
-
-/* ── Global state ─────────────────────────────────────────────────────────── */
 
 static struct {
     const uint8_t*                   base;
     size_t                           len;
     const laplace_highway_header_t*  header;
-    const laplace_highway_rel_rec_t* records;     /* points into mmap */
-    const laplace_mask256_t*         band_masks;  /* points into mmap */
-    const char*                      strings;     /* points into mmap */
-    /* Computed at load time: type_id for each relation (blake3(canonical_name)) */
+    const laplace_highway_rel_rec_t* records;
+    const laplace_mask256_t*         band_masks;
+    const char*                      strings;
     hash128_t type_id_cache[LAPLACE_HIGHWAY_REL_COUNT];
-    /* Open-addressing hash table: type_id.lo & MASK → record ordinal, -1 = empty */
     int16_t   hash_bucket[HIGHWAY_BUCKET_SIZE];
 } g_hw;
 
 static int g_hw_loaded = 0;
-
-/* ── Platform mmap ──────────────────────────────────────────────────────────── */
 
 #ifdef _WIN32
 
@@ -92,15 +84,9 @@ static void hw_unmap(const uint8_t* base, size_t len) {
 
 #endif
 
-/* ── Type-id computation (must match relation_law.c's type_id_from_canonical) ── */
-
 static void type_id_for_canonical(const char* name, uint8_t name_len, hash128_t* out) {
-    /* Content-addressed: entity hash = blake3(canonical_name_utf8_bytes).
-     * Must match relation_law.c type_id_from_canonical and EntityTypeRegistry.Id() in C#. */
     hash128_blake3((const uint8_t*)name, (size_t)name_len, out);
 }
-
-/* ── Lifecycle ────────────────────────────────────────────────────────────── */
 
 void highway_table_unload(void) {
     if (g_hw.base)
@@ -131,7 +117,6 @@ int highway_table_load(const char* path) {
         hw_unmap(base, len); return -3;
     }
 
-    /* Bounds checks: all section endpoints must fit within the file */
     uint64_t rel_end  = h->relations_offset    + h->relation_count * sizeof(laplace_highway_rel_rec_t);
     uint64_t band_end = h->band_masks_offset   + h->band_count     * sizeof(laplace_mask256_t);
     uint64_t str_end  = h->strings_offset      + h->strings_length;
@@ -146,8 +131,7 @@ int highway_table_load(const char* path) {
     g_hw.band_masks = (const laplace_mask256_t*)(base + h->band_masks_offset);
     g_hw.strings    = (const char*)(base + h->strings_offset);
 
-    /* Compute type_ids and build the open-addressing hash table */
-    memset(g_hw.hash_bucket, 0xFF, sizeof(g_hw.hash_bucket));  /* -1 (0xFFFF) = empty */
+    memset(g_hw.hash_bucket, 0xFF, sizeof(g_hw.hash_bucket));
     for (uint64_t i = 0; i < h->relation_count; ++i) {
         const laplace_highway_rel_rec_t* rec = &g_hw.records[i];
         type_id_for_canonical(g_hw.strings + rec->name_off, rec->name_len,
@@ -163,8 +147,6 @@ int highway_table_load(const char* path) {
     return 0;
 }
 
-/* ── Lookups ──────────────────────────────────────────────────────────────── */
-
 int highway_table_relation_by_hash(const hash128_t* type_id,
                                    uint8_t*         out_bit_pos,
                                    float*           out_rank,
@@ -173,7 +155,7 @@ int highway_table_relation_by_hash(const hash128_t* type_id,
     size_t b = (size_t)(type_id->lo & HIGHWAY_BUCKET_MASK);
     for (size_t probe = 0; probe < HIGHWAY_BUCKET_SIZE; ++probe) {
         int16_t idx = g_hw.hash_bucket[b];
-        if (idx < 0) return -1;   /* empty slot: not present */
+        if (idx < 0) return -1;
         if (hash128_equals(type_id, &g_hw.type_id_cache[idx])) {
             const laplace_highway_rel_rec_t* rec = &g_hw.records[idx];
             if (out_bit_pos) *out_bit_pos = rec->bit_pos;
@@ -192,8 +174,6 @@ int highway_table_relation_by_bit(uint8_t      bit_pos,
                                   uint8_t*     out_band) {
     if (!g_hw_loaded) return -1;
     if ((uint64_t)bit_pos >= g_hw.header->relation_count) return -1;
-    /* bit_pos is the record ordinal: relations are sorted alphabetically
-     * and bit positions are assigned in that same order by codegen. */
     const laplace_highway_rel_rec_t* rec = &g_hw.records[bit_pos];
     if (out_canonical) *out_canonical = g_hw.strings + rec->name_off;
     if (out_rank)      *out_rank      = rec->rank;
@@ -207,8 +187,6 @@ int highway_table_band_mask(uint8_t band, laplace_mask256_t* out_mask) {
     *out_mask = g_hw.band_masks[band];
     return 0;
 }
-
-/* ── Mask utilities ────────────────────────────────────────────────────────── */
 
 laplace_mask256_t highway_table_mask_or(laplace_mask256_t a, laplace_mask256_t b) {
     laplace_mask256_t r;

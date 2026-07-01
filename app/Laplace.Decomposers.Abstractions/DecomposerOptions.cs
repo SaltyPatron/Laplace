@@ -8,7 +8,6 @@ public sealed record DecomposerOptions(
     LanguageFilter?           Languages = null,
     
     bool                      EmitCrossLanguageLinks = true,
-    /// <summary>Stop after this many input rows/units (0 = unlimited). Sandbox / benchmark cap.</summary>
     long                      MaxInputUnits = 0)
 {
     public static DecomposerOptions Default { get; } =

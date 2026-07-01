@@ -3,7 +3,6 @@
 
 BEGIN;
 
--- Build 5000-id probe array from live entities
 CREATE TEMP TABLE tmp_sample_ent ON COMMIT DROP AS
 SELECT id FROM laplace.entities TABLESAMPLE SYSTEM (0.1) LIMIT 5000;
 

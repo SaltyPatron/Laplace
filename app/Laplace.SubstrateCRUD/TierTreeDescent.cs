@@ -2,9 +2,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
-/// <summary>
-/// Shared O(tier) Merkle descent probe helpers for tier trees (content + grammar compose).
-/// </summary>
 public static class TierTreeDescent
 {
     public static void BuildProbe(
@@ -44,11 +41,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// Tier 0/1 node ids for a flat <see cref="ISubstrateReader.EntitiesExistBitmapAsync"/>
-    /// probe — descent only covers tier&gt;=2 trunks; without these bits,
-    /// <see cref="MerkleDedup.TrunkShortcircuit"/> still treats unmarked ancestors as novel.
-    /// </summary>
     public static void BuildTier01Probe(
         TierTree tree, out List<Hash128> ids, out List<int> nodeIndices)
     {
@@ -63,10 +55,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// OR tier 0/1 flat-probe hits into a per-node emit bitmap (same index order as
-    /// <paramref name="nodeIndices"/> / flat bitmap).
-    /// </summary>
     public static void ApplyTier01Present(byte[] emitBm, IReadOnlyList<int> nodeIndices, byte[] flatBm)
     {
         long bits = (long)flatBm.Length * 8;
@@ -78,11 +66,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// Map a <c>content_descent_bitmap</c> result (tier&gt;=2 candidate order) to a per-node
-    /// emit bitmap (bit j set = node j present).
-    /// When <paramref name="treeIdxToFlat"/> is set, indexes into a merged batch probe bitmap.
-    /// </summary>
     public static byte[] NodeEmitBitmap(TierTree tree, byte[] descentBm, int[]? treeIdxToFlat = null)
     {
         int n = tree.NodeCount;
@@ -110,11 +93,6 @@ public static class TierTreeDescent
         return bm;
     }
 
-    /// <summary>
-    /// Merge tier&gt;=2 trunk ids + parent indices from multiple trees into one flat candidate list
-    /// for a single <c>content_descent_bitmap</c> round-trip. Parent indices refer to positions in
-    /// the merged <paramref name="ids"/> list.
-    /// </summary>
     public static void BuildBatchProbe(
         IReadOnlyList<TierTree> trees,
         out List<Hash128> ids,
@@ -160,10 +138,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// Tier 0 node ids resolved by the T0 perfcache — O(1) client-side, no DB round trip.
-    /// Tier 1 (UAX#29 graphemes) is excluded; those still use <see cref="BuildBatchTier1Probe"/>.
-    /// </summary>
     public static void BuildBatchTier0PerfcachePresent(
         IReadOnlyList<TierTree> trees,
         byte[][] perTreeEmitBm,
@@ -186,7 +160,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>Tier 0 (scalar codepoint) ids for a flat DB existence probe.</summary>
     public static void BuildBatchTier0Probe(
         IReadOnlyList<TierTree> trees,
         out List<Hash128> ids,
@@ -207,7 +180,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>Tier 1 (UAX#29 grapheme) ids for a flat DB existence probe.</summary>
     public static void BuildBatchTier1Probe(
         IReadOnlyList<TierTree> trees,
         out List<Hash128> ids,
@@ -228,12 +200,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// Tier 0/1 node ids for a flat <see cref="ISubstrateReader.EntitiesExistBitmapAsync"/>
-    /// probe — descent only covers tier&gt;=2 trunks; without these bits,
-    /// <see cref="MerkleDedup.TrunkShortcircuit"/> still treats unmarked ancestors as novel.
-    /// Prefer <see cref="BuildBatchTier0PerfcachePresent"/> + <see cref="BuildBatchTier1Probe"/>.
-    /// </summary>
     [Obsolete("Use BuildBatchTier0PerfcachePresent + BuildBatchTier1Probe")]
     public static void BuildBatchTier01Probe(
         IReadOnlyList<TierTree> trees,
@@ -255,9 +221,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// OR tier 0/1 flat-probe hits from a merged batch bitmap into per-tree emit bitmaps.
-    /// </summary>
     public static void ApplyBatchTier01Present(
         byte[][] perTreeEmitBm, IReadOnlyList<(int TreeIndex, int NodeIndex)> placements, byte[] flatBm)
     {
@@ -270,10 +233,6 @@ public static class TierTreeDescent
         }
     }
 
-    /// <summary>
-    /// One <c>content_descent_bitmap</c> (+ optional tier01 flat) round-trip for many trees.
-    /// Output aligns with <paramref name="trees"/>; null entries when the input tree is null.
-    /// </summary>
     public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
     {

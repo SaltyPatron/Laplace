@@ -4,14 +4,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// The AST is the merkle DAG, and a grammar's leaf text continues that same DAG downward. So a JSON
-/// scalar leaf (Wiktionary etc.) and the content path (WordNet/OMW/VerbNet via ContentWitnessBatch)
-/// must resolve the SAME surface to the SAME entity id, or the graph fragments at the grammar↔text
-/// seam. The compose path routes JSON leaves through laplace_content_root_id specifically to make
-/// this hold by construction (grammar_compose.cpp); this test is the regression guard for that.
-/// ASCII surfaces are used so NFC normalization is identity and a char index equals a byte index.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class JsonLeafContentConvergenceTests
 {
@@ -19,8 +11,8 @@ public sealed class JsonLeafContentConvergenceTests
         Hash128.OfCanonical("substrate/source/test/json-leaf-convergence/v1");
 
     [Theory]
-    [InlineData("cat")]        // single word, multi-grapheme
-    [InlineData("New York")]   // multi-word surface (the audit's example)
+    [InlineData("cat")]
+    [InlineData("New York")]
     public void JsonStringLeaf_Id_ConvergesWith_ContentPath(string surface)
     {
         string doc = "{\"w\":\"" + surface + "\"}";

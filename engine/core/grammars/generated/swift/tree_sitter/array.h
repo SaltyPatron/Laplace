@@ -28,37 +28,26 @@ extern "C" {
     uint32_t capacity; \
   }
 
-
 #define array_init(self) \
   ((self)->size = 0, (self)->capacity = 0, (self)->contents = NULL)
-
 
 #define array_new() \
   { NULL, 0, 0 }
 
-
 #define array_get(self, _index) \
   (assert((uint32_t)(_index) < (self)->size), &(self)->contents[_index])
 
-
 #define array_front(self) array_get(self, 0)
-
 
 #define array_back(self) array_get(self, (self)->size - 1)
 
-
-
 #define array_clear(self) ((self)->size = 0)
-
-
 
 #define array_reserve(self, new_capacity)        \
   ((self)->contents = _array__reserve(           \
     (void *)(self)->contents, &(self)->capacity, \
     array_elem_size(self), new_capacity)         \
   )
-
-
 
 #define array_delete(self)                           \
   do {                                               \
@@ -68,7 +57,6 @@ extern "C" {
     (self)->capacity = 0;                            \
   } while (0)
 
-
 #define array_push(self, element)                                 \
   do {                                                            \
     (self)->contents = _array__grow(                              \
@@ -77,8 +65,6 @@ extern "C" {
     );                                                            \
    (self)->contents[(self)->size++] = (element);                  \
   } while(0)
-
-
 
 #define array_grow_by(self, count)                                               \
   do {                                                                           \
@@ -91,11 +77,8 @@ extern "C" {
     (self)->size += (count);                                                     \
   } while (0)
 
-
 #define array_push_all(self, other) \
   array_extend((self), (other)->size, (other)->contents)
-
-
 
 #define array_extend(self, count, other_contents)                 \
   (self)->contents = _array__splice(                              \
@@ -103,15 +86,11 @@ extern "C" {
     array_elem_size(self), (self)->size, 0, count, other_contents \
   )
 
-
-
-
 #define array_splice(self, _index, old_count, new_count, new_contents) \
   (self)->contents = _array__splice(                                   \
     (void *)(self)->contents, &(self)->size, &(self)->capacity,        \
     array_elem_size(self), _index, old_count, new_count, new_contents  \
   )
-
 
 #define array_insert(self, _index, element)                     \
   (self)->contents = _array__splice(                            \
@@ -119,20 +98,16 @@ extern "C" {
     array_elem_size(self), _index, 0, 1, &(element)             \
   )
 
-
 #define array_erase(self, _index) \
   _array__erase((void *)(self)->contents, &(self)->size, array_elem_size(self), _index)
 
-
 #define array_pop(self) ((self)->contents[--(self)->size])
-
 
 #define array_assign(self, other)                                   \
   (self)->contents = _array__assign(                                \
     (void *)(self)->contents, &(self)->size, &(self)->capacity,     \
     (const void *)(other)->contents, (other)->size, array_elem_size(self) \
   )
-
 
 #define array_swap(self, other)                                     \
   do {                                                              \
@@ -143,28 +118,13 @@ extern "C" {
                  &(other)->size, &(other)->capacity);               \
   } while (0)
 
-
 #define array_elem_size(self) (sizeof *(self)->contents)
-
-
-
-
-
-
-
-
 
 #define array_search_sorted_with(self, compare, needle, _index, _exists) \
   _array__search_sorted(self, 0, compare, , needle, _index, _exists)
 
-
-
-
-
 #define array_search_sorted_by(self, field, needle, _index, _exists) \
   _array__search_sorted(self, 0, _compare_int, field, needle, _index, _exists)
-
-
 
 #define array_insert_sorted_with(self, compare, value) \
   do { \
@@ -173,26 +133,12 @@ extern "C" {
     if (!_exists) array_insert(self, _index, value); \
   } while (0)
 
-
-
-
-
 #define array_insert_sorted_by(self, field, value) \
   do { \
     unsigned _index, _exists; \
     array_search_sorted_by(self, field, (value) field, &_index, &_exists); \
     if (!_exists) array_insert(self, _index, value); \
   } while (0)
-
-
-
-
-
-
-
-
-
-
 
 static inline void _array__erase(void* self_contents, uint32_t *size,
                                 size_t element_size, uint32_t index) {
@@ -202,7 +148,6 @@ static inline void _array__erase(void* self_contents, uint32_t *size,
           (*size - index - 1) * element_size);
   (*size)--;
 }
-
 
 static inline void *_array__reserve(void *contents, uint32_t *capacity,
                                   size_t element_size, uint32_t new_capacity) {
@@ -218,7 +163,6 @@ static inline void *_array__reserve(void *contents, uint32_t *capacity,
   return new_contents;
 }
 
-
 static inline void *_array__assign(void* self_contents, uint32_t *self_size, uint32_t *self_capacity,
                                  const void *other_contents, uint32_t other_size, size_t element_size) {
   void *new_contents = _array__reserve(self_contents, self_capacity, element_size, other_size);
@@ -226,7 +170,6 @@ static inline void *_array__assign(void* self_contents, uint32_t *self_size, uin
   memcpy(new_contents, other_contents, *self_size * element_size);
   return new_contents;
 }
-
 
 static inline void _array__swap(uint32_t *self_size, uint32_t *self_capacity,
                                uint32_t *other_size, uint32_t *other_capacity) {
@@ -237,7 +180,6 @@ static inline void _array__swap(uint32_t *self_size, uint32_t *self_capacity,
   *other_size = tmp_size;
   *other_capacity = tmp_capacity;
 }
-
 
 static inline void *_array__grow(void *contents, uint32_t size, uint32_t *capacity,
                                uint32_t count, size_t element_size) {
@@ -251,7 +193,6 @@ static inline void *_array__grow(void *contents, uint32_t size, uint32_t *capaci
   }
   return new_contents;
 }
-
 
 static inline void *_array__splice(void *self_contents, uint32_t *size, uint32_t *capacity,
                                  size_t element_size,
@@ -292,8 +233,6 @@ static inline void *_array__splice(void *self_contents, uint32_t *size, uint32_t
   return new_contents;
 }
 
-
-
 #define _array__search_sorted(self, start, compare, suffix, needle, _index, _exists) \
   do { \
     *(_index) = start; \
@@ -313,8 +252,6 @@ static inline void *_array__splice(void *self_contents, uint32_t *size, uint32_t
     else if (comparison < 0) *(_index) += 1; \
   } while (0)
 
-
-
 #define _compare_int(a, b) ((int)*(a) - (int)(b))
 
 #ifdef _MSC_VER
@@ -327,4 +264,4 @@ static inline void *_array__splice(void *self_contents, uint32_t *size, uint32_t
 }
 #endif
 
-#endif  
+#endif

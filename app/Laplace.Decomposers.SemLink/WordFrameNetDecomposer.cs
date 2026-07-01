@@ -5,9 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests WordFrameNet FrameNet LU → WordNet synset mapping TSV (Adimen WFN / XWFN packages).
-/// </summary>
 public sealed class WordFrameNetDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =

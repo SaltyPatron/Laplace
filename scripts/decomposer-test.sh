@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Test one decomposer in a fresh isolated DB: prerequisites + target ingest, then gates.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

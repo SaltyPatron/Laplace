@@ -7,19 +7,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests semlink-master/other_resources/VN-FNRoleMapping.txt: an XML document (despite the .txt
-/// extension) of <c>vncls</c> elements, each pairing a VerbNet class with the FrameNet frame it was
-/// mapped against, and nested <c>role</c> elements giving the per-pair VerbNet-thematic-role to
-/// FrameNet-FE role correspondence. This is role-level detail that vn-fn2.json's class/frame-name
-/// list does not carry.
-///
-/// VerbNet role ids are minted via <see cref="ContentEmitter"/> exactly as
-/// <c>Laplace.Decomposers.VerbNet.VerbNetDecomposer</c> mints THEMROLE ids (plain content-addressed
-/// text root, not a typed category), so the two sources converge on the same id for the same role
-/// name. FrameNet FE ids are minted via <see cref="CategoryAnchor"/> on the bare FE name exactly as
-/// <c>Laplace.Decomposers.FrameNet.FrameNetDecomposer</c> does, so the two sources converge there too.
-/// </summary>
 internal static class SemLinkRoleMappingIngest
 {
     internal const string FileName = "VN-FNRoleMapping.txt";
@@ -147,9 +134,6 @@ internal static class SemLinkRoleMappingIngest
         return total > 0 ? total : null;
     }
 
-    // VerbNet role names and FrameNet-FE / VerbNet-class category anchors are CONTENT (ContentEmitter /
-    // CategoryAnchor): route them through the SHARED two-phase containment (EnableDeferredContent) like
-    // every other content-emitting source; drain via BuildAsync so the deferred probe runs.
     private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
         new SubstrateChangeBuilder(SemLinkDecomposer.Source, unit, null,
             entityCapacity: batch * 2,

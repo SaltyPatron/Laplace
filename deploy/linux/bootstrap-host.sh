@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
-# One-time privileged host setup for the Laplace API on hart-server.
-# Run ONCE as root (or: sudo deploy/linux/bootstrap-host.sh). Idempotent.
-#
-# Separates privileged setup (systemd unit, nginx vhost, narrow sudoers grant)
-# from the routine, unprivileged CICD deploy (deploy.sh, run as laplace-runner).
 set -euo pipefail
 
-# Resolve to this script's own directory so it works both from a repo checkout
-# (deploy/linux/) and from a flat staging copy.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR=/opt/laplace/app
 RUN_USER=laplace-runner
 RUN_GROUP=laplace-runner
 API_PORT="${API_PORT:-8080}"
-# LAN subnet allowed to reach the API port — auto-derived from the default-route
-# interface's on-link route below; override with LAN_CIDR=... sudo -E ...
 LAN_CIDR="${LAN_CIDR:-}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -41,7 +32,6 @@ ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 
 echo "==> sudoers grant for $RUN_USER (restart service + reload nginx only)"
 cat > /etc/sudoers.d/laplace-runner-deploy <<EOF
-# Allow the CICD runner to manage just the Laplace API service + reload nginx.
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart laplace-api, \\
   /usr/bin/systemctl start laplace-api, /usr/bin/systemctl stop laplace-api, \\
   /usr/bin/systemctl status laplace-api, /usr/bin/systemctl is-active laplace-api, \\
@@ -67,7 +57,6 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
   if [[ -z "$LAN_CIDR" ]]; then
     echo "   ✗ could not derive LAN subnet; re-run with LAN_CIDR=x.x.x.x/yy. Skipping."
   else
-    # `ufw allow` is idempotent — re-adding an identical rule is a no-op.
     ufw allow from "$LAN_CIDR" to any port "$API_PORT" proto tcp comment "laplace-api LAN" >/dev/null
     echo "   ufw rule ensured: $API_PORT/tcp from $LAN_CIDR"
   fi

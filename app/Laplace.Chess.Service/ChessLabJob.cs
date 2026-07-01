@@ -26,7 +26,6 @@ public sealed record ChessLabJobSummary(
     int Total = 0,
     string? Message = null);
 
-/// <summary>Snapshot of a Chess Lab job (substrate-test, ladder, cutechess gauntlet, …).</summary>
 public sealed record ChessLabJob(
     string Id,
     ChessLabJobKind Kind,

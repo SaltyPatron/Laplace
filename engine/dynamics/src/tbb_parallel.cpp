@@ -48,7 +48,7 @@ oneapi::tbb::task_arena make_arena(int host, int mkl_threads) {
     return oneapi::tbb::task_arena(c);
 }
 
-}  // namespace
+}
 
 void warm_performance_arena(int host, int mkl_threads) {
     static oneapi::tbb::global_control thread_cap(
@@ -64,7 +64,8 @@ oneapi::tbb::task_arena& performance_arena() {
     return *g_arena;
 }
 
-}  // namespace tbb_ops
-}  // namespace laplace
+}
+
+}
 
 #endif

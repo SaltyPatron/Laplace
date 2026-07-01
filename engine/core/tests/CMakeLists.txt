@@ -58,9 +58,6 @@ if(WIN32)
                 $<TARGET_FILE_DIR:laplace_core_tests>
         COMMENT "Copy laplace_core.dll + libxml2.dll beside laplace_core_tests.exe")
 
-    # icx -fsanitize=address links INTEL's asan runtime, but MSVC ships a same-named
-    # clang_rt.asan_dynamic-x86_64.dll that shadows it on PATH and breaks the loader with
-    # STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139). Copy Intel's beside the exe (app-dir wins over PATH).
     if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address" OR CMAKE_C_FLAGS MATCHES "fsanitize=address")
         get_filename_component(_ICX_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
         file(GLOB _INTEL_ASAN_RT "${_ICX_BIN}/../lib/clang/*/lib/windows/clang_rt.asan_dynamic-x86_64.dll")

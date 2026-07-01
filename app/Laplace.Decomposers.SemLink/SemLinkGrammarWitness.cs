@@ -101,12 +101,6 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
         }
     }
 
-    /// <summary>
-    /// other_resources/external_vn2pb.json: VerbNet-class key (lemma-prefixed, e.g. <c>turn-26.6.1</c>,
-    /// the canonical VerbNet class id surface, unlike vn-fn2's class-prefixed <c>26.6.1-turn</c>) to an
-    /// array of PropBank roleset names. Same shape as <see cref="WalkVnFn"/>, pointed at PropBank
-    /// rolesets instead of FrameNet frames, and additional to pb-vn2.json's roleset-keyed direction.
-    /// </summary>
     private static void WalkVnPbExternal(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
     {
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);

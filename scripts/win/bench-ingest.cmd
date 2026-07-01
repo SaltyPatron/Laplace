@@ -1,6 +1,6 @@
 @echo off
 rem Pipeline ingest benchmark — OPT-IN ONLY. Never auto-runs full corpora.
-rem Measures dedup-once path (LAPLACE_BULK_FRESH=0). Default slice: 50k units.
+rem Measures dedup-once path (trunk descent + anti-join merge). Default slice: 50k units.
 rem Usage: bench-ingest.cmd --confirm <source> [options]
 rem Sources: conceptnet | wiktionary | wiktionary-en | ud
 
@@ -55,7 +55,6 @@ if /i "%BENCH_DB%"=="laplace" (
   exit /b 2
 )
 
-set "LAPLACE_BULK_FRESH=0"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
 if not defined LAPLACE_APPLY_PARTITIONS set "LAPLACE_APPLY_PARTITIONS=1"
@@ -151,7 +150,6 @@ exit /b 0
 :print_env
 echo host=%COMPUTERNAME%
 echo LAPLACE_DB=%LAPLACE_DB%
-echo LAPLACE_BULK_FRESH=%LAPLACE_BULK_FRESH%
 echo LAPLACE_INGEST_MAX_UNITS=%LAPLACE_INGEST_MAX_UNITS%
 echo BENCH_PATH=%BENCH_PATH%
 echo CLI_EXE=%CLI_EXE%

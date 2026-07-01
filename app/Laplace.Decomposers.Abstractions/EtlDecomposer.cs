@@ -5,20 +5,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// The one generic source driver. Given an <see cref="EtlSource"/> manifest row it bootstraps the
-/// source's relation/type vocabulary, enumerates the source's files under the ecosystem path by
-/// glob, and streams each through <see cref="StructuredGrammarIngest.IngestFileAsync"/> with the
-/// source modality and an <see cref="EtlWitness"/>. Reading, batching, tier-containment dedup, and
-/// provenance all live in <see cref="StructuredGrammarIngest"/> + the partitioned sink — this
-/// driver owns none of it. Adding a source is a manifest row, not a new class.
-/// </summary>
 public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
 {
     private readonly EtlSource _src;
     private ISubstrateReader? _containmentReader;
 
-    // Languages discovered during the walk (the bespoke witnesses track these for canonical readback).
     internal static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> LanguageNamesBySource =
         new(StringComparer.Ordinal);
 
@@ -36,7 +27,6 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             var names = new HashSet<string>(StringComparer.Ordinal);
             if (LanguageNamesBySource.TryGetValue(_src.Name, out var d))
                 foreach (var n in d.Keys) names.Add(n);
-            // A factory-routed witness tracks discovered names in its own source's static dict.
             foreach (var n in EtlWitnessFactory.Readback(_src.Name)) names.Add(n);
             return names;
         }
@@ -67,8 +57,6 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
     {
         _containmentReader = context.Reader;
 
-        // ILI-anchored sources gate on the CILI map exactly as the bespoke decomposers do: a hard
-        // error where resolved synset anchors are mandatory (OMW), a warning where best-effort.
         if (_src.Anchor == AnchorResolver.IliSynset)
         {
             if (_src.RequireIliMap)
@@ -89,7 +77,6 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             ? null
             : static line => line.Length > 0 && line[0] != (byte)'#';
 
-        // Always pass the live reader — existence gate runs before compose for every source.
         ISubstrateReader? composeReader = _containmentReader;
 
         foreach (var file in files)

@@ -185,7 +185,6 @@ int etl_witness_conceptnet_row(intent_stage_t* stage, const laplace_etl_config_t
     return attest_triple(stage, cfg, &start_id, &end_id, type_name, weight);
 }
 
-/* Trunk skip: both term content roots already present => attestation only, no compose. */
 int etl_witness_conceptnet_trunk_skip(intent_stage_t* stage, const laplace_etl_config_t* cfg,
                                       const uint8_t* line, size_t line_len, const laplace_ast_t* ast,
                                       laplace_etl_exist_probe_fn probe, void* probe_ctx) {

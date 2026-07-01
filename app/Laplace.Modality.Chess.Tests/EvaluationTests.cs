@@ -2,16 +2,8 @@ using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
-/// <summary>
-/// Proves the classical evaluation: the colour-swap vertical-mirror invariant (catches every orientation
-/// / sign bug in the piece-square tables), the side-to-move/tempo invariant, material counting, and
-/// piece-square placement. Pure C#, no native/DB.
-/// </summary>
 public sealed class EvaluationTests
 {
-    // The colour-swapped vertical mirror of a board: a position that MUST evaluate identically (it is the
-    // same game seen from the other side). For every piece at (file,rank) put the opposite colour at
-    // (file,7-rank) and flip the side to move. (Eval ignores castling/ep, so they are left default.)
     private static Board Mirror(Board b)
     {
         var m = new Board { WhiteToMove = !b.WhiteToMove };
@@ -27,11 +19,11 @@ public sealed class EvaluationTests
     }
 
     [Theory]
-    [InlineData("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]                 // startpos
-    [InlineData("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")]      // Kiwipete
-    [InlineData("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1")]                                 // R+P endgame
-    [InlineData("r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3")]         // Ruy Lopez
-    [InlineData("rnbq1rk1/pp2bppp/2p2n2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 1")]         // QGD middlegame
+    [InlineData("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]
+    [InlineData("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")]
+    [InlineData("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1")]
+    [InlineData("r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3")]
+    [InlineData("rnbq1rk1/pp2bppp/2p2n2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 1")]
     public void MirrorSymmetry_EvalIsColorIndependent(string fen)
     {
         var b = Board.FromFen(fen);
@@ -42,24 +34,21 @@ public sealed class EvaluationTests
     public void Startpos_IsBalanced_MoverHasTempo()
     {
         int e = Evaluation.Evaluate(Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
-        Assert.InRange(e, 1, 20); // symmetric material/PST → only the tempo bonus remains, and it favours the mover
+        Assert.InRange(e, 1, 20);
     }
 
     [Fact]
     public void SideToMove_TempoInvariant()
     {
-        // Same pieces, only the side to move differs: the STM-relative evals sum to twice the tempo bonus
-        // (white_cp + tempo) + (-white_cp + tempo).
         const string pieces = "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R";
         int w = Evaluation.Evaluate(Board.FromFen($"{pieces} w - - 0 1"));
         int bl = Evaluation.Evaluate(Board.FromFen($"{pieces} b - - 0 1"));
-        Assert.Equal(20, w + bl); // 2 × tempo
+        Assert.Equal(20, w + bl);
     }
 
     [Fact]
     public void Material_QueenUp_IsDecisive_FromMoverPerspective()
     {
-        // White has K+Q, Black has lone K.
         int whiteToMove = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1"));
         int blackToMove = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/3QK3 b - - 0 1"));
         Assert.True(whiteToMove > 800, $"white up a queen, white to move → {whiteToMove}");
@@ -69,10 +58,8 @@ public sealed class EvaluationTests
     [Fact]
     public void Pst_CentralKnight_BeatsCornerKnight()
     {
-        // Bare K+K+N is ~pure endgame phase, where the knight's centralisation gap taper toward the
-        // (flatter) endgame table — still a clear, meaningful margin.
-        int center = Evaluation.Evaluate(Board.FromFen("4k3/8/8/3N4/8/8/8/4K3 w - - 0 1")); // N on d5
-        int corner = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/N3K3 w - - 0 1"));  // N on a1
+        int center = Evaluation.Evaluate(Board.FromFen("4k3/8/8/3N4/8/8/8/4K3 w - - 0 1"));
+        int corner = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/N3K3 w - - 0 1"));
         Assert.True(center > corner + 40, $"central knight {center} should dominate cornered knight {corner}");
     }
 
@@ -110,9 +97,8 @@ public sealed class EvaluationTests
     [Fact]
     public void BishopPair_IsRewarded()
     {
-        // Two bishops vs bishop+knight, otherwise identical king positions → the pair side scores higher.
-        int pair = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KB2 w - - 0 1"));   // B + B
-        int mixed = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KN2 w - - 0 1"));  // B + N
+        int pair = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KB2 w - - 0 1"));
+        int mixed = Evaluation.Evaluate(Board.FromFen("4k3/8/8/8/8/8/8/2B1KN2 w - - 0 1"));
         Assert.True(pair > mixed, $"bishop pair {pair} should beat bishop+knight {mixed}");
     }
 }

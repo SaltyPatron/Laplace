@@ -3,12 +3,6 @@ using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Uci;
 
-/// <summary>
-/// A minimal UCI engine over the pure <see cref="Search"/> — enough of the protocol for cutechess-cli
-/// (the self-play Elo ladder) and lichess-bot (online play): <c>uci / isready / ucinewgame / position /
-/// go / quit</c>. Stateless w.r.t. I/O — <see cref="Handle"/> processes one command line and writes any
-/// response to a supplied writer, so the whole protocol is unit-testable without stdin/stdout.
-/// </summary>
 public sealed class UciEngine
 {
     public const string Name   = "Laplace";
@@ -17,8 +11,6 @@ public sealed class UciEngine
     private Board _board = Board.FromFen(ChessModality.StartFen);
     private readonly Search _search = new();
 
-    /// <summary>Handle one UCI command; write any response to <paramref name="output"/>. Returns false on
-    /// <c>quit</c> (caller should stop the read loop).</summary>
     public bool Handle(string line, TextWriter output)
     {
         var tok = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -62,7 +54,7 @@ public sealed class UciEngine
                 return false;
 
             default:
-                return true; // ignore the rest (setoption, debug, ponderhit, …)
+                return true;
         }
     }
 
@@ -73,7 +65,7 @@ public sealed class UciEngine
         if (startIdx >= 0)
             _board = Board.FromFen(ChessModality.StartFen);
         else if (fenIdx >= 0)
-            _board = Board.FromFen(string.Join(' ', tok.Skip(fenIdx + 1).Take(6))); // FEN = 6 fields
+            _board = Board.FromFen(string.Join(' ', tok.Skip(fenIdx + 1).Take(6)));
 
         int movesIdx = Array.IndexOf(tok, "moves");
         if (movesIdx >= 0)
@@ -81,15 +73,12 @@ public sealed class UciEngine
                 ApplyUciMove(tok[k]);
     }
 
-    // Resolve a UCI long-algebraic move (e2e4, e7e8q) against the legal moves and apply it. A GUI only
-    // sends legal moves; an unrecognised one is ignored rather than crashing the engine.
     private void ApplyUciMove(string uci)
     {
         foreach (var m in MoveGen.Legal(_board))
             if (m.ToUci() == uci) { MoveApply.Make(_board, m); return; }
     }
 
-    // UCI score: "mate N" when a forced mate is in hand (plies → full moves), else "cp".
     private static string ScoreStr(int score)
     {
         const int mate = 30_000, threshold = mate - 1_000;
@@ -99,8 +88,6 @@ public sealed class UciEngine
         return $"mate {(score > 0 ? moves : -moves)}";
     }
 
-    // Translate a "go" command into search limits: explicit depth, fixed movetime, or a clock budget
-    // (≈1/30 of the remaining time plus most of the increment, with a safety margin so we never flag).
     private Search.Limits ParseGo(string[] tok)
     {
         int Int(string key, int def)
@@ -124,6 +111,6 @@ public sealed class UciEngine
             return new Search.Limits(MaxDepth: 64, MaxTimeMs: budget);
         }
 
-        return new Search.Limits(MaxDepth: 64, MaxNodes: 1_000_000, MaxTimeMs: 2000); // bare "go"
+        return new Search.Limits(MaxDepth: 64, MaxNodes: 1_000_000, MaxTimeMs: 2000);
     }
 }

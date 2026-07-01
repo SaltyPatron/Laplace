@@ -1,12 +1,4 @@
 #requires -RunAsAdministrator
-<#
-.SYNOPSIS
-  One-time elevated IIS wiring for the Laplace API: verify the .NET Hosting
-  Bundle / ANCM is registered, then create the app pool + site. Idempotent.
-  Driven entirely through appcmd.exe so it works identically under Windows
-  PowerShell 5.1 and PowerShell 7 (the WebAdministration `IIS:` PSDrive is not
-  available in the PS7 compat session). Run publish.ps1 to fill the site folder.
-#>
 [CmdletBinding()]
 param(
   [string]$SiteName     = "Laplace",
@@ -35,7 +27,6 @@ Write-Host "==> app pool '$PoolName' (No Managed Code, AlwaysRunning)" -Foregrou
 if (-not (& $appcmd list apppool /name:$PoolName 2>$null)) {
   Invoke-AppCmd add apppool /name:$PoolName | Out-Null
 }
-# managedRuntimeVersion="" => "No Managed Code" (correct for ASP.NET Core / ANCM).
 Invoke-AppCmd set apppool /apppool.name:$PoolName /managedRuntimeVersion:"" /startMode:AlwaysRunning /autoStart:true | Out-Null
 
 Write-Host "==> site '$SiteName' on port $Port -> $PhysicalPath" -ForegroundColor Cyan
@@ -44,7 +35,6 @@ if (-not (& $appcmd list site /name:$SiteName 2>$null)) {
 } else {
   Invoke-AppCmd set site /site.name:$SiteName /"[path='/'].[path='/'].physicalPath:$PhysicalPath" | Out-Null
 }
-# Bind the site's root application to our pool + enable preload.
 Invoke-AppCmd set app /app.name:"$SiteName/" /applicationPool:$PoolName /preloadEnabled:true | Out-Null
 
 & $appcmd start apppool /apppool.name:$PoolName 2>$null | Out-Null

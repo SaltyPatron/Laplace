@@ -1,9 +1,5 @@
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Propagate detected P-core count into MKL/TBB env before native DLL static init.
-/// Scripts may pre-set MKL_NUM_THREADS; this only fills gaps from <see cref="CpuTopology"/>.
-/// </summary>
 public static class NativeRuntimeEnv
 {
     public static void ApplyFromTopologyIfUnset()

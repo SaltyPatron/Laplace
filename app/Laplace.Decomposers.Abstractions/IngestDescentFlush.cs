@@ -3,9 +3,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Existence gate on roots → compose deferred units for novel only → one batched descent bitmap → drain.
-/// </summary>
 internal static class IngestDescentFlush
 {
     internal static async Task<(TRecord Record, long Units)[]> ProbeAndDrainAsync<TRecord>(

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Canonical Linux CI/deploy orchestrator (mirror of scripts/win/rebuild-all.cmd + deploy).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -206,8 +205,6 @@ phase_provision() {
   phase_perfcache_guc
   phase_api_env
 }
-
-# ----- execute -----
 
 if [[ "$SKIP_CLEAN" -eq 0 && "$MODE" == "fresh" ]]; then
   phase_clean

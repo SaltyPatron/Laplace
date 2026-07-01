@@ -1,11 +1,5 @@
 namespace Laplace.Cli;
 
-/// <summary>
-/// One-time registration of the already-grammar-conforming sources' bespoke witnesses with the
-/// generic ETL engine (<c>EtlWitnessFactory</c>). The CLI is the composition root that knows the
-/// concrete source projects; the engine in Laplace.Decomposers.Abstractions stays free of any
-/// dependency on them. Idempotent.
-/// </summary>
 internal static class EtlWitnessRegistrations
 {
     private static bool _done;

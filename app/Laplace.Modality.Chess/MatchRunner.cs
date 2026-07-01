@@ -2,25 +2,14 @@ using System.Threading;
 
 namespace Laplace.Modality.Chess;
 
-/// <summary>Chooses a move for the side to move (the rng is for diversification / fallback only).</summary>
 public delegate ChessMove MoveChooser(ChessState state, Random rng);
 
-/// <summary>
-/// Our own engine-vs-engine match harness — no third-party GUI (cutechess) needed. Plays whole games
-/// between two <see cref="MoveChooser"/>s under the real rules (<see cref="ChessModality"/>: mate /
-/// stalemate / threefold / 50-move / insufficient material; a ply cap adjudicates a draw), alternating
-/// colours and diversifying the opening with a few random plies so deterministic engines still play
-/// varied games. Reports W/D/L plus the Elo difference and a 95% error margin — the ablation lab that
-/// turns each <see cref="EvalTerm"/> overlay into a measured Elo number. Pure C#, no DB/native.
-/// </summary>
 public static class MatchRunner
 {
     public readonly record struct MatchResult(int Games, int AWins, int Draws, int BWins)
     {
-        /// <summary>Player A's score in [0,1] (win 1, draw ½).</summary>
         public double Score => Games == 0 ? 0.5 : (AWins + 0.5 * Draws) / Games;
 
-        /// <summary>A's Elo advantage over B (clamped at ±800 for a clean sweep/whitewash).</summary>
         public double EloDiff
         {
             get
@@ -32,7 +21,6 @@ public static class MatchRunner
             }
         }
 
-        /// <summary>95% Elo error margin (normal approximation); large when the result is degenerate.</summary>
         public double Margin95
         {
             get
@@ -49,11 +37,6 @@ public static class MatchRunner
         private static double Sq(double x) => x * x;
     }
 
-    /// <summary>
-    /// Play <paramref name="games"/> games between A and B, alternating colours (A is White on even game
-    /// indices). Each game opens with <paramref name="openingPlies"/> random plies (seeded per game) for
-    /// diversity, then the engines take over; a game reaching <paramref name="maxPlies"/> is a draw.
-    /// </summary>
     public static MatchResult Play(
         MoveChooser a, MoveChooser b, int games, int maxPlies = 200, int seed = 1, int openingPlies = 4)
     {
@@ -72,8 +55,6 @@ public static class MatchRunner
         return new MatchResult(games, aWins, draws, bWins);
     }
 
-    // Returns 0 = White win, 1 = Black win, 2 = draw (terminal or adjudicated at the ply cap).
-    // When `record` is non-null, each chosen move is appended (for PGN export / loop closure).
     private static int PlayOne(
         ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies,
         ChessState? start = null, List<ChessMove>? record = null)
@@ -91,15 +72,12 @@ public static class MatchRunner
         }
     }
 
-    /// <summary>Uniform-random legal move — the strength floor and the opening diversifier.</summary>
     public static ChessMove RandomChooser(ChessState s, Random rng)
     {
         var legal = MoveGen.Legal(s.Board);
         return legal[rng.Next(legal.Count)];
     }
 
-    /// <summary>A fixed-depth search player using the given eval overlays (the ablation knob) and an
-    /// optional root bias (the substrate seam — guided vs pure measures the graph's Elo contribution).</summary>
     public static MoveChooser Searcher(int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null)
     {
         var search = new Search(terms, bias);
@@ -107,9 +85,6 @@ public static class MatchRunner
                            ?? RandomChooser(s, rng);
     }
 
-    /// <summary>A FACTORY for a fresh search player (its own Search/TT) — required for parallel matches,
-    /// where sharing one stateful Search across threads would race. A small TT (<paramref name="ttBits"/>)
-    /// keeps memory bounded across many concurrent games; a shared <paramref name="bias"/> must be thread-safe.</summary>
     public static Func<MoveChooser> SearcherFactory(
         int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null, int ttBits = 16,
         int[][]? mgPst = null, int[][]? egPst = null)
@@ -120,13 +95,6 @@ public static class MatchRunner
                                ?? RandomChooser(s, rng);
         };
 
-    /// <summary>Parallel match: each game builds FRESH players from the factories (no shared mutable state)
-    /// and runs on the thread pool, up to <paramref name="concurrency"/> at once. Deterministic in the final
-    /// tally — each game's seed is fixed — so results reproduce regardless of scheduling.
-    /// <para>When <paramref name="openingFens"/> is non-empty each game STARTS from a book position
-    /// (rotated by game index, each played once from both colours), instead of <paramref name="openingPlies"/>
-    /// random plies — the fair test of corpus knowledge, since the engines begin where the substrate HAS
-    /// data. The book FEN replaces the random opening; the ply cap still adjudicates a draw.</para></summary>
     public static MatchResult Play(
         Func<MoveChooser> makeA, Func<MoveChooser> makeB, int games,
         int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,

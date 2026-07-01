@@ -3,20 +3,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Canonical emitter for highway nodes — POS tags, relation types, entity type labels, and any
-/// other named concept whose identity IS its content-addressed canonical name.
-/// Replaces <see cref="VocabularyAnchor"/>: the id is always <c>blake3(utf8_bytes)</c> via
-/// <see cref="HighwayPerfcache.NodeHash"/>, so all decomposers converge on the same entity.
-/// </summary>
 public static class HighwayNodeEmitter
 {
-    /// <summary>
-    /// Emit a highway node entity. <paramref name="canonicalName"/> is both the identity key
-    /// (its blake3 hash becomes the entity id) and the name linked via HAS_NAME_ALIAS. When
-    /// <paramref name="parentId"/> is set, a <paramref name="parentRelation"/> edge is attested.
-    /// Idempotent within a run via <paramref name="seen"/>.
-    /// </summary>
     public static Hash128 Emit(
         SubstrateChangeBuilder builder,
         string canonicalName,

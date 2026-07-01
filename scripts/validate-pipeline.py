@@ -39,7 +39,6 @@ def parse_ensure_foundation_sh(text: str) -> list[str] | None:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # "unicode:UnicodeDecomposer:0"
         cli = line.strip('"').split(":")[0]
         if cli:
             out.append(cli)
@@ -318,7 +317,6 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     return errs
 
 
-# Legacy entity/relation type namespace banned after content-addressed identity law.
 _LEGACY_TYPE_PATH = re.compile(r"substrate/type/[A-Z]")
 _TYPE_IDENTITY_CARVEOUTS = (
     "substrate/type/grammar/",

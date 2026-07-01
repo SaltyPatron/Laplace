@@ -16,12 +16,6 @@ public static class ConceptNetUri
         return TryParseConceptUri(uri, out lang, out termUnderscored, out _);
     }
 
-    /// <summary>
-    /// Parses a ConceptNet concept URI (/c/&lt;lang&gt;/&lt;term&gt;[/&lt;pos&gt;[/wn/&lt;suffix&gt;]]).
-    /// POS is the single-letter WordNet tag when present. An optional /wn/ suffix may carry an
-    /// MCR synset key or WN-RDF offset token resolvable via <see cref="SourceEntityIdConventions.ResolveSynsetAnchor"/>,
-    /// or coarse lexicographer topic labels (e.g. /wn/animal) via <see cref="ConceptNetWnTopicMap"/>.
-    /// </summary>
     public static bool TryParseConceptUri(
         ReadOnlySpan<byte> uri,
         out ReadOnlySpan<byte> lang,

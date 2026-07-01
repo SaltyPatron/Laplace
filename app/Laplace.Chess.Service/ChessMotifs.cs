@@ -1,6 +1,5 @@
 namespace Laplace.Chess.Service;
 
-/// <summary>Named tactical motifs detected from SAN mainlines (content entities via <see cref="ChessGraph.AppendGameMeta"/>).</summary>
 public static class ChessMotifs
 {
     private static readonly (string Name, string[] Sans)[] Patterns =
@@ -10,7 +9,6 @@ public static class ChessMotifs
         ("FriedLiver", ["e4", "e5", "Nf3", "Nc6", "Bc4", "Nf6", "Ng5", "d5", "exd5", "Nxd5", "Nxf7"]),
     ];
 
-    /// <summary>First matching motif name, or null.</summary>
     public static string? Detect(IReadOnlyList<string> sans)
     {
         foreach (var (name, pattern) in Patterns)
@@ -29,7 +27,6 @@ public static class ChessMotifs
     private static bool SanMatch(string played, string pattern)
     {
         if (string.Equals(played, pattern, StringComparison.Ordinal)) return true;
-        // Allow mate suffix variants.
         if (pattern.EndsWith('#') && played.StartsWith(pattern[..^1], StringComparison.Ordinal)) return true;
         return false;
     }

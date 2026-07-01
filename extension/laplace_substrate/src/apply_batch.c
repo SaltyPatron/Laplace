@@ -1,41 +1,3 @@
-/*
- * laplace_apply_batch — the ONE light set-based merge of a staged batch.
- *
- * ARCHITECTURE (do not reimplement merge logic in PL/pgSQL or C#):
- *   The client (C# via the laplace_core P/Invoke) does ALL the heavy lifting —
- *   parse / TreeSitter compose / BLAKE3 content ids / 4D geometry / tier build —
- *   then streams the finished batch in ONE pass by COPYing the native, already-
- *   computed entity / physicality / attestation tuples into three UNLOGGED
- *   staging tables shaped exactly like laplace.{entities,physicalities,
- *   attestations}. This function is the single server-side call that folds that
- *   staging into the live substrate, in-process and set-based, in ONE round trip.
- *
- *   Novelty is decided HERE, set-based, never per row:
- *     - entities      : INSERT … SELECT DISTINCT ON (id) … WHERE NOT EXISTS (id).
- *                       Entities are pure content addresses (same id ⇔ same bytes),
- *                       so the id anti-join is exact and idempotent. NO ON CONFLICT.
- *     - physicalities : dedup key is the BLAKE3 id PK only (schema forbids an
- *                       (entity_id,type) unique — "dedup is the hash"). DISTINCT
- *                       ON (id), id anti-join, ORDER BY hilbert_index for sequential
- *                       index maintenance. NO ON CONFLICT.
- *     - attestations  : novel ids INSERTed (id anti-join, NO ON CONFLICT);
- *                       ids the substrate already holds are NOT dropped — their
- *                       observation_count and last_observed_at are folded
- *                       (count += staged count) under a FOR UPDATE SKIP LOCKED
- *                       lock so a re-observation is summed, never lost.
- *
- *   The client stages a pre-filtered novel set (merkle descent before compose).
- *   Conflicts at merge time should be ≈0; entities_skipped / physicalities_skipped
- *   in the return tuple instrument any row that was staged but already present.
- *   NO ON CONFLICT — append-only of the novel set; re-observations fold via
- *   attestations only.
- *
- *   This mirrors the sanctioned binding pattern of consensus_fold_one_partition /
- *   pg_laplace_consensus_fold_partition: a C function reached from a thin SQL
- *   `CREATE FUNCTION … LANGUAGE C` that orchestrates SPI set operations and calls
- *   the native core kernels — NOT logic reimplemented in PL/pgSQL. The DB does
- *   only this light merge; all heavy compute already ran client-side in the core.
- */
 #include "postgres.h"
 
 #include "executor/spi.h"
@@ -48,8 +10,6 @@
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
 
-/* A staging prefix is an unqualified identifier the C# writer chose; we only ever
- * embed it via quote_identifier so it cannot be an injection vector. */
 static char *
 quoted_stage(const char *prefix, const char *suffix)
 {
@@ -69,7 +29,6 @@ spi_exec_count(const char *sql)
     return (int64) SPI_processed;
 }
 
-/* One set-based dedup + anti-join INSERT; returns (staged_distinct, inserted). */
 static void
 spi_staged_insert_pair(const char *sql, int64 *staged, int64 *inserted)
 {
@@ -215,14 +174,6 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
             PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
         }
 
-    /*
-     * Caller (NpgsqlSubstrateWriter) sets LOCAL session_replication_role = replica on the
-     * transaction before invoking this function — do not mutate GUCs here.
-     */
-
-    /*
-     * (1) entities — one set-based anti-join INSERT (writer stages only populated tables).
-     */
     if (has_ent)
     {
         int64 staged = 0;
@@ -243,10 +194,6 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         if (staged > ent_ins) ent_skip = staged - ent_ins;
     }
 
-    /*
-     * (2) physicalities — same single-pass merge; final rows sorted by hilbert_index so
-     * the hilbert btree/GiST see locality-preserving append order (collisions OK).
-     */
     if (has_phys)
     {
         int64 staged = 0;
@@ -270,21 +217,8 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         if (staged > phys_ins) phys_skip = staged - phys_ins;
     }
 
-    /*
-     * (3) attestations — novel ids INSERTed (id anti-join, no ON CONFLICT);
-     * already-present ids fold their observation_count (sum) + last_observed_at
-     * (greatest) under FOR UPDATE SKIP LOCKED so a re-observation is summed.
-     * Both halves read the SAME staging once (de-duplicated to a per-id total).
-     */
     if (has_att)
     {
-            /*
-             * Fold FIRST, then insert the novel ids. The fold's EXISTS predicate must
-             * see only the ids the substrate held BEFORE this batch — running the novel
-             * INSERT first would make freshly-inserted ids match EXISTS and double-count
-             * their staged observation_count. present-set and novel-set are disjoint, so
-             * folding before inserting is exact.
-             */
             if (staged_att_has_overlap(stage_att))
             {
                 att_fold = spi_exec_count(psprintf(
@@ -333,7 +267,7 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 stage_att));
     }
 
-    } /* stage presence + bulk/normal */
+    }
 
     SPI_finish();
 

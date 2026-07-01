@@ -37,10 +37,10 @@ struct laplace_etl_session {
     size_t                    owned_edge_rule_count;
     const TSLanguage*         recipe;
     laplace_grammar_row_iter_t* iter;
-    const lp_ili_map_t*       ili_map; /* loaded from LAPLACE_CILI_DIR for anchor-kind edge fields; may be NULL */
+    const lp_ili_map_t*       ili_map;
     FILE*                     fp;
     char                      path[4096];
-    size_t                    rows_left; /* 0 = unlimited */
+    size_t                    rows_left;
     laplace_etl_stats_t       total;
 };
 
@@ -153,12 +153,6 @@ static int witness_atomic2020(intent_stage_t* stage, const laplace_etl_config_t*
         cfg->trust_weight, 1, 1);
 }
 
-/*
- * Resolve one edge field to its entity id by kind: a content field is tree-composed (witnessed here);
- * an ILI-synset anchor field resolves its WN key through the session map to the existing ILI entity id
- * (referenced, not witnessed — that entity is emitted by the OMW/WordNet path). Returns 0 = resolved
- * (*out set), 1 = skip this edge (anchor didn't resolve / no map), -1 = fatal.
- */
 static int resolve_edge_field(intent_stage_t* stage, const laplace_etl_config_t* cfg,
                               const lp_ili_map_t* ili_map, uint8_t kind,
                               const uint8_t* field, size_t flen, hash128_t* out) {
@@ -192,7 +186,7 @@ static int witness_field_edges(intent_stage_t* stage, const laplace_etl_config_t
         hash128_t subject_id, object_id;
         int sr = resolve_edge_field(stage, cfg, ili_map, rule->subject_kind, subj, slen, &subject_id);
         if (sr < 0) return -1;
-        if (sr == 1) continue; /* anchor didn't resolve — drop the edge (a miss, not a fabricated id) */
+        if (sr == 1) continue;
         int or_ = resolve_edge_field(stage, cfg, ili_map, rule->object_kind, obj, olen, &object_id);
         if (or_ < 0) return -1;
         if (or_ == 1) continue;
@@ -234,7 +228,6 @@ static int probe_one_row(const laplace_compose_result_t* compose,
     tier_tree_t* tree = laplace_compose_get_tier_tree(compose);
     size_t nc = tree ? tier_tree_node_count(tree) : 0;
     if (!tree || nc != ec) {
-        /* No containment tree — flat probe over every entity id. */
         hash128_t* ids = (hash128_t*)malloc(ec * sizeof(hash128_t));
         if (!ids) return -1;
         for (size_t j = 0; j < ec; ++j) {
@@ -314,7 +307,6 @@ static int probe_one_row(const laplace_compose_result_t* compose,
         free(trunk_bm);
     }
 
-    /* Tier 0/1: flat probe — descent only covers T2+ trunks. */
     hash128_t* tier01_ids = (hash128_t*)malloc(nc * sizeof(hash128_t));
     uint32_t*  tier01_idx = (uint32_t*)malloc(nc * sizeof(uint32_t));
     if (!tier01_ids || !tier01_idx) {
@@ -678,9 +670,6 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
     }
     if (cfg->line_framed)
         laplace_grammar_row_iter_set_line_framed(s->iter, 1);
-    // Own modality_id for the session: process_row passes sess->cfg.modality_id to compose on EVERY row,
-    // so the caller's (marshalled) string can't be relied on to outlive session_open. strdup + free at close,
-    // symmetric with relation_surface above.
     s->cfg.modality_id = strdup(cfg->modality_id);
     if (!s->cfg.modality_id) {
         laplace_grammar_row_iter_free(s->iter);
@@ -688,9 +677,6 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         free(s);
         return -3;
     }
-    // Load the ILI offset map for anchor-kind edge fields from the same place C# does (LAPLACE_CILI_DIR).
-    // Best-effort: if the env/file is absent the map stays NULL and anchor edges simply drop (a miss),
-    // exactly as the C# resolver counts a miss rather than fabricating an id.
     {
         const char* cili = getenv("LAPLACE_CILI_DIR");
         if (cili && cili[0]) {
@@ -782,7 +768,6 @@ int laplace_etl_session_feed_file(laplace_etl_session_t* sess, const char* path,
             break;
         }
         if (at_eof) {
-            /* Flush a trailing record with no terminating newline. */
             rows = NULL;
             row_count = 0;
             if (laplace_grammar_row_iter_feed_lines(sess->iter, buf, 0, &rows, &row_count) == 0) {

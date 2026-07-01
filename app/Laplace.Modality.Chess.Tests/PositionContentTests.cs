@@ -2,16 +2,11 @@ using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
-/// <summary>
-/// The position's content surface (its substructure decomposition) and the bit-banged pawn features.
-/// Pure C# — no native, no DB.
-/// </summary>
 public sealed class PositionContentTests
 {
     private static string Surface(string fen)
     {
         var b = Board.FromFen(fen);
-        // mirror ChessModality's ep canonicalization indirectly by going through the modality
         var m = new ChessModality();
         return m.StateKey(m.FromFen(fen));
     }
@@ -26,11 +21,11 @@ public sealed class PositionContentTests
         var s = Surface(ChessModality.StartFen);
         Assert.Contains("stm:w", s);
         Assert.Contains("cr:KQkq", s);
-        Assert.Contains("Pe2", s);              // exact placement token
-        Assert.Contains("ke8", s);              // black king placement token
-        Assert.Contains("wpawns:", s);          // pawn-skeleton shared node
-        Assert.Contains("mat:P8N2B2R2Q1", s);   // material signature
-        Assert.Contains("wpf:d0i0p0", s);       // start: no doubled/isolated/passed white pawns
+        Assert.Contains("Pe2", s);
+        Assert.Contains("ke8", s);
+        Assert.Contains("wpawns:", s);
+        Assert.Contains("mat:P8N2B2R2Q1", s);
+        Assert.Contains("wpf:d0i0p0", s);
     }
 
     [Fact]
@@ -46,7 +41,6 @@ public sealed class PositionContentTests
     public void Surface_TranspositionsCollapse()
     {
         var m = new ChessModality();
-        // 1.e4 e5 2.Nf3  vs  1.Nf3 e5 2.e4 — same position, different move order.
         var a = Play(m, "e2e4", "e7e5", "g1f3");
         var b = Play(m, "g1f3", "e7e5", "e2e4");
         Assert.Equal(m.StateKey(a), m.StateKey(b));
@@ -61,9 +55,7 @@ public sealed class PositionContentTests
     }
 
     [Theory]
-    // white pawn d5 alone: isolated (no friendly adjacent) and passed (no enemy ahead), not doubled.
     [InlineData("7k/8/8/3P4/8/8/8/7K w - - 0 1", 0, 1, 1)]
-    // doubled white pawns d4,d3: one extra on the d-file; both isolated; only the front (d4) is passed.
     [InlineData("7k/8/8/8/3P4/3P4/8/7K w - - 0 1", 1, 2, 1)]
     public void Bitboards_PawnFeatures(string fen, int doubled, int isolated, int passed)
     {

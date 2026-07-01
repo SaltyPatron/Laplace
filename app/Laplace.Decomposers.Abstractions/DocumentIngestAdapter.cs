@@ -4,7 +4,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Streams user documents from a file or directory without ReadAllBytes on the whole tree at once.</summary>
 public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentIngestRecord>
 {
     private readonly string _root;
@@ -55,10 +54,6 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
     }
 }
 
-/// <summary>
-/// Content pipeline handler for user documents — same tier-tree emit as <see cref="ContentIngestHandler"/>,
-/// plus distributional PRECEDES attestations from <see cref="TextEntityBuilder"/>.
-/// </summary>
 public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
     private readonly ContentIngestHandler _inner = new(UserPromptContent.Source);

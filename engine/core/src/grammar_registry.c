@@ -87,7 +87,7 @@ static const grammar_entry_t GRAMMARS[] = {
     {"ispc",       tree_sitter_ispc},
     {"zig",        tree_sitter_zig},
 
-    {"pgn",        tree_sitter_pgn},   /* chess Portable Game Notation (own grammar) */
+    {"pgn",        tree_sitter_pgn},
 };
 static const size_t GRAMMAR_COUNT = sizeof(GRAMMARS) / sizeof(GRAMMARS[0]);
 
@@ -107,9 +107,9 @@ static const ext_entry_t EXTS[] = {
     {"csv", "csv"},
     {"tsv", "tsv"},
     {"tab", "tsv"},
-    {"conllu", "tsv"},   /* CoNLL-U (UD) is tab-separated: reuse the tsv row grammar */
-    {"ttl", "turtle"},   /* CILI synset glosses */
-    {"xml", "xml"},      /* FrameNet / PropBank / VerbNet frame definitions */
+    {"conllu", "tsv"},
+    {"ttl", "turtle"},
+    {"xml", "xml"},
 
     {"ts", "typescript"}, {"tsx", "typescript"},
     {"java", "java"},
@@ -134,7 +134,7 @@ static const ext_entry_t EXTS[] = {
     {"cmake", "cmake"},
     {"ispc", "ispc"},
     {"zig", "zig"},
-    {"pgn", "pgn"},      /* chess Portable Game Notation */
+    {"pgn", "pgn"},
 };
 static const size_t EXT_COUNT = sizeof(EXTS) / sizeof(EXTS[0]);
 
@@ -154,8 +154,6 @@ const TSLanguage* laplace_grammar_lookup_by_ext(const char* ext) {
     return NULL;
 }
 
-// The modality id (e.g. "python", "rust") for a file extension, or NULL. This is the single source
-// of truth for ext->modality; managed decomposers route through it instead of duplicating the map.
 const char* laplace_grammar_modality_by_ext(const char* ext) {
     if (!ext) return NULL;
     for (size_t i = 0; i < EXT_COUNT; ++i)

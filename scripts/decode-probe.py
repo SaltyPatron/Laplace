@@ -16,7 +16,7 @@ def main():
     kv, T = o._read_gguf(gguf)
     vocab = o.gguf_vocab(tok_dir)
     inv = {i: s for s, i in vocab.items()}
-    mode = sys.argv[5] if len(sys.argv) > 5 else "greedy"   # greedy | sample
+    mode = sys.argv[5] if len(sys.argv) > 5 else "greedy"
     temp = 0.8; topk = 20
     rng = np.random.default_rng(1234)
     ids = list(o.tokenize_words(vocab, prompt))
@@ -25,7 +25,7 @@ def main():
     recent = {}
     for _ in range(steps):
         logits = o.gguf_forward(kv, T, ids).astype(np.float64)
-        for tid, c in recent.items():   # repetition penalty
+        for tid, c in recent.items():
             logits[tid] -= 3.0 * c
         if mode == "sample":
             top = np.argpartition(logits, -topk)[-topk:]
@@ -35,7 +35,6 @@ def main():
             nxt = int(np.argmax(logits))
         ids.append(nxt); out.append(inv.get(nxt, f"<{nxt}>"))
         recent[nxt] = recent.get(nxt, 0) + 1
-    # render surfaces: strip the leading-space marker, join
     text = "".join(s.replace("▁", " ") for s in out)
     print("greedy continuation:", repr(text))
     print("tokens:", " ".join(out))

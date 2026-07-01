@@ -4,17 +4,12 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// CanUseNative now admits IliSynset anchor sources (the native resolver is bit-identical, proven by
-/// AnchorResolverParityTests) but must still exclude SenseKey/FrameCategory — those resolvers EMIT their
-/// anchor entity (SenseAnchor.Emit/CategoryAnchor.Emit), which the native field-edge witness does not do.
-/// </summary>
 [Trait("Tier", "fast")]
 public class NativeAnchorGateTests
 {
     private static EtlSource Src(AnchorResolver anchor, int edgeRules) =>
         new(
-            Name: "GateProbe_" + anchor + "_" + edgeRules,   // unique → not an EtlWitnessFactory bespoke name
+            Name: "GateProbe_" + anchor + "_" + edgeRules,
             SourceId: Hash128.OfCanonical("gate/probe"),
             Layer: 3,
             TrustClassId: Hash128.OfCanonical("gate/trust"),

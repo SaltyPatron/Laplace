@@ -3,13 +3,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>One content-addressed text unit — the minimal record shape for content-only sources.</summary>
 public readonly record struct ContentIngestRecord(byte[] CanonicalUtf8, int Sequence = 0);
 
-/// <summary>
-/// Content witness handler: build tier tree once, probe descent, emit novel subtrees only.
-/// Reference implementation of <see cref="IIngestRecordHandler{TRecord}"/>.
-/// </summary>
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
     private readonly Hash128 _sourceId;
@@ -26,7 +21,6 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
-        // Content-only sources have no per-record attestation walk beyond the staged tree.
     }
 
     private sealed class ContentDeferredUnit : IIngestDeferredUnit
@@ -79,9 +73,6 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
     }
 }
 
-/// <summary>
-/// Reference decomposer showing the generic pipeline pattern — no real seeds, no PG required.
-/// </summary>
 public sealed class FakeTabIngestDecomposer : IDecomposer
 {
     private readonly IReadOnlyList<ContentIngestRecord> _records;

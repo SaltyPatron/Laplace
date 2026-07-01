@@ -166,11 +166,6 @@ public static class JsonGrammarHelper
     private static ReadOnlySpan<byte> PropertyUtf8(string property) =>
         PropertyUtf8Cache.GetOrAdd(property, static p => Encoding.UTF8.GetBytes(p));
 
-    /// <summary>
-    /// Decode a JSON string leaf and mint the same content-addressed root id as
-    /// <see cref="ContentWitnessBatch"/> (text decomposer natural unit). Prefer this over
-    /// compose-path span lookup so Wiktionary/ConceptNet witnesses converge with WordNet/OMW.
-    /// </summary>
     internal static bool TryContentRootFromJsonStringSpan(
         byte[] utf8, uint start, uint end, out Hash128 entityId)
     {
@@ -337,8 +332,6 @@ public static class JsonGrammarHelper
         start = end = 0;
         var nd = ast.GetNode(nodeIndex);
         string? t = ast.NodeTypeName(nd.NodeTypeId);
-        // Use the full quoted string node so escape sequences (\uXXXX, …) outside
-        // string_content are included when decoding to canonical UTF-8.
         if (t == "string")
         {
             start = nd.StartByte;

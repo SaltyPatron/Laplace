@@ -5,10 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests MapNet FrameNet→WordNet mapping TSV (mapping_frame_synsets.txt, mapping_lus_synsets.txt).
-/// Each row stages a FrameNet frame category anchor and CORRESPONDS_TO an ILI-resolved synset.
-/// </summary>
 public sealed class MapNetDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =

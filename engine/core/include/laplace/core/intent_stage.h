@@ -63,7 +63,7 @@ int intent_stage_add_attestation(
     int16_t          outcome,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count,
-    const uint8_t*   highway_mask);   /* 32 bytes or NULL */
+    const uint8_t*   highway_mask);
 
 size_t intent_stage_emit_copy_binary(
     const intent_stage_t* stage,
@@ -79,10 +79,6 @@ const uint8_t* intent_stage_tuple_ptr(
 int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
 
-/*
- * Per-row partition: physicalities by contiguous equal-width Hilbert range on the full
- * 128-bit index; entities/attestations by id.lo % N (content-addressed, Hilbert N/A).
- */
 int intent_stage_partition(
     const intent_stage_t* src,
     size_t                part_count,

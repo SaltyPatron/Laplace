@@ -7,10 +7,6 @@ path="${2:-}"
 LOGDIR="${INGEST_LOGDIR:-/tmp}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
-# Canonical order from scripts/win/witness-manifest.json (do not reorder ad hoc).
-# FLOOR = anchors everything points into: codepoints, languages, interlingual
-# concept index (CILI). CILI must precede wordnet/omw so multilingual senses
-# attach to pre-existing concept anchors (maximal convergence).
 FLOOR=(unicode iso639 cili)
 KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)

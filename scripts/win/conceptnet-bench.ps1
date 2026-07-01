@@ -1,7 +1,3 @@
-# ConceptNet sandbox cap via LAPLACE_INGEST_MAX_UNITS. Default cap 5000 (fast sanity check).
-# Compose parallelism: LAPLACE_INGEST_COMPOSE_WORKERS. DB commit: LAPLACE_INGEST_WORKERS (keep 1).
-#
-# PostgreSQL (Windows): restart only via Services — do NOT use pg_ctl.
 param(
     [long] $MaxUnits = 5000,
     [int] $Percent = 0,
@@ -46,7 +42,6 @@ function Write-Log($line) {
 
 function Test-FatalExit([int]$code) {
     if ($code -eq 0) { return $false }
-    # ACCESS_VIOLATION 0xC0000005 and other NTSTATUS-style crash codes
     if ($code -eq -1073741819) { return $true }
     if ($code -lt 0) { return $true }
     return $false

@@ -122,7 +122,6 @@ if should_run "unicode-ingest"; then
 fi
 
 AUDIT_FAIL=0
-# Sequential layer markers — matches witness-manifest knowledge order.
 declare -A LAYER=(
   [iso639]=1
   [wordnet]=2 [omw]=3 [verbnet]=4 [propbank]=5 [framenet]=6

@@ -386,9 +386,6 @@ int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_ty
     lines.append("};")
     lines.append("")
 
-    # Reverse-index sizing: next power of two >= 4*count keeps the open-addressing bucket load
-    # factor <= 25% so probe chains stay short. The bucket is filled at runtime in
-    # relation_ids_ensure() (the type-ids are BLAKE3, computed there — not knowable at codegen time).
     rel_count = len(canon_names)
     bucket_size = 1
     while bucket_size < rel_count * 4:
@@ -734,7 +731,7 @@ def emit_pos_law(pos: dict) -> None:
     pos_frag.write_text("\n".join(sql) + "\n", encoding="utf-8")
 
 
-_HIGHWAY_MAGIC = 0x5957484C  # 'L','H','W','Y' in LE memory
+_HIGHWAY_MAGIC = 0x5957484C
 _RANK_BANDS = [
     "mandate",
     "definitional",
@@ -764,16 +761,13 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     relations = rel["relation"]
     ranks     = rel["ranks"]
 
-    # canonical list sorted → deterministic bit-position assignment
     canon_set   = sorted({r["canonical"] for r in relations})
     name_to_rel = {r["canonical"]: r for r in relations}
     N      = len(canon_set)
     N_BANDS = len(_RANK_BANDS)
 
-    # band masks: one 256-bit mask per band (stored as 32-byte bytearray)
     band_masks: list[bytearray] = [bytearray(32) for _ in range(N_BANDS)]
 
-    # string section: null-terminated canonical names in bit-position order
     string_section = bytearray()
     name_off: dict[str, int] = {}
     for name in canon_set:
@@ -781,7 +775,6 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         string_section.extend(name.encode("utf-8"))
         string_section.append(0)
 
-    # layout
     HEADER_SIZE   = 128
     REL_REC_SIZE  = 32
     BAND_MASK_SIZE = 32
@@ -789,11 +782,9 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     band_offset = rel_offset  + N      * REL_REC_SIZE
     str_offset  = band_offset + N_BANDS * BAND_MASK_SIZE
 
-    # 8-byte content fingerprint (SHA-256 of toml, first 8 bytes)
     toml_bytes  = (MANIFEST / "relation_types.toml").read_bytes()
     fingerprint = hashlib.sha256(toml_bytes).digest()[:8]
 
-    # header: '<IIQQQQQQ8s64x' = 4+4+48+8+64 = 128 bytes
     header = struct.pack(
         "<IIQQQQQQ8s64x",
         _HIGHWAY_MAGIC, 1,
@@ -804,7 +795,6 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     )
     assert len(header) == HEADER_SIZE, f"header {len(header)}"
 
-    # relation records: '<IBBBBfb19x' = 4+1+1+1+1+4+1+19 = 32 bytes each
     records = bytearray()
     for bit_pos, name in enumerate(canon_set):
         r        = name_to_rel[name]
@@ -825,10 +815,8 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         assert len(rec) == REL_REC_SIZE, f"rec {len(rec)}"
         records.extend(rec)
 
-        # set bit in the appropriate band mask
         band_masks[band][bit_pos // 8] |= 1 << (bit_pos % 8)
 
-    # assemble
     binary = bytearray(header)
     binary.extend(records)
     for bm in band_masks:
@@ -839,13 +827,11 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     out_bin = bin_out_dir / "laplace_highway_perfcache.bin"
     out_bin.write_bytes(bytes(binary))
 
-    # bucket size: next power-of-two >= 4×N (keeps load ≤ 25%)
     bucket_size = 1
     while bucket_size < N * 4:
         bucket_size <<= 1
     bucket_mask = bucket_size - 1
 
-    # generate highway_manifest.h into the include tree
     lines = [
         "#pragma once",
         "",

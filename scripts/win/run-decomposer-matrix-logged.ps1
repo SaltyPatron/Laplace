@@ -1,4 +1,3 @@
-# Decomposer matrix runner — tees all output to .ingest-proof/decomposer-matrix-run.log
 param(
     [string]$FromSource = "",
     [switch]$SkipDbIsolate

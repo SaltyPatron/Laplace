@@ -5,19 +5,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Native file ingest: tree-sitter row framing, grammar compose, trunk-containment probe, witness
-/// edges, and intent-stage drain all run in <c>laplace_core</c> — one P/Invoke per batch, not per row.
-/// </summary>
 public static unsafe class NativeGrammarIngest
 {
-    // Populated by RegisterType<T>() at startup (called from each decomposer assembly's ModuleInitializer
-    // or static constructor). Maps class name → attribute. Avoids string-matching in CanUseNative.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, UsesNativeIngestAttribute>
         s_attrs = new(StringComparer.Ordinal);
 
-    /// <summary>Register a decomposer class that carries <see cref="UsesNativeIngestAttribute"/>.
-    /// Call once per assembly, typically from a <see cref="System.Runtime.CompilerServices.ModuleInitializerAttribute"/>.</summary>
     public static void RegisterType<T>() where T : class
     {
         var attr = typeof(T).GetCustomAttributes(typeof(UsesNativeIngestAttribute), false)
@@ -27,7 +19,6 @@ public static unsafe class NativeGrammarIngest
 
     public static bool CanUseNative(in EtlSource src, DecomposerOptions? options = null)
     {
-        // Check [UsesNativeIngest] attribute registered by the decomposer assembly.
         if (s_attrs.TryGetValue(src.Name, out var attr))
         {
             if (attr.RequiresEnvOpt)
@@ -40,10 +31,6 @@ public static unsafe class NativeGrammarIngest
             return true;
         }
 
-        // IliSynset anchor fields now resolve natively (etl_anchor.c lp_resolve_synset_anchor),
-        // bit-identically to ResolveSynsetAnchor (AnchorResolverParityTests). SenseKey/FrameCategory
-        // still EMIT their anchor entity via SenseAnchor.Emit/CategoryAnchor.Emit, which the native
-        // field-edge witness does not do — so they stay on the C# path until ported.
         return src.NodeEdgeMap.Count > 0
                && src.Anchor is AnchorResolver.None or AnchorResolver.IliSynset
                && !EtlWitnessFactory.IsRegistered(src.Name);
@@ -94,10 +81,6 @@ public static unsafe class NativeGrammarIngest
                     if (cap > 0 && rowsReported >= cap) yield break;
 
                     long fileCap = cap > 0 ? cap - rowsReported : 0;
-                    // Ownership transfers to the SubstrateChange via AddIntentStage — do NOT dispose
-                    // here. `using var` disposed the stage when this iterator advanced to the next
-                    // batch while the prior change was still in the ingest channel (commit-lane
-                    // router calls IntentStage.Partition on a disposed handle → ObjectDisposedException).
                     var stage = IntentStage.New(Math.Max(batchSize * 32, 4096));
                     long emitted = FeedBatch(sess, filePath, batchSize, fileCap, stage, probeFn, probeCtx,
                         acceptFn: null, acceptCtx: IntPtr.Zero, out int rc);
@@ -138,17 +121,10 @@ public static unsafe class NativeGrammarIngest
 
     private static unsafe IntPtr OpenSession(EtlSource src, Hash128? contextId)
     {
-        // The native session loads the ILI map from LAPLACE_CILI_DIR. Mirror C#'s own CILI resolution
-        // (env var OR the built-in default) into that env so native reads the exact same map file —
-        // otherwise an unset env would make the native anchor path silently resolve nothing while the
-        // C# path would have found the default map, dropping every cross-lingual edge.
         if (src.Anchor == AnchorResolver.IliSynset)
             Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", SourceEntityIdConventions.CiliDirectory());
 
         int witnessKind = ResolveWitnessKind(src);
-        // The structs are blittable now (IntPtr, not [MarshalAs] string), so WE marshal the UTF8. Native
-        // strdups both modality_id and each relation_surface (etl_ingest.c session_open), so free these
-        // right after session_open returns.
         var allocs = new List<IntPtr>();
         try
         {
