@@ -180,6 +180,5 @@ public sealed class RepoDecomposer : IDecomposer
     // inside GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
     private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
         new SubstrateChangeBuilder(Source, $"repo/{n}", null,
-            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
-            .EnableDeferredContent(reader);
+            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
 }

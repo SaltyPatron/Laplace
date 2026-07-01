@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SEED = ROOT / "extension/laplace_substrate/sql/21_seed.sql.in"
+SEED = ROOT / "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in"
 
 def main() -> int:
     text = SEED.read_text(encoding="utf-8")

@@ -1,6 +1,19 @@
 if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.20)
-    project(laplace_extensions LANGUAGES C CXX)
+    project(laplace_extensions VERSION 0.1.0 LANGUAGES C CXX)
+
+    find_program(BASH bash
+        HINTS "C:/Program Files/Git/bin"
+        DOC "Git bash for SQL postprocess (grep/perl)")
+    if(NOT BASH)
+        message(FATAL_ERROR "Git bash not found — required for extension SQL postprocess")
+    endif()
+
+    # build-extensions.cmd sets CMAKE_C_COMPILER=icx; use the same tool for .sql.in (PostGIS/PGXS model).
+    get_filename_component(LAPLACE_SQLPP "${CMAKE_C_COMPILER}" ABSOLUTE)
+    set(LAPLACE_SQLPP_FLAGS -E -traditional-cpp -w -Upixel -Ubool)
+    message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
+    message(STATUS "Laplace SQL bash: ${BASH}")
 
     find_program(LAPLACE_PG_CONFIG pg_config
         HINTS "C:/Program Files/PostgreSQL/18/bin")
@@ -29,6 +42,9 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/${_eng}/laplace_${_eng}_static.lib — build the engine first (scripts\\win\\build-engine.cmd)")
         endif()
     endforeach()
+    if(NOT EXISTS "${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_pg_static.lib")
+        message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_pg_static.lib — build the engine first (scripts\\win\\build-engine.cmd)")
+    endif()
 
     if(NOT DEFINED ENV{MKLROOT})
         message(FATAL_ERROR "MKLROOT not set — run via scripts\\win\\build-extensions.cmd (env.cmd chain). "
@@ -48,7 +64,7 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     add_library(laplace_dynamics STATIC IMPORTED GLOBAL)
     set_target_properties(laplace_dynamics PROPERTIES
-        IMPORTED_LOCATION "${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_static.lib"
+        IMPORTED_LOCATION "${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_pg_static.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../engine/dynamics/include"
         INTERFACE_LINK_LIBRARIES "${LAPLACE_MKL_STATIC}")
 endif()

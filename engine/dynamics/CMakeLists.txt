@@ -1,5 +1,6 @@
 set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/init.h
+    include/laplace/dynamics/tbb_parallel.h
     include/laplace/dynamics/procrustes.h
     include/laplace/dynamics/eigenmaps.h
     include/laplace/dynamics/gram_schmidt.h
@@ -9,6 +10,7 @@ set(LAPLACE_DYNAMICS_HEADERS
 
 set(LAPLACE_DYNAMICS_SOURCES
     src/init.cpp
+    src/tbb_parallel.cpp
     src/procrustes.cpp
     src/eigenmaps.cpp
     src/gram_schmidt.cpp
@@ -32,6 +34,17 @@ if(WIN32)
         LAPLACE_HAS_MKL=1
     )
     target_include_directories(laplace_dynamics_static PRIVATE "$ENV{MKLROOT}/include")
+
+    add_library(laplace_dynamics_pg_static STATIC src/init.cpp)
+    target_include_directories(laplace_dynamics_pg_static PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(laplace_dynamics_pg_static PUBLIC laplace_core_static)
+    target_compile_definitions(laplace_dynamics_pg_static PRIVATE
+        MKL_LP64
+        LAPLACE_HAS_MKL=1
+        LAPLACE_RUNTIME_NO_TBB=1
+    )
+    target_include_directories(laplace_dynamics_pg_static PRIVATE "$ENV{MKLROOT}/include")
 endif()
 
 set_target_properties(laplace_dynamics PROPERTIES

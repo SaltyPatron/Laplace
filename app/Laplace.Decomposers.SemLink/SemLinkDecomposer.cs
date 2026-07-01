@@ -42,7 +42,6 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
             if (cap > 0 && consumed >= cap) yield break;
             int jsonBatch = options.BatchSize > 0 ? options.BatchSize : 1;
             ISubstrateReader? reader = context.Reader;
-            if (IntentStage.IsBulkFreshBypass) reader = null;
             long fileCap = cap > 0 ? cap - consumed : 0;
 
             await foreach (var change in SemLinkIngestSupport.IngestJsonDocumentAsync(

@@ -1,0 +1,41 @@
+---
+description: Never bypass repo scripts — manual steps break idempotency and the invention
+alwaysApply: true
+---
+
+# No manual bypass
+
+**Doing things manually rapes idempotency and breaks the invention.**
+
+This is non-negotiable. If the repo has a script, orchestrator, or deploy path for an action, use it — never improvise a one-off equivalent.
+
+## Always use the canonical path
+
+| Need | Use | Never |
+|------|-----|-------|
+| Build / deploy extensions | `scripts\win\build-extensions.cmd` → `install-extensions.cmd [--recycle]` | Hand-copy DLLs into `D:\Data\Postgres\laplace\lib`, `bin`, or PG dirs |
+| Full rebuild | `scripts\win\rebuild-all.cmd` | Partial copy/paste of build artifacts |
+| DB reset / test DB | `db-reset.cmd`, `db-isolate.cmd`, `chess-platform-seed.cmd` | Ad-hoc `DROP`/`CREATE` + manual `CREATE EXTENSION` chains |
+| Seed / ingest | `seed-step.cmd`, `seed-foundation.cmd`, `seed-stage.cmd`, `chess-platform-seed.cmd` | Raw `dotnet run ... ingest` without env + orchestrator |
+| Tests | `scripts\win\test-app.cmd` | Bare `dotnet test` |
+| Deploy health | `status.ps1`, `locks.cmd`, `verify-deploy.cmd` | Guess from `substrate_health()` alone or invent missing-runtime theories |
+
+Every wrapper sources `scripts\win\env.cmd`. Run through wrappers — do not reassemble their steps by hand.
+
+## Why
+
+- **Idempotency**: Scripts encode the same inputs → same outputs every time. Manual steps are untracked, unreproducible, and poison the next agent run.
+- **The invention**: Content-addressing, descent-before-insert, Hilbert-ordered bulk append, and Glicko fold assume the wired pipeline. Shortcuts (hand copies, `ON CONFLICT` workarounds, rerouting through text compose, skipping descent) corrupt substrate state silently.
+
+## When something fails
+
+1. Read the **actual** error from the script that failed.
+2. Run `status.ps1` and `verify-deploy.cmd` before touching deploy artifacts.
+3. Fix the **script or build**, or rerun the **orchestrator** — do not patch around it manually.
+4. If no script exists yet, **add one** so the fix is idempotent for the next run.
+
+## Hard stops
+
+- Do not copy files from `C:\Program Files`, oneAPI, or build trees into deploy paths unless `install-extensions.cmd` (or an existing script) already does so.
+- Do not terminate PG backends, alter GUCs, or mutate `D:\Data\Postgres\laplace` outside `install-extensions.cmd`, `db-reset.cmd`, or `db-isolate.cmd`.
+- Do not chain individual `seed-step` calls when an orchestrator (`chess-platform-seed.cmd`, `seed-foundation.cmd`) already defines the order and env.

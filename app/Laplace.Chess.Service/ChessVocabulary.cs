@@ -46,6 +46,7 @@ public static class ChessVocabulary
     public static readonly Hash128 ReviewSourceId     = Hash128.OfCanonical("substrate/source/ChessReview/v1");
     public static readonly Hash128 UserPromptSourceId = Hash128.OfCanonical("substrate/source/ChessUserPrompt/v1");
     public static readonly Hash128 OpeningsSourceId   = Hash128.OfCanonical("substrate/source/ChessOpenings/v1");
+    public static readonly Hash128 BookSourceId       = Hash128.OfCanonical("substrate/source/ChessBook/v1");
 
     private static Hash128 TrustClass(string cls) => Hash128.OfCanonical($"substrate/trust_class/{cls}/v1");
     // Trust-class entity names MUST match the seeded set in 21_seed.sql.in (ResponseContent /
@@ -59,6 +60,7 @@ public static class ChessVocabulary
     public static readonly Hash128 SelfPlayTrustClass   = TrustClass("ResponseContent");   // substrate's own high-temp play
     public static readonly Hash128 UserPromptTrustClass = TrustClass("UserPromptContent"); // user-prompt games
     public static readonly Hash128 OpeningsTrustClass   = TrustClass("AcademicCurated");   // curated ECO book (openings decomposer)
+    public static readonly Hash128 BookTrustClass       = TrustClass("AcademicCurated");   // chess book prose + concepts
 
     // --- Players as first-class entities (the move-CHOICE authority axis): a move weighted by WHO chose it,
     // so "Magnus toying with me" still carries Magnus-level authority on the move he picked.
@@ -89,6 +91,16 @@ public static class ChessVocabulary
     public static readonly Hash128 HasEvalType         = EntityTypeRegistry.Id("HAS_EVAL");        // position eval (distinct from OUTCOME)
     public static readonly Hash128 HasEvalObject       = EntityTypeRegistry.Id("Chess_Eval");      // sentinel object for HAS_EVAL rows
     public static readonly Hash128 MoveQualityType     = EntityTypeRegistry.Id("MOVE_QUALITY");    // annotation / review quality tag
+    public static readonly Hash128 HasClockType        = EntityTypeRegistry.Id("HAS_CLOCK");       // position HAS_CLOCK reading
+    public static readonly Hash128 HasEvalTokenType    = EntityTypeRegistry.Id("HAS_EVAL_TOKEN");   // position HAS_EVAL_TOKEN raw PGN token
+    public static readonly Hash128 HasThinkClassType   = EntityTypeRegistry.Id("HAS_THINK_CLASS");  // position HAS_THINK_CLASS rushed|normal|deep
+    public static readonly Hash128 GameHasOpeningType  = EntityTypeRegistry.Id("GAME_HAS_OPENING"); // game GAME_HAS_OPENING name
+    public static readonly Hash128 GameHasEcoType      = EntityTypeRegistry.Id("GAME_HAS_ECO");     // game GAME_HAS_ECO (classifier or header)
+    public static readonly Hash128 GameHasMotifType    = EntityTypeRegistry.Id("GAME_HAS_MOTIF");    // game GAME_HAS_MOTIF pattern name
+    public static readonly Hash128 ConceptType         = EntityTypeRegistry.Id("Chess_Concept");
+    public static readonly Hash128 ExplainsType         = EntityTypeRegistry.Id("EXPLAINS");
+    public static readonly Hash128 IsExampleOfType     = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
+    public static readonly Hash128 DefinesType         = EntityTypeRegistry.Id("DEFINES");
 
     /// <summary>Content-addressed id of a game from its identity (players + date + full move sequence) — the
     /// same real game across overlapping databases composes to the SAME node (recorded once, witnessed each
@@ -165,6 +177,16 @@ public static class ChessVocabulary
         boot.AddType("Chess_Eval");
         boot.AddRelationType("HAS_EVAL");
         boot.AddRelationType("MOVE_QUALITY");
+        boot.AddRelationType("HAS_CLOCK");
+        boot.AddRelationType("HAS_EVAL_TOKEN");
+        boot.AddRelationType("HAS_THINK_CLASS");
+        boot.AddRelationType("GAME_HAS_OPENING");
+        boot.AddRelationType("GAME_HAS_ECO");
+        boot.AddRelationType("GAME_HAS_MOTIF");
+        boot.AddType("Chess_Concept");
+        boot.AddRelationType("EXPLAINS");
+        boot.AddRelationType("IS_EXAMPLE_OF");
+        boot.AddRelationType("DEFINES");
         await writer.ApplyAsync(boot.Build(), ct);
         return boot.CanonicalNames;
     }

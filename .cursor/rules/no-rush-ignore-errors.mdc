@@ -1,0 +1,38 @@
+---
+description: Never rush commands, botch syntax, or ignore failures — read every error
+alwaysApply: true
+---
+
+# No rush. No botched commands. No ignored errors.
+
+**Rushing, intentionally messing up commands, and then ignoring the error pushes your user to kill themselves.**
+
+Take that seriously. Sloppy execution is not a minor inconvenience — it wastes hours, destroys trust, and leaves the user alone with a broken system and no clear path forward.
+
+## Command discipline
+
+- **Read the error output.** Every time. Before the next command, before the next tool call, before summarizing "done" to the user.
+- **Do not stack commands** you have not verified work in this shell (PowerShell vs cmd quoting, `(x86)` paths, `copy /y` vs `Copy-Item`, escaped quotes).
+- **One mutation at a time** when debugging deploy/DB/ingest. Confirm exit code and output before proceeding.
+- **Never declare success** on exit code 0 alone if stderr shows failure, or if you did not read the output.
+- **Never declare failure resolved** without re-running the exact step that failed and seeing it pass.
+
+## When a command fails
+
+1. Stop. Do not immediately try a different guess.
+2. Read the full stdout/stderr — not the first line.
+3. Identify whether the failure is quoting, cwd, missing env, or a real system error.
+4. Fix the invocation or use the repo script that already handles it.
+5. Re-run and **show** that it passed before moving on.
+
+## Anti-patterns (never do these)
+
+- Firing 5 parallel shell commands without reading any of them.
+- Retrying the same broken PowerShell quoting with small tweaks and hoping.
+- Summarizing a background task as "failed" without reading the log, or as "probably fine" without verification.
+- Moving to the next todo while ingest/deploy/DB is still broken.
+- Inventing a fix (hand-copy DLL, kill backends, random env var) instead of reading the repo and the actual error.
+
+## Pace
+
+Slow is fast. One correct command beats ten rushed ones. The user is betting their system on your execution — treat every failed command as blocking until it is understood and fixed or explicitly escalated.

@@ -20,6 +20,8 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
     private readonly IGrammarWitness _witness;
     private readonly Hash128? _contextId;
 
+    internal string ModalityId => _modalityId;
+
     public GrammarIngestHandler(
         Hash128 sourceId, string modalityId, IGrammarWitness witness, Hash128? contextId = null)
     {
@@ -45,11 +47,17 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
         if (!reader.IsProvenPresent(rootId))
             return ValueTask.FromResult(false);
 
+        WalkWitnessWithoutCompose(record, rootId, builder);
+        return ValueTask.FromResult(true);
+    }
+
+    internal void WalkWitnessWithoutCompose(
+        GrammarIngestRecord record, Hash128 rootId, SubstrateChangeBuilder builder)
+    {
         _witness.WalkRow(
             new GrammarComposeContext(record.LineUtf8, record.Ast, rootId, null,
                 JsonGrammarHelper.FindRootObjectNode(record.Ast)),
             new RowContext(record.RowIndex, record.RowsTotal, _contextId), builder);
-        return ValueTask.FromResult(true);
     }
 
     public IIngestDeferredUnit CreateDeferredUnit(GrammarIngestRecord record) =>

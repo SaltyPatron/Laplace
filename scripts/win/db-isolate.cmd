@@ -26,9 +26,10 @@ cd /d "%LAPLACE_ROOT%"
 
 echo ==== terminate backends on %DBNAME% ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='!DBNAME!' AND pid<>pg_backend_pid();" || exit /b 1
+ping -n 2 127.0.0.1 >nul
 
 echo ==== DROP + recreate %DBNAME% ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS !DBNAME!;" || exit /b 1
+"%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS !DBNAME! WITH (FORCE);" || exit /b 1
 "%PGBIN%\createdb.exe" -h localhost -U postgres !DBNAME! || exit /b 1
 
 echo ==== install extensions on %DBNAME% ====

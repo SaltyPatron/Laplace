@@ -103,8 +103,6 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider{
             Source, "framenet/frame", batch, context.Reader, options, ct))
             yield return change;
 
-        if (options.MaxInputUnits > 0) yield break;
-
         await foreach (var change in DecomposerBatch.RunAsync(
             FrameNetLuIngest.ParseAllLusAsync(luDir, ct),
             (lu, b) => FrameNetLuIngest.EmitLu(b, lu, Source),

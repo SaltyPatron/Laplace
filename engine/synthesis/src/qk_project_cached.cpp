@@ -5,7 +5,7 @@
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
-#  include <oneapi/tbb/parallel_for.h>
+#  include "laplace/dynamics/tbb_parallel.h"
 #  include <oneapi/tbb/blocked_range.h>
 #endif
 
@@ -79,7 +79,7 @@ int project_qk_layer(
     };
 
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, vocab, 256),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t t = rng.begin(); t != rng.end(); ++t) project_row(t);
@@ -119,7 +119,7 @@ long score_qk_head_cached(
 
     std::vector<KeyNorm> keys_desc(vocab);
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, vocab, 256),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t s = rng.begin(); s != rng.end(); ++s)
@@ -150,7 +150,7 @@ long score_qk_head_cached(
 
     std::vector<double> q_norms(n_rows);
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, n_rows, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t ri = rng.begin(); ri != rng.end(); ++ri)
@@ -178,7 +178,7 @@ long score_qk_head_cached(
                   });
     };
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, n_rows, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t ri = rng.begin(); ri != rng.end(); ++ri) score_row(ri);

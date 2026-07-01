@@ -4,44 +4,24 @@ namespace Laplace.SubstrateCRUD;
 
 /// <summary>
 /// Per-batch content tier-tree cache for the two-phase containment dedup path. The collect phase
-/// (<see cref="Append"/>) builds — once, deduped by the Blake3 of the canonical bytes — the content
-/// tier tree for each distinct content text and returns its natural-unit root id WITHOUT staging.
-/// <see cref="ProbeAndFlushAsync"/> (and the bounded auto-flush below) then runs one
-/// <c>content_descent_bitmap</c> probe (O(tier) top-down Merkle descent over T2+ trunks) and stages only the novel
-/// subtrees (a present trunk skips its whole subtree via <c>MerkleDedup.TrunkShortcircuit</c> inside
-/// the native content emit) — no second decomposition.
-///
-/// This mirrors the UD decomposer's content two-phase, but in a single forward walk: content
-/// emitters keep calling <c>ContentWitnessBatch.TryAppendToBuilder</c>, which routes here when a
-/// builder has deferred content enabled.
-///
-/// BOUNDED MEMORY: a single builder batch can be enormous (WordNet uses LAPLACE_INGEST_BATCH=65536
-/// synsets/builder, each emitting several content surfaces), so buffering EVERY distinct content
-/// tree until one end-of-batch flush held hundreds of thousands of native tier-tree handles at once
-/// and exhausted the native heap — an abrupt access-violation crash with no managed exception. The
-/// buffer is therefore flushed in bounded chunks (<see cref="MaxBufferedNodes"/>): each chunk is a
-/// self-contained probe + emit + free, so peak resident trees stay bounded. The shared content stage
-/// keeps its witness set across chunks, so a node emitted in an earlier chunk is never emitted twice;
-/// dedup semantics are byte-for-byte identical to the single-flush version.
+/// (<see cref="Append"/>) resolves the natural-unit root via cheap <see cref="TextDecomposer.ContentRootId"/>
+/// (no full tree) and only builds <see cref="IntentStage.BuildContentTree"/> for roots not already
+/// present. <see cref="ProbeAndFlushAsync"/> runs one batched <c>content_descent_bitmap</c> probe and
+/// stages only novel subtrees.
 /// </summary>
 public sealed class ContentBatch : IDisposable
 {
-    // Cap on total buffered tier-tree nodes before an automatic chunk flush. Each node is a few
-    // native struct fields; 64Ki nodes keeps peak well under a few MB of trees + probe arrays while
-    // still amortizing the existence probe over a large chunk (a handful of extra round trips for a
-    // 65536-synset WordNet builder).
-    private const int MaxBufferedNodes = 65536;
-
-    private struct Entry
+    private sealed class Entry
     {
-        public TierTree Tree;
+        public required byte[] Canonical;
         public Hash128 Source;
+        public Hash128 RootId;
+        public TierTree? Tree;
     }
 
     private readonly Dictionary<Hash128, Entry> _map = new();
     private readonly Func<IntentStage> _stageProvider;
     private readonly ISubstrateReader _reader;
-    private long _bufferedNodes;
 
     public ContentBatch(Func<IntentStage> stageProvider, ISubstrateReader reader)
     {
@@ -51,12 +31,6 @@ public sealed class ContentBatch : IDisposable
 
     public bool HasPending => _map.Count > 0;
 
-    /// <summary>
-    /// Build (once) the content tier tree for <paramref name="canonical"/> and return its natural-unit
-    /// root id so attestations can be wired immediately; staging is deferred to the next bounded
-    /// auto-flush or to <see cref="ProbeAndFlushAsync"/>. The tree is self-contained after build, so
-    /// <paramref name="canonical"/> need not outlive this call.
-    /// </summary>
     public bool Append(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
     {
         rootId = default;
@@ -64,31 +38,35 @@ public sealed class ContentBatch : IDisposable
 
         var key = Hash128.Blake3(canonical);
 
-        // compose IS the dedup: a canonical already composed this session has a known, immutable root —
-        // skip the expensive BuildContentTree (BLAKE3 + geometry per node) and hand back the cached root
-        // so the caller still wires THIS occurrence's attestation. Only NOVEL canonicals pay the build.
         if (_reader.TryGetCachedRoot(key, out rootId))
             return true;
 
-        if (!_map.TryGetValue(key, out var e))
+        if (_map.TryGetValue(key, out var existing))
         {
-            var tree = IntentStage.BuildContentTree(canonical);
-            if (tree is null) return false;
-            e = new Entry { Tree = tree, Source = sourceId };
-            _map[key] = e;
-            _bufferedNodes += tree.NodeCount;
+            rootId = existing.RootId;
+            return true;
         }
-        rootId = e.Tree.GetNode(e.Tree.NaturalUnitIndex()).Id;
-        _reader.CacheRoot(key, rootId);
+
+        Hash128? cheapRoot = TextDecomposer.ContentRootId(canonical);
+        if (cheapRoot is null) return false;
+        rootId = cheapRoot.Value;
+
+        if (_reader.IsProvenPresent(rootId))
+        {
+            _reader.CacheRoot(key, rootId);
+            return true;
+        }
+
+        _map[key] = new Entry
+        {
+            Canonical = canonical.ToArray(),
+            Source = sourceId,
+            RootId = rootId,
+            Tree = null,
+        };
         return true;
     }
 
-    /// <summary>
-    /// Flush any remaining buffered trees: one batched <c>content_descent_bitmap</c> probe over their
-    /// T2+ node ids (tree-aware Merkle descent), then stage only the novel subtrees into the
-    /// builder's content stage. Idempotent. Skipped entirely when
-    /// <see cref="IntentStage.IsBulkFreshBypass"/> is set (bulk-fresh load).
-    /// </summary>
     public Task ProbeAndFlushAsync(CancellationToken ct) => ProbeAndEmitAsync(ct);
 
     private async Task ProbeAndEmitAsync(CancellationToken ct)
@@ -100,46 +78,62 @@ public sealed class ContentBatch : IDisposable
             entries.Add(e);
 
         var stage = _stageProvider();
-        if (IntentStage.IsBulkFreshBypass)
+        var roots = new List<Hash128>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
+            roots.Add(entries[i].RootId);
+
+        byte[] rootBm = roots.Count > 0
+            ? await _reader.EntitiesExistBitmapAsync(roots, ct).ConfigureAwait(false)
+            : [];
+
+        var probeTrees = new List<TierTree>();
+        var emitEntries = new List<Entry>();
+        long bits = (long)rootBm.Length * 8;
+
+        for (int i = 0; i < entries.Count; i++)
         {
-            foreach (var e in entries)
+            var e = entries[i];
+            if (i < bits && (rootBm[i >> 3] & (1 << (i & 7))) != 0)
             {
-                if (e.Tree is null) continue;
-                stage.EmitContentTree(e.Tree, e.Source, ReadOnlySpan<byte>.Empty, out _);
+                _reader.MarkProven([e.RootId]);
+                _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
+                continue;
             }
+
+            e.Tree ??= IntentStage.BuildContentTree(e.Canonical);
+            if (e.Tree is null) continue;
+            probeTrees.Add(e.Tree);
+            emitEntries.Add(e);
         }
-        else
+
+        byte[]?[] bitmaps = probeTrees.Count > 0
+            ? await TierTreeDescent.ProbeBatchEmitBitmapsAsync(probeTrees, _reader, ct)
+                .ConfigureAwait(false)
+            : [];
+
+        for (int t = 0; t < emitEntries.Count; t++)
         {
-            var probeTrees = new List<TierTree>(entries.Count);
-            foreach (var e in entries)
+            var e = emitEntries[t];
+            if (e.Tree is null) continue;
+            byte[]? bm = t < bitmaps.Length ? bitmaps[t] : null;
+            if (bm is { Length: > 0 })
             {
-                if (e.Tree is null) continue;
-                probeTrees.Add(e.Tree);
+                for (int i = 0; i < bm.Length; i++)
+                    if (bm[i] != 0) goto emit;
+                bm = null;
             }
-
-            byte[]?[] bitmaps = probeTrees.Count > 0
-                ? await TierTreeDescent.ProbeBatchEmitBitmapsAsync(probeTrees, _reader, ct)
-                    .ConfigureAwait(false)
-                : [];
-
-            int treeIdx = 0;
-            foreach (var e in entries)
-            {
-                if (e.Tree is null) continue;
-                byte[]? bm = treeIdx < bitmaps.Length ? bitmaps[treeIdx++] : null;
-                stage.EmitContentTree(e.Tree, e.Source, bm ?? ReadOnlySpan<byte>.Empty, out _);
-            }
+        emit:
+            stage.EmitContentTree(e.Tree, e.Source, bm ?? ReadOnlySpan<byte>.Empty, out _);
+            _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
         }
 
         foreach (var e in _map.Values) e.Tree?.Dispose();
         _map.Clear();
-        _bufferedNodes = 0;
     }
 
     public void Dispose()
     {
         foreach (var e in _map.Values) e.Tree?.Dispose();
         _map.Clear();
-        _bufferedNodes = 0;
     }
 }

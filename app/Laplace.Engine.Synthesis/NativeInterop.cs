@@ -12,6 +12,14 @@ public static partial class NativeInterop
     public static string LaplaceSynthesisVersion() =>
         Marshal.PtrToStringUTF8(LaplaceSynthesisVersionPtr()) ?? string.Empty;
 
+    [LibraryImport(Library, EntryPoint = "laplace_synthesis_init")]
+    public static partial int LaplaceSynthesisInit();
+
+    static NativeInterop()
+    {
+        _ = LaplaceSynthesisInit();
+    }
+
     [LibraryImport(Library, EntryPoint = "laplace_bf16_decode")]
     public static unsafe partial int Bf16Decode(void* rawBytes, nuint nElements, double* outValues);
 

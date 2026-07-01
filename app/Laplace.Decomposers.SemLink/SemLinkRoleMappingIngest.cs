@@ -154,6 +154,5 @@ internal static class SemLinkRoleMappingIngest
         new SubstrateChangeBuilder(SemLinkDecomposer.Source, unit, null,
             entityCapacity: batch * 2,
             physicalityCapacity: 0,
-            attestationCapacity: batch * 2)
-            .EnableDeferredContent(reader);
+            attestationCapacity: batch * 2);
 }

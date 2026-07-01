@@ -5,7 +5,7 @@
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
-#  include <oneapi/tbb/parallel_for.h>
+#  include "laplace/dynamics/tbb_parallel.h"
 #  include <oneapi/tbb/blocked_range.h>
 #endif
 
@@ -73,7 +73,7 @@ long compute_qk_pairs_above_threshold_pruned(
     std::vector<double> k_cache((size_t)vocab * head_dim);
     std::vector<KeyNorm> keys_desc(vocab);
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, vocab, 256),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t s = rng.begin(); s != rng.end(); ++s) {
@@ -118,7 +118,7 @@ long compute_qk_pairs_above_threshold_pruned(
         q_norms[ri] = proj_l2(q_t, head_dim);
     };
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, n_rows, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t ri = rng.begin(); ri != rng.end(); ++ri) project_query(ri);
@@ -141,7 +141,7 @@ long compute_qk_pairs_above_threshold_pruned(
     };
 
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, n_rows, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t ri = rng.begin(); ri != rng.end(); ++ri) count_row(ri);
@@ -187,7 +187,7 @@ long compute_qk_pairs_above_threshold_pruned(
     };
 
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
+laplace::tbb_ops::parallel_for_size(
         oneapi::tbb::blocked_range<size_t>(0, rows_fit, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
             for (size_t ri = rng.begin(); ri != rng.end(); ++ri) write_row(ri);

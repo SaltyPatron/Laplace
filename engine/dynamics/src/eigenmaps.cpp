@@ -16,8 +16,8 @@
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
+#include "laplace/dynamics/tbb_parallel.h"
+#include <oneapi/tbb/blocked_range.h>
 #endif
 
 namespace {
@@ -195,7 +195,8 @@ int laplacian_eigenmaps(const double* high_dim_pts,
     };
 
 #ifdef LAPLACE_HAS_MKL
-    tbb::parallel_for(tbb::blocked_range<std::size_t>(0, n),
+    laplace::tbb_ops::parallel_for(
+        oneapi::tbb::blocked_range<std::size_t>(0, n),
                       [&](const tbb::blocked_range<std::size_t>& range) {
                           for (std::size_t i = range.begin(); i != range.end(); ++i)
                               build_knn_row(i);

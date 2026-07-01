@@ -7,6 +7,11 @@ set "LOG=%LAPLACE_ROOT%\build-win-ext\test-all.log"
 if not exist "%LAPLACE_ROOT%\build-win-ext" mkdir "%LAPLACE_ROOT%\build-win-ext"
 > "%LOG%" echo test-all started %DATE% %TIME%
 
+echo === verify-toolchain ===
+>> "%LOG%" echo === verify-toolchain ===
+call "%~dp0verify-toolchain.cmd" >> "%LOG%" 2>&1
+if errorlevel 1 set "FAIL=1"
+
 echo === engine gtest ===
 >> "%LOG%" echo === engine gtest ===
 ctest --test-dir build-win --output-on-failure -LE regress >> "%LOG%" 2>&1

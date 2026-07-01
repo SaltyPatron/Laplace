@@ -30,6 +30,7 @@
 
 static char *perfcache_path = NULL;
 static bool ingest_bulk_novel = false;
+static int native_mkl_threads = 1;
 
 void
 laplace_substrate_perfcache_init(void)
@@ -52,7 +53,24 @@ laplace_substrate_perfcache_init(void)
         PGC_USERSET,
         0,
         NULL, NULL, NULL);
+    DefineCustomIntVariable(
+        "laplace_substrate.native_mkl_threads",
+        "MKL thread count for this backend when mkl_threads is not passed from env (PG has no env.cmd).",
+        NULL,
+        &native_mkl_threads,
+        1,
+        1,
+        64,
+        PGC_SUSET,
+        0,
+        NULL, NULL, NULL);
     MarkGUCPrefixReserved("laplace_substrate");
+}
+
+int
+laplace_substrate_native_mkl_threads(void)
+{
+    return native_mkl_threads;
 }
 
 bool

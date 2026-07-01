@@ -1,4 +1,3 @@
-# Install order — one object per file.
 functions/laplace_geom_version.sql.in
 functions/laplace_hash128_blake3.sql.in
 functions/laplace_hash128_merkle.sql.in

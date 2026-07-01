@@ -15,6 +15,8 @@
 
 void laplace_substrate_perfcache_init(void);
 
+int laplace_substrate_native_mkl_threads(void);
+
 
 
 

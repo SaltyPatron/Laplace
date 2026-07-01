@@ -13,14 +13,26 @@ internal static partial class PgnEvals
     [GeneratedRegex(@"\[%eval\s+([^\]]+)\]")]
     private static partial Regex EvalRegex();
 
-    /// <summary>Centipawn eval from WHITE's perspective per move, or null when absent/misaligned.</summary>
-    public static int[]? Centipawns(string gameText, int moveCount)
+    /// <summary>Raw eval tokens per move (canonical via <see cref="ChessCanonical.EvalToken"/>), or null when misaligned.</summary>
+    public static string[]? EvalTokens(string gameText, int moveCount)
     {
         var ms = EvalRegex().Matches(gameText);
         if (ms.Count == 0 || ms.Count != moveCount) return null;
-        var outv = new int[moveCount];
+        var outv = new string[moveCount];
         for (int i = 0; i < moveCount; i++)
-            outv[i] = ParseToken(ms[i].Groups[1].Value.Trim());
+            outv[i] = ChessCanonical.EvalToken(ms[i].Groups[1].Value)
+                ?? throw new InvalidOperationException("empty eval token");
+        return outv;
+    }
+
+    /// <summary>Centipawn eval from WHITE's perspective per move, or null when absent/misaligned.</summary>
+    public static int[]? Centipawns(string gameText, int moveCount)
+    {
+        var tokens = EvalTokens(gameText, moveCount);
+        if (tokens is null) return null;
+        var outv = new int[tokens.Length];
+        for (int i = 0; i < tokens.Length; i++)
+            outv[i] = ParseToken(tokens[i]);
         return outv;
     }
 

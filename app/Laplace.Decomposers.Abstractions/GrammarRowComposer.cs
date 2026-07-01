@@ -75,10 +75,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         lock (_sync)
         {
             if (_compose != IntPtr.Zero) return;
-            if (_probe != IntPtr.Zero)
+
+            bool emitAll = existingBitmap is null || existingBitmap.Length == 0;
+            if (!emitAll && _probe != IntPtr.Zero && IsEntireTreePresent(existingBitmap, _probe))
+                return;
+
+            if (_probe != IntPtr.Zero && !emitAll)
             {
-                if (IsEntireTreePresent(existingBitmap))
-                    return;
                 fixed (byte* p = _utf8)
                 {
                     int rc = NativeInterop.GrammarComposeMaterializePhys(
@@ -90,6 +93,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 _compose = _probe;
                 return;
             }
+
+            if (_probe != IntPtr.Zero)
+            {
+                NativeInterop.ComposeResultFree(_probe);
+                _probe = IntPtr.Zero;
+            }
+
             IntPtr result = IntPtr.Zero;
             fixed (byte* p = _utf8)
             {

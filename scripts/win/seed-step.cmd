@@ -29,6 +29,7 @@ if /i "%STEP%"=="unicode" (
   if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
 ) else (
   if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=0"
+  set "LAPLACE_INGEST_MAX_UNITS="
 )
 
 cd /d "%LAPLACE_ROOT%\app"
@@ -40,7 +41,10 @@ if /i "%STEP%"=="wordnet"       goto run_ingest
 if /i "%STEP%"=="omw"           goto run_ingest
 if /i "%STEP%"=="verbnet"       goto run_ingest
 if /i "%STEP%"=="propbank"      goto run_ingest
-if /i "%STEP%"=="framenet"      goto run_ingest
+if /i "%STEP%"=="framenet" (
+  call :run_ingest_impl
+  exit /b %ERRORLEVEL%
+)
 if /i "%STEP%"=="semlink"       goto run_ingest
 if /i "%STEP%"=="mapnet"        goto run_ingest
 if /i "%STEP%"=="wordframenet" goto run_ingest

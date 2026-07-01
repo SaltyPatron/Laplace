@@ -76,6 +76,7 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
+        NativeRuntimeEnv.ApplyFromTopologyIfUnset();
         IngestTopology.EnsureReady();
         Laplace.Engine.Core.IntentStage.ResetContentBank();
         Laplace.Engine.Core.IntentStage.SetBulkFreshBypass(options.BulkFresh);

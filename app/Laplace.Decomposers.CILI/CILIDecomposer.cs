@@ -61,7 +61,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliTtlAsync(ttl, ct),
                 workers, batchSize,
-                () => NewBuilder("cili/concepts", 0, batchSize).EnableDeferredContent(reader),
+                () => NewBuilder("cili/concepts", 0, batchSize),
                 (b, rec) =>
                 {
                     var (ili, def) = rec;
@@ -91,7 +91,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapAsync(tab, version, ct),
                 workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize).EnableDeferredContent(reader),
+                () => NewBuilder($"cili/map/{version}", 0, batchSize),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
@@ -108,7 +108,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapTtlAsync(ttlMap, version, ct),
                 workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize).EnableDeferredContent(reader),
+                () => NewBuilder($"cili/map/{version}", 0, batchSize),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))

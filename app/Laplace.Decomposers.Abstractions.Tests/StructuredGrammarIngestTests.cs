@@ -150,6 +150,14 @@ public sealed class StructuredGrammarIngestTests
             if (present) Array.Fill(bm, (byte)0xFF);
             return Task.FromResult(bm);
         }
+
+        public Task<byte[]> ContentDescentBitmapAsync(
+            IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)
+        {
+            var bm = new byte[(ids.Count + 7) / 8];
+            if (present) Array.Fill(bm, (byte)0xFF);
+            return Task.FromResult(bm);
+        }
     }
 
     private static long ContentEntityCount(List<SubstrateChange> changes) =>
@@ -206,27 +214,29 @@ public sealed class StructuredGrammarIngestTests
             await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
             var witness = new NullGrammarWitness("tsv");
 
-            // Both legs go through the sequential pipeline directly so batch boundaries and
-            // within-batch witness dedup are identical — the entity counts are directly comparable.
-            // IngestFileAsync routes null-reader to the parallel workers (correct for production),
-            // but the parallel path produces variable-sized partial batches whose per-batch dedup
-            // gives a different total row count than the sequential path, making a raw count
-            // comparison meaningless. The invariant under test is: absent-bitmap ≡ no-reader in
-            // the sequential pipeline, not parallel ≡ sequential.
-            var baseline = new List<SubstrateChange>();
-            await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null,
-                containmentReader: null))
-                baseline.Add(change);
+            async Task<List<SubstrateChange>> RunPipelineAsync(ISubstrateReader? reader)
+            {
+                var stream = new GrammarFileRecordStream(path, "tsv");
+                var handler = new GrammarIngestHandler(Src, "tsv", witness);
+                var config = new IngestBatchConfig
+                {
+                    SourceId = Src,
+                    BatchLabelPrefix = "test",
+                    BatchSize = 4,
+                    ProbeChunkSize = 1024,
+                    WitnessWeight = 1.0,
+                    ContainmentReader = reader,
+                };
+                var list = new List<SubstrateChange>();
+                await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config))
+                    list.Add(change);
+                return list;
+            }
+
+            var baseline = await RunPipelineAsync(null);
 
             var absent = new UniformReader(present: false);
-            var changes = new List<SubstrateChange>();
-            await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
-                batchLabelPrefix: "test", reportUnits: null,
-                containmentReader: absent))
-                changes.Add(change);
+            var changes = await RunPipelineAsync(absent);
 
             Assert.Equal(ContentEntityCount(baseline), ContentEntityCount(changes));
             Assert.Equal(

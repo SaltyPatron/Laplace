@@ -8,9 +8,29 @@ if /i "%~1"=="--recycle" set "RECYCLE=1"
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
 del /q "%DEPLOY%\lib\*.stale~*" 2>nul
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0gen-sql.ps1" -Stage "%DEPLOY%\share_stage" || exit /b 1
-move /y "%DEPLOY%\share_stage\extension\*" "%DEPLOY%\share\extension\" >nul
-rmdir /s /q "%DEPLOY%\share_stage" 2>nul
+
+rem PostGIS model: extension SQL + .control are build artifacts from CMake (manifest.install → cpp → .sql).
+rem Deploy copies them into share/extension; CREATE EXTENSION runs the script once.
+cmake --build build-win-ext --target laplace_geom_sql laplace_substrate_sql || exit /b 1
+
+set "GEOM_DIR=%LAPLACE_ROOT%\build-win-ext\laplace_geom"
+set "SUB_DIR=%LAPLACE_ROOT%\build-win-ext\laplace_substrate"
+if not exist "%GEOM_DIR%\laplace_geom.control" (
+  echo ERROR: missing %GEOM_DIR%\laplace_geom.control — run build-extensions.cmd first
+  exit /b 1
+)
+if not exist "%SUB_DIR%\laplace_substrate.control" (
+  echo ERROR: missing %SUB_DIR%\laplace_substrate.control — run build-extensions.cmd first
+  exit /b 1
+)
+
+copy /y "%GEOM_DIR%\laplace_geom.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
+for %%F in ("%GEOM_DIR%\laplace_geom--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+
+copy /y "%SUB_DIR%\laplace_substrate.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
+for %%F in ("%SUB_DIR%\laplace_substrate--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%SUB_DIR%\laplace_substrate_upgrade.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
+
 call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
 call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
@@ -19,6 +39,11 @@ copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\lapl
 copy /y "build-win\core\perfcache\laplace_highway_perfcache.bin" "%DEPLOY%\share\laplace_highway_perfcache.bin" >nul || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
+rem laplace_substrate links laplace_dynamics (MKL/TBB) + laplace_core (libxml2) — PG backends load from deploy lib only
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.2.dll" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" || exit /b 1
+call :swapcopy "%PGBIN%\libxml2.dll" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libiomp5md.dll"
 echo deployed: %DEPLOY%
 set "PSQL=%PGBIN%\psql.exe"
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET extension_control_path = 'D:/Data/Postgres/laplace/share;$system';" || exit /b 1

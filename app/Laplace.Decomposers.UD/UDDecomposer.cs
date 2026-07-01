@@ -45,7 +45,6 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         if (files.Count == 0) yield break;
 
         ISubstrateReader? reader = context.Reader;
-        if (IntentStage.IsBulkFreshBypass) reader = null;
 
         if (workers <= 1 || files.Count == 1)
         {

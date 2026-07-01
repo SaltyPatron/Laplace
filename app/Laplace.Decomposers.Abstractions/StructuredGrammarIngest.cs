@@ -4,8 +4,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Grammar file ingest — single path: <see cref="GrammarFileRecordStream"/> →
-/// <see cref="IngestBatchPipeline"/> (batched descent, probe-before-materialize).
+/// Grammar file ingest: stream → existence gate on roots → compose novel only → apply.
 /// </summary>
 public static class StructuredGrammarIngest
 {
@@ -26,36 +25,6 @@ public static class StructuredGrammarIngest
         GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
         CancellationToken ct = default)
     {
-        if (IntentStage.IsBulkFreshBypass)
-            containmentReader = null;
-
-        // No containment reader: each worker's stage deduplicates within its own batch via
-        // the per-stage witness set (intent_stage_witness_record). Across batches the DB
-        // anti-join (apply_batch DISTINCT ON + NOT EXISTS) deduplicates without ON CONFLICT.
-        // The native content stage and intent_stage are per-instance with no global mutable
-        // state, so P-core-pinned workers compose into independent stages concurrently.
-        // With a reader: sequential pipeline uses the descent probe to filter novel entities
-        // before compose — no parallel path here, probe results are per-batch sequential.
-        if (containmentReader is null)
-            return IngestFileParallelAsync(
-                filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
-                batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
-                maxInputUnits, recordFraming, ct);
-
-        return IngestFileViaPipelineAsync(
-            filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
-            batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
-            maxInputUnits, containmentReader, recordFraming, ct);
-    }
-
-    private static IAsyncEnumerable<SubstrateChange> IngestFileParallelAsync(
-        string filePath, string modalityId, Hash128 sourceId,
-        IGrammarWitness witness, int batchSize, double witnessWeight,
-        string batchLabelPrefix, Action<long>? reportUnits,
-        Hash128? contextId, int commitEpoch,
-        Func<ReadOnlySpan<byte>, bool>? acceptRow, long maxInputUnits,
-        GrammarRecordFraming recordFraming, CancellationToken ct)
-    {
         var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
         var config = new IngestBatchConfig
@@ -63,15 +32,23 @@ public static class StructuredGrammarIngest
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = batchSize,
+            ProbeChunkSize = containmentReader is not null
+                ? IngestTopology.Current.Sizing.ProbeChunkSize
+                : Math.Max(batchSize, 1024),
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
-            ContainmentReader = null,
+            ContainmentReader = containmentReader,
             ReportUnits = reportUnits,
             MaxInputUnits = maxInputUnits,
         };
+
         var records = maxInputUnits > 0
             ? stream.RecordsAsync(ct).Take((int)Math.Min(maxInputUnits, int.MaxValue))
             : stream.RecordsAsync(ct);
+
+        if (containmentReader is not null)
+            return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+
         int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
         return PCoreParallelCompose.RunAsync(records, handler, config, workers, ct);
     }
@@ -119,11 +96,6 @@ public static class StructuredGrammarIngest
         return rows.ConvertAll(r => r.LineUtf8);
     }
 
-    /// <summary>
-    /// Single-pass: frame records from <paramref name="buf"/> AND parse each, returning bytes+AST
-    /// together. Eliminates the per-record re-parse that two-pass (FeedRawLines + ParseRow) required.
-    /// Pass <paramref name="read"/>=0 at end-of-stream to flush the final partial record.
-    /// </summary>
     internal static unsafe List<(byte[] LineUtf8, IntPtr Ast)> FeedAndParseForPipeline(
         IntPtr iter, byte[] buf, int read)
     {
@@ -167,25 +139,11 @@ public static class StructuredGrammarIngest
         ISubstrateReader? containmentReader = null,
         GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
         CancellationToken ct = default)
-    {
-        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
-        var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
-        var config = new IngestBatchConfig
-        {
-            SourceId = sourceId,
-            BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = batchSize,
-            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
-            WitnessWeight = witnessWeight,
-            CommitEpoch = commitEpoch,
-            ContainmentReader = containmentReader,
-            ReportUnits = reportUnits,
-            MaxInputUnits = maxInputUnits,
-        };
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
-    }
+        => IngestFileAsync(
+            filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
+            batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
+            maxInputUnits, containmentReader, recordFraming, ct);
 
-    /// <summary>Pipeline ingest using modality + record framing from the manifest row.</summary>
     public static IAsyncEnumerable<SubstrateChange> IngestFileViaPipelineAsync(
         string filePath,
         EtlSource source,
@@ -200,22 +158,9 @@ public static class StructuredGrammarIngest
         long maxInputUnits = 0,
         ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
-        => IngestFileViaPipelineAsync(
-            filePath,
-            source.Modality.GrammarId,
-            source.SourceId,
-            witness,
-            batchSize,
-            witnessWeight,
-            batchLabelPrefix,
-            reportUnits,
-            contextId,
-            commitEpoch,
-            acceptRow,
-            maxInputUnits,
-            containmentReader,
-            source.Modality.RecordFraming,
-            ct);
+        => IngestFileAsync(
+            filePath, source, witness, batchSize, witnessWeight, batchLabelPrefix,
+            reportUnits, contextId, commitEpoch, acceptRow, maxInputUnits, containmentReader, ct);
 
     private static unsafe IntPtr CreateRowIter(IntPtr recipe)
     {
@@ -261,16 +206,6 @@ public static class StructuredGrammarIngest
 
     private readonly record struct RawRow(byte[] LineUtf8);
 
-    private static SubstrateChangeBuilder NewBuilder(
-        Hash128 sourceId, string prefix, int bn, int batchSize, int commitEpoch,
-        ISubstrateReader? containmentReader = null) =>
-        new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
-            entityCapacity: batchSize,
-            physicalityCapacity: batchSize,
-            attestationCapacity: batchSize * 4)
-            .SetCommitEpoch(commitEpoch)
-            .EnableDeferredContent(containmentReader);
-
     public static async Task<SubstrateChange?> IngestJsonDocumentAsync(
         string filePath,
         string modalityId,
@@ -288,20 +223,37 @@ public static class StructuredGrammarIngest
         if (utf8.Length == 0) return null;
 
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
+        if (containmentReader is not null
+            && GrammarRowComposer.TryProbeRowRoot(utf8, ast, modalityId, out var rootId, out _)
+            && (containmentReader.IsProvenPresent(rootId)
+                || (await containmentReader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false))[0] != 0))
+        {
+            var b = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
+                .SetCommitEpoch(0);
+            witness.WalkRow(
+                new GrammarComposeContext(utf8, ast, rootId, null,
+                    JsonGrammarHelper.FindRootObjectNode(ast)),
+                new RowContext(0, 1), b);
+            containmentReader.MarkProven([rootId]);
+            return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
+        }
+
         using var composer = new GrammarRowComposer(utf8, ast, sourceId, modalityId);
         byte[]? bitmap = containmentReader is not null
             ? await composer.ProbeDescentBitmapAsync(containmentReader, ct)
             : null;
         var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
-        var b = NewBuilder(sourceId, batchLabel, 0, 1, commitEpoch: 0, containmentReader);
-        foreach (var e in ents) b.AddEntity(e);
-        foreach (var p in phys) b.AddPhysicality(p);
-        foreach (var a in atts) b.AddAttestation(a);
+        var builder = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
+            .SetCommitEpoch(0);
+        foreach (var e in ents) builder.AddEntity(e);
+        foreach (var p in phys) builder.AddPhysicality(p);
+        foreach (var a in atts) builder.AddAttestation(a);
 
-        var ctx = new GrammarComposeContext(utf8, ast, root, composer,
-            JsonGrammarHelper.FindRootObjectNode(ast));
-        witness.WalkRow(ctx, new RowContext(0, 1), b);
-        return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
+        witness.WalkRow(
+            new GrammarComposeContext(utf8, ast, root, composer,
+                JsonGrammarHelper.FindRootObjectNode(ast)),
+            new RowContext(0, 1), builder);
+        return await builder.SetInputUnitsConsumed(1).BuildAsync(ct);
     }
 }

@@ -95,6 +95,8 @@ internal static class IngestPipelineTestHelpers
         {
             Interlocked.Increment(ref Tier01FlatCalls);
             var bm = new byte[(candidates.Count + 7) / 8];
+            // Root existence gate uses single-id bulk IN — leave absent so compose + tree probe run.
+            if (candidates.Count == 1) return Task.FromResult(bm);
             for (int i = 0; i < candidates.Count; i++)
                 bm[i >> 3] |= (byte)(1 << (i & 7));
             return Task.FromResult(bm);

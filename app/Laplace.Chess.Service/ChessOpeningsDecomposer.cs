@@ -86,7 +86,7 @@ public sealed class ChessOpeningsDecomposer : IDecomposer
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
         // Deferred-content skip ON: opening prefixes are shared massively (every line through 1.e4 e5
         // collapses to the same nodes), so the probe stages repeated content once.
-        => new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "chess/openings").EnableDeferredContent(ctx.Reader);
+        => new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "chess/openings");
 
     /// <summary>Replay one opening line's mainline, emitting a Draw-scored (book) MOVE edge per ply, then
     /// tag the FINAL position with the line's NAME + ECO code (the identifying value — "what opening is

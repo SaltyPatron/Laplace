@@ -21,7 +21,7 @@ rem Production hosts must set PGPASSWORD (and LAPLACE_DB) explicitly — do not 
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
-if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%"
+if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%;Command Timeout=0"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
 rem Ingest worker counts (file decompose, commit pool, apply partitions) are resolved at runtime
@@ -30,6 +30,11 @@ rem in scripts unless you are deliberately overriding detection for a one-off ex
 if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
 rem One Hilbert-sorted bulk apply_batch per commit (compose still parallel on P-cores).
 if not defined LAPLACE_APPLY_PARTITIONS set "LAPLACE_APPLY_PARTITIONS=1"
+if not defined LAPLACE_TBB_MAX_THREADS_PER_CORE set "LAPLACE_TBB_MAX_THREADS_PER_CORE=1"
+if not defined MKL_NUM_THREADS set "MKL_NUM_THREADS=8"
+if not defined TBB_NUM_THREADS set "TBB_NUM_THREADS=8"
+if not defined MKL_DYNAMIC set "MKL_DYNAMIC=0"
+if not defined LAPLACE_NATIVE_THREADS set "LAPLACE_NATIVE_THREADS=8"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"

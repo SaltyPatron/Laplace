@@ -18,16 +18,31 @@ internal static partial class PgnClocks
     /// no clocks or the count doesn't line up 1:1 with <paramref name="moveCount"/> (don't guess).</summary>
     public static double[] SecondsRemaining(string gameText, int moveCount)
     {
+        var tokens = ClockTokens(gameText, moveCount);
+        if (tokens is null) return Array.Empty<double>();
+        var outv = new double[tokens.Length];
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            var parts = tokens[i].Split(':');
+            if (parts.Length != 3) continue;
+            outv[i] = int.Parse(parts[0]) * 3600 + int.Parse(parts[1]) * 60
+                + double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return outv;
+    }
+
+    /// <summary>Canonical <c>H:MM:SS</c> clock strings per move (content-addressed emission), or null when misaligned.</summary>
+    public static string[]? ClockTokens(string gameText, int moveCount)
+    {
         var ms = ClkRegex().Matches(gameText);
-        if (ms.Count == 0 || ms.Count != moveCount) return Array.Empty<double>();
-        var outv = new double[moveCount];
+        if (ms.Count == 0 || ms.Count != moveCount) return null;
+        var outv = new string[moveCount];
         for (int i = 0; i < moveCount; i++)
         {
             var m = ms[i];
-            double h = double.Parse(m.Groups[1].Value);
-            double min = double.Parse(m.Groups[2].Value);
-            double sec = double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
-            outv[i] = h * 3600 + min * 60 + sec;
+            var canon = ChessCanonical.ClockFromMatch(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value);
+            if (canon is null) return null;
+            outv[i] = canon;
         }
         return outv;
     }
