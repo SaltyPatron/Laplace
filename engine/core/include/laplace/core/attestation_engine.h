@@ -149,11 +149,16 @@ int laplace_attestation_aggregated_build(
     laplace_attestation_staged_t* out);
 
 
+/* Upper bound on a plausible per-attestation games/observation count. The fold engine
+ * already bounds per-relation games at 1<<27; anything near 1e9 in a games slot is a
+ * fixed-point (1e9-scaled) value in the wrong argument position, not a real count. */
+#define LAPLACE_ATTESTATION_GAMES_MAX 100000000LL
+
 typedef struct {
     hash128_t subject;
-    hash128_t object;            
+    hash128_t object;
     uint8_t   object_is_null;
-    int64_t   games;             
+    int64_t   games;
     int64_t   sum_score_fp1e9;
 } laplace_attestation_aggregated_cell_t;
 
@@ -185,6 +190,11 @@ int laplace_attestation_categorical_add(
     int              confirm,
     int64_t          observation_count);
 
+/* Parameter order deliberately matches laplace_attestation_aggregated_build exactly.
+ * These two must never diverge: a positional mismatch between them compiled silently
+ * (int64<->double implicit conversions) and corrupted every attestation written through
+ * this path (observation_count = games*1e9, sum_score truncated to 0, outcome forced
+ * REFUTE) — see .scratchpad/02 Issue 32. */
 int laplace_attestation_aggregated_add(
     intent_stage_t*  stage,
     const hash128_t* subject,
@@ -194,9 +204,9 @@ int laplace_attestation_aggregated_add(
     const hash128_t* source,
     const hash128_t* context,
     uint8_t          context_is_null,
+    double           witness_weight,
     int64_t          games,
     int64_t          sum_score_fp1e9,
-    double           witness_weight,
     int64_t          now_unix_us);
 
 typedef struct {

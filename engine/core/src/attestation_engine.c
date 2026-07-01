@@ -392,7 +392,12 @@ int laplace_attestation_aggregated_build(
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out) {
     if (!subject || !type_id || !source || !out) return -1;
-    if (games <= 0) return -1;
+    /* Argument-swap tripwires (Issue 32): a legitimate witness weight is a rank*trust
+     * product in [0,1], and a legitimate games count is far below 1e8 — a 1e9-scaled
+     * fixed-point value landing in either slot means a caller has its arguments
+     * rotated. Fail loudly instead of writing corrupt evidence. */
+    if (games <= 0 || games > LAPLACE_ATTESTATION_GAMES_MAX) return -1;
+    if (!(witness_weight >= 0.0 && witness_weight <= 1.0)) return -1;
 
     hash128_t subj;
     hash128_t obj;
@@ -521,6 +526,9 @@ int laplace_attestation_categorical_add(
     return staged_to_intent(stage, &staged);
 }
 
+/* Parameter order deliberately identical to laplace_attestation_aggregated_build — a
+ * positional mismatch here compiled silently via int64<->double implicit conversions and
+ * corrupted every attestation on this path (.scratchpad/02 Issue 32). */
 int laplace_attestation_aggregated_add(
     intent_stage_t*  stage,
     const hash128_t* subject,
@@ -530,15 +538,15 @@ int laplace_attestation_aggregated_add(
     const hash128_t* source,
     const hash128_t* context,
     uint8_t          context_is_null,
+    double           witness_weight,
     int64_t          games,
     int64_t          sum_score_fp1e9,
-    double           witness_weight,
     int64_t          now_unix_us) {
     if (!stage || !subject || !type_id || !source) return -1;
     laplace_attestation_staged_t staged;
     int rc = laplace_attestation_aggregated_build(
         subject, type_id, object, object_is_null, source, context, context_is_null,
-        games, sum_score_fp1e9, witness_weight, now_unix_us, &staged);
+        witness_weight, games, sum_score_fp1e9, now_unix_us, &staged);
     if (rc != 0) return rc;
     return staged_to_intent(stage, &staged);
 }
