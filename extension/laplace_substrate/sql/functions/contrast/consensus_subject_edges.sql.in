@@ -3,8 +3,7 @@ CREATE OR REPLACE FUNCTION consensus_subject_edges(p_subject bytea)
     LANGUAGE sql STABLE PARALLEL SAFE STRICT
     SET search_path = @extschema@, public AS $$
     SELECT c.type_id, c.object_id, c.rating, c.rd
-    FROM v_consensus_resolved c
+    FROM v_consensus_unrefuted c
     WHERE c.subject_id = p_subject
       AND c.object_id IS NOT NULL
-      AND NOT refuted(c.rating, c.rd)
 $$;

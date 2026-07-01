@@ -27,6 +27,11 @@ public sealed class ChessPgnDecomposer : IDecomposer
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
 
+    // Everything needed to compute a game's content-addressed GameId, cheaply enough to do for
+    // an entire chunk before committing to the expensive per-ply work below.
+    internal sealed record ParsedGame(
+        string GameText, PgnMovetext.PgnWalkResult Walk, List<string> Moves, GameOutcome Result, Hash128 GameId);
+
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -35,12 +40,69 @@ public sealed class ChessPgnDecomposer : IDecomposer
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
 
         await foreach (var change in DecomposerBatch.RunAsync(
-            StreamAllGamesAsync(context.EcosystemPath, ct),
-            (gameText, b) => ComposeGame(gameText, b, modality),
+            StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
+            (parsed, b) => ComposeParsedGame(parsed, b, modality),
             ChessVocabulary.PgnSourceId, "chess/pgn", batch, context.Reader, options, ct))
             yield return change;
     }
 
+    // Trunk-to-leaf short-circuit: a game's GameId is itself an entity (EmitGame adds it, tier
+    // Document). Parsing far enough to compute that id is cheap relative to full per-ply
+    // decomposition (no board replay, no position composition, no attestation construction) —
+    // so a whole chunk's ids get bulk-probed against the DB in ONE round trip before any of that
+    // expensive work runs, and games already known are skipped outright instead of being fully
+    // recomposed and then silently discarded by the final apply-time anti-join. Matters most
+    // when ingesting overlapping corpora (the same famous games can appear in more than one of
+    // chess.com exports / Lumbras / TWIC).
+    internal static async IAsyncEnumerable<ParsedGame> StreamNovelGamesAsync(
+        string ecosystemPath, ISubstrateReader? reader, int chunkSize,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var chunk = new List<ParsedGame>(chunkSize);
+        await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, ct))
+        {
+            if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
+            if (chunk.Count < chunkSize) continue;
+            await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
+            chunk.Clear();
+        }
+        await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
+    }
+
+    internal static async IAsyncEnumerable<ParsedGame> FilterNovelAsync(
+        List<ParsedGame> chunk, ISubstrateReader? reader, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (chunk.Count == 0) yield break;
+        if (reader is null) { foreach (var g in chunk) yield return g; yield break; }
+
+        var toProbe = new List<int>(chunk.Count);
+        for (int i = 0; i < chunk.Count; i++)
+        {
+            if (reader.IsProvenPresent(chunk[i].GameId)) continue;
+            toProbe.Add(i);
+        }
+
+        bool[] present = new bool[chunk.Count];
+        if (toProbe.Count > 0)
+        {
+            var ids = new Hash128[toProbe.Count];
+            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].GameId;
+            byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
+            long bits = (long)bm.Length * 8;
+            var proven = new List<Hash128>(toProbe.Count);
+            for (int k = 0; k < toProbe.Count; k++)
+            {
+                if (k >= bits || (bm[k >> 3] & (1 << (k & 7))) == 0) continue;
+                present[toProbe[k]] = true;
+                proven.Add(ids[k]);
+            }
+            if (proven.Count > 0) reader.MarkProven(proven);
+        }
+
+        for (int i = 0; i < chunk.Count; i++)
+            if (!present[i] && !reader.IsProvenPresent(chunk[i].GameId))
+                yield return chunk[i];
+    }
 
     private static async IAsyncEnumerable<string> StreamAllGamesAsync(
         string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
@@ -53,26 +115,34 @@ public sealed class ChessPgnDecomposer : IDecomposer
         }
     }
 
-    private static void ComposeGame(string gameText, SubstrateChangeBuilder b, ChessModality modality)
+    internal static ParsedGame? TryParseGame(string gameText)
     {
         var gameBytes = Encoding.UTF8.GetBytes(gameText);
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
             walk = PgnMovetext.Walk(ast, gameBytes);
-        if (walk.Result is null || walk.Mainline.Count == 0) return;
+        if (walk.Result is null || walk.Mainline.Count == 0) return null;
 
         var moves = walk.Mainline.Select(p => p.San).ToList();
         var result = walk.Result.Value;
+        var (whiteName, blackName) = ParseNames(gameText);
+        string date = PgnGames.TagStr(gameText, "Date");
+        var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
+        return new ParsedGame(gameText, walk, moves, result, gameId);
+    }
+
+    private static void ComposeParsedGame(ParsedGame parsed, SubstrateChangeBuilder b, ChessModality modality)
+    {
+        var (gameText, walk, moves, result, gameId) = parsed;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
         var (whiteName, blackName) = ParseNames(gameText);
         var whitePlayer = EmitPlayer(b, whiteName);
         var blackPlayer = EmitPlayer(b, blackName);
 
-        string date = PgnGames.TagStr(gameText, "Date");
-        var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
         EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo);
 
+        var (initial, standardStart) = InitialState(gameText, modality);
         int moveCount = moves.Count;
         var clockTokens = PgnClocks.ClockTokens(gameText, moveCount);
         var clocks = clockTokens is not null
@@ -89,14 +159,27 @@ public sealed class ChessPgnDecomposer : IDecomposer
             ? evalTokens.Select(PgnEvals.ParseToken).ToArray()
             : PgnEvals.Centipawns(gameText, moveCount);
 
-        EmitGameOpeningMeta(b, gameId, gameText, moves, modality);
+        EmitGameOpeningMeta(b, gameId, gameText, moves, modality, standardStart);
 
-        AppendGame(b, modality, walk.Mainline, result,
+        AppendGame(b, modality, initial, walk.Mainline, result,
                    whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId,
                    evals, clockTokens, evalTokens);
 
         if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_VARIATIONS"), "1", StringComparison.Ordinal))
-            AppendVariations(b, modality, walk.AllPlies, whitePlayer, blackPlayer);
+            AppendVariations(b, modality, initial, walk.AllPlies, whitePlayer, blackPlayer);
+    }
+
+    // A PGN game defaults to the standard starting array, but chess.com/lichess puzzle exports
+    // and some OTB archives specify a real, different starting position via [SetUp "1"]/[FEN].
+    // Previously this was ignored entirely — every game was decomposed as if [FEN] didn't exist,
+    // silently misattributing whatever moves followed to the wrong starting position.
+    internal static (ChessState Initial, bool StandardStart) InitialState(string gameText, ChessModality m)
+    {
+        if (PgnGames.TagStr(gameText, "SetUp") != "1") return (m.Initial(), true);
+        string fen = PgnGames.TagStr(gameText, "FEN");
+        if (string.IsNullOrWhiteSpace(fen)) return (m.Initial(), true);
+        try { return (m.FromFen(fen), false); }
+        catch (FormatException) { return (m.Initial(), true); }
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
@@ -151,7 +234,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
     private static void EmitGameOpeningMeta(
     SubstrateChangeBuilder b, Hash128 gameId, string gameText,
-    IReadOnlyList<string> sans, ChessModality modality)
+    IReadOnlyList<string> sans, ChessModality modality, bool standardStart)
     {
         var src = ChessVocabulary.PgnSourceId;
         string ecoHeader = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
@@ -162,13 +245,18 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (openingHeader.Length > 0)
             ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", openingHeader, PgnWitnessWeight, src);
 
+        // ECO/opening-book classification and motif detection both match against SAN sequences
+        // recorded from the standard starting array — meaningless (and a real false-match risk)
+        // for a game that actually started from a different position via [SetUp "1"]/[FEN].
+        if (!standardStart) return;
+
         var classified = OpeningClassifier.Classify(sans, modality);
         if (classified.Eco is { } eco && eco != ecoHeader)
             ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
         if (classified.Name is { } name && name != openingHeader)
             ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", name, PgnWitnessWeight, src);
 
-        if (ChessMotifs.Detect(sans) is { } motif)
+        if (ChessMotifs.DetectNamedTrap(sans) is { } motif)
             ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", motif, PgnWitnessWeight, src);
     }
 
@@ -196,7 +284,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
     }
 
     private static void AppendGame(
-        SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> plies,
+        SubstrateChangeBuilder b, ChessModality m, ChessState initial, IReadOnlyList<PgnMovetext.PgnMoveStream> plies,
         GameOutcome result, int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
         double[] clocks, double medianDrop, Hash128 gameId, int[]? evals,
         string[]? clockTokens, string[]? evalTokens)
@@ -207,7 +295,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
         const double evalWeight = 0.55;
         const double metaWeight = PgnWitnessWeight;
 
-        var state = m.Initial();
+        var state = initial;
         for (int ply = 0; ply < plies.Count; ply++)
         {
             var plyStream = plies[ply];
@@ -238,6 +326,9 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 contextId: gameId,
                 ply: ply + 1);
 
+            foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
+                ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", tag, PgnWitnessWeight, ChessVocabulary.PgnSourceId);
+
             if (clockTokens is not null && ply < clockTokens.Length)
             {
                 ChessGraph.AppendClock(b, fromKey, clockTokens[ply], metaWeight,
@@ -266,12 +357,12 @@ public sealed class ChessPgnDecomposer : IDecomposer
     }
 
     private static void AppendVariations(
-    SubstrateChangeBuilder b, ChessModality m, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
+    SubstrateChangeBuilder b, ChessModality m, ChessState initial, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
     Hash128? whitePlayer, Hash128? blackPlayer)
     {
         const double varWeight = 0.35;
-        var mainState = m.Initial();
-        var varState = m.Initial();
+        var mainState = initial;
+        var varState = initial;
         bool inVar = false;
 
         foreach (var plyStream in allPlies)

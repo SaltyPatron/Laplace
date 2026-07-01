@@ -9,9 +9,8 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea D
         SELECT cc.subject_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
             SELECT c.subject_id, c.rating, c.rd, c.witness_count
-            FROM consensus c
+            FROM v_consensus_unrefuted c
             WHERE c.object_id = s.id AND c.type_id = p_type
-              AND NOT refuted(c.rating, c.rd)
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit
         ) cc
     )

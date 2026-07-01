@@ -13,6 +13,18 @@ double math4d_distance(const double a[4], const double b[4]);
 double math4d_distance_sq(const double a[4], const double b[4]);
 double math4d_angular_distance(const double a[4], const double b[4]);
 
+/*
+ * Batched form of math4d_angular_distance: a_flat is n*4 doubles (candidate i's
+ * x,y,z,w at a_flat[i*4..i*4+3]), b is the single fixed anchor point shared
+ * across all candidates, out[i] receives angular_distance(a_flat+i*4, b).
+ * Dispatches to an AVX2 kernel when available (runtime CPUID check, resolved
+ * once and cached), with a scalar fallback identical to calling
+ * math4d_angular_distance in a loop -- always correct, AVX2 only changes
+ * performance, never behavior (beyond ordinary floating-point reassociation).
+ */
+void math4d_angular_distance_batch(const double *a_flat, int n, const double b[4],
+                                   double *out);
+
 void   math4d_add(const double a[4], const double b[4], double out[4]);
 void   math4d_sub(const double a[4], const double b[4], double out[4]);
 void   math4d_scale(const double a[4], double s, double out[4]);

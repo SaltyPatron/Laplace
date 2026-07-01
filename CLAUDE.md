@@ -2,8 +2,11 @@
 
 Content-addressable geometric-attestation substrate. Full architectural writeup lives in
 `.scratchpad/01_Initial_review.txt` and `.scratchpad/02_Identified_Issues.txt` (issue
-tracker, kept up to date across sessions) — read those before doing deep work here. This file
-is the fast-start operational reference.
+tracker, kept up to date across sessions) — read those before doing deep work here.
+`.scratchpad/05_Substrate_Invariants.txt` (what must be true about the data/model — e.g. what
+a centroid/hilbert collision does and does not certify) and `.scratchpad/06_Engineering_Ruleset.txt`
+(how code touching the substrate must be written) are the same kind of living doc, split out
+because they answer different questions. This file is the fast-start operational reference.
 
 ## What this is, in one paragraph
 

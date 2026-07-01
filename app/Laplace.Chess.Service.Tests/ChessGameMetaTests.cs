@@ -1,9 +1,40 @@
+using Laplace.Modality.Chess;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessGameMetaTests
 {
+    [Fact]
+    public void InitialState_NoSetUpTag_UsesStandardStart()
+    {
+        var m = new ChessModality();
+        var (initial, standard) = ChessPgnDecomposer.InitialState("[Event \"x\"]\n", m);
+        Assert.True(standard);
+        Assert.Equal(m.Initial().Board.ToFen(), initial.Board.ToFen());
+    }
+
+    [Fact]
+    public void InitialState_SetUpWithValidFen_UsesThatPosition()
+    {
+        const string fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+        var gameText = $"[Event \"x\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n";
+        var m = new ChessModality();
+        var (initial, standard) = ChessPgnDecomposer.InitialState(gameText, m);
+        Assert.False(standard);
+        Assert.Equal(fen, initial.Board.ToFen());
+    }
+
+    [Fact]
+    public void InitialState_SetUpWithGarbageFen_FallsBackToStandardWithoutThrowing()
+    {
+        var gameText = "[Event \"x\"]\n[SetUp \"1\"]\n[FEN \"not a real fen\"]\n";
+        var m = new ChessModality();
+        var (initial, standard) = ChessPgnDecomposer.InitialState(gameText, m);
+        Assert.True(standard);
+        Assert.Equal(m.Initial().Board.ToFen(), initial.Board.ToFen());
+    }
+
     [Theory]
     [InlineData("60", "bullet")]
     [InlineData("120+1", "bullet")]

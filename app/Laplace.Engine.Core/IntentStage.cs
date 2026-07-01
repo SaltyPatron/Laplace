@@ -147,7 +147,7 @@ public sealed class IntentStage : SafeHandle
             Hash128* objPtr = objectId is null ? null : &obj;
             Hash128* ctxPtr = contextId is null ? null : &ctx;
             Mask256 mask = highwayMask;
-            byte* maskPtr = mask.IsZero ? null : (byte*)&mask;
+            byte* maskPtr = (byte*)&mask;
             int rc = NativeInterop.IntentStageAddAttestation(
                 handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
                 outcome, lastObservedAtUnixUs, observationCount, maskPtr);

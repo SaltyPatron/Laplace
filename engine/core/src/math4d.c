@@ -278,3 +278,85 @@ double math4d_hausdorff(const double* a, size_t na, const double* b, size_t nb) 
     const double dba = directed_hausdorff(b, nb, a, na);
     return (dab > dba) ? dab : dba;
 }
+
+/*
+ * math4d_angular_distance_batch: see math4d.h for the contract. Runtime
+ * CPUID-gated AVX2 dispatch, resolved once via a cached function pointer;
+ * scalar fallback is always compiled and always correct, AVX2 only changes
+ * performance.
+ */
+#if defined(_M_X64) || defined(__x86_64__) || defined(_M_AMD64)
+#define LAPLACE_MATH4D_X86 1
+#endif
+
+#ifdef LAPLACE_MATH4D_X86
+#include <immintrin.h>
+#if defined(_MSC_VER) || defined(__INTEL_LLVM_COMPILER)
+#include <intrin.h>
+static int math4d_cpu_has_avx2(void) {
+    int info[4] = {0, 0, 0, 0};
+    __cpuidex(info, 7, 0);
+    return (info[1] & (1 << 5)) != 0; /* EBX bit 5 = AVX2 */
+}
+#elif defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
+static int math4d_cpu_has_avx2(void) {
+    unsigned int eax, ebx, ecx, edx;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return 0;
+    return (ebx & (1 << 5)) != 0;
+}
+#else
+static int math4d_cpu_has_avx2(void) { return 0; }
+#endif
+
+static double math4d_angular_one_avx2(const double a[4], const double b[4], double nb) {
+    __m256d va = _mm256_loadu_pd(a);
+    __m256d vb = _mm256_loadu_pd(b);
+    __m256d dot_v = _mm256_mul_pd(va, vb);
+    __m256d aa_v  = _mm256_mul_pd(va, va);
+    __m256d sum2  = _mm256_hadd_pd(dot_v, aa_v); /* [d0+d1, q0+q1, d2+d3, q2+q3] */
+    __m128d lo = _mm256_castpd256_pd128(sum2);
+    __m128d hi = _mm256_extractf128_pd(sum2, 1);
+    __m128d total = _mm_add_pd(lo, hi);          /* [dot_sum, aa_sum] */
+    double dot = _mm_cvtsd_f64(total);
+    double aa  = _mm_cvtsd_f64(_mm_unpackhi_pd(total, total));
+    double na  = sqrt(aa);
+
+    if (na == 0.0 || nb == 0.0) return 0.0;
+    double c = dot / (na * nb);
+    if (c > 1.0) c = 1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c);
+}
+#endif /* LAPLACE_MATH4D_X86 */
+
+static double math4d_angular_one_scalar(const double a[4], const double b[4], double nb) {
+    const double na = math4d_norm(a);
+    if (na == 0.0 || nb == 0.0) return 0.0;
+    double c = math4d_dot(a, b) / (na * nb);
+    if (c > 1.0) c = 1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c);
+}
+
+typedef double (*math4d_angular_one_fn)(const double a[4], const double b[4], double nb);
+static math4d_angular_one_fn g_math4d_angular_one = NULL;
+
+static void math4d_ensure_angular_dispatch(void) {
+    if (g_math4d_angular_one != NULL) return;
+#ifdef LAPLACE_MATH4D_X86
+    g_math4d_angular_one = math4d_cpu_has_avx2() ? math4d_angular_one_avx2
+                                                  : math4d_angular_one_scalar;
+#else
+    g_math4d_angular_one = math4d_angular_one_scalar;
+#endif
+}
+
+void math4d_angular_distance_batch(const double *a_flat, int n, const double b[4],
+                                   double *out) {
+    const double nb = math4d_norm(b);
+
+    math4d_ensure_angular_dispatch();
+    for (int i = 0; i < n; i++)
+        out[i] = g_math4d_angular_one(a_flat + (size_t) i * 4, b, nb);
+}

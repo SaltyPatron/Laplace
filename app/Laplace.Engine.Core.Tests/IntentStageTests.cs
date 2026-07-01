@@ -96,6 +96,47 @@ public class IntentStageTests
     }
 
     [Fact]
+    public void AddAttestation_DefaultHighwayMaskEmits32ZeroBytesNotNull()
+    {
+        // Regression test for the IsZero-vs-unset bug: a caller that doesn't pass
+        // highwayMask (or passes an explicitly all-zero Mask256) gets Mask256.Zero,
+        // which is a legitimately meaningful 32-byte mask (no relation bands
+        // matched), not "no mask was computed." Before the fix, AddAttestation's
+        // `mask.IsZero ? null : ...` collapsed both cases to a NULL column write.
+        using var s = IntentStage.New(1);
+        var h = Hash128.Zero;
+        s.AddAttestation(h, h, h, null, h, null,
+            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1);
+        Assert.Equal(1, s.AttestationCount);
+
+        string[] columns = IntentStage.CopyColumnList(IntentStageTable.Attestations)
+            .Split(", ");
+        int highwayMaskIndex = Array.IndexOf(columns, "highway_mask");
+        Assert.True(highwayMaskIndex >= 0, "highway_mask column not found in CopyColumnList");
+
+        var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);
+        int pos = 11 + 8; // signature + flags(4) + extension(4)
+        short fieldCount = ReadBe16(bytes.AsSpan(pos, 2));
+        Assert.Equal(columns.Length, fieldCount);
+        pos += 2;
+        for (int i = 0; i < fieldCount; i++)
+        {
+            uint len = ReadBe32(bytes.AsSpan(pos, 4));
+            pos += 4;
+            if (i == highwayMaskIndex)
+            {
+                Assert.Equal(32u, len); // NOT unchecked((uint)-1) -- must not be NULL
+                for (int b = 0; b < 32; b++)
+                    Assert.Equal(0, bytes[pos + b]);
+                return;
+            }
+            if (len != unchecked((uint)-1))
+                pos += (int)len;
+        }
+        Assert.Fail("did not reach highway_mask field");
+    }
+
+    [Fact]
     public void CopyColumnList_ReturnsKnownStringForEntities()
     {
         Assert.Equal("id, tier, type_id, first_observed_by",

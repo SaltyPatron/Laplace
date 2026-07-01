@@ -9,7 +9,6 @@ CREATE OR REPLACE FUNCTION gaps(p_word bytea)
         'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
     SELECT e.name FROM expected e
     WHERE NOT EXISTS (
-        SELECT 1 FROM consensus c JOIN subj s ON c.subject_id = s.id
-        WHERE c.type_id = relation_type_id(e.name)
-          AND NOT refuted(c.rating, c.rd))
+        SELECT 1 FROM v_consensus_unrefuted c JOIN subj s ON c.subject_id = s.id
+        WHERE c.type_id = relation_type_id(e.name))
 $$;

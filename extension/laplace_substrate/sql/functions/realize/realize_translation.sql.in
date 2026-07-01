@@ -6,13 +6,12 @@ CREATE OR REPLACE FUNCTION _realize_translation(p_id bytea, p_lang bytea DEFAULT
         SELECT render_text(m.object_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
                eff_mu(m.rating, m.rd) AS mu
-        FROM consensus m
+        FROM v_consensus_unrefuted m
         LEFT JOIN consensus lang ON lang.subject_id = m.object_id
           AND lang.type_id = relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
         WHERE m.subject_id = p_id
           AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
-          AND NOT refuted(m.rating, m.rd)
     ) q
     WHERE q.s IS NOT NULL AND q.s <> ''
     ORDER BY q.lp DESC, q.mu DESC

@@ -66,6 +66,7 @@ functions/fold/create_period_staging_with_epoch.sql.in
 functions/fold/period_phi_mixed.sql.in
 functions/fold/materialize_period_partition.sql.in
 functions/fold/materialize_period_partition_fresh.sql.in
+functions/fold/consensus_fold_partition_incremental.sql.in
 functions/fold/consensus_fold_result.sql.in
 functions/fold/hash128_lo.sql.in
 functions/fold/consensus_partition_of.sql.in
@@ -174,6 +175,7 @@ functions/cascade/cascade.sql.in
 functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
+functions/structural/containers_of.sql.in
 functions/structural/collocates.sql.in
 functions/structural/entity_curve.sql.in
 functions/structural/nearest_neighbors_4d.sql.in
@@ -303,6 +305,7 @@ functions/highway/attestations_has_highway.sql.in
 views/v_consensus_resolved.sql.in
 views/v_consensus_edges.sql.in
 views/v_entities_highway.sql.in
+views/v_consensus_unrefuted.sql.in
 functions/analysis/laplace_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in

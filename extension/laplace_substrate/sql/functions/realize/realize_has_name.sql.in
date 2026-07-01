@@ -7,14 +7,13 @@ CREATE OR REPLACE FUNCTION _realize_has_name(p_id bytea, p_lang bytea DEFAULT NU
                (lang.object_id IS NOT NULL) AS lp,
                (nm.type_id = relation_type_id('HAS_NAME')) AS prim,
                eff_mu(nm.rating, nm.rd) AS mu
-        FROM consensus nm
+        FROM v_consensus_unrefuted nm
         LEFT JOIN consensus lang ON lang.subject_id = nm.object_id
           AND lang.type_id = relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
         WHERE nm.subject_id = p_id
           AND nm.type_id IN (relation_type_id('HAS_NAME'),
                              relation_type_id('HAS_NAME_ALIAS'))
-          AND NOT refuted(nm.rating, nm.rd)
     ) q
     WHERE q.s IS NOT NULL AND q.s <> ''
     ORDER BY q.lp DESC, q.prim DESC, q.mu DESC

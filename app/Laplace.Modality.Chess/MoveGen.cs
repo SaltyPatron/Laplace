@@ -92,6 +92,59 @@ public static class MoveGen
         return IsSquareAttacked(b, k, byWhite: !whiteKing);
     }
 
+    /// Squares of enemy pieces directly attacked by the piece on `from` (sliding rays stop at the
+    /// first occupied square, same as real capture rules). Used for tactical-motif detection
+    /// (forks, hanging pieces) — a "from the piece's own square outward" counterpart to
+    /// IsSquareAttacked's "is this square attacked by any piece of color X" check.
+    public static List<int> EnemyPiecesAttackedFrom(Board b, int from)
+    {
+        var result = new List<int>();
+        var piece = b.Squares[from];
+        if (piece == Piece.Empty) return result;
+        bool white = Board.IsWhite(piece);
+
+        void MaybeAdd(int t)
+        {
+            if (!Board.OnBoard(t)) return;
+            var pc = b.Squares[t];
+            if (pc != Piece.Empty && Board.IsWhite(pc) != white) result.Add(t);
+        }
+
+        switch (Board.TypeOf(piece))
+        {
+            case Piece.WPawn:
+                foreach (int d in white ? WPawnCaps : BPawnCaps) MaybeAdd(from + d);
+                break;
+            case Piece.WKnight:
+                foreach (int d in KnightDeltas) MaybeAdd(from + d);
+                break;
+            case Piece.WKing:
+                foreach (int d in KingDeltas) MaybeAdd(from + d);
+                break;
+            case Piece.WBishop:
+            case Piece.WRook:
+            case Piece.WQueen:
+                var deltas = Board.TypeOf(piece) == Piece.WBishop ? BishopDeltas
+                    : Board.TypeOf(piece) == Piece.WRook ? RookDeltas : QueenDeltas;
+                foreach (int d in deltas)
+                {
+                    int t = from + d;
+                    while (Board.OnBoard(t))
+                    {
+                        var pc = b.Squares[t];
+                        if (pc != Piece.Empty)
+                        {
+                            if (Board.IsWhite(pc) != white) result.Add(t);
+                            break;
+                        }
+                        t += d;
+                    }
+                }
+                break;
+        }
+        return result;
+    }
+
     public static List<ChessMove> Legal(Board b)
     {
         var pseudo = Pseudo(b);

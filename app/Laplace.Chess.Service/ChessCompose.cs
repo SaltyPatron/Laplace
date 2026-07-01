@@ -24,10 +24,24 @@ public static class ChessCompose
 
     private static readonly ConcurrentDictionary<string, ChessNode> TokenMemo = new(StringComparer.Ordinal);
 
+    // Position-tier composition (Merkle hash + centroid + Hilbert encode + trajectory build +
+    // physicality id) was being fully recomputed on every call, even for a position already
+    // composed earlier in the same run — real, avoidable cost across a corpus where opening/
+    // early-game positions (and common transpositions) recur across many thousands of games.
+    // SubstrateChangeBuilder.AddEntity/AddPhysicality already dedupe by id within a batch, so a
+    // repeated position was computed in full and then silently discarded — CPU spent for
+    // nothing. Bounded (not a static-forever dictionary like TokenMemo's small, finite piece/
+    // square vocabulary) because most middle/endgame positions in a huge corpus are unique
+    // one-offs; past the cap, composition just isn't memoized rather than growing unbounded.
+    private const int PositionMemoCap = 2_000_000;
+    private static readonly ConcurrentDictionary<string, ChessComposed> PositionMemo = new(StringComparer.Ordinal);
+
     private static readonly char[] Sep = { ' ' };
 
     public static ChessComposed Position(string surface)
     {
+        if (PositionMemo.TryGetValue(surface, out var cached)) return cached;
+
         EnsureLoaded();
         var tokens = surface.Split(Sep, StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) throw new ArgumentException("empty position surface", nameof(surface));
@@ -45,7 +59,9 @@ public static class ChessCompose
         }
 
         var pos = ComposeOver(ids, coords, tokens.Length, PositionTier);
-        return new ChessComposed(pos, subs);
+        var composed = new ChessComposed(pos, subs);
+        if (PositionMemo.Count < PositionMemoCap) PositionMemo.TryAdd(surface, composed);
+        return composed;
     }
 
     public static Hash128 PositionId(string surface)
