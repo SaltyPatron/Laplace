@@ -289,11 +289,10 @@ public sealed class CILIDecomposer : IDecomposer
         return buf[..n];
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize, ISubstrateReader? reader) =>
+    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize, ISubstrateReader? _) =>
         new SubstrateChangeBuilder(Source, $"{label}-{bn}", null,
             entityCapacity: batchSize * 4, physicalityCapacity: batchSize * 4,
-            attestationCapacity: batchSize * 4)
-            .EnableDeferredContent(reader);
+            attestationCapacity: batchSize * 4);
 
     private static string VersionLabel(string path)
     {

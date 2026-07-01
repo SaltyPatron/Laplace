@@ -4,13 +4,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Tier-containment dedup parity for the grammar compose path: the native compose tier tree
-/// (laplace_compose_get_tier_tree) feeds MerkleDedup.TrunkShortcircuit inside GrammarRowComposer,
-/// exactly like TextEntityBuilder. A present trunk must skip its entire subtree (zero novel
-/// entities/physicalities), while PRECEDES/witness evidence still flows; an all-absent bitmap must
-/// reproduce the unfiltered emission byte-for-byte.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class GrammarComposeContainmentTests
 {
@@ -29,11 +22,9 @@ public sealed class GrammarComposeContainmentTests
         Hash128[] ids = composer.EntityIds();
         Assert.True(ids.Length > 0, "expected the tsv row to compose at least one entity");
 
-        // Baseline: no bitmap => the whole subtree is novel.
         var (baseEnts, basePhys, basePrec, _) = composer.Materialize(1.0);
         Assert.True(baseEnts.Length > 0);
 
-        // Every node already present => TrunkShortcircuit skips the entire tree.
         var present = new byte[(ids.Length + 7) / 8];
         for (int i = 0; i < ids.Length; i++) present[i >> 3] |= (byte)(1 << (i & 7));
 
@@ -41,8 +32,6 @@ public sealed class GrammarComposeContainmentTests
 
         Assert.Empty(ents);
         Assert.Empty(phys);
-        // PRECEDES carry new distributional evidence and must keep flowing even when every entity
-        // in the subtree is already present.
         Assert.Equal(basePrec.Length, prec.Length);
     }
 
@@ -55,7 +44,7 @@ public sealed class GrammarComposeContainmentTests
         using var composer = new GrammarRowComposer(utf8, ast, Src, "tsv");
 
         Hash128[] ids = composer.EntityIds();
-        var absent = new byte[(ids.Length + 7) / 8]; // all zero => nothing exists => all novel
+        var absent = new byte[(ids.Length + 7) / 8];
 
         var (baseEnts, basePhys, basePrec, baseRoot) = composer.Materialize(1.0);
         var (ents, phys, prec, root) = composer.Materialize(1.0, absent);
@@ -81,8 +70,6 @@ public sealed class GrammarComposeContainmentTests
         Hash128[] ids = composer.EntityIds();
         var (baseEnts, _, _, _) = composer.Materialize(1.0);
 
-        // Mark a single lowest-tier (tier 0/1) node present: containment must still emit the rest,
-        // i.e. partial presence yields a strict subset, never all-or-nothing.
         var bitmap = new byte[(ids.Length + 7) / 8];
         bitmap[0] |= 1;
 

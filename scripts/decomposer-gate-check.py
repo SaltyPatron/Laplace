@@ -62,7 +62,6 @@ def check_source(
         entry.update(extra)
         results.append(entry)
 
-    # substrate_health
     try:
         raw = psql(
             dbname,
@@ -80,7 +79,6 @@ def check_source(
     except Exception as e:
         record("substrate_health", False, str(e))
 
-    # attestations > 0
     try:
         att = int(
             psql(
@@ -94,7 +92,6 @@ def check_source(
     except Exception as e:
         record("attestations", False, str(e), count=0)
 
-    # layer_complete (document uses physicality probe)
     if src.get("skip_layer_complete"):
         try:
             exists = psql(
@@ -121,7 +118,6 @@ def check_source(
         except Exception as e:
             record("layer_complete", False, str(e))
 
-    # consensus gates (CI pattern; optional source-evidence fallback)
     for gate in src.get("consensus_gates", []):
         rel = gate["relation"]
         minimum = int(gate["min"])

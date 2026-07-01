@@ -100,7 +100,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             if (_engine is not null) return _engine;
             LoadPerfcache();
             var ds = new NpgsqlDataSourceBuilder(_connString).Build();
-            var inner = new NpgsqlSubstrateWriter(ds, bulkFreshSource: false);
+            var inner = new NpgsqlSubstrateWriter(ds);
             var writer = new ConsensusAccumulatingWriter(
                 inner, ds, foldWorkers: 1, freshSource: false, persistEvidence: true, stageAsWalks: false);
             var reader = new NpgsqlSubstrateReader(ds);

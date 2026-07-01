@@ -4,7 +4,6 @@ using static Laplace.Decomposers.Abstractions.Tests.IngestPipelineTestHelpers;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>Reference decomposer demonstrating the generic connector pattern end-to-end.</summary>
 [Collection("GrammarPerfcache")]
 public sealed class FakeTabIngestDecomposerTests
 {
@@ -24,7 +23,7 @@ public sealed class FakeTabIngestDecomposerTests
 
         Assert.Equal(5, changes.Sum(c => c.Metadata.InputUnitsConsumed));
         Assert.True(ContentEntityCount(changes) > 0);
-        Assert.Equal(3, changes.Count); // batchSize=2 => 3 batches
+        Assert.Equal(3, changes.Count);
     }
 
     [Fact]

@@ -115,7 +115,7 @@ export function Board({
                 const sq = sqName(f, rank8);
                 const dark = (f + (8 - rank8)) % 2 === 1;
                 const isLast = lastMove && (sq === lastMove.from || sq === lastMove.to);
-                const inCheck = piece === (fen.split(' ')[1] === 'w' ? 'K' : 'k'); // simplified king highlight
+                const inCheck = piece === (fen.split(' ')[1] === 'w' ? 'K' : 'k');
                 const sm = suggMark.get(sq);
                 const suggTo = sm?.role === 'to' ? sm : null;
                 const suggFrom = sm?.role === 'from' ? sm : null;

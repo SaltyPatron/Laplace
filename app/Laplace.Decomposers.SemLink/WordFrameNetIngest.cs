@@ -5,12 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests WordFrameNet / eXtended WordFrameNet TSV mappings (Adimen): FrameNet LU → WordNet synset.
-/// Expected layout under vault-root WordFrameNet/ (WFN.tar.gz → WFN/WordFrameNet, XWFN.tar.gz → XWFN/eXtendedWFN):
-/// native Adimen text (extensionless WordFrameNet / eXtendedWFN), or TSV (*.txt / *.map) with frame, lu, synset rows.
-/// Synset keys may be MCR ili-30-* tokens, bare offset-pos (02244956-v), or MapNet pos#offset.
-/// </summary>
 internal static class WordFrameNetIngest
 {
     private static readonly string[] MappingFileNames =
@@ -149,10 +143,5 @@ internal static class WordFrameNetIngest
 
         string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
         if (seen.Add(platformDefault)) yield return platformDefault;
-
-        // NOTE: we deliberately do NOT treat the ecosystem path's parent directory as a vault root.
-        // Doing so globbed arbitrary unrelated files when the ecosystem path was a temp/working dir
-        // (e.g. the OS temp root's locked installer logs → IOException). The real vault is reached via
-        // LAPLACE_DATA_ROOT, the platform default, and the ecosystem path itself + its nested WFN dirs.
     }
 }

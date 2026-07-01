@@ -1,9 +1,3 @@
-/*
- * Bulk existence + Merkle containment descent — native C/SPI only.
- *
- * NO recursive SQL, NO per-node NOT EXISTS. One hash join against entities,
- * then an in-memory tree walk (same contract as engine/core etl_ingest.c).
- */
 #include "descent_probe.h"
 
 #include "executor/spi.h"

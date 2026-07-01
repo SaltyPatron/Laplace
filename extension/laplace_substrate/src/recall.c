@@ -486,9 +486,6 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
 
 
 
-        /* A bare word or unmatched phrase: lead with the witnessed gloss — the most useful
-           answer for a known noun like "king" (the old order led with a lone POS-walk edge).
-           Fall back to a strongest-relation walk, then a held-but-bare note. */
         Oid   dtypes[2] = { TEXTOID, BYTEAOID };
         Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,

@@ -3,22 +3,11 @@ using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Seed FENs for the substrate "fair test" — drawn from the ALREADY-INGESTED Lichess ECO openings
-/// (<c>openings/*.tsv</c>), the same rows <see cref="ChessOpeningsDecomposer"/> folds into the graph (no
-/// hardcoded lines). Streams the TSVs, parses movetext with the <c>pgn</c> grammar
-/// (<see cref="ChessOpeningsDecomposer.ExtractSans"/>), replays a bounded prefix through the perft-verified
-/// movegen (<see cref="San.Resolve"/>), and returns the distinct book positions — so matches start exactly
-/// where the substrate has data. A line with an unresolved token is skipped (not emitted as a bad FEN).
-/// </summary>
 public static class OpeningSeed
 {
-    /// <summary>Default openings directory (under <c>$INGEST\Games\Chess\openings</c>).</summary>
     public static string DefaultDir => Path.Combine(
         Environment.GetEnvironmentVariable("INGEST") ?? @"D:\Data\Ingest", "Games", "Chess", "openings");
 
-    /// <summary>Distinct book FENs from the openings TSVs at <paramref name="path"/> (dir or single file),
-    /// each replayed up to <paramref name="plies"/> half-moves; <paramref name="max"/> &gt; 0 caps the count.</summary>
     public static IReadOnlyList<string> Fens(string? path = null, int plies = 10, int max = 0)
     {
         path ??= DefaultDir;
@@ -44,7 +33,7 @@ public static class OpeningSeed
         {
             if (n >= plies) break;
             var mv = San.Resolve(s.Board, m.LegalActions(s), san);
-            if (mv is null) { fen = ""; return false; }      // malformed/illegal → drop the line
+            if (mv is null) { fen = ""; return false; }
             s = m.Apply(s, mv.Value);
             n++;
         }

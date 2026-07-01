@@ -13,7 +13,6 @@ public sealed record IngestInventory(
     public static IngestInventory Single(long units, string unitType = "units") =>
         new(unitType, units, Array.Empty<IngestFileSpec>());
 
-    /// <summary>Inventory for one file — skips full scan when <paramref name="maxInputUnits"/> is set.</summary>
     public static IngestInventory? SingleFile(
         string unitType,
         string filePath,
@@ -32,7 +31,6 @@ public sealed record IngestInventory(
         return new IngestInventory(unitType, n, [new IngestFileSpec(Path.GetFileName(filePath), filePath, n)]);
     }
 
-    /// <summary>Multi-file inventory — skips per-file scan when capped.</summary>
     public static IngestInventory? FromFiles(
         string unitType,
         IReadOnlyList<string> paths,
@@ -85,7 +83,6 @@ public static class EtlInventory
         return n;
     }
 
-    /// <summary>Fast newline count for progress bars — no per-line string allocation.</summary>
     public static long EstimateNewlineCount(string path, CancellationToken ct = default)
     {
         if (!File.Exists(path)) return 0;

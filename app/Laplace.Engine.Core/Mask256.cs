@@ -3,8 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>256-bit highway mask — four uint64 words, little-endian bit ordering.
-/// Bit N (0-255) is in word N/64 at position N%64. Zero = no highway participation.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public readonly record struct Mask256(ulong W0, ulong W1, ulong W2, ulong W3)
 {

@@ -1,4 +1,3 @@
-# OMW ingest sandbox benchmarks — partial corpus via LAPLACE_INGEST_MAX_UNITS.
 param(
     [int[]] $Percents = @(5, 10),
     [long] $TotalRows = 2676800

@@ -6,7 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-/// <summary>Content roots + witness maps produced by <see cref="UdIngestHandler"/> drain.</summary>
 public sealed class UdSentenceEmitContext
 {
     private static readonly Hash128 FeatureTypeId = EntityTypeRegistry.UdFeature;
@@ -63,7 +62,6 @@ public sealed class UdSentenceEmitContext
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
-                // Content-addressed: xpos entity id = blake3(utf8(tok.Xpos)); HAS_NAME_ALIAS handles legibility.
                 Hash128 xposId = HighwayNodeEmitter.Emit(b, tok.Xpos, PosReference.PosTypeId,
                     sourceId, TC.AcademicCurated, seenEntBatch);
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -74,7 +72,6 @@ public sealed class UdSentenceEmitContext
             {
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
-                // Content-addressed: feature value entity id = blake3(utf8("{name}={val}")).
                 Hash128 valId = HighwayNodeEmitter.Emit(b, $"{fName}={fVal}", FeatureTypeId,
                     sourceId, SourceTrust.AcademicCurated, seenEntBatch);
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), sourceId,

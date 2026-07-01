@@ -411,18 +411,11 @@ int intent_stage_add_attestation(
     return 0;
 }
 
-/*
- * Per-row partition of a staging blob into N disjoint output stages.
- * Entities/attestations: id.lo % N (content-addressed BLAKE3 keys — Hilbert range N/A).
- * Physicalities: contiguous equal-width Hilbert range on the full 128-bit index
- * (part = floor(hilbert * N / 2^128)) so concurrent writers own disjoint sequential buckets.
- */
 static uint32_t be32_at(const uint8_t* p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
          | ((uint32_t)p[2] << 8)  | (uint32_t)p[3];
 }
 
-/* Returns the byte length of one row starting at src[off], or 0 on malformed input. */
 static size_t row_byte_len(const uint8_t* src, size_t len, size_t off) {
     if (off + 2 > len) return 0;
     uint16_t cols = (uint16_t)((src[off] << 8) | src[off + 1]);
@@ -431,14 +424,13 @@ static size_t row_byte_len(const uint8_t* src, size_t len, size_t off) {
         if (p + 4 > len) return 0;
         int32_t flen = (int32_t)be32_at(src + p);
         p += 4;
-        if (flen < 0) continue;            /* NULL field: length prefix only */
+        if (flen < 0) continue;
         if (p + (size_t)flen > len) return 0;
         p += (size_t)flen;
     }
     return p - off;
 }
 
-/* Locate field `field_1based` (1-indexed) inside one COPY-binary row. */
 static int row_field_at(const uint8_t* data, size_t len, size_t off, int field_1based,
                         const uint8_t** out, int32_t* out_len) {
     if (off + 2 > len) return -1;
@@ -475,7 +467,6 @@ static uint128_be_t read_be128(const uint8_t* hb) {
     return (((uint128_be_t)read_be64(hb)) << 64) | (uint128_be_t)read_be64(hb + 8);
 }
 
-/* Contiguous Hilbert range: part i owns [i*2^128/N, (i+1)*2^128/N). */
 static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
     if (part_count <= 1) return 0;
     uint128_be_t h = read_be128(hb);
@@ -483,7 +474,6 @@ static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
     return (size_t)(r >> 64 >> 64);
 }
 #else
-/* Fallback when uint128 is unavailable: high-qword equal-width ranges (contiguous in hi half). */
 static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
     if (part_count <= 1) return 0;
     uint64_t hi = read_be64(hb);
@@ -503,13 +493,11 @@ static size_t partition_row(const uint8_t* data, size_t len, size_t off, size_t 
     memcpy(&lo, data + id_off + 8, 8);
 
     if (table_kind == 1) {
-        /* physicalities: field 5 = hilbert_index (16 bytes, big-endian in COPY blob) */
         const uint8_t* hb;
         int32_t hb_len;
         if (row_field_at(data, len, off, 5, &hb, &hb_len) == 0 && hb_len >= 16)
             return hilbert_range_partition(hb, part_count);
     }
-    /* entities / attestations: id.lo % N — content-addressed, not Hilbert-sequenced */
     return (size_t)(lo % (uint64_t)part_count);
 }
 
@@ -549,7 +537,6 @@ int intent_stage_partition(
         }
     }
 
-    /* Gather the three output buffers per partition for the per-table router. */
     for (size_t t = 0; t < 3; ++t) {
         const byte_buf_t* sb;
         switch (t) {
@@ -558,7 +545,6 @@ int intent_stage_partition(
             default: sb = &src->attestations; break;
         }
         if (sb->row_count == 0) continue;
-        /* partition_one_buf needs a flat array of the right table's buffers. */
         byte_buf_t* tbl_outs = (byte_buf_t*)malloc(part_count * sizeof(byte_buf_t));
         if (!tbl_outs) {
             for (size_t i = 0; i < part_count; ++i) { intent_stage_free(parts[i]); parts[i] = NULL; }
@@ -572,7 +558,6 @@ int intent_stage_partition(
             }
         }
         int rc = partition_one_buf(sb, tbl_outs, part_count, (int)t);
-        /* Copy the (possibly realloc'd/grown) buffers back into the partition stages. */
         for (size_t i = 0; i < part_count; ++i) {
             switch (t) {
                 case 0: parts[i]->entities      = tbl_outs[i]; break;

@@ -6,26 +6,14 @@ using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// The SUBSTRATE seam for the classical search (<see cref="IRootBias"/>): at the root, look up each
-/// candidate move's learned value — the eff_mu of its <c>MOVE</c> edge in <c>laplace.consensus</c>,
-/// accumulated from the 34.5M-relation game graph — and convert it to a centipawn bonus the search blends
-/// into root selection. Same content = same id, so this is an INDEXED point lookup (consensus_pkey),
-/// batched into ONE query per engine move (never inside the search tree).
-///
-/// <para>Empirical-Bayes confidence shrinkage (the same K0=15000 the substrate host uses) pulls a move's
-/// eff_mu toward neutral by its evidence, so a high rating from few games can't dominate. Unrated/novel
-/// moves get 0 (no signal) — the classical floor stands where the graph is silent; rated moves are nudged
-/// toward what actually won.</para>
-/// </summary>
 public sealed class SubstrateRootBias : IRootBias
 {
     private const double ShrinkK0 = 15_000d;
 
     private readonly NpgsqlDataSource _ds;
     private readonly ChessModality _modality = new();
-    private readonly double _cpPerPoint;  // centipawns per Glicko rating-point of deviation from neutral
-    private readonly int _capCp;          // clamp so the prior never overrides tactics
+    private readonly double _cpPerPoint;
+    private readonly int _capCp;
 
     public SubstrateRootBias(NpgsqlDataSource ds, double cpPerPoint = 8.0, int capCp = 150)
     {
@@ -39,7 +27,6 @@ public sealed class SubstrateRootBias : IRootBias
         var bonus = new int[moves.Count];
         if (moves.Count == 0) return bonus;
 
-        // Content-address the root and each successor → the MOVE edge ids (pure compute, perfcache-backed).
         var state = _modality.FromFen(root.ToFen());
         var edgeIds = new Hash128[moves.Count];
         lock (ChessCompose.Gate)
@@ -53,11 +40,11 @@ public sealed class SubstrateRootBias : IRootBias
             }
         }
 
-        var effMu = ReadShrunkEffMu(edgeIds); // NaN where unrated/novel
+        var effMu = ReadShrunkEffMu(edgeIds);
         for (int i = 0; i < moves.Count; i++)
         {
             if (double.IsNaN(effMu[i])) { bonus[i] = 0; continue; }
-            double pts = (effMu[i] - GlickoPriors.NeutralMu) / 1e9; // rating-point deviation from a draw
+            double pts = (effMu[i] - GlickoPriors.NeutralMu) / 1e9;
             bonus[i] = Math.Clamp((int)Math.Round(_cpPerPoint * pts), -_capCp, _capCp);
         }
         return bonus;
@@ -91,7 +78,7 @@ public sealed class SubstrateRootBias : IRootBias
 
         var outv = new double[edgeIds.Length];
         for (int i = 0; i < edgeIds.Length; i++)
-            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? v : double.NaN; // no row → unrated
+            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? v : double.NaN;
         return outv;
     }
 }

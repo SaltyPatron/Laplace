@@ -47,7 +47,7 @@ export function ChessView() {
   useEffect(() => {
     let live = true;
     const tick = async () => {
-      try { const s = await apiGet<TrainStatus>('/chess/train/status'); if (live) setTrain(s); } catch { /* idle */ }
+      try { const s = await apiGet<TrainStatus>('/chess/train/status'); if (live) setTrain(s); } catch { }
     };
     void tick();
     const h = setInterval(tick, 1500);

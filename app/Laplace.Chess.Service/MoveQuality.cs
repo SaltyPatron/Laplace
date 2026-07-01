@@ -1,6 +1,5 @@
 namespace Laplace.Chess.Service;
 
-/// <summary>Maps PGN NAGs / glyph suffixes to stable MOVE_QUALITY content tokens.</summary>
 internal static class MoveQuality
 {
     public static string? FromStream(PgnMovetext.PgnMoveStream ply)

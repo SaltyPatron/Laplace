@@ -1,6 +1,5 @@
 namespace Laplace.Chess.Service;
 
-/// <summary>Live event stream for a Chess Lab job (SSE / polling).</summary>
 public abstract record ChessLabEvent
 {
     public DateTimeOffset At { get; init; } = DateTimeOffset.UtcNow;

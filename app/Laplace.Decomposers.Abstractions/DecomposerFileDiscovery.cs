@@ -1,17 +1,7 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Standardized file-discovery helpers for decomposer ingest paths.
-/// Consolidates the directory-scanning patterns in FrameNet, PropBank, VerbNet, WordNet, etc.
-/// </summary>
 public static class DecomposerFileDiscovery
 {
-    /// <summary>
-    /// Enumerate files matching <paramref name="pattern"/> under <paramref name="root"/>, trying
-    /// optional <paramref name="fallbackSubdirs"/> in order (each relative to root) before falling
-    /// back to root itself. Returns files from the first directory that exists and has any matches,
-    /// sorted by path.
-    /// </summary>
     public static IEnumerable<string> Enumerate(
         string root,
         string pattern,
@@ -33,11 +23,6 @@ public static class DecomposerFileDiscovery
         return Enumerable.Empty<string>();
     }
 
-    /// <summary>
-    /// Resolve the first subdirectory path (relative to <paramref name="root"/>) that exists and
-    /// contains at least one file matching <paramref name="pattern"/>. Returns
-    /// <paramref name="root"/> itself if no subdirectory qualifies.
-    /// </summary>
     public static string ResolveSubdir(string root, string pattern, params string[] subdirs)
     {
         foreach (var sub in subdirs)

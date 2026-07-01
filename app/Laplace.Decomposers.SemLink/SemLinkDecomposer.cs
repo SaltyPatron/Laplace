@@ -16,10 +16,6 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    // SemLink mapping files are top-level JSON objects (pb-vn2, vn-fn2, optional pb/vn/fn-wn JSON bridges)
-    // or Predicate Matrix TSV (PredicateMatrix.txt). Each record stages category anchors and CORRESPONDS_TO
-    // edges over content-addressed ids; WordNet synset targets resolve via CILI/ILI (ConceptAnchor).
-
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"],
@@ -168,11 +164,6 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider{
             yield return (vnPbExternal, SemLinkDocumentKind.VnPbExternal, "semlink/external_vn2pb");
     }
 
-    /// <summary>
-    /// other_resources/ is a sibling of instances/ under semlink-master/, not nested under it
-    /// (see <see cref="InstanceDirCandidates"/>). Resolve it relative to the instances dir we already
-    /// picked so a vault layout that moved instances/ doesn't silently strand other_resources/ too.
-    /// </summary>
     private static string OtherResourcesDir(string instancesDir)
     {
         string? parent = Path.GetDirectoryName(instancesDir);

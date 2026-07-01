@@ -6,15 +6,9 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-/// <summary>
-/// Unit tests for the shared PGN parsing helpers (<see cref="PgnGames"/>): tag scanning and the
-/// lazy game splitter. Pure string logic, no DB, no native DLL — runs in any environment.
-/// </summary>
 [Trait("Tier", "fast")]
 public sealed class PgnGamesTests
 {
-    // ----- TagStr -----
-
     [Fact]
     public void TagStr_ReturnsValue_WhenPresent()
     {
@@ -37,13 +31,10 @@ public sealed class PgnGamesTests
     [Fact]
     public void TagStr_HandlesConsecutiveTags_NoFalseMatch()
     {
-        // "WhiteElo" tag must not match a search for "White".
         const string game = "[White \"Alice\"]\n[WhiteElo \"1500\"]\n";
         Assert.Equal("Alice", PgnGames.TagStr(game, "White"));
         Assert.Equal("1500", PgnGames.TagStr(game, "WhiteElo"));
     }
-
-    // ----- TagInt -----
 
     [Fact]
     public void TagInt_ReturnsValue_WhenPresent()
@@ -60,8 +51,6 @@ public sealed class PgnGamesTests
     [Fact]
     public void TagInt_ReturnsZero_WhenNotNumeric()
         => Assert.Equal(0, PgnGames.TagInt("[WhiteElo \"?\"]\n", "WhiteElo"));
-
-    // ----- StreamGames -----
 
     [Fact]
     public void StreamGames_SplitsMultipleGames()
@@ -111,8 +100,6 @@ public sealed class PgnGamesTests
         File.WriteAllText(path, content, Encoding.UTF8);
         return path;
     }
-
-    // ----- PgnMovetext (shared AST walk) -----
 
     private static PgnMovetext.PgnWalkResult WalkMovetext(string movetext)
     {

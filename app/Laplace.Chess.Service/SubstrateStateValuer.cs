@@ -1,24 +1,9 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// The read-only substructure-fold: values a chess position by folding the <c>OUTCOME</c> consensus over
-/// its composed substructures (<see cref="ChessCompose.Position"/>) <b>plus the position itself</b>,
-/// weighted by predictiveness <c>|eff_mu−neutral|·conf(rd)·witness</c>. A seen position's own OUTCOME node
-/// carries high witness so it dominates (the exact case); a novel position relies on the substructures it
-/// shares with seen ones (the generalization) — so this is the read that lets learned knowledge transfer
-/// to positions never in the corpus. Side-to-move-relative (OUTCOME is credited to the side to move where
-/// the substructure occurred).
-///
-/// <para>Extracted from <see cref="SubstrateTurnHost"/> so the self-play engine and the search root-bias
-/// (<see cref="SubstructureFoldBias"/>) share ONE implementation and one SQL. No write path — just the
-/// data source. The native compose loop is serialized under <see cref="ChessCompose.Gate"/>; the DB read
-/// runs unlocked, so parallel callers still overlap their queries.</para>
-/// </summary>
 public sealed class SubstrateStateValuer : IStateValuer
 {
     private readonly NpgsqlDataSource _ds;
@@ -33,8 +18,6 @@ public sealed class SubstrateStateValuer : IStateValuer
         var result = new double[n];
         if (n == 0) return result;
 
-        // Compose each state; collect the distinct OUTCOME edge ids (substructures + position). The native
-        // compose primitive is not thread-safe — serialize the whole compose pass; it is fast + memoized.
         var perState = new Hash128[n][];
         var distinct = new HashSet<Hash128>();
         lock (ChessCompose.Gate)
@@ -63,14 +46,9 @@ public sealed class SubstrateStateValuer : IStateValuer
             double wsum = 0d, acc = 0d;
             foreach (var e in perState[i])
             {
-                if (!stats.TryGetValue(e, out var st)) continue;       // unrated → no contribution
-                double dev  = st.EffMu - GlickoPriors.NeutralMu;        // signed: above/below draw
-                double conf = GlickoPriors.InitialRd / (GlickoPriors.InitialRd + st.Rd); // →1 as rd→0
-                // NOTE: weighting by |dev|·conf alone (dropping ×witness) was MEASURED to regress play —
-                // it sharpens the fold toward spurious CORRELATIONS (e.g. Ph3 occurs in won games), so the
-                // bot confidently picks weak moves (g1f3→h2h3 on a novel position). The marginal OUTCOME is
-                // correlational, not causal; ×witness keeps the fold near-neutral so selection defers to
-                // the MOVE-edge/tiebreak (sound). Real fix is interaction effects, not re-weighting.
+                if (!stats.TryGetValue(e, out var st)) continue;
+                double dev  = st.EffMu - GlickoPriors.NeutralMu;
+                double conf = GlickoPriors.InitialRd / (GlickoPriors.InitialRd + st.Rd);
                 double w    = Math.Abs(dev) * conf * st.Witness;
                 if (w <= 0d) continue;
                 wsum += w; acc += w * dev;

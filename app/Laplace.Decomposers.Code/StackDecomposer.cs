@@ -253,13 +253,9 @@ public sealed class StackDecomposer : IDecomposer
             yield return f;
     }
 
-    // Filename keyword segments route through the SHARED two-phase containment
-    // (EnableDeferredContent); the parsed-code grammar tree is already containment-deduped inside
-    // GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
         new SubstrateChangeBuilder(Source, $"stack-v2/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096)
-            .EnableDeferredContent(reader);
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
 
     private readonly record struct StackRow(string? Content, string? Language, string? Path);
 }

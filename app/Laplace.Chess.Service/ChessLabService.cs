@@ -5,11 +5,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// In-process Chess Lab job host: tracks jobs, fans out live events per job, and runs background
-/// work on demand. Real runners (substrate-test, cutechess, Lichess, …) wire in at L1+; this is
-/// the start/stop/status skeleton mirrored from <see cref="ChessEngineService.StartTraining"/>.
-/// </summary>
 public sealed class ChessLabService
 {
     private readonly ILogger _log;
@@ -17,7 +12,6 @@ public sealed class ChessLabService
 
     public ChessLabService(ILogger? log = null) => _log = log ?? NullLogger.Instance;
 
-    /// <summary>Start a lab job. Returns the new job id, or null if the kind is unknown.</summary>
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null)
     {
         var id = Guid.NewGuid().ToString("N");
@@ -50,7 +44,6 @@ public sealed class ChessLabService
         return id;
     }
 
-    /// <summary>Request cancellation for a running job. Returns false when the job is missing or already finished.</summary>
     public bool StopJob(string jobId)
     {
         if (!_jobs.TryGetValue(jobId, out var slot)) return false;
@@ -80,7 +73,6 @@ public sealed class ChessLabService
         return list;
     }
 
-    /// <summary>Subscribe to live events for a job (SSE endpoint consumes this reader).</summary>
     public ChannelReader<ChessLabEvent>? EventReader(string jobId) =>
         _jobs.TryGetValue(jobId, out var slot) ? slot.Channel.Reader : null;
 

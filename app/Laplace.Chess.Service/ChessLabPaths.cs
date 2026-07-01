@@ -1,6 +1,5 @@
 namespace Laplace.Chess.Service;
 
-/// <summary>Resolves Chess Lab external binaries from env vars, repo-relative paths, or PATH.</summary>
 public static class ChessLabPaths
 {
     public const string EnvCutechess = "LAPLACE_CUTECHESS";
@@ -15,7 +14,6 @@ public static class ChessLabPaths
 
     public readonly record struct Probe(string? Path, bool Found, string Source);
 
-    /// <summary>Load <c>deploy/secrets/chess-lab.env</c> into the process environment (does not override existing vars).</summary>
     public static void LoadEnvFile(string? path = null)
     {
         foreach (var candidate in EnvFileCandidates(path))

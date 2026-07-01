@@ -2,19 +2,10 @@ using System.Collections.Concurrent;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Canonical path conventions for vocabulary entities (POS, UD morphology, relation types, …)
-/// registered into <c>canonical_names</c> so <c>render()</c>/<c>label()</c> resolve human-readable
-/// text instead of TYPE:hash fallbacks. Keys must match the content input to blake3 that produced the
-/// entity's id — i.e. <c>HighwayPerfcache.NodeHash(key)</c> round-trips to the same entity hash.
-/// </summary>
 public static class VocabularyNames
 {
-    // Content key: the entity id is blake3(utf8("{name}={value}")), so the canonical_names key is the
-    // same string — no path prefix.
     public static string UdFeatureValue(string name, string value) => $"{name}={value}";
 
-    // Content key: relation type entity id is blake3(utf8(canonical)), matching EntityTypeRegistry.Id.
     public static string RelationType(string canonical) => canonical;
 
     public static string LanguageIso639_3(string iso3) =>

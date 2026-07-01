@@ -6,12 +6,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Phase 1 safety gate: GrammarRowComposer.DrainInto (native-direct, no managed marshal) must
-/// produce byte-for-byte identical entity + physicality COPY blobs to Materialize + re-stage,
-/// for the same observed-at. Proves the one-hop path is a faithful replacement before any caller
-/// is migrated off Materialize.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class GrammarRowComposerDrainParityTests
 {
@@ -28,8 +22,6 @@ public sealed class GrammarRowComposerDrainParityTests
         using var ast = GrammarDecomposer.Parse(utf8, "tsv");
         using var composer = new GrammarRowComposer(utf8, ast, Src, "tsv");
 
-        // managed path: Materialize → re-stage with a fixed observed-at (entities have no
-        // timestamp; physicalities do, so we pin NowUs on both sides for a fair byte compare).
         var (ents, phys, prec, root) = composer.Materialize(1.0);
         Assert.True(ents.Length > 0, "expected the tsv row to compose at least one entity");
 
@@ -46,7 +38,6 @@ public sealed class GrammarRowComposerDrainParityTests
                 p.AlignmentResidual, p.SourceDim, NowUs);
         }
 
-        // native-direct path
         var precOut = ImmutableArray.CreateBuilder<AttestationRow>();
         using var actual = IntentStage.New(Math.Max(16, ents.Length + phys.Length));
         Hash128 rootDrain = composer.DrainInto(actual, 1.0, NowUs, precOut);
@@ -61,7 +52,6 @@ public sealed class GrammarRowComposerDrainParityTests
             expected.EmitCopyBinary(IntentStageTable.Physicalities),
             actual.EmitCopyBinary(IntentStageTable.Physicalities));
 
-        // PRECEDES ride as managed rows (Phase 1); their content-addressed ids must match.
         Assert.Equal(prec.Length, precOut.Count);
         for (int i = 0; i < prec.Length; i++)
         {

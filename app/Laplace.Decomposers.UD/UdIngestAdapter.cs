@@ -6,7 +6,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.UD;
 
-/// <summary>Streams one treebank file as sentence records with language metadata.</summary>
 public sealed class UdConlluFileStream : IRecordStream<UdIngestRecord>
 {
     private readonly string _path;
@@ -31,7 +30,6 @@ public sealed class UdConlluFileStream : IRecordStream<UdIngestRecord>
     }
 }
 
-/// <summary>Multi-file UD stream: (file stem, sentence) pairs for <see cref="IngestBatchPipeline.RunMultiFileAsync"/>.</summary>
 public sealed class UdConlluMultiFileStream : IMultiFileRecordStream<UdIngestRecord>
 {
     private readonly IReadOnlyList<(string Path, string Label)> _files;
@@ -54,7 +52,6 @@ public sealed class UdConlluMultiFileStream : IMultiFileRecordStream<UdIngestRec
     }
 }
 
-/// <summary>In-memory sentence list for tests.</summary>
 public sealed class UdListRecordStream(IReadOnlyList<UdIngestRecord> records) : IRecordStream<UdIngestRecord>
 {
     public async IAsyncEnumerable<UdIngestRecord> RecordsAsync(

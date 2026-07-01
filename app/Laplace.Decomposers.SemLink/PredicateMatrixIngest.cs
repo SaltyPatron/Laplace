@@ -6,10 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Ingests EHU Predicate Matrix TSV (PredicateMatrix.txt): WSD-aligned lexical bridges from
-/// PropBank rolesets, VerbNet classes, and FrameNet frames to WordNet synsets via MCR ILI offsets.
-/// </summary>
 internal static class PredicateMatrixIngest
 {
     private const int ColLang = 0;
@@ -17,11 +13,11 @@ internal static class PredicateMatrixIngest
     private const int ColVnClass = 4;
     private const int ColVnSubclass = 6;
     private const int ColVnLemma = 8;
-    private const int ColVnRole = 9;     // 10_VN_ROLE  — the thematic role (was dropped)
-    private const int ColWnSense = 10;   // 11_WN_SENSE — lemma-specific WN sense key (was dropped)
+    private const int ColVnRole = 9;
+    private const int ColWnSense = 10;
     private const int ColMcrIli = 11;
     private const int ColFnFrame = 12;
-    private const int ColFnFe = 14;      // 15_FN_FRAME_ELEMENT — the frame element (was dropped)
+    private const int ColFnFe = 14;
     private const int ColPbRoleset = 15;
 
     private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
@@ -75,9 +71,6 @@ internal static class PredicateMatrixIngest
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            // The lemma-specific WN sense (was dropped) — sense-level precision that converges with
-            // WordNet's own sense entities, so each predicate corresponds not just to the broad synset
-            // but to the exact sense. null when the row carries no sense ("wn:NULL").
             string wnSenseRaw = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColWnSense]);
             Hash128? senseId = wnSenseRaw.Equals("NULL", StringComparison.OrdinalIgnoreCase)
                 ? null : SenseAnchor.Id(wnSenseRaw);
@@ -101,11 +94,6 @@ internal static class PredicateMatrixIngest
                 if (senseId is { } vs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(vnClass), VnClassTypeId, vs);
             }
 
-            // Role-level alignment — PredicateMatrix uniquely carries the VN thematic-role <-> FN
-            // frame-element correspondence in the SAME row as the predicate links, but it was dropped,
-            // so only predicate-level links existed (no ARG/role circularization). Emit it keyed
-            // EXACTLY as SemLinkRoleMappingIngest (VN role via ContentEmitter, FN FE via CategoryAnchor +
-            // FrameNetFe, scoped by VN class) so the two sources reinforce one consensus edge, not fork.
             if (vnClass is not null && fields.Length > ColFnFe)
             {
                 string vnRole = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColVnRole]).Trim();

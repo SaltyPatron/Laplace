@@ -79,7 +79,6 @@ public sealed class IngestRunner
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
         IngestTopology.EnsureReady();
         Laplace.Engine.Core.IntentStage.ResetContentBank();
-        Laplace.Engine.Core.IntentStage.SetBulkFreshBypass(options.BulkFresh);
 
         log.LogInformation(
             "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists}",

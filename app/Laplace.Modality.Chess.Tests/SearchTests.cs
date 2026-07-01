@@ -2,15 +2,10 @@ using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
-/// <summary>
-/// Proves the search is tactically sound: it finds forced mates, wins hanging material, and — via
-/// quiescence — refuses to grab a defended piece that loses to the recapture. Pure C#, no native/DB.
-/// </summary>
 public sealed class SearchTests
 {
-    private const int MateThreshold = 29_000; // |score| above this ⇒ a forced mate (matches Search)
+    private const int MateThreshold = 29_000;
 
-    // A stand-in for a substrate-backed root bias: hands a fixed centipawn bonus to one named move.
     private sealed class FavorBias : IRootBias
     {
         private readonly string _uci;
@@ -29,10 +24,9 @@ public sealed class SearchTests
     {
         var b = Board.FromFen(ChessModality.StartFen);
         var unguided = new Search().Think(b, new Search.Limits(MaxDepth: 4));
-        // A strong prior on the passive a2a3 overrides the classical choice — the seam works.
         var guided = new Search(EvalTerm.All, new FavorBias("a2a3", 500)).Think(b, new Search.Limits(MaxDepth: 4));
-        Assert.NotEqual("a2a3", unguided.BestMove!.Value.ToUci()); // not the natural pick
-        Assert.Equal("a2a3", guided.BestMove!.Value.ToUci());      // the prior steered it
+        Assert.NotEqual("a2a3", unguided.BestMove!.Value.ToUci());
+        Assert.Equal("a2a3", guided.BestMove!.Value.ToUci());
     }
 
     [Fact]
@@ -41,7 +35,7 @@ public sealed class SearchTests
         var b = Board.FromFen("6k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1");
         var withZero = new Search(EvalTerm.All, new FavorBias("a1a1", 0)).Think(b, new Search.Limits(MaxDepth: 3));
         var pure = new Search().Think(b, new Search.Limits(MaxDepth: 3));
-        Assert.Equal(pure.BestMove!.Value.ToUci(), withZero.BestMove!.Value.ToUci()); // mate still found, unchanged
+        Assert.Equal(pure.BestMove!.Value.ToUci(), withZero.BestMove!.Value.ToUci());
     }
 
     private static Search.Result Think(string fen, int depth)
@@ -50,7 +44,6 @@ public sealed class SearchTests
     [Fact]
     public void FindsMateInOne_BackRank()
     {
-        // White Re1; Black Kg8 boxed by its own f7/g7/h7 pawns → Re8#.
         var r = Think("6k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1", depth: 3);
         Assert.NotNull(r.BestMove);
         Assert.Equal("e1e8", r.BestMove!.Value.ToUci());
@@ -60,7 +53,6 @@ public sealed class SearchTests
     [Fact]
     public void FindsForcedMateInTwo()
     {
-        // White Kf7 + Qh1 vs lone Kh8: 1.Qg2 Kh7 (forced) 2.Qg7#. Assert the mate score (not the PV).
         var r = Think("7k/5K2/8/8/8/8/8/7Q w - - 0 1", depth: 4);
         Assert.True(r.Score >= MateThreshold, $"should force mate in two, score={r.Score}");
     }
@@ -68,7 +60,6 @@ public sealed class SearchTests
     [Fact]
     public void WinsHangingQueen()
     {
-        // White Rh1 vs an undefended Black Qh4 on the open h-file → Rxh4.
         var r = Think("4k3/8/8/8/7q/8/8/4K2R w - - 0 1", depth: 4);
         Assert.NotNull(r.BestMove);
         Assert.Equal("h1h4", r.BestMove!.Value.ToUci());
@@ -77,8 +68,6 @@ public sealed class SearchTests
     [Fact]
     public void Quiescence_DoesNotGrabDefendedPawn()
     {
-        // White Rd1; Black pawn d5 is defended by the c6 pawn. Rxd5?? cxd5 loses the rook for a pawn —
-        // a naive depth-1 material grab; quiescence must see the recapture and decline it.
         var r = Think("4k3/8/2p5/3p4/8/8/8/3RK3 w - - 0 1", depth: 4);
         Assert.NotNull(r.BestMove);
         Assert.NotEqual("d1d5", r.BestMove!.Value.ToUci());

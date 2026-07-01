@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# CI foundation seed — order from scripts/win/witness-manifest.json foundation.sources
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,7 +38,6 @@ layer_ok() {
     | grep -qi true
 }
 
-# cli:decomposer:layer — must match scripts/win/seed-foundation.cmd and witness-manifest.json
 FOUNDATION=(
   "unicode:UnicodeDecomposer:0"
   "iso639:ISO639Decomposer:1"

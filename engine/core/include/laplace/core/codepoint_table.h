@@ -37,7 +37,6 @@ int codepoint_table_compose(uint32_t first, uint32_t second, uint32_t* out_compo
 int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
                                  double out_coord[4], hilbert128_t* out_hb);
 
-/** Reverse lookup: returns 0 if id is a T0 perfcache codepoint (not cp 0 / not surrogate). */
 int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp);
 
 

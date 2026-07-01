@@ -3,10 +3,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// WordNet sense keys (lemma%ss_type:lex_filenum:lex_id) as content-addressed category anchors.
-/// Converges VerbNet CORRESPONDS_TO edges with WordNet index.sense output.
-/// </summary>
 public static class SenseAnchor
 {
     private static readonly Hash128 SenseTypeId = EntityTypeRegistry.WordNetSense;

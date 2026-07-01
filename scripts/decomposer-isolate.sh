@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# DROP + CREATE an isolated Laplace database with extensions (Linux/CI).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

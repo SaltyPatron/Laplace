@@ -99,7 +99,6 @@ public static unsafe class CodepointPerfcache
         }
     }
 
-    /// <summary>True when <paramref name="id"/> is a T0 Unicode codepoint hash from the perfcache.</summary>
     public static bool TryLookupCodepoint(Hash128 id, out uint codepoint)
     {
         codepoint = 0;

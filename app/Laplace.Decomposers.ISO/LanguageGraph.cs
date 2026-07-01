@@ -43,10 +43,6 @@ internal static class LanguageGraph
         }
     }
 
-    /// Parses the IANA language-subtag-registry.txt 'Type: variant' record blocks, yielding the
-    /// variant subtag together with its declared Prefix tags (the language/tag chain(s) the
-    /// variant attaches to). A variant may have zero, one, or many Prefix lines; records with no
-    /// Prefix are yielded with an empty array.
     public static IEnumerable<(string Subtag, string[] Prefixes)> Variants(string iso639Dir)
     {
         string path = Path.Combine(iso639Dir, "iana", "language-subtag-registry.txt");

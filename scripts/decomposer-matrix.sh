@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Run manifest-order decomposer tests; optional promote into laplace (re-ingest, not clone).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

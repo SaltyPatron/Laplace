@@ -5,10 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-/// <summary>
-/// Streams top-level JSON object pairs as grammar rows — one structural parse for span discovery,
-/// then per-pair compose/probe via <see cref="IngestBatchPipeline"/>.
-/// </summary>
 public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
 {
     private readonly string _path;

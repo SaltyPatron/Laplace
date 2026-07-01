@@ -52,13 +52,10 @@ public sealed class ISODecomposer : IDecomposer{
         string dataPath = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
         var reader = context.Reader;
 
-        // Reference/print names are CONTENT (already emitted via ContentEmitter); route them through the
-        // SHARED two-phase containment (EnableDeferredContent) like every other content-emitting source.
-        // Language/script/variant codes stay code-anchored Vocabulary (standard convention, geometry-free).
+        // Reference/print names are CONTENT via ContentWitnessBatch (native in-process bank).
         var b = new SubstrateChangeBuilder(
             Source, "iso639-3/all", null,
-            entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000)
-            .EnableDeferredContent(reader);
+            entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000);
 
         int isoUnits = 0;
         await foreach (var rec in ParseAsync(dataPath, ct))
@@ -209,8 +206,7 @@ public sealed class ISODecomposer : IDecomposer{
         if (File.Exists(namePath))
         {
             var nb = new SubstrateChangeBuilder(Source, "iso639/names-0", null,
-                entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
-                .EnableDeferredContent(reader);
+                entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
             int n = 0, bn = 0;
             bool hdr = false;
             foreach (var line in File.ReadLines(namePath))
@@ -231,8 +227,7 @@ public sealed class ISODecomposer : IDecomposer{
                 {
                     if (!options.DryRun) { yield return await nb.SetInputUnitsConsumed(n).BuildAsync(ct); IntentStage.ResetContentBank(); }
                     nb = new SubstrateChangeBuilder(Source, $"iso639/names-{++bn}", null,
-                        entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
-                        .EnableDeferredContent(reader);
+                        entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
                     n = 0;
                 }
             }

@@ -246,13 +246,9 @@ public sealed class TabularDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // Target/column names, value tokens, and the per-value bare-token content all route through the
-    // SHARED two-phase containment (EnableDeferredContent); the column/value/outcome/pair ids are
-    // structural anchors with their content attached via IS_INSTANCE_OF. Drain via BuildAsync.
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
         new SubstrateChangeBuilder(Source, $"tabular/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384)
-            .EnableDeferredContent(reader);
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384);
 
     private string Tokenize(string col, string v,
                             Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)

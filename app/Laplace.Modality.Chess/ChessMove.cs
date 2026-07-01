@@ -11,12 +11,10 @@ public enum MoveFlags : byte
     Promotion = 16,
 }
 
-/// <summary>From/to are 0x88 squares. Promotion is the promoted piece TYPE (white-positive) or Empty.</summary>
 public readonly record struct ChessMove(int From, int To, Piece Promotion, MoveFlags Flags)
 {
     public bool IsPromotion => (Flags & MoveFlags.Promotion) != 0;
 
-    /// <summary>UCI long algebraic, e.g. "e2e4", "e7e8q".</summary>
     public string ToUci()
     {
         string s = Board.SquareToAlgebraic(From) + Board.SquareToAlgebraic(To);

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Promote a validated decomposer: re-run ingest on canonical laplace (idempotent, not pg clone).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

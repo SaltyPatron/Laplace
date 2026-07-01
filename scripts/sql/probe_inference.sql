@@ -1,7 +1,3 @@
--- probe_inference.sql — repeatable smoke test for the SQL-transformer inference + generation lane.
--- Usage:  psql -h localhost -U postgres -d laplace -X -P pager=off -f scripts/sql/probe_inference.sql
--- Each block is independent; psql continues past any single failure so one regression is visible
--- without masking the rest. Probe word defaults to "king" (rich multilingual + multi-sense entity).
 \set probe 'king'
 \set phrase 'the king'
 \timing on

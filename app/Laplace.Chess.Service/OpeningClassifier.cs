@@ -3,10 +3,6 @@ using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Classifies a game's opening from replayed SANs against the ingested ECO book lines
-/// (<see cref="ChessOpeningsDecomposer"/> TSV format).
-/// </summary>
 public static class OpeningClassifier
 {
     public readonly record struct OpeningMatch(string? Name, string? Eco);
@@ -14,7 +10,6 @@ public static class OpeningClassifier
     private static readonly object Gate = new();
     private static List<(string Eco, string Name, List<string> Sans)>? _lines;
 
-    /// <summary>Longest-prefix match against book lines; returns deepest named line.</summary>
     public static OpeningMatch Classify(IReadOnlyList<string> sans, ChessModality? modality = null)
     {
         EnsureLoaded();
@@ -41,7 +36,6 @@ public static class OpeningClassifier
         return new OpeningMatch(bestName, bestEco);
     }
 
-    /// <summary>Replace cached book lines (tests).</summary>
     internal static void SetLinesForTest(IEnumerable<(string Eco, string Name, List<string> Sans)> lines)
     {
         lock (Gate) { _lines = lines.ToList(); }

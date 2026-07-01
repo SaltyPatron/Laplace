@@ -4,19 +4,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// The one generic grammar walker. Reads <see cref="GrammarRowComposer.FieldSpans"/> and emits the
-/// typed edges declared by an <see cref="EtlSource.NodeEdgeMap"/>, resolving anchor-kind fields
-/// through the source's named <see cref="AnchorResolver"/> (the existing shared resolver code —
-/// never reimplemented here). Content entities still drain into the builder's native stage via the
-/// composer; this walker only adds the witness edges on top, exactly as the bespoke witnesses do.
-///
-/// Sources whose transform genuinely exceeds field-role mapping (JSON-tree walking, URI parsing,
-/// per-row meta) register their existing witness through <see cref="EtlWitnessFactory"/>; the
-/// generic <see cref="EtlDecomposer"/> then routes that real witness through the single
-/// <see cref="StructuredGrammarIngest"/> path, collapsing the decomposer class to a manifest row
-/// while keeping behaviour bit-identical (the parity oracle).
-/// </summary>
 public sealed class EtlWitness : IGrammarWitness
 {
     private readonly EtlSource _src;
@@ -83,8 +70,6 @@ public sealed class EtlWitness : IGrammarWitness
 
         Hash128? resolved = _src.Anchor switch
         {
-            // The named resolvers are the only per-source "logic" and they are shared, not
-            // reimplemented — this walker calls into the existing resolver code by name.
             AnchorResolver.SenseKey      => SenseAnchor.Emit(b, key, _src.SourceId, _src.Trust),
             AnchorResolver.FrameCategory => CategoryAnchor.Emit(b, key, EntityTypeRegistry.FrameNetFrame, _src.SourceId, _src.Trust),
             AnchorResolver.IliSynset     => SourceEntityIdConventions.ResolveSynsetAnchor(key),

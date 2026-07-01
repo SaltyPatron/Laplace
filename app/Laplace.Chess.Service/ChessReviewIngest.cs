@@ -7,16 +7,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Re-ingest offline game-review tags into the substrate: per-ply MOVE_QUALITY edges for inaccuracies+
-/// optional OUTCOME adjustment on blunder positions. Uses thresholds from <see cref="ChessGameReview"/>.
-/// </summary>
 public static class ChessReviewIngest
 {
     private const double ReviewWitnessWeight = 0.4;
     private const long QualityGames = 1;
 
-    /// <summary>Review + emit attestations for all games under a PGN file or directory.</summary>
     public static int IngestPath(SubstrateChangeBuilder b, ChessModality m, string path, int depth = 4)
     {
         int n = 0;
@@ -31,7 +26,6 @@ public static class ChessReviewIngest
         return n;
     }
 
-    /// <summary>Review + emit attestations for one game's PGN text.</summary>
     public static void IngestGameText(SubstrateChangeBuilder b, ChessModality m, string gameText, int depth = 4)
     {
         if (ChessGameReview.ReviewGameText(gameText, depth) is not { } reviewed) return;

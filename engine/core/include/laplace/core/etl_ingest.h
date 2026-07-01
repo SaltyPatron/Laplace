@@ -20,14 +20,13 @@ typedef int (*laplace_etl_accept_row_fn)(
     const uint8_t*   line,
     size_t           len);
 
-/* Edge-rule field kind: how the field's text becomes an entity id. */
-#define LAPLACE_ETL_ANCHOR_NONE       0  /* content-witness the span (tree-composed RootId) */
-#define LAPLACE_ETL_ANCHOR_ILI_SYNSET 1  /* resolve a WN synset key -> ILI anchor id via the session map */
+#define LAPLACE_ETL_ANCHOR_NONE       0
+#define LAPLACE_ETL_ANCHOR_ILI_SYNSET 1
 
 typedef struct {
     uint16_t subject_field;
     uint16_t object_field;
-    uint8_t  subject_kind; /* LAPLACE_ETL_ANCHOR_* */
+    uint8_t  subject_kind;
     uint8_t  object_kind;
     const char* relation_surface;
 } laplace_etl_edge_rule_t;
@@ -44,8 +43,8 @@ typedef struct {
     size_t      edge_rule_count;
     hash128_t   context_id;
     uint8_t     context_is_null;
-    uint8_t     skip_comment_rows; /* 1 => skip lines starting with '#' */
-    uint8_t     line_framed;       /* 1 => one physical newline = one record */
+    uint8_t     skip_comment_rows;
+    uint8_t     line_framed;
     uint8_t     _pad_cfg[5];
 } laplace_etl_config_t;
 
@@ -58,11 +57,6 @@ typedef struct {
     uint64_t rows_emitted;
 } laplace_etl_stats_t;
 
-/*
- * Probe `n` content ids; write `n` bits into `out_bitmap` ((n+7)/8 bytes). Returns 0 on success.
- * `bitmap_bits` must be >= n. When `parents` is non-null, callers use top-down Merkle descent
- * (content_descent_bitmap); when null, a flat entities_exist_bitmap probe is used.
- */
 typedef int (*laplace_etl_exist_probe_fn)(
     void*            ctx,
     const hash128_t* ids,
@@ -77,11 +71,6 @@ int laplace_etl_session_open(
 
 void laplace_etl_session_close(laplace_etl_session_t* sess);
 
-/*
- * Stream `path` into `stage`. Stops after `max_rows` rows (0 = unlimited) or when the internal
- * batch would exceed `batch_row_cap` rows (must be > 0). Returns 1 if more rows remain, 0 if EOF
- * or cap hit, -1 on error. `stats` accumulates across calls on the same session.
- */
 int laplace_etl_session_feed_file(
     laplace_etl_session_t*      sess,
     const char*                 path,

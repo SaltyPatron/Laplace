@@ -1,17 +1,3 @@
--- Grounded forward-pass over the live consensus field — the trajectory_pairs (raw bigram) replacement.
--- Navigates the typed, Glicko-folded field by plane/band weighting, not a precomputed co-occurrence table.
--- Hot-swappable: a plain function over consensus — no extension rebuild, no reseed.
---
---   mode 'recall'   : MEANING-constrained. Only traverse rank>=0.5 edges (definitional/taxonomic/
---                     equivalence/partitive/causal), so the walk climbs the concept/sense ladder and
---                     stays there instead of descending into word-sequence scaffolding ("and the the").
---   mode 'generate' : sequential/syntactic planes allowed (no band floor), eff_mu picks the edge.
---
--- Tie-break is deterministic (object_id) so the walk is reproducible.
--- Renders each step via label() (follows HAS_NAME_ALIAS) → render_text() fallback. Intermediate ILI
--- concepts that lack a definition alias still render as their raw id (i90107) — that is the WS3
--- compositional-synset gap (synsets are string-addressed, not legible concept nodes), surfaced exactly.
-
 CREATE OR REPLACE FUNCTION laplace.forward_pass(
     p_prompt text, p_steps int DEFAULT 12, p_mode text DEFAULT 'recall')
 RETURNS text

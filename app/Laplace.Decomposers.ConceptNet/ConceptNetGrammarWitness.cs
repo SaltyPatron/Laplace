@@ -5,14 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-/// <summary>
-/// Lean ConceptNet assertion witness — the (subject, relation, object) commonsense triple, nothing more.
-/// Both concept terms are content-addressed through the shared deferred-content path (compose-is-dedup),
-/// and the assertion weight rides as the attestation magnitude. Matches the generic head/rel/tail walker
-/// (Atomic2020 is the parity oracle); the previous per-row pile-on — HAS_LANGUAGE, language entities,
-/// POS, synset bridges, surface-text decomposition, dataset content — is what blew the row count to ~17
-/// per assertion and made the ingest take hours. Enrichments belong on the declarative path, not here.
-/// </summary>
 internal sealed class ConceptNetGrammarWitness : IGrammarWitness
 {
     private readonly LanguageFilter? _langs;

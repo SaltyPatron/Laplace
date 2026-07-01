@@ -3,10 +3,6 @@ using Laplace.Chess.Service;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-/// <summary>
-/// `/chess/*` — the turn-based chess modality over the live substrate. Sits OUTSIDE the `/v1`
-/// rate-limit/billing gates (local play + training). Thin over <see cref="ChessEngineService"/>.
-/// </summary>
 internal static class ChessEndpoints
 {
     public static void MapChessEndpoints(this WebApplication app)
@@ -33,7 +29,6 @@ internal static class ChessEndpoints
         app.MapGet("/chess/train/status", (ChessEngineService svc) =>
             Results.Json(svc.Status())).WithTags("chess");
 
-        // --- Chess Lab ---
         app.MapGet("/chess/lab/catalog", () =>
         {
             var engines = ChessLabPaths.Catalog.ToDictionary(

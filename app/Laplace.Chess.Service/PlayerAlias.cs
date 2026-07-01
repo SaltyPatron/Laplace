@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Canonical player-name normalization for stable <see cref="ChessVocabulary.PlayerId"/> hashing.</summary>
 internal static partial class PlayerAlias
 {
     [GeneratedRegex(@"[^\p{L}\p{N}\s]+")]
@@ -11,7 +10,6 @@ internal static partial class PlayerAlias
     [GeneratedRegex(@"\s+")]
     private static partial Regex SpaceRegex();
 
-    /// <summary>Lowercase, strip punctuation, <c>"Last, First"</c> → <c>"first last"</c>.</summary>
     public static string Canonical(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";

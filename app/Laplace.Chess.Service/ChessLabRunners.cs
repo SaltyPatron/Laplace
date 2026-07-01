@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>Shared Chess Lab job runners extracted from CLI logic (<see cref="Laplace.Cli.ChessCommands"/>).</summary>
 public static class ChessLabRunners
 {
     public static string LabDir => ChessLabPaths.LabDir;

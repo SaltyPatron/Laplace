@@ -1,7 +1,5 @@
 #pragma once
 
-/* Generated from engine/manifest/relation_types.toml — do not edit. */
-
 #define LAPLACE_HIGHWAY_MAGIC    0x5957484Cu
 #define LAPLACE_HIGHWAY_VERSION  1u
 #define LAPLACE_HIGHWAY_REL_COUNT   153u
@@ -9,7 +7,6 @@
 #define HIGHWAY_BUCKET_SIZE         1024u
 #define HIGHWAY_BUCKET_MASK         1023u
 
-/* Bit position of each relation type in the 256-bit highway mask */
 #define HIGHWAY_BIT_ADJACENT_TO_PIXEL                                  0u
 #define HIGHWAY_BIT_ALSO_SEE                                           1u
 #define HIGHWAY_BIT_ATTENDS                                            2u
@@ -164,7 +161,6 @@
 #define HIGHWAY_BIT_X_REASON                                           151u
 #define HIGHWAY_BIT_X_WANT                                             152u
 
-/* Band index constants */
 #define HIGHWAY_BAND_MANDATE                                       0u
 #define HIGHWAY_BAND_DEFINITIONAL                                  1u
 #define HIGHWAY_BAND_TAXONOMIC                                     2u

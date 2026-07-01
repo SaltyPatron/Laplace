@@ -3,9 +3,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Grammar file ingest: stream → existence gate on roots → compose novel only → apply.
-/// </summary>
 public static class StructuredGrammarIngest
 {
     public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
@@ -43,7 +40,6 @@ public static class StructuredGrammarIngest
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 
-    /// <summary>Ingest one file using record framing from the manifest row.</summary>
     public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
         string filePath,
         EtlSource source,

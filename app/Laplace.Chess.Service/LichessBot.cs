@@ -8,16 +8,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Lichess Bot API client: streams account events, accepts challenges, and plays games using the α-β
-/// <see cref="Search"/> (PeSTO leaf eval, optional substructure-fold root prior + learned-PST blend).
-/// Multiple games run concurrently via independent background tasks. Token is read from
-/// <c>LICHESS_API</c> env var; pass it explicitly via the constructor for CLI use.
-///
-/// <para>Accepts standard chess (not Chess960/variants) by default; filter speed classes with
-/// <paramref name="acceptSpeeds"/>. Does NOT auto-submit to the event stream if the token has
-/// insufficient scopes — check the Lichess bot account settings (bot:play scope is required).</para>
-/// </summary>
 public sealed class LichessBot : IAsyncDisposable
 {
     private readonly HttpClient _http;
@@ -30,12 +20,6 @@ public sealed class LichessBot : IAsyncDisposable
 
     private const string Base = "https://lichess.org";
 
-    /// <param name="token">Lichess personal-access token (bot:play scope).</param>
-    /// <param name="depth">α-β search depth per move.</param>
-    /// <param name="bias">Optional substructure-fold root prior (the substrate seam).</param>
-    /// <param name="mgPst">Learned midgame PST (null → pure PeSTO).</param>
-    /// <param name="egPst">Learned endgame PST (null → pure PeSTO).</param>
-    /// <param name="acceptSpeeds">Which speed classes to accept (null = all): "bullet","blitz","rapid","classical".</param>
     public LichessBot(
         string token, int depth = 4,
         IRootBias? bias = null, int[][]? mgPst = null, int[][]? egPst = null,
@@ -51,14 +35,11 @@ public sealed class LichessBot : IAsyncDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
-    /// <summary>Resolve the bot token: first checks <paramref name="explicitToken"/>, then
-    /// <c>LICHESS_API</c> env var, then the <c>deploy\secrets\lichess.env</c> file.</summary>
     public static string? ResolveToken(string? explicitToken = null)
     {
         if (!string.IsNullOrWhiteSpace(explicitToken)) return explicitToken;
         var env = Environment.GetEnvironmentVariable("LICHESS_API");
         if (!string.IsNullOrWhiteSpace(env)) return env;
-        // Fallback: parse deploy\secrets\lichess.env (key=value, LICHESS_TOKEN line).
         var envFile = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "deploy", "secrets", "lichess.env");
         if (!File.Exists(envFile)) return null;
@@ -74,11 +55,6 @@ public sealed class LichessBot : IAsyncDisposable
         return null;
     }
 
-    /// <summary>
-    /// Run the bot: stream account events and dispatch game handlers. Keeps streaming until
-    /// <paramref name="ct"/> is cancelled; reconnects automatically on network drops. Set
-    /// <paramref name="maxConcurrent"/> to cap the number of simultaneous games.
-    /// </summary>
     public async Task RunAsync(int maxConcurrent = 4, CancellationToken ct = default)
     {
         var games = new Dictionary<string, Task>();
@@ -122,7 +98,6 @@ public sealed class LichessBot : IAsyncDisposable
                         }
                     }
 
-                    // Prune completed game tasks.
                     foreach (var k in games.Keys.Where(k => games[k].IsCompleted).ToList())
                         games.Remove(k);
                 }
@@ -144,7 +119,6 @@ public sealed class LichessBot : IAsyncDisposable
 
     private async Task PlayGameAsync(string gameId, bool weAreWhite, CancellationToken ct)
     {
-        // Fresh Search per game so the TT/killers from a previous game don't pollute this one.
         var search = new Search(EvalTerm.All, _bias, ttBits: 20, _mgPst, _egPst);
 
         try
@@ -169,7 +143,7 @@ public sealed class LichessBot : IAsyncDisposable
                     initialFen = ev.TryGetProperty("initialFen", out var fen) ? fen.GetString() ?? "startpos" : "startpos";
                     if (IsTerminal(state)) break;
                 }
-                else // gameState
+                else
                 {
                     moves     = ev.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime     = ev.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
@@ -180,15 +154,12 @@ public sealed class LichessBot : IAsyncDisposable
                     if (IsTerminal(ev)) break;
                 }
 
-                // Reconstruct the board from the initial FEN + the full move history. Rebuilding
-                // from scratch on each event is cheaper than tracking incremental state, and it
-                // guarantees consistency across reconnects and missed messages.
                 var startFen = initialFen is "startpos" or "" ? ChessModality.StartFen : initialFen;
                 var board = Board.FromFen(startFen);
                 foreach (var uci in moves.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                     ApplyUci(board, uci);
 
-                if (board.WhiteToMove != weAreWhite) continue;  // not our turn
+                if (board.WhiteToMove != weAreWhite) continue;
 
                 int myTime = weAreWhite ? wtime : btime;
                 int myInc  = weAreWhite ? winc : binc;
@@ -203,7 +174,7 @@ public sealed class LichessBot : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { /* bot stopped */ }
+        catch (OperationCanceledException) { }
         catch (Exception ex) { _log.LogWarning(ex, "game {Id} stream ended early", gameId); }
 
         _log.LogInformation("game {Id} finished", gameId);
@@ -211,11 +182,9 @@ public sealed class LichessBot : IAsyncDisposable
 
     private bool ShouldAccept(JsonElement challenge)
     {
-        // Only standard chess — no Chess960, fromPosition, or other variants.
         if (!challenge.TryGetProperty("variant", out var v)
             || !v.TryGetProperty("key", out var vk) || vk.GetString() != "standard")
             return false;
-        // Speed filter: accept all speeds unless a whitelist was given.
         if (_acceptSpeeds is not null && !_acceptSpeeds.Contains(SpeedOf(challenge)))
             return false;
         return true;
@@ -230,17 +199,12 @@ public sealed class LichessBot : IAsyncDisposable
         return s.GetString() is not ("started" or "created");
     }
 
-    // Apply a UCI move string to the board (mutates in place). If the move isn't legal, it is
-    // silently ignored — Lichess only sends legal moves; a parse failure here means a board/move
-    // sync bug that should not crash the game loop.
     private static void ApplyUci(Board board, string uci)
     {
         foreach (var m in MoveGen.Legal(board))
             if (m.ToUci() == uci) { MoveApply.Make(board, m); return; }
     }
 
-    // Time budget in milliseconds: spend roughly 1/30 of remaining time plus 80% of the increment,
-    // with a 50ms safety margin so the bot never flags on network latency. Mirrors UciEngine.ParseGo.
     private static int TimeBudget(int myTimeMs, int myIncMs)
         => Math.Max(50, Math.Min(myTimeMs - 100, myTimeMs / 30 + (int)(myIncMs * 0.8)));
 
@@ -258,8 +222,6 @@ public sealed class LichessBot : IAsyncDisposable
         }
     }
 
-    // Stream newline-delimited JSON from a Lichess API endpoint. Empty lines are keep-alives (skip).
-    // Yields one JsonElement per non-empty line. The caller handles reconnection.
     private async IAsyncEnumerable<JsonElement> StreamNdjsonAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -275,7 +237,7 @@ public sealed class LichessBot : IAsyncDisposable
         while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
         {
             if (ct.IsCancellationRequested) yield break;
-            if (string.IsNullOrWhiteSpace(line)) continue;  // keep-alive
+            if (string.IsNullOrWhiteSpace(line)) continue;
             JsonDocument doc;
             try { doc = JsonDocument.Parse(line); }
             catch { _log.LogDebug("unparseable ndjson line: {Line}", line); continue; }

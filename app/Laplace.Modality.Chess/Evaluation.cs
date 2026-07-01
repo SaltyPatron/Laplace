@@ -2,53 +2,27 @@ using System.Numerics;
 
 namespace Laplace.Modality.Chess;
 
-/// <summary>
-/// Independently toggleable evaluation overlays. Each term is colour-symmetric, so ANY subset preserves
-/// the mirror invariant — letting you ablate a term (measure its Elo contribution) or, later, swap a
-/// hand-tuned overlay for a substrate-LEARNED one (e.g. piece-square values measured from the 29M-move
-/// corpus — the same 768 piece-square atoms <see cref="ChessCompose"/>-style composition already uses)
-/// without disturbing the rest.
-/// </summary>
 [Flags]
 public enum EvalTerm
 {
     None          = 0,
-    Material      = 1 << 0,  // tapered material values
-    Pst           = 1 << 1,  // tapered piece-square tables (the PeSTO prior; swappable for a learned overlay)
+    Material      = 1 << 0,
+    Pst           = 1 << 1,
     BishopPair    = 1 << 2,
-    RookFiles     = 1 << 3,  // rooks on open / semi-open files
-    PawnStructure = 1 << 4,  // doubled + isolated penalties
+    RookFiles     = 1 << 3,
+    PawnStructure = 1 << 4,
     Tempo         = 1 << 5,
     All           = Material | Pst | BishopPair | RookFiles | PawnStructure | Tempo,
 }
 
-/// <summary>
-/// A classical, tapered (mid→endgame) static evaluation in centipawns — the search's leaf judgment.
-/// Pure C#, no DB/native, deterministic. Built from the public-domain <b>PeSTO</b> material + piece-square
-/// tables (Rofchade), plus a handful of cheap structural terms (bishop pair, rooks on (semi-)open files,
-/// doubled/isolated pawns, tempo). The score is returned <b>relative to the side to move</b> (positive =
-/// the mover is better), the negamax convention the search expects.
-///
-/// <para>Correctness is gated by a mirror-symmetry invariant (see the tests): a position and its
-/// colour-swapped vertical mirror must evaluate identically, which catches every board-orientation and
-/// sign bug. The substrate's learned positional value blends in ABOVE this, in the search root — this
-/// term is the fast, exact, hand-checkable floor.</para>
-/// </summary>
 public static class Evaluation
 {
-    // Game-phase weights per piece type (P,N,B,R,Q,K) → 24 at the full opening, decreasing as pieces
-    // come off. The tapered score interpolates the midgame and endgame evaluations by this phase.
     private static readonly int[] PhaseInc = { 0, 1, 1, 2, 4, 0 };
     private const int PhaseTotal = 24;
 
-    // Material (centipawns), midgame and endgame, indexed by piece type 1..6 → 0..5.
     private static readonly int[] MgMaterial = { 82, 337, 365, 477, 1025, 0 };
     private static readonly int[] EgMaterial = { 94, 281, 297, 512, 936, 0 };
 
-    /// <summary>Evaluate <paramref name="b"/> in centipawns from the side-to-move's perspective, using
-    /// only the enabled overlay <paramref name="terms"/> (default: all). <paramref name="mgPstOverride"/>/
-    /// <paramref name="egPstOverride"/> swap the hand-tuned PeSTO piece-square tables for substrate-LEARNED
-    /// ones (same <c>[type-1][idx]</c> shape); null keeps PeSTO — so default behaviour is unchanged.</summary>
     public static int Evaluate(
         Board b, EvalTerm terms = EvalTerm.All, int[][]? mgPstOverride = null, int[][]? egPstOverride = null)
     {
@@ -58,19 +32,17 @@ public static class Evaluation
         int wBishops = 0, bBishops = 0;
         ulong wPawns = 0, bPawns = 0;
 
-        // Single board scan: accumulate White-positive material and PST separately (so either can be
-        // toggled), the game phase, and the bits the structural terms need.
         for (int sq = 0; sq < 128; sq++)
         {
             if ((sq & 0x88) != 0) { sq += 7; continue; }
             var p = b.Squares[sq];
             if (p == Piece.Empty) continue;
 
-            int type = Math.Abs((sbyte)p);     // 1..6
+            int type = Math.Abs((sbyte)p);
             int ti = type - 1;
             bool white = (sbyte)p > 0;
             int file = Board.FileOf(sq), rank = Board.RankOf(sq);
-            int idx = white ? (7 - rank) * 8 + file : rank * 8 + file; // PST written rank-8-first, White POV
+            int idx = white ? (7 - rank) * 8 + file : rank * 8 + file;
             int sign = white ? 1 : -1;
 
             mgMat += sign * MgMaterial[ti];
@@ -86,8 +58,6 @@ public static class Evaluation
             }
         }
 
-        // Tapered group (material + PST): sum the enabled mg/eg contributions, then taper ONCE — so any
-        // subset is exact (no per-term integer-division rounding) and stays mirror-symmetric.
         int mg = 0, eg = 0;
         if ((terms & EvalTerm.Material) != 0) { mg += mgMat; eg += egMat; }
         if ((terms & EvalTerm.Pst) != 0)      { mg += mgPst; eg += egPst; }
@@ -109,7 +79,6 @@ public static class Evaluation
             white_cp += DoubledIsolatedPenalty * (Bitboards.Doubled(bPawns) + Bitboards.Isolated(bPawns));
         }
 
-        // Flip to the side-to-move's perspective, then add the tempo (so it always favours the mover).
         int stm = b.WhiteToMove ? white_cp : -white_cp;
         if ((terms & EvalTerm.Tempo) != 0) stm += Tempo;
         return stm;
@@ -127,8 +96,6 @@ public static class Evaluation
         return (mg * p + eg * (PhaseTotal - p)) / PhaseTotal;
     }
 
-    /// <summary>Bonus for each rook of <paramref name="white"/> on an open (no pawns) or semi-open
-    /// (no friendly pawns) file.</summary>
     private static int RookFileTerm(Board b, ulong ownPawns, ulong enemyPawns, bool white)
     {
         Piece rook = white ? Piece.WRook : Piece.BRook;
@@ -138,17 +105,13 @@ public static class Evaluation
             if ((sq & 0x88) != 0) { sq += 7; continue; }
             if (b.Squares[sq] != rook) continue;
             ulong fileMask = Bitboards.FileMask(Board.FileOf(sq));
-            if ((ownPawns & fileMask) != 0) continue;          // own pawn on the file → not (semi-)open
+            if ((ownPawns & fileMask) != 0) continue;
             bonus += (enemyPawns & fileMask) == 0 ? RookOpenFile : RookSemiOpenFile;
         }
         return bonus;
     }
 
-    // 0x88 square → little-endian rank-file bit (a1=0), matching Bitboards.
     private static int Bb(int sq0x88) => (Board.RankOf(sq0x88) << 3) | Board.FileOf(sq0x88);
-
-    // ---- PeSTO piece-square tables (centipawns), written rank 8 (top) → rank 1, file a→h, White POV.
-    //      Indexed [pieceType-1][ (7-rank)*8 + file ] for White; [type-1][ rank*8 + file ] for Black. ----
 
     private static readonly int[] MgPawn = {
           0,   0,   0,   0,   0,   0,   0,   0,
@@ -271,15 +234,9 @@ public static class Evaluation
         -53, -34, -21, -11, -28, -14, -24, -43,
     };
 
-    // Aggregated AFTER the individual tables — static field initializers run in textual order, so these
-    // must follow every table they reference (else they capture nulls). Indexed by piece type 1..6 → 0..5.
     private static readonly int[][] MgPst = { MgPawn, MgKnight, MgBishop, MgRook, MgQueen, MgKing };
     private static readonly int[][] EgPst = { EgPawn, EgKnight, EgBishop, EgRook, EgQueen, EgKing };
 
-    /// <summary>Return the PeSTO PST tables with a learned delta ADDED on top (PeSTO floor + corpus nudge) —
-    /// the "blend, don't replace" path (a flat learned table replacing PeSTO regresses hard; PeSTO + a small
-    /// learned overlay is the honest way to fold corpus knowledge into the leaf eval). Shapes must match
-    /// <c>[6][64]</c>; returns fresh tables (PeSTO stays untouched).</summary>
     public static (int[][] Mg, int[][] Eg) BlendPeStoWith(int[][] addMg, int[][] addEg)
     {
         var mg = new int[6][]; var eg = new int[6][];

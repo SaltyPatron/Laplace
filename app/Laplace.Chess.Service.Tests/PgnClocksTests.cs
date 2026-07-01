@@ -2,11 +2,6 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-/// <summary>
-/// Proves the per-move clock recovery the <c>pgn</c> grammar strips — the "additional information" the
-/// corpus was ingested without. Extraction is aligned to the move count; think-time scales the move-choice
-/// weight (deliberate move &gt; pre-move/scramble). Pure string handling, no DB.
-/// </summary>
 public sealed class PgnClocksTests
 {
     private const string Movetext =
@@ -23,7 +18,7 @@ public sealed class PgnClocksTests
 
     [Fact]
     public void SecondsRemaining_EmptyWhenCountMismatch()
-        => Assert.Empty(PgnClocks.SecondsRemaining(Movetext, 5));   // 6 clocks, 5 moves → don't guess
+        => Assert.Empty(PgnClocks.SecondsRemaining(Movetext, 5));
 
     [Fact]
     public void SecondsRemaining_EmptyWhenNoClocks()
@@ -34,11 +29,8 @@ public sealed class PgnClocksTests
     {
         var clocks = PgnClocks.SecondsRemaining(Movetext, 6);
         double median = PgnClocks.MedianDrop(clocks);
-        // White ply 4 (3. Bb5): spent 175-155 = 20s, well above the median drop → up-weighted (>1).
         Assert.True(PgnClocks.ThinkFactor(clocks, median, 4) > 1.0);
-        // Black ply 3 (2... Nc6): 180-178 = 2s, below median → down-weighted (<1).
         Assert.True(PgnClocks.ThinkFactor(clocks, median, 3) < 1.0);
-        // First two plies have no prior same-side clock → neutral 1.0.
         Assert.Equal(1.0, PgnClocks.ThinkFactor(clocks, median, 0));
     }
 

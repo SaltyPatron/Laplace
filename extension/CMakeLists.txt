@@ -9,7 +9,6 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         message(FATAL_ERROR "Git bash not found — required for extension SQL postprocess")
     endif()
 
-    # build-extensions.cmd sets CMAKE_C_COMPILER=icx; use the same tool for .sql.in (PostGIS/PGXS model).
     get_filename_component(LAPLACE_SQLPP "${CMAKE_C_COMPILER}" ABSOLUTE)
     set(LAPLACE_SQLPP_FLAGS -E -traditional-cpp -w -Upixel -Ubool)
     message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")

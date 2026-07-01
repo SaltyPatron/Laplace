@@ -9,7 +9,6 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 
-
 #ifdef TREE_SITTER_REUSE_ALLOCATOR
 
 extern void *(*ts_current_malloc)(size_t size);
@@ -51,4 +50,4 @@ extern void (*ts_current_free)(void *ptr);
 }
 #endif
 
-#endif 
+#endif

@@ -35,7 +35,6 @@ public sealed class LocalPgFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        IntentStage.SetBulkFreshBypass(false);
         await InitGate.WaitAsync();
         try
         {

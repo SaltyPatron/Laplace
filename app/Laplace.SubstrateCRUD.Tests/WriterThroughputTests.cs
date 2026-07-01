@@ -8,11 +8,6 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
-/// <summary>
-/// Write-path throughput gates. Tagged <c>Tier=perf</c> — excluded from default CI
-/// (<c>--filter Tier!=perf</c>) because they run against a live PostgreSQL substrate.
-/// </summary>
-/// <summary>Isolated fixture — one throughput gate per class so prior inserts do not skew anti-join.</summary>
 [Trait("Tier", "perf")]
 [Collection("substrate-pg-writer-throughput")]
 public sealed class EntityWriterThroughputTests
@@ -37,10 +32,7 @@ public sealed class EntityWriterThroughputTests
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
 
-        IntentStage.SetBulkFreshBypass(true);
-        try
-        {
-            var writer = new NpgsqlSubstrateWriter(_pg.DataSource, bulkFreshSource: true, applyPartitions: 1);
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 1);
         const int totalRows = 500_000;
         var stage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
@@ -56,11 +48,6 @@ public sealed class EntityWriterThroughputTests
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Entity apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
           + $"({result.EntitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
-        }
-        finally
-        {
-            IntentStage.SetBulkFreshBypass(false);
-        }
     }
 }
 
@@ -80,7 +67,7 @@ public sealed class WriterThroughputTests
     public WriterThroughputTests(LocalPgFixture pg) => _pg = pg;
 
     private static NpgsqlSubstrateWriter Writer(NpgsqlDataSource ds) =>
-        new(ds, bulkFreshSource: true, applyPartitions: 1);
+        new(ds, applyPartitions: 1);
 
     private Hash128 Id(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
@@ -116,9 +103,6 @@ public sealed class WriterThroughputTests
     [Fact]
     public async Task Attestation_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        IntentStage.SetBulkFreshBypass(true);
-        try
-        {
         await EnsureVocabAsync();
         var writer = Writer(_pg.DataSource);
 
@@ -150,19 +134,11 @@ public sealed class WriterThroughputTests
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Attestation apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
             + $"({result.AttestationsInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
-        }
-        finally
-        {
-            IntentStage.SetBulkFreshBypass(false);
-        }
     }
 
     [Fact]
     public async Task Physicality_NativeStage_Exceeds_500k_RowsPerSecond()
     {
-        IntentStage.SetBulkFreshBypass(true);
-        try
-        {
         await EnsureVocabAsync();
         var writer = Writer(_pg.DataSource);
 
@@ -197,11 +173,6 @@ public sealed class WriterThroughputTests
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Physicality apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
             + $"({result.PhysicalitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
-        }
-        finally
-        {
-            IntentStage.SetBulkFreshBypass(false);
-        }
     }
 
     [Fact]

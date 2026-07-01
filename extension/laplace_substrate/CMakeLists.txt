@@ -4,7 +4,6 @@ if(NOT BASH)
     set(BASH bash)
 endif()
 
-# Version = 16-hex content hash of SQL sources → ALTER EXTENSION ... UPDATE when SQL changes.
 file(GLOB_RECURSE _ext_sql_sources CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.sql.in
     ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.h.in

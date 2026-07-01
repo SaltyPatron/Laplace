@@ -2,7 +2,6 @@ using System.Text;
 
 namespace Laplace.Modality.Chess;
 
-/// <summary>Piece codes. White pieces are positive, black negative; 0 is empty.</summary>
 public enum Piece : sbyte
 {
     Empty = 0,
@@ -14,27 +13,21 @@ public enum Piece : sbyte
 public enum CastleRights : byte
 {
     None = 0,
-    WhiteKing = 1,   // K
-    WhiteQueen = 2,  // Q
-    BlackKing = 4,   // k
-    BlackQueen = 8,  // q
+    WhiteKing = 1,
+    WhiteQueen = 2,
+    BlackKing = 4,
+    BlackQueen = 8,
     All = WhiteKing | WhiteQueen | BlackKing | BlackQueen,
 }
 
-/// <summary>
-/// 0x88 board. Squares 0..127; a square is on-board iff (sq &amp; 0x88) == 0.
-/// Square index = rank*16 + file, rank 0 = rank 1 (White's back rank), file 0 = a-file.
-/// </summary>
 public sealed class Board
 {
     public readonly Piece[] Squares = new Piece[128];
     public bool WhiteToMove;
     public CastleRights Castle;
-    public int EpSquare;        // 0x88 square behind a pawn that just double-pushed, or -1
+    public int EpSquare;
     public int HalfmoveClock;
     public int FullmoveNumber;
-
-    // King squares are recomputed lazily/where needed; we scan for them to keep make/unmake simple.
 
     public Board Clone()
     {
@@ -70,8 +63,6 @@ public sealed class Board
         return -1;
     }
 
-    // --- FEN ---
-
     public static Board FromFen(string fen)
     {
         var parts = fen.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -79,13 +70,12 @@ public sealed class Board
             throw new FormatException($"Invalid FEN (need >=4 fields): {fen}");
 
         var b = new Board();
-        // Field 1: piece placement, ranks 8..1
         string placement = parts[0];
         var ranks = placement.Split('/');
         if (ranks.Length != 8) throw new FormatException($"Invalid FEN ranks: {fen}");
         for (int r = 0; r < 8; r++)
         {
-            int rank = 7 - r; // ranks[0] is rank 8
+            int rank = 7 - r;
             int file = 0;
             foreach (char c in ranks[r])
             {

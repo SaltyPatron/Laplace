@@ -6,17 +6,8 @@ using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
-/// <summary>
-/// Verifies the generic engine loop end-to-end WITHOUT the native substrate (no DB, no native libs),
-/// using in-memory stubs for the two substrate seams. Proves: (1) self-play produces only legal moves
-/// and terminates, and (2) a learned win immediately raises that move's eff_mu above the unrated prior
-/// and makes greedy selection pick it — the "learn online, see it next move" behaviour. The live
-/// substrate swaps these stubs for ContentEmitter composition + the Glicko fold.
-/// </summary>
 public sealed class SelfPlayEngineTests
 {
-    // Deterministic managed content address (FNV-1a 128) — stands in for ContentEmitter.RootId so the
-    // loop runs without native libs. Same surface → same id, like the real composed root.
     private sealed class FnvAddresser : IContentAddresser
     {
         public Hash128 Address(string s)
@@ -32,9 +23,6 @@ public sealed class SelfPlayEngineTests
         }
     }
 
-    // In-memory substrate: accumulates per-edge (games, sumScore) and reports a Glicko-shaped eff_mu
-    // (rating moves with mean score; rd shrinks with games), so the explore/exploit gradient matches the
-    // real one: a confirmed win > unrated prior > a confirmed loss.
     private sealed class FakeSubstrate : IEdgeRatings, ITurnLearner
     {
         private readonly IContentAddresser _addr;
@@ -70,7 +58,7 @@ public sealed class SelfPlayEngineTests
 
         private static double EffMu(long games, long sumScore)
         {
-            double mean = (double)sumScore / games / 1e9;            // 0..1
+            double mean = (double)sumScore / games / 1e9;
             double rating = GlickoPriors.NeutralMu + (mean - 0.5) * 400_000_000_000d;
             double rd = Math.Max(50_000_000_000d, GlickoPriors.InitialRd - games * 30_000_000_000d);
             return rating - 2d * rd;
@@ -99,14 +87,13 @@ public sealed class SelfPlayEngineTests
 
             Assert.True(played.Plies > 0);
             Assert.Equal(played.Plies, played.Edges.Count);
-            // Terminal (non-adjudicated) games must have ended on a real rule; either way the outcome is valid.
             if (!played.Adjudicated)
             {
                 var final = ReplayToEnd(modality, played);
                 Assert.NotNull(modality.Terminal(final));
             }
         }
-        Assert.True(sub.EdgeCount > 0); // edges were learned
+        Assert.True(sub.EdgeCount > 0);
     }
 
     [Fact]
@@ -115,18 +102,15 @@ public sealed class SelfPlayEngineTests
         var engine = NewEngine(out var modality, out var sub);
         var start = modality.Initial();
 
-        // The opening move e2e4 and the position it reaches.
         var e4 = modality.LegalActions(start).Single(m => m.ToUci() == "e2e4");
         var afterE4 = modality.Apply(start, e4);
         var edge = new RecordedEdge(modality.StateKey(start), modality.StateKey(afterE4), "e2e4", PlyOutcome.Win);
 
-        // Before learning: e2e4 is at the unrated prior.
         var before = await engine.ScoreMovesAsync(start);
         var e4Before = before.Single(c => c.Action.ToUci() == "e2e4");
         Assert.False(e4Before.Rated);
         Assert.Equal(GlickoPriors.UnratedEffMu, e4Before.EffMu, 3);
 
-        // Learn it as a win a few times (one rating period each), then re-query immediately.
         for (int i = 0; i < 3; i++) await sub.LearnGameAsync(new[] { edge });
 
         var after = await engine.ScoreMovesAsync(start);
@@ -135,7 +119,6 @@ public sealed class SelfPlayEngineTests
         Assert.True(e4After.EffMu > GlickoPriors.UnratedEffMu,
             $"learned-win eff_mu {e4After.EffMu} should exceed unrated prior {GlickoPriors.UnratedEffMu}");
 
-        // Greedy selection now prefers the learned winning move over the unrated field.
         var chosen = ModalityEngine<ChessState, ChessMove>.Select(after, temperature: 0d, new Random(1));
         Assert.Equal("e2e4", chosen.Action.ToUci());
     }
@@ -160,7 +143,6 @@ public sealed class SelfPlayEngineTests
 
     private static ChessState ReplayToEnd(ChessModality modality, PlayedGame<ChessMove> played)
     {
-        // Reconstruct the terminal state by replaying recorded UCI moves from the start.
         var state = modality.Initial();
         foreach (var e in played.Edges)
         {

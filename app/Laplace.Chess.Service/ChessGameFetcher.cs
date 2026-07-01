@@ -3,12 +3,6 @@ using System.Text.Json;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Pulls a player's full game history as PGN from the public, sanctioned game APIs (no scraping, no
-/// auth): chess.com's Published-Data API and the lichess games API. Writes one .pgn file ready for
-/// `ingest chess`. chess.com usernames e.g. "Anthony-Hart", "MagnusCarlsen"; lichess e.g.
-/// "DrNykterstein" (Carlsen).
-/// </summary>
 public static class ChessGameFetcher
 {
     private static readonly HttpClient Http = CreateClient();
@@ -16,7 +10,6 @@ public static class ChessGameFetcher
     private static HttpClient CreateClient()
     {
         var c = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        // chess.com rejects empty User-Agent; identify ourselves (their docs ask for a contact).
         c.DefaultRequestHeaders.UserAgent.ParseAdd("Laplace-Chess-Ingest/1.0");
         return c;
     }
@@ -35,12 +28,6 @@ public static class ChessGameFetcher
             _ => throw new ArgumentException($"unknown site '{site}' (chesscom|lichess)", nameof(site)),
         };
 
-    /// <summary>
-    /// chess.com Published-Data API: archives newest-first, split into individual games, optionally kept
-    /// only when base time control ≥ <paramref name="minTcSeconds"/> (e.g. 600 = rapid+classical, dropping
-    /// blitz/bullet for cleaner move quality; daily/correspondence always kept). Stops at <paramref name="max"/>
-    /// KEPT games, so the cap selects the most-recent quality games rather than the oldest.
-    /// </summary>
     public static async Task<int> FetchChessComAsync(
         string user, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
     {
@@ -50,7 +37,7 @@ public static class ChessGameFetcher
         using var doc = JsonDocument.Parse(archJson);
         var archives = doc.RootElement.GetProperty("archives").EnumerateArray()
             .Select(e => e.GetString()!).ToList();
-        archives.Reverse(); // newest month first → cap keeps recent games
+        archives.Reverse();
         log?.Invoke($"  {archives.Count} monthly archives (newest first)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
@@ -77,7 +64,6 @@ public static class ChessGameFetcher
         return kept;
     }
 
-    /// <summary>Split a chess.com monthly PGN bundle into individual game texts (each starts with [Event).</summary>
     private static IEnumerable<string> SplitGames(string bundle)
     {
         int i = bundle.IndexOf("[Event ", StringComparison.Ordinal);
@@ -89,7 +75,6 @@ public static class ChessGameFetcher
         }
     }
 
-    /// <summary>Base seconds from a game's [TimeControl] tag ("600"→600, "180+2"→180, "1/86400"→daily=max).</summary>
     private static int BaseTcSeconds(string game)
     {
         const string key = "[TimeControl \"";
@@ -99,13 +84,12 @@ public static class ChessGameFetcher
         int end = game.IndexOf('"', t);
         if (end < 0) return 0;
         var tc = game[t..end];
-        if (tc.StartsWith("1/", StringComparison.Ordinal)) return int.MaxValue; // daily/correspondence
+        if (tc.StartsWith("1/", StringComparison.Ordinal)) return int.MaxValue;
         int plus = tc.IndexOf('+');
         var basePart = plus >= 0 ? tc[..plus] : tc;
         return int.TryParse(basePart, out var s) ? s : 0;
     }
 
-    /// <summary>lichess games API: streams the user's games as PGN directly to the file.</summary>
     public static async Task<int> FetchLichessAsync(
         string user, int? max, string outPath, Action<string>? log, CancellationToken ct)
     {

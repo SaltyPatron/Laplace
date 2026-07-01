@@ -3,10 +3,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Top-down existence gate: one bulk <c>entities_present_ordinals</c> on natural-unit roots
-/// before any compose. Present root ⟹ subtree already in substrate ⟹ witness only.
-/// </summary>
 internal static class IngestExistenceGate
 {
     internal static async Task<(TRecord Record, long Units)[]> RemovePresentAsync<TRecord>(

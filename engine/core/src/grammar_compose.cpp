@@ -113,7 +113,6 @@ static int json_span_has_escapes(const uint8_t* span, size_t span_len) {
     return 0;
 }
 
-// Decode JSON string escapes (\n, \uXXXX, …) into UTF-8. Caller frees *out when non-null.
 static int json_unescape_utf8(const uint8_t* span, size_t span_len,
                               uint8_t** out, size_t* out_len) {
     *out = NULL;
@@ -240,13 +239,6 @@ static int json_leaf_fill_grapheme_children(
         content_span = decoded_owned;
     }
 
-    // Identity convergence: a JSON scalar leaf's entity id must equal the canonical
-    // content root id (laplace_content_root_id) so that the same surface ("New York",
-    // a gloss, a lemma) decomposed by a structured source (Wiktionary/JSON) and by the
-    // content path (WordNet/OMW/VerbNet via ContentWitnessBatch) resolves to ONE entity.
-    // Both call content_tree_build + natural_unit_index, so the ids match by construction.
-    // Falls back to the grapheme-merkle id below if the content tree can't be built
-    // (e.g. perfcache not loaded).
     if (out_root_id) {
         if (laplace_content_root_id(content_span, content_len, out_root_id) != 0)
             hash128_zero(out_root_id);
@@ -405,15 +397,8 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                 continue;
             }
             m = w;
-            // Tier is composition DEPTH on a fixed semantic ladder (codepoint=0, grapheme=1,
-            // word=2, sentence=3, document=4) — NOT AST recursion depth. A deeply nested grammar
-            // AST (e.g. ConceptNet's file->row->field->token tsv) must NOT climb the depth axis past
-            // Document; the previous `max_tier + 1` clamped only at 255, so nested rows produced
-            // tier 6/7/8 entities that fail identity_law_violations() (tier_out_of_range). Structural
-            // nesting beyond Document is carried by grammar_type_id, not the tier field. Saturate at
-            // Document so composed ids stay inside the sanctioned 0..4 band.
             {
-                const uint8_t TIER_DOCUMENT = 4;  // == EntityTier.Document
+                const uint8_t TIER_DOCUMENT = 4;
                 uint8_t next = (uint8_t)(max_tier + 1);
                 tier = next < TIER_DOCUMENT ? next : TIER_DOCUMENT;
             }
@@ -464,10 +449,6 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         hilbert128_t hb;
         hash_composer_compose_node(tier, child_ids, child_coords, m,
                                    &st->comp_id[idx], out_coord, &hb);
-        // For a JSON scalar leaf, adopt the canonical content root id so the entity
-        // (and the span lookup / edge endpoints derived from it) converges with the
-        // content-witness path. Coord/physicality stay grapheme-derived and remain
-        // source-scoped, which is intended.
         if (leaf_root_id.hi != 0 || leaf_root_id.lo != 0)
             st->comp_id[idx] = leaf_root_id;
         memcpy(st->comp_coord + idx * 4, out_coord, 4 * sizeof(double));
@@ -546,8 +527,6 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
     return 0;
 }
 
-// Open-addressing lookup: entity index whose id == target, or UINT32_MAX. slot[] holds first
-// occurrence indices keyed by id.lo (power-of-two cap).
 static uint32_t containment_idmap_find(
     const uint32_t* slot, size_t cap,
     const laplace_compose_result_t* r, hash128_t target) {
@@ -560,13 +539,6 @@ static uint32_t containment_idmap_find(
     }
 }
 
-// Build the containment tier tree: one flat node per emitted entity (node i <-> entities[i], same
-// id + tier), with parent_idx pointing at the entity index of each compositional node's structural
-// (AST) parent. Graphemes and type-meta nodes stay roots (TIER_TREE_INVALID) and are probed
-// directly; with a full per-node existing-bitmap this is exactly correct by the Merkle invariant
-// (a present composite implies all its constituents are present), and the compositional parent links
-// let a present trunk short-circuit its whole subtree. Returns NULL on allocation failure (callers
-// then emit all entities — never wrong, just unfiltered).
 static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                                 const char* modality_id, hash128_t source_id,
                                 hash128_t type_meta_id, laplace_compose_result_t** out,
@@ -587,7 +559,7 @@ static tier_tree_t* build_containment_tree(
     size_t cap = 1;
     while (cap < ec * 2) cap <<= 1;
     uint32_t* slot = (uint32_t*)malloc(cap * sizeof(uint32_t));
-    if (!slot) return t;  // tree without parent links is still correct under a full bitmap
+    if (!slot) return t;
     for (size_t i = 0; i < cap; ++i) slot[i] = UINT32_MAX;
     for (size_t i = 0; i < ec; ++i) {
         size_t p = (size_t)(r->entities[i].id.lo & (cap - 1));
@@ -781,9 +753,6 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                             int materialize_phys) {
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
-    // Geometry is source-free: physicality ids no longer hash source. source_id is retained on the
-    // ABI for callers that pass it (and for entity first-observed provenance on the managed side),
-    // but it does not enter any content/geometry id computed here.
     (void)source_id;
     if (len == 0 || laplace_ast_node_count(ast) == 0) return 0;
 
@@ -982,8 +951,6 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         }
     }
 
-    // Containment tree for managed-side MerkleDedup.TrunkShortcircuit (owned by r, freed in
-    // laplace_compose_result_free). NULL on alloc failure => caller emits all entities.
     r->tree = build_containment_tree(r, ast, &st);
 
     free(emitted_entity);
@@ -1193,10 +1160,6 @@ int laplace_compose_drain_into_stage(
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
         if (!phys_novel(&filter, &ph->entity_id)) continue;
         if (intent_stage_witness_seen(stage, &ph->id)) continue;
-        // trajectory_n is a count of DOUBLES (m vertices * 4 coords XYZM), per push_phys + the .NET
-        // getter. intent_stage_add_physicality wants the VERTEX count, so divide by 4 — passing the
-        // doubles-count made the linestring writer read 4x past the buffer (heap-buffer-overflow,
-        // caught by ASAN at intent_stage.c:171). The content-witness drain already passes vertices.
         if (intent_stage_add_physicality(
                 stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
                 ph->trajectory_xyzm, (uint32_t)(ph->trajectory_n / 4), (int32_t)ph->n_constituents,

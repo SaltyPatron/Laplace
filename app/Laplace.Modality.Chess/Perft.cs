@@ -2,7 +2,6 @@ namespace Laplace.Modality.Chess;
 
 public static class Perft
 {
-    /// <summary>Count leaf nodes at the given depth (root not counted). Standard perft.</summary>
     public static long Run(Board b, int depth)
     {
         if (depth == 0) return 1;
@@ -18,10 +17,8 @@ public static class Perft
         return nodes;
     }
 
-    /// <summary>Convenience overload from a ChessState.</summary>
     public static long Run(ChessState s, int depth) => Run(s.Board, depth);
 
-    /// <summary>Divide: per-root-move leaf counts (for debugging).</summary>
     public static Dictionary<string, long> Divide(Board b, int depth)
     {
         var result = new Dictionary<string, long>();

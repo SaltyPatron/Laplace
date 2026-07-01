@@ -3,10 +3,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.OMW;
 
-/// <summary>
-/// Serial scan: probe + materialize_phys per OMW tab row. Finds the first row that fails
-/// native compose without DB or parallel ingest noise.
-/// </summary>
 public static class OmwComposeProbe
 {
     public sealed record Failure(

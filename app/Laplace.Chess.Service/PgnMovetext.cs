@@ -4,15 +4,8 @@ using Laplace.Modality;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Shared extraction of a game's movetext from the <c>pgn</c> tree-sitter AST. Both
-/// <see cref="ChessPgnDecomposer"/> and <see cref="ChessOpeningsDecomposer"/> parse through the SAME
-/// grammar — converge, not fork. One ordered document walk collects mainline moves plus aligned metadata
-/// slots (comments, NAGs, annotation glyphs) for eval / quality / variation ingest.
-/// </summary>
 internal static class PgnMovetext
 {
-    /// <summary>One ply from the ordered AST walk (mainline or variation).</summary>
     public sealed record PgnMoveStream(
         string San,
         int PlyIndex,
@@ -22,23 +15,17 @@ internal static class PgnMovetext
         string? StandaloneAnnotation = null,
         string? SuffixAnnotation = null);
 
-    /// <summary>Full walk result: mainline plies, every ply (incl. variations), and the game result.</summary>
     public sealed record PgnWalkResult(
         IReadOnlyList<PgnMoveStream> Mainline,
         IReadOnlyList<PgnMoveStream> AllPlies,
         GameOutcome? Result);
 
-    /// <summary>
-    /// Single pass over the AST: ordered mainline SAN tokens plus the terminating result, or
-    /// <c>null</c> result when there is none.
-    /// </summary>
     public static (List<string> Moves, GameOutcome? Result) Extract(GrammarAst ast, byte[] utf8)
     {
         var walk = Walk(ast, utf8);
         return (walk.Mainline.Select(m => m.San).ToList(), walk.Result);
     }
 
-    /// <summary>Document-order AST walk with aligned metadata slots per move.</summary>
     public static PgnWalkResult Walk(GrammarAst ast, byte[] utf8)
     {
         var all = new List<PgnMoveStream>();
@@ -127,7 +114,6 @@ internal static class PgnMovetext
         return int.TryParse(text[1..], out int v) ? v : null;
     }
 
-    /// <summary>Trailing <c>!!</c>/<c>?</c> glyphs on the SAN token (after check/mate markers).</summary>
     internal static string? ExtractSuffixAnnotation(string raw)
     {
         int end = raw.Length;
