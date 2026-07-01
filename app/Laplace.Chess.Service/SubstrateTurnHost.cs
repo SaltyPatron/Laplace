@@ -93,7 +93,10 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/selfplay/game");
 
 
-        ChessVocabulary.EmitPlayer(b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId);
+        // SelfPlayTrustClass = "ResponseContent" — the player-name claim must carry the same low
+        // trust as the rest of this self-play source, not the curated-corpus default.
+        ChessVocabulary.EmitPlayer(
+            b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);
 
 
         bool hasWin = false;

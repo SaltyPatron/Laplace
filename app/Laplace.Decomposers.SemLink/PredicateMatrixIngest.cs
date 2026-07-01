@@ -77,21 +77,21 @@ internal static class PredicateMatrixIngest
 
             if (TryRoleset(fields[ColPbRoleset], out string? roleset) && roleset is not null)
             {
-                StageCorrespondsTo(batch, seen, CategoryAnchor.Id(roleset), RolesetTypeId, synId.Value);
-                if (senseId is { } rs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(roleset), RolesetTypeId, rs);
+                StageCorrespondsTo(batch, seen, roleset, RolesetTypeId, synId.Value);
+                if (senseId is { } rs) StageCorrespondsTo(batch, seen, roleset, RolesetTypeId, rs);
             }
 
             if (TryFrame(fields[ColFnFrame], out string? frame) && frame is not null)
             {
-                StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, synId.Value);
-                if (senseId is { } fs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, fs);
+                StageCorrespondsTo(batch, seen, frame, FrameTypeId, synId.Value);
+                if (senseId is { } fs) StageCorrespondsTo(batch, seen, frame, FrameTypeId, fs);
             }
 
             string? vnClass = VerbNetClassKey(fields);
             if (vnClass is not null)
             {
-                StageCorrespondsTo(batch, seen, CategoryAnchor.Id(vnClass), VnClassTypeId, synId.Value);
-                if (senseId is { } vs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(vnClass), VnClassTypeId, vs);
+                StageCorrespondsTo(batch, seen, vnClass, VnClassTypeId, synId.Value);
+                if (senseId is { } vs) StageCorrespondsTo(batch, seen, vnClass, VnClassTypeId, vs);
             }
 
             if (vnClass is not null && fields.Length > ColFnFe)
@@ -278,15 +278,18 @@ internal static class PredicateMatrixIngest
     private static void StageCorrespondsTo(
         SubstrateChangeBuilder b,
         HashSet<(Hash128 Subject, Hash128 Object)> seen,
-        Hash128? subjectId,
+        string subjectKey,
         Hash128 subjectType,
         Hash128 synId)
     {
+        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
+        // content (entity + physicality) via the real tiered content pipeline. Using
+        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
+        // entity minted with no matching physicality.
+        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, SemLinkDecomposer.Source, TC.AcademicCurated);
         if (subjectId is null) return;
         if (!seen.Add((subjectId.Value, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId.Value, EntityTier.Word, subjectType, SemLinkDecomposer.Source));
-        CategoryAnchor.AttestCategory(b, subjectId.Value, subjectType, SemLinkDecomposer.Source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
             subjectId.Value, "CORRESPONDS_TO", synId, SemLinkDecomposer.Source, TC.AcademicCurated));
     }

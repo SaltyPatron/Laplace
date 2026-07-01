@@ -315,6 +315,7 @@ public sealed class LlamaTokenizerParser
                 physicalityCapacity: n * 5,
                 attestationCapacity: 0);
 
+            Span<double> coord = stackalloc double[4];
             for (int i = start; i < end; i++)
             {
                 var rec = records[i];
@@ -329,6 +330,27 @@ public sealed class LlamaTokenizerParser
                 {
                     b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
                         firstObservedBy: sourceId);
+                    // Parse() already computed a real coordinate for this fallback path
+                    // (single-byte atoms via ByteAtoms.Coord) -- reuse it instead of leaving
+                    // this Word-tier content entity without a matching physicality. Genuinely
+                    // non-geometric sentinels (e.g. special tokens) have HasContentCoord=false
+                    // and correctly get no physicality.
+                    if (rec.HasContentCoord)
+                    {
+                        coord[0] = rec.ContentX; coord[1] = rec.ContentY;
+                        coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
+                        Hash128 physId = PhysicalityId.Compute(
+                            rec.EntityId, PhysicalityType.Content,
+                            rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM,
+                            ReadOnlySpan<double>.Empty);
+                        b.AddPhysicality(new PhysicalityRow(
+                            Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
+                            Type: PhysicalityType.Content,
+                            CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
+                            HilbertIndex: Hilbert128.Encode(coord),
+                            TrajectoryXyzm: null, NConstituents: 0,
+                            AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+                    }
                 }
 
             }
@@ -419,6 +441,23 @@ public sealed class LlamaTokenizerParser
         }
         var id = Hash128.Blake3(canonical);
         b.AddEntity(id, EntityTier.Word, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
+        // Same fallback coordinate rule as Parse(): a lone high byte still has a real,
+        // deterministic ByteAtoms placement -- give it the matching physicality rather than
+        // leaving this Word-tier content entity geometry-less.
+        if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
+        {
+            var bc = ByteAtoms.Coord(canonical[0]);
+            Span<double> coord = stackalloc double[4] { bc[0], bc[1], bc[2], bc[3] };
+            Hash128 physId = PhysicalityId.Compute(
+                id, PhysicalityType.Content, bc[0], bc[1], bc[2], bc[3], ReadOnlySpan<double>.Empty);
+            b.AddPhysicality(new PhysicalityRow(
+                Id: physId, EntityId: id, SourceId: sourceId,
+                Type: PhysicalityType.Content,
+                CoordX: bc[0], CoordY: bc[1], CoordZ: bc[2], CoordM: bc[3],
+                HilbertIndex: Hilbert128.Encode(coord),
+                TrajectoryXyzm: null, NConstituents: 0,
+                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+        }
         return id;
     }
 

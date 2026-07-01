@@ -74,7 +74,7 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
 
         if (!Directory.Exists(path)) yield break;
 
-        foreach (string file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+        foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }

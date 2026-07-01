@@ -86,6 +86,26 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         int total = _records!.Length;
         int batch = options.BatchSize > 1 ? options.BatchSize : DefaultBatch;
 
+        // Tier-0 completeness precondition: bulk-write every codepoint's entity+physicality
+        // pair, unconditionally and atomically paired, BEFORE any batch below can reference a
+        // codepoint as a relation target. Unicode mappings (uppercase/lowercase/decomposition/
+        // mirror/confusables/name-aliases) are not monotonic in codepoint order, so without
+        // this preamble a forward reference from StageCodepointTarget could land in a batch
+        // that commits before the referenced codepoint's own primary entity+physicality pair
+        // does, leaving a real (if transient) entity-without-physicality row in the DB. Once
+        // this preamble has run, tier-0 existence is a guaranteed precondition for everything
+        // that follows -- StageCodepointTarget below asserts against it instead of defensively
+        // re-staging an entity-only row. Redundant re-emission of the same ids by BuildBatch's
+        // own per-chunk pairing further down is intentional and harmless: apply_batch's
+        // anti-join dedup (`LEFT JOIN ... WHERE id IS NULL`) skips ids that already exist.
+        for (int start = 0; start < total; start += batch)
+        {
+            ct.ThrowIfCancellationRequested();
+            int end = Math.Min(start + batch, total);
+            yield return BuildTier0Seed(start, end);
+            IntentStage.ResetContentBank();
+        }
+
         for (int start = 0; start < total; start += batch)
         {
             ct.ThrowIfCancellationRequested();
@@ -111,7 +131,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     var aliasId = ContentEmitter.Emit(b, alias, Source);
                     if (aliasId is { } aid)
                         b.AddAttestation(NativeAttestation.Categorical(
-                            StageCodepointTarget(b, recs, cp), "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
+                            StageCodepointTarget(recs, cp), "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
                     count++;
                 }
                 if (count >= batch)
@@ -133,11 +153,11 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 int first = char.ConvertToUtf32(target, 0);
                 int firstLen = char.IsSurrogatePair(target, 0) ? 2 : 1;
                 Hash128? targetId = target.Length == firstLen
-                    ? StageCodepointTarget(b, recs, (uint)first)
+                    ? StageCodepointTarget(recs, (uint)first)
                     : ContentEmitter.Emit(b, target, Source);
                 if (targetId is { } tid)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        StageCodepointTarget(b, recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
+                        StageCodepointTarget(recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
                 if (++count >= batch)
                 {
                     b.SetInputUnitsConsumed(count);
@@ -200,7 +220,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     Source, SourceTrust.StandardsDerived));
 
                 bb.AddAttestation(NativeAttestation.Categorical(
-                    byteId, "DECODES_TO", StageCodepointTarget(bb, recs, (uint)v), Source,
+                    byteId, "DECODES_TO", StageCodepointTarget(recs, (uint)v), Source,
                     SourceTrust.StandardsDerived, contextId: latin1));
 
                 uint cp1252Target = bv <= 0x9F
@@ -208,7 +228,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     : (uint)bv;
                 if (cp1252Target != 0)
                     bb.AddAttestation(NativeAttestation.Categorical(
-                        byteId, "DECODES_TO", StageCodepointTarget(bb, recs, cp1252Target), Source,
+                        byteId, "DECODES_TO", StageCodepointTarget(recs, cp1252Target), Source,
                         SourceTrust.StandardsDerived, contextId: cp1252));
             }
             yield return bb.Build();
@@ -345,7 +365,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 uint targetCp = ucd.UppercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasUppercaseMapping,
-                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                        StageCodepointTarget(recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
             if (ucd.LowercaseMapping[cp] != 0)
@@ -353,7 +373,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 uint targetCp = ucd.LowercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasLowercaseMapping,
-                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                        StageCodepointTarget(recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
             uint[]? decomp = ucd.CanonDecomp[cp];
@@ -367,7 +387,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                         Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
                         b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCanonDecomposesTo,
-                            StageCodepointTarget(b, recs, targetCp), Source, ctx,
+                            StageCodepointTarget(recs, targetCp), Source, ctx,
                             RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
                     }
                 }
@@ -375,7 +395,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
             if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasTitlecaseMapping,
-                    StageCodepointTarget(b, recs, ucd.TitlecaseMapping[cp]), Source, null,
+                    StageCodepointTarget(recs, ucd.TitlecaseMapping[cp]), Source, null,
                     RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             uint[]? compat = ucd.CompatDecomp[cp];
@@ -389,7 +409,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                         Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
                         b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCompatDecomposesTo,
-                            StageCodepointTarget(b, recs, targetCp), Source, ctx,
+                            StageCodepointTarget(recs, targetCp), Source, ctx,
                             RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
                     }
                 }
@@ -408,7 +428,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
             uint mir = ucd.BidiMirror[cp];
             if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    entityId, "HAS_MIRROR", StageCodepointTarget(b, recs, mir), Source, null, SourceTrust.StandardsDerived));
+                    entityId, "HAS_MIRROR", StageCodepointTarget(recs, mir), Source, null, SourceTrust.StandardsDerived));
 
             string? age = ucd.AgeForCodepoint(ucp);
             if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
@@ -426,11 +446,69 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         return b.Build();
     }
 
-    private Hash128 StageCodepointTarget(SubstrateChangeBuilder b, CodepointRecord[] recs, uint targetCp)
+    /// <summary>
+    /// Resolves the entity id for a codepoint referenced as a relation TARGET (uppercase/
+    /// lowercase/decomposition/mirror/confusable/name-alias mapping, etc.), never as the
+    /// primary node being decomposed. Tier-0 existence is a guaranteed precondition here --
+    /// the entity+physicality pair for every codepoint is bulk-seeded, atomically paired, by
+    /// <see cref="BuildTier0Seed"/> before any batch that can call this method runs. This
+    /// method therefore does NOT stage an entity row (doing so would reintroduce the
+    /// entity-without-physicality window this precondition exists to close) -- it only
+    /// validates and resolves the id, failing loudly if the codepoint is out of range of the
+    /// seeded record set rather than silently trusting some other code path to backfill it.
+    /// </summary>
+    private static Hash128 StageCodepointTarget(CodepointRecord[] recs, uint targetCp)
     {
-        Hash128 targetId = recs[targetCp].Hash;
-        b.AddEntity(targetId, tier: 0, CodepointType, firstObservedBy: Source);
-        return targetId;
+        if (targetCp >= (uint)recs.Length)
+            throw new ArgumentOutOfRangeException(nameof(targetCp), targetCp,
+                "StageCodepointTarget: codepoint is outside the tier-0 seeded record set -- " +
+                "every codepoint's entity+physicality pair must already exist (see BuildTier0Seed) " +
+                "before it can be referenced as a relation target.");
+        return recs[targetCp].Hash;
+    }
+
+    /// <summary>
+    /// Bulk-writes the entity+physicality pair for every codepoint in [start, end), sourced
+    /// directly from the precomputed <see cref="CodepointRecord"/> table (perfcache-backed
+    /// when available). Always emits entity and physicality together -- this is the ONLY
+    /// place in this decomposer that mints tier-0 rows, and it runs to completion for the
+    /// entire codepoint space before any attestation-bearing batch is yielded, so that
+    /// <see cref="StageCodepointTarget"/> can safely assume every codepoint it is asked to
+    /// resolve already has both rows committed.
+    /// </summary>
+    private SubstrateChange BuildTier0Seed(int start, int end)
+    {
+        int n = end - start;
+        var b = new SubstrateChangeBuilder(
+            Source, $"codepoints/tier0-seed/U+{start:X4}..U+{(end - 1):X4}", null,
+            entityCapacity: n,
+            physicalityCapacity: n,
+            attestationCapacity: 0)
+            .SetCommitEpoch(0);
+
+        CodepointRecord[] recs = _records!;
+
+        for (int cp = start; cp < end; cp++)
+        {
+            ref readonly CodepointRecord r = ref recs[cp];
+            Hash128 entityId = r.Hash;
+
+            b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
+
+            Hash128 physId = PhysicalityId.Compute(
+                entityId, PhysicalityType.Content,
+                r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
+                ReadOnlySpan<double>.Empty);
+
+            b.AddPhysicality(new PhysicalityRow(
+                Id: physId, EntityId: entityId, SourceId: Source,
+                Type: PhysicalityType.Content,
+                CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
+                HilbertIndex: r.Hilbert,
+                TrajectoryXyzm: null, NConstituents: 0,
+                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+        }
+        return b.Build();
     }
 
     private void EnsureComputed(IDecomposerContext context)

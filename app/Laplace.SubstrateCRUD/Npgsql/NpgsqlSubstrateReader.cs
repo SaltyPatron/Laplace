@@ -61,6 +61,20 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
+    /// <summary>
+    /// Ids confirmed present in the DB (or in this run's guaranteed-
+    /// committed set) via a real presence-query result -- NOT "ids seen at
+    /// least once". Only ever populate via <see cref="MarkProven"/> with an
+    /// already-filtered "confirmed present" subset of a probe round; never
+    /// with a probe round's whole, unfiltered candidate list. That
+    /// unconditional-population bug (TierTreeDescent.cs previously calling
+    /// MarkProven on an entire batch, including ids the same batch's
+    /// bitmap had just proven absent) permanently poisoned this
+    /// process-lifetime cache and caused every later occurrence of that
+    /// content anywhere in the ingest run to be silently treated as already
+    /// present -- see the dorian.txt repro in
+    /// .scratchpad/02_Identified_Issues.txt.
+    /// </summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
 
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
@@ -173,6 +187,40 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             null => Array.Empty<byte>(),
             _ => throw new InvalidOperationException(
                 $"content_descent_bitmap returned unexpected type: {result.GetType()}")
+        };
+    }
+
+    /// <summary>
+    /// One round of the tier-by-tier, trunk-to-leaf batch existence probe.
+    /// Calls the native tier_batch_existence_probe() SQL function directly
+    /// -- no C#-side caching layer here, deliberately: the native side
+    /// already does its own perfcache fast-path internally
+    /// (batch_presence_core() in descent_probe.c), and every bit in the
+    /// result is a real, positive confirmation for exactly the ids passed
+    /// in. The caller (TierTreeDescent.ProbeBatchEmitBitmapsAsync) is
+    /// responsible for filtering which ids to check each round and for
+    /// only calling MarkProven with the subset this round's bitmap actually
+    /// confirmed present.
+    /// </summary>
+    public async Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+    {
+        if (ids is null) throw new ArgumentNullException(nameof(ids));
+        int n = ids.Count;
+        if (n == 0) return Array.Empty<byte>();
+
+        var byteaArray = new byte[n][];
+        for (int i = 0; i < n; i++) byteaArray[i] = ids[i].ToBytes();
+
+        await using var cmd = _ds.CreateCommand("SELECT laplace.tier_batch_existence_probe($1)");
+        var p = cmd.Parameters.AddWithValue(byteaArray);
+        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result switch
+        {
+            byte[] bytes => bytes,
+            null => new byte[(n + 7) / 8],
+            _ => throw new InvalidOperationException(
+                $"tier_batch_existence_probe returned unexpected type: {result.GetType()}")
         };
     }
 

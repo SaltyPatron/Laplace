@@ -453,51 +453,53 @@ static int row_field_at(const uint8_t* data, size_t len, size_t off, int field_1
     return -1;
 }
 
-static uint64_t read_be64(const uint8_t* p) {
-    return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48)
-         | ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32)
-         | ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16)
-         | ((uint64_t)p[6] << 8)  | (uint64_t)p[7];
-}
-
-#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__ == 16
-typedef unsigned __int128 uint128_be_t;
-
-static uint128_be_t read_be128(const uint8_t* hb) {
-    return (((uint128_be_t)read_be64(hb)) << 64) | (uint128_be_t)read_be64(hb + 8);
-}
-
-static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
-    if (part_count <= 1) return 0;
-    uint128_be_t h = read_be128(hb);
-    uint128_be_t r = h * (uint128_be_t)part_count;
-    return (size_t)(r >> 64 >> 64);
-}
-#else
-static size_t hilbert_range_partition(const uint8_t* hb, size_t part_count) {
-    if (part_count <= 1) return 0;
-    uint64_t hi = read_be64(hb);
-#ifdef _WIN32
-    uint64_t ignored;
-    return (size_t)(_umul128(hi, (uint64_t)part_count, &ignored));
-#else
-    return (size_t)(((unsigned __int128)hi * (unsigned __int128)part_count) >> 64);
-#endif
-}
-#endif
-
+/*
+ * Referential-locality partition key.
+ *
+ * Rows in one intent_stage_t can reference each other by id (a physicality's
+ * `entity_id` column, an attestation's `subject_id` column). NpgsqlSubstrateWriter
+ * commits each output partition in its OWN independent transaction and may run those
+ * transactions in parallel -- so if a referencing row and the row it references land
+ * in different partitions, there is no guarantee both land together, or even that
+ * both land at all if one partition's transaction fails after a sibling's already
+ * committed. That is the "fake parallelism" defect: partitioning entities by their own
+ * id hash while partitioning physicalities by an unrelated Hilbert-range value (and
+ * attestations by their own id hash) has zero cross-linkage, so an entity and the
+ * physicality/attestation that references it were only ever co-located by chance.
+ *
+ * The fix: every table partitions by the SAME key -- the id of the entity a row is
+ * "about". For entities that's their own id (nothing references an entity's own row
+ * from below it); for physicalities and attestations it's the id of the entity they
+ * reference (`entity_id` / `subject_id`, both column 2 in the row layout), NOT their
+ * own row id and NOT a Hilbert value. This guarantees an entity and every physicality/
+ * attestation whose subject is that entity always land in the same partition, hence
+ * the same transaction.
+ *
+ * Hilbert order is still valuable for physicalities' storage locality, but it must be
+ * applied as an ORDER BY of rows already assigned to a partition (see
+ * physicalities_sort_by_hilbert below), never as the mechanism that decides which
+ * transaction a row ends up in.
+ */
 static size_t partition_row(const uint8_t* data, size_t len, size_t off, size_t part_count,
                             int table_kind) {
+    int field_1based = (table_kind == 0) ? 1 /* entities.id */
+                                          : 2 /* physicalities.entity_id / attestations.subject_id */;
+
+    const uint8_t* fld;
+    int32_t fld_len;
+    if (row_field_at(data, len, off, field_1based, &fld, &fld_len) == 0 && fld_len >= 16) {
+        uint64_t lo;
+        memcpy(&lo, fld + 8, 8);
+        return (size_t)(lo % (uint64_t)part_count);
+    }
+
+    /* Malformed row (should be unreachable given the writers above) -- fall back to the
+     * row's own id so partitioning still terminates deterministically rather than
+     * crashing; this only ever loses referential co-location for a row that was already
+     * unparseable by the field-aware path. */
     size_t id_off = off + 2 + 4;
     uint64_t lo;
     memcpy(&lo, data + id_off + 8, 8);
-
-    if (table_kind == 1) {
-        const uint8_t* hb;
-        int32_t hb_len;
-        if (row_field_at(data, len, off, 5, &hb, &hb_len) == 0 && hb_len >= 16)
-            return hilbert_range_partition(hb, part_count);
-    }
     return (size_t)(lo % (uint64_t)part_count);
 }
 
@@ -517,6 +519,63 @@ static int partition_one_buf(
         outs[part].row_count++;
         off += rlen;
     }
+    return 0;
+}
+
+typedef struct {
+    size_t         off;
+    size_t         len;
+    const uint8_t* hilbert;
+} phys_row_span_t;
+
+static int cmp_phys_row_span_hilbert(const void* a, const void* b) {
+    const phys_row_span_t* ra = (const phys_row_span_t*)a;
+    const phys_row_span_t* rb = (const phys_row_span_t*)b;
+    return memcmp(ra->hilbert, rb->hilbert, 16);
+}
+
+/*
+ * Reorders the physicality rows already assigned to a single partition by their Hilbert
+ * index (column 5, big-endian bytes so a plain memcmp gives correct numeric order), for
+ * sequential I/O locality against physicalities_coord_gist-adjacent storage on COPY.
+ * This is purely a within-partition ORDER BY -- it never changes which partition/
+ * transaction a row belongs to, unlike the old hilbert_range_partition scheme it
+ * replaces.
+ */
+static int physicalities_sort_by_hilbert(byte_buf_t* buf) {
+    if (buf->row_count <= 1) return 0;
+
+    phys_row_span_t* spans = (phys_row_span_t*)malloc(buf->row_count * sizeof(phys_row_span_t));
+    if (!spans) return -1;
+
+    size_t off = 0;
+    for (size_t r = 0; r < buf->row_count; ++r) {
+        size_t rlen = row_byte_len(buf->data, buf->len, off);
+        if (rlen == 0) { free(spans); return -1; }
+        const uint8_t* hb;
+        int32_t hb_len;
+        if (row_field_at(buf->data, buf->len, off, 5, &hb, &hb_len) != 0 || hb_len < 16) {
+            free(spans);
+            return -1;
+        }
+        spans[r].off = off;
+        spans[r].len = rlen;
+        spans[r].hilbert = hb;
+        off += rlen;
+    }
+
+    qsort(spans, buf->row_count, sizeof(phys_row_span_t), cmp_phys_row_span_hilbert);
+
+    uint8_t* sorted = (uint8_t*)malloc(buf->len > 0 ? buf->len : 1);
+    if (!sorted) { free(spans); return -1; }
+    size_t w = 0;
+    for (size_t r = 0; r < buf->row_count; ++r) {
+        memcpy(sorted + w, buf->data + spans[r].off, spans[r].len);
+        w += spans[r].len;
+    }
+    memcpy(buf->data, sorted, buf->len);
+    free(sorted);
+    free(spans);
     return 0;
 }
 
@@ -569,6 +628,17 @@ int intent_stage_partition(
         if (rc != 0) {
             for (size_t i = 0; i < part_count; ++i) { intent_stage_free(parts[i]); parts[i] = NULL; }
             return -1;
+        }
+
+        if (t == 1) {
+            /* Physicalities are now grouped by referenced entity_id (correctness); apply
+             * the Hilbert-order I/O locality win within each partition's own rows. */
+            for (size_t i = 0; i < part_count; ++i) {
+                if (physicalities_sort_by_hilbert(&parts[i]->physicalities) != 0) {
+                    for (size_t j = 0; j < part_count; ++j) { intent_stage_free(parts[j]); parts[j] = NULL; }
+                    return -1;
+                }
+            }
         }
     }
     return 0;

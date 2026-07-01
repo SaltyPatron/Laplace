@@ -1,0 +1,271 @@
+LAPLACE — CHESS FIXES SESSION STATUS (04)
+Status/session-log only. Not the architecture doc — see 03_Chess.txt for how the chess
+subsystem ought to work per the invention; this file is strictly "what was done this session
+and the exact evidence for each claim." Every line below either cites the exact command/query
+run and its real output, or is explicitly marked as NOT verified and why.
+
+Session order: full audit (produced 03_Chess.txt) -> user directed "fix all of it, including
+highway_mask" -> 8 fix tasks executed -> full native+.NET rebuild -> DB purge of the pre-fix
+chess ingest -> clean re-ingest -> live verification -> a real regression was caught and fixed
+in the UCI test suite before writing this file.
+
+================================================================================
+FIX 1 — chess relation types registered in engine/manifest/relation_types.toml
+================================================================================
+Change: added 26 `[[relation]]` entries (MOVE, OUTCOME, PLAYED_BY, HAS_RATING, OPENING_NAME,
+HAS_ECO, HAS_WHITE, HAS_BLACK, HAS_EVENT, ON_DATE, HAS_TIME_CONTROL, HAS_TC_CLASS,
+HAS_TERMINATION, HAS_RESULT, GAME_AT, GAME_AT_PLY, HAS_EVAL, HAS_EVAL_TOKEN, MOVE_QUALITY,
+HAS_CLOCK, HAS_THINK_CLASS, GAME_HAS_OPENING, GAME_HAS_ECO, GAME_HAS_MOTIF, EXPLAINS,
+IS_EXAMPLE_OF). Also redirected `ChessVocabulary.DefinesType` to reuse the existing
+"HAS_DEFINITION" canonical (was minting a redundant "DEFINES") and `ChessPgnDecomposer`'s
+player-alias attestation from a chess-only "SAME_AS" to the existing "CORRESPONDS_TO"
+(rank=equivalence, already in the manifest).
+VERIFIED: ran `python scripts/codegen-attestation-law.py` — output:
+  "highway perfcache ok: ...\laplace_highway_perfcache.bin (8725 bytes, 179 relations, 13 bands,
+  1024-slot table)" — 179 = the prior 153 + these 26 new entries, confirmed by exact count.
+VERIFIED: ran `scripts\win\rebuild-all.cmd` (full clean rebuild) — exit 0. Its own final check
+  printed "highway perfcache ready: 8725 bytes — ...\build-win\core\perfcache\
+  laplace_highway_perfcache.bin", i.e. the same 179-relation blob is what's actually deployed
+  to the path the .NET app loads from (HighwayPerfcache.ResolveDefaultPath derives this
+  directory from LAPLACE_PERFCACHE_BIN, set by env.cmd).
+NOT FIXED, CONFIRMED BY DIRECT QUERY: after purging and cleanly re-ingesting chess data (see
+  FIX 9 below) under this rebuilt binary, ran:
+    SELECT relation_canonical(a.type_id), encode(a.highway_mask,'hex'), count(*)
+    FROM attestations a WHERE a.source_id = decode('28b6b80ba59c0e67c750d7eaee070504','hex')
+    GROUP BY 1,2 ORDER BY 1;
+  -> every relation's mask_hex column is empty (NULL) across all ~702K fresh chess attestations.
+  Widened the check to the WHOLE table, not just chess:
+    SELECT count(*) FROM attestations WHERE highway_mask IS NOT NULL;  -> 0
+  This is a repo-wide issue, not specific to chess or to this fix — registering the relation
+  types in the manifest was necessary but not sufficient. The actual write path
+  (SubstrateChangeBuilder.AddAttestation -> HighwayPerfcache.MaskForRelationType, per
+  03_Chess.txt Issue C02) still never populates the column for ANY source in this database,
+  chess or otherwise. Root cause not further diagnosed this session — open.
+
+================================================================================
+FIX 2 — cutechess-cli bare-comment eval format ({+0.48/17 0.13s}, {+M3/12 0.05s})
+================================================================================
+Change: `PgnEvals.cs` — added `CutechessEvalRegex` (matches the bare decimal/mate score before
+the "/depth" token) as a fallback when the lichess `[%eval ...]` regex finds zero matches, plus
+`NormalizeCutechessToken` converting cutechess's "+M3"/"-M3" mate notation to the "#"-prefixed
+form `ParseToken` already expects. `PgnClocks.cs` left lichess-only, with a comment explaining
+why (cutechess's per-move number is time SPENT, not time REMAINING — a different quantity than
+what ThinkFactor/SecondsRemaining model; not fixed this session, flagged in-code).
+NOT LIVE-VERIFIED THIS SESSION: the real cutechess-cli PGN sample this fix was based on
+(D:\Temp\claude\...\scratchpad\real_test.pgn) was generated earlier in the session, BEFORE this
+code change. This fix was not re-run against a fresh cutechess-cli match afterward, and no unit
+test was added for CutechessEvalRegex specifically. `dotnet test
+app/Laplace.Chess.Service.Tests` (85/85 pass, see FIX-verification summary at the bottom) confirms
+no regression to the existing lichess-format tests, but does not confirm the new cutechess-format
+branch actually fires correctly. Open follow-up: add a PgnEvalsTests case using the literal
+"{+0.48/17 0.13s}" string and a mate case, and/or re-run a live cutechess match through
+CutechessRunner -> ChessPgnDecomposer end to end.
+
+================================================================================
+FIX 3 — PositionContent.cs CountOutposts bugs
+================================================================================
+Change: fixed `bb.Of(white ? WBishop : WBishop)` -> `bb.Of(white ? WBishop : BBishop)` (Black's
+outpost query was reading White's bishop bitboard); fixed the "defended" check to look at the
+rank BEHIND the piece (`white ? r-1 : r+1`) instead of the piece's own rank; removed a dead,
+both-branches-identical ternary.
+VERIFIED: added 4 new `[Theory]` cases to `PositionContentTests.cs`
+(`CountOutposts_MatchesColorAndSupportRank`) — a defended black knight (expect 1), an
+undefended black knight (expect 0), a same-rank "support" that must NOT count (expect 0 — this
+is the exact case the old bug would have gotten wrong), and a black BISHOP outpost with no
+white bishop on the board at all (expect 1 — this is the exact case the WBishop/BBishop bug
+would have silently returned 0 for).
+VERIFIED: `dotnet test app/Laplace.Modality.Chess.Tests -c Release` ->
+  "Passed! - Failed: 0, Passed: 95, Skipped: 0, Total: 95" (91 pre-existing + 4 new).
+
+================================================================================
+FIX 4 — ChessVocabulary.EmitPlayer hardcoded trust class
+================================================================================
+Change: `EmitPlayer` now takes an explicit `witnessWeight` parameter (default
+`SourceTrust.AcademicCurated`, correct for the PGN caller) instead of hardcoding
+AcademicCurated (0.85) unconditionally; `SubstrateTurnHost.LearnGameAsync` (self-play) now
+passes `SourceTrust.Response` (0.20) explicitly, matching its own `SelfPlayTrustClass =
+"ResponseContent"`.
+VERIFIED (compiles, no regression): `dotnet test app/Laplace.Chess.Service.Tests` 85/85 pass
+  (see bottom summary) — this suite has no test asserting the literal HAS_NAME_ALIAS witness
+  weight value, so this only confirms no build/behavior regression, not that the corrected
+  weight is what actually lands in a live self-play run.
+NOT LIVE-VERIFIED: no self-play (`laplace chess selfplay`) was run this session to confirm the
+  new weight against a real `HAS_NAME_ALIAS` attestation row.
+
+================================================================================
+FIX 5 — blunder/outcome conflation (ChessReviewIngest.EmitBlunderOutcome)
+================================================================================
+Change: removed the `EmitBlunderOutcome` method and its call entirely — it wrote a synthetic
+`PlyOutcome.Loss` onto `OutcomeType`/`OutcomeObject`, the same (subject,type,object) shape real
+game-result evidence uses, whenever a blunder was flagged, regardless of the game's actual
+result. `AppendMoveQuality` (already present, untouched) is the correctly-scoped signal for
+"this move was judged poor."
+VERIFIED (compiles, no regression): `dotnet test app/Laplace.Chess.Service.Tests` 85/85 pass.
+NOT LIVE-VERIFIED: no `laplace chess review --re-ingest` run was executed this session against
+  real PGN to directly confirm no OutcomeType attestation is written for a real detected
+  blunder.
+
+================================================================================
+FIX 6 — Elo used as a Glicko-2 witness-count multiplier (EloGames)
+================================================================================
+This one came from the user directly correcting the approach mid-session ("ELO != glicko2"),
+not from the original audit.
+Change: removed `EloGames(elo)` entirely from `ChessPgnDecomposer.cs` (previously scaled the
+MOVE edge's `games`/`moveChoiceGames` witness count by a linear rescaling of the player's raw
+Elo number, `(elo-600)/200` clamped 1-12 — a category error, since Elo and Glicko-2 are
+different rating systems and the player's real Elo is already losslessly captured by the
+existing, separate `HAS_RATING` attestation, `Rating()` at ChessPgnDecomposer.cs:182-186,
+unaffected by this change). `games` is now a flat `1` (2 for a mate-ending move — an
+outcome-type bonus, unrelated to Elo). `moveChoiceGames` argument is no longer passed at all
+(AppendMoveEdge defaults it to `games`). Also removed the equivalent ThinkFactor-based scaling
+of `moveChoiceGames` for the same reason (think-time is separately, losslessly captured via
+HAS_CLOCK/HAS_THINK_CLASS already) — same principle extended per the user's explicit
+"same with the clock" follow-up. Grepped Chess.Service afterward for any other
+Elo/CpLoss/think-time-into-witness-count pattern — none found (ChessReviewIngest's
+QualityGames/ReviewWitnessWeight and the NAG-based MOVE_QUALITY path were already flat
+constants, not derived per-instance).
+VERIFIED, END-TO-END, LIVE (real data, most substantive verification this session):
+  1. Purged the pre-fix chess ingest from the live `laplace` DB (user-approved, ran in a
+     transaction):
+       DELETE FROM attestations WHERE source_id = <ChessPgn source hash>;  -> "DELETE 702385"
+       DELETE FROM consensus WHERE type_id = ANY(<24 chess-exclusive relation hashes>);
+         -> "DELETE 522193"
+     Post-delete check: `SELECT count(*) FROM attestations WHERE source_id = <ChessPgn>;` -> 0.
+  2. Re-ingested the same file under the fixed+rebuilt code:
+       `dotnet run --project app/Laplace.Cli -- ingest chess
+       D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn`
+     -> "INGEST_COMPLETE ... rows_new=0e+0p+702171a" / "done: 1 intents applied, 0 novel
+     entities, 0 physicalities" (0 novel entities/physicalities is expected and correct — the
+     underlying content-addressed positions/games already existed from the pre-fix ingest, only
+     attestations/consensus were purged) / "consensus: 524,305 relations materialized".
+  3. Checked the raw MOVE-edge witness_count distribution post-fix:
+       SELECT witness_count, count(*) FROM consensus
+       WHERE type_id = decode('ff8b246f79b9bbe4bb0e92fa292f217e','hex')  -- MOVE
+       GROUP BY witness_count ORDER BY witness_count DESC LIMIT 15;
+     -> top values: 532, 357, 308, 284, 160, 132, 104, 92(x2), 79, 78, 56, 54, 53, 51, 47 — a
+     clean, sharply-decreasing distribution (real repertoire concentration), not noise.
+  4. Checked HAS_RATING attestation count (the replacement, lossless signal):
+       SELECT count(*) FROM attestations WHERE source_id=<ChessPgn> AND type_id=<HAS_RATING>;
+     -> 2436 (≈2.0 per game across 1219 real games, consistent with most games having both
+     WhiteElo/BlackElo tags present).
+  5. Queried the live engine's opening-move ranking before vs. after, same exact command both
+     times (`dotnet run --project app/Laplace.Cli -- chess move
+     rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1`):
+       BEFORE (pre-fix code, first-ever ingest): bestmove h2h3 (eff_mu 1507.9) — h2h3 never
+       appears at all in a raw grep of the source PGN's first-move column (verified:
+       `grep -o '^1\.\s*[A-Za-z0-9=+#O-]*' ... | sed ... | sort | uniq -c | sort -rn` lists e4
+       448, g3 295, Nf3 246, d4 117, ... down to a4/1 — no h3 line at all). e4/g3/Nf3/d4 did not
+       appear anywhere in the top 8.
+       AFTER (post-fix code, purged + clean re-ingest): bestmove e2e4 (eff_mu 1472.9), #2 is
+       g2g3 (1472.7) — the two moves confirmed (by the user directly, and by the raw PGN grep
+       above) to be the real, dominant repertoire (e4=448 games, g3=295 games including the
+       stated "kingside fianchetto" repertoire) are now ranked #1 and #2.
+  Caveat, stated plainly: the absolute eff_mu spread is still tight (1472.5-1472.9) because
+  `SubstrateTurnHost.Shrink`'s `ShrinkK0 = 15000` constant still shrinks nearly all signal
+  toward the 1500 neutral prior for a witness pool this size (max witness 532 vs K0 15000 ≈
+  3.4% of any rating deviation survives) — that constant was NOT touched this session, it's a
+  separate, larger tuning decision (calibrated for corpus-scale ingestion, not a single
+  1,219-game personal file) flagged but not acted on.
+
+================================================================================
+FIX 7 — UciEngine.cs: unimplemented stop, unbounded go-depth, malformed-FEN crash
+================================================================================
+Change: `go` now runs the search on a background `Task` (via a new `StartSearch`) instead of
+blocking `Handle()`, so `stop` (implemented as `_searchCts.Cancel()` + a bounded `.Wait(2000)`)
+can actually interrupt an in-flight search — `Search.Think` gained an optional
+`CancellationToken` parameter, checked inside the existing `TimeUp()` gate. `go depth N` (no
+other time control) now also gets a 120,000ms hard ceiling (was `int.MaxValue`) as a
+belt-and-suspenders safety net — this is the exact invocation `CutechessRunner.cs:58` drives
+(`tc=inf/depth={depth}`). `SetPosition` now builds a local board and only commits it to
+`_board` after successfully parsing, inside a try/catch for `FormatException`, instead of
+mutating `_board` directly and letting a bad FEN propagate an unhandled exception that killed
+the whole process. Added a public `WaitForIdle(timeoutMs)` so a synchronous caller (a test
+harness, or any non-interactive embedder) can deterministically wait for an in-flight
+background search.
+REAL REGRESSION CAUGHT AND FIXED DURING THIS SESSION'S OWN VERIFICATION: first
+`dotnet test app/Laplace.Chess.Uci.Tests` run after this change: "Failed: 5, Passed: 3, Total:
+8" — every test that sends "go ..." and then immediately inspects the output for "bestmove"
+failed with "Sequence contains no matching element", because `go` no longer blocks. Root cause:
+the existing `Run()` test helper assumed synchronous `Handle()` behavior that this fix removed.
+Fixed by calling the new `WaitForIdle()` in the test helper after sending all commands.
+Re-ran: "Passed! - Failed: 0, Passed: 8, Skipped: 0, Total: 8".
+Then added two NEW tests directly exercising the actual new behavior (not just re-confirming
+old behavior still works):
+  - `MalformedFen_DoesNotThrow_AndKeepsPriorPosition` — sends a real invalid FEN mid-game,
+    asserts the engine doesn't throw/die (isready still answers) and the position is still
+    "after 1.e4", not corrupted.
+  - `Stop_DuringUnboundedDepthSearch_ReturnsWellBeforeTheSafetyCeiling` — sends "go depth 64"
+    (no time control, relies entirely on stop/the 120s ceiling), sleeps 50ms, sends "stop",
+    asserts a bestmove appears and the whole round-trip took under 5 seconds — i.e. asserts
+    "stop" is what ended it, not the 120-second ceiling.
+FINAL VERIFIED: `dotnet test app/Laplace.Chess.Uci.Tests -c Release` ->
+  "Passed! - Failed: 0, Passed: 10, Skipped: 0, Total: 10" (8 original + 2 new).
+NOT LIVE-VERIFIED: no real cutechess-cli-vs-this-engine match was re-run after this fix (the
+  real cutechess match earlier in the session was BEFORE these changes existed). The unit-test
+  evidence above is real and direct, but a live tc=inf/depth=N cutechess round-trip against the
+  rebuilt laplace-uci.exe was not re-executed this session.
+
+================================================================================
+FIX 8 — CutechessRunner silent partial-failure
+================================================================================
+Change: added a `sawScore` flag, set when `ScoreRegex` actually matches a line. Final state is
+now `Completed` only if `proc.ExitCode == 0 AND sawScore`; otherwise `Failed`, with a message
+distinguishing "exited 0 but produced no parseable score line" from a real non-zero exit.
+VERIFIED (compiles, no regression): `dotnet test app/Laplace.Chess.Service.Tests` 85/85 pass —
+  includes the pre-existing `CutechessRunnerTests.ParseLines_ExtractsScoreAndElo` (exercises
+  `ParseLinesForTest`, a pure parsing helper untouched by this change).
+NOT LIVE-VERIFIED: no test exercises the new sawScore/Failed-state logic itself (it lives in
+  `RunAsync`, which actually shells out to a process and isn't unit-tested — same gap the
+  original audit noted). No live cutechess run was re-executed against the rebuilt binary this
+  session to confirm the new failure-reporting path fires correctly on a real run.
+
+================================================================================
+FIX 9 — chess HTTP endpoints: path traversal + unbounded concurrent jobs
+================================================================================
+Change: `ChessLabRunners.RunLichessFetchAsync` now builds its output path from
+`ChessGameFetcher.Sanitize(user)`/`Sanitize(site)` (made `internal`, was `private`) instead of
+the raw, unsanitized config values taken straight from the public `/chess/lab/start` request
+body — closes the arbitrary-file-write primitive the audit found. `ChessLabService.StartJob`
+now enforces a real concurrency cap (`LAPLACE_CHESS_LAB_MAX_CONCURRENT`, default 4; counts
+currently-`Running` jobs and rejects new ones past the cap, returning null same as the existing
+"failed to start job" path already handled by the endpoint).
+Explicitly NOT done: did not add `ITenantResolver`/billing-style "gating" to chess endpoints as
+  originally proposed. Investigated `HeaderTenantResolver` (the only registered
+  `ITenantResolver`) and found it performs zero verification — it reads an `X-Laplace-Tenant`
+  header and trusts whatever value is given. The user confirmed real auth is planned as Azure
+  B2C External ID/OAuth/SSO, not yet wired up, and that the tenant-header scheme was AI-agent
+  drift standing in for it, not a real security boundary — adding it to chess endpoints would
+  not have added real security, only the appearance of it, so it was left alone.
+VERIFIED (compiles, no regression): `dotnet test app/Laplace.Chess.Service.Tests` 85/85 pass.
+NOT LIVE-VERIFIED: no HTTP request was actually sent to `/chess/lab/start` this session to
+  confirm the sanitizer or the concurrency cap fire correctly at the endpoint layer end-to-end.
+
+================================================================================
+FULL TEST-SUITE VERIFICATION SUMMARY (real commands, real output, this session)
+================================================================================
+  dotnet test app/Laplace.Modality.Chess.Tests -c Release
+    -> Passed! Failed: 0, Passed: 95, Skipped: 0, Total: 95, Duration: 32s
+  dotnet test app/Laplace.Chess.Service.Tests -c Release
+    -> Passed! Failed: 0, Passed: 85, Skipped: 0, Total: 85, Duration: 1s
+  dotnet test app/Laplace.Chess.Uci.Tests -c Release
+    -> Passed! Failed: 0, Passed: 10, Skipped: 0, Total: 10, Duration: 3s
+    (first run after the UciEngine.cs change was 3 passed / 5 failed — a real regression,
+    diagnosed and fixed in the same session before this file was written; see FIX 7.)
+  scripts\win\rebuild-all.cmd (full clean native+.NET rebuild) -> exit 0.
+
+================================================================================
+OPEN ITEMS NOT ADDRESSED THIS SESSION
+================================================================================
+  - highway_mask remains NULL on every attestation in the entire database, chess or otherwise
+    (FIX 1). The manifest registration was necessary but the write path itself is still broken;
+    root cause not diagnosed.
+  - SubstrateTurnHost.Shrink's ShrinkK0=15000 constant still crushes most rating signal toward
+    neutral for anything smaller than corpus-scale ingestion (noted in FIX 6's verification).
+  - FIX 2, 4, 5, 8, 9 are compiled and pass the existing/no-regression test suites, but were not
+    exercised live end-to-end this session (no self-play run, no re-ingested review pass, no
+    live cutechess match, no live HTTP request against the lab endpoints) — see each section's
+    "NOT LIVE-VERIFIED" note for specifics.
+  - ChessMotifs.cs (2 hardcoded openings), the lab-layer's "no automated substrate ingestion"
+    gap, and the full-decomposition scope the user described (player/clock/game metadata,
+    reviews, comments, cross-linking to the chess literature corpus) are unstarted — this
+    session was scoped to fixing the audit's findings, not building the new feature set.

@@ -46,13 +46,13 @@ internal static class FnLuSynsetBridgeIngest
             Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw, synsetVersion);
             if (synId is null) continue;
 
-            Hash128? luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey(frame, luName));
-            if (luId is null) continue;
+            string luKey = SourceEntityIdConventions.FrameNetLuKey(frame, luName);
+            if (CategoryAnchor.Id(luKey) is null) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, source, luId.Value, LuTypeId, synId.Value);
+            StageCorrespondsTo(batch, seen, source, luKey, LuTypeId, synId.Value);
 
             if (++count >= batchSize)
             {
@@ -112,13 +112,13 @@ internal static class FnLuSynsetBridgeIngest
             if (synId is null) continue;
 
             string luName = PosSuffix(pos) is { Length: > 0 } sfx ? $"{lemma}.{sfx}" : lemma;
-            Hash128? luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey(currentFrame, luName));
-            if (luId is null) continue;
+            string luKey = SourceEntityIdConventions.FrameNetLuKey(currentFrame, luName);
+            if (CategoryAnchor.Id(luKey) is null) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, source, luId.Value, LuTypeId, synId.Value);
+            StageCorrespondsTo(batch, seen, source, luKey, LuTypeId, synId.Value);
 
             if (++count >= batchSize)
             {
@@ -256,16 +256,20 @@ internal static class FnLuSynsetBridgeIngest
         SubstrateChangeBuilder b,
         HashSet<(Hash128 Subject, Hash128 Object)> seen,
         Hash128 source,
-        Hash128 subjectId,
+        string subjectKey,
         Hash128 subjectType,
         Hash128 synId)
     {
-        if (!seen.Add((subjectId, synId))) return;
+        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
+        // content (entity + physicality) via the real tiered content pipeline. Using
+        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
+        // entity minted with no matching physicality.
+        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, source, TC.AcademicCurated);
+        if (subjectId is null) return;
+        if (!seen.Add((subjectId.Value, synId))) return;
 
-        b.AddEntity(new EntityRow(subjectId, EntityTier.Word, subjectType, source));
-        CategoryAnchor.AttestCategory(b, subjectId, subjectType, source, TC.AcademicCurated);
         b.AddAttestation(NativeAttestation.Categorical(
-            subjectId, "CORRESPONDS_TO", synId, source, TC.AcademicCurated));
+            subjectId.Value, "CORRESPONDS_TO", synId, source, TC.AcademicCurated));
     }
 
     private static SubstrateChangeBuilder NewBuilder(Hash128 source, string unit, int batch) =>

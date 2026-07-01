@@ -79,6 +79,16 @@ const uint8_t* intent_stage_tuple_ptr(
 int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
 
+/*
+ * Splits `src` into `part_count` new stages, each safe to commit as an independent
+ * transaction: every row partitions by the id of the entity it is "about" (an
+ * entity's own id; a physicality's entity_id; an attestation's subject_id), so an
+ * entity and every physicality/attestation whose subject is that entity always land
+ * in the same output partition. Physicality rows within each output partition are
+ * additionally ordered by Hilbert index for storage locality -- that ordering never
+ * affects partition assignment. Callers must NOT further split an output partition's
+ * rows across independent transactions, or this guarantee is lost.
+ */
 int intent_stage_partition(
     const intent_stage_t* src,
     size_t                part_count,

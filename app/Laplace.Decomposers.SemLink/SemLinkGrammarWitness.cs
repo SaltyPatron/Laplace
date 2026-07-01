@@ -183,10 +183,10 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
 
     private static Hash128? StageCategory(SubstrateChangeBuilder b, string key, Hash128 categoryTypeId)
     {
-        Hash128? id = CategoryAnchor.Id(key);
-        if (id is null) return null;
-        b.AddEntity(new EntityRow(id.Value, EntityTier.Word, categoryTypeId, SemLinkDecomposer.Source));
-        CategoryAnchor.AttestCategory(b, id.Value, categoryTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
-        return id;
+        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
+        // content (entity + physicality) via the real tiered content pipeline. Using
+        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
+        // entity minted with no matching physicality.
+        return CategoryAnchor.Emit(b, key, categoryTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
     }
 }

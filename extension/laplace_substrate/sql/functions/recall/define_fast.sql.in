@@ -1,0 +1,11 @@
+-- Native replacement for the define()/senses()/lexical_peers() SQL composition
+-- chain (see recall.c:define_fast_impl for the full rationale) -- that chain
+-- measured at 48+ seconds / 2.27M shared-buffer hits for a single word because
+-- every function in it uses a CTE, which blocks PostgreSQL's SQL-function
+-- inlining for set-returning functions, turning nested calls into opaque
+-- black boxes with zero cross-function optimization. This does the same job
+-- as a small, fixed number of explicitly sequenced native SPI calls instead.
+CREATE OR REPLACE FUNCTION define_fast(p_word bytea, p_context bytea[] DEFAULT NULL, p_limit int DEFAULT 5)
+    RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_define_fast'
+    LANGUAGE C STABLE;

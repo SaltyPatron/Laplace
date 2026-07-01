@@ -65,12 +65,14 @@ public static partial class CutechessRunner
 
         using var proc = Process.Start(psi)!;
         int done = 0;
+        bool sawScore = false;
         await foreach (var line in ReadLinesAsync(proc, ct))
         {
             yield return new ChessLabLogEvent("info", line);
             var score = ScoreRegex().Match(line);
             if (score.Success)
             {
+                sawScore = true;
                 done = int.Parse(score.Groups[1].Value) + int.Parse(score.Groups[2].Value) + int.Parse(score.Groups[3].Value);
                 yield return new ChessLabProgressEvent(done, rounds * 2);
             }
@@ -81,8 +83,16 @@ public static partial class CutechessRunner
 
         try { proc.Kill(entireProcessTree: true); } catch { }
         await proc.WaitForExitAsync(ct);
-        yield return new ChessLabDoneEvent(
-            proc.ExitCode == 0 ? ChessLabJobState.Completed : ChessLabJobState.Failed);
+        // Exit code alone isn't sufficient: a 0 exit with zero parsed "Score of ..." lines means
+        // cutechess-cli's output didn't match what we expect (version bump, localization, or a
+        // run that produced no games) — that's a real failure, not a silent "Completed" with no
+        // metrics.
+        yield return proc.ExitCode == 0 && sawScore
+            ? new ChessLabDoneEvent(ChessLabJobState.Completed)
+            : new ChessLabDoneEvent(ChessLabJobState.Failed,
+                proc.ExitCode == 0
+                    ? "cutechess exited 0 but no \"Score of ...\" line was ever parsed from its output"
+                    : $"cutechess exited with code {proc.ExitCode}");
     }
 
     internal static IEnumerable<ChessLabEvent> ParseLinesForTest(IEnumerable<string> lines)

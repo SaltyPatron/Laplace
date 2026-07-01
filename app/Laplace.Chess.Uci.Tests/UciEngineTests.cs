@@ -13,6 +13,10 @@ public sealed class UciEngineTests
         var sw = new StringWriter();
         foreach (var c in commands)
             if (!engine.Handle(c, sw)) break;
+        // "go" now runs the search on a background task (so real "stop" can interrupt it) instead
+        // of blocking Handle() — an embedder that wants synchronous behavior, like this test
+        // harness, must wait for it explicitly.
+        engine.WaitForIdle();
         return sw.ToString();
     }
 
@@ -88,5 +92,45 @@ public sealed class UciEngineTests
     {
         var line = output.Split('\n').Select(l => l.Trim()).First(l => l.StartsWith("bestmove"));
         return line.Split(' ')[1];
+    }
+
+    [Fact]
+    public void MalformedFen_DoesNotThrow_AndKeepsPriorPosition()
+    {
+        var engine = new UciEngine();
+        var sw = new StringWriter();
+        Assert.True(engine.Handle("position startpos moves e2e4", sw));
+        // Previously: Board.FromFen threw FormatException here with no catch, killing the process.
+        Assert.True(engine.Handle("position fen not-a-real-fen", sw));
+        Assert.True(engine.Handle("isready", sw));
+        Assert.Contains("readyok", sw.ToString());
+
+        // Position should still be "after 1. e4", not reset/corrupted by the malformed command.
+        sw = new StringWriter();
+        Assert.True(engine.Handle("go depth 2", sw));
+        engine.WaitForIdle();
+        string mv = BestMove(sw.ToString());
+        var b = Board.FromFen(ChessModality.StartFen);
+        MoveApply.Make(b, MoveGen.Legal(b).First(m => m.ToUci() == "e2e4"));
+        Assert.Contains(mv, MoveGen.Legal(b).Select(m => m.ToUci()));
+    }
+
+    [Fact]
+    public void Stop_DuringUnboundedDepthSearch_ReturnsWellBeforeTheSafetyCeiling()
+    {
+        var engine = new UciEngine();
+        var sw = new StringWriter();
+        Assert.True(engine.Handle("position startpos", sw));
+        // depth 64 with no other time control relies entirely on "stop" (or the 120s safety net,
+        // see ParseGo) to end the search — this asserts "stop" is what actually ends it, not the
+        // ceiling, by requiring it to return in well under 120s.
+        Assert.True(engine.Handle("go depth 64", sw));
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        System.Threading.Thread.Sleep(50);
+        Assert.True(engine.Handle("stop", sw));
+        elapsed.Stop();
+        Assert.Contains("bestmove", sw.ToString());
+        Assert.True(elapsed.ElapsedMilliseconds < 5000,
+            $"stop should end an in-flight search promptly, took {elapsed.ElapsedMilliseconds}ms");
     }
 }

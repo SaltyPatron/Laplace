@@ -3,10 +3,14 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
-        (SELECT chr(@extschema@.codepoint_for_id(p_id))
-         FROM @extschema@.entities e
-         WHERE e.id = p_id AND e.tier = 0),
-        
+        -- Perfcache-backed: authoritative for a valid tier-0 codepoint on its own
+        -- (a hash128 match against the reverse index *is* the proof), independent
+        -- of whether that codepoint has been given its own entities row yet. Do
+        -- NOT gate this on an entities lookup -- that would defeat the whole point
+        -- of having a perfcache and would misrender orphaned-but-valid tier-0 ids
+        -- via the slower fallbacks below (or worse, as opaque hex).
+        chr(@extschema@.codepoint_for_id(p_id)),
+
         
         
         

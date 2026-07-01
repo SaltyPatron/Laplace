@@ -4,10 +4,43 @@
 
 #include "utils/array.h"
 
+/*
+ * Batch existence probe primitives.
+ *
+ * Both functions below share the same safe semantics: the caller-supplied
+ * bitmap `bm` is assumed pre-zeroed ("unknown"/"absent" by default), and a
+ * bit is ONLY ever set when a real, positive confirmation of presence was
+ * obtained (perfcache codepoint match, or a real SPI batch query against
+ * `entities`). Neither function ever assumes presence and neither ever
+ * short-circuits a whole subtree based on an unconfirmed default -- that
+ * "assume-present, clear-on-disproof" scheme is exactly the shape of bug
+ * that previously lived in this file's tree-walking
+ * laplace_content_descent_bitmap_core() (removed) and, independently, in
+ * TierTreeDescent.cs's now-fixed unconditional MarkProven() call on the C#
+ * side. Presence is only ever asserted from a real query result.
+ *
+ * Trunk-to-leaf, tier-by-tier descent (do we need to check this node's
+ * children at all?) is deliberately NOT implemented here anymore. It is
+ * driven entirely by the C# orchestrator (TierTreeDescent.cs), which calls
+ * laplace_tier_batch_existence_probe() once per tier/round with exactly the
+ * candidate ids for that round (already filtered to exclude descendants of
+ * nodes proven present in an earlier round, per the content-addressing
+ * guarantee that a present node's whole subtree is present too). Keeping
+ * the tree-walk in C# rather than recursing inside a single SPI call keeps
+ * each round a clean, auditable batch query and lets the caller decide when
+ * to stop descending -- rather than baking that policy into native code.
+ */
+
+/* Used by entities_exist_bitmap(ids bytea[]) -- general-purpose "which of
+ * these ids have a committed entities row" check, independent of any
+ * tier-tree/parent structure. */
 int laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
 
-void laplace_content_descent_bitmap_core(
-    const uint8_t *ids16,
-    const int32_t *parents,
-    int n,
-    uint8_t *bm);
+/* Used by tier_batch_existence_probe(ids bytea[]) -- the tier-by-tier
+ * descent primitive. Functionally identical presence semantics to
+ * laplace_entities_present_bitmap (same shared implementation), exposed
+ * under its own name/SQL entry point so the ingest-descent call sites are
+ * self-documenting about *why* they're calling it (one round of a
+ * trunk-to-leaf batch probe) rather than incidentally reusing a
+ * general-purpose existence check. */
+int laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count);

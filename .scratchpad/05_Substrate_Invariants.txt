@@ -1,0 +1,77 @@
+SUBSTRATE INVARIANTS — things that must be true
+==================================================
+Not a how-to-work-with-it doc (see 06_Engineering_Ruleset.txt for that). This is the axiom
+list: properties that hold by construction, and what a collision/equality/bit actually
+certifies vs. what it does not. Every rule below is grounded in a specific file/line, not
+aspiration — update it when the grounding changes, don't let it drift into wishful thinking.
+
+Rule #1: Content-hash identity is exact. Centroid/hilbert identity is not.
+    - BLAKE3 entity-id collision (identical id) MUST mean identical canonical content. This
+      is the substrate's one true strong identity invariant — it's what makes cross-source
+      merging a hash collision, not an entity-resolution pass.
+    - physicalities.coord collision, and hilbert_index collision (confirmed the SAME
+      signal — laplace_hilbert_encode takes one POINT4D and encodes coord, laplace_geom.c:381
+      — not an independent check), do NOT mean identical entity, and for tier>0 do NOT even
+      mean identical order/shape. They certify only "same constituent multiset, some order" —
+      never "same entity," never "similar shape."
+    - Why: for tier>0, coord = math4d_centroid(constituents) = arithmetic mean, and mean is
+      commutative — mean(a,b,c) == mean(b,a,c) for any permutation. Any two entities built
+      from the same multiset of child points, any order, are GUARANTEED identical centroids
+      and therefore identical hilbert_index (mod quantization). Verified directly: word_id
+      ('cat') and word_id('act') return bit-identical POINT ZM centroids.
+    - Converse NOT guaranteed: two DIFFERENT multisets could in principle average to the same
+      point (distinct sums, same mean) — vanishingly unlikely with real codepoint-seeded
+      geometry, but not mathematically excluded. So centroid/hilbert equality is sufficient
+      to INVESTIGATE an anagram relationship (this is exactly what anagrams_of.sql.in does,
+      correctly, by joining on hilbert_index) — but must never be trusted as sufficient for
+      an order-sensitive judgment. word_shape_peers's `OR k.ang <= 0.115` branch violated this
+      exact rule (fixed this session — see 02_Identified_Issues.txt).
+
+Rule #2: Tier-0 coord/hilbert identity IS a real identity signal. Tier>0 is not — same bytes,
+different meaning, branch on tier before drawing any conclusion from a collision.
+    - Tier-0 codepoints get FIXED positions on S³, seeded once by Unicode's own UCA collation
+      order — not averaged from anything. A tier-0 coord/hilbert collision between two
+      DISTINCT codepoints would mean an actual seeding bug (two codepoints assigned the same
+      position), not a benign multiset coincidence.
+    - Tier>0 (grapheme/word/sentence/document, and other modalities' composed tiers) coord is
+      a genuine precomputed centroid via math4d_centroid — computed once at ingestion, never
+      recomputed on read. A tier>0 collision reflects Rule #1's averaging property and is
+      routine/expected for anagrams, not a bug.
+    - Any code reasoning about a coord/hilbert collision MUST know which tier produced it —
+      the identical bit pattern means two structurally different things depending on tier.
+
+Rule #3: trajectory and coord are both GeometryZM but are not interchangeable, and mixing
+them up is exactly how Rule #1 gets violated.
+    - trajectory (composed entities) is an ORDERED, exactly-invertible sequence of the
+      constituents' points — order-sensitive by construction. This is why laplace_frechet_4d
+      (a path/shape metric, operates on trajectory) correctly discriminates cat vs act
+      (frechet=0.35) while laplace_angular_distance_4d (operates on coord) cannot (ang=0,
+      identical centroids).
+    - A function that needs "are these two composed entities actually similarly ordered/
+      shaped" must use an order-sensitive metric on trajectory. A function that needs "roughly
+      the same neighborhood in space" (a coarse locality pre-filter, NOT a similarity verdict)
+      may use coord/hilbert_index — but only to narrow a candidate set for a subsequent
+      order-sensitive check, never as the final admission criterion on its own. This is the
+      general form of the word_shape_peers bug, and applies to any future KNN-shaped function
+      written against coord.
+
+Rule #4: A mantissa-packed GeometryZM value is not geometry, and there is no crash to catch
+the mistake if you treat it as one.
+    - trajectory/coord columns double as mantissa.c's bit-packed payload channel — hash ids +
+      scores + counts smuggled through the same PointZM/GeometryZM columns for non-spatial
+      evidence-log data, disambiguated only by a flag bit.
+    - Any geometric function (ST_Intersects, the <<->> KNN operator, frechet, angular_distance,
+      hilbert_encode) invoked on a mantissa-packed row will silently return a numerically
+      valid, semantically meaningless result — no error, no crash, nothing to signal the
+      mistake. Always confirm the flag bit marks genuine spatial content before calling a
+      geometric function on a coord/trajectory value pulled from an unfamiliar query path.
+
+Rule #5 (currently VIOLATED — tracked as a live gap, not aspiration): a set highway_mask bit
+must mean the entity/attestation genuinely instantiates that canonical relation type.
+    - Confirmed NULL on real production attestations this session (ISO639Decomposer output),
+      despite the population path existing in code (HighwayPerfcache.MaskForRelationType in
+      SubstrateChangeBuilder.cs). extension/laplace_substrate/sql/39_highway.sql.in is 0
+      bytes — likely related, not yet root-caused.
+    - Until fixed and verified live, no future code may assume highway_mask is populated for
+      filtering/ranking. Treat every highway_mask read as untrusted until this rule is
+      actually true again.

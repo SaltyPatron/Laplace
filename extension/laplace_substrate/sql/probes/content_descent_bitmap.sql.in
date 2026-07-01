@@ -1,3 +1,9 @@
+-- Legacy/back-compat entry point. The real trunk-to-leaf, tier-by-tier
+-- descent is now driven entirely by the C# orchestrator (TierTreeDescent.cs)
+-- via repeated tier_batch_existence_probe() rounds -- `parents` here is
+-- validated for shape only and otherwise unused; there is no native
+-- tree-walk or default-present assumption left in this function. See
+-- pg_laplace_content_descent_bitmap() in laplace_substrate.c.
 CREATE OR REPLACE FUNCTION content_descent_bitmap(ids bytea[], parents int[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_content_descent_bitmap'

@@ -1117,6 +1117,194 @@ symmetry = "symmetric"
 parent = null
 family_root = "EXCLUDES"
 
+# Chess (Laplace.Chess.Service / ChessVocabulary.cs). Previously minted only via
+# EntityTypeRegistry.Id (raw BLAKE3 of the bare name) with no manifest entry, which meant
+# HighwayPerfcache.MaskForRelationType could never find them — highway_mask was structurally
+# guaranteed zero for every chess attestation. Registered here so the generated highway
+# perfcache/relation law actually cover them.
+
+[[relation]]
+canonical = "MOVE"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "MOVE"
+
+[[relation]]
+canonical = "OUTCOME"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "OUTCOME"
+
+[[relation]]
+canonical = "PLAYED_BY"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "PLAYED_BY"
+
+[[relation]]
+canonical = "HAS_RATING"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_RATING"
+
+[[relation]]
+canonical = "OPENING_NAME"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "OPENING_NAME"
+
+[[relation]]
+canonical = "HAS_ECO"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ECO"
+
+[[relation]]
+canonical = "HAS_WHITE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_WHITE"
+
+[[relation]]
+canonical = "HAS_BLACK"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_BLACK"
+
+[[relation]]
+canonical = "HAS_EVENT"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EVENT"
+
+[[relation]]
+canonical = "ON_DATE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "ON_DATE"
+
+[[relation]]
+canonical = "HAS_TIME_CONTROL"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_TIME_CONTROL"
+
+[[relation]]
+canonical = "HAS_TC_CLASS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = "HAS_TIME_CONTROL"
+family_root = "HAS_TIME_CONTROL"
+
+[[relation]]
+canonical = "HAS_TERMINATION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_TERMINATION"
+
+[[relation]]
+canonical = "HAS_RESULT"
+rank = "definitional"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_RESULT"
+
+[[relation]]
+canonical = "GAME_AT"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "GAME_AT"
+
+[[relation]]
+canonical = "GAME_AT_PLY"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "GAME_AT"
+family_root = "GAME_AT"
+
+[[relation]]
+canonical = "HAS_EVAL"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EVAL"
+
+[[relation]]
+canonical = "HAS_EVAL_TOKEN"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = "HAS_EVAL"
+family_root = "HAS_EVAL"
+
+[[relation]]
+canonical = "MOVE_QUALITY"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "MOVE_QUALITY"
+
+[[relation]]
+canonical = "HAS_CLOCK"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CLOCK"
+
+[[relation]]
+canonical = "HAS_THINK_CLASS"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = "HAS_CLOCK"
+family_root = "HAS_CLOCK"
+
+[[relation]]
+canonical = "GAME_HAS_OPENING"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = "OPENING_NAME"
+family_root = "OPENING_NAME"
+
+[[relation]]
+canonical = "GAME_HAS_ECO"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = "HAS_ECO"
+family_root = "HAS_ECO"
+
+[[relation]]
+canonical = "GAME_HAS_MOTIF"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "GAME_HAS_MOTIF"
+
+[[relation]]
+canonical = "EXPLAINS"
+rank = "definitional"
+symmetry = "asymmetric"
+parent = null
+family_root = "EXPLAINS"
+
+[[relation]]
+canonical = "IS_EXAMPLE_OF"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_EXAMPLE_OF"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"

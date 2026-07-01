@@ -97,18 +97,18 @@ static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
 
 
 static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
-    if (len == 0) return -2;
-    if (!codepoint_table_is_loaded()) return -3;
+    if (len == 0) return -4;                          /* empty input */
+    if (!codepoint_table_is_loaded()) return -3;       /* perfcache not loaded */
 
     tier_tree_t* tree = NULL;
-    if (laplace_text_decomposer_run(utf8, len, &tree) != 0 || !tree) return -2;
+    if (laplace_text_decomposer_run(utf8, len, &tree) != 0 || !tree) return -5;  /* decomposer failure */
     if (hash_composer_run(tree, codepoint_resolver, NULL) != 0) {
         tier_tree_free(tree);
-        return -2;
+        return -6;                                     /* hash-composer failure */
     }
     if (tier_tree_node_count(tree) == 0) {
         tier_tree_free(tree);
-        return -2;
+        return -7;                                     /* decomposer produced a zero-node tree */
     }
     *out_tree = tree;
     return 0;

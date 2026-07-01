@@ -4,7 +4,10 @@ CREATE OR REPLACE FUNCTION trajectory_unpacked_points(p_entity bytea)
     SET search_path = @extschema@, public AS $$
     SELECT u.entity_id,
            GREATEST(u.run_length, 1)::int AS run_length,
-           (SELECT e.tier FROM entities e WHERE e.id = u.entity_id) AS ctier
+           COALESCE(
+               (SELECT e.tier FROM entities e WHERE e.id = u.entity_id),
+               CASE WHEN @extschema@.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
+           ) AS ctier
     FROM physicalities p,
     LATERAL public.ST_DumpPoints(p.trajectory) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u

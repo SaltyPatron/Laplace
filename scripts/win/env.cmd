@@ -1,4 +1,6 @@
 @echo off
+if defined LAPLACE_ENV_LOADED exit /b 0
+set "LAPLACE_ENV_LOADED=1"
 set "NoDefaultCurrentDirectoryInExePath="
 set "PSModulePath="
 call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" >nul 2>&1
@@ -41,3 +43,5 @@ if not defined INGEST set "INGEST=D:\Data\Ingest"
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"
 if not defined REPOS set "REPOS=D:\Repositories"
 if not defined LAPLACE_MODEL_HUB set "LAPLACE_MODEL_HUB=D:\Models\hub"
+
+exit /b 0

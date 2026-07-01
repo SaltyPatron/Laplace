@@ -97,16 +97,18 @@ public static class PositionContent
 
     private static int CountOutposts(Bitboards bb, bool white)
     {
-        ulong minors = bb.Of(white ? Piece.WKnight : Piece.BKnight) | bb.Of(white ? Piece.WBishop : Piece.WBishop);
+        ulong minors = bb.Of(white ? Piece.WKnight : Piece.BKnight) | bb.Of(white ? Piece.WBishop : Piece.BBishop);
         ulong own = bb.Of(white ? Piece.WPawn : Piece.BPawn);
         ulong enemy = bb.Of(white ? Piece.BPawn : Piece.WPawn);
         int count = 0;
         foreach (int bit in Bitboards.Bits(minors))
         {
             int r = Bitboards.RankOfBit(bit);
-            if (white ? r < 2 || r > 5 : r < 2 || r > 5) continue;
+            if (r < 2 || r > 5) continue;
             int f = Bitboards.FileOfBit(bit);
-            bool defended = (own & Bitboards.AdjacentFiles(f) & RankMask(r)) != 0;
+            // A pawn defends an outpost square diagonally from the rank BEHIND it, not its own rank.
+            int supportRank = white ? r - 1 : r + 1;
+            bool defended = (own & Bitboards.AdjacentFiles(f) & RankMask(supportRank)) != 0;
             bool blocked = (enemy & Bitboards.AdjacentFiles(f) & ForwardRanks(r, white)) != 0;
             if (defended && !blocked) count++;
         }

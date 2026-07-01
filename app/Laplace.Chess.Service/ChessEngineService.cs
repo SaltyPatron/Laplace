@@ -69,22 +69,6 @@ public sealed class ChessEngineService : IAsyncDisposable
 
 
 
-    private ChessState? _live;
-    private readonly object _liveLock = new();
-
-    private ChessState SyncState(string fen)
-    {
-        lock (_liveLock)
-        {
-            if (_live is { } live && live.Board.ToFen() == fen) return live;
-            var s = _modality!.FromFen(fen);
-            _live = s;
-            return s;
-        }
-    }
-
-    private void SetLive(ChessState s) { lock (_liveLock) { _live = s; } }
-
     private async Task<ModalityEngine<ChessState, ChessMove>> EngineAsync(CancellationToken ct)
     {
         if (_engine is not null) return _engine;
@@ -154,14 +138,13 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        var state = SyncState(fen);
+        var state = _modality!.FromFen(fen);
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         var cands = await engine.ScoreMovesAsync(state, ct);
         var chosen = ModalityEngine<ChessState, ChessMove>.Select(cands, temperature, Rng());
         var next = chosen.Next;
-        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessBestMove(chosen.Action.ToUci(), next.Board.ToFen(), chosen.EffMu / 1e9,
             chosen.Rated, status != "ongoing", status);
@@ -198,7 +181,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = SyncState(fen);
+        var state = _modality!.FromFen(fen);
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
@@ -207,7 +190,6 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
 
         var next = _modality.Apply(state, mv);
-        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
 
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate, status != "ongoing", status);
@@ -260,14 +242,13 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<ChessApplyResult> ApplyMoveAsync(string fen, string uci, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = SyncState(fen);
+        var state = _modality!.FromFen(fen);
         ChessMove? mv = null;
         foreach (var m in _modality!.LegalActions(state))
             if (m.ToUci() == uci) { mv = m; break; }
         if (mv is null)
             return new ChessApplyResult(fen, false, "illegal move", Legal: false);
         var next = _modality.Apply(state, mv.Value);
-        SetLive(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true);
     }

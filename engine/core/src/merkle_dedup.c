@@ -29,6 +29,31 @@ int merkle_dedup_filter_novel(
     return 0;
 }
 
+/*
+ * Audited alongside the descent_probe.c/TierTreeDescent.cs rewrite: this
+ * function's own skip-propagation is correct and does NOT share the
+ * "assume-present, clear-on-disproof" bug that previously lived in both
+ * descent_probe.c's laplace_content_descent_bitmap_core() (native) and
+ * TierTreeDescent.cs's unconditional MarkProven() call (C#, the actual
+ * root cause -- see dorian.txt repro in .scratchpad/02_Identified_Issues.txt).
+ *
+ * The reverse loop below (r = count..1) visits parents strictly before
+ * their children: tier_tree_add_node() requires a node's children to
+ * already exist at lower array indices before the parent itself is
+ * appended (see tier_tree.c), so parent[i] < i always holds and skip[] is
+ * fully populated for parent[i] by the time index i is processed. Given
+ * that invariant, skip[i] = self_existing[i] || skip[parent[i]] correctly
+ * propagates "already covered" status root-to-leaf with no shortcut that
+ * could ever skip verifying a genuinely-absent node.
+ *
+ * This function never assumes presence itself -- it entirely trusts
+ * whatever `existing_bitmap` the caller supplies (see
+ * content_witness_batch.c's content_witness_emit_tree(), which receives it
+ * from the same descent-probe pipeline being replaced). It was a correct
+ * consumer of an incorrect bitmap; now that the bitmap's producer
+ * (descent_probe.c + TierTreeDescent.cs) only ever sets bits from real,
+ * positively-confirmed presence, this function needs no changes.
+ */
 int merkle_dedup_trunk_shortcircuit(
     const tier_tree_t* tree,
     const uint8_t*     existing_bitmap,
