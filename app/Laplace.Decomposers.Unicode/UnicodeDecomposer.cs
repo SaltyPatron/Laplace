@@ -81,6 +81,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
     {
         EnsureComputed(context);
         EnsureUcdProperties(context);
+        IntentStage.ResetContentBank();
         int total = _records!.Length;
         int batch = options.BatchSize > 1 ? options.BatchSize : DefaultBatch;
 
@@ -210,6 +211,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
                         SourceTrust.StandardsDerived, contextId: cp1252));
             }
             yield return bb.Build();
+            IntentStage.ResetContentBank();
         }
     }
 

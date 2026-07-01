@@ -23,14 +23,8 @@ rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e
 rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
 rem per COPY on the hot path. Default off; set LAPLACE_COPY_VALIDATE=1 to re-arm for debugging.
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
-rem Bulk-fresh only for the first empty-table step (unicode). Later foundation steps MUST run
-rem trunk-to-leaf descent — bulk-fresh skips it and re-stages every content node.
-if /i "%STEP%"=="unicode" (
-  if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
-) else (
-  if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=0"
-  set "LAPLACE_INGEST_MAX_UNITS="
-)
+rem Stale shell caps must not leak across foundation steps (bench sets its own).
+if /i not "%STEP%"=="unicode" set "LAPLACE_INGEST_MAX_UNITS="
 
 cd /d "%LAPLACE_ROOT%\app"
 

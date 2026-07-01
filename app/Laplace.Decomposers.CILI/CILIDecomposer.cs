@@ -61,7 +61,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliTtlAsync(ttl, ct),
                 workers, batchSize,
-                () => NewBuilder("cili/concepts", 0, batchSize),
+                () => NewBuilder("cili/concepts", 0, batchSize, reader),
                 (b, rec) =>
                 {
                     var (ili, def) = rec;
@@ -91,7 +91,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapAsync(tab, version, ct),
                 workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize),
+                () => NewBuilder($"cili/map/{version}", 0, batchSize, reader),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
@@ -108,7 +108,7 @@ public sealed class CILIDecomposer : IDecomposer
             var changes = PCoreParallelCompose.RunAsync(
                 ParseIliMapTtlAsync(ttlMap, version, ct),
                 workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize),
+                () => NewBuilder($"cili/map/{version}", 0, batchSize, reader),
                 EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
@@ -289,10 +289,11 @@ public sealed class CILIDecomposer : IDecomposer
         return buf[..n];
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize) =>
-        new(Source, $"{label}-{bn}", null,
+    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, $"{label}-{bn}", null,
             entityCapacity: batchSize * 4, physicalityCapacity: batchSize * 4,
-            attestationCapacity: batchSize * 4);
+            attestationCapacity: batchSize * 4)
+            .EnableDeferredContent(reader);
 
     private static string VersionLabel(string path)
     {

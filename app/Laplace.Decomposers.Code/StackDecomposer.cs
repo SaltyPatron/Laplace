@@ -258,7 +258,8 @@ public sealed class StackDecomposer : IDecomposer
     // GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
     private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
         new SubstrateChangeBuilder(Source, $"stack-v2/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096)
+            .EnableDeferredContent(reader);
 
     private readonly record struct StackRow(string? Content, string? Language, string? Path);
 }

@@ -32,9 +32,7 @@ public static class StructuredGrammarIngest
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = batchSize,
-            ProbeChunkSize = containmentReader is not null
-                ? IngestTopology.Current.Sizing.ProbeChunkSize
-                : Math.Max(batchSize, 1024),
+            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
             ContainmentReader = containmentReader,
@@ -42,15 +40,7 @@ public static class StructuredGrammarIngest
             MaxInputUnits = maxInputUnits,
         };
 
-        var records = maxInputUnits > 0
-            ? stream.RecordsAsync(ct).Take((int)Math.Min(maxInputUnits, int.MaxValue))
-            : stream.RecordsAsync(ct);
-
-        if (containmentReader is not null)
-            return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
-
-        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
-        return PCoreParallelCompose.RunAsync(records, handler, config, workers, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 
     /// <summary>Ingest one file using record framing from the manifest row.</summary>
