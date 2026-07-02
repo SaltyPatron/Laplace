@@ -27,10 +27,13 @@ internal static class IngestPipelineTestHelpers
     /// Upper bound on probe ROUND TRIPS for a chunked ingest under the
     /// tier-descent architecture: per probe chunk, one existence-gate call
     /// plus at most one call per tier round (tiers 0..4 content + margin
-    /// for the tier-0/1 flat completion). The invariant that matters is
-    /// that probe calls scale with chunks × tiers — never with row count.
+    /// for the tier-0/1 flat completion), plus the batched content-anchor
+    /// probe pass at build time (roots bitmap + descent rounds) when the
+    /// builder carries witness-emitted content. The invariant that matters
+    /// is that probe calls scale with chunks × tiers plus a per-build
+    /// constant — never with row count.
     /// </summary>
-    internal static int MaxProbeCallsFor(int probeChunks) => probeChunks * 9;
+    internal static int MaxProbeCallsFor(int probeChunks) => probeChunks * 12;
 
     internal sealed class ProbeTrackingReader : ISubstrateReader
     {

@@ -215,7 +215,8 @@ public static class StructuredGrammarIngest
                 || (await containmentReader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false))[0] != 0))
         {
             var b = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
-                .SetCommitEpoch(0);
+                .SetCommitEpoch(0)
+                .EnableDeferredContent(containmentReader);
             witness.WalkRow(
                 new GrammarComposeContext(utf8, ast, rootId, null,
                     JsonGrammarHelper.FindRootObjectNode(ast)),
@@ -230,8 +231,14 @@ public static class StructuredGrammarIngest
             : null;
         var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
+        // Deferred content routes witness-emitted anchors (CategoryAnchor/
+        // ContentEmitter -> ContentWitnessBatch.TryAppendToBuilder) through
+        // ContentBatch's presence probing at BuildAsync instead of staging
+        // them unconditionally — without it, category anchors bypass the
+        // containment reader entirely and already-present content re-stages.
         var builder = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
-            .SetCommitEpoch(0);
+            .SetCommitEpoch(0)
+            .EnableDeferredContent(containmentReader);
         foreach (var e in ents) builder.AddEntity(e);
         foreach (var p in phys) builder.AddPhysicality(p);
         foreach (var a in atts) builder.AddAttestation(a);

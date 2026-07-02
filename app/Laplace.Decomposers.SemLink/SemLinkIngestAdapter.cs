@@ -110,7 +110,11 @@ public static class SemLinkIngestSupport
             ProbeChunkSize = Math.Clamp(batchSize, 64, 1024),
             ContainmentReader = reader,
             MaxInputUnits = maxInputUnits,
-            EnableDeferredContentOnBuilder = false,
+            // SemLink's witness stages category anchors (CategoryAnchor.Emit ->
+            // ContentWitnessBatch.TryAppendToBuilder) — without deferred content
+            // those bypass the containment reader and re-stage already-present
+            // content unconditionally. No-op when reader is null.
+            EnableDeferredContentOnBuilder = true,
         };
 
     public static async IAsyncEnumerable<SubstrateChange> IngestJsonDocumentAsync(
