@@ -1,18 +1,21 @@
+# Required on every platform: the .sql.in postprocess rules in laplace_geom and
+# laplace_substrate run through `bash -c "grep | perl"`. Fail at configure time,
+# not with a cryptic `/bin/sh: -c: not found` mid-ninja.
+find_program(BASH bash
+    HINTS "C:/Program Files/Git/bin"
+    DOC "bash for SQL postprocess (grep/perl)")
+if(NOT BASH)
+    message(FATAL_ERROR "bash not found — required for extension SQL postprocess")
+endif()
+message(STATUS "Laplace SQL bash: ${BASH}")
+
 if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.20)
     project(laplace_extensions VERSION 0.1.0 LANGUAGES C CXX)
 
-    find_program(BASH bash
-        HINTS "C:/Program Files/Git/bin"
-        DOC "Git bash for SQL postprocess (grep/perl)")
-    if(NOT BASH)
-        message(FATAL_ERROR "Git bash not found — required for extension SQL postprocess")
-    endif()
-
     get_filename_component(LAPLACE_SQLPP "${CMAKE_C_COMPILER}" ABSOLUTE)
     set(LAPLACE_SQLPP_FLAGS -E -traditional-cpp -w -Upixel -Ubool)
     message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
-    message(STATUS "Laplace SQL bash: ${BASH}")
 
     find_program(LAPLACE_PG_CONFIG pg_config
         HINTS "C:/Program Files/PostgreSQL/18/bin")
