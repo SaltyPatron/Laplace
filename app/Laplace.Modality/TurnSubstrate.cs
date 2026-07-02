@@ -15,26 +15,11 @@ public interface IContentAddresser
 
 public static class ConsensusKeys
 {
-    private static readonly byte[] ZeroObject = new byte[16];
-
     public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128 obj)
-    {
-        Span<byte> buf = stackalloc byte[48];
-        subject.WriteBytes(buf[..16]);
-        type.WriteBytes(buf.Slice(16, 16));
-        obj.WriteBytes(buf.Slice(32, 16));
-        return Hash128.Blake3(buf);
-    }
+        => Laplace.Engine.Core.ConsensusKeys.EdgeId(subject, type, obj);
 
     public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128? obj)
-    {
-        if (obj is { } o) return EdgeId(subject, type, o);
-        Span<byte> buf = stackalloc byte[48];
-        subject.WriteBytes(buf[..16]);
-        type.WriteBytes(buf.Slice(16, 16));
-        ZeroObject.CopyTo(buf.Slice(32, 16));
-        return Hash128.Blake3(buf);
-    }
+        => Laplace.Engine.Core.ConsensusKeys.EdgeId(subject, type, obj);
 }
 
 public interface IEdgeRatings

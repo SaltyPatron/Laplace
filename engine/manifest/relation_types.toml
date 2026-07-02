@@ -193,6 +193,17 @@ symmetry = "symmetric"
 parent = null
 family_root = "DISTINCT_FROM"
 
+# ENCODES: a probed model circuit (Model_Circuit entity) mechanistically implements a
+# relation type (HeadClassifier verdicts). Previously minted as a raw hash with no manifest
+# entry, so every circuit-classification edge carried an ungoverned type id and a zero
+# highway mask — same gap the chess block below fixed for its vocabulary.
+[[relation]]
+canonical = "ENCODES"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "ENCODES"
+
 [[relation]]
 canonical = "ENHANCED_DEPENDS_ON"
 rank = "partitive"
@@ -899,6 +910,21 @@ symmetry = "symmetric"
 parent = null
 family_root = "RELATED_TO"
 
+# SIMILAR_TO: model-geometric similarity (embedding-SVD cosine from ingested model weights).
+# Deliberately a SEPARATE canonical from IS_SIMILAR_TO (lexical similarity): model cosine
+# similarity (cat~dog) is broader than lexical synonymy, so the two must not fold into the
+# same consensus nodes — corroboration across witness classes happens at read time via the
+# shared RELATED_TO family, not by id collision. Rank matches the other model-extracted
+# planes (ATTENDS/COMPLETES_TO/CONTINUES_TO). Replaces the former alias SIMILAR_TO ->
+# IS_SIMILAR_TO, which made ModelTokenEdgeETL's raw-hash mint diverge from Resolve()'s
+# alias resolution and left the plane ungoverned.
+[[relation]]
+canonical = "SIMILAR_TO"
+rank = "tensor_calculation"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
 [[relation]]
 canonical = "SYMBOL_OF"
 rank = "associative"
@@ -1403,11 +1429,6 @@ flip = true
 [[alias]]
 surface = "MADE_OF"
 canonical = "HAS_SUBSTANCE"
-flip = false
-
-[[alias]]
-surface = "SIMILAR_TO"
-canonical = "IS_SIMILAR_TO"
 flip = false
 
 [[alias]]

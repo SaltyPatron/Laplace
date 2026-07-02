@@ -25,10 +25,12 @@
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/highway_table.h"
 
 #include "perfcache_native.h"
 
 static char *perfcache_path = NULL;
+static char *highway_perfcache_path = NULL;
 static bool ingest_bulk_novel = false;
 static int native_mkl_threads = 1;
 
@@ -40,6 +42,15 @@ laplace_substrate_perfcache_init(void)
         "Path to the T0 perfcache blob (laplace_t0_perfcache.bin).",
         "Empty disables perfcache-backed lookups; consumers fall back or error per their contract.",
         &perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.highway_perfcache_path",
+        "Path to the highway perfcache blob (laplace_highway_perfcache.bin).",
+        "Empty disables highway plane-selection functions; they error until configured.",
+        &highway_perfcache_path,
         "",
         PGC_SIGHUP,
         0,
@@ -93,6 +104,24 @@ laplace_perfcache_ready(void)
                            "-3: record count/size mismatch; -4: body CRC mismatch."),
                  errhint("Fix laplace_substrate.perfcache_path or redeploy the blob "
                          "(install-extensions.cmd stages it).")));
+    return true;
+}
+
+bool
+laplace_highway_ready(void)
+{
+    if (highway_table_is_loaded())
+        return true;
+    if (highway_perfcache_path == NULL || highway_perfcache_path[0] == '\0')
+        return false;
+
+    if (highway_table_load(highway_perfcache_path) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                 errmsg("laplace_substrate: failed to load highway perfcache \"%s\"",
+                        highway_perfcache_path),
+                 errhint("Fix laplace_substrate.highway_perfcache_path or redeploy the "
+                         "blob (install-extensions.cmd stages it).")));
     return true;
 }
 

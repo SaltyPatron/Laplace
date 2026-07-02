@@ -46,6 +46,33 @@ public static unsafe class Glicko2
         return NativeInterop.Glicko2EffectiveMu(&st);
     }
 
+    public static Glicko2State Init(long ratingFp1e9, long rdFp1e9, long volatilityFp1e9)
+    {
+        var st = new Glicko2State();
+        NativeInterop.Glicko2Init(&st, ratingFp1e9, rdFp1e9, volatilityFp1e9);
+        return st;
+    }
+
+    public static long NeutralMuFp1e9() => NativeInterop.Glicko2NeutralMuFp();
+
+    public static void FoldUniformPeriod(
+        ref Glicko2State state,
+        long opponentRatingFp1e9,
+        long opponentPhiFp1e9,
+        long games,
+        long sumScoreFp1e9,
+        long tauFp1e9,
+        long nowUnixNs)
+    {
+        if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
+        fixed (Glicko2State* statePtr = &state)
+        {
+            NativeInterop.Glicko2FoldUniformPeriod(statePtr,
+                opponentRatingFp1e9, opponentPhiFp1e9, games, sumScoreFp1e9,
+                tauFp1e9, nowUnixNs);
+        }
+    }
+
     public static void UpdatePeriod(
         ref Glicko2State state,
         ReadOnlySpan<Glicko2Observation> observations,

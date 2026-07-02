@@ -1,3 +1,0 @@
-CREATE INDEX IF NOT EXISTS entities_highway_hash
-    ON entities USING hash (highway_mask)
-    WHERE highway_mask IS NOT NULL;

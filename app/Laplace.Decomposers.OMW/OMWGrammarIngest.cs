@@ -171,7 +171,11 @@ internal static class OMWGrammarIngest
         string fileLang = OMWTabFiles.FileLang(tabFile);
         var witness = new OMWGrammarWitness(fileLang);
 
-        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+        // Identify the failing FILE on any ingest error. A 2-hour OMW run died at
+        // 95.9% with a bare "laplace_grammar_compose_probe returned -2" and no way
+        // to tell which of 1,226 tab files held the offending record — the exact
+        // observability gap Issue 20 hit on the document path.
+        var source = StructuredGrammarIngest.IngestFileAsync(
             tabFile,
             EtlManifest.Get("omw"),
             witness: witness,
@@ -184,8 +188,21 @@ internal static class OMWGrammarIngest
             acceptRow: static line => line.Length > 0 && line[0] != (byte)'#',
             maxInputUnits: maxInputUnits,
             containmentReader: containmentReader,
-            ct: ct))
+            ct: ct);
+        await using var e = source.GetAsyncEnumerator(ct);
+        while (true)
         {
+            SubstrateChange change;
+            try
+            {
+                if (!await e.MoveNextAsync()) break;
+                change = e.Current;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"OMW ingest failed in \"{tabFile}\": {ex.Message}", ex);
+            }
             yield return change;
         }
     }

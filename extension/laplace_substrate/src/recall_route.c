@@ -343,7 +343,9 @@ route_prompt_impl(const char *prompt, RouteResult *r)
         goto done;
 
     if (try_groups(p,
-                   "^(?:write|generate|implement|create)\\s+(?:(?:a|an|some|the)\\s+)?(.+?)(?:\\s+(?:function|method|script|snippet|code|program|class))?$",
+                   "^(?:write|generate|implement|create|develop|build|code|construct|make)\\s+"
+                   "(?:(?:a|an|some|the)\\s+)?"
+                   "(.+?)(?:\\s+(?:function|method|script|snippet|code|program|class|application|app|website|service|tool))?$",
                    r, "related", "HAS_EXAMPLE", false))
         goto done;
 

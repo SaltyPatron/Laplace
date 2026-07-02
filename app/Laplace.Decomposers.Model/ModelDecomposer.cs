@@ -282,7 +282,9 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             }
         }
 
-        long partners = Math.Min(distinctVocab, 64);
+        // Matches ModelTokenEdgeETL's enforced per-row edge budget, so this estimate
+        // is the actual emission bound rather than a 3-6 orders-optimistic guess.
+        long partners = Math.Min(distinctVocab, ModelTokenEdgeETL.EdgeTopK);
         long perLayerPlanes = 3L * distinctVocab * partners * r.NumLayers;
         long similarTo = distinctVocab * partners;
         return distinctVocab + perLayerPlanes + similarTo;

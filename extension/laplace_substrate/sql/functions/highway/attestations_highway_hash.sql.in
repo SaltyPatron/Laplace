@@ -1,3 +1,0 @@
-CREATE INDEX IF NOT EXISTS attestations_highway_hash
-    ON attestations USING hash (highway_mask)
-    WHERE highway_mask IS NOT NULL;

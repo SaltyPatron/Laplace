@@ -37,10 +37,12 @@ public sealed class IngestBatchPipelineTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), config))
             changes.Add(change);
 
-        Assert.Equal(ExpectedDescentProbeChunks(rowCount, probeChunk), reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.True(reader.FlatCandidateCounts.Count >= 1);
         Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
-        Assert.True(reader.FlatProbeCalls >= 2, "root bulk IN then tier1 flat completion");
+        Assert.True(reader.FlatProbeCalls >= 2, "root bulk IN then tier rounds");
+        Assert.InRange(reader.FlatProbeCalls, 2,
+            MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, probeChunk)));
         Assert.True(ContentEntityCount(changes) > 0);
     }
 
@@ -60,8 +62,9 @@ public sealed class IngestBatchPipelineTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), config))
         { }
 
-        Assert.Equal(1, reader.DescentProbeCalls);
-        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN + tier1 flat completion");
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
+        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN + tier rounds");
+        Assert.InRange(reader.FlatProbeCalls, 1, MaxProbeCallsFor(1));
     }
 
     [Fact]
@@ -84,7 +87,7 @@ public sealed class IngestBatchPipelineTests
             changes.Add(c);
 
         Assert.Equal(1, reader.FlatProbeCalls);
-        Assert.Equal(0, reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.Equal(0, ContentEntityCount(changes));
         Assert.Equal(records.Count, changes.Sum(x => x.Metadata.InputUnitsConsumed));
     }
@@ -155,8 +158,9 @@ public sealed class IngestBatchPipelineTests
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
             changes.Add(c);
 
-        Assert.True(reader.Tier01FlatCalls >= 1, "tier 1 nodes flat-probed after root gate");
-        Assert.True(reader.DescentCalls > 0, "T2+ trunks descent-probe after compose");
+        Assert.True(reader.Tier01FlatCalls >= 2,
+            "root gate plus tier rounds all flow through the flat probe surface");
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         var baseline = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
             new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig()))
@@ -175,7 +179,7 @@ public sealed class IngestBatchPipelineTests
         var reader = new ProbeTrackingReader(present: true);
         byte[]? bm = await composer.ProbeDescentBitmapAsync(reader);
         Assert.NotNull(bm);
-        Assert.True(reader.DescentProbeCalls > 0 || reader.FlatProbeCalls > 0);
+        Assert.True(reader.FlatProbeCalls > 0);
 
         var (ents, phys, prec, _) = composer.Materialize(1.0, bm);
         Assert.Empty(ents);
@@ -292,8 +296,8 @@ public sealed class IngestBatchPipelineTests
                 batchLabelPrefix: "via-pipeline", reportUnits: null, containmentReader: reader))
                 changes.Add(change);
 
-            Assert.True(reader.DescentProbeCalls + reader.FlatProbeCalls > 0,
-                "present ingest must probe (descent batch and/or trunk shortcircuit flat)");
+            Assert.True(reader.FlatProbeCalls > 0,
+                "present ingest must probe (tier descent and/or trunk shortcircuit flat)");
             Assert.Equal(0, ContentEntityCount(changes));
             Assert.Equal(lines.Length, changes.Sum(c => c.Metadata.InputUnitsConsumed));
         }
@@ -324,9 +328,11 @@ public sealed class IngestBatchPipelineTests
                 containmentReader: reader))
             { }
 
-            Assert.True(reader.DescentProbeCalls < rowCount,
-                "grammar ingest must batch probe within pending chunks, not one descent call per row");
-            Assert.Equal(ExpectedDescentProbeChunks(rowCount, 1024), reader.DescentProbeCalls);
+            Assert.Equal(0, reader.LegacyContentDescentCalls);
+            Assert.True(reader.FlatProbeCalls < rowCount,
+                "grammar ingest must batch probe within pending chunks, not one probe call per row");
+            Assert.InRange(reader.FlatProbeCalls, 1,
+                MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, 1024)));
         }
         finally
         {

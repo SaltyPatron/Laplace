@@ -5,11 +5,20 @@ namespace Laplace.Decomposers.Abstractions;
 
 internal static class IngestExistenceGate
 {
+    internal static Task<(TRecord Record, long Units)[]> RemovePresentAsync<TRecord>(
+        List<TRecord> records,
+        IIngestRecordHandler<TRecord> handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        CancellationToken ct)
+        => RemovePresentAsync(records, handler, reader, builder, probedAbsent: null, ct);
+
     internal static async Task<(TRecord Record, long Units)[]> RemovePresentAsync<TRecord>(
         List<TRecord> records,
         IIngestRecordHandler<TRecord> handler,
         ISubstrateReader reader,
         SubstrateChangeBuilder builder,
+        ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
         if (records.Count == 0) return [];
@@ -31,6 +40,14 @@ internal static class IngestExistenceGate
                 rootIndex[i] = -2;
                 continue;
             }
+
+            // Root already probed absent within this working set: it cannot
+            // have appeared since our own unwritten working set began, so
+            // skip the re-probe and let the record flow through the normal
+            // deferred-unit path (stage witness-dedup absorbs re-emission,
+            // WalkWitness still counts the observation).
+            if (probedAbsent is not null && probedAbsent.Contains(rootId)) continue;
+
             rootIndex[i] = roots.Count;
             roots.Add((i, rootId));
         }
@@ -43,7 +60,12 @@ internal static class IngestExistenceGate
             long bits = (long)bm.Length * 8;
             for (int k = 0; k < roots.Count; k++)
             {
-                if (k >= bits || (bm[k >> 3] & (1 << (k & 7))) == 0) continue;
+                bool present = k < bits && (bm[k >> 3] & (1 << (k & 7))) != 0;
+                if (!present)
+                {
+                    probedAbsent?.Add(roots[k].RootId);
+                    continue;
+                }
                 int i = roots[k].Index;
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
                 reader.MarkProven([roots[k].RootId]);

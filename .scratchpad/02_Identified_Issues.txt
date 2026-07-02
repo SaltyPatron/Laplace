@@ -775,3 +775,161 @@ on real KNN <<->> queries against the live ~4.6M-row physicalities table.
     priority since it's not on the hot path, but worth a line in a future cleanup: either
     fix its CTE shape to use a genuine bound parameter, or delete it now that
     word_shape_peers_fast fully supersedes it.
+
+ISSUE 33 -- apply_batch stall: never-ANALYZEd staging temp tables flip the anti-join plan as
+the target tables grow (33-minute batch at 12.6 GB working set, live incident)
+Status: FIXED in source (extension/laplace_substrate/src/apply_batch.c -- ANALYZE each staged
+temp table right after probe_stage_tables, before any anti-join), NOT yet deployed (extension
+DLL swap pending the post-OMW rebuild); incident mitigated live via pg_cancel_backend.
+Incident (2026-07-01, OMW ingest at ~12% / entities ~5.4M): pid 18444's laplace_apply_batch
+ran 33+ minutes state=active (no wait event -- genuinely computing) at a 12,650 MB working
+set, where identical-shaped batches take ~50s; the second partition writer (pid 13924) sat
+queued behind the advisory lock the whole time, freezing the whole ingest. Diagnosis chain:
+stats on entities/physicalities/attestations were FRESH (autoanalyze completed 17:58-18:01)
+but pid 18444's transaction began 17:57:44 -- planned before/while autoanalyze rewrote stats.
+Deeper root cause: NpgsqlSubstrateWriter creates TEMP staging tables and raw-binary-COPYs
+into them, and neither C# nor apply_batch.c ever runs ANALYZE on them (verified: zero ANALYZE
+anywhere in the write path) -- temp tables have no stats until analyzed, so the planner's
+join-side/strategy choice for `staging LEFT JOIN laplace.entities` rests on a default
+page-based guess. Small target tables forgive this; at 5M+ entities a wrong hash-side choice
+builds the hash over the multi-million-row target (matches the 12.6 GB working set) and the
+batch goes quadratic-feeling. Remedy applied live: pg_cancel_backend(18444) -- SQLSTATE 57014
+is classified transient by TransientErrorRetryPolicy (class 57), so the client retries the
+batch cleanly and replans against current stats. Source fix: three-line ANALYZE of the staged
+temp tables inside apply_batch (milliseconds on bounded staging; comment in code documents
+this incident). Follow-up worth considering, not done: statement_timeout or a watchdog around
+apply_batch calls so a future planner pathology fails fast into the existing retry path
+instead of stalling an entire ingest behind the advisory lock.
+
+ISSUE 34 -- apply_batch anti-join throughput collapses with target-table growth (perf gates
+now failing at 10M-row scale; physicalities worst at 3,174 rows/s vs the 500,000 gate)
+Status: OPEN, observation filed during P0 verification (2026-07-01, post-OMW DB: ~5.4M
+entities / ~10.9M physicalities). WriterThroughputTests' three 500k-rows/s gates fail against
+the current live DB: entity apply 235,994 rows/s, attestation 7,259 rows/s, physicality
+3,174 rows/s (157.5s for 500k staged rows, 3 round trips). These gates presumably passed on
+the smaller DBs they were written against; the anti-join (staging LEFT JOIN target WHERE id
+IS NULL) degrades as the target grows. The new in-apply_batch ANALYZE (Issue 33 fix) gives
+the planner real staging stats but does not change the fundamental cost of probing a
+multi-million-row target per batch. Candidates, not yet decided: (a) EXPLAIN the three
+anti-joins at scale and force/verify index-probe plans (500k pkey lookups should beat a
+10.9M-row scan); (b) under the advisory lock, INSERT ... ON CONFLICT DO NOTHING is
+race-free and skips the anti-join read entirely (the lock already provides the "prevention"
+the original design wanted -- ON CONFLICT here would be belt-and-suspenders, not
+retry-after-collision); (c) partition-local dedup via the merkle/descent bitmaps the client
+already computes, so apply_batch trusts client-proven-novel batches (ingest_bulk_novel
+exists for exactly this and is off by default). Re-baseline these gates after the P0.2 fresh
+reseed and decide.
+
+ISSUE 35 -- the FINAL root cause under the highway_mask saga: HighwayPerfcache checked
+rc == 1 where highway_table_relation_by_hash returns 0 on success
+Status: FIXED + verified live on regenerated data (2026-07-01 fresh reseed).
+The saga had three stacked causes, each masking the next: (1) Issue 01 -- relation types
+absent from relation_types.toml (chess/model vocab), fixed by manifest registration;
+(2) Issue 29 -- IntentStage.cs conflated default-mask with null pointer, writing SQL NULL,
+fixed at the marshal boundary; (3) THIS -- HighwayPerfcache.MaskForRelationType (and
+TryGetRelation) treated the native success code 0 as a miss (`rc == 1 ? Set(bit) : Zero`),
+so even after (1) and (2) every mask ever written was 32 zero bytes. The same rc==1-vs-0
+convention error was independently reproduced in the new highway_mask.c SQL functions this
+session (relation_highway_bit/band returned NULL for every relation) -- which is exactly how
+it was finally caught: the new native SQL surface made the miss visible in one query where
+the C# write path had silently degraded to zero masks for months.
+Verified on the post-fix fresh reseed, unicode layer: 1,632,015/1,632,019 attestations carry
+a non-zero highway_mask; every sampled relation's set bit matches relation_highway_bit() and
+its band mask via laplace_highway_match() (HAS_LINE_BREAK bit 78, HAS_EAST_ASIAN_WIDTH 55,
+HAS_BLOCK 46, HAS_AGE 42, HAS_SCRIPT 92, ...). Remaining 1 NULL + 3 zero-mask rows are the
+SubstrateCanonical bootstrap attestations (written without a perfcache, expected).
+05_Substrate_Invariants Rule #5 is now satisfied on live data for the first time.
+Hardening candidate, not done: give the native by_hash/by_bit lookups a boolean-shaped
+wrapper or an enum so the 0-success C convention can't be misread as truthy again (this
+exact misreading now has three independent instances across C# and C).
+
+ISSUE 34 ADDENDUM (2026-07-01 reseed observations)
+(a) The unqualified ANALYZE added for Issue 33 was itself a ~30x document-ingest regression:
+PostGIS's ND typanalyze over staging coord/trajectory geometries (measured in isolation:
+unqualified ANALYZE on 33K trajectory-bearing staging rows = 2,731ms; column-targeted
+ANALYZE (id) = 11.9ms). Fixed same day: apply_batch now runs ANALYZE <staging> (id) only --
+updates reltuples/relpages + id stats (all the join-side decision needs), never touches a
+geometry column. Deployed mid-reseed via DLL hot-swap + backend recycle (which killed the
+ladder shell -- 57P01 is fatal to seed-step; ladder resumed cleanly via markers/dedup, a
+designed-for recovery worth remembering: recycle backends only between stages).
+(b) Residual: document-stage apply_batch calls still measure 15-20s where the historical
+baseline log (scripts/win/document-text-ingest.log) shows 285K-row batches in 7.9s. Isolated
+measurements EXONERATE: ANALYZE(id) 12ms; the entities/physicalities anti-join 56ms/33K rows;
+gist+GIN index maintenance 163ms/33K physicality inserts. Prime remaining suspect: the
+attestation merge path (FOR UPDATE SKIP LOCKED fold + array_agg last-writer-wins collapse
+over ~100K attestation rows/batch) and/or consensus period-staging writes. ingest_bulk_novel
+has NO C# setter (manual GUC, off) -- if the historical baseline ran with it on, that alone
+could explain the delta. Needs an auto_explain (log_nested_statements) capture in a
+controlled run; not chased mid-reseed. NOTE: document layer_complete=False is DELIBERATE
+(ingest document passes skipSourceCompletion:true; per-document root short-circuit is the
+dedup mechanism for the open-ended corpus) -- not a defect.
+
+ISSUE 36 -- attestations_highway_hash: a hash index over a 66-distinct-value column, armed
+into a per-row catastrophe by the Issue-35 mask fix (root cause of the "2 hours for 240MB"
+OMW ingest and the post-reseed write slowdown)
+Status: FIXED -- indexes dropped live (DROP INDEX CONCURRENTLY) + removed from extension
+source/manifests so no future CREATE EXTENSION recreates them.
+Mechanism, measured: hash indexes degenerate on massive duplicate sets. highway_mask has 66
+distinct values across 12.26M populated rows (~186K duplicates per key); every bucket is a
+huge overflow-page chain, and every INSERT/UPDATE must walk its chain to find a free slot.
+EXPLAIN(BUFFERS) on apply_batch's two attestation statements showed ~700 buffer hits PER ROW
+(42.9M hits to update 60K rows; 30.4M to insert 40K) with the join trees accounting for <3%
+of it. The index had grown to 641MB -- nearly the size of attestations_pkey -- for zero query
+value (equality on a 66-value column is seq-scan territory; bit-overlap queries cannot use a
+hash index at all; plane selection goes through consensus_type_btree / relation-type sets).
+Why it looked fine for the project's whole history: the index is partial (WHERE highway_mask
+IS NOT NULL) and every mask ever written was NULL (Issues 01/29) or would have been all-zero-
+but-NULL -- the index was EMPTY until the Issue-35 rc fix populated masks on the 2026-07-01
+reseed, arming the trap. Fixing correctness exposed the landmine: unicode's floor stage ran
+fast (masks populate but table still small), and each subsequent layer got slower as chains
+grew -- document 530 rows/s, OMW 2 hours for 240MB.
+Measured effect of removal (rollback-txn proof, under concurrent ingest load): fold UPDATE
+10.03s -> 3.40s; array_agg INSERT 8.81s -> 2.94s for the same staging set. Remaining per-row
+cost (FK triggers ~1.5s/40K rows; non-HOT update maintenance across the 8 remaining indexes)
+tracked under Issue 34's candidates.
+Kept: attestations_has_highway / entities_has_highway partial btrees (subject_id, type_id) --
+sane structure, real lookup value.
+
+================================================================================
+UPDATE 2026-07-02 — full SQL-surface audit; Issue 23 corrected
+================================================================================
+
+ISSUE 23 CORRECTION (verified directly against source, not agent hearsay): the claim
+"hilbert4d/math4d/astar are never exposed to SQL" is overstated as written. The separate
+extension/laplace_geom extension (laplace_geom.c:126-573) exposes 18 native functions to
+SQL (hash128 blake3/merkle, distance/angular/dwithin/centroid/frechet/hausdorff 4d,
+hilbert encode/decode, mantissa pack/unpack, vertex/trajectory accessors), and astar.cpp
+IS driven from SQL via astar_path_raw (extension/laplace_substrate/src/astar_path.c:153-169,
+real astar_open/astar_next frontier; edge expansion via SPI). The accurate residual gap:
+no GENERIC native KNN driver (candidate generation + ranking in one native call) —
+word_shape_peers_fast is the single instance; structural_neighbors/locale/cluster,
+consensus_peer, metric_edges, and SQL word_shape_peers remain SQL routers with the Rule #4
+correlated-CTE defect. procrustes + engine/dynamics + engine/synthesis remain C#-only.
+
+NEW: .scratchpad/07_SQL_Surface_Audit.txt — full-repo SQL surface audit (2026-07-02):
+inline SQL in C# (4 chess files inline `rating - 2*rd` bypassing eff_mu(); edge-id formula
+maintained in BOTH laplace.consensus_id and C# ConsensusKeys.EdgeId; ContentRoundtrip's
+hand-rolled recursive PostGIS descent), dead SQL (all 42 top-level NN_*.sql.in never built
+— extension assembles ONLY from manifests via generated/install_chain; orphan
+refresh_consensus_views.sql.in in neither manifest), heavy-SQL violations ranked
+(relate_path recursive BFS worst), ~25 functions inlining the entity+physicality type=1
+join with no view, six different "string -> entity id" implementations, competing
+label()/render() renderers between endpoints and CLI, and a prioritized P0-P3 roadmap.
+
+ISSUE 37 -- OMW grammar_compose_probe rc=-2: transient, NOT a data record; instrumented, not
+root-caused
+Status: OPEN (instrumented) -- does not block; OMW layer complete.
+The 2026-07-02 00:39 crash (rc=-2 at 95.9% of OMW) was NOT reproducible: a full identical
+rerun completed cleanly (3,438,843/3,440,071 records -- delta is comment/header lines --
+failed=0, layer_complete=True, 583s end-to-end post-Issue-36). All 1,388 wns files verified
+byte-perfect strict UTF-8 (Python strict decoder, per line); the native utf8_decode audited
+correct (RFC 3629-strict incl. surrogate/overlong rejection); the row iterator's carry logic
+audited correct (splits only on \n / holds back partial records until finalize). Conclusion:
+the -2 was manufactured transiently -- prime suspect is a concurrency-sensitive path in the
+parallel per-file compose (the original run's pathologically slow timing under Issue 36's
+hash-index tax produced interleavings a healthy run does not). Instrumentation now in place
+so any recurrence self-identifies: OMWGrammarIngest wraps per-file errors with the tab-file
+path; GrammarEntityBuilder/GrammarRowComposer compose exceptions now report content length,
+first-invalid-byte offset, surrounding hex, and a lossy text preview (DescribeContent).
+Do NOT chase further without a reproduction; the diagnostics will hand over the record if it
+ever fires again.

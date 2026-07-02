@@ -54,6 +54,18 @@ public sealed class IngestBatchConfig
     public int BatchSize { get; init; } = 256;
     public int ProbeChunkSize { get; init; } = 1024;
     public double WitnessWeight { get; init; } = 1.0;
+
+    /// <summary>
+    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder
+    /// spans the entire record stream: descent probes still run per
+    /// ProbeChunkSize interval (each distinct id probed at most once per
+    /// working set — proven-present via the reader's cache, probed-absent
+    /// via a working-set cache), but NOTHING is yielded mid-stream; the
+    /// pipeline emits exactly one SubstrateChange at the end, carrying the
+    /// whole novel frontier (stage witness-dedup makes cross-interval
+    /// duplicate emission a no-op). BatchSize is ignored in this mode.
+    /// </summary>
+    public bool WorkingSet { get; init; }
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
@@ -95,6 +107,7 @@ public sealed class IngestBatchConfig
             EntityCapacity = EntityCapacity,
             PhysicalityCapacity = PhysicalityCapacity,
             AttestationCapacity = AttestationCapacity,
+            WorkingSet = WorkingSet,
         };
 }
 
@@ -130,6 +143,10 @@ public static class IngestBatchPipeline
         var reader = config.EffectiveReader ?? AllAbsentSubstrateReader.Instance;
         var pending = new List<TRecord>(config.ProbeChunkSize);
 
+        // Working-set mode: one builder for the whole stream, one change at
+        // the end, no per-BatchSize yields. probedAbsent spans this run only.
+        var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
+
         var state = new BatchState(config.NewBuilder(0));
         long rowsTotal = 0;
         long unitsConsumed = 0;
@@ -142,7 +159,7 @@ public static class IngestBatchPipeline
 
             if (config.MaxInputUnits > 0 && unitsConsumed >= config.MaxInputUnits)
             {
-                await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
+                await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
                 if (state.InBatch > 0)
                     yield return await state.BuildRemainingAsync(ct);
@@ -152,14 +169,14 @@ public static class IngestBatchPipeline
             pending.Add(record);
             if (pending.Count >= config.ProbeChunkSize)
             {
-                await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
+                await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
             }
             unitsConsumed += units;
 
             config.ReportUnits?.Invoke(rowsTotal);
 
-            if (state.InBatch >= config.BatchSize)
+            if (!config.WorkingSet && state.InBatch >= config.BatchSize)
             {
                 yield return await state.YieldBatchAsync(ct);
                 state.ResetBuilder(config.NewBuilder(state.BatchNumber));
@@ -168,7 +185,7 @@ public static class IngestBatchPipeline
 
         if (pending.Count > 0)
         {
-            await foreach (var change in FlushPending(pending, handler, reader, state, config, ct))
+            await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                 yield return change;
         }
 
@@ -234,6 +251,7 @@ public static class IngestBatchPipeline
         ISubstrateReader reader,
         BatchState state,
         IngestBatchConfig config,
+        ISet<Hash128>? probedAbsent,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (pending.Count == 0) yield break;
@@ -242,12 +260,12 @@ public static class IngestBatchPipeline
         pending.Clear();
 
         var drained = await IngestDescentFlush.ProbeAndDrainAsync(
-            batch, handler, reader, state.Builder, config, ct).ConfigureAwait(false);
+            batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
 
         foreach (var (_, units) in drained)
         {
             state.AddUnits(units);
-            if (state.InBatch >= config.BatchSize)
+            if (!config.WorkingSet && state.InBatch >= config.BatchSize)
             {
                 yield return await state.YieldBatchAsync(ct);
                 state.ResetBuilder(config.NewBuilder(state.BatchNumber));

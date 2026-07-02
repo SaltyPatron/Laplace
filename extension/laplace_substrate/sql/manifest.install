@@ -27,6 +27,7 @@ probes/physicalities_present_ordinals.sql.in
 probes/attestations_present_ordinals.sql.in
 probes/table_present_ordinals.sql.in
 probes/entities_exist_bitmap.sql.in
+probes/attestations_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
 probes/drop_content_descent_novel_ordinals.sql.in
@@ -298,8 +299,12 @@ functions/geometry/structural_cluster.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/highway/laplace_highway_match.sql.in
 functions/highway/laplace_highway_popcount.sql.in
-functions/highway/entities_highway_hash.sql.in
-functions/highway/attestations_highway_hash.sql.in
+functions/highway/laplace_highway_band_mask.sql.in
+functions/highway/relation_highway.sql.in
+functions/highway/consensus_band_edges.sql.in
+functions/highway/laplace_highway_mask_bits.sql.in
+functions/highway/attestations_highway_bits_gin.sql.in
+functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
 functions/highway/attestations_has_highway.sql.in
 views/v_consensus_resolved.sql.in

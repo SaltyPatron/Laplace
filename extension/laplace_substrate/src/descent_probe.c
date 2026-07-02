@@ -51,10 +51,16 @@ spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
  *      didn't resolve.
  * No default-present assumption, no tree-walk, no short-circuiting based on
  * an unconfirmed guess -- a bit is 1 iff this function actually confirmed
- * that id has a committed entities row.
+ * that id has a committed row in the probed table.
+ *
+ * `ordinals_sql` selects which table's present-ordinals probe answers the
+ * batch query. `use_perfcache` gates the tier-0 codepoint fast path: valid
+ * only when probing `entities` (a codepoint id IS an entity id by axiom);
+ * other tables' ids derive differently and must always hit the real query.
  */
 static int
-batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
+                    const char *ordinals_sql, bool use_perfcache)
 {
     Datum      *elems;
     bool       *nulls;
@@ -95,7 +101,7 @@ batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count)
             continue;
         id = (const uint8_t *) VARDATA_ANY(b);
 
-        if (laplace_perfcache_ready())
+        if (use_perfcache && laplace_perfcache_ready())
         {
             uint32_t cp;
 
@@ -124,7 +130,7 @@ batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count)
     args[0] = PointerGetDatum(probe_array);
 
     spi_rc = spi_mark_present_ordinals(
-        "SELECT idx FROM laplace.entities_present_ordinals($1)",
+        ordinals_sql,
         1, argtypes, args, sub_bm, probe_n);
 
     if (spi_rc == SPI_OK_SELECT)
@@ -148,11 +154,26 @@ batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 int
 laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
-    return batch_presence_core(ids_array, bm, candidate_count);
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
+                               true);
 }
 
 int
 laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
-    return batch_presence_core(ids_array, bm, candidate_count);
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
+                               true);
+}
+
+int
+laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    /* Attestation ids derive from (subject,type,object,source,context) --
+     * never codepoint ids -- so the perfcache fast path is off by
+     * construction, not merely expected-not-to-match. */
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.attestations_present_ordinals($1)",
+                               false);
 }

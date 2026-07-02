@@ -33,8 +33,9 @@ public sealed class DocumentIngestPipelineTests
             new ListContentStream(records), new DocumentIngestHandler(), config))
         { }
 
-        Assert.Equal(ExpectedDescentProbeChunks(docCount, docCount), reader.DescentProbeCalls);
-        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN before compose");
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
+        Assert.InRange(reader.FlatProbeCalls, 1,
+            MaxProbeCallsFor(ExpectedDescentProbeChunks(docCount, docCount)));
     }
 
     [Fact]
@@ -68,7 +69,7 @@ public sealed class DocumentIngestPipelineTests
             changes.Add(c);
 
         Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present documents");
-        Assert.Equal(0, reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline));
         Assert.True(AttestationCount(changes) > 0,
             "document handler must still emit distributional attestations on present trees");

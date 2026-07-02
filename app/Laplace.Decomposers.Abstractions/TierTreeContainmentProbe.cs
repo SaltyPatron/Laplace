@@ -15,4 +15,9 @@ public static class TierTreeContainmentProbe
     public static Task<byte[]?[]> ProbeBatchNodeEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
         => TierTreeDescent.ProbeBatchEmitBitmapsAsync(trees, reader, ct);
+
+    public static Task<byte[]?[]> ProbeBatchNodeEmitBitmapsAsync(
+        IReadOnlyList<TierTree?> trees, ISubstrateReader reader,
+        ISet<Hash128>? probedAbsent, CancellationToken ct = default)
+        => TierTreeDescent.ProbeBatchEmitBitmapsAsync(trees, reader, probedAbsent, ct);
 }

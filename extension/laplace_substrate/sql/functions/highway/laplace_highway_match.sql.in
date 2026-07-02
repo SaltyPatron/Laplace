@@ -1,9 +1,9 @@
+-- Does this highway mask share any set bit with the band/relation mask?
+-- Native (highway_mask.c): the prior SQL body ran a per-row bytea AND through
+-- the SQL executor for what is four uint64 AND/OR ops. NULL on either side
+-- returns false (unchanged WHERE semantics); length mismatch is an error,
+-- matching the old `&` operator behavior.
 CREATE OR REPLACE FUNCTION laplace_highway_match(mask bytea, band_mask bytea)
-RETURNS boolean
-LANGUAGE sql
-IMMUTABLE
-AS $$
-    SELECT mask IS NOT NULL
-       AND band_mask IS NOT NULL
-       AND (mask & band_mask) <> '\x00000000000000000000000000000000000000000000000000000000000000000000'::bytea
-$$;
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_match'
+    LANGUAGE C IMMUTABLE;

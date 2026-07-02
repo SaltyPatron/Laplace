@@ -39,6 +39,17 @@ public sealed class ModelTokenEdgeETL
             System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
             out var tf) ? tf : 0.0;
 
+    // Per-subject-row edge budget per plane. Without this, a zero floor emits every
+    // positive-scoring pair — O(V²) per plane, per head — which is computationally
+    // unbounded on a real vocabulary (V=32k ⇒ ~5×10⁸ candidate pairs per plane).
+    // Per-row top-|score| selection bounds every plane at V×k while keeping exactly
+    // the strongest partners, and makes EstimateMatchupUnits' partner assumption true
+    // instead of 3-6 orders optimistic. ATTENDS divides the budget across heads so a
+    // layer's total attention budget matches the other planes'.
+    internal static readonly int EdgeTopK =
+        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_MODEL_EDGE_TOPK"), out var tk) && tk > 0
+            ? tk : 64;
+
 
 
 
@@ -191,12 +202,12 @@ public sealed class ModelTokenEdgeETL
         _log.LogInformation("phase=edges: SVD reduced {N:N0} tokens d={D}->rank {R} (tol 1%), {Sec:F1}s; "
             + "folding SIMILAR_TO (every pair, no floor)", n, d, rank, sw.Elapsed.TotalSeconds);
 
-        var typeId = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
+        var typeId = RelationTypeRegistry.Resolve("SIMILAR_TO").Id;
         double weight = WeightFor("SIMILAR_TO");
         await foreach (var change in EmitBilinearPairs(
             Y, Y, n, rank, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "similarity", RelationName: "SIMILAR_TO"),
-            sampleForDecoder: false, ct))
+            sampleForDecoder: false, topK: EdgeTopK, ct))
             yield return change;
     }
 
@@ -241,13 +252,13 @@ public sealed class ModelTokenEdgeETL
         NormRows(Ed, n, d);
         NormRows(Ud, n, d);
 
-        var typeId = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
+        var typeId = RelationTypeRegistry.Resolve("CONTINUES_TO").Id;
         double weight = WeightFor("CONTINUES_TO");
         _log.LogInformation("phase=edges: folding CONTINUES_TO (LM-head direct path, untied, full d={D}) over {N} tokens", d, n);
         await foreach (var change in EmitBilinearPairs(
             Ed, Ud, n, d, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "continues", RelationName: "CONTINUES_TO"),
-            sampleForDecoder: true, ct))
+            sampleForDecoder: true, topK: EdgeTopK, ct))
             yield return change;
     }
 
@@ -301,10 +312,13 @@ public sealed class ModelTokenEdgeETL
         if (rcq != 0 || rck != 0 || rce != 0)
         { _log.LogWarning("phase=edges L{L}: QK projection rc=({A},{B},{C}); skipping", L, rcq, rck, rce); yield break; }
 
-        var typeId = RelationTypeRegistry.RelationTypeId("ATTENDS");
+        var typeId = RelationTypeRegistry.Resolve("ATTENDS").Id;
         double weight = WeightFor("ATTENDS");
         var Qh = new double[(long)n * hd];
         var Kh = new double[(long)n * hd];
+        // The layer's ATTENDS budget is shared across heads so one layer's attention
+        // plane emits ~V*EdgeTopK edges total, matching the OV/MLP planes.
+        int perHeadK = Math.Max(1, EdgeTopK / Math.Max(1, H));
         for (int h = 0; h < H; h++)
         {
             ct.ThrowIfCancellationRequested();
@@ -314,7 +328,8 @@ public sealed class ModelTokenEdgeETL
             if (gK is not null) ScaleColsD(Kh, n, hd, gK);
             await foreach (var change in EmitBilinearPairs(
                 Qh, Kh, n, hd, typeId, weight, ents, ents, commitEpoch,
-                new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true, ct))
+                new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true,
+                topK: perHeadK, ct))
                 yield return change;
         }
     }
@@ -370,11 +385,12 @@ public sealed class ModelTokenEdgeETL
         var En = (double[])Ad.Clone();
         NormRows(En, n, d);
 
-        var typeId = RelationTypeRegistry.RelationTypeId("OV_RELATES");
+        var typeId = RelationTypeRegistry.Resolve("OV_RELATES").Id;
         double weight = WeightFor("OV_RELATES");
         await foreach (var change in EmitBilinearPairs(
             OVout, En, n, d, typeId, weight, ents, ents, commitEpoch,
-            new CircuitDescriptor(L, -1, "ov", "OV_RELATES"), sampleForDecoder: true, ct))
+            new CircuitDescriptor(L, -1, "ov", "OV_RELATES"), sampleForDecoder: true,
+            topK: EdgeTopK, ct))
             yield return change;
     }
 
@@ -413,7 +429,7 @@ public sealed class ModelTokenEdgeETL
             }
         }
 
-        var typeId = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
+        var typeId = RelationTypeRegistry.Resolve("COMPLETES_TO").Id;
         double weight = WeightFor("COMPLETES_TO");
         var descriptor = new CircuitDescriptor(L, -1, "mlp", "COMPLETES_TO");
 
@@ -428,6 +444,7 @@ public sealed class ModelTokenEdgeETL
             int re = Math.Min(rb + RowTile, n);
             int cnt = RunFfnTile(Ad, n, d, gate, up, down, I, rb, re, oR, oC, oV, oS, cap);
             if (cnt < 0) { _log.LogWarning("phase=edges L{L}: ffn tile failed; skipping MLP", L); yield break; }
+            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, EdgeTopK);
             for (int e = 0; e < cnt; e++)
             {
                 if (oC[e] == oR[e]) continue;
@@ -450,7 +467,7 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitBilinearPairs(
         double[] left, double[] right, int n, int r, Hash128 typeId, double weight,
         List<Hash128> rowEnts, List<Hash128> colEnts, int commitEpoch,
-        CircuitDescriptor descriptor, bool sampleForDecoder,
+        CircuitDescriptor descriptor, bool sampleForDecoder, int topK,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long cap = (long)RowTile * n;
@@ -470,6 +487,7 @@ public sealed class ModelTokenEdgeETL
             int re = Math.Min(rb + RowTile, n);
             int cnt = RunBilinearTile(left, rb, re, right, n, r, oR, oC, oV, oS, cap);
             if (cnt < 0) yield break;
+            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, topK);
             for (int e = 0; e < cnt; e++)
             {
                 if (oC[e] == oR[e]) continue;
@@ -558,6 +576,11 @@ public sealed class ModelTokenEdgeETL
                 int rc = DynInterop.FfnTokenPairsTile(pe, (nuint)n, (nuint)d, pe,
                     pg, pu, pdn, (nuint)interm, (nuint)rb, (nuint)re, Theta,
                     pR, pC, pV, pS, (nuint)cap, &count, &overflow);
+                if (rc == 0 && overflow != 0)
+                    throw new InvalidOperationException(
+                        $"ffn_token_pairs_tile overflow at cap {cap}: the native tile drops edges in scan "
+                        + "order (not by score), so results would be silently biased -- raise "
+                        + "LAPLACE_MODEL_EDGE_FLOOR to prune before the cap.");
                 return rc != 0 ? -1 : (int)count;
             }
         }
@@ -574,9 +597,56 @@ public sealed class ModelTokenEdgeETL
             {
                 int rc = DynInterop.BilinearEdgesTile(pl, (nuint)rb, (nuint)re, pr, (nuint)n,
                     (nuint)dim, Theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
+                if (rc == 0 && overflow != 0)
+                    throw new InvalidOperationException(
+                        $"bilinear_edges_tile overflow at cap {cap}: the native tile drops edges in scan "
+                        + "order (not by score), so results would be silently biased -- raise "
+                        + "LAPLACE_MODEL_EDGE_FLOOR to prune before the cap.");
                 return rc != 0 ? -1 : (int)count;
             }
         }
+    }
+
+    // Keep only the top-k |value| edges per subject row within one tile's results,
+    // compacting the parallel arrays in place. Tiles partition rows, so per-tile
+    // selection is exact per-row selection. Returns the new count.
+    private static int SelectTopKPerRow(int cnt, int rb, int re, int[] oR, int[] oC, double[] oV, long[] oS, int k)
+    {
+        if (cnt <= 0 || k <= 0) return Math.Max(cnt, 0);
+        int rows = re - rb;
+        var perRow = new int[rows];
+        for (int e = 0; e < cnt; e++) perRow[oR[e] - rb]++;
+        bool over = false;
+        for (int i = 0; i < rows; i++) if (perRow[i] > k) { over = true; break; }
+        if (!over) return cnt;
+
+        var offsets = new int[rows + 1];
+        for (int i = 0; i < rows; i++) offsets[i + 1] = offsets[i] + perRow[i];
+        var idx = new int[cnt];
+        var cursor = (int[])offsets.Clone();
+        for (int e = 0; e < cnt; e++) idx[cursor[oR[e] - rb]++] = e;
+
+        var keep = new List<int>(Math.Min(cnt, rows * k));
+        for (int i = 0; i < rows; i++)
+        {
+            int start = offsets[i], len = perRow[i];
+            if (len <= k)
+            {
+                for (int j = 0; j < len; j++) keep.Add(idx[start + j]);
+                continue;
+            }
+            var rowIdx = new int[len];
+            Array.Copy(idx, start, rowIdx, 0, len);
+            Array.Sort(rowIdx, (a, b) => Math.Abs(oV[b]).CompareTo(Math.Abs(oV[a])));
+            for (int j = 0; j < k; j++) keep.Add(rowIdx[j]);
+        }
+        keep.Sort();
+        int w = 0;
+        foreach (int e in keep)
+        {
+            oR[w] = oR[e]; oC[w] = oC[e]; oV[w] = oV[e]; oS[w] = oS[e]; w++;
+        }
+        return w;
     }
 
     private static void SliceHead(double[] full, double[] head, int n, int fullDim, int h, int hd)

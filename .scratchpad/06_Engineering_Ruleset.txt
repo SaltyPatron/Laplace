@@ -53,13 +53,41 @@ Rule #6: No duplicate/overlapping logic without a documented reason it isn't con
       (Rule #1 in 05_Substrate_Invariants.txt) or a future correctness fix can silently miss
       one of the copies.
     - This is the concrete first target for the "foundational set of functions/views" ask:
-      a shared view layer (candidates identified by survey: v_consensus_unrefuted,
-      v_word_senses) that every consumer joins against instead of re-deriving. NOT YET BUILT —
-      scope/priority to be confirmed before starting, since it touches ~20+ call sites.
+      a shared view layer that every consumer joins against instead of re-deriving.
+      STATUS UPDATE (2026-07-02): v_consensus_unrefuted BUILT + deployed to 21 files
+      (02_Identified_Issues Issue 30); still outstanding: v_word_senses, the 4 deferred
+      NOT-refuted inliners (relate_path, consensus_peer, senses_with_context x2), and the
+      missing views identified by the 07 audit (v_word_points — ~25 inline copies of the
+      entity+physicality type=1 join — word_anchor(), v_attestation_readable). See
+      .scratchpad/07_SQL_Surface_Audit.txt for the full list + P0-P3 roadmap.
 
 Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
 chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
 variants that break the greppable pattern.
+
+Rule #8: The canonical ingest pipeline is a SEQUENCE, not a set of components (author spec,
+2026-07-02, stated during the OMW 20x-slowdown discussion). Having the right algorithm at the
+wrong point in the sequence is a violation even if the algorithm itself is correct.
+    1. Tree-sitter unpacks the packaging (raw file format) -> raw content. Nothing more.
+    2. Decomposer turns raw content into substrate records. Client-side, once.
+    3. Client-side dedup across the ENTIRE working set (hash-identical records merge in
+       memory -- content addressing makes this a dictionary, not a query).
+    4. Glicko-2 matchups accumulate CLIENT-SIDE across the set (same native glicko2.c math
+       already P/Invoked; only the merge with prior DB state needs a read, and that is ONE
+       bulk read of touched edge ids).
+    5. ONE trunk->tier descent across the whole working set -- O(tiers) round trips per
+       ingest, each a bulk set-membership probe, present nodes pruning their subtrees.
+    6. The descent output is the filtered write list. Writes are pure bulk COPY of
+       known-novel rows in tier order. No anti-join. No ON CONFLICT. No server-side
+       re-verification. The server receives records; it does not re-derive novelty.
+    Violations as of 2026-07-02 (why OMW ingests ~20x slower than WordNet despite equal
+    input size): descent runs per flush batch (O(batches x tiers) rounds, interleaved with
+    writes) instead of once per working set; apply_batch anti-joins every staged row anyway
+    (ingest_bulk_novel GUC exists for exactly this and nothing sets it -- no C# setter);
+    attestation observations ship un-merged and are collapsed server-side per batch
+    (array_agg + FOR UPDATE SKIP LOCKED row work); consensus fold runs server-side per batch
+    through staging-lifecycle round trips (matchup math never client-side; even the built+
+    verified native fold, Issue 31, is still server-side and still per batch).
 
 Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - materialize_period_partition / materialize_period_partition_fresh differ only by whether

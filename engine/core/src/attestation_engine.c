@@ -434,8 +434,8 @@ int laplace_attestation_aggregated_batch_build(
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out) {
     if (!cells || !type_id || !source || !out) return -1;
+    if (!(witness_weight >= 0.0 && witness_weight <= 1.0)) return -1;
 
-    
     const laplace_relation_def_t* def = NULL;
     laplace_rel_symmetry_t symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
     if (laplace_relation_lookup(type_id, &def) == 0 && def)
@@ -452,7 +452,7 @@ int laplace_attestation_aggregated_batch_build(
 
     for (size_t i = 0; i < n; ++i) {
         const laplace_attestation_aggregated_cell_t* c = &cells[i];
-        if (c->games <= 0) return -1;
+        if (c->games <= 0 || c->games > LAPLACE_ATTESTATION_GAMES_MAX) return -1;
 
         hash128_t subj = c->subject;
         hash128_t obj;

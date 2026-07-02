@@ -1,0 +1,13 @@
+-- Highway coordinates of a relation type: its bit position in the 256-bit
+-- mask and its salience-band index. NULL for ungoverned (non-canonical) ids —
+-- an ungoverned type showing up here is a manifest-registration gap, the
+-- exact bug class that left chess/model planes maskless.
+CREATE OR REPLACE FUNCTION relation_highway_bit(p_type_id bytea)
+    RETURNS int
+    AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_bit'
+    LANGUAGE C STABLE;
+
+CREATE OR REPLACE FUNCTION relation_highway_band(p_type_id bytea)
+    RETURNS int
+    AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_band'
+    LANGUAGE C STABLE;

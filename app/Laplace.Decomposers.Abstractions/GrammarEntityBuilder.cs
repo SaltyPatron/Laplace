@@ -131,9 +131,42 @@ public sealed class GrammarEntityBuilder
                 p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
                 _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
             if (rc != 0 || composeResult == IntPtr.Zero)
-                throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+                throw new InvalidOperationException(
+                    $"laplace_grammar_compose_probe returned {rc} ({DescribeContent(_utf8)})");
         }
         return composeResult;
+    }
+
+    // rc=-2 from the native side means utf8_decode rejected a byte sequence. A bare
+    // return code cost a 2-hour OMW run with no way to find the record; this names
+    // the first invalid offset, the bytes around it, and a lossy text preview.
+    internal static string DescribeContent(byte[] utf8)
+    {
+        int bad = -1;
+        for (int i = 0; i < utf8.Length;)
+        {
+            byte b = utf8[i];
+            int need = b < 0x80 ? 0 : (b & 0xE0) == 0xC0 ? 1 : (b & 0xF0) == 0xE0 ? 2
+                     : (b & 0xF8) == 0xF0 ? 3 : -1;
+            if (need < 0) { bad = i; break; }
+            if (i + need >= utf8.Length && need > 0) { bad = i; break; }
+            bool ok = true;
+            for (int j = 1; j <= need; j++)
+                if ((utf8[i + j] & 0xC0) != 0x80) { ok = false; break; }
+            if (!ok) { bad = i; break; }
+            i += need + 1;
+        }
+        string where = bad < 0 ? "utf8-valid" : $"first invalid byte at offset {bad}";
+        string hex = "";
+        if (bad >= 0)
+        {
+            int h0 = Math.Max(0, bad - 8), h1 = Math.Min(utf8.Length, bad + 8);
+            hex = " bytes[" + h0 + ".." + h1 + ")=" + Convert.ToHexString(utf8, h0, h1 - h0);
+            int p0 = Math.Max(0, bad - 80);
+            string ctxText = System.Text.Encoding.UTF8.GetString(utf8, p0, bad - p0);
+            hex += " preceding-text=\"" + ctxText.Replace('\n', ' ').Replace('\r', ' ') + "\"";
+        }
+        return $"len={utf8.Length}, {where}{hex}";
     }
 
     private unsafe void MaterializePhys(IntPtr composeResult)
@@ -157,7 +190,8 @@ public sealed class GrammarEntityBuilder
                 p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
                 _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &composeResult);
             if (rc != 0 || composeResult == IntPtr.Zero)
-                throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
+                throw new InvalidOperationException(
+                    $"laplace_grammar_compose returned {rc} ({DescribeContent(_utf8)})");
         }
         return composeResult;
     }

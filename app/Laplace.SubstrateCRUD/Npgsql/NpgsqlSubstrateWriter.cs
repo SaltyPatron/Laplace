@@ -327,7 +327,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         int expectedFields = table switch
         {
             IntentStageTable.Entities => 4,
-            IntentStageTable.Physicalities => 11,
+            IntentStageTable.Physicalities => 10,
             _ => 10,
         };
 

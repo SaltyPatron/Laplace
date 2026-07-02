@@ -1,0 +1,7 @@
+-- The 256-bit mask OR-ing every relation bit in the given salience band
+-- (band indices come from the manifest's rank ladder; see highway_manifest.h).
+-- Requires laplace_substrate.highway_perfcache_path to be configured.
+CREATE OR REPLACE FUNCTION laplace_highway_band_mask(p_band int)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_band_mask'
+    LANGUAGE C STABLE;

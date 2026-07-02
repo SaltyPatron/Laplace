@@ -271,8 +271,28 @@ public static class TierTreeDescent
     /// MarkProven is only ever called with the subset of a round's
     /// candidates that round's own bitmap positively confirmed present.
     /// </summary>
-    public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
+    public static Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
+        => ProbeBatchEmitBitmapsAsync(trees, reader, probedAbsent: null, ct);
+
+    /// <summary>
+    /// Working-set overload. <paramref name="probedAbsent"/> is a
+    /// caller-owned, working-set-lifetime record of ids a previous round in
+    /// the SAME working set already probed and found absent: they are
+    /// skipped (bit left 0 — "emit") without re-querying, because the
+    /// working set's stage witness-dedup already absorbed their first
+    /// emission and re-probing an id that cannot have appeared since our
+    /// own unwritten working set began is pure waste. This is an efficiency
+    /// cache only — it must never be shared across working sets or
+    /// processes (another writer may commit the id at any time; the write
+    /// protocol's in-transaction re-probe is what restores correctness at
+    /// the boundary). Ids proven PRESENT are handled by the reader's own
+    /// process-lifetime proven cache and are confirmed here without a DB
+    /// round trip, subtree-pruned exactly as a fresh confirmation would be.
+    /// </summary>
+    public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
+        IReadOnlyList<TierTree?> trees, ISubstrateReader reader,
+        ISet<Hash128>? probedAbsent, CancellationToken ct = default)
     {
         int n = trees.Count;
         var results = new byte[]?[n];
@@ -311,8 +331,14 @@ public static class TierTreeDescent
 
         for (int tier = maxTier; tier >= 0; tier--)
         {
+            // One probe slot per DISTINCT id this round; every (tree, node)
+            // occurrence of that id shares the slot's answer. OMW-style
+            // sources repeat the same lemma across thousands of records --
+            // probing per occurrence multiplies the round's row count for
+            // no information.
             var ids = new List<Hash128>();
-            var placements = new List<(int TreeIndex, int NodeIndex)>();
+            var slotOf = new Dictionary<Hash128, int>();
+            var placements = new List<List<(int TreeIndex, int NodeIndex)>>();
             for (int t = 0; t < treeCount; t++)
             {
                 var tree = probeTrees[t];
@@ -321,8 +347,36 @@ public static class TierTreeDescent
                 {
                     if (resolved[t][j]) continue;
                     if (tree.GetNode((uint)j).Tier != tier) continue;
-                    ids.Add(tree.GetNode((uint)j).Id);
-                    placements.Add((t, j));
+                    var id = tree.GetNode((uint)j).Id;
+
+                    // Already proven present (process-lifetime cache, only
+                    // ever populated from real positive results): confirm
+                    // and subtree-prune without a DB round trip.
+                    if (reader.IsProvenPresent(id))
+                    {
+                        perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                        resolved[t][j] = true;
+                        MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
+                        continue;
+                    }
+
+                    // Already probed absent within this working set: leave
+                    // the bit 0 (emit); stage witness-dedup absorbs the
+                    // duplicate emission. Children still probe normally.
+                    if (probedAbsent is not null && probedAbsent.Contains(id))
+                    {
+                        resolved[t][j] = true;
+                        continue;
+                    }
+
+                    if (!slotOf.TryGetValue(id, out int slot))
+                    {
+                        slot = ids.Count;
+                        slotOf[id] = slot;
+                        ids.Add(id);
+                        placements.Add(new List<(int, int)>(1));
+                    }
+                    placements[slot].Add((t, j));
                 }
             }
             if (ids.Count == 0) continue;
@@ -331,14 +385,21 @@ public static class TierTreeDescent
             long bits = (long)bm.Length * 8;
 
             var confirmedPresent = new List<Hash128>();
-            for (int k = 0; k < placements.Count; k++)
+            for (int k = 0; k < ids.Count; k++)
             {
-                if (k >= bits || (bm[k >> 3] & (1 << (k & 7))) == 0) continue;
-                var (t, j) = placements[k];
-                perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
-                resolved[t][j] = true;
+                bool present = k < bits && (bm[k >> 3] & (1 << (k & 7))) != 0;
+                if (!present)
+                {
+                    probedAbsent?.Add(ids[k]);
+                    continue;
+                }
                 confirmedPresent.Add(ids[k]);
-                MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
+                foreach (var (t, j) in placements[k])
+                {
+                    perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                    resolved[t][j] = true;
+                    MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
+                }
             }
 
             // Only the ids THIS round's real query positively confirmed

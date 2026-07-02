@@ -1181,7 +1181,7 @@ int laplace_compose_drain_into_stage(
         int64_t sum_score = pr->games * LAPLACE_GLICKO2_FP_SCALE;
         if (laplace_attestation_aggregated_add(
                 stage, &pr->subject_id, &precedes_type, &pr->object_id, 0,
-                source_id, NULL, 1, pr->games, sum_score, witness_weight, now_unix_us) != 0) {
+                source_id, NULL, 1, witness_weight, pr->games, sum_score, now_unix_us) != 0) {
             free_emit_filter(&filter);
             return -1;
         }

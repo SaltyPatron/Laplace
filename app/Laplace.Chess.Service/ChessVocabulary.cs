@@ -149,7 +149,7 @@ public static class ChessVocabulary
         boot.AddType("Chess_Concept");
         boot.AddRelationType("EXPLAINS");
         boot.AddRelationType("IS_EXAMPLE_OF");
-        boot.AddRelationType("DEFINES");
+        boot.AddRelationType("HAS_DEFINITION");
         await writer.ApplyAsync(boot.Build(), ct);
         return boot.CanonicalNames;
     }

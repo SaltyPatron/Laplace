@@ -34,7 +34,9 @@ public sealed class IngestPipelineWrongPatternTests
             DefaultConfig(reader, batchSize: rowCount, probeChunk: probeChunk)))
         { }
 
-        Assert.Equal(ExpectedDescentProbeChunks(rowCount, probeChunk), reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
+        Assert.InRange(reader.FlatProbeCalls, 1,
+            MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, probeChunk)));
         Assert.True(reader.FlatCandidateCounts.Count >= 1);
         Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
         Assert.True(reader.MaxFlatCandidates > rowCount,
@@ -72,7 +74,7 @@ public sealed class IngestPipelineWrongPatternTests
             changes.Add(c);
 
         Assert.Equal(1, reader.FlatProbeCalls);
-        Assert.Equal(0, reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.Equal(0, ContentEntityCount(changes));
     }
 

@@ -44,3 +44,10 @@ int laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candi
  * trunk-to-leaf batch probe) rather than incidentally reusing a
  * general-purpose existence check. */
 int laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count);
+
+/* Used by attestations_exist_bitmap(ids bytea[]) -- same positive-
+ * confirmation-only semantics against `attestations` instead of `entities`.
+ * No perfcache fast path (attestation ids are never codepoint ids by
+ * construction). Serves the working-set write protocol's in-transaction
+ * re-probe of claimed-novel attestation ids. */
+int laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);

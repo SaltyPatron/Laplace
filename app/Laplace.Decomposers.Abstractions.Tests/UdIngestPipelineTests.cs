@@ -40,8 +40,9 @@ public sealed class UdIngestPipelineTests
             new UdListRecordStream(records), handler, config))
         { }
 
-        Assert.Equal(ExpectedDescentProbeChunks(sentenceCount, sentenceCount), reader.DescentProbeCalls);
-        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN + tier1 flat completion");
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
+        Assert.InRange(reader.FlatProbeCalls, 1,
+            MaxProbeCallsFor(ExpectedDescentProbeChunks(sentenceCount, sentenceCount)));
     }
 
     [Fact]
@@ -76,7 +77,7 @@ public sealed class UdIngestPipelineTests
             new UdListRecordStream(records), handler, config))
             changes.Add(c);
 
-        Assert.True(reader.DescentProbeCalls >= 1, "present ingest must batched-probe sentence content trees");
+        Assert.True(reader.FlatProbeCalls >= 1, "present ingest must batched-probe sentence content trees");
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline),
             "present bitmap should not increase staged content entities vs fresh ingest");
         Assert.True(AttestationCount(changes) > 0, "present sentences must still emit UD attestations");

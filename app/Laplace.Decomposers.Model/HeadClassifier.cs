@@ -21,7 +21,7 @@ public sealed record CircuitDescriptor(int Layer, int Head, string Plane, string
 
 public sealed class HeadClassifier
 {
-    public static readonly Hash128 EncodesTypeId = RelationTypeRegistry.RelationTypeId("ENCODES");
+    public static readonly Hash128 EncodesTypeId = RelationTypeRegistry.Resolve("ENCODES").Id;
 
     public static readonly Hash128 ModelCircuitTypeId = EntityTypeRegistry.Id("Model_Circuit");
 

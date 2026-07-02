@@ -1,11 +1,8 @@
+-- Number of set bits in a highway mask. Native (highway_mask.c): the prior
+-- SQL body implemented POPCNT as get_byte -> bit(8)::text -> replace ->
+-- length inside a generate_series loop; this is hardware popcount over
+-- uint64 chunks. NULL returns 0 (matches the old COALESCE).
 CREATE OR REPLACE FUNCTION laplace_highway_popcount(mask bytea)
-RETURNS integer
-LANGUAGE sql
-IMMUTABLE
-AS $$
-    SELECT COALESCE(
-        (SELECT sum(bit_count)::integer
-         FROM (SELECT length(replace(get_byte(mask, g)::bit(8)::text, '0', '')) AS bit_count
-               FROM generate_series(0, octet_length(mask) - 1) AS g) bits),
-        0)
-$$;
+    RETURNS integer
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_popcount'
+    LANGUAGE C IMMUTABLE;

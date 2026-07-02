@@ -44,6 +44,7 @@ if(WIN32)
         src/content_resolve.c
         src/descent_probe.c
         src/containers_of.c
+        src/highway_mask.c
         src/consensus_fold_incremental.c
     )
     set_target_properties(${EXT_NAME} PROPERTIES
@@ -83,6 +84,7 @@ else()
         src/perfcache.c
         src/content_resolve.c
         src/containers_of.c
+        src/highway_mask.c
         src/consensus_fold_incremental.c
     )
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})

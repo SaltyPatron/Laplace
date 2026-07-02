@@ -71,10 +71,15 @@ public class Hash128Tests
     [Fact]
     public void Merkle_TierIsNotIdentity()
     {
+        // hash128_merkle mixes the tier byte into the domain (the Issue-25 fix:
+        // before it, word_id('a'), the tier-1 grapheme 'a', and the tier-0
+        // codepoint 'a' were bit-identical -- a guaranteed cross-tier collision,
+        // verified live). Same children at different tiers MUST hash differently;
+        // single-child tier collapse is hash_composer's job, not Merkle's.
         var a = Hash128.Blake3("x"u8);
         var t1 = Hash128.Merkle(1, new[] { a });
         var t2 = Hash128.Merkle(2, new[] { a });
-        Assert.Equal(t1, t2);
+        Assert.NotEqual(t1, t2);
     }
 
     [Fact]

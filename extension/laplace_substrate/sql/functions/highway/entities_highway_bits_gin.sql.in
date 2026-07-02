@@ -1,0 +1,5 @@
+-- Same bit-overlap access for entity masks (currently sparse; the index stays
+-- proportional to populated rows via the partial predicate).
+CREATE INDEX IF NOT EXISTS entities_highway_bits_gin
+    ON entities USING gin (@extschema@.laplace_highway_mask_bits(highway_mask))
+    WHERE highway_mask IS NOT NULL;

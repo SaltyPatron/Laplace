@@ -1,0 +1,303 @@
+SQL SURFACE AUDIT (07) — layering, duplication, centralization, missing views
+================================================================================
+Full-repo audit (2026-07-02) of the SQL surface against the Rule #1 architecture
+(06_Engineering_Ruleset.txt: SQL/C# orchestrate, native C/C++/SPI does heavy lifting).
+Method: four parallel audit passes (inline SQL in C#; SQL-layer catalog; native-exposure
+map; query-pattern standardization), key claims spot-verified against source directly
+(chess inline-mu sites, eff_mu body, install-chain includes, laplace_geom/astar_path
+entry points). Builds on the 2026-07-01 survey in 06; does not re-derive Issues 22/23/
+26/27/28/30-36 except where this audit falsified or extended them.
+
+================================================================================
+SECTION 0 — CORRECTIONS TO PRIOR DOCS (verified personally, not agent hearsay)
+================================================================================
+
+0.1 Issue 23 ("no native geometric code is exposed to SQL; hilbert4d/math4d/procrustes/
+astar never reachable from DB") is OVERSTATED AS WRITTEN. There are TWO extensions:
+  - extension/laplace_geom (laplace_geom.c) exposes 18 native functions to SQL:
+    pg_laplace_hash128_blake3/merkle, distance_4d, angular_distance_4d, dwithin_4d,
+    centroid_4d, radius_origin, frechet_4d, hausdorff_4d, hilbert_encode/decode,
+    mantissa_pack/unpack, vertex_atom/tier, trajectory_constituents/constituent_ids.
+    (Verified: PG_FUNCTION_INFO_V1 list in laplace_geom.c:126-573.)
+  - astar.cpp IS exposed: extension/laplace_substrate/src/astar_path.c drives the real
+    native frontier (astar_open/astar_next at astar_path.c:153-169) behind
+    astar_path_raw (cascade/astar_path_raw.sql.in). Edge EXPANSION is SPI, but the
+    search algorithm is native.
+  The accurate residual claim: the scalar geometric PRIMITIVES are native and
+  SQL-reachable; what's missing is a generic native KNN DRIVER (candidate generation +
+  ranking as one native call). word_shape_peers_fast (recall.c) is the one instance
+  that exists; every other KNN-shaped function is still a SQL router (see 2.2).
+  Still true with no caveats: procrustes.cpp (engine/dynamics) and all of
+  engine/dynamics + engine/synthesis are C#-only (P/Invoke), never DB-reachable.
+
+0.2 06_Engineering_Ruleset Rule #6's "shared view layer NOT YET BUILT" is stale:
+  v_consensus_unrefuted was built + deployed to 21 files (Issue 30). Still open from
+  that item: v_word_senses; the 4 deferred inliners (relate_path, consensus_peer,
+  senses_with_context, senses_with_context_bootstrap).
+
+0.3 True native orphans (implemented + tested, wired to NEITHER SQL nor C#):
+  math4d_karcher_mean, math4d_log_s3, math4d_exp_s3 (engine/core/src/math4d.c:92-138).
+  Referenced only by test_math4d.cpp.
+
+================================================================================
+SECTION 1 — INLINE SQL IN C# (app/, 55 projects)
+================================================================================
+
+Clean areas (verified, worth protecting):
+  - ALL Laplace.Decomposers.* production code contains ZERO inline SQL — decomposers
+    emit Intent objects only. (Only DB-touching file in the whole family is one test,
+    UnicodeSeedIntegrationTests.cs.)
+  - NpgsqlSubstrateWriter / ConsensusAccumulatingWriter are model citizens: bulk COPY
+    into temp staging + one laplace_apply_batch / fold-function SPI call.
+  - No embedded-resource .sql anywhere in any .csproj; all DDL lives in db/migrations
+    (DbUp, from disk) + the extension.
+
+1.1 DUPLICATION GROUP A — effective-mu inlined instead of eff_mu() [highest value]
+  eff_mu(rating, rd) IS `rating - 2*rd` (functions/mu/eff_mu.sql.in:3, verified).
+  Four byte-identical inline copies bypass it:
+    app/Laplace.Chess.Service/SubstrateTurnHost.cs:47
+    app/Laplace.Chess.Service/SubstrateStateValuer.cs:74
+    app/Laplace.Chess.Service/SubstrateRootBias.cs:63
+    app/Laplace.Chess.Service/LearnedPst.cs:71
+    (all: SELECT id, (rating - 2*rd)::float8 ... FROM laplace.consensus WHERE id=ANY($1))
+  Other sites correctly route through the function family but at different
+  scalings: eff_mu_display (= eff_mu/1e9 rounded) in NpgsqlSubstrateReader.cs:278,
+  ProvenanceExtractor.cs:252, EvalCommands.cs:82,101; eff_mu - glicko2_neutral_mu
+  (centered) in FoundryExport.cs:413. One quantity; the risk is silent drift if the
+  mu law ever changes — the four chess copies would not follow.
+
+1.2 DUPLICATION GROUP B — edge-id derivation exists in BOTH SQL and C#
+  SQL: laplace.consensus_id(subject,type,object) (schema/, LAPLACE_IMMUTABLE).
+  C#:  ConsensusKeys.EdgeId = Blake3(subject||type||object)
+       (app/Laplace.Modality/TurnSubstrate.cs:20-37).
+  Consumers split across the two with no shared contract:
+    - via consensus_id join: NpgsqlSubstrateReader.cs:277 (GetEdgeStrengths),
+      EvalCommands.cs:85-86,104-105 (duplicated join pattern)
+    - via C# EdgeId + PK read: the four chess files above + ModalityEngine.cs:63
+  Missing canonical entry point: laplace.edge_strength(subject,type,object) (+ batch
+  form) — three hand-rolled variants of the identical triple->mu lookup today.
+
+1.3 DUPLICATION GROUP C — entity count/existence by type
+  SELECT count(*) FROM laplace.entities WHERE type_id=$1 — three copies:
+    NpgsqlSubstrateReader.cs:52, ProvenanceExtractor.cs:154, TurnWitness.cs:52.
+  SELECT 1 ... LIMIT 1 variants: TurnWitness.cs:117 (entities), :129 (physicalities
+  type=1) — hand-rolls what entities_exist_bitmap/tier_batch_existence_probe provide.
+  QueryCommands.cs:364 EXISTS(SELECT 1 FROM laplace.entities ...) — SUBTLY WRONG:
+  bypasses entity_exists(), which also accepts valid tier-0 codepoint ids that have no
+  entities row. The CLI diverges from both the function and the verify scripts here.
+
+1.4 DUPLICATION GROUP D — raw coordinate reads bypassing entity_physicalities()
+  Raw physicalities + ST_X/Y/Z/M: FoundryExport.cs:620-625, ContentRoundtrip.cs:53,
+  UnicodeSeedIntegrationTests.cs:114. Correct form (entity_physicalities) used at
+  SubstrateClient.cs:358,564, QueryCommands.cs:471, IngestCommands.cs:712 — and the
+  SubstrateClient copy is itself copy-pasted twice within the file (:356-361, :562-567).
+
+1.5 Heavy computation living in C# strings (Rule #1 violations)
+  - ContentRoundtrip.cs:44-58: WITH RECURSIVE trajectory descent +
+    CROSS JOIN LATERAL ST_DumpPoints + ST_X/Y/Z/M unpack, entirely hand-rolled in the
+    CLI. No SQL/native reconstruct_content(id)->bytea exists (recall_trajectories
+    returns rendered text, not bytes, so the roundtrip path can't use it). This is the
+    document-identity flagship feature implemented as an ad-hoc client query.
+  - EvalCommands.cs:67-105 (PositivesSql/NegativesSql): multi-CTE synonym-pair
+    self-join + row_number() OVER (ORDER BY random()) negative sampling + double
+    consensus_id lookups — a full eval kernel embedded in C#; should be a substrate
+    function (laplace.eval_relation_pairs(...)).
+  - FoundryExport.cs:411-415: raw consensus plane export (GREATEST((eff_mu-neutral)/1e9,0))
+    hand-written in the SAME FILE that calls relation_plane/consensus_adjacency for
+    exactly this shape everywhere else.
+  - Billing (app.* schema, 6 PostgresBilling* stores): app-domain, not substrate, but
+    TryConsumeCredit's WITH candidate ... FOR UPDATE ... jsonb_set CTE
+    (PostgresBillingEntitlementStore.cs:162-184) is transactional business logic that
+    belongs in an app.consume_credit() function.
+
+================================================================================
+SECTION 2 — SQL LAYER (extension/laplace_substrate/sql)
+================================================================================
+
+2.0 Build-system findings (immediately actionable, zero risk)
+  - The extension is assembled ONLY from manifest.install/manifest.upgrade via
+    laplace_write_sql_chain -> generated/install_chain.sql.in (verified:
+    laplace_substrate.sql.in includes only sqldefines.h + generated chain).
+    THEREFORE all 42 top-level NN_*.sql.in files are DEAD — never built. 01-26 still
+    hold stale content (14_period_fold.sql.in = 28KB duplicating live functions/fold/**;
+    21_seed 9KB; 10_bootstrap 9KB; 26_generation 8KB); 27-42 are 0 bytes; 39_ absent
+    (deleted); 33_ prefix duplicated (33_lexical_variants + 33_taxonomy_expand).
+    Delete the whole numbered set — pure confusion surface.
+  - Orphan file in NEITHER manifest: views/refresh_consensus_views.sql.in — duplicates
+    v_consensus_resolved + v_consensus_edges bodies verbatim. Those two views now exist
+    in THREE source locations (views/*.sql.in, consensus_fold_swap.sql.in's runtime
+    re-create, and this orphan). Delete or wire it.
+  - Otherwise both manifests are consistent: all 326 install entries resolve to real
+    files; upgrade omits only bootstrap + canonical_names_seed (correct); the
+    functions/highway/** subtree (10 files) is present and identical in both manifests —
+    the recently deleted highway-hash files are fully gone, the new GIN/native set is
+    fully wired. The highway layer is now the REFERENCE example of correct layering
+    (perfcache-resolved type sets in memory, native uint64 mask ops, one indexed query).
+
+2.1 Views: 4 exist, adoption uneven, several missing
+  Existing: v_consensus_resolved, v_consensus_edges, v_consensus_unrefuted,
+  v_entities_highway. v_consensus_unrefuted used by 21 functions (Issue 30);
+  v_consensus_resolved/edges by only 4; at least 4 files still inline NOT refuted(...)
+  (relate_path, consensus_peer, senses_with_context, senses_with_context_bootstrap —
+  the Issue-30 deferrals).
+  MISSING views (derived from repeated inline join shapes):
+  - v_word_points: `JOIN physicalities p ON p.entity_id=e.id AND p.type=1 [AND coord/
+    trajectory NOT NULL]` appears inline in ~25 functions (structural_neighbors/locale/
+    cluster, word_shape_peers, consensus_peer, metric_edges, laplace_nearest_entity,
+    laplace_attention_centroid, word_curve, anagrams_of, vocab builders...). The single
+    most-repeated un-viewed shape in the codebase.
+  - word_anchor(bytea): the "resolve word -> its type=1 coord+trajectory LIMIT 1"
+    anchor subquery is hand-rolled in structural_neighbors, structural_locale,
+    word_shape_peers, consensus_peer — and it is exactly the seam where the Rule #4
+    correlated-CTE KNN defect keeps re-entering (see 2.2).
+  - v_attestation_readable: attestations JOIN entities labelling shape repeated across
+    the inspect/* attestation_response family.
+
+2.2 Heavy work still in pure SQL (Rule #1/#4 violations, ranked)
+  a. relate_path.sql.in — WITH RECURSIVE bidirectional BFS + LCA to depth 7 over
+     consensus, path arrays + =ANY(path) cycle checks, array path reconstruction.
+     The single heaviest SQL-side traversal; native graph engine (astar.cpp,
+     graph_taxonomy.c) already exists and hypernyms/isa_path/cascade are already C.
+  b. laplace_ancestry.sql.in — recursive consensus descent to depth 10, band-filtered.
+     Same class as (a).
+  c. The KNN-router family: structural_neighbors, structural_locale, structural_cluster
+     (+ structural_cluster_batch's plpgsql FOREACH loop multiplying it), consensus_peer
+     (geometric arm), word_shape_peers (SQL original). All share the correlated-CTE
+     anchor anti-pattern that Rule #4 documents (defeats GiST index-ordered KNN ->
+     silent full-scan fallback; Issue 33's EXPLAIN evidence) plus per-row native
+     distance recomputation. word_shape_peers_fast is the proven template; none of the
+     others have received it. word_shape_peers (SQL) survives alongside its own native
+     replacement and is the un-suffixed name a new caller would reach for — retire it
+     or make it a thin wrapper.
+  d. metric_edges.sql.in — full Cartesian self-join of the vocab (a JOIN b ON a.id<>b.id)
+     then window-prune then per-row frechet/hausdorff: O(n^2) kNN-graph construction in
+     the executor.
+  e. hash128_lo.sql.in — 8x get_byte + shift/OR bit assembly in SQL, in the fold hot
+     path; and walk_text.sql.in REINVENTS it inline via encode(...)::bit(64)::bigint
+     (heavy + duplicated in one shot).
+  f. laplace_l2_sq.sql.in — 4D squared L2 via four ST_X/Y/Z/M calls per row, called
+     per-row inside laplace_nearest_entity; math4d_distance_sq exists natively but has
+     no scalar SQL exposure (laplace_dwithin_4d wraps it only as a predicate). Minor
+     but the clearest "primitive exists, SQL reimplements it" instance.
+
+2.3 Duplication inside the SQL layer
+  - define/senses/examples bootstrap-vs-final signature collisions: define(bytea,int)
+    declared TWICE (define_bootstrap + define, both in manifest, later CREATE OR
+    REPLACE silently wins); same for define_with_context x2, senses x2,
+    senses_with_context x2, examples x2. Intentional bootstrap-window pattern but
+    easy to misread — and define_fast (native) supersedes the whole chain anyway.
+  - Four wrappers on "get a definition" (define, define_fast, recall_define_response,
+    recall_fallback_gloss) — already flagged in 06 Rule #6, still true.
+  - Pass-through aliases: nearest_neighbors_4d -> structural_neighbors; entity_curve ->
+    word_curve; word_shape_distance and trajectory_prefix_distance both = frechet_4d.
+  - Overlapping consensus-edge reader family: consensus_neighbors_directed/undirected,
+    consensus_walk_edges, consensus_step_edge, foundry_crawl_neighbors, walk_branches,
+    walk_strongest — plus the relatedness family (related, related_in, shared_objects,
+    salient_facts, relation_summary, usage_overlap, completions, top_relations) all
+    re-expressing "consensus JOIN entities, unrefuted, ORDER BY eff_mu".
+
+================================================================================
+SECTION 3 — C# vs NATIVE DUPLICATE IMPLEMENTATIONS (divergence risk)
+================================================================================
+Most of Laplace.Engine.Core is thin P/Invoke (Hilbert128, Hash128, Math4d, ScoreLaw,
+SuperFibonacci — single source of truth, safe). The exceptions:
+  - Mask256.cs (C# 256-bit mask algebra, explicit little-endian BinaryPrimitives) vs
+    highway_table.c/highway_mask.c (raw memcpy, documented LE-only assumption). Agree
+    on LE hosts; two independent implementations of the same algebra with no shared
+    source of truth. Would silently disagree on a BE target.
+  - HighwayPerfcache.MaskForRelationType builds masks managed-side (Mask256.Set) while
+    the DB builds them natively (pg_laplace_highway_band_mask). This exact managed
+    path already shipped the rc==1-vs-0 bug that zeroed every mask for months
+    (Issue 35) — the concrete realization of the divergence risk.
+  - HighwayPerfcache.NodeHash vs Hash128.OfCanonical: two managed canonical-string->
+    UTF8->blake3 paths that must stay in lockstep with laplace_relation_type_id's
+    native derivation.
+  - ConsensusKeys.EdgeId vs laplace.consensus_id (see 1.2) — the same blake3 triple-id
+    formula maintained independently in C# and SQL.
+
+================================================================================
+SECTION 4 — QUERY-PATTERN STANDARDIZATION (how lookups happen today)
+================================================================================
+There is NO single gateway type: SubstrateClient.cs (endpoints) and QueryCommands.cs
+(CLI) are parallel, independently-authored read surfaces that overlap heavily, share
+no code, and call DIFFERENT substrate functions for the same logical operations.
+
+4.1 Same logical operation, N implementations:
+  - "string -> entity id": SIX ways. word_id() (SubstrateClient.cs:136,271,527);
+    hex-or-word CASE inlined twice in the same file (SubstrateClient.cs:390-395 and
+    :556-561, copy-paste); resolve_topic (SubstrateClient.cs:53); resolve_last_word
+    (QueryCommands.cs:124); first_placed_topic (QueryCommands.cs:150); engine-side
+    ContentRootId/HashComposer with no SQL at all (QueryCommands.cs:357,405-411,
+    ContentRoundtrip.cs). These are NOT equivalent functions; no canonical
+    resolve(text[,context]) contract exists.
+  - "human label for id": TWO competing renderers with different semantics — label()
+    (endpoints: SubstrateClient.cs:135,267,324-328,399-403,424) vs render() (CLI:
+    QueryCommands.cs:420-546, IngestCommands.cs:711, scripts). Endpoint and CLI can
+    render the same entity differently today.
+  - "converse/recall": THREE entry points — recall(p, resolve_topic(...)) (endpoint),
+    recall(p) (CLI recall), recall_session(p) (CLI converse + EndpointMappings doc).
+  - "edge strength for triple": THREE (see 1.2).
+  - "facts about X": FOUR (consensus_out_readable, consensus_out, salient_facts, raw
+    consensus scans in scripts).
+  - Layer-completion marker convention (canonical_id('substrate/type/HasLayerCompleted/'
+    ||layer||'/v1')) hand-built in 4+ places: NpgsqlSubstrateReader.cs:35,
+    IngestCommands.cs:655, scripts/sql/substrate-audit.sql,
+    scripts/win/sql/chess-test-status.sql:34 — no shared helper.
+
+4.2 Canonical entry points that SHOULD exist (derived from what consumers hand-roll):
+  1. resolve(text, context) -> id — one text-resolution contract (collapses the six).
+  2. edge_strength(subject,type,object) + batch form — one triple->mu reader; pick ONE
+     of consensus_id (SQL) / ConsensusKeys.EdgeId (C#) as the id source of truth.
+  3. reconstruct_content(id) -> bytea — byte-returning document reconstruction so
+     ContentRoundtrip stops hand-rolling recursive PostGIS traversal.
+  4. decompose(text) -> setof (tier, ord, id, ...) — the known gap (CLAUDE.md); today
+     it's engine-only or generate_series hacks in scripts.
+  5. entity_form(id) — the single canonical placement read (kills the copy-pasted
+     entity_physicalities ORDER BY type LIMIT 1 blocks).
+  6. Batch entity_exists that all callers share (fixing QueryCommands.cs:364's
+     tier-0-blind hand-rolled EXISTS).
+  7. word_anchor(id) (SQL or native) — shared anchor fetch for every KNN router.
+  8. ONE of label()/render() blessed as the renderer; the other deleted or delegating.
+
+4.3 api() introspection findings
+  api() reflects pg_proc for the laplace schema — auto-synced, so no phantom entries;
+  but (a) it cannot surface public.* functions consumers genuinely require
+  (laplace_trajectory_constituent_ids, laplace_hash128_blake3 — load-bearing for
+  reconstruction and id-hashing); (b) it lists internal fold plumbing
+  (period_staging_table, walk_fold_prepare...) indistinguishably from the public
+  contract — no public/internal flag; (c) it is blind to the C#-side "virtual
+  functions" (ContentRootId, ConsensusKeys.EdgeId, Hash128.OfCanonical) that are
+  logically substrate operations.
+
+4.4 scripts/ bypassing the substrate
+  Worst: scripts/substrate-inference-demo.sql (reimplements id hashing + little-endian
+  id assembly via generate_series+substr, full generate_series(1,1114111) codepoint
+  enumeration, raw physicalities/consensus reads). scripts/win/_verify-*/_debug-*/
+  _apply-* do raw consensus/physicalities scans instead of consensus_out/salient_facts/
+  entity_physicalities. scripts/sql/* audit/debug files are mostly good citizens.
+
+================================================================================
+SECTION 5 — PRIORITIZED ROADMAP
+================================================================================
+P0 (zero-risk deletions / dead weight):
+  1. Delete all 42 top-level NN_*.sql.in (dead since the manifest build) + the orphan
+     views/refresh_consensus_views.sql.in.
+  2. Retire SQL word_shape_peers (superseded by _fast; still carries the Rule #4 bug).
+P1 (single-formula/single-door consolidation, small diffs, kills drift risk):
+  3. Route the four chess (rating - 2*rd) sites through eff_mu; add
+     edge_strength(subject,type,object)+batch and collapse the three triple->mu
+     implementations; decide consensus_id vs ConsensusKeys.EdgeId as the one id source.
+  4. entity_count(type)/existence helpers; fix QueryCommands.cs:364 via entity_exists.
+  5. Bless label() OR render(); layer-marker helper for HasLayerCompleted convention.
+P2 (missing views / entry points):
+  6. v_word_points + word_anchor(); migrate the 4 remaining NOT refuted() inliners;
+     v_attestation_readable.
+  7. resolve(text,context); entity_form(id); decompose(text); reconstruct_content(id).
+P3 (native migrations, the Rule #1 backlog, use word_shape_peers_fast as template):
+  8. relate_path + laplace_ancestry -> native graph engine.
+  9. structural_neighbors/locale/cluster(+batch), consensus_peer, metric_edges ->
+     native SPI KNN drivers sharing one anchor fetch.
+  10. hash128_lo -> C; fix walk_text's inline reinvention.
+  11. Scalar laplace_l2_sq -> expose math4d_distance_sq.
+  12. EvalCommands' eval kernel + FoundryExport.cs:411 raw plane -> substrate functions.
+  13. Decide fate of true orphans (karcher_mean/log_s3/exp_s3): expose or delete.

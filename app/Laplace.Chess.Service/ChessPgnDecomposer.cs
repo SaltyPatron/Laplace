@@ -37,7 +37,16 @@ public sealed class ChessPgnDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var modality = new ChessModality();
-        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
+        // options.BatchSize is LAPLACE_INGEST_BATCH, a global knob sized for cheap flat
+        // records (WordNet synsets, ConceptNet triples). A chess game is not a flat record —
+        // it explodes into dozens-to-hundreds of entity/physicality/attestation rows per game.
+        // Inheriting the global batch size directly (confirmed live at 65536 via env.cmd)
+        // collapsed an 88,760-game file into ~1-2 giant intents, which in turn made every
+        // IngestRunner commit-threshold check moot (nothing to flush until the one giant
+        // intent finally dequeues) and forced a single ~20-minute apply_batch call plus a
+        // single monolithic consensus fold at the very end. Capped independent of the global
+        // knob so IngestRunner's row/intent flush thresholds can actually fire mid-run.
+        int batch = Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 512, 1, 512);
 
         await foreach (var change in DecomposerBatch.RunAsync(
             StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),

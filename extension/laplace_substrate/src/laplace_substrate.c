@@ -346,6 +346,15 @@ pg_laplace_tier_batch_existence_probe(PG_FUNCTION_ARGS)
                                   laplace_tier_batch_existence_probe);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_attestations_exist_bitmap);
+
+Datum
+pg_laplace_attestations_exist_bitmap(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum(fcinfo, "attestations_exist_bitmap",
+                                  laplace_attestations_present_bitmap);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
 
 /*

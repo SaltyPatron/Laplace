@@ -23,11 +23,30 @@ internal static class IngestPipelineTestHelpers
     internal static int ExpectedDescentProbeChunks(int rowCount, int probeChunkSize) =>
         rowCount == 0 ? 0 : (rowCount + probeChunkSize - 1) / probeChunkSize;
 
+    /// <summary>
+    /// Upper bound on probe ROUND TRIPS for a chunked ingest under the
+    /// tier-descent architecture: per probe chunk, one existence-gate call
+    /// plus at most one call per tier round (tiers 0..4 content + margin
+    /// for the tier-0/1 flat completion). The invariant that matters is
+    /// that probe calls scale with chunks × tiers — never with row count.
+    /// </summary>
+    internal static int MaxProbeCallsFor(int probeChunks) => probeChunks * 9;
+
     internal sealed class ProbeTrackingReader : ISubstrateReader
     {
         private readonly bool _present;
         public int FlatProbeCalls;
-        public int DescentProbeCalls;
+
+        /// <summary>
+        /// Calls to the LEGACY flat (ids, parents) probe
+        /// (ISubstrateReader.ContentDescentBitmapAsync). The pipeline was
+        /// migrated to TierTreeDescent's tier-by-tier probing (which lands
+        /// in <see cref="FlatProbeCalls"/> via TierBatchExistenceProbeAsync's
+        /// default delegation), so tests assert this stays ZERO — the one
+        /// remaining production caller is NativeGrammarIngest, which is not
+        /// exercised through this pipeline.
+        /// </summary>
+        public int LegacyContentDescentCalls;
         public int MaxFlatCandidates;
         public int TotalFlatCandidates;
         public readonly List<int> FlatCandidateCounts = [];
@@ -61,7 +80,7 @@ internal static class IngestPipelineTestHelpers
         public Task<byte[]> ContentDescentBitmapAsync(
             IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)
         {
-            Interlocked.Increment(ref DescentProbeCalls);
+            Interlocked.Increment(ref LegacyContentDescentCalls);
             return Task.FromResult(MakeBitmap(ids.Count, _present));
         }
 
@@ -76,7 +95,7 @@ internal static class IngestPipelineTestHelpers
     internal sealed class Tier01PresentReader : ISubstrateReader
     {
         public int Tier01FlatCalls;
-        public int DescentCalls;
+        public int LegacyContentDescentCalls;
 
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -99,7 +118,7 @@ internal static class IngestPipelineTestHelpers
         public Task<byte[]> ContentDescentBitmapAsync(
             IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)
         {
-            Interlocked.Increment(ref DescentCalls);
+            Interlocked.Increment(ref LegacyContentDescentCalls);
             return Task.FromResult(new byte[(ids.Count + 7) / 8]);
         }
     }

@@ -105,8 +105,13 @@ public static unsafe class HighwayPerfcache
             byte bit;
             float rank;
             byte band;
+            // highway_table_relation_by_hash returns 0 on success, -1 on miss.
+            // This line checked rc == 1 from the day it was written, so every mask
+            // this function ever produced was all-zero — the final root cause under
+            // the whole highway_mask saga (Issues 01/29 fixed NULL-vs-zero marshaling
+            // above this, but nothing below it ever set a bit).
             int rc = NativeInterop.HighwayTableRelationByHash(&typeId, &bit, &rank, &band);
-            return rc == 1 ? Mask256.Zero.Set(bit) : Mask256.Zero;
+            return rc == 0 ? Mask256.Zero.Set(bit) : Mask256.Zero;
         }
     }
 
@@ -118,7 +123,7 @@ public static unsafe class HighwayPerfcache
             byte bp; float r; byte b;
             int rc = NativeInterop.HighwayTableRelationByHash(&typeId, &bp, &r, &b);
             bitPos = bp; rank = r; band = b;
-            return rc == 1;
+            return rc == 0;
         }
     }
 }

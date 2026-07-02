@@ -1,0 +1,24 @@
+-- Plane selection: every unrefuted consensus edge whose relation type belongs
+-- to the given salience band, strongest (eff_mu) first. This is the primitive
+-- the foundry/pour and band-scoped readers should use instead of hand-rolled
+-- rank-threshold scans.
+--
+-- Native (highway_mask.c): the band's relation-type id set is computed
+-- entirely in memory from the highway perfcache (bit -> canonical -> type id,
+-- zero DB round trips), then ONE indexed query fetches the edges
+-- (consensus_type_btree for the ANY() filter, the eff_mu expression index for
+-- ordering) — the define_fast pattern.
+CREATE OR REPLACE FUNCTION consensus_band_edges(
+    p_band       int,
+    p_min_eff_mu bigint DEFAULT NULL,
+    p_limit      bigint DEFAULT 1000)
+    RETURNS TABLE(
+        subject_id    bytea,
+        type_id       bytea,
+        object_id     bytea,
+        rating        bigint,
+        rd            bigint,
+        witness_count bigint,
+        eff_mu        bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_band_edges'
+    LANGUAGE C STABLE;

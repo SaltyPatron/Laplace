@@ -58,7 +58,8 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                     p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
                     _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
                 if (rc != 0 || result == IntPtr.Zero)
-                    throw new InvalidOperationException($"laplace_grammar_compose_probe returned {rc}");
+                    throw new InvalidOperationException(
+                        $"laplace_grammar_compose_probe returned {rc} ({GrammarEntityBuilder.DescribeContent(_utf8)})");
             }
             _probe = result;
         }
@@ -107,7 +108,8 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                     p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
                     _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
                 if (rc != 0 || result == IntPtr.Zero)
-                    throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
+                    throw new InvalidOperationException(
+                        $"laplace_grammar_compose returned {rc} ({GrammarEntityBuilder.DescribeContent(_utf8)})");
             }
             _compose = result;
         }

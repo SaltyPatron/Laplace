@@ -5,18 +5,28 @@ namespace Laplace.Decomposers.Abstractions;
 
 internal static class IngestDescentFlush
 {
-    internal static async Task<(TRecord Record, long Units)[]> ProbeAndDrainAsync<TRecord>(
+    internal static Task<(TRecord Record, long Units)[]> ProbeAndDrainAsync<TRecord>(
         List<TRecord> records,
         IIngestRecordHandler<TRecord> handler,
         ISubstrateReader reader,
         SubstrateChangeBuilder builder,
         IngestBatchConfig config,
         CancellationToken ct)
+        => ProbeAndDrainAsync(records, handler, reader, builder, config, probedAbsent: null, ct);
+
+    internal static async Task<(TRecord Record, long Units)[]> ProbeAndDrainAsync<TRecord>(
+        List<TRecord> records,
+        IIngestRecordHandler<TRecord> handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        IngestBatchConfig config,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
     {
         if (records.Count == 0) return [];
 
         var shortcircuited = await IngestExistenceGate.RemovePresentAsync(
-            records, handler, reader, builder, ct).ConfigureAwait(false);
+            records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
 
         if (records.Count == 0)
             return shortcircuited;
@@ -44,7 +54,7 @@ internal static class IngestDescentFlush
         }
 
         byte[]?[] flatBitmaps = await TierTreeContainmentProbe
-            .ProbeBatchNodeEmitBitmapsAsync(flatTrees, reader, ct).ConfigureAwait(false);
+            .ProbeBatchNodeEmitBitmapsAsync(flatTrees, reader, probedAbsent, ct).ConfigureAwait(false);
 
         var drained = new List<(TRecord, long)>(pending.Count + shortcircuited.Length);
         drained.AddRange(shortcircuited);

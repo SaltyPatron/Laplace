@@ -66,12 +66,19 @@ the mistake if you treat it as one.
       mistake. Always confirm the flag bit marks genuine spatial content before calling a
       geometric function on a coord/trajectory value pulled from an unfamiliar query path.
 
-Rule #5 (currently VIOLATED — tracked as a live gap, not aspiration): a set highway_mask bit
-must mean the entity/attestation genuinely instantiates that canonical relation type.
-    - Confirmed NULL on real production attestations this session (ISO639Decomposer output),
-      despite the population path existing in code (HighwayPerfcache.MaskForRelationType in
-      SubstrateChangeBuilder.cs). extension/laplace_substrate/sql/39_highway.sql.in is 0
-      bytes — likely related, not yet root-caused.
-    - Until fixed and verified live, no future code may assume highway_mask is populated for
-      filtering/ranking. Treat every highway_mask read as untrusted until this rule is
-      actually true again.
+Rule #5 (SATISFIED as of the 2026-07-01 fresh reseed — was violated for the project's whole
+prior history): a set highway_mask bit must mean the entity/attestation genuinely
+instantiates that canonical relation type.
+    - Three stacked causes, fixed in sequence (see 02 Issues 01/29/35): relation types
+      missing from the manifest; NULL-vs-zero marshal conflation in IntentStage.cs; and the
+      final one under them all — HighwayPerfcache checked rc == 1 where the native lookup
+      returns 0 on success, so every mask ever written was all-zero even after the first
+      two fixes.
+    - Verified live on regenerated data: 1,632,015/1,632,019 unicode-layer attestations
+      carry a non-zero mask whose set bit matches relation_highway_bit() and its band mask
+      (laplace_highway_match). The only NULL/zero masks are the SubstrateCanonical
+      bootstrap rows.
+    - Data written BEFORE this reseed (any database generation predating 2026-07-01) still
+      has NULL/all-zero masks — per the no-repairs directive those generations are
+      regenerated, never backfilled. Code may now rely on highway_mask for
+      filtering/ranking ONLY against post-reseed data.

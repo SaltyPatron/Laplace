@@ -158,6 +158,32 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
 
         probe_stage_tables(stage_ent, stage_phys, stage_att, &has_ent, &has_phys, &has_att);
 
+        /*
+         * ANALYZE the freshly COPY'd staging tables before the anti-joins below.
+         * Temp tables have NO statistics until analyzed, so the planner's join-side
+         * choice for `staging LEFT JOIN laplace.entities` rides on a default
+         * page-count guess. Observed live (2026-07-01, OMW ingest at ~5.4M entities):
+         * one apply_batch call ground for 33+ minutes at a 12.6 GB working set —
+         * the hash built over the multi-million-row target side instead of the
+         * ~100K-row staging side — where the identical batch shape takes ~50s with
+         * a sane plan.
+         *
+         * COLUMN-TARGETED on purpose: an unqualified ANALYZE invokes PostGIS's
+         * ND-statistics typanalyze over the staging physicalities' coord/trajectory
+         * geometries, which is catastrophic on trajectory-heavy batches (measured
+         * live: document-stage apply calls went from ~4-8s to 200+s — a ~30x
+         * ingest regression — while point-only unicode batches were unaffected).
+         * ANALYZE <table> (id) still updates reltuples/relpages (the join-side
+         * row estimate the planner actually needs here) and id-column stats,
+         * and never touches a geometry column.
+         */
+        if (has_ent)
+            (void) SPI_execute(psprintf("ANALYZE %s (id)", stage_ent), false, 0);
+        if (has_phys)
+            (void) SPI_execute(psprintf("ANALYZE %s (id)", stage_phys), false, 0);
+        if (has_att)
+            (void) SPI_execute(psprintf("ANALYZE %s (id)", stage_att), false, 0);
+
         if (bulk_novel)
         {
             if (has_ent)
@@ -238,52 +264,55 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
 
     if (has_att)
     {
+            /*
+             * One aggregate pass + one indexed UPDATE join. The prior shape ran THREE
+             * index passes over the same ids (d-CTE join, a FOR UPDATE SKIP LOCKED
+             * lock-CTE join, then a semi-join re-checking the lock CTE). The lock dance
+             * predates the advisory-lock serialization at the top of this function:
+             * with apply_batch callers mutually exclusive, no concurrent apply can hold
+             * row locks on these ids, and UPDATE takes its own row locks — SKIP LOCKED
+             * had nothing left to skip and cost two extra passes per call.
+             */
             if (staged_att_has_overlap(stage_att))
             {
                 att_fold = spi_exec_count(psprintf(
-                    "WITH d AS MATERIALIZED ("
-                    "  SELECT s.id, "
-                    "         sum(s.observation_count)::bigint AS games, "
-                    "         max(s.last_observed_at)          AS ts "
-                    "  FROM %s s "
-                    "  INNER JOIN laplace.attestations a ON a.id = s.id "
-                    "  GROUP BY s.id "
-                    "), locked AS MATERIALIZED ("
-                    "  SELECT a.id FROM laplace.attestations a "
-                    "  INNER JOIN d ON d.id = a.id "
-                    "  FOR UPDATE OF a SKIP LOCKED "
-                    ") "
                     "UPDATE laplace.attestations a SET "
                     "  observation_count = a.observation_count + d.games, "
                     "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
-                    "FROM d "
-                    "WHERE a.id = d.id AND a.id IN (SELECT id FROM locked)",
+                    "FROM ("
+                    "  SELECT s.id, "
+                    "         sum(s.observation_count)::bigint AS games, "
+                    "         max(s.last_observed_at)          AS ts "
+                    "  FROM %s s GROUP BY s.id"
+                    ") d "
+                    "WHERE a.id = d.id",
                     stage_att));
             }
 
+            /*
+             * Duplicate staged ids (same attestation observed twice within one batch,
+             * across partitions) collapse to one row: the LATEST row's fields win and
+             * observation counts sum. DISTINCT ON does the representative pick with a
+             * single sort; the prior shape ran TEN independently-sorted array_agg()s
+             * per group to extract fields one at a time from the same logical row.
+             */
             att_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.attestations "
                 "  (id, subject_id, type_id, object_id, source_id, context_id, "
                 "   outcome, last_observed_at, observation_count, highway_mask) "
-                "SELECT s.id, s.subject_id, s.type_id, s.object_id, s.source_id, "
-                "       s.context_id, s.outcome, s.last_observed_at, s.observation_count, "
-                "       s.highway_mask "
+                "SELECT r.id, r.subject_id, r.type_id, r.object_id, r.source_id, "
+                "       r.context_id, r.outcome, r.last_observed_at, g.games, r.highway_mask "
                 "FROM ("
-                "  SELECT s.id, "
-                "         (array_agg(s.subject_id ORDER BY s.last_observed_at DESC))[1] AS subject_id, "
-                "         (array_agg(s.type_id ORDER BY s.last_observed_at DESC))[1] AS type_id, "
-                "         (array_agg(s.object_id ORDER BY s.last_observed_at DESC))[1] AS object_id, "
-                "         (array_agg(s.source_id ORDER BY s.last_observed_at DESC))[1] AS source_id, "
-                "         (array_agg(s.context_id ORDER BY s.last_observed_at DESC))[1] AS context_id, "
-                "         (array_agg(s.outcome ORDER BY s.last_observed_at DESC))[1] AS outcome, "
-                "         max(s.last_observed_at) AS last_observed_at, "
-                "         sum(s.observation_count)::bigint AS observation_count, "
-                "         (array_agg(s.highway_mask ORDER BY s.last_observed_at DESC))[1] AS highway_mask "
+                "  SELECT DISTINCT ON (s.id) s.* FROM %s s "
+                "  ORDER BY s.id, s.last_observed_at DESC"
+                ") r "
+                "JOIN ("
+                "  SELECT s.id, sum(s.observation_count)::bigint AS games "
                 "  FROM %s s GROUP BY s.id"
-                ") s "
-                "LEFT JOIN laplace.attestations a ON a.id = s.id "
+                ") g ON g.id = r.id "
+                "LEFT JOIN laplace.attestations a ON a.id = r.id "
                 "WHERE a.id IS NULL",
-                stage_att));
+                stage_att, stage_att));
     }
 
     }

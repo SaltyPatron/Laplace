@@ -26,7 +26,9 @@ public sealed class SemLinkIngestPipelineTests
                 path, SemLinkDocumentKind.PbVn, "semlink/test", batchSize: pairCount, reader))
             { }
 
-            Assert.Equal(ExpectedDescentProbeChunks(pairCount, pairCount), reader.DescentProbeCalls);
+            Assert.Equal(0, reader.LegacyContentDescentCalls);
+            Assert.InRange(reader.FlatProbeCalls, 1,
+                MaxProbeCallsFor(ExpectedDescentProbeChunks(pairCount, pairCount)));
         }
         finally
         {

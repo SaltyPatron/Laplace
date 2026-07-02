@@ -218,6 +218,23 @@ public static unsafe partial class NativeInterop
         long tau,
         long nowNs);
 
+    [LibraryImport(Library, EntryPoint = "glicko2_init")]
+    internal static partial void Glicko2Init(
+        Glicko2State* state, long ratingFp1e9, long rdFp1e9, long volatilityFp1e9);
+
+    [LibraryImport(Library, EntryPoint = "glicko2_fold_uniform_period")]
+    internal static partial void Glicko2FoldUniformPeriod(
+        Glicko2State* state,
+        long opponentRatingFp1e9,
+        long opponentPhiFp1e9,
+        long games,
+        long sumScoreFp1e9,
+        long tau,
+        long nowNs);
+
+    [LibraryImport(Library, EntryPoint = "laplace_glicko2_neutral_mu_fp")]
+    internal static partial long Glicko2NeutralMuFp();
+
 
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_lookup_by_id", StringMarshalling = StringMarshalling.Utf8)]

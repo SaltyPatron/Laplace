@@ -22,6 +22,8 @@ int laplace_substrate_native_mkl_threads(void);
 
 bool laplace_perfcache_ready(void);
 
+bool laplace_highway_ready(void);
+
 
 
 

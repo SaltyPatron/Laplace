@@ -42,7 +42,7 @@ public sealed class FakeTabIngestDecomposerTests
             changes.Add(change);
 
         Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present rows");
-        Assert.Equal(0, reader.DescentProbeCalls);
+        Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.Equal(0, ContentEntityCount(changes));
     }
 
