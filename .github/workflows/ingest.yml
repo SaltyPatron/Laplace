@@ -1,0 +1,131 @@
+name: Laplace — ingest source
+
+# One parameterized ingest for every corpus source (replaces the 17 per-source
+# wrapper workflows). Source list mirrors scripts/ingest-source.sh; per-source
+# tuning defaults live in one case block below; pass/fail gates come from
+# scripts/decomposer-gates.json via decomposer-gate-check.py (single source of
+# truth — no gate specs typed into workflow inputs).
+#
+# Assumes the runner already carries a deployed build (run the main pipeline
+# first if the substrate schema or engine changed).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "corpus source"
+        type: choice
+        required: true
+        options:
+          - unicode
+          - iso639
+          - cili
+          - document
+          - wordnet
+          - omw
+          - verbnet
+          - propbank
+          - framenet
+          - mapnet
+          - wordframenet
+          - semlink
+          - conceptnet
+          - atomic2020
+          - ud
+          - wiktionary
+          - tatoeba
+          - opensubtitles
+          - all
+      database:
+        description: "target DB (two-DB law: laplace = CI, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      path:
+        description: "optional path argument (document root, etc.)"
+        type: string
+        default: ""
+      workers:
+        description: "LAPLACE_INGEST_WORKERS override (blank = per-source default)"
+        type: string
+        default: ""
+      commit_rows:
+        description: "LAPLACE_INGEST_COMMIT_ROWS override (blank = per-source default)"
+        type: string
+        default: ""
+      langs:
+        description: "LAPLACE_INGEST_LANGS override (blank = per-source default)"
+        type: string
+        default: ""
+      skip_gates:
+        description: "skip post-ingest consensus gates"
+        type: boolean
+        default: false
+
+concurrency:
+  group: laplace-ingest-${{ inputs.database }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_DATA_ROOT: /vault/Data
+  LAPLACE_INGEST_WORKERS: "2"
+  LAPLACE_DECOMPOSE_WORKERS: "2"
+  LAPLACE_FOLD_WORKERS: "4"
+  LAPLACE_APPLY_PARTITIONS: "6"
+
+jobs:
+  ingest:
+    name: "${{ inputs.source }} → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Resolve per-source tuning
+        id: tune
+        run: |
+          # Defaults distilled from the archived per-source wrappers
+          # (.github/archive/ci-2026-07/workflows/) — override via inputs.
+          workers="" commit_rows="" langs=""
+          case "${{ inputs.source }}" in
+            conceptnet) workers="1"; commit_rows="50000" ;;
+            ud)         langs="en"; commit_rows="25000" ;;
+            wiktionary) langs="en"; commit_rows="50000" ;;
+          esac
+          [ -n "${{ inputs.workers }}" ]     && workers="${{ inputs.workers }}"
+          [ -n "${{ inputs.commit_rows }}" ] && commit_rows="${{ inputs.commit_rows }}"
+          [ -n "${{ inputs.langs }}" ]       && langs="${{ inputs.langs }}"
+          {
+            echo "workers=$workers"
+            echo "commit_rows=$commit_rows"
+            echo "langs=$langs"
+          } >> "$GITHUB_OUTPUT"
+          echo "tuning: workers='$workers' commit_rows='$commit_rows' langs='$langs'"
+
+      - name: Ingest
+        env:
+          LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+          PGDATABASE: ${{ inputs.database }}
+        run: |
+          [ -n "${{ steps.tune.outputs.workers }}" ]     && export LAPLACE_INGEST_WORKERS="${{ steps.tune.outputs.workers }}"
+          [ -n "${{ steps.tune.outputs.commit_rows }}" ] && export LAPLACE_INGEST_COMMIT_ROWS="${{ steps.tune.outputs.commit_rows }}"
+          [ -n "${{ steps.tune.outputs.langs }}" ]       && export LAPLACE_INGEST_LANGS="${{ steps.tune.outputs.langs }}"
+          if [ -n "${{ inputs.path }}" ]; then
+            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
+          else
+            scripts/ingest-source.sh "${{ inputs.source }}"
+          fi
+
+      - name: Gate — decomposer consensus checks
+        if: ${{ !inputs.skip_gates && inputs.source != 'all' }}
+        run: |
+          python3 scripts/decomposer-gate-check.py \
+            --source "${{ inputs.source }}" \
+            --dbname "${{ inputs.database }}" \
+            --host /var/run/postgresql \
+            --user laplace_admin

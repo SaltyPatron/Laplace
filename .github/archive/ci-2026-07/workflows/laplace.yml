@@ -1,0 +1,333 @@
+name: Laplace — build, deploy, test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      fresh_db:
+        description: "nuke + re-migrate + reseed foundation (required after destructive schema changes)"
+        type: boolean
+        default: false
+      skip_seed:
+        description: "deploy only; skip ensure-foundation"
+        type: boolean
+        default: false
+      skip_clean:
+        description: "fresh mode only — keep existing build/ tree"
+        type: boolean
+        default: true
+
+concurrency:
+  group: laplace-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+  LAPLACE_INGEST_WORKERS: "2"
+  LAPLACE_DECOMPOSE_WORKERS: "2"
+  LAPLACE_FOLD_WORKERS: "4"
+  LAPLACE_APPLY_PARTITIONS: "6"
+  LAPLACE_UD_LANGS: en
+  LAPLACE_WIKTIONARY_LANGS: en
+
+jobs:
+
+  policy-checks:
+    name: Policy — manifest, attestation, vocabulary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate witness-manifest vs orchestration scripts
+        run: python scripts/validate-pipeline.py
+
+      - name: Regenerate attestation law and check drift
+        run: |
+          python scripts/codegen-attestation-law.py
+          git diff --exit-code engine/core/src/generated/ extension/laplace_substrate/sql/generated/
+
+      - name: Forbid C# attestation policy in decomposers
+        run: |
+          set -e
+          violations=0
+          files=$(find app -path 'app/Laplace.Decomposers.*/*.cs' \
+            ! -path 'app/Laplace.Decomposers.*.Tests/*')
+          for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::error file=$f::Forbidden attestation policy: $pattern"
+              violations=$((violations+1))
+            done < <(rg -l "$pattern" $files 2>/dev/null || true)
+          done
+          exit "$violations"
+
+      - name: Scan for unflagged banned terms
+        run: |
+          set +e
+          banned_terms=(
+            "HNSWLib" "hnswlib" "FAISS" "ScaNN" "Milvus" "Pinecone"
+            "oneDNN" "cuDNN"
+          )
+          files_to_scan=$(find . -type f \( -name '*.md' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.c' -o -name '*.cs' -o -name '*.sql' \) \
+            ! -path './.git/*' ! -path './node_modules/*')
+          violations=0
+          for term in "${banned_terms[@]}"; do
+            while IFS= read -r match; do
+              file=$(echo "$match" | cut -d: -f1)
+              case "$file" in
+                ./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md|./.github/workflows/laplace.yml)
+                  ;;
+                *)
+                  echo "::warning file=$file::Banned term '$term' appears outside allowed files"
+                  violations=$((violations+1))
+                  ;;
+              esac
+            done < <(grep -nH "$term" $files_to_scan 2>/dev/null)
+          done
+          echo "Total unflagged banned-term occurrences: $violations"
+          exit "$violations"
+
+  capabilities:
+    name: Verify self-hosted runner capabilities
+    if: github.event_name != 'pull_request'
+    needs: policy-checks
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Guard — workspace must stay submodule-free
+        run: |
+          fail=0
+          if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
+            echo "::error::.git/modules is populated — deps must source from \$LAPLACE_EXTERNAL"
+            fail=1
+          fi
+          init=$(git submodule status 2>/dev/null | grep -cE '^[ +U]' || true)
+          if [ "${init:-0}" -gt 0 ]; then
+            echo "::error::$init submodule(s) initialized in workspace"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "✓ workspace submodule-free"
+          exit "$fail"
+
+      - name: Ensure /opt/laplace install destinations exist
+        run: |
+          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
+            mkdir -p "/opt/laplace/$d"
+          done
+
+      - name: Sync /opt/laplace/external/ to .gitmodules pin
+        run: scripts/sync-external.sh
+
+      - name: Toolchain probes
+        run: |
+          [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
+          command -v python3 >/dev/null || command -v python >/dev/null || { echo "::error::python3 missing"; exit 1; }
+          command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
+          command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
+          for dep in eigen spectra blake3 googletest postgresql postgis proj geos gdal tree-sitter; do
+            [ -d "$LAPLACE_EXTERNAL/$dep/.git" ] || { echo "::error::$LAPLACE_EXTERNAL/$dep missing"; exit 1; }
+          done
+          RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
+          [ "$RESULT" = "laplace_admin on postgres" ] || { echo "::error::peer auth failed: $RESULT"; exit 1; }
+          UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
+          [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
+
+  proj:
+    name: dep — proj
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: proj
+          verify: |
+            /opt/laplace/proj/lib/libproj.so
+            /opt/laplace/proj/include/proj.h
+
+  geos:
+    name: dep — geos
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: geos
+          verify: |
+            /opt/laplace/geos/lib/libgeos_c.so
+            /opt/laplace/geos/include/geos_c.h
+
+  gdal:
+    name: dep — gdal
+    if: github.event_name != 'pull_request'
+    needs: [capabilities, proj]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: gdal
+          verify: |
+            /opt/laplace/gdal/lib/libgdal.so
+            /opt/laplace/gdal/include/gdal.h
+
+  postgresql:
+    name: dep — postgresql 18
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgresql
+          verify: |
+            /opt/laplace/pgsql-18/bin/postgres
+            /opt/laplace/pgsql-18/include/server/postgres.h
+
+  postgis:
+    name: dep — postgis
+    if: github.event_name != 'pull_request'
+    needs: [capabilities, postgresql, geos, proj, gdal]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgis
+          verify: |
+            /opt/laplace/pgsql-18/lib/postgis-3.so
+            /opt/laplace/pgsql-18/share/extension/postgis.control
+
+  tree-sitter:
+    name: dep — tree-sitter
+    if: github.event_name != 'pull_request'
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/build-dep
+        with:
+          target: tree-sitter
+          verify: |
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a
+            /opt/laplace/tree-sitter/include/tree_sitter/api.h
+
+  run:
+    name: Build → deploy → test (single self-hosted job)
+    if: github.event_name != 'pull_request'
+    needs: [postgis, tree-sitter, policy-checks]
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: stop API service
+        run: sudo systemctl stop laplace-api || true
+
+      - name: pipeline
+        run: |
+          args=(--mode hot)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
+            args=(--mode fresh)
+            [ "${{ inputs.skip_clean }}" = "true" ] && args+=(--skip-clean)
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.skip_seed }}" = "true" ]; then
+            args+=(--skip-seed)
+          fi
+          bash scripts/pipeline.sh "${args[@]}"
+
+      - name: ctest (engine unit tests, excludes pg_regress)
+        run: ctest --test-dir build --output-on-failure -LE regress
+
+      - name: dotnet test (engine bindings + substrate integration)
+        run: |
+          bin=$(find "$GITHUB_WORKSPACE/build" "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" \
+            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
+          export LAPLACE_PERFCACHE_BIN="$bin"
+          echo "LAPLACE_PERFCACHE_BIN=$bin"
+          cd app
+          # Throughput gates (Tier=perf) need a clean DB; skip on the live seeded substrate.
+          filter='--filter Tier!=perf'
+          for proj in \
+            Laplace.Engine.Core.Tests \
+            Laplace.Engine.Dynamics.Tests \
+            Laplace.Engine.Synthesis.Tests \
+            Laplace.Decomposers.Abstractions.Tests \
+            Laplace.Decomposers.Containers.Abstractions.Tests \
+            Laplace.SubstrateCRUD.Tests \
+            Laplace.Ingestion.Tests \
+            Laplace.Decomposers.Unicode.Tests \
+            Laplace.Decomposers.Model.Tests \
+            Laplace.Decomposers.FrameNet.Tests \
+            Laplace.Decomposers.VerbNet.Tests \
+            Laplace.Decomposers.SemLink.Tests \
+            Laplace.Decomposers.PropBank.Tests \
+            Laplace.Decomposers.OpenSubtitles.Tests; do
+            echo "::group::dotnet test $proj"
+            dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal $filter
+            echo "::endgroup::"
+          done
+
+      - name: pg_regress smoke
+        run: ctest --test-dir build --output-on-failure -L regress
+
+      - name: Show regress diffs on failure
+        if: failure()
+        run: |
+          for f in build/extension/*/tests/regress_output/regression.diffs; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+      - name: restore API service
+        if: always() && !cancelled()
+        run: |
+          sudo systemctl start laplace-api
+          sleep 3
+          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
+            sudo journalctl -u laplace-api -n 40 --no-pager
+            exit 1
+          }
+
+      - name: endpoint health + tests
+        if: success()
+        run: |
+          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.skip_seed }}" != "true" ]; then
+            curl -fsS http://127.0.0.1:5187/health/ready
+            echo
+            psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
+              -c "SELECT metric, value FROM laplace.substrate_counts();"
+            curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+              -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+              --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
+            echo
+          fi
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --nologo --verbosity minimal --filter 'Tier!=perf'

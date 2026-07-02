@@ -1,0 +1,127 @@
+name: Model pipeline (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      model_dir:
+        description: "Model directory to ingest + synthesize from (empty = $LAPLACE_TINYLLAMA_DIR on the runner)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  MODEL_DIR_INPUT: ${{ inputs.model_dir }}
+  GGUF_OUT: /tmp/tinyllama-substrate-ci.gguf
+  CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build --"
+  LAPLACE_INGEST_WORKERS: 4
+  LAPLACE_FOLD_WORKERS: 4
+
+jobs:
+  ingest:
+    name: "ingest — token×token bilinear circuits (onto the seeded DB; NO nuke)"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh model "${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR}"
+
+  idempotency:
+    name: "verify — re-ingest short-circuits (no double-counting)"
+    needs: ingest
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: re-ingest must short-circuit
+        run: |
+          out="$(scripts/ingest-source.sh model "${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR}" 2>&1)"; echo "$out"
+          echo "$out" | grep -qi "already ingested" || { echo "::error::re-ingest did not short-circuit — idempotency broken"; exit 1; }
+
+  relation_types:
+    name: "verify — model relation types present in CONSENSUS above floor"
+    needs: idempotency
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: gate relation types (consensus)
+        run: |
+          P(){ psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
+          gate() {
+            n=$(P "SELECT laplace.consensus_count(laplace.relation_type_id('$1'));")
+            [ "${n:-0}" -ge "$2" ] || { echo "::error::consensus type $1 has ${n:-0} relations (need >= $2)"; exit 1; }
+            echo "  ✓ $1 = $n consensus relations"
+          }
+          gate SIMILAR_TO       1000
+          gate ATTENDS          1000
+          gate OV_RELATES       1000
+          gate COMPLETES_TO     1000
+
+  consensus:
+    name: "consensus — verify the per-period fold ran at ingest (no batch rebuild exists)"
+    needs: relation_types
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: verify consensus materialized by the ingest period fold
+        run: |
+          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          cn=$("${PSQL[@]}" "SELECT count(*) FROM laplace.consensus;")
+          fresh=$("${PSQL[@]}" "SELECT count(*) FROM laplace.consensus WHERE last_observed_at > now() - interval '1 day';")
+          echo "consensus rows = $cn (touched this period: $fresh)"
+          [ "${cn:-0}" -gt 0 ]    || { echo "::error::consensus empty — the ingest's per-period fold did not run"; exit 1; }
+          [ "${fresh:-0}" -gt 0 ] || { echo "::error::no consensus rows touched this period — fold did not cover the model ingest"; exit 1; }
+
+  query:
+    name: "query — ranked-μ SQL inference over consensus (no GPU)"
+    needs: consensus
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: ranked-μ query
+        run: |
+          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          cn=$("${PSQL[@]}" "SELECT laplace.consensus_count();")
+          echo "consensus rows = $cn"
+          [ "${cn:-0}" -gt 0 ] || { echo "::error::consensus empty after ingest (accumulate-at-ingest produced no rows)"; exit 1; }
+          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "SELECT * FROM laplace.top_relations_readable(10);"
+          rows=$("${PSQL[@]}" "SELECT count(*) FROM laplace.top_relations_readable(10);")
+          [ "${rows:-0}" -gt 0 ] || { echo "::error::ranked-μ query returned no rows"; exit 1; }
+          echo "::notice::ranked-μ query OK — $rows top relations rendered readable"
+
+  synthesize:
+    name: "synthesize — substrate → GGUF (model recipe)"
+    needs: query
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: synthesize
+        run: |
+          rm -f "$GGUF_OUT"
+          out="$($CLI synthesize substrate "${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR}/config.json" "$GGUF_OUT" 2>&1)"; echo "$out"
+          echo "$out" | grep -qiE 'synthesis complete' || { echo "::error::synthesize did not complete"; exit 1; }
+          echo "$out" | grep -qi 'basis generated' || { echo "::error::foundry basis generation did not run"; exit 1; }
+
+  gguf-verify:
+    name: "verify — GGUF valid + non-trivial"
+    needs: synthesize
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: verify GGUF
+        run: |
+          [ -f "$GGUF_OUT" ] || { echo "::error::GGUF missing: $GGUF_OUT"; exit 1; }
+          sz=$(stat -c%s "$GGUF_OUT")
+          [ "$sz" -gt 50000000 ] || { echo "::error::GGUF too small ($sz bytes) — synthesis produced trivial output"; exit 1; }
+          echo "::notice::GGUF OK — $((sz/1048576)) MB at $GGUF_OUT"

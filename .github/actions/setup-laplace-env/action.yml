@@ -1,0 +1,24 @@
+name: Set up Laplace build/runtime env
+description: >
+  Export the workspace-relative runtime env into $GITHUB_ENV: Intel oneAPI
+  toolchain vars (when the runner service was started without them),
+  build-tree LD_LIBRARY_PATH for the engine .so files, and PostgreSQL
+  connection defaults (peer auth as laplace_admin over the unix socket).
+
+runs:
+  using: composite
+  steps:
+    - name: Export workspace env (+ oneAPI fallback for pre-.env runners)
+      shell: bash
+      run: |
+        if [ -z "${MKLROOT:-}" ]; then
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+        fi
+        echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
+        echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
+        echo "LAPLACE_DB=${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}" >> "$GITHUB_ENV"

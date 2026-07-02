@@ -1,0 +1,379 @@
+name: Laplace — build, deploy, test
+
+# One sequenced, idempotent pipeline. Every stage is a no-op on a healthy,
+# up-to-date system; every stage gates the next. CI is an orchestrator only —
+# the operations live in scripts/pipeline.sh (one phase per job) so the
+# Actions graph maps 1:1 onto pipeline phases.
+#
+#   policy ─┐
+#           ├─> build -> unit-test -> deploy -> db-ops -> integration-test
+#   deps ───┘                                                    │
+#                              restore-api <── smoke <── seed <── publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full_clean:
+        description: "wipe build/ before building"
+        type: boolean
+        default: false
+      fresh_db:
+        description: "nuke + re-migrate + force-reseed foundation (destructive schema changes only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: laplace-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+  LAPLACE_INGEST_WORKERS: "2"
+  LAPLACE_DECOMPOSE_WORKERS: "2"
+  LAPLACE_FOLD_WORKERS: "4"
+  LAPLACE_APPLY_PARTITIONS: "6"
+  LAPLACE_UD_LANGS: en
+  LAPLACE_WIKTIONARY_LANGS: en
+
+jobs:
+
+  policy:
+    name: Policy — manifest, attestation, vocabulary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CI presence tripwire
+        # Guards against a repo-hygiene commit sweeping the CI definition away
+        # again (commit 0b5d1df deleted every workflow + composite action and
+        # CI silently stopped triggering).
+        run: |
+          fail=0
+          for f in \
+            .github/workflows/laplace.yml \
+            .github/workflows/ingest.yml \
+            .github/workflows/model.yml \
+            .github/actions/setup-laplace-env/action.yml \
+            scripts/pipeline.sh \
+            scripts/ingest-source.sh \
+            scripts/ensure-foundation.sh; do
+            [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
+          done
+          exit "$fail"
+
+      - name: Validate witness-manifest vs orchestration scripts
+        run: python scripts/validate-pipeline.py
+
+      - name: Regenerate attestation law and check drift
+        run: |
+          python scripts/codegen-attestation-law.py
+          git diff --exit-code engine/core/src/generated/ extension/laplace_substrate/sql/generated/
+
+      - name: Forbid C# attestation policy in decomposers
+        run: |
+          set -e
+          violations=0
+          files=$(find app -path 'app/Laplace.Decomposers.*/*.cs' \
+            ! -path 'app/Laplace.Decomposers.*.Tests/*')
+          for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::error file=$f::Forbidden attestation policy: $pattern"
+              violations=$((violations+1))
+            done < <(rg -l "$pattern" $files 2>/dev/null || true)
+          done
+          exit "$violations"
+
+      - name: Scan for unflagged banned terms
+        run: |
+          set +e
+          banned_terms=(
+            "HNSWLib" "hnswlib" "FAISS" "ScaNN" "Milvus" "Pinecone"
+            "oneDNN" "cuDNN"
+          )
+          files_to_scan=$(find . -type f \( -name '*.md' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.c' -o -name '*.cs' -o -name '*.sql' \) \
+            ! -path './.git/*' ! -path './node_modules/*' ! -path './.github/archive/*')
+          violations=0
+          for term in "${banned_terms[@]}"; do
+            while IFS= read -r match; do
+              file=$(echo "$match" | cut -d: -f1)
+              case "$file" in
+                ./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md)
+                  ;;
+                *)
+                  echo "::warning file=$file::Banned term '$term' appears outside allowed files"
+                  violations=$((violations+1))
+                  ;;
+              esac
+            done < <(grep -nH "$term" $files_to_scan 2>/dev/null)
+          done
+          echo "Total unflagged banned-term occurrences: $violations"
+          exit "$violations"
+
+  deps:
+    name: Runner capabilities + system deps (no-op when current)
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Guard — workspace must stay submodule-free
+        run: |
+          fail=0
+          if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
+            echo "::error::.git/modules is populated — deps must source from \$LAPLACE_EXTERNAL"
+            fail=1
+          fi
+          init=$(git submodule status 2>/dev/null | grep -cE '^[ +U]' || true)
+          if [ "${init:-0}" -gt 0 ]; then
+            echo "::error::$init submodule(s) initialized in workspace"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "workspace submodule-free"
+          exit "$fail"
+
+      - name: Toolchain probes
+        run: |
+          [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
+          command -v python3 >/dev/null || { echo "::error::python3 missing"; exit 1; }
+          command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
+          command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
+          command -v bash >/dev/null || { echo "::error::bash not found"; exit 1; }
+          RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
+          [ "$RESULT" = "laplace_admin on postgres" ] || { echo "::error::peer auth failed: $RESULT"; exit 1; }
+          UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
+          [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
+
+      - name: Sync /opt/laplace/external to .gitmodules pins
+        run: |
+          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
+            mkdir -p "/opt/laplace/$d"
+          done
+          scripts/sync-external.sh
+
+      - name: Build system deps (ExternalProject — idempotent)
+        run: |
+          cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+          umask 0002 && cmake --build build/deps -j
+
+      - name: Verify installed dep artifacts
+        run: |
+          miss=0
+          for f in \
+            /opt/laplace/proj/lib/libproj.so \
+            /opt/laplace/geos/lib/libgeos_c.so \
+            /opt/laplace/gdal/lib/libgdal.so \
+            /opt/laplace/pgsql-18/bin/postgres \
+            /opt/laplace/pgsql-18/lib/postgis-3.so \
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a; do
+            if [ -e "$f" ]; then echo "  ok $f"; else echo "::error::missing artifact: $f"; miss=1; fi
+          done
+          exit "$miss"
+
+  build:
+    name: Build — engine, extensions, app, perfcache
+    if: github.event_name != 'pull_request'
+    needs: [policy, deps]
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Clean build tree (dispatch full_clean only)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_clean
+        run: bash scripts/pipeline.sh clean
+
+      - name: Build
+        run: bash scripts/pipeline.sh build
+
+  unit-test:
+    name: Unit tests — native engine (ctest, excludes pg_regress)
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure -LE regress
+
+  deploy:
+    name: Deploy — stage install to /opt/laplace
+    if: github.event_name != 'pull_request'
+    needs: unit-test
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Stop API for the deploy window
+        run: sudo systemctl stop laplace-api || true
+
+      - name: Install
+        run: bash scripts/pipeline.sh install
+
+  db-ops:
+    name: DB — migrate, extension sync, perfcache GUC
+    if: github.event_name != 'pull_request'
+    needs: deploy
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Migrate + sync extension + perfcache GUC + API env
+        run: |
+          args=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
+            args+=(--fresh-db)
+          fi
+          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension perfcache-guc api-env
+
+  integration-test:
+    name: Integration tests — pg_regress + dotnet (solution-wide)
+    if: github.event_name != 'pull_request'
+    needs: db-ops
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Clear stale regress output (diffs below must be from THIS run)
+        run: rm -rf build/extension/*/tests/regress_output
+
+      - name: pg_regress
+        run: ctest --test-dir build --output-on-failure -L regress
+
+      - name: Show regress diffs on failure
+        if: failure()
+        run: |
+          for f in build/extension/*/tests/regress_output/regression.diffs; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+      - name: dotnet test (whole solution — no per-project lists)
+        run: |
+          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
+            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
+          export LAPLACE_PERFCACHE_BIN="$bin"
+          echo "LAPLACE_PERFCACHE_BIN=$bin"
+          # Tier=perf throughput gates need a clean DB; skip on the live substrate.
+          cd app
+          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+            --filter 'Tier!=perf'
+
+  publish:
+    name: Publish — API + SPA, restart service
+    if: github.event_name != 'pull_request'
+    needs: integration-test
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Publish API + SPA
+        run: bash scripts/pipeline.sh publish
+
+      - name: Restart API + health gate
+        run: |
+          sudo systemctl restart laplace-api
+          sleep 3
+          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
+            sudo journalctl -u laplace-api -n 40 --no-pager
+            exit 1
+          }
+
+  seed:
+    name: Seed — foundation ladder (idempotent, no-op when present)
+    if: github.event_name != 'pull_request'
+    needs: publish
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Ensure foundation
+        run: |
+          args=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
+            args+=(--force)
+          fi
+          bash scripts/pipeline.sh "${args[@]}" foundation
+
+  smoke:
+    name: Smoke — live endpoint + substrate counts
+    if: github.event_name != 'pull_request'
+    needs: seed
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Live endpoint smoke
+        run: |
+          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
+          curl -fsS http://127.0.0.1:5187/health/ready
+          echo
+          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
+            -c "SELECT metric, value FROM laplace.substrate_counts();"
+          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
+          echo
+
+      - name: Endpoint contract tests against the live service
+        run: |
+          cd app
+          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+            --filter 'Tier!=perf & FullyQualifiedName~Endpoints.OpenAICompat'
+
+  restore-api:
+    name: Restore API (always — even after failed stages)
+    if: always() && github.event_name != 'pull_request' && needs.deploy.result != 'skipped'
+    needs: [deploy, publish, seed, smoke]
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 10
+    steps:
+      - name: Ensure API is running
+        run: |
+          sudo systemctl start laplace-api || true
+          sleep 3
+          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
+            echo "::warning::laplace-api unhealthy after restore"
+            sudo journalctl -u laplace-api -n 40 --no-pager
+            exit 1
+          }

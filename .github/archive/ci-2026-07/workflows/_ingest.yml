@@ -1,0 +1,81 @@
+name: _ingest (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: "ingest-source.sh source name"
+        type: string
+        required: true
+      timeout-minutes:
+        description: "explicit job timeout — never the silent 360 default"
+        type: number
+        required: true
+      gate:
+        description: "newline 'RELATION_TYPE MIN_CONSENSUS' pairs gated post-ingest"
+        type: string
+        default: ""
+      path-arg:
+        description: "optional positional arg (model dir)"
+        type: string
+        default: ""
+      database:
+        description: "target database (two-DB law: laplace = CI, laplace-dev = manual)"
+        type: string
+        default: "laplace"
+      langs:
+        description: "language scope (LAPLACE_INGEST_LANGS) — ud/wiktionary law: en"
+        type: string
+        default: ""
+      workers:
+        description: "LAPLACE_INGEST_WORKERS override (conceptnet law: 1)"
+        type: string
+        default: ""
+      commit-rows:
+        description: "LAPLACE_INGEST_COMMIT_ROWS override (conceptnet law: 50000)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_INGEST_WORKERS: 2
+  LAPLACE_DECOMPOSE_WORKERS: 2
+  LAPLACE_FOLD_WORKERS: 4
+
+jobs:
+  ingest:
+    name: "${{ inputs.source }} → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest ${{ inputs.source }}
+        env:
+          LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+        run: |
+          
+          if [ -n "${{ inputs.langs }}" ]; then export LAPLACE_INGEST_LANGS="${{ inputs.langs }}"; fi
+          if [ -n "${{ inputs.workers }}" ]; then export LAPLACE_INGEST_WORKERS="${{ inputs.workers }}"; fi
+          if [ -n "${{ inputs.commit-rows }}" ]; then export LAPLACE_INGEST_COMMIT_ROWS="${{ inputs.commit-rows }}"; fi
+          if [ -n "${{ inputs.path-arg }}" ]; then
+            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path-arg }}"
+          else
+            scripts/ingest-source.sh "${{ inputs.source }}"
+          fi
+      - name: gate signature arenas
+        if: ${{ inputs.gate != '' }}
+        env:
+          GATE_SPEC: ${{ inputs.gate }}
+        run: |
+          gate() {
+            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.relation_type_id('$1'));")
+            echo "gate $1: consensus=$n (min $2)"
+            [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
+          }
+          printf '%s\n' "$GATE_SPEC" | while read -r rel_type min; do
+            if [ -n "$rel_type" ]; then gate "$rel_type" "$min"; fi
+          done

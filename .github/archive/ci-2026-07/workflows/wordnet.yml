@@ -1,0 +1,45 @@
+name: wordnet
+
+on:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: "target DB"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      deploy:
+        description: "build+install+migrate first"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      database:
+        type: string
+        default: "laplace"
+      deploy:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ inputs.deploy }}
+    uses: ./.github/workflows/_build-deploy.yml
+    with:
+      database: ${{ inputs.database }}
+
+  ingest:
+    needs: deploy
+    if: ${{ !cancelled() && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: wordnet
+      timeout-minutes: 90
+      database: ${{ inputs.database }}
+      gate: |
+        IS_A 50000
+        HAS_DOMAIN_TOPIC 1
+        HAS_VERB_FRAME 1
