@@ -19,7 +19,7 @@ if not exist "%LIVE%\" (
 )
 
 
-tasklist /fi "imagename eq w3wp.exe" | find /i "w3wp.exe" >nul
+tasklist /fi "imagename eq w3wp.exe" | "%SystemRoot%\System32\find.exe" /i "w3wp.exe" >nul
 if not errorlevel 1 (
     echo [deploy-api] w3wp is RUNNING — stop the laplace-api app pool first, then re-run this.
     exit /b 1

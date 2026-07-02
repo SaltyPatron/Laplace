@@ -119,9 +119,15 @@ phrase_id_is_entity(hash128_t *id)
     int   rc;
     Datum d;
 
+    /* STORED-row check, deliberately NOT entity_exists(): that helper also
+     * answers true for any valid codepoint via the perfcache axiom, and
+     * under the tier-blind content law (same content = same hash; tier is a
+     * floor) a single-letter word IS its codepoint — the axiom would make
+     * stopwords like 'a' hijack phrase resolution ahead of real lexical
+     * matches. "Is this segment known content" is the stored-row question. */
     args[0] = hash128_to_datum(id);
     rc = SPI_execute_with_args(
-        "SELECT laplace.entity_exists($1)",
+        "SELECT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = $1)",
         1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return false;

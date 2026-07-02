@@ -66,6 +66,10 @@ public sealed class IngestBatchConfig
     /// duplicate emission a no-op). BatchSize is ignored in this mode.
     /// </summary>
     public bool WorkingSet { get; init; }
+
+    /// <summary>Records per descent interval in working-set mode; tests pin
+    /// this — production uses WorkingSetMode.ProbeIntervalRecords.</summary>
+    public int? WorkingSetProbeInterval { get; init; }
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
@@ -108,6 +112,7 @@ public sealed class IngestBatchConfig
             PhysicalityCapacity = PhysicalityCapacity,
             AttestationCapacity = AttestationCapacity,
             WorkingSet = WorkingSet,
+            WorkingSetProbeInterval = WorkingSetProbeInterval,
         };
 }
 
@@ -141,13 +146,20 @@ public static class IngestBatchPipeline
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var reader = config.EffectiveReader ?? AllAbsentSubstrateReader.Instance;
-        var pending = new List<TRecord>(config.ProbeChunkSize);
 
-        // Working-set mode: one builder for the whole stream, one change at
-        // the end, no per-BatchSize yields. probedAbsent spans this run only.
+        // Working-set mode: descent runs at LARGE accumulation intervals
+        // (probe round trips scale with distinct ids / interval, never rows);
+        // one builder spans the stream; the only mid-stream yield is the
+        // memory-budget valve, which closes one working set and opens the
+        // next through the same path. probedAbsent spans this run only.
+        int probeInterval = config.WorkingSet
+            ? Math.Max(config.ProbeChunkSize,
+                config.WorkingSetProbeInterval ?? WorkingSetMode.ProbeIntervalRecords)
+            : config.ProbeChunkSize;
+        var pending = new List<TRecord>(Math.Min(probeInterval, 65_536));
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
 
-        var state = new BatchState(config.NewBuilder(0));
+        var state = new BatchState(config.NewBuilder(0), resetBankOnBuild: !config.WorkingSet);
         long rowsTotal = 0;
         long unitsConsumed = 0;
 
@@ -167,10 +179,17 @@ public static class IngestBatchPipeline
             }
 
             pending.Add(record);
-            if (pending.Count >= config.ProbeChunkSize)
+            if (pending.Count >= probeInterval)
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
+
+                if (config.WorkingSet && state.InBatch > 0
+                    && state.Builder.StagedBytesEstimate >= WorkingSetMode.BudgetBytes)
+                {
+                    yield return await state.YieldBatchAsync(ct);
+                    state.ResetBuilder(config.NewBuilder(state.BatchNumber));
+                }
             }
             unitsConsumed += units;
 
@@ -273,7 +292,7 @@ public static class IngestBatchPipeline
         }
     }
 
-    private sealed class BatchState(SubstrateChangeBuilder builder)
+    private sealed class BatchState(SubstrateChangeBuilder builder, bool resetBankOnBuild = true)
     {
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
@@ -291,7 +310,11 @@ public static class IngestBatchPipeline
         public async Task<SubstrateChange> YieldBatchAsync(CancellationToken ct)
         {
             var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
-            IntentStage.ResetContentBank();
+            // Working-set mode keeps the content bank across builds: content
+            // already witnessed by an earlier (committed-first) stage must
+            // not re-stage in later ones. The runner resets it at the
+            // working-set boundary, after the apply commits.
+            if (resetBankOnBuild) IntentStage.ResetContentBank();
             InBatch = 0;
             _rowsInBatch = 0;
             BatchNumber++;
@@ -301,7 +324,7 @@ public static class IngestBatchPipeline
         public async Task<SubstrateChange> BuildRemainingAsync(CancellationToken ct)
         {
             var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
-            IntentStage.ResetContentBank();
+            if (resetBankOnBuild) IntentStage.ResetContentBank();
             return change;
         }
     }

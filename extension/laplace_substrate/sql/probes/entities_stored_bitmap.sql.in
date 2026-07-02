@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap'
+    LANGUAGE C STABLE;

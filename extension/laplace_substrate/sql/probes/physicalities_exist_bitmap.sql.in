@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
+    LANGUAGE C STABLE;

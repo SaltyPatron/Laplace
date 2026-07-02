@@ -939,3 +939,105 @@ path; GrammarEntityBuilder/GrammarRowComposer compose exceptions now report cont
 first-invalid-byte offset, surrounding hex, and a lossy text preview (DescribeContent).
 Do NOT chase further without a reproduction; the diagnostics will hand over the record if it
 ever fires again.
+
+UPDATE 2026-07-02 (later) — Rule #8 Phase 2 landed: the write protocol
+(plan: ~/.claude/plans/enumerated-growing-kay.md; spec: 06 Rule #8)
+apply_batch is NO LONGER CALLED from C#. NpgsqlSubstrateWriter's core
+(Npgsql/NpgsqlWorkingSetApply.cs, partial class) now does: one tx
+[SET LOCAL replica/sync_off/jit_off + pg_advisory_xact_lock('laplace_apply_batch' key,
+same key as before) -> optional flush-journal token claim -> in-tx bulk verification
+probes -> subtract hits -> pure COPY direct into laplace.entities/physicalities/
+attestations (tier order irrelevant within one atomic tx) -> ONE unnest UPDATE merging
+present attestations (counts sum, GREATEST ts)]. No temp tables, no anti-join, no
+ON CONFLICT. CopyTupleParser.cs parses the native IntentStage COPY blobs client-side
+(ids, phys entity refs, attestation ts/count + patch offsets) and re-emits filtered
+row subsets byte-identically (contiguous kept rows coalesce into windowed copies).
+ApplyManyAsync and the new ApplyWorkingSetAsync(change) share this core; the working-set
+lane additionally claims laplace.ingest_flush_journal (working_set_id = intent hash,
+INSERT ON CONFLICT DO NOTHING) so a retry after commit-ambiguity is a no-op instead of
+double-counting the additive attestation merges.
+
+Three new probes (all batch_presence_core, positive-confirmation-only):
+- entities_stored_bitmap: perfcache OFF — the write lane needs "is there a committed
+  ROW", not "is this id resolvable"; the axiom answer would silently drop every tier-0
+  codepoint entity during the unicode seed (they only exist because this lane writes them).
+- physicalities_exist_bitmap: physicality presence decided by its OWN id, never inferred
+  from its entity — projections/building blocks legitimately land after the entity exists
+  (the first draft inferred from entity presence and broke
+  ApplyAsync_PhysicalitiesSameEntityType_DistinctIds_CoexistAndDedupById).
+- attestations_exist_bitmap already existed (Phase 0).
+
+Duplicate semantics preserved exactly from apply_batch: duplicate staged attestation ids
+collapse to the latest-ts representative with summed games (client-side now, count patched
+in the COPY stream); entities/physicalities dedup first-occurrence. Fixed in passing: the
+old managed marshal dropped duplicate attestation ids across changes (seenAtt first-wins)
+LOSING their observation counts — pre-existing data-loss bug, now merged properly.
+
+Perf A/B on the exact 500k-attestation throughput workload (fixture DB, Debug):
+old lane = 537ms COPY-to-temp + 6,812ms apply_batch = 7.3s; new lane = ~330ms client
+(parse 62/group 47/probe 173/emit 49) + 3.0s real COPY = ~3.3s. New lane 2.2x faster.
+The Tier=perf 500k rows/s gates (IngestBaselineGates.MinWriterRowsPerSecond) did not pass
+on the old lane on this machine either — author confirms they are arbitrary metrics tests,
+bypassed for now (already Tier!=perf-excluded in CI/test-app.cmd). New
+BulkApply_RoundTrips_StayConstantInRowCount replaces the retired 1-vs-8 partition test
+(partition fan-out deleted: the advisory lock serialized it anyway).
+
+Suites green post-change: SubstrateCRUD 62/62 (Tier!=perf), Decomposers.Abstractions
+302/302, Engine.Core 105/105, Ingestion 16/16, WorkingSetApplyTests 4/4 (repeat-apply
+subtraction, dup collapse, interior-subtree subtraction, journal replay no-op),
+CopyTupleParserTests 5/5 (incl. byte-identical full re-emission vs native EmitCopyBinary).
+Also fixed: UnicodeSeedIntegrationTests.ResolvePerfcacheBlob threw DirectoryNotFoundException
+on Windows probing the Linux /opt root (pre-existing env bug, masked both unicode tests).
+
+Phase 2 residual: live-gate run (fresh DB, unicode+wordnet seed via new lane, repeat-ingest
+0 inserts) pending; apply_batch native fn + wrapper SQL still installed (deletion is
+Phase 5); IngestRunner still per-batch ApplyManyAsync (working-set wiring is Phase 4).
+
+UPDATE 2026-07-02 (evening) — Phase 2 GATE CLOSED, plus two build-staleness incidents root-caused
+Gate results (fresh DB, unicode + wordnet via seed-step, all through the new write lane):
+- unicode: 1m52s (ingest 76.6s + fold ~34s), 1,632,018 attestations, layer_complete.
+- wordnet: 2m27s (ingest 103.5s + fold 46s), 725,076 novel entities, 2,267,608
+  attestations, 76 round trips across 8 intents. senses('dog')=8, define() returns
+  the real gloss.
+- repeat-ingest: completion-marker short-circuit, 0 intents, 0 RT, 5.9s.
+- FORCED repeat (--force, author-directed): 0e+0p+0a across ALL 2.28M staged rows,
+  59 RT, counts byte-identical, no PK violations; attestation observation_counts
+  exactly doubled (1→2, 2→4, ...) — the merge lane summed exactly once per
+  re-observation. Author: "non-issue but we just proved your fix."
+
+Incident 1 — stale Release binary: seed-step.cmd runs `dotnet run -c Release --no-build`;
+the first post-rewrite seeds executed a pre-Phase-2 binary and resurrected apply_batch,
+which stalled terminally (active query, zero CPU/disk — the recurring stall). Killing the
+backend surfaced the old-lane stack trace. Root fix beyond rebuilding: app/Directory.Build.props
+now DEFAULTS LAPLACE_BUILD_ROOT to D:\Data\Builds\Laplace on Windows (bare dotnet build,
+IDE, and env.cmd builds all share ONE output universe), in-repo obj/bin are glob-excluded
+(DefaultItemExcludes) and were purged (110 dirs) — this also killed the CS0579
+duplicate-AssemblyInfo publish failure.
+
+Incident 2 — split hash universes: extension DLLs import laplace_core_static.lib from
+build-win (extension/CMakeLists.txt:63); the engine static lib predated the a8d344d
+tier-byte revert while the CLI's laplace_core.dll did not. Result: word_id('dog') =
+tier-MIXED hash (ecada9c9...) vs decomposer 'dog' = tier-blind (01cdcce1...) — the seeded
+data was CORRECT; word_id/senses() were the liars (senses=0, "wordnet lexicon not
+queryable"). Proven live via laplace_hash128_merkle(0,[x]) <> merkle(1,[x]) on the deployed
+lib (tier_blind_live=f), then rebuilt extensions against the fresh engine → converged
+(tier_blind_live=t, word_id('dog') == DB id, senses=8). LESSON: build-extensions after ANY
+engine rebuild — the static-lib import means extension DLL freshness does NOT imply engine
+code freshness. The `check wordnet/dog: id_ok` field is near-useless (word_id never returns
+NULL for non-empty input) — it green-lit a broken universe; senses>0 is the real check.
+
+Also fixed in passing: WordNetDecomposer.DescribeInputAsync counted only synset lines
+(117,659) while decompose runs four record streams against one consumed counter →
+input_pct=284%. Inventory now counts index.sense/*.exc/sentidx.vrb too (unit label
+"records"). NOTE: Laplace.Cli Release output still carries the pre-fix decomposer DLL
+(built after the last Cli Release build) — next `dotnet build Laplace.Cli -c Release`
+picks it up; harmless until then (cosmetic percentage only).
+
+Windows scripts: seed-step/deploy-api/seed-everything/seed-post-wiktionary now invoke
+"%SystemRoot%\System32\find.exe" explicitly — git-bash findutils can no longer shadow the
+tasklist|find guards (the cosmetic `find: '/I'` noise is gone; the guard still checks the
+wrong image name Laplace.Cli.exe vs dotnet.exe — known, unchanged).
+
+Phase 2 is DONE. Remaining: Phase 3 (client-side consensus fold — the 34-52s server fold
+per seed is now the dominant cost), Phase 4 (working-set wiring + OMW wall-time target,
+ReadAllBytes fix), Phase 5 (deletions incl. apply_batch itself).

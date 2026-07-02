@@ -110,6 +110,27 @@ public sealed class SubstrateChangeBuilder
         }
     }
 
+    /// <summary>
+    /// Staged bytes held by this builder — native COPY-tuple buffers plus a
+    /// coarse per-row estimate for managed rows. Drives the working-set
+    /// memory budget valve; an estimate, not an accounting.
+    /// </summary>
+    public long StagedBytesEstimate
+    {
+        get
+        {
+            long total = 0;
+            foreach (var s in _intentStages)
+                if (!s.IsInvalid) total += s.TotalTupleBytes;
+            total += (long)_entities.Count * 72
+                   + (long)_physicalities.Count * 160
+                   + (long)_attestations.Count * 152;
+            foreach (var p in _physicalities)
+                if (p.TrajectoryXyzm is { } t) total += (long)t.Length * 8;
+            return total;
+        }
+    }
+
 
 
 

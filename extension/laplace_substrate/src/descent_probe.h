@@ -51,3 +51,19 @@ int laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int ca
  * construction). Serves the working-set write protocol's in-transaction
  * re-probe of claimed-novel attestation ids. */
 int laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
+
+/* Used by physicalities_exist_bitmap(ids bytea[]) -- positive-confirmation
+ * presence against `physicalities` by the row's OWN id. A physicality may
+ * legitimately be staged for an already-stored entity (projections /
+ * building blocks arrive after the entity), so the write lane must never
+ * infer physicality presence from entity presence. */
+int laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
+
+/* Used by entities_stored_bitmap(ids bytea[]) -- "is there a committed
+ * entities ROW", with the perfcache codepoint fast path deliberately OFF.
+ * entities_exist_bitmap answers resolvability (perfcache ids count as
+ * present without a table read), which is right for dedup/descent but wrong
+ * for the write lane's in-transaction verification: that probe decides what
+ * gets written, and tier-0 rows only exist because the unicode seed writes
+ * them through this very lane. */
+int laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);

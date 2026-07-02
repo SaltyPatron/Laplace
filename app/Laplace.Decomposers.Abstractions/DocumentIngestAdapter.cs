@@ -88,5 +88,6 @@ public static class DocumentIngestSupport
             ProbeChunkSize = Math.Clamp(batchSize, 16, 256),
             WitnessWeight = UserPromptContent.WitnessWeight,
             ContainmentReader = reader,
+            WorkingSet = WorkingSetMode.Enabled,
         };
 }

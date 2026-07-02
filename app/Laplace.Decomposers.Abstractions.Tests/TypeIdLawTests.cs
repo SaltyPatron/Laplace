@@ -137,6 +137,18 @@ public class TypeIdLawTests
 
     private static string FindRepoRoot()
     {
+        // Build outputs live outside the repo (Directory.Build.props), so
+        // the ancestor walk from the test binary can't reach it — the props
+        // file stamps the root into every assembly instead.
+        var stamped = typeof(TypeIdLawTests).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .OfType<System.Reflection.AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
+        if (stamped is not null
+            && Directory.Exists(Path.Combine(stamped, "app"))
+            && Directory.Exists(Path.Combine(stamped, "engine")))
+            return stamped;
+
         var dir = AppContext.BaseDirectory;
         while (dir is not null)
         {

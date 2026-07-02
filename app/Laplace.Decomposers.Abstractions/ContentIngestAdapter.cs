@@ -77,13 +77,16 @@ public sealed class FakeTabIngestDecomposer : IDecomposer
 {
     private readonly IReadOnlyList<ContentIngestRecord> _records;
     private readonly IngestBatchConfig _config;
+    private readonly bool _workingSet;
 
     public FakeTabIngestDecomposer(
         IReadOnlyList<ContentIngestRecord> records,
         Hash128 sourceId,
         int batchSize = 4,
-        ISubstrateReader? containmentReader = null)
+        ISubstrateReader? containmentReader = null,
+        bool? workingSet = null)
     {
+        _workingSet = workingSet ?? WorkingSetMode.Enabled;
         _records = records;
         _config = new IngestBatchConfig
         {
@@ -122,6 +125,7 @@ public sealed class FakeTabIngestDecomposer : IDecomposer
             ContainmentReader = _config.ContainmentReader,
             ReportUnits = _config.ReportUnits,
             MaxInputUnits = _config.MaxInputUnits,
+            WorkingSet = _workingSet,
         };
 
         await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))

@@ -115,6 +115,7 @@ public static class SemLinkIngestSupport
             // those bypass the containment reader and re-stage already-present
             // content unconditionally. No-op when reader is null.
             EnableDeferredContentOnBuilder = true,
+            WorkingSet = WorkingSetMode.Enabled,
         };
 
     public static async IAsyncEnumerable<SubstrateChange> IngestJsonDocumentAsync(

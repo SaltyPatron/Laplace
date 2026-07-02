@@ -19,4 +19,8 @@
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.SubstrateCRUD.Tests" />
+  </ItemGroup>
+
 </Project>

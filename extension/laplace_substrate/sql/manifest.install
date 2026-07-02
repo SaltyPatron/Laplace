@@ -2,6 +2,8 @@ schema/laplace_substrate_version.sql.in
 schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
+schema/tables/ingest_flush_journal.sql.in
+schema/tables/index_cycle_journal.sql.in
 indexes/entities_tier_btree.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
@@ -28,6 +30,8 @@ probes/attestations_present_ordinals.sql.in
 probes/table_present_ordinals.sql.in
 probes/entities_exist_bitmap.sql.in
 probes/attestations_exist_bitmap.sql.in
+probes/entities_stored_bitmap.sql.in
+probes/physicalities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
 probes/drop_content_descent_novel_ordinals.sql.in

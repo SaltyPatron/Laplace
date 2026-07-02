@@ -217,6 +217,7 @@ public static class UdIngestSupport
             EntityCapacity = batchSentences * 40,
             PhysicalityCapacity = batchSentences * 40,
             AttestationCapacity = batchSentences * 60,
+            WorkingSet = WorkingSetMode.Enabled,
         };
 
     public static int ResolveBatchSentences(DecomposerOptions options) =>

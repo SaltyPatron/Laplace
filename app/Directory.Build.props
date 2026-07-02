@@ -1,6 +1,27 @@
 <Project>
+  <!--
+    All build outputs live OUTSIDE the repo, always. LAPLACE_BUILD_ROOT
+    defaults on Windows so bare `dotnet build`/IDE builds land in the same
+    tree as env.cmd-driven script builds — a split default previously left
+    stale in-repo obj/ folders whose generated AssemblyInfo.cs got globbed
+    into redirected builds (CS0579 duplicate-attribute failures). Linux/CI
+    keeps in-repo outputs unless it sets LAPLACE_BUILD_ROOT itself.
+  -->
+  <PropertyGroup>
+    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Builds\Laplace</LAPLACE_BUILD_ROOT>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
     <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>
     <BaseIntermediateOutputPath>$(LAPLACE_BUILD_ROOT)\app\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
   </PropertyGroup>
+  <PropertyGroup>
+    <!-- Never compile leftovers from a previous in-repo output layout. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Outputs live outside the repo, so tests can no longer find the repo
+         root by walking up from their own binary — stamp it instead. -->
+    <AssemblyMetadata Include="LaplaceRepoRoot"
+                      Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))" />
+  </ItemGroup>
 </Project>

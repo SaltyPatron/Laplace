@@ -433,6 +433,12 @@ DECLARE
     o bytea := laplace_hash128_blake3('test/guard/object');
     refused boolean := false;
 BEGIN
+    -- consensus carries real FKs to entities (the content swap preserves them;
+    -- the old identity swap silently produced an FK-less table, which is the
+    -- only reason this fixture ever worked without these rows).
+    INSERT INTO entities (id, tier, type_id, first_observed_by)
+    VALUES (s, 0, type_t, NULL), (t, 0, type_t, NULL), (o, 0, type_t, NULL)
+    ON CONFLICT DO NOTHING;
     DELETE FROM consensus;
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)

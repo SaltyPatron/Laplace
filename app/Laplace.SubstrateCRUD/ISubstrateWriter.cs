@@ -36,6 +36,24 @@ public interface ISubstrateWriter
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
 
+    /// <summary>
+    /// Applies one whole working set (Rule #8: descent already filtered the
+    /// change to claimed-novel rows; the writer verifies in-transaction and
+    /// bulk-COPYs what survives). Implementations without a working-set lane
+    /// fall back to a plain apply.
+    /// </summary>
+    Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
+        => ApplyAsync(change, ct);
+
+    /// <summary>
+    /// Applies a group of changes as ONE working set — one transaction, one
+    /// verification pass, one idempotency token derived from every member's
+    /// intent hash. The runner accumulates per-file/per-budget changes and
+    /// closes them here.
+    /// </summary>
+    Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+        => ApplyManyAsync(changes, ct);
+
 
 
 

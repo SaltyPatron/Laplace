@@ -355,6 +355,24 @@ pg_laplace_attestations_exist_bitmap(PG_FUNCTION_ARGS)
                                   laplace_attestations_present_bitmap);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_entities_stored_bitmap);
+
+Datum
+pg_laplace_entities_stored_bitmap(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum(fcinfo, "entities_stored_bitmap",
+                                  laplace_entities_stored_bitmap);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap);
+
+Datum
+pg_laplace_physicalities_exist_bitmap(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum(fcinfo, "physicalities_exist_bitmap",
+                                  laplace_physicalities_present_bitmap);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
 
 /*

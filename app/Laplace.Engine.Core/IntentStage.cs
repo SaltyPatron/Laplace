@@ -179,6 +179,27 @@ public sealed class IntentStage : SafeHandle
         return ((IntPtr)p, checked((long)len));
     }
 
+    /// <summary>Total staged COPY-tuple bytes across all three tables.</summary>
+    public long TotalTupleBytes
+    {
+        get
+        {
+            ThrowIfDisposed();
+            long total = 0;
+            unsafe
+            {
+                nuint len;
+                NativeInterop.IntentStageTuplePtr(handle, (int)IntentStageTable.Entities, &len);
+                total += checked((long)len);
+                NativeInterop.IntentStageTuplePtr(handle, (int)IntentStageTable.Physicalities, &len);
+                total += checked((long)len);
+                NativeInterop.IntentStageTuplePtr(handle, (int)IntentStageTable.Attestations, &len);
+                total += checked((long)len);
+            }
+            return total;
+        }
+    }
+
     public int EmitCopyBinary(IntentStageTable table, Span<byte> dest)
     {
         ThrowIfDisposed();

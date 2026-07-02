@@ -14,7 +14,7 @@ public sealed class FakeTabIngestDecomposerTests
             .Select(i => ContentRecord($"tab-row-{i}"))
             .ToList();
 
-        var decomposer = new FakeTabIngestDecomposer(records, TestSource, batchSize: 2);
+        var decomposer = new FakeTabIngestDecomposer(records, TestSource, batchSize: 2, workingSet: false);
         var ctx = new FakeDecomposerContext();
 
         var changes = new List<SubstrateChange>();

@@ -1,0 +1,9 @@
+-- Idempotency tokens for the working-set write lane. One row per applied
+-- working set (id = the working set's intent hash), claimed with
+-- INSERT ... ON CONFLICT DO NOTHING inside the apply transaction: a retry
+-- after commit-ambiguity finds the token and skips the additive lanes
+-- (attestation count merges) that would otherwise double-apply.
+CREATE TABLE IF NOT EXISTS ingest_flush_journal (
+    working_set_id  bytea        PRIMARY KEY CHECK (octet_length(working_set_id) = 16),
+    applied_at      timestamptz  NOT NULL DEFAULT now()
+);

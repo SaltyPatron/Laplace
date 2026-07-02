@@ -99,7 +99,7 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_impl
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
 if not errorlevel 1 (
   echo ERROR: Laplace.Cli.exe is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
@@ -112,7 +112,7 @@ call :wait_cli_exit
 exit /b 0
 
 :wait_cli_exit
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
 if errorlevel 1 exit /b 0
 timeout /t 1 /nobreak >nul 2>nul
 goto wait_cli_exit

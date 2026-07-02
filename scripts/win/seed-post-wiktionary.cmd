@@ -8,7 +8,7 @@ echo ===== seed-post-wiktionary started %DATE% %TIME% =====
 
 echo [%TIME%] waiting for wiktionary ingest to finish...
 :wait_wikt
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
 if not errorlevel 1 (
   timeout /t 30 /nobreak >nul 2>nul
   goto wait_wikt

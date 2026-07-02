@@ -50,7 +50,7 @@ public sealed class IngestPipelineWrongPatternTests
         var applyCalls = 0;
         var fakeWriter = new FakeWriter(() => Interlocked.Increment(ref applyCalls));
 
-        var decomposer = new FakeTabIngestDecomposer(records, TestSource, batchSize: 2);
+        var decomposer = new FakeTabIngestDecomposer(records, TestSource, batchSize: 2, workingSet: false);
         var ctx = new FakeDecomposerContext(fakeWriter);
 
         var changes = new List<SubstrateChange>();

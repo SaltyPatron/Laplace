@@ -127,7 +127,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         foreach (var root in new[] { "/opt/laplace/share/laplace", AppContext.BaseDirectory })
         {
             var dir = new DirectoryInfo(root);
-            while (dir is not null)
+            while (dir is not null && dir.Exists)
             {
                 foreach (var build in dir.EnumerateDirectories("build*"))
                 {

@@ -100,8 +100,11 @@ public sealed class CompoundIdentifierDecompositionTests
 
         // Every SUB-word tier of standalone "abandon" (words, graphemes,
         // codepoints — tiers <= 2) must reappear identically inside the
-        // compound's tree; only wrapper tiers above the word (sentence/
-        // document nodes whose content legitimately differs) may diverge.
+        // compound's tree. Standalone "abandon"'s nodes ABOVE tier 2 carry
+        // the word's own id (tier is a floor — a one-word content unit IS
+        // the word, see TierFloorIdentityTests); the compound's higher-tier
+        // nodes carry the compound's id (different content). So tiers <= 2
+        // is the correct comparison universe, not an exemption.
         var leaks = new List<string>();
         foreach (var (tier, ids) in standalone.OrderBy(kv => kv.Key))
         {

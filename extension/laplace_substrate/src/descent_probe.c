@@ -177,3 +177,31 @@ laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candi
                                "SELECT idx FROM laplace.attestations_present_ordinals($1)",
                                false);
 }
+
+int
+laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    /* Physicality ids are their own content hashes, never codepoint ids --
+     * perfcache fast path off by construction. Serves the write lane's
+     * in-transaction verification: a physicality row may legitimately be
+     * staged for an entity that already exists (projections, building
+     * blocks land after the entity), so presence is decided by the
+     * physicality's OWN id, never inferred from its entity. */
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.physicalities_present_ordinals($1)",
+                               false);
+}
+
+int
+laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    /* Perfcache fast path deliberately OFF: this probe answers "is there a
+     * committed entities ROW", not "is this id resolvable". The write lane's
+     * in-transaction verification is what makes tier-0 codepoint rows stored
+     * in the first place (the unicode seed) -- answering their presence
+     * axiomatically here would subtract them from the write list and the
+     * rows would never land. */
+    return batch_presence_core(ids_array, bm, candidate_count,
+                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
+                               false);
+}

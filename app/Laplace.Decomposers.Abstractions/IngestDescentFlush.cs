@@ -31,9 +31,35 @@ internal static class IngestDescentFlush
         if (records.Count == 0)
             return shortcircuited;
 
+        // Deferred-unit creation is the CPU-heavy client-side stage (grammar
+        // parse + tier-tree build + merkle compose per record) — fan it out
+        // across P-cores. Everything downstream (drain into the shared
+        // builder) stays sequential; unit creation touches only per-record
+        // state and the lock-free perfcache.
+        var units = new IIngestDeferredUnit[records.Count];
+        int composeWorkers = Math.Min(records.Count >= 64
+            ? CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8) : 1, records.Count);
+        if (composeWorkers <= 1)
+        {
+            for (int i = 0; i < records.Count; i++)
+                units[i] = handler.CreateDeferredUnit(records[i]);
+        }
+        else
+        {
+            var snapshot = records;
+            int nextIdx = -1;
+            await CpuTopology.RunPinnedAsyncParallel(composeWorkers, (_, _) =>
+            {
+                for (int i = Interlocked.Increment(ref nextIdx); i < snapshot.Count;
+                     i = Interlocked.Increment(ref nextIdx))
+                    units[i] = handler.CreateDeferredUnit(snapshot[i]);
+                return Task.CompletedTask;
+            }, ct).ConfigureAwait(false);
+        }
+
         var pending = new List<(TRecord Record, IIngestDeferredUnit Unit)>(records.Count);
-        foreach (var record in records)
-            pending.Add((record, handler.CreateDeferredUnit(record)));
+        for (int i = 0; i < records.Count; i++)
+            pending.Add((records[i], units[i]));
         records.Clear();
 
         var flatTrees = new List<TierTree?>();

@@ -501,7 +501,8 @@ internal static class IngestCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
         bool force = cli?.Force ?? false;
-        var innerWriter = new NpgsqlSubstrateWriter(ds, applyPartitions: topo.ApplyPartitions);
+        var innerWriter = new NpgsqlSubstrateWriter(ds,
+            logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
             freshSource: false,

@@ -8,7 +8,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
+public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
 {
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
 
@@ -102,7 +102,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                      || string.Equals(lane, "bulk", StringComparison.OrdinalIgnoreCase);
         if (_terminalFold)
             _log.LogInformation(
-                "terminal fold: epochs stage to disk and fold once at materialize (finish_consensus_fold)");
+                "LAPLACE_FOLD_LANE=terminal: flat periods now fold client-side per epoch regardless "
+                + "(no staging to defer); the flag only affects the walk-journal lane");
         if (_partitions is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(foldWorkers), _partitions,
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
@@ -126,7 +127,27 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         try
         {
             if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
-            return await ApplyManyCoreAsync(changes, ct);
+            return await ApplyManyCoreAsync(changes, ct, workingSet: false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inflightApplies);
+        }
+    }
+
+    public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
+        => ApplyWorkingSetAsync(new[] { change }, ct);
+
+    public async Task<ApplyResult> ApplyWorkingSetAsync(
+        IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+        Interlocked.Increment(ref _inflightApplies);
+        try
+        {
+            if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+            return await ApplyManyCoreAsync(changes, ct, workingSet: true);
         }
         finally
         {
@@ -135,7 +156,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     }
 
     private async Task<ApplyResult> ApplyManyCoreAsync(
-        IReadOnlyList<SubstrateChange> changes, CancellationToken ct)
+        IReadOnlyList<SubstrateChange> changes, CancellationToken ct, bool workingSet = false)
     {
         Dictionary<(Hash128 S, Hash128 K, Hash128? O), Acc>? commitBatchAcc = null;
 
@@ -175,7 +196,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
 
-        var result = await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
+        var result = workingSet
+            ? await _inner.ApplyWorkingSetAsync(ForwardChanges(changes), ct)
+            : await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
 
 
 
@@ -465,9 +488,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
 
 
-    private int PartitionOf(Acc acc)
-        => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
-
     public async Task FlushPeriodAsync(CancellationToken ct = default)
     {
         await _stagingGate.WaitAsync(ct);
@@ -497,7 +517,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 return;
             }
 
-            if (_maxFoldBacklog > 0 && !_terminalFold)
+            if (_maxFoldBacklog > 0)
             {
                 bool throttled = false;
                 while (Volatile.Read(ref _epochsStaged) - Volatile.Read(ref _epochsFolded) >= _maxFoldBacklog)
@@ -523,46 +543,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             if (snapshot.IsEmpty) return;
 
             int epoch = ++_periodEpoch;
-            var stageSw = System.Diagnostics.Stopwatch.StartNew();
-
-            await using (var conn = await _ds.OpenConnectionAsync(ct))
-            {
-                if (!_sweptStale)
-                {
-                    await using var sweep = conn.CreateCommand();
-                    sweep.CommandText = "SELECT laplace.drop_period_staging()";
-                    await sweep.ExecuteNonQueryAsync(ct);
-                    _sweptStale = true;
-                }
-                await using var ddl = conn.CreateCommand();
-                ddl.CommandText = "SELECT laplace.create_period_staging($1, $2)";
-                ddl.Parameters.AddWithValue(_partitions);
-                ddl.Parameters.AddWithValue(epoch);
-                await ddl.ExecuteNonQueryAsync(ct);
-                _anyEpochCreated = true;
-            }
-
-            var buckets = new List<Acc>[_partitions];
-            for (int k = 0; k < _partitions; k++) buckets[k] = new List<Acc>();
-            foreach (var acc in snapshot.Values) buckets[PartitionOf(acc)].Add(acc);
-
-            await CpuTopology.RunPinnedAsyncParallel(_partitions, async (part, token) =>
-            {
-                await CopyPartitionAsync(epoch, part, buckets[part], token);
-            }, ct);
-            stageSw.Stop();
             int staged = Interlocked.Increment(ref _epochsStaged);
             _log.LogInformation(
-                "consensus stage e{Epoch}: {Relations:N0} partial relations → {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s); fold queue depth {Depth}",
-                epoch, snapshot.Count, _partitions, stageSw.ElapsedMilliseconds,
-                snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds),
-                staged - Volatile.Read(ref _epochsFolded));
+                "consensus period e{Epoch}: {Relations:N0} pre-merged relations queued for client fold; fold queue depth {Depth}",
+                epoch, snapshot.Count, staged - Volatile.Read(ref _epochsFolded));
 
-            if (!_terminalFold)
-            {
-                var prev = _foldChain;
-                _foldChain = ChainFoldAsync(prev, epoch);
-            }
+            var prev = _foldChain;
+            _foldChain = FoldChainClientAsync(prev, epoch, snapshot.Values);
         }
         finally
         {
@@ -609,94 +596,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    private async Task ChainFoldAsync(Task prev, int epoch)
-    {
-        await prev.ConfigureAwait(false);
-        var foldSw = System.Diagnostics.Stopwatch.StartNew();
-        var counts = new long[_partitions];
-        await CpuTopology.RunPinnedAsyncParallel(_partitions, async (part, token) =>
-        {
-            await using var conn = await _ds.OpenConnectionAsync(token).ConfigureAwait(false);
-            conn.Notice += (_, e) =>
-                _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
-            await using (var sub = conn.CreateCommand())
-            {
-                sub.CommandText = "SET client_min_messages = 'log'";
-                await sub.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-            }
-            await using var tx = await conn.BeginTransactionAsync(token).ConfigureAwait(false);
-            try
-            {
-                await using (var guc = conn.CreateCommand())
-                {
-                    guc.Transaction = tx;
-                    guc.CommandText = "SET LOCAL session_replication_role = replica";
-                    await guc.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
-                await using var mat = conn.CreateCommand();
-                mat.Transaction = tx;
-                mat.CommandTimeout = 0;
-                mat.CommandText = _freshSource
-                    ? "SELECT laplace.materialize_period_partition_fresh(laplace.period_staging_table($1, $2))"
-                    : "SELECT laplace.materialize_period_partition(laplace.period_staging_table($1, $2))";
-                mat.Parameters.AddWithValue(epoch);
-                mat.Parameters.AddWithValue(part);
-                counts[part] = (long)(await mat.ExecuteScalarAsync(token).ConfigureAwait(false) ?? 0L);
-                await tx.CommitAsync(token).ConfigureAwait(false);
-            }
-            catch
-            {
-                try { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
-                catch { }
-                throw;
-            }
-        }, CancellationToken.None).ConfigureAwait(false);
-        foldSw.Stop();
-        long total = counts.Sum();
-        Interlocked.Add(ref _foldedRelations, total);
-        int folded = Interlocked.Increment(ref _epochsFolded);
-        _log.LogInformation(
-            "consensus fold e{Epoch}: {Relations:N0} relations materialized across {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s); epochs folded {Folded}/{Staged}",
-            epoch, total, _partitions, foldSw.ElapsedMilliseconds,
-            total / Math.Max(1e-3, foldSw.Elapsed.TotalSeconds),
-            folded, Volatile.Read(ref _epochsStaged));
-    }
-
     private const long PgEpochDeltaUs = 946_684_800_000_000L;
-    private const int MaxRowBytes = 110;
-
-    private static int WriteRow(Span<byte> dst, int o, Acc acc)
-    {
-        BinaryPrimitives.WriteInt16BigEndian(dst[o..], 7); o += 2;
-        o = PgBinaryCopy.WriteHash(dst, o, acc.Subject);
-        o = PgBinaryCopy.WriteHash(dst, o, acc.Type);
-        if (acc.Object is Hash128 obj) o = PgBinaryCopy.WriteHash(dst, o, obj);
-        else { BinaryPrimitives.WriteInt32BigEndian(dst[o..], -1); o += 4; }
-        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.PhiFp1e9);
-        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.Games);
-        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.SumScoreFp1e9);
-        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.MaxTsUnixUs - PgEpochDeltaUs);
-        return o;
-    }
-
-    private async Task CopyPartitionAsync(int epoch, int partition, List<Acc> rows, CancellationToken ct)
-    {
-        if (rows.Count == 0) return;
-        string table = $"consensus_period_staging_e{epoch:D4}_{partition}";
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY laplace.{table} "
-          + "(subject_id, type_id, object_id, phi, games, sum_score, last_ts) "
-          + "FROM STDIN (FORMAT BINARY)", ct);
-
-        var copy = new PgCopyRowBuffer(stream);
-        foreach (var acc in rows)
-        {
-            await copy.EnsureRoomAsync(MaxRowBytes, ct);
-            copy.Commit(WriteRow(copy.Array, copy.Filled, acc));
-        }
-        await copy.FinalizeAsync(ct);
-    }
 
     public async Task<long> FoldIncrementalAsync(CancellationToken ct = default)
     {
@@ -704,10 +604,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             throw new InvalidOperationException(
                 "FoldIncrementalAsync requires the flat incremental lane; this writer is in walk-journal "
                 + "mode (walks only fold at MaterializeConsensusAsync via the terminal walk fold)");
-        if (_terminalFold)
-            throw new InvalidOperationException(
-                "FoldIncrementalAsync requires the incremental lane; LAPLACE_FOLD_LANE=terminal/bulk "
-                + "defers all folding to the full rebuild at MaterializeConsensusAsync");
 
         await FlushPeriodAsync(ct).ConfigureAwait(false);
 
@@ -734,7 +630,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             return await ParallelWalkFoldAsync(ct);
         }
 
-        if (_terminalFold || _stageAsWalks)
+        if (_stageAsWalks)
         {
 
 
@@ -743,7 +639,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
 
 
-            if (_stageAsWalks && !_terminalFold)
+            if (!_terminalFold)
                 _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
             string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
             var sw = System.Diagnostics.Stopwatch.StartNew();

@@ -24,6 +24,7 @@ public sealed class WorkingSetPipelineTests
             ProbeChunkSize = probeChunk,
             ContainmentReader = reader,
             WorkingSet = true,
+            WorkingSetProbeInterval = probeChunk,
         };
 
     private static async Task<List<SubstrateChange>> RunAsync(

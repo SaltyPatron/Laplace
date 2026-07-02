@@ -21,7 +21,7 @@ echo   STAGES: floor^(unicode iso639^) document knowledge^(cili wordnet omw verb
 echo   log=%LOG% >> "%LOG%"
 echo. >> "%LOG%"
 
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | find /I "Laplace.Cli.exe" >nul
+tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
 if not errorlevel 1 (
   echo ERROR: Laplace.Cli.exe already running >> "%LOG%"
   exit /b 2

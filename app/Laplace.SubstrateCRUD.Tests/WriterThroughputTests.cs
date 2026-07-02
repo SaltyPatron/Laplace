@@ -32,7 +32,7 @@ public sealed class EntityWriterThroughputTests
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
 
-        var writer = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 1);
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         const int totalRows = 500_000;
         var stage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
@@ -67,7 +67,7 @@ public sealed class WriterThroughputTests
     public WriterThroughputTests(LocalPgFixture pg) => _pg = pg;
 
     private static NpgsqlSubstrateWriter Writer(NpgsqlDataSource ds) =>
-        new(ds, applyPartitions: 1);
+        new(ds);
 
     private Hash128 Id(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
@@ -176,27 +176,27 @@ public sealed class WriterThroughputTests
     }
 
     [Fact]
-    public async Task ApplyPartitions_One_Vs_Eight_RoundTrips_SingleBulkApplyIsLeaner()
+    public async Task BulkApply_RoundTrips_StayConstantInRowCount()
     {
+        // The Rule #8 lane: one GUC/lock batch, one verification probe per
+        // 131072-id chunk, one COPY per touched table. 50k rows must not
+        // cost more round trips than 5k rows.
         await EnsureVocabAsync();
-        const int rows = 50_000;
-        var stage = IntentStage.New(rows);
-        for (int i = 0; i < rows; i++)
-            stage.AddEntity(Id(80_000_000 + i), 0, ThroughputTypeId, null);
-        var change = NativeOnly(stage, ThroughputSrc, "tp-rt-compare");
 
-        var single = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 1);
-        var r1 = await single.ApplyAsync(change);
-        Assert.InRange(r1.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
+        async Task<int> RoundTripsFor(int rows, int idBase)
+        {
+            var stage = IntentStage.New(rows);
+            for (int i = 0; i < rows; i++)
+                stage.AddEntity(Id(idBase + i), 0, ThroughputTypeId, null);
+            var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+            var r = await writer.ApplyAsync(NativeOnly(stage, ThroughputSrc, $"tp-rt-{idBase}"));
+            Assert.Equal(rows, r.EntitiesInserted);
+            return r.RoundTrips;
+        }
 
-        var stage2 = IntentStage.New(rows);
-        for (int i = 0; i < rows; i++)
-            stage2.AddEntity(Id(81_000_000 + i), 0, ThroughputTypeId, null);
-        var change2 = NativeOnly(stage2, ThroughputSrc, "tp-rt-compare-8");
-
-        var oct = new NpgsqlSubstrateWriter(_pg.DataSource, applyPartitions: 8);
-        var r8 = await oct.ApplyAsync(change2);
-        Assert.True(r8.RoundTrips > r1.RoundTrips,
-            $"expected 8-way apply fan-out to exceed single bulk apply (1-part={r1.RoundTrips} RT, 8-part={r8.RoundTrips} RT)");
+        int small = await RoundTripsFor(5_000, 80_000_000);
+        int large = await RoundTripsFor(50_000, 81_000_000);
+        Assert.Equal(small, large);
+        Assert.InRange(large, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
     }
 }

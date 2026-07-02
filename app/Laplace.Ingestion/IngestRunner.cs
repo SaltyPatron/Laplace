@@ -120,13 +120,30 @@ public sealed class IngestRunner
                     rows += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
             return rows;
         }
+        static long BytesOf(SubstrateChange c)
+        {
+            long bytes = ((long)c.Entities.Length + c.Physicalities.Length + c.Attestations.Length) * 152;
+            if (!c.IntentStages.IsDefaultOrEmpty)
+                foreach (var s in c.IntentStages)
+                    if (!s.IsInvalid) bytes += s.TotalTupleBytes;
+            return bytes;
+        }
+
+        // Rule #8: the working set is the unit of write. Yielded changes
+        // accumulate until the memory budget closes the set with ONE
+        // journaled apply; batch/commit-row caps only govern the retired
+        // per-batch lane (LAPLACE_WORKING_SET=0).
+        bool workingSet = Laplace.Decomposers.Abstractions.WorkingSetMode.Enabled;
+        long wsBytes = 0;
         bool ShouldFlush(int intents, int rows) =>
             commitRows > 0
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
         bool ShouldFlushWithCap(int intents, int rows) =>
-            ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
+            workingSet
+                ? wsBytes >= Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
 
 
@@ -149,7 +166,7 @@ public sealed class IngestRunner
                 long units = intent.Metadata.InputUnitsConsumed;
                 if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
                 options.Progress?.Report(MakeProgress(counters));
-                if (batchSize == 1 && commitRows == 0)
+                if (!workingSet && batchSize == 1 && commitRows == 0)
                 {
                     await ProcessOneIntentAsync(intent, decomposer, options, rng,
                                                 counters, failures, log, ct);
@@ -157,17 +174,19 @@ public sealed class IngestRunner
                 }
                 sbatch.Add(intent);
                 sbatchRows += RowsOf(intent);
+                wsBytes += BytesOf(intent);
                 if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                 {
                     await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                            counters, failures, log, ct);
+                                            counters, failures, log, workingSet, ct);
                     sbatch.Clear();
                     sbatchRows = 0;
+                    wsBytes = 0;
                 }
             }
             if (sbatch.Count > 0)
                 await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                        counters, failures, log, ct);
+                                        counters, failures, log, workingSet, ct);
         }
         else
         {
@@ -223,7 +242,7 @@ public sealed class IngestRunner
                     Interlocked.Add(ref bufferedRows, -RowsOf(intent));
                     try { drained.Release(); } catch (SemaphoreFullException) { }
 
-                    if (batchSize == 1 && commitRows == 0)
+                    if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
                         await ProcessOneIntentAsync(intent, decomposer, options, rng,
                                                      counters, failures, log, ct);
@@ -231,18 +250,20 @@ public sealed class IngestRunner
                     }
                     batch.Add(intent);
                     batchRows += RowsOf(intent);
+                    wsBytes += BytesOf(intent);
                     if (ShouldFlushWithCap(batch.Count, batchRows))
                     {
                         await ProcessBatchAsync(batch, decomposer, options, rng,
-                                                counters, failures, log, ct);
+                                                counters, failures, log, workingSet, ct);
                         batch.Clear();
                         batchRows = 0;
+                        wsBytes = 0;
                     }
                 }
             }
             if (batch.Count > 0)
                 await ProcessBatchAsync(batch, decomposer, options, rng,
-                                        counters, failures, log, ct);
+                                        counters, failures, log, workingSet, ct);
 
 
             await producer;
@@ -397,6 +418,7 @@ public sealed class IngestRunner
         RunCounters counters,
         List<IngestFailure> failures,
         ILogger log,
+        bool workingSet,
         CancellationToken ct)
     {
         if (batch.Count == 0) return;
@@ -419,7 +441,9 @@ public sealed class IngestRunner
                     var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
-                var apply = await _writer.ApplyManyAsync(batch, ct);
+                var apply = workingSet
+                    ? await _writer.ApplyWorkingSetAsync(batch, ct)
+                    : await _writer.ApplyManyAsync(batch, ct);
 
                 Interlocked.Add(ref counters._unitsApplied, unitCount);
                 Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);

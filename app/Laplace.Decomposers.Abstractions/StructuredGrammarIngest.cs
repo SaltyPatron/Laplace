@@ -35,6 +35,7 @@ public static class StructuredGrammarIngest
             ContainmentReader = containmentReader,
             ReportUnits = reportUnits,
             MaxInputUnits = maxInputUnits,
+            WorkingSet = WorkingSetMode.Enabled,
         };
 
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
@@ -205,6 +206,17 @@ public static class StructuredGrammarIngest
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
         if (recipe == IntPtr.Zero) return null;
 
+        // This lane parses ONE document as one grammar AST — it must hold
+        // the whole record. Record-oriented multi-record files stream
+        // through IngestFileAsync's row iterator instead; a giant file here
+        // means a caller routed a corpus at the single-document lane.
+        const long maxSingleDocumentBytes = 64L * 1024 * 1024;
+        long fileLen = new FileInfo(filePath).Length;
+        if (fileLen > maxSingleDocumentBytes)
+            throw new InvalidOperationException(
+                $"IngestJsonDocumentAsync: {filePath} is {fileLen / (1024 * 1024)}MB — the single-document "
+                + "lane buffers the whole record (a document IS one grammar record). Files past 64MB must "
+                + "stream record-boundary chunks through IngestFileAsync's grammar row iterator.");
         byte[] utf8 = await File.ReadAllBytesAsync(filePath, ct);
         if (utf8.Length == 0) return null;
 

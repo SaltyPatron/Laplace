@@ -94,7 +94,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", "1");
         IngestTopology.EnsureReady();
         var reader = new NpgsqlSubstrateReader(ds);
-        var writer = new NpgsqlSubstrateWriter(ds, applyPartitions: 1);
+        var writer = new NpgsqlSubstrateWriter(ds);
         return new IngestRunner(writer, reader, NullLoggerFactory.Instance);
     }
 
