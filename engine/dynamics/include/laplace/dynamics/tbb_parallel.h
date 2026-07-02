@@ -12,6 +12,10 @@
 namespace laplace {
 namespace tbb_ops {
 
+// TBB's view of how many threads the performance cores support (P-cores only
+// on hybrid parts). 0 when topology can't be resolved.
+int performance_concurrency();
+
 void warm_performance_arena(int host, int mkl_threads);
 
 oneapi::tbb::task_arena& performance_arena();

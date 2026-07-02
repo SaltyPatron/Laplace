@@ -4,6 +4,9 @@
 
 #ifdef LAPLACE_HAS_MKL
 
+#  include <cstdio>
+#  include <cstdlib>
+
 #  include <oneapi/tbb/global_control.h>
 #  include <oneapi/tbb/info.h>
 #  include <oneapi/tbb/task_arena.h>
@@ -50,6 +53,16 @@ oneapi::tbb::task_arena make_arena(int host, int mkl_threads) {
 
 }
 
+int performance_concurrency() {
+    oneapi::tbb::task_arena::constraints c;
+    const auto types = oneapi::tbb::info::core_types();
+    if (types.size() > 1)
+        c.set_core_type(types.back());
+    apply_max_threads_per_core(c);
+    const int n = oneapi::tbb::info::default_concurrency(c);
+    return n > 0 ? n : 0;
+}
+
 void warm_performance_arena(int host, int mkl_threads) {
     static oneapi::tbb::global_control thread_cap(
         oneapi::tbb::global_control::max_allowed_parallelism,
@@ -61,6 +74,14 @@ void warm_performance_arena(int host, int mkl_threads) {
 oneapi::tbb::task_arena& performance_arena() {
     if (!g_arena)
         (void)laplace_runtime_init(LAPLACE_RUNTIME_HOST_CLI, -1);
+    if (!g_arena) {
+        // Init failed before warming the arena. Dereferencing would segfault
+        // deep inside a parallel kernel; die with a diagnosable message.
+        std::fprintf(stderr,
+                     "laplace_dynamics: performance_arena unavailable — "
+                     "laplace_runtime_init failed (no resolvable thread count)\n");
+        std::abort();
+    }
     return *g_arena;
 }
 

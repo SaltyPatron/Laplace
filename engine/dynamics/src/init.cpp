@@ -41,6 +41,19 @@ int resolve_thread_count_from_env() {
     return 0;
 }
 
+// Env vars are overrides only. When unset, self-detect from CPU topology —
+// TBB's P-core concurrency (mirrors CpuTopology.PerformanceCoreCount on the
+// C# side, which sets these env vars for managed hosts before native init).
+int resolve_thread_count() {
+    if (const int n = resolve_thread_count_from_env())
+        return n;
+#ifndef LAPLACE_RUNTIME_NO_TBB
+    if (const int n = laplace::tbb_ops::performance_concurrency())
+        return n;
+#endif
+    return 0;
+}
+
 int g_mkl_num_threads = -1;
 int g_runtime_host = -1;
 
@@ -50,7 +63,7 @@ int g_runtime_host = -1;
 
 extern "C" int laplace_runtime_resolve_thread_count(void) {
 #ifdef LAPLACE_HAS_MKL
-    return resolve_thread_count_from_env();
+    return resolve_thread_count();
 #else
     return 0;
 #endif
@@ -71,9 +84,10 @@ extern "C" int laplace_runtime_init(int host, int mkl_threads) {
     if (mkl_threads > 0) {
         g_mkl_num_threads = mkl_threads;
     } else if (host == LAPLACE_RUNTIME_HOST_PG) {
+        // Never autodetect inside a postgres backend — the GUC must decide.
         return -1;
     } else {
-        g_mkl_num_threads = resolve_thread_count_from_env();
+        g_mkl_num_threads = resolve_thread_count();
         if (g_mkl_num_threads <= 0)
             return -1;
     }

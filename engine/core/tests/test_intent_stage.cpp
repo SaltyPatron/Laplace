@@ -514,8 +514,9 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
 }
 
 
-static void collect_ids_lo(const intent_stage_t* s, intent_stage_table_t table,
-                           std::vector<uint64_t>& out) {
+/* Collect the low 8 bytes of a 16-byte field (1-based index) from every row. */
+static void collect_field_lo(const intent_stage_t* s, intent_stage_table_t table,
+                             uint16_t field_1based, std::vector<uint64_t>& out) {
     const size_t need = intent_stage_emit_copy_binary(s, table, nullptr, 0);
     std::vector<uint8_t> buf(need);
     EXPECT_EQ(need, intent_stage_emit_copy_binary(s, table, buf.data(), buf.size()));
@@ -523,17 +524,16 @@ static void collect_ids_lo(const intent_stage_t* s, intent_stage_table_t table,
     const uint8_t* end = buf.data() + buf.size() - kTrailer;
     while (p + 2 <= end) {
         const uint16_t cols = read_be16(p);
-        if (cols == 0xffff) break;     
+        if (cols == 0xffff) break;
         p += 2;
-        
-        const uint32_t f1 = read_be32(p); p += 4;
-        ASSERT_EQ(16u, f1);
-        uint64_t lo = 0;
-        std::memcpy(&lo, p + 8, 8);     
-        out.push_back(lo);
-        p += 16;
-        for (uint16_t c = 1; c < cols; ++c) {
+        for (uint16_t c = 1; c <= cols; ++c) {
             const int32_t flen = (int32_t)read_be32(p); p += 4;
+            if (c == field_1based) {
+                ASSERT_EQ(16, flen);
+                uint64_t lo = 0;
+                std::memcpy(&lo, p + 8, 8);
+                out.push_back(lo);
+            }
             if (flen > 0) p += (size_t)flen;
         }
     }
@@ -555,14 +555,15 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
     }
     for (size_t i = 0; i < kPhys; ++i) {
         hash128_t id; id.hi = 0x2222; id.lo = i * 40503ULL + 13;
-        hash128_t e = make_hash(0x33);
+        hash128_t e; e.hi = 0x33; e.lo = i * 6700417ULL + 11;
         ASSERT_EQ(0, intent_stage_add_physicality(
             s, &id, &e, 1, coord, &hb, nullptr, 0, 0, 1, 0.0, 1, 0,
             INTENT_STAGE_PG_EPOCH_UNIX_US));
     }
     for (size_t i = 0; i < kAtt; ++i) {
         hash128_t id; id.hi = 0x3333; id.lo = i * 2246822519ULL + 29;
-        hash128_t sub = make_hash(0x44), kid = make_hash(0x45), src = make_hash(0x46);
+        hash128_t sub; sub.hi = 0x44; sub.lo = i * 7919ULL + 3;
+        hash128_t kid = make_hash(0x45), src = make_hash(0x46);
         ASSERT_EQ(0, intent_stage_add_attestation(
             s, &id, &sub, &kid, nullptr, &src, nullptr, 1,
             INTENT_STAGE_PG_EPOCH_UNIX_US, 1, NULL));
@@ -578,14 +579,22 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
         total_phys += intent_stage_physicality_count(parts[k]);
         total_att  += intent_stage_attestation_count(parts[k]);
 
-        
-        for (auto table : {INTENT_STAGE_TABLE_ENTITIES,
-                           INTENT_STAGE_TABLE_ATTESTATIONS}) {
-            std::vector<uint64_t> los;
-            collect_ids_lo(parts[k], table, los);
-            for (uint64_t lo : los)
-                EXPECT_EQ(k, (size_t)(lo % kN)) << "row landed in wrong partition";
-        }
+        /* Referential-locality contract (see partition_row): entities route
+         * by their own id; physicalities/attestations route by the entity
+         * they reference (entity_id / subject_id — field 2), so a row and
+         * the entity it's about always share a partition/transaction. */
+        std::vector<uint64_t> los;
+        collect_field_lo(parts[k], INTENT_STAGE_TABLE_ENTITIES, 1, los);
+        for (uint64_t lo : los)
+            EXPECT_EQ(k, (size_t)(lo % kN)) << "entity landed in wrong partition";
+        los.clear();
+        collect_field_lo(parts[k], INTENT_STAGE_TABLE_PHYSICALITIES, 2, los);
+        for (uint64_t lo : los)
+            EXPECT_EQ(k, (size_t)(lo % kN)) << "physicality not co-located with its entity";
+        los.clear();
+        collect_field_lo(parts[k], INTENT_STAGE_TABLE_ATTESTATIONS, 2, los);
+        for (uint64_t lo : los)
+            EXPECT_EQ(k, (size_t)(lo % kN)) << "attestation not co-located with its subject";
     }
     
     EXPECT_EQ(kEnt,  total_ent);

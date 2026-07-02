@@ -238,7 +238,8 @@ TEST(LaplaceContentRootId, MatchesContentWitnessBatchRoot) {
 
 TEST(LaplaceContentRootId, RejectsEmptyAndNull) {
     hash128_t id;
-    EXPECT_EQ(-2, laplace_content_root_id((const uint8_t*)"x", 0, &id));
+    /* content_tree_build contract: -4 empty input, -1 null args. */
+    EXPECT_EQ(-4, laplace_content_root_id((const uint8_t*)"x", 0, &id));
     EXPECT_EQ(-1, laplace_content_root_id(nullptr, 1, &id));
     EXPECT_EQ(-1, laplace_content_root_id((const uint8_t*)"x", 1, nullptr));
 }
