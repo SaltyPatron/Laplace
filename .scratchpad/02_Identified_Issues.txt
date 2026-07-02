@@ -398,11 +398,17 @@ Fix, comprehensive, all verified live/build-checked:
   - descent_probe.c: replaced the "assume 0xFF present, clear-on-disproof" scheme with a
     positive-confirmation-only tier_batch_existence_probe primitive (new SQL/native function),
     applied uniformly to all tiers including tier-0 (no special-casing).
-  - hash128.c: hash128_merkle now mixes `tier` into the hash instead of discarding it (was
-    previously silently tier-blind -- live-verified this was a GUARANTEED collision, not just
-    low-probability, for every single-character grapheme/word/codepoint triple: word_id('a'),
-    the tier-1 grapheme id for 'a', and the tier-0 codepoint id for 'a' were bit-identical
-    before this fix).
+  - hash128.c: [REVERTED 2026-07-02 by owner directive] hash128_merkle briefly mixed `tier`
+    into the hash (2026-07-01). That was WRONG and is reverted: the content-addressing law is
+    "same content = same hash" -- the id is a function of the child-id sequence and nothing
+    else. word_id('a') == grapheme 'a' == codepoint 'a' being bit-identical is BY DESIGN, not
+    a collision: same content is the same entity, and tier disambiguation (if ever needed) is
+    a schema-level compound key (id, tier), never part of the id. The tier-mix also broke the
+    converse/word_id pg_regress goldens (regenerated 2026-06-30 under the content-only law)
+    and would have forced a full corpus re-seed as a hash-domain change. Tests updated to
+    assert tier-blindness: test_hash128.cpp (MerkleIsTierBlind, MerkleEmptyChildSetIsAlsoTierBlind),
+    Hash128Tests.cs (Merkle_TierIsNotPartOfIdentity), laplace_geom hash128 regress
+    (tier_is_not_identity).
   - intent_stage.c: partition-by-content-unit instead of partition-by-each-row's-own-hash, so
     referentially-connected rows (entity + the physicality/attestation that references it)
     can no longer be split across independent transactions (the "fake parallelism" issue --

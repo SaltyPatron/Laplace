@@ -82,18 +82,18 @@ TEST(LaplaceCoreHash128, MerkleComposesChildrenDeterministically) {
     EXPECT_TRUE(hash128_equals(&out1, &out2));
 }
 
-TEST(LaplaceCoreHash128, MerkleTierIsMixedIntoHash) {
-    // The tier parameter is mixed into the domain-separated hash after the
-    // MERKLE_DOMAIN byte, so composing the *same* child at different tiers
-    // must produce *different* ids (composed-node hashing is tier-sensitive,
-    // not tier-blind).
+TEST(LaplaceCoreHash128, MerkleIsTierBlind) {
+    // CONTENT-ADDRESSING LAW: same content = same hash. The id is a function
+    // of the child-id sequence only — tier is not identity. Disambiguating
+    // the same content observed at different tiers is a schema-level compound
+    // key (id, tier), never part of the id.
     const uint8_t a_in[] = "child_a";
     hash128_t a;
     hash128_blake3(a_in, sizeof(a_in) - 1, &a);
     hash128_t tier1, tier2;
     hash128_merkle(1, &a, 1, &tier1);
     hash128_merkle(2, &a, 1, &tier2);
-    EXPECT_FALSE(hash128_equals(&tier1, &tier2));
+    EXPECT_TRUE(hash128_equals(&tier1, &tier2));
 }
 
 TEST(LaplaceCoreHash128, MerkleChildOrderMatters) {
@@ -110,11 +110,11 @@ TEST(LaplaceCoreHash128, MerkleChildOrderMatters) {
     EXPECT_FALSE(hash128_equals(&out_ab, &out_ba));
 }
 
-TEST(LaplaceCoreHash128, MerkleEmptyChildSetIsAlsoTierSensitive) {
+TEST(LaplaceCoreHash128, MerkleEmptyChildSetIsAlsoTierBlind) {
     hash128_t t0, t1;
     hash128_merkle(0, nullptr, 0, &t0);
     hash128_merkle(1, nullptr, 0, &t1);
-    EXPECT_FALSE(hash128_equals(&t0, &t1));
+    EXPECT_TRUE(hash128_equals(&t0, &t1));
 }
 
 TEST(LaplaceCoreHash128, StructLayoutIs16BytesPod) {

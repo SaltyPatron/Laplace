@@ -27,6 +27,23 @@ Rule #1: Content-hash identity is exact. Centroid/hilbert identity is not.
       an order-sensitive judgment. word_shape_peers's `OR k.ang <= 0.115` branch violated this
       exact rule (fixed this session — see 02_Identified_Issues.txt).
 
+Rule #1b: Tier is a FLOOR, not identity. same content = same hash, at every tier.
+    - entities.tier records the LOWEST tier at which that content exists — the minimal form.
+      There is no separate "sentence" entity for 'cat': 'cat' is a tier-2 word, and it can
+      serve as-is at every tier above it ("How do you feel?" → "Fine" — that one-word reply
+      IS the sentence; the sentence IS the word; one id).
+    - Mechanism: hash_composer_compose_node (hash_composer.c) collapses single-child nodes to
+      the child's own id — no re-hash, no wrapper. Promotion up the tier ladder is free and
+      identity-preserving by construction.
+    - Corollary: tier must NEVER be mixed into the content hash (hash128_merkle discards its
+      tier argument on purpose). It was briefly mixed in on 2026-07-01 and reverted
+      2026-07-02 by owner directive: 'A' is 'A' regardless of tier — identical ids across
+      tiers are the design, not a collision. It was also internally inconsistent: only
+      multi-child nodes got tier-mixed, so "Fine"-as-sentence kept its word id while
+      "the cat"-as-sentence forked from "the cat"-as-phrase.
+    - If code ever needs to distinguish the same content observed at different tiers, that is
+      a compound key at the schema level (id, tier) — never part of the id.
+
 Rule #2: Tier-0 coord/hilbert identity IS a real identity signal. Tier>0 is not — same bytes,
 different meaning, branch on tier before drawing any conclusion from a collision.
     - Tier-0 codepoints get FIXED positions on S³, seeded once by Unicode's own UCA collation

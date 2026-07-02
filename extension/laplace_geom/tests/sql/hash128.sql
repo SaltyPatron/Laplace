@@ -21,14 +21,16 @@ SELECT octet_length(
     )
 ) AS merkle_len;
 
+-- CONTENT-ADDRESSING LAW: same content = same hash. Tier is not identity;
+-- it is schema-level compound-key material only.
 SELECT laplace_hash128_merkle(
         0::smallint,
         ARRAY[laplace_hash128_blake3('x'::bytea)]
     )
-    <> laplace_hash128_merkle(
+    = laplace_hash128_merkle(
         1::smallint,
         ARRAY[laplace_hash128_blake3('x'::bytea)]
-    ) AS tier_is_mixed_into_hash;
+    ) AS tier_is_not_identity;
 
 SELECT laplace_hash128_merkle(
         0::smallint,

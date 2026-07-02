@@ -87,8 +87,12 @@ lookups had to be hand-rolled via `generate_series` + `substring`.
 ## Core concepts worth knowing before reading code
 
 - **Tiers**: 0 = raw Unicode codepoint (the "Rosetta stone" / "null sector" — nothing
-  composes below it), 1 = grapheme (UAX29), 2 = word, 3 = sentence, 4 = document. Each
-  modality (image/audio/code) gets its own analogous tiered ladder, not literal UAX29 reuse.
+ composes below it), 1 = grapheme (UAX29), 2 = word, 3 = sentence, 4 = document. Each
+ modality (image/audio/code) gets its own analogous tiered ladder, not literal UAX29 reuse.
+ Tier is a **floor**, not identity: `entities.tier` records the lowest form of the content,
+ and the same content keeps the same id at every tier above it ('cat' has no separate
+ "sentence" entity — a one-word reply *is* the sentence). same content = same hash; tier is
+ never mixed into the id (see Rule #1b in `.scratchpad/05_Substrate_Invariants.txt`).
   Tree-sitter's job is narrowly scoped: strip raw content out of a container format (only
   ~37 of ~300 vendored grammars are actually wired into `grammar_registry.c`), then hand off
   to the same tiered decomposer pipeline everything else uses.
