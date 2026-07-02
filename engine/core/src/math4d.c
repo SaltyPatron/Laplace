@@ -291,7 +291,9 @@ double math4d_hausdorff(const double* a, size_t na, const double* b, size_t nb) 
 
 #ifdef LAPLACE_MATH4D_X86
 #include <immintrin.h>
-#if defined(_MSC_VER) || defined(__INTEL_LLVM_COMPILER)
+/* <intrin.h>/__cpuidex exist only on Windows toolchains; Linux icx defines
+ * __INTEL_LLVM_COMPILER too but has no MSVC intrin.h, so gate on _WIN32. */
+#if defined(_WIN32)
 #include <intrin.h>
 static int math4d_cpu_has_avx2(void) {
     int info[4] = {0, 0, 0, 0};
