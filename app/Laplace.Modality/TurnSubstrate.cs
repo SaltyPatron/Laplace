@@ -13,15 +13,6 @@ public interface IContentAddresser
     Hash128 Address(string canonicalSurface);
 }
 
-public static class ConsensusKeys
-{
-    public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128 obj)
-        => Laplace.Engine.Core.ConsensusKeys.EdgeId(subject, type, obj);
-
-    public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128? obj)
-        => Laplace.Engine.Core.ConsensusKeys.EdgeId(subject, type, obj);
-}
-
 public interface IEdgeRatings
 {
     Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default);
