@@ -18,31 +18,37 @@ endforeach()
 string(SHA256 _ext_sql_hash "${_ext_sql_hashes}")
 string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 
+# One source list for every platform. MODULE libraries link with undefined
+# symbols allowed (PG extensions resolve against the postgres binary at dlopen),
+# so a file missing from one platform's list only surfaces as a runtime
+# `undefined symbol` when the extension is first loaded — never at build time.
+set(EXT_C_SOURCES
+    src/laplace_substrate.c
+    src/consensus_fold_step.c
+    src/consensus_fold_engine.c
+    src/consensus_fold_walks.c
+    src/generate_walk.c
+    src/trajectory_corpus.c
+    src/trajectory_generate.c
+    src/variant_synth.c
+    src/astar_path.c
+    src/apply_batch.c
+    src/graph_taxonomy.c
+    src/graph_contrast.c
+    src/graph_cascade.c
+    src/foundry_crawl.c
+    src/recall.c
+    src/recall_route.c
+    src/perfcache.c
+    src/content_resolve.c
+    src/descent_probe.c
+    src/containers_of.c
+    src/highway_mask.c
+    src/consensus_fold_incremental.c
+)
+
 if(WIN32)
-    add_library(${EXT_NAME} MODULE
-        src/laplace_substrate.c
-        src/consensus_fold_step.c
-        src/consensus_fold_engine.c
-        src/consensus_fold_walks.c
-        src/generate_walk.c
-        src/trajectory_corpus.c
-        src/trajectory_generate.c
-        src/variant_synth.c
-        src/astar_path.c
-        src/apply_batch.c
-        src/graph_taxonomy.c
-        src/graph_contrast.c
-        src/graph_cascade.c
-        src/foundry_crawl.c
-        src/recall.c
-        src/recall_route.c
-        src/perfcache.c
-        src/content_resolve.c
-        src/descent_probe.c
-        src/containers_of.c
-        src/highway_mask.c
-        src/consensus_fold_incremental.c
-    )
+    add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME ${EXT_NAME} SUFFIX ".dll"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
@@ -60,29 +66,6 @@ if(WIN32)
         "${LAPLACE_PG_LIBDIR}/postgres.lib"
     )
 else()
-    set(EXT_C_SOURCES
-        src/laplace_substrate.c
-        src/consensus_fold_step.c
-        src/consensus_fold_engine.c
-        src/consensus_fold_walks.c
-        src/generate_walk.c
-        src/trajectory_corpus.c
-        src/trajectory_generate.c
-        src/variant_synth.c
-        src/astar_path.c
-        src/apply_batch.c
-        src/graph_taxonomy.c
-        src/graph_contrast.c
-        src/graph_cascade.c
-        src/foundry_crawl.c
-        src/recall.c
-        src/recall_route.c
-        src/perfcache.c
-        src/content_resolve.c
-        src/containers_of.c
-        src/highway_mask.c
-        src/consensus_fold_incremental.c
-    )
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX ""
