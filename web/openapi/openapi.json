@@ -1134,6 +1134,18 @@
         }
       }
     },
+    "/chess/learned-pst": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/chess/lab/catalog": {
       "get": {
         "tags": [

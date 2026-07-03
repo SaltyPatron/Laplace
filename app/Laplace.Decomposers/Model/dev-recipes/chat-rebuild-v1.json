@@ -7,7 +7,7 @@
   "rope": true,
   "tie_embeddings": false,
   "norm": "rmsnorm",
-  "vocab": { "source": "crawl", "seeds": ["the","king","water","good","time","people","make","world","day","said"], "hops": 2, "fanout": 30, "size": 1500 },
+  "vocab": { "source": "crawl", "seeds": ["the","king","water","good","time","people","make","world","day","said"], "hops": 4, "fanout": 64, "size": 32000 },
   "embed": { "op": "coord" },
   "lm_head": { "op": "trajectory" },
   "compile": "continuation",
