@@ -18,6 +18,7 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -162,6 +163,46 @@ rev_index_ensure(void)
         qsort(idx, count, sizeof(uint32_t), rev_cmp);
         rev_count = count;
         rev_idx = idx;
+    }
+}
+
+void
+laplace_substrate_perfcache_prewarm(void)
+{
+    int rc;
+
+    /* Only under shared_preload_libraries: the postmaster loads once and
+     * every forked backend inherits the mmap'd blobs, the CRC validation,
+     * and the reverse index copy-on-write. Without preload, backends keep
+     * the lazy first-call load (a postmaster-less CREATE EXTENSION session
+     * has no fork to amortize into). Failures WARN instead of ERROR — a
+     * stale path must not stop the whole cluster from starting; the lazy
+     * path's ERROR still fires with full detail on first real use. */
+    if (!process_shared_preload_libraries_in_progress)
+        return;
+
+    if (perfcache_path != NULL && perfcache_path[0] != '\0')
+    {
+        rc = codepoint_table_load_perfcache(perfcache_path);
+        if (rc == 0)
+        {
+            rev_index_ensure();
+            ereport(LOG,
+                    (errmsg("laplace_substrate: perfcache prewarmed in postmaster (\"%s\")",
+                            perfcache_path)));
+        }
+        else
+            ereport(WARNING,
+                    (errmsg("laplace_substrate: perfcache prewarm failed (rc=%d, \"%s\"); "
+                            "backends fall back to lazy load", rc, perfcache_path)));
+    }
+
+    if (highway_perfcache_path != NULL && highway_perfcache_path[0] != '\0')
+    {
+        if (highway_table_load(highway_perfcache_path) != 0)
+            ereport(WARNING,
+                    (errmsg("laplace_substrate: highway prewarm failed (\"%s\"); "
+                            "backends fall back to lazy load", highway_perfcache_path)));
     }
 }
 

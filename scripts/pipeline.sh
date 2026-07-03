@@ -135,6 +135,24 @@ phase_perfcache_guc() {
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "SELECT pg_reload_conf()"
   echo "perfcache_path -> $bin"
+  # Preload the extension in the postmaster so every forked backend inherits
+  # the mmap'd perfcache + reverse index copy-on-write (_PG_init prewarm)
+  # instead of paying a multi-second lazy load on its first substrate call.
+  # Requires a postmaster restart; only touched when the value changes.
+  local preload
+  preload=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SHOW shared_preload_libraries")
+  if [[ ",${preload// /}," != *",laplace_substrate,"* ]]; then
+    local newval="laplace_substrate"
+    [[ -n "$preload" ]] && newval="$preload,laplace_substrate"
+    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1       -c "ALTER SYSTEM SET shared_preload_libraries = '$newval'"
+    if command -v systemctl >/dev/null && systemctl is-active --quiet postgresql; then
+      echo "shared_preload_libraries -> $newval (restarting postgresql to activate prewarm)"
+      sudo systemctl restart postgresql
+    else
+      echo "::warning::shared_preload_libraries set to '$newval' — restart PostgreSQL to activate the perfcache prewarm"
+    fi
+  fi
+
 }
 
 phase_api_env() {

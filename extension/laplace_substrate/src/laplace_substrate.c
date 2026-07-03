@@ -721,6 +721,7 @@ _PG_init(void)
 
     laplace_corpus_guc_init();
     laplace_substrate_perfcache_init();
+    laplace_substrate_perfcache_prewarm();
 
     {
         const int rc = laplace_runtime_init(LAPLACE_RUNTIME_HOST_PG,

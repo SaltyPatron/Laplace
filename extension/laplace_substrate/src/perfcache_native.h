@@ -24,6 +24,12 @@ bool laplace_perfcache_ready(void);
 
 bool laplace_highway_ready(void);
 
+/* Eager warm-up for shared_preload_libraries: mmap + CRC-validate both
+ * perfcache blobs and build the codepoint reverse index in the POSTMASTER,
+ * so forked backends inherit everything copy-on-write and never pay the
+ * multi-second first-call load. No-op unless preloading. */
+void laplace_substrate_perfcache_prewarm(void);
+
 
 
 
