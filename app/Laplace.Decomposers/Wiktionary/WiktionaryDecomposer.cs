@@ -68,6 +68,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
                 workerCount: workers,
                 acceptRow: acceptRow,
                 recordFraming: source.Modality.RecordFraming,
+                containmentReader: context.Reader,
                 ct: ct))
             {
                 if (!options.DryRun) yield return change;

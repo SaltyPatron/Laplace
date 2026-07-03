@@ -66,7 +66,8 @@ public static class StructuredGrammarIngest
         int commitEpoch = 0,
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
-        int recordsPerChange = 262_144,
+        int recordsPerChange = 32_768,
+        ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
     {
         // The feeder only FRAMES records — the native grammar parse is the
@@ -103,6 +104,21 @@ public static class StructuredGrammarIngest
                 long seq = Interlocked.Increment(ref rowSeq);
                 var record = new GrammarIngestRecord(
                     lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
+
+                // Hot-cache trunk shortcircuit: a row whose root is already
+                // proven present composes NOTHING — witness-only, microseconds.
+                // This is what makes re-ingest cost scale with novelty
+                // instead of corpus size (Rule #8 step 3).
+                if (containmentReader is not null
+                    && GrammarRowComposer.TryProbeRowRoot(lineUtf8, record.Ast, modalityId, out var probedRoot, out var tier)
+                    && tier >= 2
+                    && containmentReader.IsProvenPresent(probedRoot))
+                {
+                    handler.WalkWitnessWithoutCompose(record, probedRoot, builder);
+                    record.Ast.Dispose();
+                    return;
+                }
+
                 using var unit = handler.CreateDeferredUnit(record);
                 var root = unit.DrainInto(builder, config.WitnessWeight, null);
                 handler.WalkWitness(record, root, builder, unit);
@@ -134,14 +150,22 @@ public static class StructuredGrammarIngest
                 FileShare.Read, bufferSize: 4 << 20, useAsync: true);
             var buf = new byte[4 << 20];
             bool eof = false;
+            long framed = 0;
+            long bytesRead = 0;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             while (!eof)
             {
                 int read = await fs.ReadAsync(buf, ct);
                 if (read <= 0) { eof = true; read = 0; }
+                bytesRead += read;
                 ct.ThrowIfCancellationRequested();
                 foreach (byte[] lineUtf8 in FeedRawLinesForPipeline(iter, buf, read))
                 {
                     if (acceptRow is not null && !acceptRow(lineUtf8)) continue;
+                    if (++framed % 50_000 == 0)
+                        Console.WriteLine(
+                            $"WS_COMPOSE feed: {framed:N0} records framed, {bytesRead >> 20:N0}MB read "
+                            + $"({framed / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} rec/s)");
                     yield return lineUtf8;
                 }
             }
