@@ -1074,3 +1074,77 @@ wrong image name Laplace.Cli.exe vs dotnet.exe — known, unchanged).
 Phase 2 is DONE. Remaining: Phase 3 (client-side consensus fold — the 34-52s server fold
 per seed is now the dominant cost), Phase 4 (working-set wiring + OMW wall-time target,
 ReadAllBytes fix), Phase 5 (deletions incl. apply_batch itself).
+
+UPDATE 2026-07-02 (late evening) — backlog sweep: 01/03/13/16/18/32 closed, 15's latent
+disposal bug fixed, Issue-33 word_shape_peers follow-up done, NU1903 pinned.
+
+ISSUE 01 — CLOSED, superseded by the 29→35 chain. The "highway_mask NULL on production
+attestations" symptom had three stacked causes, all fixed and verified live on the
+2026-07-01 fresh reseed (see Issue 35: 1,632,015/1,632,019 unicode attestations carry a
+correct non-zero mask). Nothing left of 01 as filed.
+
+ISSUE 03 — CLOSED. extension/laplace_substrate/sql/39_highway.sql.in no longer exists;
+the SQL-level highway surface it was a placeholder for now lives in
+sql/functions/highway/*.sql.in (11 objects + v_entities_highway view) backed by
+src/highway_mask.c, and is live: api('highway') returns laplace_highway_band_mask/
+mask_bits/match/popcount, relation_highway_bit/band.
+
+ISSUE 13 — FIXED. seed-step.cmd now runs an independent :verify_step after every ingest:
+maps the step to its decomposer SourceName (unicode→UnicodeDecomposer ... chess→ChessPgn)
+and queries evidence_count(NULL, source_id('<source>')) directly against %LAPLACE_DBNAME%;
+0/empty ⇒ exit 3. source_id() is a pure hash (verified: bogus name ⇒ hash, count 0), so a
+failed ingest can't false-pass. Steps with no mapping (safetensors/model-*) print
+"verify skipped" and pass through. Verified live against UnicodeDecomposer (1,632,017).
+
+ISSUE 16/18 — FIXED. The tasklist IMAGENAME guard could never fire (`dotnet run` launches
+as dotnet.exe). Replaced in seed-step.cmd (:cli_running, shared by mutex guard and
+:wait_cli_exit), seed-everything.cmd, and seed-post-wiktionary.cmd with a
+Win32_Process COMMAND-LINE match: any dotnet.exe/Laplace.Cli.exe process whose command line
+mentions Laplace.Cli counts as a live ingest (idle dotnet build-server daemons don't match
+— the exact red herring documented under Issue 16). Exit-code convention kept identical to
+the old find-based check (0 = running). Verified live: the guard correctly detected the
+wiktionary ingest running during this session (both the `dotnet run ... ingest wiktionary`
+wrapper and the actual Laplace.Cli.exe child — note the CLI DOES run as Laplace.Cli.exe
+under the new shared-output-root build, but the dotnet.exe wrapper still doesn't, so the
+command-line match covers both shapes).
+
+ISSUE 15 — the latent disposal-ownership bug is now FIXED (the "(a) retry/skip path"
+half). NpgsqlSubstrateWriter.ApplyManyInternalAsync disposed caller-owned prebuilt
+IntentStages in a finally — including on a failed apply about to be retried wholesale by
+IngestRunner's transient-error loop, turning every retry into ObjectDisposedException and
+masking the real error. Now disposes them ONLY on success; stages abandoned by a fatal
+abort are reclaimed by the SafeHandle finalizer. Combined with the Issue 17 advisory lock
+(prevention) and the Issue 16/18 guard fix (orchestration), all three layers of the
+concurrent-ingest incident are addressed. Writer/working-set/retry-policy suites 26/26.
+
+ISSUE 32 — CLOSED (both halves). Code: already fixed in source before this sweep —
+laplace_attestation_aggregated_add forwards (witness_weight, games, sum_score_fp1e9) in
+build()'s order, parameter order deliberately unified, and build() carries argument-swap
+tripwires (games in (0, LAPLACE_ATTESTATION_GAMES_MAX], witness_weight in [0,1] — a
+rotated call now fails loudly instead of writing corrupt evidence). The single caller
+(grammar_compose.cpp:1182) passes correctly. Data repair: MOOT — verified against the
+live post-reseed DB: zero SemLink attestations exist and zero attestations anywhere have
+observation_count >= 1e9 (max is 1,708,836); the poisoned rows died with the old database.
+
+ISSUE 33 follow-up (word_shape_peers seq-scan CTE) — DONE, by deletion. The SQL-level
+word_shape_peers() had no callers (lexical_peers and everything live uses
+word_shape_peers_fast) and still carried the CTE-column-instead-of-bound-parameter KNN
+defect. Removed word_shape_peers.sql.in; added functions/lexical/drop_word_shape_peers.sql.in
+(DROP FUNCTION IF EXISTS) to both manifests per the existing drop-file convention.
+NOT YET DEPLOYED to the live DB — bundles regenerated via build-extensions.cmd, but
+install-extensions deliberately deferred: a wiktionary ingest is running and deploy
+recycles backends (57P01 kills the ingest shell — the Issue 34 addendum lesson).
+Run install-extensions.cmd after the ingest finishes.
+
+NU1903 — FIXED. Microsoft.AspNetCore.OpenApi 10.0.0 pulls Microsoft.OpenApi 2.0.0
+(GHSA-v5pm-xwqc-g5wc, high, stack-overflow DoS on circular schema refs; patched in 2.7.5).
+Directory.Packages.props now sets CentralPackageTransitivePinningEnabled=true and pins
+Microsoft.OpenApi 2.7.5. `dotnet list package --vulnerable --include-transitive` is clean.
+
+Still OPEN after this sweep (the genuinely big engineering items, none quick):
+04 (feature_extractor.cpp stub), 05 (astar heuristic 0.0), 06 (MoE/attention-bias zeros),
+07 (type-grained highway mask — design decision), 19's bulk-descent architectural half,
+23 (native geometric KNN — partially answered by word_shape_peers_fast + Issue 33's
+finding that GiST KNN is fast when bound correctly), 34 (apply-throughput at scale —
+largely superseded by the Rule #8 Phase 2 write lane; re-baseline), 37 (OMW rc=-2,
+instrumented, wait for recurrence), and Rule #8 Phases 3-5.

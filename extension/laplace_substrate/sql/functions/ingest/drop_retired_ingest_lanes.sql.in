@@ -1,0 +1,7 @@
+-- Rule #8 retirement: the write protocol verifies claimed-novel ids
+-- in-transaction and bulk-COPYs directly (NpgsqlWorkingSetApply); the period
+-- fold runs client-side against the same native glicko-2
+-- (NpgsqlConsensusFold). The server-side apply/fold entry points below have
+-- no callers and are dropped on upgrade.
+DROP FUNCTION IF EXISTS laplace_apply_batch(text);
+DROP FUNCTION IF EXISTS consensus_fold_partition_incremental(text, boolean);

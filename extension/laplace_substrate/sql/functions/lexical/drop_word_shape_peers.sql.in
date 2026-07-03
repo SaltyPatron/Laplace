@@ -1,0 +1,7 @@
+-- Retired: the SQL-level word_shape_peers() is fully superseded by
+-- word_shape_peers_fast() (native SPI, recall.c), which is what lexical_peers()
+-- and every live caller uses. The SQL version's `nearest` CTE also carried the
+-- known seq-scan defect (coord passed as a CTE column reference instead of a
+-- genuine bound parameter defeats the GiST KNN index -- .scratchpad/02 Issue 33),
+-- so it was both dead and slow. Dropped rather than fixed.
+DROP FUNCTION IF EXISTS word_shape_peers(bytea, double precision);

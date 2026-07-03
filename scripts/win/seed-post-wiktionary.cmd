@@ -8,7 +8,9 @@ echo ===== seed-post-wiktionary started %DATE% %TIME% =====
 
 echo [%TIME%] waiting for wiktionary ingest to finish...
 :wait_wikt
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
+rem `dotnet run` launches the CLI as dotnet.exe, so match on the command line
+rem (.scratchpad/02 Issues 16/18); exit 0 = an ingest is running.
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'dotnet.exe' -or $_.Name -eq 'Laplace.Cli.exe') -and $_.CommandLine -match 'Laplace\.Cli' }) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
   timeout /t 30 /nobreak >nul 2>nul
   goto wait_wikt

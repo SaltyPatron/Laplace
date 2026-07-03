@@ -70,7 +70,6 @@ functions/fold/create_period_staging_with_epoch.sql.in
 functions/fold/period_phi_mixed.sql.in
 functions/fold/materialize_period_partition.sql.in
 functions/fold/materialize_period_partition_fresh.sql.in
-functions/fold/consensus_fold_partition_incremental.sql.in
 functions/fold/consensus_fold_result.sql.in
 functions/fold/hash128_lo.sql.in
 functions/fold/consensus_partition_of.sql.in
@@ -190,7 +189,7 @@ functions/lexical/grapheme_case_target.sql.in
 functions/lexical/word_case_map_surface.sql.in
 functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/word_case_class_surface.sql.in
-functions/lexical/word_shape_peers.sql.in
+functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/lexical_peers.sql.in
 functions/lexical/senses.sql.in
@@ -238,7 +237,7 @@ functions/generation/continue_text.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
-functions/ingest/laplace_apply_batch.sql.in
+functions/ingest/drop_retired_ingest_lanes.sql.in
 functions/ingest/drop_apply_batch_merge_entities.sql.in
 functions/ingest/drop_apply_batch_merge_physicalities.sql.in
 functions/ingest/drop_apply_batch_merge_attestations.sql.in

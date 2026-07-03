@@ -1,6 +1,6 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-
 
 
 
@@ -12,7 +12,35 @@ internal static class NativeTestBootstrap
     {
         if (!OperatingSystem.IsWindows()) return;
 
+        // laplace_synthesis (and dynamics under MKL) resolve oneAPI runtime
+        // DLLs from PATH; test hosts launched without env.cmd don't have
+        // them. Prepend the oneAPI bins so NativeLibrary.Load can bind
+        // dependencies exactly like the script-driven processes do.
+        var oneApi = new[]
+        {
+            @"C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin",
+            @"C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin",
+            @"C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin",
+        };
+        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var dir in oneApi)
+            if (Directory.Exists(dir) && !path.Contains(dir, StringComparison.OrdinalIgnoreCase))
+                path = dir + ";" + path;
+        Environment.SetEnvironmentVariable("PATH", path);
+
         string? root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
+
+        // Build outputs live outside the repo (Directory.Build.props), so an
+        // ancestor walk from the test binary can't find build-win — prefer
+        // the repo root stamped into every assembly at build time.
+        if (string.IsNullOrEmpty(root))
+        {
+            root = typeof(NativeTestBootstrap).Assembly
+                .GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
+            if (root is not null && !Directory.Exists(Path.Combine(root, "build-win", "core")))
+                root = null;
+        }
         if (string.IsNullOrEmpty(root))
         {
             var dir = AppContext.BaseDirectory;
@@ -35,9 +63,9 @@ internal static class NativeTestBootstrap
                      ("synthesis", "laplace_synthesis"),
                  })
         {
-            var path = Path.Combine(root, "build-win", sub, name + ".dll");
-            if (!File.Exists(path)) continue;
-            try { NativeLibrary.Load(path); }
+            var path2 = Path.Combine(root, "build-win", sub, name + ".dll");
+            if (!File.Exists(path2)) continue;
+            try { NativeLibrary.Load(path2); }
             catch (DllNotFoundException) { }
         }
     }

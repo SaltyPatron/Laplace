@@ -159,6 +159,24 @@ public static class IngestBatchPipeline
         var pending = new List<TRecord>(Math.Min(probeInterval, 65_536));
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
 
+        // Working sets yield nothing mid-stream, which starves every
+        // yield-driven progress counter — a monolithic source otherwise
+        // composes in total silence until the budget valve. When the caller
+        // wired no reporter, heartbeat the console directly.
+        var reportUnits = config.ReportUnits;
+        if (config.WorkingSet && reportUnits is null)
+        {
+            string wsLabel = config.BatchLabelPrefix;
+            var wsSw = System.Diagnostics.Stopwatch.StartNew();
+            reportUnits = n =>
+            {
+                if (n % 524_288 == 0)
+                    Console.WriteLine(
+                        $"WS_COMPOSE {wsLabel}: {n:N0} records composed "
+                        + $"({n / Math.Max(1e-3, wsSw.Elapsed.TotalSeconds):N0} rec/s)");
+            };
+        }
+
         var state = new BatchState(config.NewBuilder(0), resetBankOnBuild: !config.WorkingSet);
         long rowsTotal = 0;
         long unitsConsumed = 0;
@@ -193,7 +211,7 @@ public static class IngestBatchPipeline
             }
             unitsConsumed += units;
 
-            config.ReportUnits?.Invoke(rowsTotal);
+            reportUnits?.Invoke(rowsTotal);
 
             if (!config.WorkingSet && state.InBatch >= config.BatchSize)
             {

@@ -1,9 +1,0 @@
-CREATE OR REPLACE FUNCTION laplace_apply_batch(p_stage_prefix text)
-    RETURNS TABLE (entities_inserted        bigint,
-                   physicalities_inserted   bigint,
-                   attestations_inserted    bigint,
-                   attestations_folded      bigint,
-                   entities_skipped         bigint,
-                   physicalities_skipped    bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_apply_batch'
-    LANGUAGE C VOLATILE;

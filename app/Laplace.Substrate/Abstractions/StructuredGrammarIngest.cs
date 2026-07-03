@@ -41,6 +41,48 @@ public static class StructuredGrammarIngest
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 
+    /// <summary>
+    /// Record-level parallel compose for MONOLITHIC files. A per-file worker
+    /// pool covers multi-file sources (UD, OMW), but a single multi-GB file
+    /// runs one pipeline — one core — no matter how many workers the
+    /// topology declares. Here one reader frames records and N pinned
+    /// P-core workers compose them into per-worker builders
+    /// (PCoreParallelCompose); no per-interval probing — the write lane's
+    /// bulk in-transaction verification is the single dedup pass, which is
+    /// the Rule #8 shape for novel-heavy corpora. Yields flow continuously
+    /// (one change per <paramref name="recordsPerChange"/> per worker), so
+    /// progress counters tick and the runner's working-set accumulation +
+    /// budget valve handle the rest.
+    /// </summary>
+    public static IAsyncEnumerable<SubstrateChange> IngestFileParallelAsync(
+        string filePath,
+        string modalityId,
+        Hash128 sourceId,
+        IGrammarWitness witness,
+        double witnessWeight,
+        string batchLabelPrefix,
+        int workerCount,
+        Hash128? contextId = null,
+        int commitEpoch = 0,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
+        GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
+        int recordsPerChange = 262_144,
+        CancellationToken ct = default)
+    {
+        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
+        var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
+        var config = new IngestBatchConfig
+        {
+            SourceId = sourceId,
+            BatchLabelPrefix = batchLabelPrefix,
+            BatchSize = recordsPerChange,
+            WitnessWeight = witnessWeight,
+            CommitEpoch = commitEpoch,
+        };
+        return PCoreParallelCompose.RunAsync(
+            stream.RecordsAsync(ct), handler, config, workerCount, ct);
+    }
+
     public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
         string filePath,
         EtlSource source,

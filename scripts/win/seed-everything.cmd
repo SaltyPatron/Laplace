@@ -21,9 +21,11 @@ echo   STAGES: floor^(unicode iso639^) document knowledge^(cili wordnet omw verb
 echo   log=%LOG% >> "%LOG%"
 echo. >> "%LOG%"
 
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
+rem `dotnet run` launches the CLI as dotnet.exe, so match on the command line
+rem (.scratchpad/02 Issues 16/18); exit 0 = an ingest is running.
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'dotnet.exe' -or $_.Name -eq 'Laplace.Cli.exe') -and $_.CommandLine -match 'Laplace\.Cli' }) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
-  echo ERROR: Laplace.Cli.exe already running >> "%LOG%"
+  echo ERROR: a Laplace.Cli ingest is already running >> "%LOG%"
   exit /b 2
 )
 

@@ -57,15 +57,19 @@ cost most of a session to root-cause. **Always use the Bash tool** (git-bash) in
 ```
 cmd //c "scripts\\win\\seed-step.cmd wordnet"
 ```
-Minor known side-effect of that workaround: git-bash's `/usr/bin/find.exe` (GNU findutils)
-shadows Windows' `find.exe` for the `tasklist | find` mutex-guard inside
-`seed-step.cmd:run_ingest_impl` — produces cosmetic `find: '/I': No such file or directory`
-lines but does not block ingestion. Also note: that mutex guard checks for a process named
-`Laplace.Cli.exe`, but `dotnet run` actually launches as `dotnet.exe` — so the guard does not
-reliably prevent two concurrent ingests. (Concurrent ingestion was observed to work for a
-while but one run hit `PostgresException 23505: duplicate key value violates unique
-constraint "entities_pkey"` followed by an `ObjectDisposedException` on `IntentStage` —
-concurrent-ingest safety is not proven; see `.scratchpad/02` for the live incident.)
+The ingest mutex guard in `seed-step.cmd`/`seed-everything.cmd`/`seed-post-wiktionary.cmd`
+now matches on the process *command line* (any `dotnet.exe`/`Laplace.Cli.exe` whose command
+line mentions `Laplace.Cli`, via `Get-CimInstance Win32_Process`) — the old
+`tasklist | find "Laplace.Cli.exe"` check could never fire because `dotnet run` launches as
+`dotnet.exe` (.scratchpad/02 Issues 16/18, fixed and verified against a live ingest).
+`seed-step.cmd` also runs an independent post-step verification (`:verify_step`): it queries
+`evidence_count(NULL, source_id('<decomposer>'))` directly against the DB after each ingest
+and fails the step (exit 3) if no evidence landed — never trust the CLI's own summary line
+(Issue 13). The original concurrent-ingest crash (23505 + `ObjectDisposedException` on
+`IntentStage`) is addressed at all three layers: advisory lock in the write lane
+(prevention), command-line mutex guard (orchestration), and `NpgsqlSubstrateWriter` no
+longer disposes caller-owned IntentStages on a failed apply that the ingest runner is about
+to retry (the ObjectDisposedException masker — see `.scratchpad/02` Issue 15).
 
 `env.cmd` needed a real fix this session: it unconditionally prepended 5 PATH segments (and
 re-ran Intel oneAPI's `setvars.bat`, which does the same) on every `call`, with no guard
@@ -99,11 +103,12 @@ lookups had to be hand-rolled via `generate_series` + `substring`.
 - **`highway_mask`**: 256-bit bitmask (on both `entities` and `attestations`), one bit per
   canonical relation *type* (153 assigned, generated from `engine/manifest/relation_types.toml`
   into `highway_manifest.h`) — coarse (type-level, not value-level; dynamic `DEP_*`/`FEAT_*`
-  relations collapse onto their family-root bit). **Confirmed NULL on real production
-  attestations** (ISO639Decomposer output) this session — the population path
-  (`HighwayPerfcache.MaskForRelationType` in `SubstrateChangeBuilder.cs`) exists in code but
-  isn't reliably reaching the DB. `extension/laplace_substrate/sql/39_highway.sql.in` is 0
-  bytes — likely related.
+  relations collapse onto their family-root bit). Population is FIXED and verified live
+  (the three-cause saga is `.scratchpad/02` Issues 01→29→35; ~1.63M of 1.63M unicode
+  attestations carry correct non-zero masks post-reseed). The SQL surface lives in
+  `extension/laplace_substrate/sql/functions/highway/*.sql.in` backed by
+  `src/highway_mask.c` (`relation_highway_bit/band`, `laplace_highway_match/popcount/...`);
+  the old empty `39_highway.sql.in` placeholder is gone.
 - **perfcache**: two build-time-generated, mmap'd, deterministic binary blobs —
   `laplace_t0_perfcache.bin` (every Unicode codepoint's geometry + hash + segmentation
   properties, generated from pinned UCD/DUCET files with a CI determinism gate) and
@@ -120,23 +125,20 @@ lookups had to be hand-rolled via `generate_series` + `substring`.
 expert weights / attention bias fall through to zero in GGUF synthesis; zero documentation
 existed anywhere in this repo before this session.
 
-**No native (C/SPI) geometric KNN function exists anywhere.** Every "nearest neighbor" /
-"shape peer" SQL function (`laplace_nearest_entity`, `nearest_neighbors_4d`,
-`word_shape_peers`) is pure SQL leaning on the `physicalities_coord_gist` index for
-`ORDER BY coord <<->> point LIMIT k` — zero custom native traversal. The real 4D/geometric
-native code (`hilbert4d.c`, `math4d.c`, `procrustes.cpp`, `astar.cpp`) is never exposed to
-SQL. This is the concrete instance of a repeated architectural point from the author: SQL/C#
-should orchestrate, native C/C++/SPI should do the heavy lifting — for the substrate's single
-most load-bearing query class (recall/converse/word-relations all depend on it), there's
-currently nothing to orchestrate.
+**Native geometric KNN**: the hot path is now `word_shape_peers_fast` (native SPI in
+`recall.c`, bound-parameter GiST KNN — 50ms where the old SQL shape seq-scanned for
+560ms-1.6s; `.scratchpad/02` Issues 23/26/33). The old SQL-level `word_shape_peers()` was
+deleted this session (drop file in both manifests) — it was dead (nothing called it;
+`lexical_peers` uses `_fast`) and still carried the seq-scan CTE defect. The broader
+architectural point stands for other lanes: coord must reach the planner as a genuine
+bound parameter or the GiST index is skipped (three independent instances of this defect
+have been found and fixed — check query shape before blaming PostGIS internals).
 
-**Concurrent writes were unsafe until this session** — `apply_batch.c`'s anti-join dedup has
-a check-then-act race (two concurrent decomposers can both see the same content-addressed id
-as novel before either commits, one hits a raw unique-violation). Fixed with
-`pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))` right after `SPI_connect()`
-in `apply_batch.c` — serializes concurrent `apply_batch` calls (transaction-scoped, released
-automatically). If you see `entities_pkey`/`physicalities_pkey` unique-violations again,
-check this lock is still there before assuming something else broke.
+**Concurrent writes** — protected by `pg_advisory_xact_lock(hashtextextended(
+'laplace_apply_batch', 0))` (now acquired in the Rule #8 Phase 2 write lane,
+`NpgsqlWorkingSetApply.cs`; formerly in `apply_batch.c`). If you see
+`entities_pkey`/`physicalities_pkey` unique-violations again, check this lock is still
+there before assuming something else broke.
 
 **`descent_probe.c`'s content-descent traversal was O(n²)** (rescanned the full candidate
 array per visited node instead of building a children-index once) — fixed to O(n) this

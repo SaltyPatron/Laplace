@@ -128,42 +128,39 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             if (anyRows)
             {
-                try
-                {
-                    var r = await ApplyStagesCoreAsync(sourceStages, workingSetToken, ct);
-                    entitiesInserted = r.e;
-                    physicalitiesInserted = r.p;
-                    attestationsInserted = r.a;
-                    attestationsFolded = r.fold;
-                    entitiesSkipped = r.eSkip;
-                    physicalitiesSkipped = r.pSkip;
-                    roundTrips += r.rt;
+                var r = await ApplyStagesCoreAsync(sourceStages, workingSetToken, ct);
+                entitiesInserted = r.e;
+                physicalitiesInserted = r.p;
+                attestationsInserted = r.a;
+                attestationsFolded = r.fold;
+                entitiesSkipped = r.eSkip;
+                physicalitiesSkipped = r.pSkip;
+                roundTrips += r.rt;
 
-                    if (workingSetToken is null && (entitiesSkipped > 0 || physicalitiesSkipped > 0))
-                    {
-                        _log.LogWarning(
-                            "MERGE_CONFLICT entities_skipped={EntitiesSkipped} physicalities_skipped={PhysicalitiesSkipped} "
-                            + "(staged rows already present — descent dedup should have removed these)",
-                            entitiesSkipped, physicalitiesSkipped);
-                    }
-                    else if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
-                    {
-                        _log.LogInformation(
-                            "WORKING_SET_SUBTRACTION entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
-                            + "(claimed-novel rows committed by a concurrent ingest between descent and apply)",
-                            entitiesSkipped, physicalitiesSkipped);
-                    }
-                }
-                finally
+                if (workingSetToken is null && (entitiesSkipped > 0 || physicalitiesSkipped > 0))
                 {
-                    foreach (var pre in prebuiltStages) pre.Dispose();
+                    _log.LogWarning(
+                        "MERGE_CONFLICT entities_skipped={EntitiesSkipped} physicalities_skipped={PhysicalitiesSkipped} "
+                        + "(staged rows already present — descent dedup should have removed these)",
+                        entitiesSkipped, physicalitiesSkipped);
+                }
+                else if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
+                {
+                    _log.LogInformation(
+                        "WORKING_SET_SUBTRACTION entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
+                        + "(claimed-novel rows committed by a concurrent ingest between descent and apply)",
+                        entitiesSkipped, physicalitiesSkipped);
                 }
             }
-            else
-            {
-                foreach (var pre in prebuiltStages)
-                    pre.Dispose();
-            }
+
+            // Caller-owned prebuilt stages are retired ONLY on success. On a failed
+            // apply the batch may be retried wholesale (IngestRunner's transient-error
+            // loop re-submits the same SubstrateChange objects); disposing here on the
+            // failure path turned every retry into an ObjectDisposedException that
+            // masked the real error (.scratchpad/02 Issues 15/17). IntentStage is a
+            // SafeHandle, so stages abandoned by a fatal abort are still reclaimed by
+            // the finalizer.
+            foreach (var pre in prebuiltStages) pre.Dispose();
         }
         finally
         {

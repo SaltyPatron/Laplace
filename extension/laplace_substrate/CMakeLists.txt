@@ -32,7 +32,6 @@ set(EXT_C_SOURCES
     src/trajectory_generate.c
     src/variant_synth.c
     src/astar_path.c
-    src/apply_batch.c
     src/graph_taxonomy.c
     src/graph_contrast.c
     src/graph_cascade.c
@@ -44,7 +43,6 @@ set(EXT_C_SOURCES
     src/descent_probe.c
     src/containers_of.c
     src/highway_mask.c
-    src/consensus_fold_incremental.c
 )
 
 if(WIN32)

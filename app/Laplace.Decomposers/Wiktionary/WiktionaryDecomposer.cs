@@ -51,6 +51,30 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             ? line => WiktionaryJsonFilter.MatchesLanguageFilter(line, langs)
             : null;
 
+        // One 22GB file = one pipeline = one core on the sequential lane.
+        // Record-parallel compose across the P-cores unless a unit cap asks
+        // for the sequential, exactly-bounded path.
+        if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0)
+        {
+            var source = EtlManifest.Get("wiktionary");
+            int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
+            await foreach (var change in StructuredGrammarIngest.IngestFileParallelAsync(
+                file,
+                source.Modality.GrammarId,
+                source.SourceId,
+                witness: witness,
+                witnessWeight: 0.7,
+                batchLabelPrefix: "wiktionary",
+                workerCount: workers,
+                acceptRow: acceptRow,
+                recordFraming: source.Modality.RecordFraming,
+                ct: ct))
+            {
+                if (!options.DryRun) yield return change;
+            }
+            yield break;
+        }
+
         await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             file,
             EtlManifest.Get("wiktionary"),

@@ -35,10 +35,7 @@ if /i "%STEP%"=="wordnet"       goto run_ingest
 if /i "%STEP%"=="omw"           goto run_ingest
 if /i "%STEP%"=="verbnet"       goto run_ingest
 if /i "%STEP%"=="propbank"      goto run_ingest
-if /i "%STEP%"=="framenet" (
-  call :run_ingest_impl
-  exit /b %ERRORLEVEL%
-)
+if /i "%STEP%"=="framenet"      goto run_ingest
 if /i "%STEP%"=="semlink"       goto run_ingest
 if /i "%STEP%"=="mapnet"        goto run_ingest
 if /i "%STEP%"=="wordframenet" goto run_ingest
@@ -50,6 +47,7 @@ if /i "%STEP%"=="tatoeba"       goto run_ingest
 if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
 if /i "%STEP%"=="chess"         goto run_ingest_path
+if /i "%STEP%"=="openings"      goto run_ingest_path
 if /i "%STEP%"=="stack"         goto run_ingest_path
 if /i "%STEP%"=="repo"          goto run_ingest_path
 if /i "%STEP%"=="tiny-codes"    goto run_ingest_path
@@ -99,9 +97,14 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_impl
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
+rem `dotnet run` launches the CLI as dotnet.exe, never Laplace.Cli.exe, so an
+rem IMAGENAME-only tasklist check can never fire (.scratchpad/02 Issues 16/18).
+rem Match on the command line instead: any dotnet.exe/Laplace.Cli.exe process
+rem whose command line mentions Laplace.Cli is a live ingest (idle build-server
+rem dotnet processes don't mention it).
+call :cli_running
 if not errorlevel 1 (
-  echo ERROR: Laplace.Cli.exe is already running — wait for it to finish or stop it before seed-step %STEP%
+  echo ERROR: a Laplace.Cli ingest is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
 )
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
@@ -109,13 +112,62 @@ dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ing
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" exit /b %RC%
 call :wait_cli_exit
-exit /b 0
+call :verify_step
+exit /b %ERRORLEVEL%
+
+rem exit /b 0 = an ingest CLI process is running, 1 = none (same convention as
+rem the old tasklist^|find check, so callers keep `if not errorlevel 1` = running).
+:cli_running
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'dotnet.exe' -or $_.Name -eq 'Laplace.Cli.exe') -and $_.CommandLine -match 'Laplace\.Cli' }) { exit 0 } else { exit 1 }"
+exit /b %ERRORLEVEL%
 
 :wait_cli_exit
-tasklist /FI "IMAGENAME eq Laplace.Cli.exe" 2>nul | "%SystemRoot%\System32\find.exe" /I "Laplace.Cli.exe" >nul
+call :cli_running
 if errorlevel 1 exit /b 0
-timeout /t 1 /nobreak >nul 2>nul
+timeout /t 2 /nobreak >nul 2>nul
 goto wait_cli_exit
+
+rem Independent post-step verification (.scratchpad/02 Issue 13): don't trust the
+rem CLI's self-printed summary — ask the database whether evidence from this step's
+rem source actually landed.
+:verify_step
+set "STEP_SOURCE="
+if /i "%STEP%"=="unicode"       set "STEP_SOURCE=UnicodeDecomposer"
+if /i "%STEP%"=="iso639"        set "STEP_SOURCE=ISO639Decomposer"
+if /i "%STEP%"=="cili"          set "STEP_SOURCE=CILIDecomposer"
+if /i "%STEP%"=="wordnet"       set "STEP_SOURCE=WordNetDecomposer"
+if /i "%STEP%"=="omw"           set "STEP_SOURCE=OMWDecomposer"
+if /i "%STEP%"=="verbnet"       set "STEP_SOURCE=VerbNetDecomposer"
+if /i "%STEP%"=="propbank"      set "STEP_SOURCE=PropBankDecomposer"
+if /i "%STEP%"=="framenet"      set "STEP_SOURCE=FrameNetDecomposer"
+if /i "%STEP%"=="semlink"       set "STEP_SOURCE=SemLinkDecomposer"
+if /i "%STEP%"=="mapnet"        set "STEP_SOURCE=MapNetDecomposer"
+if /i "%STEP%"=="wordframenet"  set "STEP_SOURCE=WordFrameNetDecomposer"
+if /i "%STEP%"=="conceptnet"    set "STEP_SOURCE=ConceptNetDecomposer"
+if /i "%STEP%"=="atomic2020"    set "STEP_SOURCE=Atomic2020Decomposer"
+if /i "%STEP%"=="ud"            set "STEP_SOURCE=UDDecomposer"
+if /i "%STEP%"=="wiktionary"    set "STEP_SOURCE=WiktionaryDecomposer"
+if /i "%STEP%"=="tatoeba"       set "STEP_SOURCE=TatoebaDecomposer"
+if /i "%STEP%"=="opensubtitles" set "STEP_SOURCE=OpenSubtitlesDecomposer"
+if /i "%STEP%"=="document"      set "STEP_SOURCE=UserPrompt"
+if /i "%STEP%"=="stack"         set "STEP_SOURCE=StackDecomposer"
+if /i "%STEP%"=="repo"          set "STEP_SOURCE=RepoDecomposer"
+if /i "%STEP%"=="tiny-codes"    set "STEP_SOURCE=TinyCodesDecomposer"
+if /i "%STEP%"=="chess"         set "STEP_SOURCE=ChessPgn"
+if /i "%STEP%"=="openings"      set "STEP_SOURCE=ChessOpenings"
+if not defined STEP_SOURCE (
+  echo ==== seed-step verify: no source mapping for '%STEP%' — skipped ====
+  exit /b 0
+)
+set "STEP_EVIDENCE="
+for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
+if not defined STEP_EVIDENCE goto verify_fail
+if "%STEP_EVIDENCE%"=="0" goto verify_fail
+echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====
+exit /b 0
+:verify_fail
+echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME%)
+exit /b 3
 
 :run_model_tinyllama
 call :resolve_model LAPLACE_MODEL_TINYLLAMA LAPLACE_TINYLLAMA_DIR "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" TINYLLAMA || exit /b 1
