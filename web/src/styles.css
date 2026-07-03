@@ -160,7 +160,7 @@ table.catalog th { color: var(--muted); font-weight: 500; }
   .chess { flex-direction: column; }
   .board { height: min(78vh, 92vw); }
   .board-legend { max-width: 92vw; }
-  .chess-side { min-width: 0; width: 100%; }
+  .chess-side { flex: 1 1 auto; min-width: 0; width: 100%; }
 
   header { flex-wrap: wrap; gap: 0.75rem 1rem; }
   .tenant input { width: 8rem; }
@@ -174,7 +174,11 @@ table.catalog th { color: var(--muted); font-weight: 500; }
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
   aspect-ratio: 1 / 1;
-  height: min(78vh, calc(100vw - 24rem), 760px);
+  /* Size the board off the space its wrapper actually has (100cqw), minus the eval
+     column beside it (~4.2rem), capped by viewport height and an absolute max. No
+     hard-coded assumption about the side panel's width — that magic number was the
+     source of the overlap/jank when the panel width didn't match. */
+  height: min(78vh, calc(100cqw - 4.2rem), 760px);
   width: auto;
   container-type: inline-size;
   border: 2px solid var(--border);
@@ -182,7 +186,11 @@ table.catalog th { color: var(--muted); font-weight: 500; }
   touch-action: none;
   position: relative;
 }
-.board-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.board-wrap {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.6rem; flex: 1 1 auto; min-width: 0; min-height: 0;
+  container-type: inline-size;
+}
 .board-area { display: flex; gap: 0.5rem; align-items: stretch; max-width: 100%; }
 .eval-col { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; }
 .eval-readout { width: 3.4rem; text-align: center; line-height: 1.2; font-size: 0.62rem; color: var(--muted); }
@@ -262,9 +270,9 @@ table.catalog th { color: var(--muted); font-weight: 500; }
 @keyframes status-pop { from { transform: scale(0.97); opacity: 0.4; } to { transform: scale(1); opacity: 1; } }
 .ctl-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; flex-basis: 100%; }
 .ctl-row label { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; cursor: pointer; }
-.chess-controls .fen { color: var(--muted); font-size: 0.78rem; flex-basis: 100%; }
+.chess-controls .fen { color: var(--muted); font-size: 0.78rem; flex-basis: 100%; max-width: 100%; overflow-wrap: anywhere; }
 .chess-error { color: #ff6b6b; font-size: 0.82rem; flex-basis: 100%; font-family: ui-monospace, monospace; }
-.chess-side { display: flex; flex-direction: column; gap: 1rem; min-width: 16rem; }
+.chess-side { display: flex; flex-direction: column; gap: 1rem; flex: 0 1 20rem; min-width: 0; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
 .panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
 .panel .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
@@ -278,7 +286,17 @@ table.catalog th { color: var(--muted); font-weight: 500; }
 .moves li.prior .mu { color: var(--muted); }
 .moves .pickstar { color: #ffcf3a; margin-left: auto; }
 .moves .tag { color: var(--muted); font-size: 0.7rem; margin-left: auto; }
-.move-history { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--muted); word-break: break-all; margin: 0; }
+/* Move list: wrap into fixed-width columns inside the panel and cap height with an
+   internal scroll, instead of one ever-growing line that stretched the side column. */
+.move-history {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.1rem 0.6rem; max-height: 12rem; overflow-y: auto;
+  font-family: ui-monospace, monospace; font-size: 0.8rem;
+}
+.move-history li { display: flex; gap: 0.4rem; align-items: baseline; }
+.move-history .movenum { color: var(--muted); width: 1.6rem; text-align: right; flex: 0 0 auto; }
+.move-history .ply { width: 3.1rem; flex: 0 0 auto; }
 
 /* board state highlights that previously had no CSS */
 .square.last-move::after {
@@ -305,9 +323,84 @@ table.catalog th { color: var(--muted); font-weight: 500; }
   height: 100%; overflow-y: auto; padding: 1rem 1.2rem;
   display: flex; flex-direction: column; gap: 1rem;
 }
-.lab-engines { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0.2rem 0 0.6rem; font-size: 0.82rem; }
-.lab-engines .ok { color: var(--confirm); }
-.lab-engines .missing { color: var(--muted); opacity: 0.75; }
+.lab-title { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.lab-title h3 { margin: 0; }
+.lab-engines { display: flex; flex-wrap: wrap; gap: 0.4rem 0.5rem; margin: 0.5rem 0 0.7rem; font-size: 0.8rem; }
+.engine-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.12rem 0.55rem;
+  border-radius: 99px; border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.engine-chip b { font-weight: 600; }
+.engine-chip.ok { color: var(--confirm); border-color: rgba(62, 207, 142, 0.4); background: rgba(62, 207, 142, 0.08); }
+.engine-chip.missing { color: var(--muted); opacity: 0.85; }
+
+/* Typed param form: a responsive grid of labelled controls that wraps instead of
+   overflowing, replacing the old flat free-text list. */
+.lab-form {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.5rem 0.8rem; margin: 0.2rem 0 0.7rem;
+}
+.lab-field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.lab-field > span { text-transform: lowercase; }
+.lab-field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.lab-field-head b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+.lab-field input[type="text"], .lab-field input[type="password"] {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.45rem; font-size: 0.85rem; min-width: 0; width: 100%;
+}
+.lab-field-row { flex-direction: row; align-items: center; justify-content: space-between; }
+.lab-noparams { grid-column: 1 / -1; margin: 0.2rem 0; }
+
+/* slider + number box */
+.lab-slider { display: flex; align-items: center; gap: 0.5rem; }
+.lab-slider input[type="range"] {
+  flex: 1 1 auto; min-width: 0; height: 1.1rem; accent-color: var(--accent);
+  background: transparent; cursor: pointer;
+}
+.lab-slider .lab-num {
+  flex: 0 0 3.6rem; width: 3.6rem; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.35rem;
+  font-size: 0.82rem; font-variant-numeric: tabular-nums; text-align: right;
+}
+
+/* segmented pill control */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--panel-2); }
+.seg button {
+  flex: 1 1 auto; background: none; border: none; color: var(--muted); cursor: pointer;
+  padding: 0.28rem 0.6rem; font-size: 0.8rem; border-radius: 0;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent); color: #fff; }
+
+/* toggle switch */
+.toggle {
+  width: 2.5rem; height: 1.35rem; border-radius: 99px; border: 1px solid var(--border);
+  background: var(--panel-2); position: relative; cursor: pointer; padding: 0; flex: 0 0 auto;
+  transition: background 0.15s ease;
+}
+.toggle i { position: absolute; top: 2px; left: 2px; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: var(--muted); transition: transform 0.15s ease, background 0.15s ease; }
+.toggle.on { background: rgba(79, 140, 255, 0.35); border-color: var(--accent); }
+.toggle.on i { transform: translateX(1.15rem); background: var(--accent); }
+.lab-actions { align-items: center; }
+.lab-blocked { color: var(--draw); font-size: 0.8rem; }
+
+.lab-jobs .lab-job-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.lab-job-list li.sel > button { border-color: var(--accent); }
+.lab-job-list button {
+  width: 100%; display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  padding: 0.35rem 0.6rem; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 0.82rem;
+}
+.lab-job-list .jk { font-weight: 600; }
+.lab-job-list .muted { margin-left: auto; }
+.state {
+  font-size: 0.7rem; padding: 0.05rem 0.5rem; border-radius: 99px; text-transform: uppercase;
+  letter-spacing: 0.03em; border: 1px solid var(--border);
+}
+.state-running, .state-pending { color: var(--accent); }
+.state-completed { color: var(--confirm); }
+.state-failed { color: var(--error); }
+.state-cancelled { color: var(--muted); }
 .lab-feed { flex: 1 1 auto; min-height: 12rem; display: flex; flex-direction: column; }
 .lab-events {
   list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1 1 auto;

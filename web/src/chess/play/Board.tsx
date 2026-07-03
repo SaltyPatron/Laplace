@@ -21,7 +21,13 @@ export function parseBoard(fen: string): string[][] {
   });
 }
 
-export const sqName = (file: number, rank8: number) => `${FILES[file]}${8 - rank8}`;
+// board row index (0 = rank 8, FEN order) -> square name. `rowIdx` is the row into the
+// parseBoard() array, NOT the chess rank; the chess rank is 8 - rowIdx.
+export const sqName = (file: number, rowIdx: number) => `${FILES[file]}${8 - rowIdx}`;
+
+// Visual order: index 0 is the top/left cell. Non-flip shows White at the bottom
+// (rank 8 top, file a left); flip shows Black at the bottom (rank 1 top, file h left).
+const visualOrder = (flip: boolean) => (flip ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7]);
 
 export const whiteToMove = (fen: string) => fen.split(' ')[1] !== 'b';
 
@@ -70,7 +76,8 @@ export function Board({
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
   const board = parseBoard(fen);
-  const ranks = flip ? [...board].reverse() : board;
+  const rowOrder = visualOrder(flip); // board-row indices in visual top->bottom order
+  const colOrder = visualOrder(flip); // file indices in visual left->right order
 
   const selMoves = sel ? legal.filter((m) => m.uci.startsWith(sel)) : [];
   const targets = new Set(selMoves.map((m) => m.uci.slice(2, 4)));
@@ -123,12 +130,12 @@ export function Board({
             onContextMenu={(e) => e.preventDefault()}
             onPointerMove={(e) => { if (drag) onDragMove(e.clientX, e.clientY); }}
           >
-            {ranks.map((row, r) =>
-              row.map((piece, fi) => {
-                const f = flip ? 7 - fi : fi;
-                const rank8 = flip ? r + 1 : 8 - r;
-                const sq = sqName(f, rank8);
-                const dark = (f + (8 - rank8)) % 2 === 1;
+            {rowOrder.map((boardRow) =>
+              colOrder.map((f) => {
+                const piece = board[boardRow]?.[f] ?? '';
+                const rank = 8 - boardRow;
+                const sq = sqName(f, boardRow);
+                const dark = (f + rank) % 2 === 1;
                 const isLast = lastMove && (sq === lastMove.from || sq === lastMove.to);
                 const inCheck = piece === (fen.split(' ')[1] === 'w' ? 'K' : 'k');
                 const sm = suggMark.get(sq);

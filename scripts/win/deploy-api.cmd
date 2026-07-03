@@ -19,9 +19,13 @@ if not exist "%LIVE%\" (
 )
 
 
-tasklist /fi "imagename eq w3wp.exe" | "%SystemRoot%\System32\find.exe" /i "w3wp.exe" >nul
+rem Only LaplacePool's own worker blocks the copy. The old check matched ANY w3wp.exe on
+rem the box (every IIS app pool), so it aborted even with LaplacePool stopped whenever some
+rem unrelated site had a worker up — the reason deploy-api kept silently no-op'ing.
+set "APPCMD=%SystemRoot%\System32\inetsrv\appcmd.exe"
+"%APPCMD%" list wp 2>nul | "%SystemRoot%\System32\find.exe" /i "LaplacePool" >nul
 if not errorlevel 1 (
-    echo [deploy-api] w3wp is RUNNING — stop the laplace-api app pool first, then re-run this.
+    echo [deploy-api] LaplacePool worker is RUNNING — stop the LaplacePool app pool first, then re-run this.
     exit /b 1
 )
 

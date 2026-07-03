@@ -55,15 +55,16 @@ export function ChessView() {
 
   useEffect(() => { void refreshLegal(fen); }, [fen, refreshLegal]);
 
-  useEffect(() => {
-    let live = true;
-    const tick = async () => {
-      try { const s = await apiGet<TrainStatus>('/chess/train/status'); if (live) setTrain(s); } catch { }
-    };
-    void tick();
-    const h = setInterval(tick, 1500);
-    return () => { live = false; clearInterval(h); };
+  const fetchTrain = useCallback(async () => {
+    try { setTrain(await apiGet<TrainStatus>('/chess/train/status')); } catch { }
   }, []);
+  // One status read on mount, then poll ONLY while a training run is active — idle costs nothing.
+  useEffect(() => { void fetchTrain(); }, [fetchTrain]);
+  useEffect(() => {
+    if (!train?.running) return;
+    const h = setInterval(fetchTrain, 1500);
+    return () => clearInterval(h);
+  }, [train?.running, fetchTrain]);
 
   useEffect(() => {
     // Track movement on window, not just the board, so the drag ghost follows the cursor
@@ -160,9 +161,9 @@ export function ChessView() {
       games: String(knobs.games), temperature: String(knobs.temp),
       maxPlies: String(knobs.maxPlies), weight: String(knobs.weight),
     }).toString();
-    apiPost(`/chess/train/start?${q}`, {}).catch(() => {});
+    apiPost(`/chess/train/start?${q}`, {}).then(fetchTrain).catch(() => {});
   };
-  const stopTrain = () => apiPost('/chess/train/stop', {}).catch(() => {});
+  const stopTrain = () => apiPost('/chess/train/stop', {}).then(fetchTrain).catch(() => {});
 
   const topMoves = [...legal].sort((a, b) => b.effMu - a.effMu).slice(0, 8);
   const stmEval = topMoves[0]?.effMu ?? 1500;

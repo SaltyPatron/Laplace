@@ -30,8 +30,16 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
       )}
       {history.length > 0 && (
         <section className="panel">
-          <h3>Move list</h3>
-          <p className="move-history">{history.join(' ')}</p>
+          <h3>Move list <span className="muted">({history.length} plies)</span></h3>
+          <ol className="move-history">
+            {Array.from({ length: Math.ceil(history.length / 2) }, (_, i) => (
+              <li key={i}>
+                <span className="movenum">{i + 1}.</span>
+                <span className="ply">{history[i * 2]}</span>
+                <span className="ply">{history[i * 2 + 1] ?? ''}</span>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
     <section className="panel">
