@@ -69,7 +69,10 @@ public static class StructuredGrammarIngest
         int recordsPerChange = 262_144,
         CancellationToken ct = default)
     {
-        var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
+        // The feeder only FRAMES records — the native grammar parse is the
+        // expensive half for fat JSON records, and parsing on the feeder
+        // starves every worker (measured: 8 workers, exactly one busy core).
+        // Each worker owns a private row iterator and does parse + compose.
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
         var config = new IngestBatchConfig
         {
@@ -79,8 +82,75 @@ public static class StructuredGrammarIngest
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
         };
+        var workerIters = new ThreadLocal<IntPtr>(() =>
+        {
+            IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
+            return recipe == IntPtr.Zero ? IntPtr.Zero : CreateRowIterForPipeline(recipe);
+        }, trackAllValues: true);
+        long rowSeq = 0;
+
         return PCoreParallelCompose.RunAsync(
-            stream.RecordsAsync(ct), handler, config, workerCount, ct);
+            RawRecordsAsync(filePath, modalityId, acceptRow, ct),
+            workerCount,
+            recordsPerChange,
+            NewBuilderFactory(config),
+            (builder, lineUtf8) =>
+            {
+                IntPtr iter = workerIters.Value;
+                if (iter == IntPtr.Zero) return;
+                if (!TryParseRowForPipeline(iter, lineUtf8, out IntPtr astPtr) || astPtr == IntPtr.Zero)
+                    return;
+                long seq = Interlocked.Increment(ref rowSeq);
+                var record = new GrammarIngestRecord(
+                    lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
+                using var unit = handler.CreateDeferredUnit(record);
+                var root = unit.DrainInto(builder, config.WitnessWeight, null);
+                handler.WalkWitness(record, root, builder, unit);
+            },
+            ct);
+    }
+
+    private static Func<SubstrateChangeBuilder> NewBuilderFactory(IngestBatchConfig config)
+    {
+        int batchNum = -1;
+        return () => config.NewBuilder(Interlocked.Increment(ref batchNum));
+    }
+
+    /// <summary>Frame-only record stream: raw record bytes out, no parsing.</summary>
+    private static async IAsyncEnumerable<byte[]> RawRecordsAsync(
+        string filePath,
+        string modalityId,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
+        if (recipe == IntPtr.Zero) yield break;
+        IntPtr iter = CreateRowIterForPipeline(recipe);
+        if (iter == IntPtr.Zero) yield break;
+
+        try
+        {
+            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                FileShare.Read, bufferSize: 4 << 20, useAsync: true);
+            var buf = new byte[4 << 20];
+            bool eof = false;
+            while (!eof)
+            {
+                int read = await fs.ReadAsync(buf, ct);
+                if (read <= 0) { eof = true; read = 0; }
+                ct.ThrowIfCancellationRequested();
+                foreach (byte[] lineUtf8 in FeedRawLinesForPipeline(iter, buf, read))
+                {
+                    if (acceptRow is not null && !acceptRow(lineUtf8)) continue;
+                    yield return lineUtf8;
+                }
+            }
+        }
+        finally
+        {
+            if (iter != IntPtr.Zero)
+                NativeInterop.GrammarRowIterFree(iter);
+        }
     }
 
     public static IAsyncEnumerable<SubstrateChange> IngestFileAsync(
