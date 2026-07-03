@@ -12,6 +12,7 @@
 #   install         cmake --install to $LAPLACE_INSTALL_PREFIX
 #   migrate         Laplace.Migrations up (idempotent; --fresh-db nukes first)
 #   sync-extension  CREATE/ALTER EXTENSION laplace_substrate to built version
+#   tune-pg         machine-sized ALTER SYSTEM tuning (restarts if pending)
 #   perfcache-guc   point laplace_substrate.perfcache_path at installed blob
 #   api-env         ensure laplace-api.env has current perfcache path
 #   publish         deploy/linux/deploy.sh (API + SPA to $LAPLACE_INSTALL_PREFIX/app)
@@ -125,6 +126,32 @@ phase_sync_extension() {
   fi
 }
 
+phase_tune_pg() {
+  echo "===== PHASE — TUNE PG ====="
+  # Sized from the machine, not hardcoded: ~25% RAM shared_buffers, ~65%
+  # effective_cache_size, parallel workers from cores. PG18 async I/O via
+  # io_uring + huge_pages=try (needs vm.nr_hugepages; try degrades quietly).
+  # wal_level=minimal: single-node ingest server, no replicas — bulk COPY
+  # WAL volume drops; flip to replica/logical the day a standby exists.
+  local mem_kb cores sb ecs
+  mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+  cores=$(nproc)
+  sb=$(( mem_kb / 4 / 1024 ))MB
+  ecs=$(( mem_kb * 65 / 100 / 1024 ))MB
+  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1     -c "ALTER SYSTEM SET shared_buffers = '$sb'"     -c "ALTER SYSTEM SET effective_cache_size = '$ecs'"     -c "ALTER SYSTEM SET maintenance_work_mem = '2GB'"     -c "ALTER SYSTEM SET work_mem = '256MB'"     -c "ALTER SYSTEM SET max_wal_size = '32GB'"     -c "ALTER SYSTEM SET min_wal_size = '4GB'"     -c "ALTER SYSTEM SET wal_compression = on"     -c "ALTER SYSTEM SET wal_buffers = '128MB'"     -c "ALTER SYSTEM SET wal_level = minimal"     -c "ALTER SYSTEM SET max_wal_senders = 0"     -c "ALTER SYSTEM SET checkpoint_timeout = '30min'"     -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9"     -c "ALTER SYSTEM SET max_worker_processes = 32"     -c "ALTER SYSTEM SET max_parallel_workers = $cores"     -c "ALTER SYSTEM SET max_parallel_workers_per_gather = $(( (cores + 1) / 2 ))"     -c "ALTER SYSTEM SET max_parallel_maintenance_workers = $(( (cores + 1) / 2 ))"     -c "ALTER SYSTEM SET effective_io_concurrency = 256"     -c "ALTER SYSTEM SET maintenance_io_concurrency = 256"     -c "ALTER SYSTEM SET random_page_cost = 1.1"     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0"     -c "ALTER SYSTEM SET huge_pages = try"     -c "ALTER SYSTEM SET io_method = io_uring"     -c "ALTER SYSTEM SET io_workers = $(( (cores + 1) / 2 ))"     -c "SELECT pg_reload_conf()"
+  local pending
+  pending=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
+  if [[ "$pending" != "0" ]]; then
+    if command -v systemctl >/dev/null && systemctl is-active --quiet postgresql; then
+      echo "tune-pg: $pending setting(s) pending restart — restarting postgresql"
+      sudo systemctl restart postgresql
+    else
+      echo "::warning::tune-pg: $pending setting(s) pending restart — restart PostgreSQL to apply"
+    fi
+  fi
+  echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs cores=$cores"
+}
+
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
   local bin
@@ -194,7 +221,7 @@ while [[ $# -gt 0 ]]; do
     --fresh-db) FRESH_DB=1; shift ;;
     --force) FORCE_FOUNDATION=1; shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|perfcache-guc|api-env|publish|foundation)
+    clean|codegen|build|install|migrate|sync-extension|tune-pg|perfcache-guc|api-env|publish|foundation)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -210,6 +237,7 @@ for phase in "${PHASES[@]}"; do
     install)        phase_install ;;
     migrate)        phase_migrate ;;
     sync-extension) phase_sync_extension ;;
+    tune-pg)        phase_tune_pg ;;
     perfcache-guc)  phase_perfcache_guc ;;
     api-env)        phase_api_env ;;
     publish)        phase_publish ;;

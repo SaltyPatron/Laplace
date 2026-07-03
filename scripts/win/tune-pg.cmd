@@ -35,6 +35,9 @@ echo tune-pg: P-cores=%PCORES% -^> max_parallel_workers=%PCORES%, per_gather=%PG
  -c "ALTER SYSTEM SET maintenance_io_concurrency = 256;" ^
  -c "ALTER SYSTEM SET random_page_cost = 1.1;" ^
  -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;" ^
+ -c "ALTER SYSTEM SET huge_pages = try;" ^
+ -c "ALTER SYSTEM SET io_method = worker;" ^
+ -c "ALTER SYSTEM SET io_workers = %PGATHER%;" ^
  || exit /b 1
 
 %PSQL% -c "SELECT pg_reload_conf();" || exit /b 1

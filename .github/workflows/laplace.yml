@@ -85,8 +85,7 @@ jobs:
         run: |
           set -e
           violations=0
-          files=$(find app \( -path 'app/Laplace.Decomposers/*.cs' -o -path 'app/Laplace.Decomposers.*/*.cs' \) \
-            ! -path 'app/Laplace.Decomposers.*.Tests/*' \
+          files=$(find app \( -path 'app/Laplace.Decomposers/*.cs' -o -path 'app/Laplace.Decomposers/*/*.cs' -o -path 'app/Laplace.Substrate/Abstractions/*.cs' \) \
             ! -path 'app/Laplace.Decomposers.Tests/*')
           for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
             while IFS= read -r f; do
@@ -250,7 +249,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
             args+=(--fresh-db)
           fi
-          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension perfcache-guc api-env
+          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg perfcache-guc api-env
 
   integration-test:
     name: Integration tests — pg_regress + dotnet (solution-wide)
