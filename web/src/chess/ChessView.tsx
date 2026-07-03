@@ -3,9 +3,18 @@ import { apiGet, apiPost } from '../api/client';
 import { Board, parseBoard, whiteToMove, useBoardRef, type MoveScore } from './play/Board';
 import { MoveList } from './play/MoveList';
 import { EnginePanel, type TrainKnobs, type TrainStatus } from './play/EnginePanel';
+import { PstGrid } from './play/PstGrid';
 
-interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; }
-interface BestMove { uci: string | null; fen: string; effMu: number; rated: boolean; terminal: boolean; status: string; }
+interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; motifs?: string[]; }
+interface BestMove {
+  uci: string | null; fen: string; effMu: number; rated: boolean; terminal: boolean; status: string;
+  scoreCp: number; depth: number; nodes: number; pv?: string[]; motifs?: string[];
+}
+export interface SearchInfo { scoreCp: number; depth: number; nodes: number; substrate: boolean; pv: string[]; }
+
+const MOTIF_LABEL: Record<string, string> = {
+  fork: 'fork', discovered_check: 'discovered check', hanging_piece_won: 'won material',
+};
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -30,6 +39,8 @@ export function ChessView() {
   const [history, setHistory] = useState<string[]>([]);
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
   const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
+  const [search, setSearch] = useState<SearchInfo | null>(null);
+  const [motifs, setMotifs] = useState<string[]>([]);
 
   const [marks, setMarks] = useState<Set<string>>(new Set());
   const [userArrows, setUserArrows] = useState<{ from: string; to: string }[]>([]);
@@ -55,9 +66,13 @@ export function ChessView() {
   }, []);
 
   useEffect(() => {
+    // Track movement on window, not just the board, so the drag ghost follows the cursor
+    // everywhere instead of freezing at the board edge when dragging toward the side panel.
+    const move = (e: PointerEvent) => setDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
     const up = () => { setDrag(null); rdrag.current = null; };
+    window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-    return () => window.removeEventListener('pointerup', up);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
   }, []);
 
   const board = parseBoard(fen);
@@ -75,6 +90,8 @@ export function ChessView() {
         setLastMove({ from: r.uci.slice(0, 2), to: r.uci.slice(2, 4) });
         setHistory((h) => [...h, r.uci!]);
       }
+      setSearch({ scoreCp: r.scoreCp, depth: r.depth, nodes: r.nodes, substrate: useSubstrate, pv: r.pv ?? [] });
+      setMotifs(r.motifs ?? []);
       setFen(r.fen); setStatus(r.status); setErr(null);
     } catch (e) { setErr(`bot move failed: ${msg(e)}`); }
     finally { setBusy(false); }
@@ -87,6 +104,7 @@ export function ChessView() {
       if (!r.legal) { setErr(`illegal move: ${uci}`); return; }
       setLastMove({ from: uci.slice(0, 2), to: uci.slice(2, 4) });
       setHistory((h) => [...h, uci]);
+      setMotifs(r.motifs ?? []);
       setFen(r.fen); setStatus(r.status); setErr(null);
       if (!r.terminal && autoReply) await botMove(r.fen);
     } catch (e) { setErr(`move failed: ${msg(e)}`); }
@@ -135,7 +153,7 @@ export function ChessView() {
   const newGame = async () => {
     const r = await apiGet<{ fen: string }>('/chess/new');
     setFen(r.fen); setStatus('ongoing'); setSel(null); setMarks(new Set()); setUserArrows([]);
-    setHistory([]); setLastMove(null);
+    setHistory([]); setLastMove(null); setSearch(null); setMotifs([]);
   };
   const startTrain = () => {
     const q = new URLSearchParams({
@@ -150,10 +168,11 @@ export function ChessView() {
   const stmEval = topMoves[0]?.effMu ?? 1500;
   const whiteEval = whiteToMove(fen) ? stmEval - 1500 : 1500 - stmEval;
   const evalFrac = 1 / (1 + Math.exp(-whiteEval / 200));
-  const evalPawns = whiteEval / 100;
   const winPct = Math.round(evalFrac * 100);
+  // whiteEval is a Glicko rating delta (not centipawns) — label it as rating points so it
+  // doesn't read as a second, conflicting pawn eval next to the search readout.
   const leadTxt = Math.abs(whiteEval) < 12 ? 'Even'
-    : whiteEval > 0 ? `White +${evalPawns.toFixed(1)}` : `Black +${(-evalPawns).toFixed(1)}`;
+    : whiteEval > 0 ? `White +${Math.round(whiteEval)}` : `Black +${Math.round(-whiteEval)}`;
 
   const botBest = topMoves[0];
   const botBestFrom = botBest?.uci.slice(0, 2);
@@ -179,6 +198,11 @@ export function ChessView() {
             className={`status${busy ? ' thinking' : ''}${over ? (status === 'draw' ? ' over draw' : ' over win') : ''}`}
             role="status"
           >{statusText}</div>
+          {motifs.length > 0 && (
+            <div className="motifs">
+              {motifs.map((m) => <span key={m} className="motif-chip">{MOTIF_LABEL[m] ?? m}</span>)}
+            </div>
+          )}
           {err && <div className="chess-error" role="alert">{err}</div>}
           <div className="ctl-row">
             <button onClick={newGame}>New game</button>
@@ -187,7 +211,7 @@ export function ChessView() {
             <label><input type="checkbox" checked={flip} onChange={(e) => setFlip(e.target.checked)} /> flip</label>
           </div>
           <div className="ctl-row">
-            <label>depth<input type="number" min={1} max={12} value={searchDepth} onChange={(e) => setSearchDepth(+e.target.value)} /></label>
+            <label>depth<input type="number" min={1} max={12} value={searchDepth} onChange={(e) => { const n = parseInt(e.target.value, 10); if (!Number.isNaN(n)) setSearchDepth(Math.min(12, Math.max(1, n))); }} /></label>
             <label><input type="checkbox" checked={useSubstrate} onChange={(e) => setUseSubstrate(e.target.checked)} /> substrate root bias</label>
             <label><input type="checkbox" checked={evalMode} onChange={(e) => setEvalMode(e.target.checked)} /> eval mode (legal scores)</label>
           </div>
@@ -233,7 +257,8 @@ export function ChessView() {
           onStart={startTrain}
           onStop={stopTrain}
         />
-        <MoveList topMoves={topMoves} history={history} evalMode={evalMode} />
+        <MoveList topMoves={topMoves} history={history} evalMode={evalMode} search={search} />
+        <PstGrid />
       </div>
     </div>
   );

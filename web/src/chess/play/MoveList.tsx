@@ -1,18 +1,33 @@
 import type { MoveScore } from './Board';
+import type { SearchInfo } from '../ChessView';
 
 export interface MoveListProps {
   topMoves: MoveScore[];
   history?: string[];
   evalMode?: boolean;
+  search?: SearchInfo | null;
 }
 
-export function MoveList({ topMoves, history = [], evalMode = false }: MoveListProps) {
+export function MoveList({ topMoves, history = [], evalMode = false, search = null }: MoveListProps) {
   const muLo = Math.min(...topMoves.map((m) => m.effMu), Infinity);
   const muHi = Math.max(...topMoves.map((m) => m.effMu), -Infinity);
   const goodHue = (mu: number) => Math.round((muHi > muLo ? (mu - muLo) / (muHi - muLo) : 0.5) * 130);
 
   return (
     <>
+      {search && (
+        <section className="panel search-info">
+          <h3>Last search</h3>
+          <ul className="stats">
+            <li>eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b> <span className="muted">pawns, mover&rsquo;s view</span></li>
+            <li>depth <b>{search.depth}</b> · nodes <b>{search.nodes.toLocaleString()}</b></li>
+            {search.pv.length > 0 && (
+              <li>pv <span className="pv">{search.pv.join(' ')}</span></li>
+            )}
+            <li className="muted">{search.substrate ? 'substrate-biased' : 'pure'} alpha-beta</li>
+          </ul>
+        </section>
+      )}
       {history.length > 0 && (
         <section className="panel">
           <h3>Move list</h3>

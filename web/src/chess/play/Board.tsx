@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from 'react';
 
 export const GLYPH: Record<string, string> = {
   K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
@@ -27,14 +27,18 @@ export const whiteToMove = (fen: string) => fen.split(' ')[1] !== 'b';
 
 const fmtDelta = (mu?: number) => { const d = (mu ?? 1500) - 1500; return `${d >= 0 ? '+' : ''}${Math.round(d)}`; };
 
-function sqCenter(sq: string): { x: number; y: number } {
+// Overlay coordinates must follow the same flip transform the squares use, or arrows land on
+// the point-symmetric wrong square when the board is flipped.
+function sqCenter(sq: string, flip: boolean): { x: number; y: number } {
   const f = FILES.indexOf(sq[0]);
   const rank = Number(sq[1]);
-  return { x: (f + 0.5) * 12.5, y: (8 - rank + 0.5) * 12.5 };
+  const col = flip ? 7 - f : f;
+  const row = flip ? rank - 1 : 8 - rank;
+  return { x: (col + 0.5) * 12.5, y: (row + 0.5) * 12.5 };
 }
 
-function elbow(from: string, to: string): string {
-  const a = sqCenter(from), b = sqCenter(to);
+function elbow(from: string, to: string, flip: boolean): string {
+  const a = sqCenter(from, flip), b = sqCenter(to, flip);
   const corner = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
   return `${a.x},${a.y} ${corner.x},${corner.y} ${b.x},${b.y}`;
 }
@@ -91,7 +95,18 @@ export function Board({
     });
   }
 
-  const sqPx = (boardRef.current?.clientWidth ?? 480) / 8;
+  // Track the board's rendered width so the drag ghost (position:fixed, outside the container,
+  // so it can't use cqw) stays sized correctly across resizes instead of reading a stale ref.
+  const [boardW, setBoardW] = useState(0);
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    setBoardW(el.clientWidth);
+    const ro = new ResizeObserver(([entry]) => setBoardW(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [boardRef]);
+  const sqPx = (boardW || boardRef.current?.clientWidth || 480) / 8;
 
   return (
     <>
@@ -155,7 +170,7 @@ export function Board({
               </defs>
               {userArrows.map((ar, i) => (
                 <polyline key={`${ar.from}${ar.to}${i}`} className="uarrow" markerEnd="url(#uarrowhead)"
-                          points={elbow(ar.from, ar.to)} />
+                          points={elbow(ar.from, ar.to, flip)} />
               ))}
             </svg>
           </div>

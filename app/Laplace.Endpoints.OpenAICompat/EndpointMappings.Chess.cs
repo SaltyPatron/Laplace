@@ -5,6 +5,8 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class ChessEndpoints
 {
+    private static readonly JsonSerializerOptions LabEventJson = new(JsonSerializerDefaults.Web);
+
     public static void MapChessEndpoints(this WebApplication app)
     {
         app.MapGet("/chess/new", (ChessEngineService svc) =>
@@ -28,6 +30,9 @@ internal static class ChessEndpoints
 
         app.MapGet("/chess/train/status", (ChessEngineService svc) =>
             Results.Json(svc.Status())).WithTags("chess");
+
+        app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
+            Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
         app.MapGet("/chess/lab/catalog", () =>
         {
@@ -78,7 +83,9 @@ internal static class ChessEndpoints
             ctx.Response.Headers.CacheControl = "no-cache";
             await foreach (var evt in reader.ReadAllAsync(ct))
             {
-                var json = JsonSerializer.Serialize(evt, evt.GetType());
+                // Match the camelCase used by Results.Json elsewhere; default options emit
+                // PascalCase, which never matched the web client's field checks.
+                var json = JsonSerializer.Serialize(evt, evt.GetType(), LabEventJson);
                 await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             }

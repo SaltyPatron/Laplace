@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace Laplace.Chess.Service;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ChessLabJobKind
 {
     SubstrateTest,
@@ -12,6 +15,7 @@ public enum ChessLabJobKind
     LichessFetch,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ChessLabJobState
 {
     Pending,

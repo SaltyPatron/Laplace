@@ -1,15 +1,27 @@
 export interface LabEvent {
   at?: string;
+  // log
   level?: string;
   message?: string;
+  // progress
   done?: number;
   total?: number;
   label?: string;
+  // metric
   name?: string;
   value?: number;
   unit?: string;
+  // table
   title?: string;
+  columns?: string[];
   rows?: string[][];
+  // per-game
+  index?: number;
+  white?: string;
+  black?: string;
+  result?: string;
+  pgnPath?: string;
+  // done
   finalState?: string;
 }
 
@@ -21,9 +33,21 @@ export interface LabJob {
   artifacts: Record<string, string>;
 }
 
+export interface LabJobSpec {
+  kind: string;
+  label?: string;
+  default?: Record<string, string>;
+}
+
+export interface LabEngine {
+  path: string;
+  found: boolean;
+  source: string;
+}
+
 export interface LabCatalog {
-  jobs: { kind: string; label?: string }[];
-  binaries: { cutechessOk: boolean; stockfishOk: boolean; qtOk: boolean };
+  jobs: LabJobSpec[];
+  engines: Record<string, LabEngine>;
 }
 
 export async function* streamLabEvents(jobId: string, signal?: AbortSignal): AsyncGenerator<LabEvent> {

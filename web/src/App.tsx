@@ -19,10 +19,10 @@ export function App() {
           <span className="tagline">witnessed consensus, not weights</span>
         </h1>
         <nav>
-          <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>Chat</button>
-          <button className={tab === 'chess-play' ? 'active' : ''} onClick={() => setTab('chess-play')}>Play</button>
-          <button className={tab === 'chess-lab' ? 'active' : ''} onClick={() => setTab('chess-lab')}>Lab</button>
-          <button className={tab === 'billing' ? 'active' : ''} onClick={() => setTab('billing')}>Billing</button>
+          <button aria-current={tab === 'chat' ? 'page' : undefined} className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>Chat</button>
+          <button aria-current={tab === 'chess-play' ? 'page' : undefined} className={tab === 'chess-play' ? 'active' : ''} onClick={() => setTab('chess-play')}>Play</button>
+          <button aria-current={tab === 'chess-lab' ? 'page' : undefined} className={tab === 'chess-lab' ? 'active' : ''} onClick={() => setTab('chess-lab')}>Lab</button>
+          <button aria-current={tab === 'billing' ? 'page' : undefined} className={tab === 'billing' ? 'active' : ''} onClick={() => setTab('billing')}>Billing</button>
         </nav>
         <div className="tenant">
           <label htmlFor="tenant">tenant</label>

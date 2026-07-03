@@ -12,6 +12,9 @@ export function ChatView() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     apiGet<ModelList>('/v1/models')
@@ -20,7 +23,12 @@ export function ChatView() {
   }, []);
 
   useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
+    const el = transcriptRef.current;
+    if (!el) return;
+    // Only auto-follow if the user is already near the bottom; otherwise a token stream
+    // yanks them down every chunk while they're trying to read earlier replies.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTo({ top: el.scrollHeight });
   }, [messages]);
 
   async function requestQuote(serviceId: string, message: string) {
@@ -53,9 +61,13 @@ export function ChatView() {
 
     const payload = { model, stream: true, messages: history };
 
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
       let pendingProvenance: ProvenanceEntry | null = null;
-      for await (const chunk of streamChat('/v1/chat/completions', payload, { tenant, quoteId })) {
+      for await (const chunk of streamChat('/v1/chat/completions', payload, { tenant, quoteId }, ac.signal)) {
         const delta = chunk.choices?.[0]?.delta;
         const lap = chunk.laplace;
         if (delta?.content !== undefined || lap) {
@@ -74,6 +86,9 @@ export function ChatView() {
       }
       updateLastAssistant((m) => ({ ...m, streaming: false }));
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return;
+      }
       if (e instanceof PaymentRequiredError) {
         updateLastAssistant((m) => ({ ...m, streaming: false, error: 'payment required' }));
         await requestQuote('chat.completions', e.message);
@@ -91,15 +106,17 @@ export function ChatView() {
 
   
   async function retryWithQuote() {
-    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-    if (!lastUser) return;
+    const history = messages
+      .filter((m) => !m.streaming && !m.error)
+      .map((m) => ({ role: m.role, content: m.content }));
+    if (!history.some((m) => m.role === 'user')) return;
     setBusy(true);
     setPendingQuote(null);
     pushMessage({ role: 'assistant', content: '', provenance: [], streaming: true });
     try {
       const response = await apiPost<ChatCompletionResponse>(
         '/v1/chat/completions',
-        { model, messages: [{ role: 'user', content: lastUser.content }] },
+        { model, messages: history },
         { tenant, quoteId },
       );
       const content = response.choices?.[0]?.message?.content ?? '';

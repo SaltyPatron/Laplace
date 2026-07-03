@@ -92,6 +92,30 @@ public sealed class Search
         return new Result(best, bestScore, reached, _nodes);
     }
 
+    /// Reconstruct the principal variation by walking transposition-table best moves from the
+    /// root, validating each against the legal move list so a key collision can't emit an
+    /// illegal move. Call immediately after Think on the same root board.
+    public IReadOnlyList<string> ExtractPv(Board board, int maxLen = 12)
+    {
+        var pv = new List<string>(maxLen);
+        var b = board.Clone();
+        var seen = new HashSet<ulong>();
+        for (int i = 0; i < maxLen; i++)
+        {
+            ulong key = Zobrist.Hash(b);
+            if (!seen.Add(key)) break;
+            ref TtEntry e = ref _tt[key & _ttMask];
+            if (!e.Valid || e.Key != key || e.Move == default) break;
+            var mv = e.Move;
+            bool legal = false;
+            foreach (var lm in MoveGen.Legal(b)) if (lm == mv) { legal = true; break; }
+            if (!legal) break;
+            pv.Add(mv.ToUci());
+            MoveApply.MakeWithUndo(b, mv);
+        }
+        return pv;
+    }
+
     private int Negamax(Board b, int depth, int alpha, int beta, int ply)
     {
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }

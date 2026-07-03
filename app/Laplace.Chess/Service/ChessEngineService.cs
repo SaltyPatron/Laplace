@@ -11,9 +11,13 @@ namespace Laplace.Chess.Service;
 
 public readonly record struct ChessMoveScore(string Uci, double EffMu, bool Rated);
 
-public sealed record ChessBestMove(string? Uci, string Fen, double EffMu, bool Rated, bool Terminal, string Status);
+public sealed record ChessBestMove(
+    string? Uci, string Fen, double EffMu, bool Rated, bool Terminal, string Status,
+    int ScoreCp = 0, int Depth = 0, long Nodes = 0,
+    IReadOnlyList<string>? Pv = null, IReadOnlyList<string>? Motifs = null);
 
-public sealed record ChessApplyResult(string Fen, bool Terminal, string Status, bool Legal);
+public sealed record ChessApplyResult(
+    string Fen, bool Terminal, string Status, bool Legal, IReadOnlyList<string>? Motifs = null);
 
 public sealed record ChessTrainStatus(
     bool Running, long Games, int White, int Black, int Draws, int Adjudicated,
@@ -185,14 +189,19 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        var result = BuildEngine(substrate).Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var search = BuildEngine(substrate);
+        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
 
         var next = _modality.Apply(state, mv);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
+        var pv = search.ExtractPv(state.Board);
+        var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
 
-        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate, status != "ongoing", status);
+        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
+            status != "ongoing", status, ScoreCp: result.Score, Depth: result.Depth, Nodes: result.Nodes,
+            Pv: pv, Motifs: motifs);
     }
 
     public async Task RunStrongSelfPlayAsync(
@@ -250,10 +259,17 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessApplyResult(fen, false, "illegal move", Legal: false);
         var next = _modality.Apply(state, mv.Value);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true);
+        var motifs = ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board).ToList();
+        return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true, Motifs: motifs);
     }
 
 
+
+    public async Task<IReadOnlyList<LearnedSquare>> LearnedPstAsync(CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        return LearnedPst.ReadWhite(_ds!);
+    }
 
     public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
     {
