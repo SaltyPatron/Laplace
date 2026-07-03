@@ -148,7 +148,7 @@ public static unsafe class NativeGrammarIngest
                 }
             }
 
-            long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            long nowUs = IngestClock.NowUnixUs();
             IntPtr modalityId = Marshal.StringToCoTaskMemUTF8(src.Modality.GrammarId);
             allocs.Add(modalityId);
             IntPtr sess = IntPtr.Zero;

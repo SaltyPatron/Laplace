@@ -269,7 +269,14 @@ static int emit_node(
 
     double* traj = NULL;
     size_t m = node.child_count;
-    if (m > 0) {
+    /* A composition of exactly one child is content-identical to that child (same law as
+     * "cat has no separate sentence entity -- a one-word reply IS the sentence"): building an
+     * explicit length-1 trajectory here manufactures a distinct physicality id for something
+     * that should hash identically to its sole child's own physicality, which is exactly what
+     * silently duplicated physicality rows against BuildTier0Seed's atomic (no-trajectory)
+     * seeding of the same content -- see .scratchpad/02 Issue 25 residual. */
+    size_t n_traj = (m > 1) ? m : 0;
+    if (n_traj > 0) {
         hash128_t* child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
         uint64_t*  flags     = (uint64_t*)malloc(m * sizeof(uint64_t));
         if (!child_ids || !flags) {
@@ -293,11 +300,11 @@ static int emit_node(
     }
 
     hash128_t phys_id;
-    physicality_id_compute(node.id, node.coord, traj, m * 4, &phys_id);
+    physicality_id_compute(node.id, node.coord, traj, n_traj * 4, &phys_id);
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
-            node.coord, &node.hilbert, traj, (uint32_t)m,
-            (int32_t)m, 1, 0.0, 1, 0, now_us) != 0) {
+            node.coord, &node.hilbert, traj, (uint32_t)n_traj,
+            (int32_t)n_traj, 1, 0.0, 1, 0, now_us) != 0) {
         free(traj);
         return -2;
     }

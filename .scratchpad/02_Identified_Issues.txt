@@ -1148,3 +1148,81 @@ Still OPEN after this sweep (the genuinely big engineering items, none quick):
 finding that GiST KNN is fast when bound correctly), 34 (apply-throughput at scale —
 largely superseded by the Rule #8 Phase 2 write lane; re-baseline), 37 (OMW rc=-2,
 instrumented, wait for recurrence), and Rule #8 Phases 3-5.
+
+==== 2026-07-03 session: chess PGN parallel lane (Lumbras 909k-game live debugging) ====
+
+ISSUE 38 — FIXED. Mixed stale binaries after a locked build. A Release rebuild ran while a
+live ingest held file locks; MSB3027 failed to copy exactly Laplace.Chess.dll and
+Laplace.Decomposers.dll into the CLI output, leaving pre-consolidation DLLs (old struct
+layouts) beside post-consolidation ones. First chess runs after the 28->13 merge crashed
+with AccessViolation inside managed MoveGen.GenPawn and Internal CLR error (0x80131506)
+inside HashSet<Hash128> — classic cross-assembly struct-layout mismatch signatures, NOT
+chess bugs. Fix: wipe the CLI Release output dir + full rebuild; both crashes gone on
+identical commands. RULE: after ANY build that reports MSB3027 copy failures, the output
+tree is poisoned — clean-rebuild before handing binaries to anything.
+
+ISSUE 39 — FIXED. Chess PGN lane was single-threaded AND silent in working-set mode.
+Two independent defects compounding: (a) ChessPgnDecomposer fed DecomposerBatch.RunAsync —
+one thread did tree-sitter parse + per-ply board replay + compose for the whole corpus
+(measured 0.98 cores, 235 games/s); (b) in WS mode DecomposerBatch uses ONE spanning
+builder that yields only at the memory budget, so IngestRunner printed no INGEST_PROGRESS
+for 244s (the batch=512 knob in the chess code is dead in WS mode). Fix mirrors the
+wiktionary parallel lane: feeder frames raw game text only (chunked block reads + manual
+line split — the original per-line awaited ReadLineAsync capped framing at ~400 games/s),
+workers own parse+compose via PCoreParallelCompose (tree-sitter parsers are per-thread TLS
+in grammar_decomposer.c — verified, not assumed), hot-cache GameId shortcircuit only
+(bulk DB novelty probe stays on the sequential path), WS_COMPOSE feed heartbeat every 50k.
+
+ISSUE 40 — FIXED, and it was the dominant compose-scaling killer: WORKSTATION GC.
+No ServerGarbageCollection anywhere in the app tree. Measured live via dotnet-counters on
+the parallel chess lane: 1.87 GB/s allocation rate, 73 gen0 + 29 gen1 collections/s, 16%
+of wall time in GC pause — every collection suspends all 7 pinned workers. Per-core
+efficiency: 71 games/core-s parallel vs 235 sequential. Fix: DOTNET_gcServer=1 +
+DOTNET_GCHeapCount=8 (P-core budget) in env.cmd (guarded, defined-check like the rest).
+After: gen0 2.4/s, gen1 1.6/s, pause 6%, ~500-600 games/s compose (~2.1x sequential),
+120 games/core-s. Lock contention ROSE 11k->16k/s once GC stopped masking it — that is
+the next compose ceiling if one is ever needed (suspect memo/builder path; unproven).
+
+ISSUE 41 — FIXED. PCoreParallelCompose output channel was UNBOUNDED: workers outpacing
+the single consumer (runner drains changes through per-attestation consensus Accumulate;
+caught live mid-ConcurrentDictionary.GrowTable at 25M entries) piled fully-staged changes
+into RAM without limit. Now bounded at workerCount*2 with Wait — producers block and the
+pipeline self-limits to the consumer's real pace instead of converting the imbalance into
+memory. (The dedup-window "fix" tried first — recordsPerChange 512->4096 — was WRONG:
+content_witness_batch_add runs content_tree_build BEFORE the per-stage witness_seen check,
+so the expensive tree build is never deduped by builder window anyway, and ChessCompose
+already carries a global PositionMemo. It only fattened in-flight changes 8x. Reverted.)
+
+ISSUE 42 — FIXED. Fixed 8 GiB working-set budget OOM'd the 48 GB box. Staged-bytes
+estimate under-counts true resident ~2.5-3x (managed row objects, memo caches, consensus
+accumulator, server-GC heap slack): 8 GiB staged measured as ~21 GB resident, plus PG's
+locked huge pages, plus a 25.2M-relation fold spike = 0.5 GB free system-wide, everything
+paging, CLI at 0.5 cores (the "disk raped" symptom was pagefile churn, not PG writes).
+WorkingSetMode.BudgetBytes default is now RAM-aware: phys/16 clamped to [1 GiB, 8 GiB]
+(128 GB server keeps 8 GiB; 48 GB box gets 3 GiB). LAPLACE_WORKING_SET_BUDGET_MB still
+overrides. Verified live: sets close ~30k games, applies fire, memory sawtooths.
+
+SCALE OBSERVATIONS from the first full Rule #8 cycles on chess (open, not defects):
+  - Chess explodes to ~690 substrate rows/game (Lumbras 909k games ~= 630M rows). The
+    pipeline is APPLY-bound at scale: ~60s compose per ~300-400s apply per ~30k-game set
+    (apply runs synchronously in the consume loop; workers sit on backpressure). The big
+    remaining lever is pipelining: apply working set N while composing N+1 — IngestRunner
+    change, would take effective rate from ~85 to ~100+ games/s. NOT DONE.
+  - WS1 apply: 20.7M rows in 305s (entities 86k, attestations 94k rows/s, 8 id-range
+    conns); physicalities consistently the slowest (~29k rows/s, geometry payload).
+    WS2 attestations dropped to 61k rows/s — the index-cycle's "staged >= half live"
+    condition stops firing as tables grow; expected decay, re-baseline Issue 34 with this.
+  - Client fold rate decays with priors growth: e1 54k rel/s -> e2 20.7k rel/s (ReadPriors
+    against a growing consensus table). Watch on full seeds.
+  - EmitNodes does not consult the proven-present hot cache (only GameId-level shortcircuit
+    exists), so cross-working-set trunk positions are recomposed and staged again — WS2
+    subtracted 169k entities/164k physicalities at verify. Safe but wasted work; also the
+    WORKING_SET_SUBTRACTION message blames "a concurrent ingest" — misleading wording for
+    plain cross-set self-overlap.
+
+OPS LESSON (cost a run): cmd.exe re-reads live batch files by byte offset — never edit a
+.cmd while any invocation of it is executing. Editing env.cmd is safe while seed-step.cmd
+is blocked inside dotnet run (different file), but kill first anyway. Also: in a
+backpressured pipeline, producer rate == consumer rate BY CONSTRUCTION — a feed heartbeat
+matching the compose rate identifies no bottleneck; only independent evidence (per-thread
+CPU, stacks, counters) does. Three runs were burned re-learning this.

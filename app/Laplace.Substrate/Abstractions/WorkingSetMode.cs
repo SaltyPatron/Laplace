@@ -28,9 +28,17 @@ public static class WorkingSetMode
     /// <summary>
     /// Safety valve, not a second architecture: when a working set's staged
     /// bytes exceed the budget it closes (one apply) and the next one opens
-    /// through the same code path. Default 8 GiB.
+    /// through the same code path. The default scales to the machine —
+    /// staged-bytes estimate under-counts true resident cost ~2.5-3x (managed
+    /// row objects, memo caches, the consensus accumulator, server-GC heap
+    /// slack), and Postgres holds its own locked share of the same RAM. A
+    /// fixed 8 GiB budget measured out as ~21 GB resident and drove a 48 GB
+    /// box to 0.5 GB free mid-fold; phys/16 keeps the same 8 GiB on a 128 GB
+    /// server and backs off proportionally on smaller machines.
     /// </summary>
     public static readonly long BudgetBytes =
-        (long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_WORKING_SET_BUDGET_MB"), out var mb) && mb > 0
-            ? mb : 8_192) * 1024L * 1024L;
+        long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_WORKING_SET_BUDGET_MB"), out var mb) && mb > 0
+            ? mb * 1024L * 1024L
+            : Math.Clamp(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 16,
+                1024L * 1024L * 1024L, 8_192L * 1024L * 1024L);
 }

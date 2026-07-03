@@ -50,10 +50,17 @@ public static class PCoreParallelCompose
             SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        var output = Channel.CreateUnbounded<SubstrateChange>(new UnboundedChannelOptions
+        // Bounded, and it matters: with an unbounded output channel, workers
+        // that outpace the single consumer (the runner's per-attestation
+        // consensus accumulate) pile fully-staged changes into RAM without
+        // limit — measured live as multi-GB growth on the chess lane. Bounded,
+        // the producers block and the pipeline self-limits to the consumer's
+        // real pace instead of turning the imbalance into memory.
+        var output = Channel.CreateBounded<SubstrateChange>(new BoundedChannelOptions(workerCount * 2)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
         });
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -87,6 +94,14 @@ public static class PCoreParallelCompose
                 {
                     var builder = newBuilder();
                     int n = 0;
+                    // Yield on STAGED BYTES, not record count: records vary
+                    // ~1000x in substrate weight (a wiktionary entry is
+                    // ~1,100 rows), so a count quota is minutes-to-hours of
+                    // silence on fat corpora while a byte quota is a steady
+                    // cadence and a per-worker memory bound. The count quota
+                    // remains as the upper bound for feather-weight records.
+                    const long yieldBytes = 256L << 20;
+                    int sinceCheck = 0;
                     var reader = input.Reader;
                     while (true)
                     {
@@ -94,11 +109,19 @@ public static class PCoreParallelCompose
                         if (reader.TryRead(out var rec))
                         {
                             compose(builder, rec);
-                            if (++n >= recordsPerChange)
+                            n++;
+                            bool quota = n >= recordsPerChange;
+                            if (!quota && ++sinceCheck >= 256)
+                            {
+                                sinceCheck = 0;
+                                quota = builder.StagedBytesEstimate >= yieldBytes;
+                            }
+                            if (quota)
                             {
                                 output.Writer.TryWrite(builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult());
                                 builder = newBuilder();
                                 n = 0;
+                                sinceCheck = 0;
                             }
                             continue;
                         }

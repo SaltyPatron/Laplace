@@ -1,5 +1,6 @@
 #include "laplace/core/attestation_engine.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -15,7 +16,36 @@ static const double kPhiTrusted = 30.0;
 static const double kPhiCrank   = 350.0;
 static const int64_t kScoreHalfFp = 500000000LL;
 
+/* Genesis sentinel epoch (2020-01-01T00:00:00Z, microseconds) — mirrors
+ * IngestClock.GenesisEpochUnixUs on the managed side. */
+static const int64_t kDeterministicGenesisUs = 1577836800000000LL;
+
+/* Deterministic-time override for reproducible package builds. Returns a pinned
+ * timestamp (>0) when LAPLACE_DETERMINISTIC_TIME is set, else 0 (use the wall clock).
+ * Same env-var contract as the managed IngestClock: an integer value is taken as exact
+ * microseconds since the Unix epoch; any other non-empty value maps to the genesis
+ * sentinel. Cached after first read; the re-read race is benign (deterministic result,
+ * aligned 64-bit load/store). Off entirely for live ingest (env unset). */
+static int64_t laplace_deterministic_time_us(void) {
+    static int64_t cached = -1; /* -1 = unread, 0 = none, >0 = pinned */
+    int64_t c = cached;
+    if (c != -1) return c;
+
+    int64_t v = 0;
+    const char* s = getenv("LAPLACE_DETERMINISTIC_TIME");
+    if (s && *s) {
+        char* end = NULL;
+        long long parsed = strtoll(s, &end, 10);
+        if (end && *end == '\0' && parsed > 0) v = (int64_t)parsed;
+        else v = kDeterministicGenesisUs;
+    }
+    cached = v;
+    return v;
+}
+
 static int64_t unix_us_now(void) {
+    int64_t det = laplace_deterministic_time_us();
+    if (det > 0) return det;
 #ifdef _WIN32
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);

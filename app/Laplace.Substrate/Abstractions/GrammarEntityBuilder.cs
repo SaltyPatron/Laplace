@@ -217,7 +217,7 @@ public sealed class GrammarEntityBuilder
     {
         int n = _ast.NodeCount;
         {
-            long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            long nowUs = IngestClock.NowUnixUs();
             var entities = ImmutableArray.CreateBuilder<EntityRow>();
             var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
 

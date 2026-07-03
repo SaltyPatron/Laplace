@@ -45,7 +45,7 @@ public sealed class TextEntityBuilder
         if (nodeCount == 0)
             return (_entities.ToImmutable(), _physicalities.ToImmutable());
 
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        long nowUs = IngestClock.NowUnixUs();
 
         if (_existingBitmap is { Length: > 0 })
         {
@@ -78,7 +78,13 @@ public sealed class TextEntityBuilder
         double[]? trajectoryXyzm = null;
         int nConstituents = 0;
 
-        if (node.ChildCount > 0)
+        // A composition of exactly one child is content-identical to that child (same law as
+        // "cat has no separate sentence entity -- a one-word reply IS the sentence"): building
+        // an explicit length-1 trajectory here manufactures a distinct physicality id for
+        // something that should hash identically to its sole child's own physicality, which is
+        // exactly what silently duplicated ~1100 physicality rows against BuildTier0Seed's
+        // atomic (no-trajectory) seeding of the same content -- see .scratchpad/02 Issue 25 residual.
+        if (node.ChildCount > 1)
         {
             var childIds = new Hash128[node.ChildCount];
             var childFlags = new ulong[node.ChildCount];

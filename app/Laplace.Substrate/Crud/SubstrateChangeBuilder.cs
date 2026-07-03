@@ -208,7 +208,7 @@ public sealed class SubstrateChangeBuilder
                 intentId,
                 _sourceId,
                 _sourceContentUnitName,
-                DateTimeOffset.UtcNow,
+                IngestClock.Now(),
                 _parentIntentId,
                 _inputUnitsConsumed,
                 _commitEpoch),

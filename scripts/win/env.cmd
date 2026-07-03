@@ -38,6 +38,13 @@ if not defined MKL_NUM_THREADS set "MKL_NUM_THREADS=8"
 if not defined TBB_NUM_THREADS set "TBB_NUM_THREADS=8"
 if not defined MKL_DYNAMIC set "MKL_DYNAMIC=0"
 if not defined LAPLACE_NATIVE_THREADS set "LAPLACE_NATIVE_THREADS=8"
+REM Server GC for the ingest CLI: measured live (Lumbras chess, 7 compose workers)
+REM at 1.9GB/s allocation rate, 73 gen0 + 29 gen1 collections/s, 16% of wall time
+REM in GC pause under the default workstation GC — every collection suspends all
+REM pinned workers at once. Server GC = per-core heaps + parallel collection.
+REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS.
+if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
+if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"

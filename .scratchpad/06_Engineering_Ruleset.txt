@@ -89,6 +89,32 @@ wrong point in the sequence is a violation even if the algorithm itself is corre
     through staging-lifecycle round trips (matchup math never client-side; even the built+
     verified native fold, Issue 31, is still server-side and still per batch).
 
+Rule #9: The CLI is a server workload — it runs with Server GC (DOTNET_gcServer=1 +
+DOTNET_GCHeapCount=8 in env.cmd, guarded). Grounded in: parallel chess compose measured
+1.9 GB/s allocation with 73 gen0 + 29 gen1 collections/s and 16% of wall time paused under
+the workstation-GC default; Server GC took it to 2.4/1.6 collections/s, 6% pause, and
++70% throughput (Issue 40). Any new entry point that composes in parallel must inherit
+env.cmd or set these itself.
+
+Rule #10: Parallel pipeline stages communicate through BOUNDED channels only. An unbounded
+channel between a fast producer and a slow consumer is a memory leak with extra steps
+(Issue 41: fully-staged SubstrateChanges piled into RAM until the box hit 0.5 GB free).
+Backpressure is the design, not a failure mode: a blocked worker during apply is correct.
+
+Rule #11: Diagnose parallel-lane performance with independent evidence — per-thread CPU,
+stack dumps, runtime counters — never with pipeline-internal rates. In a backpressured
+pipeline the producer rate equals the consumer rate by construction, so "the feeder is at
+X/s and compose is at X/s" identifies nothing. And a machine-wide symptom (high CPU + flat
+throughput + even per-thread busyness) fits GC storms, paging, and lock convoys equally —
+counters distinguish them in one 15s sample; theories don't (Issues 40-42 were found only
+after three runs burned on plausible-but-wrong knob fixes).
+
+Rule #12: Sizing defaults derive from the machine, not constants. Working-set budget is
+phys/16 clamped [1,8] GiB (Issue 42 — a fixed 8 GiB OOM'd the 48 GB box while being
+correct on the 128 GB server); worker counts come from CpuTopology; MKL/TBB thread counts
+should come from the same topology resolution (currently a blanket 8 in env.cmd — only
+laplace_synthesis links MKL, engine/core does not, verified 2026-07-03).
+
 Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - materialize_period_partition / materialize_period_partition_fresh differ only by whether
       the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized

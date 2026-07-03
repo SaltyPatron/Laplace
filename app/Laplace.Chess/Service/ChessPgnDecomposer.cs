@@ -48,11 +48,67 @@ public sealed class ChessPgnDecomposer : IDecomposer
         // knob so IngestRunner's row/intent flush thresholds can actually fire mid-run.
         int batch = Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 512, 1, 512);
 
+        // A concatenated PGN archive = one pipeline = one core on the sequential
+        // lane — and working-set mode's single spanning builder in DecomposerBatch
+        // means no change (and therefore no INGEST_PROGRESS line) yields until the
+        // memory budget fills, so a 900k-game corpus is minutes of silence on one
+        // core. Same cure as the wiktionary lane: the feeder frames raw game text
+        // only; workers own the expensive work (tree-sitter parse, per-ply board
+        // replay, compose) in parallel, each yielding every `batch` games so the
+        // runner's progress heartbeat actually beats. A unit cap or dry run keeps
+        // the sequential, exactly-bounded path.
+        if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0 && !options.DryRun)
+        {
+            int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
+            var reader = context.Reader;
+            using var modalities = new ThreadLocal<ChessModality>(() => new ChessModality());
+            int bn = -1;
+            await foreach (var change in PCoreParallelCompose.RunAsync(
+                StreamAllGamesWithHeartbeatAsync(context.EcosystemPath, ct),
+                workers,
+                batch,
+                () => new SubstrateChangeBuilder(
+                    ChessVocabulary.PgnSourceId, $"chess/pgn/{Interlocked.Increment(ref bn)}", null,
+                    entityCapacity: batch * 4,
+                    physicalityCapacity: batch * 2,
+                    attestationCapacity: batch * 8),
+                (b, gameText) =>
+                {
+                    if (TryParseGame(gameText) is not { } parsed) return;
+                    // Hot-cache shortcircuit only (same contract as the wiktionary
+                    // parallel lane): a game already proven present is skipped
+                    // outright; DB-level dedup of the rest is the descent's job.
+                    // The chunked EntitiesExistBitmapAsync probe stays on the
+                    // sequential path, where blocking a compose worker on a DB
+                    // round trip wouldn't serialize the whole lane.
+                    if (reader is not null && reader.IsProvenPresent(parsed.GameId)) return;
+                    ComposeParsedGame(parsed, b, modalities.Value!);
+                },
+                ct))
+                yield return change;
+            yield break;
+        }
+
         await foreach (var change in DecomposerBatch.RunAsync(
             StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
             (parsed, b) => ComposeParsedGame(parsed, b, modality),
             ChessVocabulary.PgnSourceId, "chess/pgn", batch, context.Reader, options, ct))
             yield return change;
+    }
+
+    private static async IAsyncEnumerable<string> StreamAllGamesWithHeartbeatAsync(
+        string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
+    {
+        long framed = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, ct))
+        {
+            if (++framed % 50_000 == 0)
+                Console.WriteLine(
+                    $"WS_COMPOSE feed: {framed:N0} games framed "
+                    + $"({framed / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} games/s)");
+            yield return gameText;
+        }
     }
 
     // Trunk-to-leaf short-circuit: a game's GameId is itself an entity (EmitGame adds it, tier
@@ -194,23 +250,66 @@ public sealed class ChessPgnDecomposer : IDecomposer
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
         => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn");
 
+    // One awaited ReadLineAsync per line caps the feeder around ~400 games/s —
+    // slower than even a single compose worker, so the parallel lane starved at
+    // exactly the framing rate (measured live: feed 403 games/s == composed
+    // rate, 7 workers each ~60% idle). Chunked block reads with manual line
+    // splitting keep the same game-text semantics (terminators stripped, lines
+    // joined with '\n') at file-IO speed.
     private static async IAsyncEnumerable<string> StreamGamesAsync(
     string path, [EnumeratorCancellation] CancellationToken ct)
     {
         using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sb = new StringBuilder(2048);
+        var carry = new StringBuilder(256);
         bool inGame = false;
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
+        var buf = new char[1 << 20];
+        int read;
+        while ((read = await reader.ReadAsync(buf.AsMemory(), ct).ConfigureAwait(false)) > 0)
         {
+            int lineStart = 0;
+            for (int i = 0; i < read; i++)
+            {
+                if (buf[i] != '\n') continue;
+                int end = i > lineStart && buf[i - 1] == '\r' ? i - 1 : i;
+                var tail = buf.AsSpan(lineStart, end - lineStart);
+                if (carry.Length > 0)
+                {
+                    carry.Append(tail);
+                    // A CRLF split exactly at the block boundary leaves the '\r'
+                    // in carry (the in-block check above can't see across reads).
+                    if (carry[^1] == '\r') carry.Length--;
+                    ProcessLine(carry.ToString().AsSpan(), sb, ref inGame, out var completed);
+                    carry.Clear();
+                    if (completed is not null) yield return completed;
+                }
+                else
+                {
+                    ProcessLine(tail, sb, ref inGame, out var completed);
+                    if (completed is not null) yield return completed;
+                }
+                lineStart = i + 1;
+            }
+            if (lineStart < read) carry.Append(buf.AsSpan(lineStart, read - lineStart));
+        }
+        if (carry.Length > 0)
+        {
+            var last = carry.ToString().TrimEnd('\r');
+            ProcessLine(last.AsSpan(), sb, ref inGame, out var completedLast);
+            if (completedLast is not null) yield return completedLast;
+        }
+        if (sb.Length > 0) yield return sb.ToString();
+
+        static void ProcessLine(ReadOnlySpan<char> line, StringBuilder sb, ref bool inGame, out string? completed)
+        {
+            completed = null;
             if (line.StartsWith("[Event ", StringComparison.Ordinal))
             {
-                if (inGame && sb.Length > 0) { yield return sb.ToString(); sb.Clear(); }
+                if (inGame && sb.Length > 0) { completed = sb.ToString(); sb.Clear(); }
                 inGame = true;
             }
             if (inGame) { sb.Append(line); sb.Append('\n'); }
         }
-        if (sb.Length > 0) yield return sb.ToString();
     }
 
 

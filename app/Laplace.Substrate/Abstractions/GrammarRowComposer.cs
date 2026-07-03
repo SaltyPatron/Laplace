@@ -229,7 +229,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             Hash128 RootId) Materialize(double witnessWeight, byte[]? existingBitmap)
     {
         EnsureComposed(existingBitmap);
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        long nowUs = IngestClock.NowUnixUs();
         var entities = ImmutableArray.CreateBuilder<EntityRow>();
         var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
         var precedes = ImmutableArray.CreateBuilder<AttestationRow>();
@@ -348,7 +348,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     {
         EnsureComposed(existingBitmap);
         ArgumentNullException.ThrowIfNull(builder);
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        long nowUs = IngestClock.NowUnixUs();
         var stage = builder.ContentStage;
 
         unsafe
