@@ -29,13 +29,7 @@ for %%P in (
   Laplace.Decomposers.Containers.Abstractions.Tests
   Laplace.SubstrateCRUD.Tests
   Laplace.Ingestion.Tests
-  Laplace.Decomposers.Unicode.Tests
-  Laplace.Decomposers.Model.Tests
-  Laplace.Decomposers.FrameNet.Tests
-  Laplace.Decomposers.VerbNet.Tests
-  Laplace.Decomposers.SemLink.Tests
-  Laplace.Decomposers.PropBank.Tests
-  Laplace.Decomposers.OpenSubtitles.Tests
+  Laplace.Decomposers.Tests
   Laplace.Endpoints.OpenAICompat.Tests
   Laplace.Modality.Chess.Tests
   Laplace.Chess.Service.Tests

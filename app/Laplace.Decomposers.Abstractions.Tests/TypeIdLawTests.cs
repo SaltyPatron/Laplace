@@ -70,7 +70,7 @@ public class TypeIdLawTests
 
         foreach (var file in Directory.EnumerateFiles(decomposerDir, "*.cs", SearchOption.AllDirectories))
         {
-            if (!file.Contains("Laplace.Decomposers.", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!file.Contains("Laplace.Decomposers", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
                 || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))

@@ -159,8 +159,8 @@ fi
 if should_run "model"; then
   if [[ -d "$TINYLLAMA" ]]; then
     run_just "deposit safetensors" just ingest-tinyllama || AUDIT_FAIL=1
-    if [[ -x "$ROOT/scripts/model-synthesize.sh" ]]; then
-      run_just "model-synthesize" "$ROOT/scripts/model-synthesize.sh" "$TINYLLAMA" || AUDIT_FAIL=1
+    if [[ -x "$ROOT/scripts/model-synthesize-ci.sh" ]]; then
+      run_just "model-synthesize" "$ROOT/scripts/model-synthesize-ci.sh" "$TINYLLAMA" || AUDIT_FAIL=1
     fi
   else
     skip "deposit safetensors (LAPLACE_TINYLLAMA_DIR missing)"

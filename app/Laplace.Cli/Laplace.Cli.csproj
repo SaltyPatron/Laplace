@@ -2,40 +2,18 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <LangVersion>latest</LangVersion>
     <RootNamespace>Laplace.Cli</RootNamespace>
     <AssemblyName>Laplace.Cli</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Npgsql" Version="10.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Laplace.Decomposers.Unicode\Laplace.Decomposers.Unicode.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.ISO\Laplace.Decomposers.ISO.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.CILI\Laplace.Decomposers.CILI.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.WordNet\Laplace.Decomposers.WordNet.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.UD\Laplace.Decomposers.UD.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Tatoeba\Laplace.Decomposers.Tatoeba.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Atomic2020\Laplace.Decomposers.Atomic2020.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.ConceptNet\Laplace.Decomposers.ConceptNet.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Wiktionary\Laplace.Decomposers.Wiktionary.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.FrameNet\Laplace.Decomposers.FrameNet.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.OpenSubtitles\Laplace.Decomposers.OpenSubtitles.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.VerbNet\Laplace.Decomposers.VerbNet.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.PropBank\Laplace.Decomposers.PropBank.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.SemLink\Laplace.Decomposers.SemLink.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Code\Laplace.Decomposers.Code.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Model\Laplace.Decomposers.Model.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Image\Laplace.Decomposers.Image.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Audio\Laplace.Decomposers.Audio.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers\Laplace.Decomposers.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Dynamics\Laplace.Engine.Dynamics.csproj" />

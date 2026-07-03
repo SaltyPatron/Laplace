@@ -65,8 +65,23 @@ One bit for "this touches a HAS_POS relation," none for which POS value; all dyn
 per-label relations (DEP_* deprel labels) collapse onto their family-root bit.
 
 ISSUE 08 — 55-project decomposer sprawl / ~260 dormant tree-sitter grammar submodules
-Status: OPEN (from 01_Initial_review.txt 3.1, unchanged; author's own assessment: "terrible
-design... AI agents gave it to me this way and I just noticed")
+Status: RESOLVED this session (both halves)
+(a) Decomposer sprawl: 19 decomposer libraries + 12 test projects consolidated into 2
+projects (Laplace.Decomposers + Laplace.Decomposers.Tests) with per-source subfolders;
+namespaces and SourceId/SourceName strings preserved byte-identically. Verified: full
+rebuild-all.cmd, 892 tests green, isolated re-ingest of unicode/iso639/cili/wordnet into a
+fresh DB produced hash-identical content-addressed ids vs canonical laplace DB, and forced
+re-ingest short-circuited with 0 new rows. Also centralized TFM/Nullable/LangVersion into
+Directory.Build.props and package versions into Directory.Packages.props (CPM), deduped
+NumericClassId wrappers / path-probing / CILI UTF-8 helpers, migrated ISO onto
+DecomposerBatch, and deleted dead scripts (decomposer-clone.sh, ladder-ci, thin wrappers,
+scripts/win/_*.sql debug debris, King/lexical one-off cmd cluster).
+(b) Dormant grammar submodules: author decision = KEEP. Tree-sitter is the parsing engine;
+the 299-submodule pool is intentional (wire-on-demand), as are the postgresql/postgis/geos/
+proj/gdal submodules (planned unified Intel/Eigen/Spectra-linked rebuild). Documented in
+engine/core/grammars/README.md, including why generated/sql + generated/swift exist
+(upstream gitignores parser.c; checked-in generated copies keep the build hermetic — with a
+regeneration rule when those submodules are bumped) and that generated/pgn is homegrown.
 
 ISSUE 09 — zero documentation anywhere in the repository
 Status: IN PROGRESS (this review series — 01, 02, and a forthcoming CLAUDE.md are the first

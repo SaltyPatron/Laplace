@@ -44,7 +44,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
     private int _epochsFolded;
     private Task _foldChain = Task.CompletedTask;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
-    private readonly object _accumLock = new();
+    // Read side = concurrent Accumulate (per-edge Acc locks handle merge);
+    // write side = the period snapshot swap. The previous plain lock
+    // serialized every attestation of every compose worker in the process.
+    private readonly ReaderWriterLockSlim _accumLock = new();
     private int _inflightApplies;
     private volatile bool _disposing;
 
@@ -340,7 +343,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
     private void Accumulate(AttestationRow a)
     {
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
-        lock (_accumLock)
+        _accumLock.EnterReadLock();
+        try
         {
             var acc = _accumulation.GetOrAdd((a.SubjectId, a.TypeId, a.ObjectId), static _ => new Acc());
             lock (acc)
@@ -360,6 +364,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                     + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
                 if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
             }
+        }
+        finally
+        {
+            _accumLock.ExitReadLock();
         }
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
@@ -500,11 +508,13 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
 
                 ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snap;
-                lock (_accumLock)
+                _accumLock.EnterWriteLock();
+                try
                 {
                     snap = _accumulation;
                     _accumulation = new ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc>();
                 }
+                finally { _accumLock.ExitWriteLock(); }
                 if (!snap.IsEmpty)
                 {
                     foreach (var acc in snap.Values)
@@ -535,11 +545,13 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
             }
 
             ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snapshot;
-            lock (_accumLock)
+            _accumLock.EnterWriteLock();
+            try
             {
                 snapshot = _accumulation;
                 _accumulation = new ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc>();
             }
+            finally { _accumLock.ExitWriteLock(); }
             if (snapshot.IsEmpty) return;
 
             int epoch = ++_periodEpoch;

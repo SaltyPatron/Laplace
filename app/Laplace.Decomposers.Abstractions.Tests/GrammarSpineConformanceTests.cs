@@ -38,18 +38,18 @@ public class GrammarSpineConformanceTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
         {
-            ("Laplace.Decomposers.Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness"]),
-            ("Laplace.Decomposers.SemLink", ["IngestBatchPipeline", "GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            ("Laplace.Decomposers.Tatoeba", ["StructuredGrammarIngest", "TatoebaGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
-            ("Laplace.Decomposers.ConceptNet", ["StructuredGrammarIngest", "ConceptNetGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
-            ("Laplace.Decomposers.OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
-            ("Laplace.Decomposers.Atomic2020", ["StructuredGrammarIngest", "Atomic2020GrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
-            ("Laplace.Decomposers.UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
+            ("Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness"]),
+            ("SemLink", ["IngestBatchPipeline", "GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
+            ("Tatoeba", ["StructuredGrammarIngest", "TatoebaGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            ("ConceptNet", ["StructuredGrammarIngest", "ConceptNetGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            ("OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
+            ("Atomic2020", ["StructuredGrammarIngest", "Atomic2020GrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            ("UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)
         {
-            var dir = Path.Combine(repoRoot, "app", project);
+            var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", project);
             var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
                 .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
                          && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
@@ -64,7 +64,7 @@ public class GrammarSpineConformanceTests
     public void OpenSubtitles_UsesContentWitnessBatch_NotHandRolledTabularParse()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers.OpenSubtitles");
+        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "OpenSubtitles");
         var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Contains("bin") && !p.Contains("obj"))
             .Select(File.ReadAllText));

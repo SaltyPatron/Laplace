@@ -1,4 +1,7 @@
-
+# NOTE: Linux dev convenience layer only — recipes here may drift.
+# The canonical orchestration paths are scripts/pipeline.sh (Linux CI)
+# and scripts/win/*.cmd (Windows). scripts/validate-pipeline.py is the
+# cross-toolchain policy gate; trust it over this file when they disagree.
 
 set shell := ["bash", "-uc"]
 
@@ -157,7 +160,7 @@ synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
     just synthesize substrate "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR}/config.json" {{output}}
 
 model-synthesize model_path:
-    scripts/model-synthesize.sh {{model_path}}
+    scripts/model-synthesize-ci.sh {{model_path}}
 
 model-synthesize-ci: build build-app
     @chmod +x scripts/model-synthesize-ci.sh

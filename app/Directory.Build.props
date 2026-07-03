@@ -7,6 +7,13 @@
     into redirected builds (CS0579 duplicate-attribute failures). Linux/CI
     keeps in-repo outputs unless it sets LAPLACE_BUILD_ROOT itself.
   -->
+  <!-- Shared compiler settings for every project under app/. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
   <PropertyGroup>
     <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Builds\Laplace</LAPLACE_BUILD_ROOT>
   </PropertyGroup>

@@ -1,30 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>Laplace.Decomposers.Abstractions.Tests</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Xunit.SkippableFact" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.ConceptNet\Laplace.Decomposers.ConceptNet.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.SemLink\Laplace.Decomposers.SemLink.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.UD\Laplace.Decomposers.UD.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Wiktionary\Laplace.Decomposers.Wiktionary.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers\Laplace.Decomposers.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
   </ItemGroup>
 
