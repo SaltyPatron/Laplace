@@ -118,7 +118,12 @@ public static class PCoreParallelCompose
                             }
                             if (quota)
                             {
-                                output.Writer.TryWrite(builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult());
+                                var change = builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult();
+                                // Bounded output + FullMode.Wait: must BLOCK on write, not TryWrite.
+                                // TryWrite returns false and DROPS the change when the channel is
+                                // full (consumer slower than the workers), silently losing composed
+                                // records — the count-loss the parallel-compose tests catch.
+                                output.Writer.WriteAsync(change, runCt).AsTask().GetAwaiter().GetResult();
                                 builder = newBuilder();
                                 n = 0;
                                 sinceCheck = 0;
@@ -128,7 +133,11 @@ public static class PCoreParallelCompose
                         var wait = reader.WaitToReadAsync(runCt).AsTask();
                         if (!wait.GetAwaiter().GetResult()) break;
                     }
-                    if (n > 0) output.Writer.TryWrite(builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult());
+                    if (n > 0)
+                    {
+                        var change = builder.SetInputUnitsConsumed(n).BuildAsync(runCt).GetAwaiter().GetResult();
+                        output.Writer.WriteAsync(change, runCt).AsTask().GetAwaiter().GetResult();
+                    }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
