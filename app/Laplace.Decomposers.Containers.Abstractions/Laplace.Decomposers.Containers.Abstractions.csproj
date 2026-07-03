@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <RootNamespace>Laplace.Decomposers.Containers.Abstractions</RootNamespace>
-    <AssemblyName>Laplace.Decomposers.Containers.Abstractions</AssemblyName>
-  </PropertyGroup>
-
-</Project>

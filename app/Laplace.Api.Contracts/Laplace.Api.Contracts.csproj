@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <RootNamespace>Laplace.Api.Contracts</RootNamespace>
-    <AssemblyName>Laplace.Api.Contracts</AssemblyName>
-  </PropertyGroup>
-
-</Project>

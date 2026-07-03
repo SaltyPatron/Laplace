@@ -82,6 +82,24 @@ proj/gdal submodules (planned unified Intel/Eigen/Spectra-linked rebuild). Docum
 engine/core/grammars/README.md, including why generated/sql + generated/swift exist
 (upstream gitignores parser.c; checked-in generated copies keep the build hermetic — with a
 regeneration rule when those submodules are bumped) and that generated/pgn is homegrown.
+(c) Second wave (author-requested, same session): the remaining 28 projects consolidated to
+13. Laplace.Core = Engine.Core + Engine.Dynamics + Engine.Synthesis + Modality (folders
+Core/Dynamics/Synthesis/Modality); Laplace.Substrate = SubstrateCRUD + Ingestion +
+Decomposers.Abstractions + Containers.Abstractions (folders Crud/Ingestion/Abstractions/
+Containers); Laplace.Chess = Modality.Chess + Chess.Service (folders Modality/Service);
+Api.Contracts folded into Endpoints.OpenAICompat/Contracts. 12 test projects -> 5
+(Core.Tests, Substrate.Tests, Decomposers.Tests, Endpoints.OpenAICompat.Tests, Chess.Tests).
+All namespaces preserved byte-identically (assembly names changed; nothing binds to them —
+DllImport targets native DLLs, no reflection-by-assembly-name found). Migrations kept as a
+standalone exe (scripts/pipeline.sh, publish.cmd, Justfile all invoke it directly).
+Laplace.Chess.Uci kept (separate deployable, laplace-uci.exe). One real merge hazard found
+and fixed: GrammarPerfcacheFixture (ex-Abstractions.Tests) called CodepointPerfcache.Unload()
+on dispose — harmless when each suite was its own process, but in the merged Substrate.Tests
+assembly it yanked the process-global native T0 perfcache out from under the ex-Ingestion
+tests running in parallel ("content witness requires the T0 perfcache"). Fixture now loads
+only if not already loaded and never unloads. Verified: 891 tests green across 5 suites
+(old-vs-new discovered-test-list diff on Laplace.Decomposers.Tests is empty; the 892-vs-891
+delta is xunit run-level counting noise, not a lost test), validate-pipeline.py OK.
 
 ISSUE 09 — zero documentation anywhere in the repository
 Status: IN PROGRESS (this review series — 01, 02, and a forthcoming CLAUDE.md are the first

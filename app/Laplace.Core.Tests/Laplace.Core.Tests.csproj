@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <RootNamespace>Laplace.Decomposers.Tests</RootNamespace>
+    <RootNamespace>Laplace.Core.Tests</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
@@ -11,14 +11,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Npgsql" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Laplace.Decomposers\Laplace.Decomposers.csproj" />
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
-    <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
   </ItemGroup>
 
 </Project>

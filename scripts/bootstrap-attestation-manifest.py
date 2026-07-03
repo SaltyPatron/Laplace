@@ -4,8 +4,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REG = ROOT / "app/Laplace.Decomposers.Abstractions/RelationTypeRegistry.cs"
-POS = ROOT / "app/Laplace.Decomposers.Abstractions/PosReference.cs"
+REG = ROOT / "app/Laplace.Substrate/Abstractions/RelationTypeRegistry.cs"
+POS = ROOT / "app/Laplace.Substrate/Abstractions/PosReference.cs"
 MANIFEST = ROOT / "engine/manifest"
 
 RANK_MAP = {

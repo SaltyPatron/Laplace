@@ -9,7 +9,7 @@
 
   <ItemGroup>
     
-    <ProjectReference Include="..\Laplace.Modality.Chess\Laplace.Modality.Chess.csproj" />
+    <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
   </ItemGroup>
 
 </Project>

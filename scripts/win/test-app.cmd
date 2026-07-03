@@ -22,18 +22,11 @@ set "MATCHED="
 
 set "XUNIT_TIER_EXCLUDE=Tier^!=perf"
 for %%P in (
-  Laplace.Engine.Core.Tests
-  Laplace.Engine.Dynamics.Tests
-  Laplace.Engine.Synthesis.Tests
-  Laplace.Decomposers.Abstractions.Tests
-  Laplace.Decomposers.Containers.Abstractions.Tests
-  Laplace.SubstrateCRUD.Tests
-  Laplace.Ingestion.Tests
+  Laplace.Core.Tests
+  Laplace.Substrate.Tests
   Laplace.Decomposers.Tests
   Laplace.Endpoints.OpenAICompat.Tests
-  Laplace.Modality.Chess.Tests
-  Laplace.Chess.Service.Tests
-  Laplace.Chess.Uci.Tests
+  Laplace.Chess.Tests
 ) do (
   set "RUNIT=1"
   if defined FILTER (

@@ -8,6 +8,7 @@ if /i "%~1"=="--recycle" set "RECYCLE=1"
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
 del /q "%DEPLOY%\lib\*.stale~*" 2>nul
+del /q "%DEPLOY%\share\*.stale~*" 2>nul
 
 
 
@@ -35,8 +36,10 @@ call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
 call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
 call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
-copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\laplace_t0_perfcache.bin" >nul || exit /b 1
-copy /y "build-win\core\perfcache\laplace_highway_perfcache.bin" "%DEPLOY%\share\laplace_highway_perfcache.bin" >nul || exit /b 1
+rem perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm),
+rem so they need the same rename-then-copy hot-swap as the DLLs.
+call :swapcopy "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share" || exit /b 1
+call :swapcopy "build-win\core\perfcache\laplace_highway_perfcache.bin" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
 
@@ -62,15 +65,17 @@ exit /b 0
 :swapcopy
 set "SRC=%~1"
 set "BASE=%~nx1"
+set "DESTDIR=%~2"
+if "%DESTDIR%"=="" set "DESTDIR=%DEPLOY%\lib"
 if exist "%SRC%" goto sc_copy
 echo missing build artifact: "%SRC%"
 exit /b 1
 :sc_copy
-copy /y "%SRC%" "%DEPLOY%\lib\%BASE%" >nul 2>nul && exit /b 0
-ren "%DEPLOY%\lib\%BASE%" "%BASE%.stale~%RANDOM%" 2>nul || goto sc_fail
-copy /y "%SRC%" "%DEPLOY%\lib\%BASE%" >nul 2>nul || goto sc_fail
+copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul && exit /b 0
+ren "%DESTDIR%\%BASE%" "%BASE%.stale~%RANDOM%" 2>nul || goto sc_fail
+copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul || goto sc_fail
 echo   hot-swapped %BASE% -- old image renamed; backends pick up the new copy on reconnect
 exit /b 0
 :sc_fail
-echo FAILED to deploy %BASE% into %DEPLOY%\lib
+echo FAILED to deploy %BASE% into %DESTDIR%
 exit /b 1

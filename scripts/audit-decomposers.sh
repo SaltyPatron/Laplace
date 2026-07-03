@@ -168,7 +168,7 @@ if should_run "model"; then
 fi
 
 section "DOTNET TESTS (no full PG unicode integration unless configured)"
-(cd "$ROOT/app" && dotnet test Laplace.Decomposers.Abstractions.Tests -c Release --no-restore 2>/dev/null || dotnet test Laplace.Decomposers.Abstractions.Tests -c Release) || AUDIT_FAIL=1
+(cd "$ROOT/app" && dotnet test Laplace.Substrate.Tests -c Release --no-restore 2>/dev/null || dotnet test Laplace.Substrate.Tests -c Release) || AUDIT_FAIL=1
 
 section "AUDIT END exit=$AUDIT_FAIL"
 exit "$AUDIT_FAIL"

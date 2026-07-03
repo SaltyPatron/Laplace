@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Laplace.Engine.Core</RootNamespace>
+    <AssemblyName>Laplace.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Substrate" />
+    <InternalsVisibleTo Include="Laplace.Core.Tests" />
+    <InternalsVisibleTo Include="Laplace.Substrate.Tests" />
+  </ItemGroup>
+
+</Project>

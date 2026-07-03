@@ -2,23 +2,21 @@
 
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <RootNamespace>Laplace.Decomposers</RootNamespace>
-    <AssemblyName>Laplace.Decomposers</AssemblyName>
+    <RootNamespace>Laplace.SubstrateCRUD</RootNamespace>
+    <AssemblyName>Laplace.Substrate</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Laplace.Decomposers.Tests" />
     <InternalsVisibleTo Include="Laplace.Substrate.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Parquet.Net" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
-    <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
   </ItemGroup>
 
 </Project>

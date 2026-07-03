@@ -115,8 +115,7 @@ lookups had to be hand-rolled via `generate_series` + `substring`.
 
 ## Known gaps (see `.scratchpad/02_Identified_Issues.txt` for the live, itemized list)
 
-55 .NET projects for what's conceptually ~14 decomposers (author's own assessment: "AI
-agents gave it to me this way and I just noticed"); `feature_extractor.cpp` is a full stub;
+`feature_extractor.cpp` is a full stub;
 `astar.cpp`'s heuristic is hardcoded `0.0` (uniform-cost search today, not true A*); MoE
 expert weights / attention bias fall through to zero in GGUF synthesis; zero documentation
 existed anywhere in this repo before this session.
@@ -148,8 +147,17 @@ scoped by tier — see `.scratchpad/02` Issue 19 for the distinction. Don't conf
 algorithmic complexity of one call" with "implemented O(tier) bulk dedup" — they're different
 fixes at different scope, and only the narrower one has been done.
 
-**Decomposer consolidation is proposed but not started**: one `Laplace.Decomposers` library
-+ `Decomposer<T>` base class + one test project, collapsing ~28 projects to 2. Every
-decomposer already implements `IDecomposer`/`IIngestInventoryProvider` uniformly, so this is
-purely a physical-boundary problem, not a redesign. Explicitly deferred by the author as of
-this session — don't start it unprompted.
+**Project consolidation is DONE (two waves, author-approved)**: the app tree is now 13
+projects — 4 libraries (`Laplace.Core` = old Engine.Core/Dynamics/Synthesis + Modality;
+`Laplace.Substrate` = SubstrateCRUD + Ingestion + Decomposers.Abstractions +
+Containers.Abstractions; `Laplace.Decomposers` = all 19 source decomposers;
+`Laplace.Chess` = Modality.Chess + Chess.Service), 4 deployables (`Laplace.Cli`,
+`Laplace.Endpoints.OpenAICompat` with Api.Contracts folded in, `Laplace.Chess.Uci`,
+`Laplace.Migrations`), and 5 test projects mirroring the libraries. **Namespaces were
+preserved byte-identically** (`Laplace.Engine.Core` etc. still exist as namespaces inside
+the merged assemblies) — content-addressed SourceId/SourceName strings never changed, so
+substrate ids are untouched; verified via isolated re-ingest producing hash-identical ids
+and 0 novel rows on forced re-run. Assembly names DID change (`Laplace.Core.dll` etc.);
+nothing binds to them. One merge-specific trap to remember: xunit suites that used to be
+separate processes now share process-global native state (T0 perfcache) — fixtures must not
+`CodepointPerfcache.Unload()` on dispose (see GrammarPerfcacheFixture).

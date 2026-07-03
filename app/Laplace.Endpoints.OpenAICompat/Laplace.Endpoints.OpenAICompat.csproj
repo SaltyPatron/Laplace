@@ -25,11 +25,9 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Stripe.net" />
-    <ProjectReference Include="..\Laplace.Api.Contracts\Laplace.Api.Contracts.csproj" />
-    <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
-    <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
-    <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
-    <ProjectReference Include="..\Laplace.Chess.Service\Laplace.Chess.Service.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
+    <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
   </ItemGroup>
 
   <ItemGroup>
