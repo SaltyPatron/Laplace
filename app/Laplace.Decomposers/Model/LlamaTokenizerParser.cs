@@ -339,10 +339,7 @@ public sealed class LlamaTokenizerParser
                     {
                         coord[0] = rec.ContentX; coord[1] = rec.ContentY;
                         coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
-                        Hash128 physId = PhysicalityId.Compute(
-                            rec.EntityId, PhysicalityType.Content,
-                            rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM,
-                            ReadOnlySpan<double>.Empty);
+                        Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
                         b.AddPhysicality(new PhysicalityRow(
                             Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
                             Type: PhysicalityType.Content,
@@ -448,8 +445,7 @@ public sealed class LlamaTokenizerParser
         {
             var bc = ByteAtoms.Coord(canonical[0]);
             Span<double> coord = stackalloc double[4] { bc[0], bc[1], bc[2], bc[3] };
-            Hash128 physId = PhysicalityId.Compute(
-                id, PhysicalityType.Content, bc[0], bc[1], bc[2], bc[3], ReadOnlySpan<double>.Empty);
+            Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
             b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: id, SourceId: sourceId,
                 Type: PhysicalityType.Content,

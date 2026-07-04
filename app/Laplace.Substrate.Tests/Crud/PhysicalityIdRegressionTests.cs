@@ -4,30 +4,31 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
-// Regression test for Issue 25's residual duplication: grapheme 's' (word_id('s')) had two
-// live rows in physicalities (verified against the DB) -- one from BuildTier0Seed
-// (no trajectory, n_constituents=0) and one from a composed-node emission path that built a
-// redundant length-1 trajectory. This asserts that with the fix (ChildCount/child_count > 1
-// gate), computing a Content physicality for a single-child composition of this exact entity
-// now reproduces BuildTier0Seed's id bit-for-bit, instead of manufacturing a second one.
+// Issue 25's residual duplication (grapheme 's' had two physicality rows -- one atomic from
+// BuildTier0Seed, one from a composed path that built a redundant length-1 trajectory) was
+// originally patched by gating trajectory-building on ChildCount>1 so the two float-hashes
+// coincided. That gate only covered the empty-trajectory case; entities with divergent
+// NON-empty trajectories (e.g. 319 chess-move tokens) still forked. The real fix makes
+// physicality identity CONTENT-derived: physId = hash(entityId, type), independent of the
+// coord/trajectory geometry entirely. So a composed physicality and the atomic seed for the
+// same content now produce the same id STRUCTURALLY -- there is no float path to diverge on.
 public class PhysicalityIdRegressionTests
 {
     [Fact]
-    public void SingleChildComposition_MatchesBuildTier0SeedPhysicalityId_ForGraphemeS()
+    public void PhysicalityId_IsContentDerived_IndependentOfGeometry()
     {
-        // word_id('s'), queried live from the substrate.
         var entityId = Hash128.FromBytes(Convert.FromHexString("3d1d92230feb6db469532f26d9e2d7ab"));
-        // BuildTier0Seed's existing row for this entity (type=1/Content, no trajectory).
-        var expectedTier0SeedId = Hash128.FromBytes(Convert.FromHexString("c374f67dc5e8902d1164e6d8f64f5789"));
 
-        const double cx = 0.05841298349972678, cy = 0.09524158322668967,
-                     cz = -0.756665955281575, cm = -0.6441844427653898;
+        // Same (entity, type) -> same id, regardless of how the caller arrived at any geometry.
+        var a = PhysicalityId.Compute(entityId, PhysicalityType.Content);
+        var b = PhysicalityId.Compute(entityId, PhysicalityType.Content);
+        Assert.Equal(a, b);
 
-        // Post-fix behavior for a ChildCount==1 composition: no trajectory built, matching
-        // BuildTier0Seed's own no-trajectory convention for the same content-addressed entity.
-        var computed = PhysicalityId.Compute(
-            entityId, PhysicalityType.Content, cx, cy, cz, cm, ReadOnlySpan<double>.Empty);
+        // Type participates in identity so distinct physicality roles never collide.
+        Assert.NotEqual(a, PhysicalityId.Compute(entityId, PhysicalityType.BuildingBlock));
 
-        Assert.Equal(expectedTier0SeedId, computed);
+        // Different content -> different id (entity_id is the only content input).
+        var other = Hash128.FromBytes(Convert.FromHexString("00112233445566778899aabbccddeeff"));
+        Assert.NotEqual(a, PhysicalityId.Compute(other, PhysicalityType.Content));
     }
 }

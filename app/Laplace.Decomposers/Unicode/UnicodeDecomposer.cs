@@ -204,9 +204,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 bb.AddEntity(byteId, tier: 0, ByteAtoms.TypeId, firstObservedBy: Source);
 
                 var coord = ByteAtoms.Coord(bv);
-                Hash128 physId = PhysicalityId.Compute(
-                    byteId, PhysicalityType.Content,
-                    coord[0], coord[1], coord[2], coord[3], ReadOnlySpan<double>.Empty);
+                Hash128 physId = PhysicalityId.Compute(byteId, PhysicalityType.Content);
                 bb.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: byteId, SourceId: Source,
                     Type: PhysicalityType.Content,
@@ -295,10 +293,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
             b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
 
-            Hash128 physId = PhysicalityId.Compute(
-                entityId, PhysicalityType.Content,
-                r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
-                ReadOnlySpan<double>.Empty);
+            Hash128 physId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
 
             b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: entityId, SourceId: Source,
@@ -495,10 +490,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
             b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
 
-            Hash128 physId = PhysicalityId.Compute(
-                entityId, PhysicalityType.Content,
-                r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
-                ReadOnlySpan<double>.Empty);
+            Hash128 physId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
 
             b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: entityId, SourceId: Source,

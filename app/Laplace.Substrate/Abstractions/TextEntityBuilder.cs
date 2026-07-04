@@ -104,10 +104,7 @@ public sealed class TextEntityBuilder
         double cx, cy, cz, cm;
         unsafe { cx = node.Coord[0]; cy = node.Coord[1]; cz = node.Coord[2]; cm = node.Coord[3]; }
 
-        var physId = PhysicalityId.Compute(
-            node.Id, PhysicalityType.Content,
-            cx, cy, cz, cm,
-            trajectoryXyzm ?? ReadOnlySpan<double>.Empty);
+        var physId = PhysicalityId.Compute(node.Id, PhysicalityType.Content);
 
         _physicalities.Add(new PhysicalityRow(
             Id: physId,

@@ -87,9 +87,7 @@ public sealed class RepoDecomposer : IDecomposer
                 out _, out _, out double repoCx, out double repoCy, out double repoCz, out double repoCm))
         {
             Span<double> repoCoord = stackalloc double[4] { repoCx, repoCy, repoCz, repoCm };
-            Hash128 repoPhysId = PhysicalityId.Compute(
-                repoId, PhysicalityType.Content, repoCx, repoCy, repoCz, repoCm,
-                ReadOnlySpan<double>.Empty);
+            Hash128 repoPhysId = PhysicalityId.Compute(repoId, PhysicalityType.Content);
             b.AddPhysicality(new PhysicalityRow(
                 Id: repoPhysId, EntityId: repoId, SourceId: Source,
                 Type: PhysicalityType.Content,

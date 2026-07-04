@@ -36,24 +36,25 @@ static int codepoint_resolver(uint32_t atom, void* ,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-static void physicality_id_compute(hash128_t entity_id,
-                                   const double coord[4], const double* traj, size_t traj_n,
+/* Physicality identity is CONTENT-derived, exactly like entity identity.
+ * entity_id is already blake3-Merkle(tier, child_ids) -- an exact, collision-
+ * resistant hash of the content -- and the geometry (centroid coord + trajectory)
+ * is a DERIVED, non-exact function of that same content (Substrate Invariant
+ * Rule #1: "Content-hash identity is exact. Centroid/hilbert identity is not" --
+ * centroids collide, e.g. cat/act). So identity is (entity_id, physicality_type)
+ * ONLY; the coord/trajectory are stored as payload but MUST NOT enter the id.
+ * Hashing the float geometry made identity fragile to sub-ULP float divergence
+ * across the several compose paths and re-ingests, forging spurious duplicate
+ * physicalities (observed: 319 chess-move entities with paired coord-identical,
+ * trajectory-float-divergent rows). This also makes the old length-1-trajectory
+ * gate moot for identity: a single-child composition now yields the same id as
+ * the atomic seed automatically, because neither hashes the trajectory. */
+static void physicality_id_compute(hash128_t entity_id, int16_t physicality_type,
                                    hash128_t* out) {
-    size_t traj_bytes = traj_n * sizeof(double);
-    size_t total = 16 + 2 + 32 + traj_bytes;
-    uint8_t* buf = (uint8_t*)malloc(total);
-    if (!buf) { hash128_zero(out); return; }
-    size_t o = 0;
-    memcpy(buf + o, &entity_id, 16); o += 16;
-    int16_t physicality_type = 1;
-    memcpy(buf + o, &physicality_type, 2); o += 2;
-    memcpy(buf + o, coord, 32); o += 32;
-    if (traj_n > 0) {
-        memcpy(buf + o, traj, traj_bytes);
-        o += traj_bytes;
-    }
-    hash128_blake3(buf, o, out);
-    free(buf);
+    uint8_t buf[18];
+    memcpy(buf, &entity_id, 16);
+    memcpy(buf + 16, &physicality_type, 2);
+    hash128_blake3(buf, sizeof(buf), out);
 }
 
 
@@ -300,7 +301,9 @@ static int emit_node(
     }
 
     hash128_t phys_id;
-    physicality_id_compute(node.id, node.coord, traj, n_traj * 4, &phys_id);
+    /* Content-derived identity: (entity_id, physicality_type=Content). The coord
+     * and trajectory below are still stored as payload, but no longer forge the id. */
+    physicality_id_compute(node.id, 1, &phys_id);
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,

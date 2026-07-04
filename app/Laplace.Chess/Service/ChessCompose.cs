@@ -101,8 +101,7 @@ public static class ChessCompose
         double[] coord = Math4d.Centroid(childCoords);
         Hilbert128 hb = Hilbert128.Encode(coord);
         double[] traj = Trajectory.Build(childIds);
-        Hash128 physId = PhysicalityId.Compute(
-            id, PhysicalityType.Content, coord[0], coord[1], coord[2], coord[3], traj);
+        Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
         return new ChessNode(id, coord, hb, traj, physId, n, tier);
     }
 

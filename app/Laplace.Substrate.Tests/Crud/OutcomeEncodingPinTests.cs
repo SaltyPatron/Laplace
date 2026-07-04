@@ -26,9 +26,12 @@ public class OutcomeEncodingPinTests
     [Fact]
     public void PhysicalityType_Content_Is_1_Matching_Native_Hardcode()
     {
-        // engine/core/src/content_witness_batch.c physicality_id_compute() bakes
-        // physicality_type=1 into every natively-minted physicality id. C# passes the type
-        // as a parameter (PhysicalityId.Compute), so the two agree only while Content == 1.
+        // Physicality identity is (entity_id, physicality_type). The native minter in
+        // engine/core/src/content_witness_batch.c passes physicality_type=1 for its Content
+        // physicalities, and C# PhysicalityId.Compute takes the type as a parameter; the two
+        // agree only while Content == 1. (This is also why the SAME entity can carry distinct
+        // physicalities by role -- e.g. a chess move token's text Content vs its board
+        // BuildingBlock -- without colliding: the type is part of the id.)
         Assert.Equal(1, (int)PhysicalityType.Content);
     }
 }
