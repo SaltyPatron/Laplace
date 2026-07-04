@@ -1,10 +1,6 @@
 
 
 
-
-
-
-
 CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
     RETURNS TABLE(neighbor text, relation text, attention double precision,
                   geodesic double precision)
@@ -16,8 +12,8 @@ CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
         SELECT c.object_id AS nb, c.type_id, eff_mu(c.rating, c.rd) AS mu
         FROM consensus c
         WHERE c.subject_id = p_word AND c.object_id IS NOT NULL
-          
-          
+
+
           AND c.type_id NOT IN (relation_type_id('HAS_LANGUAGE'),
                                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                 relation_type_id('PRECEDES'), relation_type_id('FOLLOWS'),
@@ -32,17 +28,22 @@ CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
     best AS (
         SELECT nb, (array_agg(type_id ORDER BY mu DESC))[1] AS type_id, max(mu) AS mu
         FROM edges WHERE nb <> p_word GROUP BY nb)
-    SELECT t.neighbor, t.relation, t.attention, t.geodesic
+    -- Rank purely on ids + numbers (attention, geodesic), THEN render. The inner
+    -- ORDER BY keeps the sort below the label() lateral, so labels are produced
+    -- streaming off the sorted candidates only until p_k rows survive the
+    -- empty-label filter -- instead of rendering every neighbor before sorting.
+    SELECT l.txt AS neighbor, type_label(r.type_id) AS relation,
+           r.attention, r.geodesic
     FROM (
-        SELECT label(b.nb) AS neighbor, type_label(b.type_id) AS relation,
-               (b.mu::double precision / 1e9) AS attention,
+        SELECT b.nb, b.type_id, (b.mu::double precision / 1e9) AS attention,
                CASE WHEN qc.coord IS NOT NULL AND p.coord IS NOT NULL
                     THEN laplace_angular_distance_4d(p.coord, qc.coord) END AS geodesic
         FROM best b
         LEFT JOIN physicalities p ON p.entity_id = b.nb AND p.type = 1
         CROSS JOIN qcoord qc
-    ) t
-    WHERE NULLIF(btrim(t.neighbor), '') IS NOT NULL
-    ORDER BY t.attention DESC NULLS LAST, t.geodesic NULLS LAST
+        ORDER BY attention DESC NULLS LAST, geodesic NULLS LAST
+    ) r
+    CROSS JOIN LATERAL (SELECT label(r.nb) AS txt) l
+    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     LIMIT p_k
 $$;

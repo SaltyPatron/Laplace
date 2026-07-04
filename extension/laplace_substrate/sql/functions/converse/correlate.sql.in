@@ -2,15 +2,22 @@ CREATE OR REPLACE FUNCTION correlate(p_words text[])
     RETURNS TABLE(relation text, target text, words text[], strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- Group on ids, not rendered strings: content-addressing means one id = one
+    -- content, but one surface string can cover many ids (homographs), so the
+    -- old GROUP BY label(type)/label(object) both conflated distinct targets
+    -- that happen to share a surface AND rendered a label for every consensus
+    -- edge of every input word. Aggregate per (type_id, object_id), then render
+    -- exactly once per output row at the boundary.
     WITH v AS (SELECT w AS word, word_id(w) AS id FROM unnest(p_words) AS w WHERE word_id(w) IS NOT NULL),
-    e AS (
-        SELECT v.word,
-               COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
-               label(c.object_id) AS target,
-               (eff_mu(c.rating, c.rd))::float8 / 1e9 AS w
+    g AS (
+        SELECT c.type_id, c.object_id,
+               array_agg(DISTINCT v.word ORDER BY v.word) AS words,
+               count(DISTINCT v.word) AS nwords,
+               (max(eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
         FROM v JOIN consensus c ON c.subject_id = v.id
-    )
-    SELECT relation, target, array_agg(DISTINCT word ORDER BY word) AS words, max(w) AS strength
-    FROM e GROUP BY relation, target
-    ORDER BY count(DISTINCT word) DESC, max(w) DESC, relation
+        GROUP BY c.type_id, c.object_id)
+    SELECT COALESCE(NULLIF(relation_canonical(g.type_id), ''), label(g.type_id)) AS relation,
+           label(g.object_id) AS target, g.words, g.strength
+    FROM g
+    ORDER BY g.nwords DESC, g.strength DESC, 1
 $$;

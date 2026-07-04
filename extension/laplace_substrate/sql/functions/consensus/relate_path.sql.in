@@ -2,6 +2,12 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- Candidate discovery is id/attestation logic only: every candidate carries
+    -- its node/type/direction arrays and numeric score, and the single winner is
+    -- picked on (len, mu) before any rendering. realize_path/type_label run
+    -- exactly once, on the winning row -- never inside the search. (The old body
+    -- rendered the chain text for every direct candidate edge even though
+    -- ORDER BY len, mu LIMIT 1 kept one row.)
     WITH RECURSIVE
     lat(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY[
         'IS_SYNONYM_OF','IS_SIMILAR_TO','IS_ANTONYM_OF','HAS_PART','HAS_MEMBER',
@@ -15,17 +21,15 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
     xset(id) AS (SELECT p_x UNION SELECT synset_id FROM x_top),
     yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),
     direct AS (
-        SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
-                          COALESCE(word_language(p_x), word_language(p_y))) AS chain,
-               eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
-               type_label(c.type_id) AS plane
+        SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
+               ARRAY[1] AS dirs, eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
+               c.type_id AS plane_type
         FROM xset x JOIN consensus c ON c.subject_id = x.id
           AND c.object_id IN (SELECT id FROM yset)
           AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
         UNION ALL
-        SELECT realize_path(ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
-                          COALESCE(word_language(p_x), word_language(p_y))),
-               eff_mu_display(c.rating, c.rd), 1, type_label(c.type_id)
+        SELECT ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
+               eff_mu_display(c.rating, c.rd), 1, c.type_id
         FROM xset x JOIN consensus c ON c.object_id = x.id
           AND c.subject_id IN (SELECT id FROM yset)
           AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
@@ -59,17 +63,23 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
         WHERE ux.d > 0 OR uy.d > 0
         ORDER BY ux.d + uy.d, LEAST(ux.mu, uy.mu) DESC NULLS LAST LIMIT 1
     ),
-    lca AS (
-        SELECT realize_path(
-                   xp || array_reverse(yp[1:cardinality(yp)-1]),
+    winner AS (
+        SELECT a.nodes, a.types, a.dirs, a.mu, a.len, a.plane_type
+        FROM (
+            SELECT nodes, types, dirs, mu, len, plane_type FROM direct
+            UNION ALL
+            SELECT xp || array_reverse(yp[1:cardinality(yp)-1]),
                    xk || array_reverse(yk),
                    (SELECT COALESCE(array_agg(1), ARRAY[]::int[]) FROM generate_subscripts(xk, 1))
                        || (SELECT COALESCE(array_agg(-1), ARRAY[]::int[]) FROM generate_subscripts(yk, 1)),
-                   COALESCE(word_language(p_x), word_language(p_y))) AS chain,
-               mu, len, 'taxonomy'::text AS plane FROM lca_pick
+                   mu, len, NULL::bytea
+            FROM lca_pick
+        ) a ORDER BY a.len, a.mu DESC NULLS LAST LIMIT 1
     )
-    SELECT a.chain, a.mu, a.plane FROM (
-        SELECT chain, mu, len, plane FROM direct
-        UNION ALL SELECT chain, mu, len, plane FROM lca
-    ) a ORDER BY a.len, a.mu DESC NULLS LAST LIMIT 1
+    SELECT realize_path(w.nodes, w.types, w.dirs,
+                        COALESCE(word_language(p_x), word_language(p_y))) AS chain,
+           w.mu AS path_mu,
+           CASE WHEN w.plane_type IS NULL THEN 'taxonomy'
+                ELSE type_label(w.plane_type) END AS plane
+    FROM winner w
 $$;
