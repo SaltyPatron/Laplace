@@ -11,17 +11,15 @@ CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
     self AS (SELECT unnest(ids) AS id FROM me),
     anchors AS (
         SELECT DISTINCT c.object_id AS anchor
-        FROM self s JOIN consensus c ON c.subject_id = s.id
+        FROM self s JOIN v_consensus_unrefuted c ON c.subject_id = s.id
         WHERE c.type_id IN (relation_type_id('IS_SYNONYM_OF'), relation_type_id('EVOKES_FRAME'))
-          AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+          AND c.object_id IS NOT NULL
         UNION
         SELECT DISTINCT so.object_id
         FROM self s
-        JOIN consensus hs ON hs.subject_id = s.id AND hs.type_id = relation_type_id('HAS_SENSE')
-                         AND NOT refuted(hs.rating, hs.rd)
-        JOIN consensus so ON so.subject_id = hs.object_id
+        JOIN v_consensus_unrefuted hs ON hs.subject_id = s.id AND hs.type_id = relation_type_id('HAS_SENSE')
+        JOIN v_consensus_unrefuted so ON so.subject_id = hs.object_id
                          AND so.type_id = relation_type_id('IS_SENSE_OF')
-                         AND NOT refuted(so.rating, so.rd)
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu

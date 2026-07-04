@@ -12,20 +12,16 @@ CREATE OR REPLACE FUNCTION concept_members(p_concept bytea)
     -- synset are both members). Pure id logic -- no render_text/label here; the
     -- caller renders survivors at the display boundary.
     SELECT c.subject_id, 'synonym'::text, eff_mu_display(c.rating, c.rd), c.witness_count
-    FROM consensus c
+    FROM v_consensus_unrefuted c
     WHERE c.object_id = p_concept AND c.type_id = relation_type_id('IS_SYNONYM_OF')
-      AND NOT refuted(c.rating, c.rd)
     UNION ALL
     SELECT hs.subject_id, 'sense'::text, eff_mu_display(hs.rating, hs.rd), hs.witness_count
-    FROM consensus so
-    JOIN consensus hs ON hs.object_id = so.subject_id
+    FROM v_consensus_unrefuted so
+    JOIN v_consensus_unrefuted hs ON hs.object_id = so.subject_id
                      AND hs.type_id = relation_type_id('HAS_SENSE')
-                     AND NOT refuted(hs.rating, hs.rd)
     WHERE so.object_id = p_concept AND so.type_id = relation_type_id('IS_SENSE_OF')
-      AND NOT refuted(so.rating, so.rd)
     UNION ALL
     SELECT c.subject_id, 'frame'::text, eff_mu_display(c.rating, c.rd), c.witness_count
-    FROM consensus c
+    FROM v_consensus_unrefuted c
     WHERE c.object_id = p_concept AND c.type_id = relation_type_id('EVOKES_FRAME')
-      AND NOT refuted(c.rating, c.rd)
 $$;

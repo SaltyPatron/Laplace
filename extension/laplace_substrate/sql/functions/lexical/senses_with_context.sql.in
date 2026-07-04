@@ -9,14 +9,14 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     -- subject or object" scoring, just computed as a join instead of a per-row re-scan.
     WITH ctx_as_subject AS (
         SELECT c.object_id, sum(eff_mu(c.rating, c.rd)) AS boost
-        FROM consensus c
-        WHERE c.subject_id = ANY (p_context) AND NOT refuted(c.rating, c.rd)
+        FROM v_consensus_unrefuted c
+        WHERE c.subject_id = ANY (p_context)
         GROUP BY c.object_id
     ),
     ctx_as_object AS (
         SELECT c.subject_id, sum(eff_mu(c.rating, c.rd)) AS boost
-        FROM consensus c
-        WHERE c.object_id = ANY (p_context) AND NOT refuted(c.rating, c.rd)
+        FROM v_consensus_unrefuted c
+        WHERE c.object_id = ANY (p_context)
         GROUP BY c.subject_id
     )
     SELECT s.object_id, ss.object_id,
