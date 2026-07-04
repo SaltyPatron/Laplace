@@ -15,6 +15,6 @@ CREATE OR REPLACE FUNCTION consensus_walk_edges(
       AND NOT EXISTS (
           SELECT 1 FROM entities et
           WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
-    ORDER BY relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd) DESC
+    ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
 $$;

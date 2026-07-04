@@ -5,6 +5,6 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type byte
            c.eff_mu, c.witness_count
     FROM v_consensus_resolved c
     WHERE c.object_id IS NOT NULL AND (p_type IS NULL OR c.type_id = p_type)
-    ORDER BY relation_rank_resolved(c.type_id) * (c.eff_mu_raw / 1e9) DESC
+    ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
     LIMIT p_limit
 $$;

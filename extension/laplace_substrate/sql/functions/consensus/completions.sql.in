@@ -4,6 +4,6 @@ CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 
     SELECT c.object_id, c.type_id, c.eff_mu, c.witness_count
     FROM v_consensus_resolved c
     WHERE c.subject_id = p_subject AND c.object_id IS NOT NULL
-    ORDER BY relation_rank_resolved(c.type_id) * (c.eff_mu_raw / 1e9) DESC
+    ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
     LIMIT p_limit
 $$;

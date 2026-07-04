@@ -6,6 +6,6 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     FROM consensus c
     WHERE c.object_id = p_id
     
-    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
+    ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
 $$;

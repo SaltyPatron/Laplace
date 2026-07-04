@@ -1,0 +1,23 @@
+CREATE OR REPLACE FUNCTION edge_rank(p_type bytea, p_eff_mu numeric)
+    RETURNS double precision
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- The single salience-weighted edge ranking used by every consensus read:
+    -- relation-type salience rank times the edge's confidence (eff_mu, scaled
+    -- back to the /1e9 unit). Was copy-pasted verbatim into 8 ORDER BY clauses
+    -- (consensus_out/in, completions, top_relations, consensus_out_readable,
+    -- links, epistemic_status, consensus_walk_edges).
+    --
+    -- p_eff_mu is numeric, NOT double precision, on purpose: the literal 1e9 is
+    -- a numeric constant, so the callers' original `eff_mu(...) / 1e9` was an
+    -- EXACT numeric division; a float8 parameter would silently switch it to
+    -- rounded float8 division and reorder rows that tie only in the ~15th digit
+    -- (invisible on subject-filtered reads, but it reshuffles top_relations'
+    -- whole-table LIMIT). Callers pass eff_mu(rating,rd) or a view's eff_mu_raw
+    -- column -- both bigint, coerced exactly to numeric.
+    --
+    -- No SET search_path and NOT STRICT so it inlines into the caller's ORDER BY
+    -- (a STRICT SQL function is not inlined when its args aren't provably
+    -- non-null); NULL still propagates identically through relation_rank_resolved
+    -- (itself STRICT) and the multiply, so dropping STRICT is semantically free.
+    SELECT @extschema@.relation_rank_resolved(p_type) * (p_eff_mu / 1e9)
+$$;

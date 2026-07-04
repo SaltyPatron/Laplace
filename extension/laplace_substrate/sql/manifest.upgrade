@@ -135,6 +135,7 @@ functions/relation/relation_type_in_family.sql.in
 functions/relation/relation_rank.sql.in
 functions/relation/relation_canonical.sql.in
 functions/relation/relation_rank_resolved.sql.in
+functions/relation/edge_rank.sql.in
 functions/lexical/type_label.sql.in
 functions/lexical/senses_bootstrap.sql.in
 functions/lexical/senses_with_context_bootstrap.sql.in
