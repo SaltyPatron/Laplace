@@ -298,6 +298,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
         Hash128 sourceId, CancellationToken ct = default)
         => _inner.FinalizeSourceAsync(sourceId, ct);
 
+    public Task BeginBulkRunAsync(CancellationToken ct = default)
+        => _inner.BeginBulkRunAsync(ct);
+
+    public Task CompleteBulkRunAsync(CancellationToken ct = default)
+        => _inner.CompleteBulkRunAsync(ct);
+
     public static bool ResolvePersistEvidence()
     {
         string? persist = Environment.GetEnvironmentVariable("LAPLACE_PERSIST_EVIDENCE");

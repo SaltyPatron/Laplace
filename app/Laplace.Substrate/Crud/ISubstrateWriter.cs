@@ -61,4 +61,25 @@ public interface ISubstrateWriter
     Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
         => Task.FromResult((0, 0, 0));
+
+    /// <summary>
+    /// Declares that a bulk ingest run is starting. Writers that cycle
+    /// secondary indexes for fresh-seed-shaped applies scope the cycle to
+    /// the whole run: drop at the first qualifying apply, keep them down
+    /// across every apply of the run, rebuild once at
+    /// <see cref="CompleteBulkRunAsync"/>. Rebuild cost is a full-table
+    /// scan per index, so per-apply cycling is O(applies × table size) —
+    /// the run, not the apply, is the correct scope. No-op by default.
+    /// </summary>
+    Task BeginBulkRunAsync(CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Ends the bulk run declared by <see cref="BeginBulkRunAsync"/>:
+    /// rebuilds whatever indexes the run dropped. Must be called on every
+    /// exit path (the index-cycle journal makes a missed call recoverable,
+    /// not free — reads degrade until the next recovery). No-op by default.
+    /// </summary>
+    Task CompleteBulkRunAsync(CancellationToken ct = default)
+        => Task.CompletedTask;
 }

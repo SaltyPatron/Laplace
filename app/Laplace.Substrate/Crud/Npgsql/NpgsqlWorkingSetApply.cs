@@ -46,6 +46,31 @@ public sealed partial class NpgsqlSubstrateWriter
         new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
     /// <summary>
+    /// Run-scoped index cycle, active between BeginBulkRunAsync and
+    /// CompleteBulkRunAsync. While active, qualifying applies drop
+    /// secondaries but do NOT rebuild them — the rebuild happens once at
+    /// run end. Only the apply lane touches this (applies are serialized
+    /// by the runner and by the apply advisory lock), so no locking.
+    /// </summary>
+    private NpgsqlIndexCycle? _runCycle;
+
+    public async Task BeginBulkRunAsync(CancellationToken ct = default)
+    {
+        // Recover any journaled drops a crashed prior run left behind
+        // BEFORE this run makes its own cycling decisions.
+        await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
+        _runCycle = new NpgsqlIndexCycle(_ds, _log);
+    }
+
+    public async Task CompleteBulkRunAsync(CancellationToken ct = default)
+    {
+        var cycle = _runCycle;
+        _runCycle = null;
+        if (cycle is not null)
+            await cycle.FinishAsync(ct);
+    }
+
+    /// <summary>
     /// Applies one whole working set in a single serialized transaction,
     /// claiming an idempotency token in laplace.ingest_flush_journal keyed
     /// by the change's intent hash. A retry after commit-ambiguity finds the
@@ -287,8 +312,22 @@ public sealed partial class NpgsqlSubstrateWriter
                 // interleaves; a crash mid-phase leaves no flush-journal
                 // token and the replay's verification subtracts whatever
                 // landed.
-                var cycle = new NpgsqlIndexCycle(_ds, _log);
-                await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
+                //
+                // Cycle scope: inside a bulk run the run-scoped cycle owns
+                // the indexes — each qualifying apply drops whatever is
+                // still standing (idempotent: dropped indexes no longer
+                // appear in pg_index) and the ONE rebuild happens at
+                // CompleteBulkRunAsync. Outside a bulk run (no bracket),
+                // the apply cycles locally as before. Correct with the
+                // indexes down between applies: every write-lane presence
+                // probe (*_stored_bitmap / *_present_ordinals) is a PK
+                // lookup, and PK/unique/exclusion never cycle.
+                var cycle = _runCycle;
+                if (cycle is null)
+                {
+                    cycle = new NpgsqlIndexCycle(_ds, _log);
+                    await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
+                }
                 await cycle.BeginAsync(new[]
                 {
                     ("entities", (long)keptEnts.Count),
@@ -306,7 +345,8 @@ public sealed partial class NpgsqlSubstrateWriter
                     attBlobs, keptAtts, ct);
                 aIns = keptAtts.Count;
 
-                await cycle.FinishAsync(ct);
+                if (!ReferenceEquals(cycle, _runCycle))
+                    await cycle.FinishAsync(ct);
             }
 
             if (mergeIds.Count > 0)

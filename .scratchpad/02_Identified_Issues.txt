@@ -1250,3 +1250,35 @@ produce INGEST_PROGRESS lines with composed= counts — no feeder heartbeat need
 Perf-gate note: 4 pre-existing calibration failures on this box (WriterThroughput
 round_trips=13 vs <=12 range at commit_rows=50k; warm-reingest 30s/GB gate) — none touch
 the compose path; not regressions from this fix, not chased.
+
+ISSUE 44 — FIXED (code; live verification pending next bulk seed). Index cycling was
+scoped to the APPLY, not the RUN. NpgsqlWorkingSetApply constructed a fresh
+NpgsqlIndexCycle inside every parallel-copy working-set apply: drop 9 physicalities
+secondaries -> COPY -> rebuild all 9 -> next batch repeats. Each rebuild scans the whole
+LIVE table (coord GiST measured 70.8s at ~8.3M rows during the 2026-07-04 OMW run), so a
+multi-batch run pays O(applies x table size) — quadratic in run length, observed live as
+back-to-back INDEX_CYCLE drop/rebuild pairs per INGEST_BATCH. Worse at both ends: early
+batches pay repeated full rebuilds; once live grows past 2x the staged size the
+staged>=live/2 guard stops qualifying and late batches pay per-tuple maintenance on all 9
+indexes instead. Ownership was also at the wrong layer: the apply lane can only see one
+batch; only the run (IngestRunner, which logs INGEST_START/INGEST_COMPLETE and knows
+input_units up front) can decide the cycle window.
+Fix (run-scoped bracket, pipeline-owned):
+  - ISubstrateWriter gains BeginBulkRunAsync/CompleteBulkRunAsync (default no-op).
+  - NpgsqlSubstrateWriter: run-scoped _runCycle; journal recovery moves to run begin;
+    qualifying applies drop into the run cycle (idempotent — dropped indexes vanish from
+    pg_index) and skip the per-apply rebuild; CompleteBulkRunAsync rebuilds ONCE.
+    Non-bracketed callers keep the old per-apply cycle exactly.
+  - IngestRunner.RunAsync brackets both loop lanes in try/finally; rebuild runs on every
+    exit path INCLUDING fatal apply errors; on cancellation it is skipped (don't block
+    teardown on a minutes-scale rebuild — the index_cycle_journal recovers the drops at
+    the next run's begin). Completion marker + INGEST_COMPLETE land after the rebuild.
+  - ConsensusAccumulatingWriter forwards both bracket calls to inner.
+Safety audit done before widening the down-window to the whole run: every write-lane
+presence probe (entities_stored_bitmap / *_exist_bitmap / *_present_ordinals in
+descent_probe.c) is a PK lookup, and PK/unique/exclusion never cycle; OMW's decomposer
+makes no mid-run substrate reads. Recall-side queries degrade while a seed runs — already
+true during each per-batch window, now for the run's duration; acceptable on a seed box.
+Verified: Laplace.Substrate builds clean. NOT yet verified against a live bulk ingest
+(OMW was mid-flight on the old binary when this was written) — next seed-step run should
+show exactly one INDEX_CYCLE drop line and one rebuild line per run.

@@ -150,123 +150,152 @@ public sealed class IngestRunner
 
 
         bool syncIngest = Environment.GetEnvironmentVariable("LAPLACE_INGEST_SYNC") == "1";
-        if (syncIngest)
+
+        // The RUN is the index-cycle scope. Rebuilding an index scans the
+        // whole live table, so per-apply cycling costs
+        // O(applies × table size); bracketing the run drops once at the
+        // first qualifying apply and rebuilds exactly once, in the finally
+        // below. A crash before the finally is covered by the writer's
+        // index-cycle journal (recovered at the next run's begin).
+        await _writer.BeginBulkRunAsync(ct);
+        try
         {
-            CpuTopology.RequirePerformanceCorePin();
-
-
-
-
-            var sbatch = new List<SubstrateChange>(batchSize);
-            int sbatchRows = 0;
-            await foreach (var intent in decomposer
-                .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+            if (syncIngest)
             {
-                Interlocked.Increment(ref counters._unitsProduced);
-                long units = intent.Metadata.InputUnitsConsumed;
-                if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
-                options.Progress?.Report(MakeProgress(counters));
-                if (!workingSet && batchSize == 1 && commitRows == 0)
-                {
-                    await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                counters, failures, log, ct);
-                    continue;
-                }
-                sbatch.Add(intent);
-                sbatchRows += RowsOf(intent);
-                wsBytes += BytesOf(intent);
-                if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
-                {
-                    await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                            counters, failures, log, workingSet, ct);
-                    sbatch.Clear();
-                    sbatchRows = 0;
-                    wsBytes = 0;
-                }
-            }
-            if (sbatch.Count > 0)
-                await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                        counters, failures, log, workingSet, ct);
-        }
-        else
-        {
+                CpuTopology.RequirePerformanceCorePin();
 
-            int channelCap = sizing.DecomposeChannelCapacity;
-            long rowBudget = sizing.RowBudget;
-            long bufferedRows = 0;
-            var drained = new SemaphoreSlim(0, channelCap);
 
-            var channel = Channel.CreateBounded<SubstrateChange>(
-                new BoundedChannelOptions(channelCap)
-                {
-                    SingleReader = true,
-                    SingleWriter = true,
-                    FullMode = BoundedChannelFullMode.Wait,
-                });
 
-            var producer = CpuTopology.RunOnPinnedThread(async ct =>
-            {
-                try
-                {
-                    await foreach (var intent in decomposer
-                        .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
-                    {
-                        Interlocked.Increment(ref counters._unitsProduced);
-                        long units = intent.Metadata.InputUnitsConsumed;
-                        if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
-                        options.Progress?.Report(MakeProgress(counters));
-                        int r = RowsOf(intent);
-                        while (Interlocked.Read(ref bufferedRows) + r > rowBudget
-                               && Volatile.Read(ref bufferedRows) > 0)
-                        {
-                            await drained.WaitAsync(ct);
-                        }
-                        Interlocked.Add(ref bufferedRows, r);
-                        await channel.Writer.WriteAsync(intent, ct);
-                    }
-                    channel.Writer.TryComplete();
-                }
-                catch (Exception ex)
-                {
-                    channel.Writer.TryComplete(ex);
-                }
-            }, "ingest-decompose-pcore", ct);
 
-            var batch = new List<SubstrateChange>(batchSize);
-            int batchRows = 0;
-            while (await channel.Reader.WaitToReadAsync(ct))
-            {
-                while (channel.Reader.TryRead(out var intent))
+                var sbatch = new List<SubstrateChange>(batchSize);
+                int sbatchRows = 0;
+                await foreach (var intent in decomposer
+                    .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
                 {
-                    ct.ThrowIfCancellationRequested();
-                    Interlocked.Add(ref bufferedRows, -RowsOf(intent));
-                    try { drained.Release(); } catch (SemaphoreFullException) { }
-
+                    Interlocked.Increment(ref counters._unitsProduced);
+                    long units = intent.Metadata.InputUnitsConsumed;
+                    if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                    options.Progress?.Report(MakeProgress(counters));
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
                         await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                     counters, failures, log, ct);
+                                                    counters, failures, log, ct);
                         continue;
                     }
-                    batch.Add(intent);
-                    batchRows += RowsOf(intent);
+                    sbatch.Add(intent);
+                    sbatchRows += RowsOf(intent);
                     wsBytes += BytesOf(intent);
-                    if (ShouldFlushWithCap(batch.Count, batchRows))
+                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                     {
-                        await ProcessBatchAsync(batch, decomposer, options, rng,
+                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, ct);
-                        batch.Clear();
-                        batchRows = 0;
+                        sbatch.Clear();
+                        sbatchRows = 0;
                         wsBytes = 0;
                     }
                 }
+                if (sbatch.Count > 0)
+                    await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                                            counters, failures, log, workingSet, ct);
             }
-            if (batch.Count > 0)
-                await ProcessBatchAsync(batch, decomposer, options, rng,
-                                        counters, failures, log, workingSet, ct);
+            else
+            {
+
+                int channelCap = sizing.DecomposeChannelCapacity;
+                long rowBudget = sizing.RowBudget;
+                long bufferedRows = 0;
+                var drained = new SemaphoreSlim(0, channelCap);
+
+                var channel = Channel.CreateBounded<SubstrateChange>(
+                    new BoundedChannelOptions(channelCap)
+                    {
+                        SingleReader = true,
+                        SingleWriter = true,
+                        FullMode = BoundedChannelFullMode.Wait,
+                    });
+
+                var producer = CpuTopology.RunOnPinnedThread(async ct =>
+                {
+                    try
+                    {
+                        await foreach (var intent in decomposer
+                            .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+                        {
+                            Interlocked.Increment(ref counters._unitsProduced);
+                            long units = intent.Metadata.InputUnitsConsumed;
+                            if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                            options.Progress?.Report(MakeProgress(counters));
+                            int r = RowsOf(intent);
+                            while (Interlocked.Read(ref bufferedRows) + r > rowBudget
+                                   && Volatile.Read(ref bufferedRows) > 0)
+                            {
+                                await drained.WaitAsync(ct);
+                            }
+                            Interlocked.Add(ref bufferedRows, r);
+                            await channel.Writer.WriteAsync(intent, ct);
+                        }
+                        channel.Writer.TryComplete();
+                    }
+                    catch (Exception ex)
+                    {
+                        channel.Writer.TryComplete(ex);
+                    }
+                }, "ingest-decompose-pcore", ct);
+
+                var batch = new List<SubstrateChange>(batchSize);
+                int batchRows = 0;
+                while (await channel.Reader.WaitToReadAsync(ct))
+                {
+                    while (channel.Reader.TryRead(out var intent))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        Interlocked.Add(ref bufferedRows, -RowsOf(intent));
+                        try { drained.Release(); } catch (SemaphoreFullException) { }
+
+                        if (!workingSet && batchSize == 1 && commitRows == 0)
+                        {
+                            await ProcessOneIntentAsync(intent, decomposer, options, rng,
+                                                         counters, failures, log, ct);
+                            continue;
+                        }
+                        batch.Add(intent);
+                        batchRows += RowsOf(intent);
+                        wsBytes += BytesOf(intent);
+                        if (ShouldFlushWithCap(batch.Count, batchRows))
+                        {
+                            await ProcessBatchAsync(batch, decomposer, options, rng,
+                                                    counters, failures, log, workingSet, ct);
+                            batch.Clear();
+                            batchRows = 0;
+                            wsBytes = 0;
+                        }
+                    }
+                }
+                if (batch.Count > 0)
+                    await ProcessBatchAsync(batch, decomposer, options, rng,
+                                            counters, failures, log, workingSet, ct);
 
 
-            await producer;
+                await producer;
+            }
+        }
+        finally
+        {
+            // Rebuild on every exit path, including failures — a fatal
+            // apply error must not leave the table index-less. The one
+            // exception is cancellation: the user is tearing the process
+            // down, so don't block exit on a minutes-scale rebuild — the
+            // journal recovers the drops at the next run's begin.
+            try
+            {
+                await _writer.CompleteBulkRunAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                log.LogWarning(
+                    "bulk-run index rebuild skipped (cancelled) — journaled "
+                    + "drops will be recovered at the next run's begin");
+            }
         }
 
         unitsAttempted = counters.UnitsAttempted;
