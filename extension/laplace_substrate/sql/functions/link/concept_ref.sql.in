@@ -1,0 +1,26 @@
+CREATE OR REPLACE FUNCTION concept_ref(p_ref text)
+    RETURNS bytea
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    -- Resolve an external concept identifier to its content-addressed anchor
+    -- entity, so callers can link things by ILI / WordNet synset key / frame
+    -- name. Every shape is keyed off the SAME content hash the ingest
+    -- decomposers used (word_id = laplace_content_root_id), so the anchor id is
+    -- reconstructed, never resolved by rendered surface:
+    --   * ILI id       'i68021'       -> the synset entity IS that hash
+    --   * WordNet key   '05510358-n'  -> that hash is the offset-pos key
+    --                                    entity; the synset (ILI) anchor is the
+    --                                    HAS_SYNSET_KEY subject pointing at it
+    --   * frame / other 'Self_motion' -> the category entity IS that hash
+    -- Returns NULL when the identifier is empty or the key has no ILI mapping.
+    WITH norm AS (SELECT NULLIF(btrim(p_ref), '') AS r)
+    SELECT CASE
+        WHEN (SELECT r FROM norm) IS NULL THEN NULL
+        WHEN (SELECT r FROM norm) ~ '^[0-9]{8}-[nvasr]$'
+            THEN (SELECT c.subject_id FROM consensus c
+                  WHERE c.object_id = word_id((SELECT r FROM norm))
+                    AND c.type_id = relation_type_id('HAS_SYNSET_KEY')
+                  LIMIT 1)
+        ELSE word_id((SELECT r FROM norm))
+    END
+$$;

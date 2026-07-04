@@ -1,39 +1,46 @@
 
 
 
-
-
-
 CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
                                         p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- Dedup and rank by (member, lang) id pair, never by rendered surface (the
+    -- old GROUP BY render_text(member) conflated homographs). The user-supplied
+    -- language reference is text, so it is resolved at the INPUT boundary: each
+    -- DISTINCT candidate language is matched once against the reference (by
+    -- label or definition surface), instead of re-rendering per member row.
+    -- render_text runs above the sort, streaming until p_limit rows survive.
     WITH src_langs AS (
         SELECT c.object_id AS id FROM consensus c
         WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
     ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
-    cand AS (
-        SELECT sm.member, sm.lang, sm.mu, sm.witnesses, sm.sense_mu, label(sm.lang) AS code
+    agg AS (
+        SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
+               max(sm.sense_mu) AS sense_mu
         FROM synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
           AND sm.lang NOT IN (SELECT id FROM src_langs)
-    )
-    SELECT t.tr, t.code, t.mu::numeric, t.witnesses
-    FROM (
-        SELECT render_text(c.member, 64) AS tr, c.code,
-               max(c.mu) AS mu, max(c.witnesses) AS witnesses, max(c.sense_mu) AS sense_mu
-        FROM cand c, want w
+        GROUP BY sm.member, sm.lang
+    ),
+    lang_match AS (
+        SELECT l.lang FROM (SELECT DISTINCT lang FROM agg) l, want w
         WHERE w.name IS NULL
-           OR lower(c.code) = w.name
+           OR lower(label(l.lang)) = w.name
            OR EXISTS (SELECT 1 FROM consensus d
-                      WHERE d.subject_id = c.lang
+                      WHERE d.subject_id = l.lang
                         AND d.type_id = relation_type_id('HAS_DEFINITION')
                         AND lower(render_text(d.object_id, 32)) = w.name)
-        GROUP BY render_text(c.member, 64), c.code
-    ) t
-    WHERE NULLIF(btrim(t.tr), '') IS NOT NULL
-    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.code
+    )
+    SELECT r.txt AS translation, label(a.lang) AS language, a.mu::numeric, a.witnesses
+    FROM (
+        SELECT member, lang, mu, witnesses FROM agg
+        WHERE lang IN (SELECT lang FROM lang_match)
+        ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
+    ) a
+    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

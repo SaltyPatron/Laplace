@@ -147,7 +147,6 @@ functions/converse/word_segment.sql.in
 functions/converse/label.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/word_language.sql.in
-inference/synset_members.sql.in
 inference/synonyms.sql.in
 inference/translations.sql.in
 inference/translate_to.sql.in
@@ -201,6 +200,9 @@ functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
 functions/lexical/examples.sql.in
 functions/lexical/synset_members.sql.in
+functions/link/concept_ref.sql.in
+functions/link/concept_members.sql.in
+functions/link/concept_peers.sql.in
 functions/identity/fake_tier_band_count.sql.in
 functions/identity/identity_law_violations.sql.in
 functions/identity/compositional_type_ids.sql.in

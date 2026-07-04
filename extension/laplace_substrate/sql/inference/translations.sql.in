@@ -1,31 +1,33 @@
 
 
 
-
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    
-    
-    
-    
+    -- Dedup and rank by (member, lang) id pair, never by rendered surface: the
+    -- old DISTINCT ON (render_text(member)) collapsed distinct translations --
+    -- even across different languages -- whenever their surfaces coincided.
+    -- render_text/label run above the sort, streaming off the ranked candidates
+    -- only until p_limit rows survive the empty-surface filter.
     WITH src_langs AS (
         SELECT c.object_id AS id FROM consensus c
         WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
     ),
-    per_word AS (
-        SELECT DISTINCT ON (render_text(sm.member, 64))
-               render_text(sm.member, 64) AS translation, label(sm.lang) AS language,
-               sm.mu, sm.witnesses, sm.sense_mu
+    agg AS (
+        SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
+               max(sm.sense_mu) AS sense_mu
         FROM synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
           AND sm.lang NOT IN (SELECT id FROM src_langs)
-        ORDER BY render_text(sm.member, 64), sm.sense_mu DESC NULLS LAST, sm.mu DESC, sm.witnesses DESC
+        GROUP BY sm.member, sm.lang
     )
-    SELECT t.translation, t.language, t.mu::numeric, t.witnesses
-    FROM per_word t
-    WHERE NULLIF(btrim(t.translation), '') IS NOT NULL
-    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.language
+    SELECT r.txt AS translation, label(a.lang) AS language, a.mu::numeric, a.witnesses
+    FROM (
+        SELECT member, lang, mu, witnesses FROM agg
+        ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
+    ) a
+    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

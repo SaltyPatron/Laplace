@@ -1,0 +1,43 @@
+CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
+    RETURNS TABLE(peer text, kind text, strength double precision)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    -- Words related to p_word through a shared content-addressed anchor -- a
+    -- synset/ILI concept or a FrameNet frame. Surface- and language-independent
+    -- because the bridge is the anchor id, not any rendered string: two words
+    -- link iff they attach to the same anchor entity. Ranking is pure id/mu;
+    -- label() runs once per surviving row, past the LIMIT, at the boundary.
+    WITH me AS (SELECT lexical_peers(p_word) AS ids),
+    self AS (SELECT unnest(ids) AS id FROM me),
+    anchors AS (
+        SELECT DISTINCT c.object_id AS anchor
+        FROM self s JOIN consensus c ON c.subject_id = s.id
+        WHERE c.type_id IN (relation_type_id('IS_SYNONYM_OF'), relation_type_id('EVOKES_FRAME'))
+          AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+        UNION
+        SELECT DISTINCT so.object_id
+        FROM self s
+        JOIN consensus hs ON hs.subject_id = s.id AND hs.type_id = relation_type_id('HAS_SENSE')
+                         AND NOT refuted(hs.rating, hs.rd)
+        JOIN consensus so ON so.subject_id = hs.object_id
+                         AND so.type_id = relation_type_id('IS_SENSE_OF')
+                         AND NOT refuted(so.rating, so.rd)
+    ),
+    peers AS (
+        SELECT m.member, m.kind, max(m.mu) AS mu
+        FROM anchors a
+        CROSS JOIN LATERAL concept_members(a.anchor) m
+        WHERE m.member <> ALL (SELECT id FROM self)
+        GROUP BY m.member, m.kind
+    ),
+    ranked AS (
+        SELECT member, kind, mu FROM peers
+        ORDER BY mu DESC NULLS LAST, member
+        LIMIT p_limit
+    )
+    SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
+    FROM ranked r
+    CROSS JOIN LATERAL (SELECT label(r.member) AS txt) l
+    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
+    ORDER BY r.mu DESC NULLS LAST, l.txt
+$$;

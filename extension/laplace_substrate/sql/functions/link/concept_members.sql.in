@@ -1,0 +1,31 @@
+CREATE OR REPLACE FUNCTION concept_members(p_concept bytea)
+    RETURNS TABLE(member bytea, kind text, mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    -- Every entity linked to an anchor (a synset/ILI concept or a FrameNet
+    -- frame), pivoting only on ids. Three content-addressed bridge kinds:
+    --   synonym : member --IS_SYNONYM_OF--> synset
+    --   sense   : member --HAS_SENSE--> sense --IS_SENSE_OF--> synset
+    --   frame   : member --EVOKES_FRAME--> frame
+    -- Because the pivot is the anchor id, membership crosses language and
+    -- surface for free (an English and a French lemma on the same ILI-seeded
+    -- synset are both members). Pure id logic -- no render_text/label here; the
+    -- caller renders survivors at the display boundary.
+    SELECT c.subject_id, 'synonym'::text, eff_mu_display(c.rating, c.rd), c.witness_count
+    FROM consensus c
+    WHERE c.object_id = p_concept AND c.type_id = relation_type_id('IS_SYNONYM_OF')
+      AND NOT refuted(c.rating, c.rd)
+    UNION ALL
+    SELECT hs.subject_id, 'sense'::text, eff_mu_display(hs.rating, hs.rd), hs.witness_count
+    FROM consensus so
+    JOIN consensus hs ON hs.object_id = so.subject_id
+                     AND hs.type_id = relation_type_id('HAS_SENSE')
+                     AND NOT refuted(hs.rating, hs.rd)
+    WHERE so.object_id = p_concept AND so.type_id = relation_type_id('IS_SENSE_OF')
+      AND NOT refuted(so.rating, so.rd)
+    UNION ALL
+    SELECT c.subject_id, 'frame'::text, eff_mu_display(c.rating, c.rd), c.witness_count
+    FROM consensus c
+    WHERE c.object_id = p_concept AND c.type_id = relation_type_id('EVOKES_FRAME')
+      AND NOT refuted(c.rating, c.rd)
+$$;

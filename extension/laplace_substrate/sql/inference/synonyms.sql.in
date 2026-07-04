@@ -5,21 +5,25 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    
-    
-    
-    
-    
-    WITH src_lang AS (SELECT word_language(p_word) AS id)
-    SELECT t.synonym, t.mu::numeric, t.witnesses
-    FROM (
-        SELECT render_text(sm.member, 64) AS synonym,
-               max(sm.mu) AS mu, max(sm.witnesses) AS witnesses, max(sm.sense_mu) AS sense_mu
+    -- Dedup and rank by member id, never by rendered surface: identical content
+    -- always hashes to the same id, so two members that render alike are
+    -- DISTINCT content (homographs) and must stay distinct rows. render_text
+    -- runs above the sort, streaming off the ranked candidates only until
+    -- p_limit rows survive the empty-surface filter.
+    WITH src_lang AS (SELECT word_language(p_word) AS id),
+    agg AS (
+        SELECT sm.member, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
+               max(sm.sense_mu) AS sense_mu
         FROM synset_members(p_word) sm
         WHERE sm.lang = (SELECT id FROM src_lang)
-        GROUP BY render_text(sm.member, 64)
-    ) t
-    WHERE NULLIF(btrim(t.synonym), '') IS NOT NULL
-    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.synonym
+        GROUP BY sm.member
+    )
+    SELECT r.txt AS synonym, a.mu::numeric, a.witnesses
+    FROM (
+        SELECT member, mu, witnesses FROM agg
+        ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, member
+    ) a
+    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;
