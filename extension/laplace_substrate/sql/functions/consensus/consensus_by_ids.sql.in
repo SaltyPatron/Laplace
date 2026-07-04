@@ -1,0 +1,16 @@
+CREATE OR REPLACE FUNCTION consensus_by_ids(p_ids bytea[])
+    RETURNS TABLE(id bytea, eff_mu double precision, rd double precision,
+                  witness_count double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Batch consensus lookup by primary id, returning the confidence axis the
+    -- Chess lane needs. Replaces four hand-copied reads (LearnedPst,
+    -- SubstrateStateValuer, SubstrateTurnHost, SubstrateRootBias) that each
+    -- open-coded `(rating - 2*rd)::double precision` instead of eff_mu(); since
+    -- eff_mu(r,d) IS rating - 2*rd the value is identical, but centralized on
+    -- the canonical helper. No SET search_path so it inlines into the caller's
+    -- FROM (the state-valuation path is hot).
+    SELECT c.id, @extschema@.eff_mu(c.rating, c.rd)::double precision,
+           c.rd::double precision, c.witness_count::double precision
+    FROM @extschema@.consensus c
+    WHERE c.id = ANY(p_ids)
+$$;

@@ -1,0 +1,13 @@
+CREATE OR REPLACE FUNCTION resolve_ref(p_ref text)
+    RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Resolve a caller-supplied reference to an entity id: a 32-hex string is a
+    -- literal content id (decode it); anything else is a surface to content-
+    -- address via word_id. Centralizes the identical `WITH resolved AS (SELECT
+    -- CASE WHEN @target ~ '^[0-9a-f]{32}$' ...)` CTE that EvidenceAsync and
+    -- EmbeddingAsync each inlined. No SET search_path so it inlines.
+    SELECT CASE
+        WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
+        ELSE @extschema@.word_id(p_ref)
+    END
+$$;

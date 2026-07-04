@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION label_or_hex(p_id bytea)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Human-facing render with a stable fallback: the entity's label, or its
+    -- hex content id when unlabelled. Centralizes the `COALESCE(label(x),
+    -- encode(x,'hex'))` idiom repeated 9x across SubstrateClient's audit,
+    -- ExplainTrace, relations and Evidence queries. No SET search_path so it
+    -- inlines into the caller's projection.
+    SELECT COALESCE(@extschema@.label(p_id), encode(p_id, 'hex'))
+$$;
