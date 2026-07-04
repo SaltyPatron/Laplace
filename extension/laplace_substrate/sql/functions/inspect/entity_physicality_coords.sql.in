@@ -1,0 +1,17 @@
+CREATE OR REPLACE FUNCTION entity_physicality_coords(p_ids bytea[])
+    RETURNS TABLE(entity_id bytea, x double precision, y double precision,
+                  z double precision, m double precision)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    -- Batch tier-1 coordinates for a set of entity ids: the S^3 point of each
+    -- entity's primary (type=1) physicality, one row per id. Centralizes the
+    -- inline ST_X/Y/Z/M read FoundryExport issued against the base physicalities
+    -- table. DISTINCT ON (entity_id) ... ORDER BY entity_id, p.id keeps the same
+    -- lowest-id physicality the export selected.
+    SELECT DISTINCT ON (p.entity_id) p.entity_id,
+           ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord)
+    FROM physicalities p
+    JOIN unnest(p_ids) AS u(id) ON u.id = p.entity_id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+    ORDER BY p.entity_id, p.id
+$$;

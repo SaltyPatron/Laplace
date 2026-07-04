@@ -71,8 +71,7 @@ public sealed class SubstrateStateValuer : IStateValuer
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, (rating - 2*rd)::double precision, rd::double precision, " +
-            "witness_count::double precision FROM laplace.consensus WHERE id = ANY($1)";
+            "SELECT id, eff_mu, rd, witness_count FROM laplace.consensus_by_ids($1)";
         cmd.Parameters.Add(new NpgsqlParameter
         {
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,

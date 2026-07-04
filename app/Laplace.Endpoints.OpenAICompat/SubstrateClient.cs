@@ -132,7 +132,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 encode(c.type_id, 'hex') AS type_id_hex,
                 c.eff_mu,
                 c.witnesses,
-                COALESCE(laplace.label(c.object_id), encode(c.object_id, 'hex')) AS object_label
+                laplace.label_or_hex(c.object_id) AS object_label
             FROM laplace.completions(laplace.word_id(@prompt), @limit) c
             ORDER BY c.eff_mu DESC;
             """;
@@ -308,7 +308,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.path) AS u(x)) AS path_hex,
                 ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.types) AS u(x)) AS type_path_hex,
                 encode(gt.entity_id, 'hex') AS entity_id_hex,
-                COALESCE(laplace.label(gt.entity_id), encode(gt.entity_id, 'hex')) AS entity_label,
+                laplace.label_or_hex(gt.entity_id) AS entity_label,
                 gt.eff_mu,
                 gt.path_mu,
                 gt.witnesses
@@ -410,11 +410,11 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         const string sql = """
             SELECT
                 encode(t.subject_id, 'hex') AS subject_id_hex,
-                COALESCE(laplace.label(t.subject_id), encode(t.subject_id, 'hex')) AS subject_label,
+                laplace.label_or_hex(t.subject_id) AS subject_label,
                 encode(t.type_id, 'hex') AS type_id_hex,
-                COALESCE(laplace.label(t.type_id), encode(t.type_id, 'hex')) AS type_label,
+                laplace.label_or_hex(t.type_id) AS type_label,
                 encode(t.object_id, 'hex') AS object_id_hex,
-                COALESCE(laplace.label(t.object_id), encode(t.object_id, 'hex')) AS object_label,
+                laplace.label_or_hex(t.object_id) AS object_label,
                 t.eff_mu,
                 t.witnesses
             FROM laplace.top_relations(@limit, NULL) t;
@@ -450,20 +450,17 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         // and when @target does not resolve (entity_id NULL -> caller returns null).
         const string sql = """
             WITH resolved AS (
-                SELECT CASE
-                    WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
-                    ELSE laplace.word_id(@target)
-                END AS id
+                SELECT laplace.resolve_ref(@target) AS id
             )
             SELECT
                 r.id,
-                COALESCE(laplace.label(r.id), encode(r.id, 'hex')),
+                laplace.label_or_hex(r.id),
                 encode(a.type_id, 'hex'),
-                COALESCE(laplace.label(a.type_id), encode(a.type_id, 'hex')),
+                laplace.label_or_hex(a.type_id),
                 encode(a.object_id, 'hex'),
-                COALESCE(laplace.label(a.object_id), encode(a.object_id, 'hex')),
+                laplace.label_or_hex(a.object_id),
                 encode(a.source_id, 'hex'),
-                COALESCE(laplace.label(a.source_id), encode(a.source_id, 'hex')),
+                laplace.label_or_hex(a.source_id),
                 CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
                 a.outcome,
                 a.observation_count
@@ -589,10 +586,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         // form-then-meaning read order and consensus_out_readable's internal ranking.
         const string sql = """
             WITH resolved AS (
-                SELECT CASE
-                    WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
-                    ELSE laplace.word_id(@target)
-                END AS id
+                SELECT laplace.resolve_ref(@target) AS id
             )
             SELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,
                    f.x, f.y, f.z, f.m, f.radius, f.n_constituents,

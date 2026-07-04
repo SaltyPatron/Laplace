@@ -99,6 +99,7 @@ functions/readback/render.sql.in
 functions/readback/register_canonicals.sql.in
 functions/inspect/entity_facets.sql.in
 functions/inspect/entity_physicalities.sql.in
+functions/inspect/entity_physicality_coords.sql.in
 functions/inspect/attestations_out.sql.in
 functions/inspect/attestations_in.sql.in
 functions/inspect/consensus_out_readable.sql.in
@@ -110,6 +111,7 @@ functions/inspect/attestation_unary_response_type.sql.in
 functions/consensus/top_relations.sql.in
 functions/consensus/completions.sql.in
 functions/consensus/consensus_out.sql.in
+functions/consensus/consensus_by_ids.sql.in
 functions/consensus/consensus_in.sql.in
 functions/consensus/classify_circuit.sql.in
 functions/consensus/walk_branches.sql.in
@@ -144,8 +146,10 @@ functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
 functions/lexical/examples_bootstrap.sql.in
 functions/converse/word_id.sql.in
+functions/converse/resolve_ref.sql.in
 functions/converse/word_segment.sql.in
 functions/converse/label.sql.in
+functions/converse/label_or_hex.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/word_language.sql.in
 inference/synonyms.sql.in

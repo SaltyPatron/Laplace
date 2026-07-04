@@ -617,12 +617,8 @@ internal static class FoundryExport
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
-        cmd.CommandText = @"SELECT DISTINCT ON (p.entity_id) p.entity_id,
-                ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord)
-            FROM laplace.physicalities p
-            JOIN unnest($1::bytea[]) AS u(id) ON u.id = p.entity_id
-            WHERE p.type = 1 AND p.coord IS NOT NULL
-            ORDER BY p.entity_id, p.id";
+        cmd.CommandText =
+            "SELECT entity_id, x, y, z, m FROM laplace.entity_physicality_coords($1)";
         cmd.Parameters.Add(new NpgsqlParameter
         { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         await using var rdr = await cmd.ExecuteReaderAsync();

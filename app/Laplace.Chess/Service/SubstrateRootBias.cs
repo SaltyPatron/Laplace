@@ -60,8 +60,7 @@ public sealed class SubstrateRootBias : IRootBias
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText =
-                "SELECT id, (rating - 2*rd)::double precision, witness_count::double precision " +
-                "FROM laplace.consensus WHERE id = ANY($1)";
+                "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1)";
             cmd.Parameters.Add(new NpgsqlParameter
             {
                 NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
