@@ -916,39 +916,67 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     if (st.comp_valid[0])
         r->root_id = st.comp_id[0];
 
-    for (size_t p = 0; p < n; ++p) {
-        uint32_t prev = UINT32_MAX;
-        int count = 0;
+    /* Sibling-order PRECEDES. JSON containers emit none: member/array
+       order there is dump-format plumbing, and attesting it duplicated
+       ordering the physicality trajectories already carry losslessly.
+       Text modalities keep word-order evidence. Single pass with a
+       per-parent last-child cursor plus an open-addressing dedup table
+       (the old shape rescanned all n nodes per parent and linearly
+       scanned the precedes array per pair — O(n^2) on fat records). */
+    if (!json_mod && n > 0) {
+        uint32_t* last_child = (uint32_t*)malloc(n * sizeof(uint32_t));
+        size_t    tab_cap    = 64;
+        while (tab_cap < n * 2) tab_cap <<= 1;
+        uint32_t* table    = (uint32_t*)malloc(tab_cap * sizeof(uint32_t));
+        size_t    prec_cap = r->precedes_count;
+        if (!last_child || !table) {
+            free(last_child); free(table);
+            rc = -3; goto fail_emit;
+        }
+        memset(last_child, 0xFF, n * sizeof(uint32_t));
+        memset(table, 0xFF, tab_cap * sizeof(uint32_t));
         for (size_t i = 0; i < n; ++i) {
             laplace_ast_node_t nd;
             if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-            if (nd.parent != (uint32_t)p) continue;
             if (!st.comp_valid[i]) continue;
-            if (prev != UINT32_MAX && st.comp_valid[prev]) {
-                hash128_t a = st.comp_id[prev], b = st.comp_id[i];
-                size_t found = (size_t)-1;
-                for (size_t k = 0; k < r->precedes_count; ++k) {
-                    if (r->precedes[k].subject_id.hi == a.hi && r->precedes[k].subject_id.lo == a.lo
-                        && r->precedes[k].object_id.hi == b.hi && r->precedes[k].object_id.lo == b.lo) {
-                        found = k; break;
-                    }
+            if (nd.parent >= n) continue;
+            uint32_t prev = last_child[nd.parent];
+            last_child[nd.parent] = (uint32_t)i;
+            if (prev == UINT32_MAX) continue;
+            hash128_t a = st.comp_id[prev], b = st.comp_id[i];
+            uint64_t h = (a.hi ^ (a.lo * 0x9E3779B97F4A7C15ULL))
+                       ^ ((b.hi + 0xC2B2AE3D27D4EB4FULL) * 0x165667B19E3779F9ULL) ^ b.lo;
+            size_t s = (size_t)h & (tab_cap - 1);
+            uint32_t found = UINT32_MAX;
+            for (;;) {
+                uint32_t k = table[s];
+                if (k == UINT32_MAX) break;
+                if (r->precedes[k].subject_id.hi == a.hi && r->precedes[k].subject_id.lo == a.lo
+                    && r->precedes[k].object_id.hi == b.hi && r->precedes[k].object_id.lo == b.lo) {
+                    found = k; break;
                 }
-                if (found != (size_t)-1) {
-                    r->precedes[found].games++;
-                } else {
-                    laplace_compose_precedes_t* pr = (laplace_compose_precedes_t*)realloc(
-                        r->precedes, (r->precedes_count + 1) * sizeof(*pr));
-                    if (!pr) { rc = -3; goto fail_emit; }
-                    r->precedes = pr;
-                    r->precedes[r->precedes_count].subject_id = a;
-                    r->precedes[r->precedes_count].object_id = b;
-                    r->precedes[r->precedes_count].games = 1;
-                    r->precedes_count++;
-                }
+                s = (s + 1) & (tab_cap - 1);
             }
-            prev = (uint32_t)i;
-            (void)count;
+            if (found != UINT32_MAX) {
+                r->precedes[found].games++;
+                continue;
+            }
+            if (r->precedes_count == prec_cap) {
+                size_t ncap = prec_cap ? prec_cap * 2 : 64;
+                laplace_compose_precedes_t* pr = (laplace_compose_precedes_t*)realloc(
+                    r->precedes, ncap * sizeof(*pr));
+                if (!pr) { free(last_child); free(table); rc = -3; goto fail_emit; }
+                r->precedes = pr;
+                prec_cap = ncap;
+            }
+            r->precedes[r->precedes_count].subject_id = a;
+            r->precedes[r->precedes_count].object_id = b;
+            r->precedes[r->precedes_count].games = 1;
+            table[s] = (uint32_t)r->precedes_count;
+            r->precedes_count++;
         }
+        free(last_child);
+        free(table);
     }
 
     r->tree = build_containment_tree(r, ast, &st);

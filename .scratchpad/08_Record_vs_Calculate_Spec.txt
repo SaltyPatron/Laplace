@@ -1,0 +1,134 @@
+08 — RECORD vs CALCULATE: ingest/analysis split spec (chess PGN first, generalizes)
+================================================================================
+Author-decided 2026-07-03. Companion to 03_Chess / 04_Chess_Fixes. Trust model +
+DB facts mirrored in memory: project_ingest_record_vs_calculate, project_calc_trust_model,
+project_chess_ingest_state.
+
+STATUS (2026-07-04)
+-------------------
+DONE + VALIDATED (unit + live against the 144M-row DB):
+  - Recorder = ChessPgnDecomposer, witnessed-only, no chess engine, comments captured. Emits ZERO
+    geometry (unit-verified).
+  - Analyzer = ChessAnalyzeDecomposer (`laplace ingest chess-analyze <path>`), gated by the
+    per-(game, version) AnalysisMarker watermark (EntitiesExistBitmapAsync probe). Derives
+    positions/geometry/moves/motifs/opening/consensus + bridges PGN eval/quality onto positions
+    under lower-trust sources. Live run: 488 ChessAnalysis attestations + 2 markers applied,
+    consensus folded, status=ok, positions deduped by hash against the existing corpus.
+  - Re-runnable: runs with skipSourceCompletion=true (no source-completion marker) so the per-game
+    marker is the only skip gate. Watermark skip unit-verified (FilterUnanalyzedAsync).
+  - Opt-in engine eval: LAPLACE_CHESS_ANALYZE_DEPTH>0 runs our own eval per position (currently
+    UNBIASED / deterministic; see NEXT PHASE).
+
+NEXT PHASE — corpus-growth re-analysis (replace, not accumulate):
+  The witness layer (each game's outcome at each position) accumulates correctly and is
+  incrementally self-current. The CORPUS-DEPENDENT derived metrics (substrate-BIASED eval,
+  best-move-per-consensus) are snapshots that go stale as the corpus grows, and re-analysis must
+  OVERWRITE them, not add a witness. Two pieces: (1) eval through the substrate bias (FoldBias) so
+  it IS corpus-dependent; (2) REPLACE semantics for ChessAnalysis value attestations (flag the
+  source set-not-add in the fold; no writer evict API today, so this touches the apply/fold path —
+  the concurrency-sensitive part). Re-analysis is TARGETED + SUBLINEAR (only hot positions shift;
+  endgames saturate); a corpus-epoch watermark marks stale vs current. NOT built yet.
+
+PRINCIPLE
+---------
+Ingestion is RECORDING (witnessing), not PROCESSING. Two layers:
+  witnessed  = what a source literally asserts. Transcribe verbatim into the 5-tuple.
+  calculated = anything derived by interpreting the witnessed layer. Deferred, versioned.
+Same content = same hash => linking/meshing is automatic (insert-if-absent), never an
+entity-resolution pass. Calculated layer is a pure deterministic fn of witnessed layer =>
+memoized, content-addressed, re-derivable, EVICTABLE.
+
+WHY (measured)
+--------------
+Chess PGN ingest is slow vs WordNet because current ingest REPLAYS a chess engine per ply
+(San.Resolve legal-move-gen) and folds consensus inline. WordNet just transcribes. Move the
+replay + derivation out of ingest and chess ingest becomes transcription too. Also de-risks
+the PCoreParallelCompose drop bug (append-only recording is idempotent/re-runnable) and
+subsumes the per-ply waste (EmitNodes 6x, 2M memo cap, AppendEval substructure re-iterate).
+
+RECORDER (new cheap ingest path)
+--------------------------------
+Records, per game, WITHOUT any chess logic (no board replay, no move gen, no geometry):
+  - Game entity (Document) = GameId(white,black,date,moves). Same game => recorded once;
+    re-seeing just adds witnesses (played-by/at-time).
+  - Tags as witnessed content: Event, Date, ECO, Opening, Result, Termination, TimeControl,
+    Site, Round, titles, Annotator (capture MORE tags than today; they're free to record).
+  - Players + Elo (HAS_WHITE/BLACK/RATING).
+  - Ordered SAN move tokens attributed to the game (the move list as-is; NO resolution).
+  - Per-ply witnessed annotations: %clk, %eval token, NAG/glyph, AND free-text comment prose
+    (** currently DROPPED — gap to close: emit comment text as a witnessed content node on the
+    ply **).
+  All append-only, content-addressed, idempotent. Source = ChessPgn (witnessed trust class).
+
+ANALYZER (new deferred pass, UI-triggered / batched)
+----------------------------------------------------
+Pure fn of the witnessed layer. Scans games where analyzed_version < current, then:
+  - Replay SAN -> concrete moves -> board positions (the deferred San.Resolve cost).
+  - Compose positions (canonical key, substructures, coord/Hilbert/trajectory physicalities).
+  - Cross-game meshing happens HERE, deterministically (same position => same hash) and caches
+    forever.
+  - Motifs, opening classification, engine eval (if run), move-quality inference.
+  - Consensus fold (Glicko) over the derived + witnessed outcomes.
+  Emits derived attestations under an ANALYSIS source/trust class, stamped analysis_version.
+  Idempotent: deterministic => identical ids => re-run dedups. Bump analysis_version to evict
+  + re-derive without touching the witnessed layer.
+
+WATERMARK
+---------
+Per-game analysis_version (stored as a witnessed/meta attestation or a side table). Scan =
+"games with analyzed_version < CURRENT_ANALYSIS_VERSION". Growth of novel positions is
+sublinear (Heaps ~N^β, not strictly log); consensus update per witness is O(1). First corpus
+expensive, rest cheap.
+
+EVAL / QUALITY ARE COMPETING WITNESSES, NOT DUPLICATES (decided 2026-07-04)
+---------------------------------------------------------------------------
+The PGN's %eval and its ?/! NAGs are a THIRD-PARTY LOWER-TRUST WITNESS to a position's value /
+a move's quality — no different from a GM book's assessment. They must COMPETE against what we
+calculate, so do NOT dedupe them away. Design:
+  - Recorder keeps the PGN eval/quality on the ply node (witnessed, immutable record).
+  - Analyzer, at the replayed position, emits TWO attestations on the SAME (position, HAS_EVAL)
+    and (position, MOVE_QUALITY): (a) its OWN value under ChessAnalysis (high trust), and (b) the
+    PGN's value bridged from the ply node onto the position under the lower-trust annotation
+    source (NOT folded into ChessAnalysis).
+  - Consensus reconciles by trust: calc dominates, PGN survives as corroboration/provenance, and
+    their DIVERGENCE is itself signal (human blunder-call the engine disputes, or vice versa).
+  Clock has no calculated rival => provenance-only, stays on the ply. (Corrects an earlier
+  "drop the position-attached copies" recommendation, which would have silenced a witness.)
+
+TRUST (see project_calc_trust_model)
+------------------------------------
+  deterministic-exact calc (position/legality/material/mate/canonical opening) = ground truth,
+    top trust, overrides testimony. Immutable until logic changes.
+  heuristic calc (eval/motif/opening/quality) = high but f(method: engine, depth,
+    analysis_version); supersedable by a better calc. Bind trust to method, don't flat-rate.
+  Trust lives in source/trust-class. Different RELATION TYPE only when it's a different KIND of
+    claim or must not fold with the witnessed one; SAME relation + different source when
+    consensus should reconcile competing estimates (deep eval dominates, annotator eval survives
+    as provenance). Calc-outranks-observation only where they claim the SAME fact; provenance
+    (who/when/clock) has no calculated rival.
+
+APPLY-SIDE PERF (independent of the split, still needed)
+-------------------------------------------------------
+IngestRunner consumer is SINGLE-THREADED (one ApplyWorkingSetAsync at a time, IngestRunner.cs
+~237-266), serialized by global pg_advisory_xact_lock('laplace_apply_batch'). Decompose is
+already parallel (PCoreParallelCompose, up to 8 P-core-pinned workers, ChessPgnDecomposer.cs:62).
+  Fix 1: N apply lanes sharded by subject-id hash, each own connection + PARTITION-SCOPED
+         advisory lock => disjoint shards apply concurrently.
+  Fix 2: stage-then-fold — COPY raw attestations (append-only, shardable), then ONE bulk
+         set-based Glicko fold, instead of online per-attestation accumulate.
+
+MIGRATION
+---------
+Existing 126.3M ChessPgn attestations on hart-desktop are today's monolithic witnessed+calculated
+mix under one source. The split separates them going forward. Existing rows can be left as-is or
+evicted+re-derived once the analyzer exists (per-source eviction, then re-run). Don't re-ingest
+without eviction (double-counts consensus — IngestRunner completion-marker guard).
+
+CODE SEAMS
+----------
+  ChessPgnDecomposer.ComposeParsedGame / AppendGame  -> split into RecordGame (witnessed) and
+    (delete) the per-ply derivation, which becomes the analyzer.
+  ChessGraph.Append* (EmitNodes 6x/ply)              -> analyzer only; compose from-node ONCE/ply.
+  ChessCompose.Position (2M memo cap)                -> analyzer only.
+  IngestRunner consumer loop                          -> parallel sharded apply lanes.
+  ConsensusAccumulatingWriter                         -> stage-then-fold option.

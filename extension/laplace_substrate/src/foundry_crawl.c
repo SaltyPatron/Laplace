@@ -260,11 +260,14 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
             }
             else if (child_rel > oe->rel)
             {
-                
+
 
                 oe->rel = child_rel;
             }
         }
+        /* Row data is copied into the seen/words structures above; free the
+         * result set before the next frontier node's probe. */
+        SPI_freetuptable(SPI_tuptable);
     }
 
     

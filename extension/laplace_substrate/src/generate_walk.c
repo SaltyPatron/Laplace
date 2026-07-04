@@ -659,6 +659,9 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
                 if (rows[r].run < 1) rows[r].run = 1;
                 rows[r].flags = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
             }
+            /* rows[] holds independent copies now; free the tuptable before
+             * recursing (render_node re-enters SPI_execute_plan). */
+            SPI_freetuptable(SPI_tuptable);
 
             initStringInfo(&out);
             for (uint64 r = 0; r < nrows && ok; r++)

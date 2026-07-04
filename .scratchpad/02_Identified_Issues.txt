@@ -1226,3 +1226,27 @@ is blocked inside dotnet run (different file), but kill first anyway. Also: in a
 backpressured pipeline, producer rate == consumer rate BY CONSTRUCTION — a feed heartbeat
 matching the compose rate identifies no bottleneck; only independent evidence (per-thread
 CPU, stacks, counters) does. Three runs were burned re-learning this.
+
+ISSUE 43 — FIXED. Grammar-compose PRECEDES emitter: attestation bloat and the compose CPU
+sink were the SAME code block (grammar_compose.cpp sibling-order loop). Two defects:
+(a) It attested adjacent-sibling order at EVERY level of the AST. For JSON modalities
+    (wiktionary kaikki records) the AST is the JSON parse tree, so sense->sense,
+    field->field, element->element dump-format order became evidence rows — measured
+    ~450k of 455k wiktionary attestations per 1k records were this plumbing vs 2.6k
+    HAS_DEFINITION + 3.2k HAS_EXAMPLE actual knowledge (~1.3% signal). Ordering is
+    already lossless in physicality trajectories; the rows certified nothing.
+(b) It was O(n^2): per AST node it rescanned all n nodes for children, plus a linear
+    scan of the precedes array per pair. Fat kaikki records (thousands of JSON nodes)
+    burned tens of millions of ops each — 6.9 cores busy staging ~5MB/s, which also
+    starved every yield/progress threshold (the "zero telemetry" symptom: the pipeline
+    was fine, compose never produced anything to report).
+Fix: JSON modalities emit ZERO structural-order PRECEDES (is_json_modality gate already
+in scope); text modalities keep word-order PRECEDES via single pass with per-parent
+last-child cursor + open-addressing dedup table (O(n)). Same pair set + games counts as
+the old loop for text, different array order only (COPY re-sorts). Verified: engine
+355/355, regress 14/14 (incl. converse + law suites), drain-parity green. Post-fix the
+byte-bound yields (256MB/worker) + IngestRunner's standard per-change Progress.Report
+produce INGEST_PROGRESS lines with composed= counts — no feeder heartbeat needed (removed).
+Perf-gate note: 4 pre-existing calibration failures on this box (WriterThroughput
+round_trips=13 vs <=12 range at commit_rows=50k; warm-reingest 30s/GB gate) — none touch
+the compose path; not regressions from this fix, not chased.

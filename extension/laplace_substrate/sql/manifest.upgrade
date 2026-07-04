@@ -81,6 +81,7 @@ functions/fold/consensus_fold_swap.sql.in
 functions/fold/walk_fold_prepare.sql.in
 functions/fold/walk_fold_finalize.sql.in
 functions/fold/finish_consensus_fold.sql.in
+functions/fold/finish_consensus_fold_steps.sql.in
 functions/fold/materialize_period_consensus.sql.in
 functions/readback/canonical_id.sql.in
 functions/readback/canonical_names.sql.in

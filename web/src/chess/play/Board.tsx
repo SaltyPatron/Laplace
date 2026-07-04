@@ -65,6 +65,7 @@ export interface BoardProps {
   boardRef: RefObject<HTMLDivElement | null>;
   flip?: boolean;
   lastMove?: { from: string; to: string } | null;
+  matedKing?: string | null;
   onPointerDown: (e: PointerEvent, sq: string) => void;
   onPointerUp: (e: PointerEvent, sq: string) => void;
   onDragMove: (x: number, y: number) => void;
@@ -72,7 +73,7 @@ export interface BoardProps {
 
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
-  whiteEval, evalFrac, leadTxt, winPct, boardRef, flip = false, lastMove,
+  whiteEval, evalFrac, leadTxt, winPct, boardRef, flip = false, lastMove, matedKing,
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
   const board = parseBoard(fen);
@@ -137,32 +138,32 @@ export function Board({
                 const sq = sqName(f, boardRow);
                 const dark = (f + rank) % 2 === 1;
                 const isLast = lastMove && (sq === lastMove.from || sq === lastMove.to);
-                const inCheck = piece === (fen.split(' ')[1] === 'w' ? 'K' : 'k');
+                // Real signal only exists for checkmate (status). There is no mid-game
+                // "in check" flag from the backend, so this fires only on the mated king —
+                // NOT on every side-to-move king (which lit the white king red at the start).
+                const inCheck = !!matedKing && piece === matedKing;
                 const sm = suggMark.get(sq);
-                const suggTo = sm?.role === 'to' ? sm : null;
-                const suggFrom = sm?.role === 'from' ? sm : null;
                 const cls = ['square', dark ? 'dark' : 'light',
                   sel === sq ? 'sel' : '', targets.has(sq) ? 'target' : '',
                   marks.has(sq) ? 'marked' : '',
                   isLast ? 'last-move' : '',
-                  inCheck ? 'in-check' : '',
-                  suggTo ? 'sugg sugg-to' : '',
+                  inCheck ? 'mated' : '',
+                  sm ? (sm.role === 'to' ? 'sugg sugg-to' : 'sugg sugg-from') : '',
                   showPick && sq === botBestTo ? 'pick' : '',
                   drag?.from === sq ? 'dragging' : ''].join(' ');
                 const th = targets.has(sq) ? targetHue(sq) : null;
-                const style = suggTo
-                  ? ({ ['--sugg' as string]: `hsl(${suggTo.hue} 90% 50%)` } as CSSProperties)
+                // Suggestions tint the SQUARE (via --sugg + color-mix in CSS); pieces keep
+                // their own color. --teval drives the selected-move target dots.
+                const style = sm
+                  ? ({ ['--sugg' as string]: `hsl(${sm.hue} 70% 50%)` } as CSSProperties)
                   : th !== null
                   ? ({ ['--teval' as string]: `hsl(${th} 70% 55%)` } as CSSProperties)
-                  : undefined;
-                const pieceStyle = suggFrom
-                  ? ({ color: `hsl(${suggFrom.hue} 85% 45%)` } as CSSProperties)
                   : undefined;
                 return (
                   <div key={sq} className={cls} style={style}
                        onPointerDown={(e) => onPointerDown(e, sq)}
                        onPointerUp={(e) => onPointerUp(e, sq)}>
-                    {piece && <span className={`piece${suggFrom ? ' piece-sugg' : ''}`} style={pieceStyle}>{GLYPH[piece]}</span>}
+                    {piece && <span className="piece">{GLYPH[piece]}</span>}
                     {showPick && sq === botBestTo && <span className="botpick" title="bot's pick">★</span>}
                     {targets.has(sq) && <span className="target-mu">{fmtDelta(targetMu.get(sq))}</span>}
                   </div>

@@ -3,9 +3,10 @@ CREATE OR REPLACE FUNCTION laplace_distill(
     p_min_eff_mu float8 DEFAULT 0.5)
 RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
-    WITH band_types AS MATERIALIZED (
+    WITH band_types AS (
         SELECT e.id FROM entities e
-        WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+        WHERE e.highway_mask IS NOT NULL
+          AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
     )
     SELECT c.subject_id, c.type_id, c.object_id,
            (eff_mu(c.rating, c.rd)::float8 / 1e9) AS eff_mu

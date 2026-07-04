@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet } from '../../api/client';
+import { Panel } from './Panel';
 
 interface LearnedSquare { piece: string; file: number; rank: number; devPoints: number; witness: number; }
 
@@ -32,15 +33,13 @@ export function PstGrid() {
   const at = (file: number, rank: number) => forPiece.find((s) => s.file === file && s.rank === rank);
 
   return (
-    <section className="panel pst">
-      <div className="pst-head">
-        <h3>Learned PST</h3>
-        <div className="pst-pieces">
-          {PIECES.map((p) => (
-            <button key={p} className={p === piece ? 'active' : 'ghost'} onClick={() => setPiece(p)} title={PIECE_NAME[p]}>{p}</button>
-          ))}
-        </div>
+    <Panel className="pst" title="Learned PST" actions={
+      <div className="pst-pieces">
+        {PIECES.map((p) => (
+          <button key={p} className={p === piece ? 'active' : 'ghost'} onClick={() => setPiece(p)} title={PIECE_NAME[p]}>{p}</button>
+        ))}
       </div>
+    }>
       {err && <div className="chess-error">{err}</div>}
       {loading && !squares && <p className="muted">loading…</p>}
       {squares && (
@@ -69,6 +68,6 @@ export function PstGrid() {
           </p>
         </>
       )}
-    </section>
+    </Panel>
   );
 }

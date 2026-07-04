@@ -36,7 +36,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var modality = new ChessModality();
         // options.BatchSize is LAPLACE_INGEST_BATCH, a global knob sized for cheap flat
         // records (WordNet synsets, ConceptNet triples). A chess game is not a flat record —
         // it explodes into dozens-to-hundreds of entity/physicality/attestation rows per game.
@@ -61,7 +60,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
         {
             int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
             var reader = context.Reader;
-            using var modalities = new ThreadLocal<ChessModality>(() => new ChessModality());
             int bn = -1;
             await foreach (var change in PCoreParallelCompose.RunAsync(
                 StreamAllGamesWithHeartbeatAsync(context.EcosystemPath, ct),
@@ -70,7 +68,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 () => new SubstrateChangeBuilder(
                     ChessVocabulary.PgnSourceId, $"chess/pgn/{Interlocked.Increment(ref bn)}", null,
                     entityCapacity: batch * 4,
-                    physicalityCapacity: batch * 2,
+                    physicalityCapacity: 1,
                     attestationCapacity: batch * 8),
                 (b, gameText) =>
                 {
@@ -78,11 +76,8 @@ public sealed class ChessPgnDecomposer : IDecomposer
                     // Hot-cache shortcircuit only (same contract as the wiktionary
                     // parallel lane): a game already proven present is skipped
                     // outright; DB-level dedup of the rest is the descent's job.
-                    // The chunked EntitiesExistBitmapAsync probe stays on the
-                    // sequential path, where blocking a compose worker on a DB
-                    // round trip wouldn't serialize the whole lane.
                     if (reader is not null && reader.IsProvenPresent(parsed.GameId)) return;
-                    ComposeParsedGame(parsed, b, modalities.Value!);
+                    RecordGame(parsed, b);
                 },
                 ct))
                 yield return change;
@@ -91,7 +86,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
         await foreach (var change in DecomposerBatch.RunAsync(
             StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
-            (parsed, b) => ComposeParsedGame(parsed, b, modality),
+            (parsed, b) => RecordGame(parsed, b),
             ChessVocabulary.PgnSourceId, "chess/pgn", batch, context.Reader, options, ct))
             yield return change;
     }
@@ -169,7 +164,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
                 yield return chunk[i];
     }
 
-    private static async IAsyncEnumerable<string> StreamAllGamesAsync(
+    internal static async IAsyncEnumerable<string> StreamAllGamesAsync(
         string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
     {
         foreach (var file in EnumerateFiles(ecosystemPath))
@@ -196,9 +191,14 @@ public sealed class ChessPgnDecomposer : IDecomposer
         return new ParsedGame(gameText, walk, moves, result, gameId);
     }
 
-    private static void ComposeParsedGame(ParsedGame parsed, SubstrateChangeBuilder b, ChessModality modality)
+    // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
+    // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
+    // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
+    // (ChessAnalyze), run later off this witnessed layer. See .scratchpad/08_Record_vs_Calculate.
+    internal static void RecordGame(ParsedGame parsed, SubstrateChangeBuilder b)
     {
         var (gameText, walk, moves, result, gameId) = parsed;
+        var src = ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
         var (whiteName, blackName) = ParseNames(gameText);
@@ -206,49 +206,80 @@ public sealed class ChessPgnDecomposer : IDecomposer
         var blackPlayer = EmitPlayer(b, blackName);
 
         EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo);
-
-        var (initial, standardStart) = InitialState(gameText, modality);
-        int moveCount = moves.Count;
-        var clockTokens = PgnClocks.ClockTokens(gameText, moveCount);
-        var clocks = clockTokens is not null
-            ? clockTokens.Select(t =>
-            {
-                var p = t.Split(':');
-                return int.Parse(p[0]) * 3600 + int.Parse(p[1]) * 60
-                    + double.Parse(p[2], System.Globalization.CultureInfo.InvariantCulture);
-            }).ToArray()
-            : Array.Empty<double>();
-        double medianDrop = PgnClocks.MedianDrop(clocks);
-        var evalTokens = PgnEvals.EvalTokens(gameText, moveCount);
-        var evals = evalTokens is not null
-            ? evalTokens.Select(PgnEvals.ParseToken).ToArray()
-            : PgnEvals.Centipawns(gameText, moveCount);
-
-        EmitGameOpeningMeta(b, gameId, gameText, moves, modality, standardStart);
-
-        AppendGame(b, modality, initial, walk.Mainline, result,
-                   whiteElo, blackElo, whitePlayer, blackPlayer, clocks, medianDrop, gameId,
-                   evals, clockTokens, evalTokens);
-
-        if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_VARIATIONS"), "1", StringComparison.Ordinal))
-            AppendVariations(b, modality, initial, walk.AllPlies, whitePlayer, blackPlayer);
+        RecordStartPosition(b, gameId, gameText, src);
+        RecordOpeningHeaders(b, gameId, gameText, src);
+        RecordMovetext(b, gameId, moves, src);
+        RecordPlyAnnotations(b, gameId, gameText, walk, moves.Count, src);
     }
 
-    // A PGN game defaults to the standard starting array, but chess.com/lichess puzzle exports
-    // and some OTB archives specify a real, different starting position via [SetUp "1"]/[FEN].
-    // Previously this was ignored entirely — every game was decomposed as if [FEN] didn't exist,
-    // silently misattributing whatever moves followed to the wrong starting position.
-    internal static (ChessState Initial, bool StandardStart) InitialState(string gameText, ChessModality m)
+    // [SetUp "1"]/[FEN] start recorded verbatim as witnessed content so the analyzer can replay
+    // non-standard starts without the source PGN. Absent => analyzer defaults to the standard array.
+    private static void RecordStartPosition(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
     {
-        if (PgnGames.TagStr(gameText, "SetUp") != "1") return (m.Initial(), true);
+        if (PgnGames.TagStr(gameText, "SetUp") != "1") return;
         string fen = PgnGames.TagStr(gameText, "FEN");
-        if (string.IsNullOrWhiteSpace(fen)) return (m.Initial(), true);
-        try { return (m.FromFen(fen), false); }
-        catch (FormatException) { return (m.Initial(), true); }
+        if (string.IsNullOrWhiteSpace(fen)) return;
+        if (ContentEmitter.Emit(b, fen, src) is { } fid)
+            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_SETUP", fid, src, null, PgnWitnessWeight));
     }
 
-    private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
-        => new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/pgn");
+    // Source-asserted ECO/opening headers = witnessed. The analyzer later computes its OWN
+    // classification as a separate, higher-trust calculated witness; consensus reconciles them.
+    private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
+    {
+        string eco = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
+        if (eco.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
+        string opening = ChessCanonical.OpeningName(PgnGames.TagStr(gameText, "Opening")) ?? "";
+        if (opening.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
+    }
+
+    // The mainline SAN sequence as one witnessed content node — the analyzer replays it to derive
+    // positions. (GameId already incorporates the moves, so this is the game's defining content.)
+    private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<string> moves, Hash128 src)
+    {
+        if (moves.Count == 0) return;
+        if (ContentEmitter.Emit(b, string.Join(' ', moves), src) is { } mtId)
+            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
+    }
+
+    // Per-ply witnessed annotations (SAN, clock, eval token, move quality, comment) hung on a
+    // deterministic ply anchor PlyId(game,ply) the analyzer reconstructs to attach them to the
+    // position it computes at that ply. A ply node is materialized only when it carries an
+    // annotation — plain moves live in the movetext. Comment text is now recorded (was dropped).
+    private static void RecordPlyAnnotations(
+        SubstrateChangeBuilder b, Hash128 gameId, string gameText,
+        PgnMovetext.PgnWalkResult walk, int moveCount, Hash128 src)
+    {
+        var clockTokens = PgnClocks.ClockTokens(gameText, moveCount);
+        var evalTokens = PgnEvals.EvalTokens(gameText, moveCount);
+        var mainline = walk.Mainline;
+        for (int ply = 0; ply < mainline.Count; ply++)
+        {
+            var pm = mainline[ply];
+            string? clk = clockTokens is not null && ply < clockTokens.Length ? clockTokens[ply] : null;
+            string? ev = evalTokens is not null && ply < evalTokens.Length ? evalTokens[ply] : null;
+            string? comment = string.IsNullOrWhiteSpace(pm.CommentText) ? null : pm.CommentText;
+            string? quality = MoveQuality.FromStream(pm);
+            if (clk is null && ev is null && comment is null && quality is null) continue;
+
+            var plyId = ChessVocabulary.PlyId(gameId, ply);
+            b.AddEntity(plyId, EntityTier.Word, ChessVocabulary.PlyType, src);
+            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_PLY", plyId, src, gameId, PgnWitnessWeight));
+            PlyMeta(b, plyId, "HAS_SAN", pm.San, src, gameId);
+            PlyMeta(b, plyId, "HAS_CLOCK", clk, src, gameId);
+            PlyMeta(b, plyId, "HAS_EVAL_TOKEN", ev, src, gameId);
+            PlyMeta(b, plyId, "MOVE_QUALITY", quality, src, gameId);
+            PlyMeta(b, plyId, "HAS_COMMENT", comment, src, gameId);
+        }
+    }
+
+    private static void PlyMeta(
+        SubstrateChangeBuilder b, Hash128 ply, string rel, string? value, Hash128 src, Hash128 ctx)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (ContentEmitter.Emit(b, value, src) is { } vid)
+            b.AddAttestation(NativeAttestation.Categorical(ply, rel, vid, src, ctx, PgnWitnessWeight));
+    }
 
     // One awaited ReadLineAsync per line caps the feeder around ~400 games/s —
     // slower than even a single compose worker, so the parallel lane starved at
@@ -340,34 +371,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, gameId, src);
     }
 
-    private static void EmitGameOpeningMeta(
-    SubstrateChangeBuilder b, Hash128 gameId, string gameText,
-    IReadOnlyList<string> sans, ChessModality modality, bool standardStart)
-    {
-        var src = ChessVocabulary.PgnSourceId;
-        string ecoHeader = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
-        if (ecoHeader.Length > 0)
-            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", ecoHeader, PgnWitnessWeight, src);
-
-        string openingHeader = ChessCanonical.OpeningName(PgnGames.TagStr(gameText, "Opening")) ?? "";
-        if (openingHeader.Length > 0)
-            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", openingHeader, PgnWitnessWeight, src);
-
-        // ECO/opening-book classification and motif detection both match against SAN sequences
-        // recorded from the standard starting array — meaningless (and a real false-match risk)
-        // for a game that actually started from a different position via [SetUp "1"]/[FEN].
-        if (!standardStart) return;
-
-        var classified = OpeningClassifier.Classify(sans, modality);
-        if (classified.Eco is { } eco && eco != ecoHeader)
-            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
-        if (classified.Name is { } name && name != openingHeader)
-            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", name, PgnWitnessWeight, src);
-
-        if (ChessMotifs.DetectNamedTrap(sans) is { } motif)
-            ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", motif, PgnWitnessWeight, src);
-    }
-
     private static void Meta(SubstrateChangeBuilder b, Hash128 game, string rel, string value, Hash128 src)
     {
         if (string.IsNullOrWhiteSpace(value) || value == "?" || value == "-" || value == "????.??.??") return;
@@ -389,127 +392,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
         string baseStr = plus >= 0 ? tc[..plus] : tc;
         if (!int.TryParse(baseStr, out int baseSec)) return "";
         return baseSec < 180 ? "bullet" : baseSec < 600 ? "blitz" : baseSec < 1500 ? "rapid" : "classical";
-    }
-
-    private static void AppendGame(
-        SubstrateChangeBuilder b, ChessModality m, ChessState initial, IReadOnlyList<PgnMovetext.PgnMoveStream> plies,
-        GameOutcome result, int whiteElo, int blackElo, Hash128? whitePlayer, Hash128? blackPlayer,
-        double[] clocks, double medianDrop, Hash128 gameId, int[]? evals,
-        string[]? clockTokens, string[]? evalTokens)
-    {
-        bool mate = plies.Count > 0 && plies[^1].San.IndexOf('#') >= 0;
-        int? winner = result.IsDraw ? null : result.Winner;
-        const long evalGames = 2;
-        const double evalWeight = 0.55;
-        const double metaWeight = PgnWitnessWeight;
-
-        var state = initial;
-        for (int ply = 0; ply < plies.Count; ply++)
-        {
-            var plyStream = plies[ply];
-            var mv = San.Resolve(state.Board, m.LegalActions(state), plyStream.San);
-            if (mv is null) return;
-            int mover = m.SideToMove(state);
-            var next = m.Apply(state, mv.Value);
-            string fromKey = m.StateKey(state);
-
-            // Witness count stays a flat, ELO-independent "1 occurrence" — a player's Elo is a
-            // separate, timestamped fact (Rating() below emits it as its own HAS_RATING
-            // attestation, context-scoped to this game), not a multiplier smuggled into the
-            // Glicko-2 fold's witness dimension. Elo and Glicko-2 are different rating systems;
-            // conflating a raw Elo number into "how many games this counts as" was never a
-            // meaningful unit conversion.
-            long games = 1;
-            if (mate && winner == mover) games += 1;
-            // Think-time (tf) stays out of the witness count too, same reasoning as Elo above —
-            // it's independently attested via HAS_CLOCK/HAS_THINK_CLASS below, not folded into
-            // Glicko-2 evidence weight. moveChoiceGames is omitted so AppendMoveEdge defaults it
-            // to `games`.
-            double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-
-            ChessGraph.AppendMoveEdge(
-                b, fromKey, m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight,
-                sourceId: ChessVocabulary.PgnSourceId,
-                moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
-                contextId: gameId,
-                ply: ply + 1);
-
-            foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
-                ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", tag, PgnWitnessWeight, ChessVocabulary.PgnSourceId);
-
-            if (clockTokens is not null && ply < clockTokens.Length)
-            {
-                ChessGraph.AppendClock(b, fromKey, clockTokens[ply], metaWeight,
-                    ChessVocabulary.PgnSourceId, gameId);
-                if (clocks.Length > 0)
-                    ChessGraph.AppendThinkClass(b, fromKey, ChessCanonical.ThinkClass(tf), metaWeight,
-                        ChessVocabulary.PgnSourceId, gameId);
-            }
-
-            if (evalTokens is not null && ply < evalTokens.Length)
-                ChessGraph.AppendEvalToken(b, fromKey, evalTokens[ply], metaWeight,
-                    ChessVocabulary.EvalPgnSourceId, gameId);
-
-            if (evals is not null && ply < evals.Length)
-            {
-                int cp = mover == 0 ? evals[ply] : -evals[ply];
-                ChessGraph.AppendEval(b, fromKey, cp, evalGames, evalWeight, ChessVocabulary.EvalPgnSourceId, gameId);
-            }
-
-            if (MoveQuality.FromStream(plyStream) is { } quality)
-                ChessGraph.AppendMoveQuality(
-                    b, fromKey, quality, 1, PgnWitnessWeight * 0.5, ChessVocabulary.PgnSourceId, gameId);
-
-            state = next;
-        }
-    }
-
-    private static void AppendVariations(
-    SubstrateChangeBuilder b, ChessModality m, ChessState initial, IReadOnlyList<PgnMovetext.PgnMoveStream> allPlies,
-    Hash128? whitePlayer, Hash128? blackPlayer)
-    {
-        const double varWeight = 0.35;
-        var mainState = initial;
-        var varState = initial;
-        bool inVar = false;
-
-        foreach (var plyStream in allPlies)
-        {
-            if (plyStream.InVariation)
-            {
-                if (!inVar) { varState = CloneState(m, mainState); inVar = true; }
-                if (TryPlay(m, ref varState, plyStream.San, out var fromKey, out var toKey, out int mover))
-                {
-                    ChessGraph.AppendMoveEdge(
-                        b, fromKey, toKey, PlyOutcome.Draw, games: 1, varWeight,
-                        sourceId: ChessVocabulary.PgnSourceId,
-                        moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
-                        contextId: null);
-                }
-            }
-            else
-            {
-                inVar = false;
-                TryPlay(m, ref mainState, plyStream.San, out _, out _, out _);
-            }
-        }
-    }
-
-    private static ChessState CloneState(ChessModality m, ChessState s) => m.FromFen(s.Board.ToFen());
-
-    private static bool TryPlay(
-        ChessModality m, ref ChessState state, string san,
-        out string fromKey, out string toKey, out int mover)
-    {
-        fromKey = toKey = "";
-        mover = 0;
-        var mv = San.Resolve(state.Board, m.LegalActions(state), san);
-        if (mv is null) return false;
-        mover = m.SideToMove(state);
-        fromKey = m.StateKey(state);
-        state = m.Apply(state, mv.Value);
-        toKey = m.StateKey(state);
-        return true;
     }
 
     private static (int White, int Black) ParseElos(string game)

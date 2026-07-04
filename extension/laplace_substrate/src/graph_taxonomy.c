@@ -11,6 +11,7 @@
 #include "funcapi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/hsearch.h"
 #include "utils/numeric.h"
 
 #include "laplace/core/hash128.h"
@@ -29,6 +30,60 @@ tax_find(const hash128_t *ids, int n, const hash128_t *key)
         if (hash128_eq(&ids[i], key))
             return i;
     return -1;
+}
+
+/*
+ * consensus_taxonomy_edges is prepared once (static) and re-executed per
+ * dequeued node instead of re-planning on every SPI_execute_with_args call.
+ * The query, its two arguments, and the rows read back are unchanged.
+ */
+static SPIPlanPtr tax_edges_plan = NULL;
+
+static void
+ensure_tax_edges_plan(void)
+{
+    if (tax_edges_plan == NULL)
+    {
+        Oid        argtypes[2] = { BYTEAOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare(
+            "SELECT object_id, type_id, rating, rd "
+            "FROM laplace.consensus_taxonomy_edges($1, $2)",
+            2, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "tax_bfs_up: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "tax_bfs_up: SPI_keepplan failed");
+        tax_edges_plan = plan;
+    }
+}
+
+/* id -> node-index map, replacing the O(n) tax_find scan over the BFS node
+ * array. Node ids are unique (dedup on insert), so the map is 1:1 and returns
+ * exactly the index the linear scan would have — BFS order and output are
+ * unchanged. */
+typedef struct TaxIdxEntry
+{
+    char key[16];
+    int  idx;
+} TaxIdxEntry;
+
+static int
+tax_idx_find(HTAB *map, const hash128_t *h)
+{
+    bool         found;
+    TaxIdxEntry *e = (TaxIdxEntry *) hash_search(map, h, HASH_FIND, &found);
+
+    return found ? e->idx : -1;
+}
+
+static void
+tax_idx_add(HTAB *map, const hash128_t *h, int idx)
+{
+    bool         found;
+    TaxIdxEntry *e = (TaxIdxEntry *) hash_search(map, h, HASH_ENTER, &found);
+
+    e->idx = idx;
 }
 
 static Datum
@@ -86,15 +141,33 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
     int    n = 0;
     int   *queue = (int *) palloc(sizeof(int) * cap);
     bytea *nodebuf = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    Oid    argtypes[2] = { BYTEAOID, BYTEAARRAYOID };
     Datum  args[2];
     int    rc;
+    Datum *type_datums;
+    Datum  types_arr_datum;
+    HTAB  *idmap;
+    HASHCTL ctl;
+
+    ensure_tax_edges_plan();
+
+    /* The up-type array is constant for the whole walk: build it once. */
+    type_datums = (Datum *) palloc(sizeof(Datum) * up_type_n);
+    for (int ti = 0; ti < up_type_n; ti++)
+        type_datums[ti] = hash128_to_datum(&up_types[ti]);
+    types_arr_datum = PointerGetDatum(construct_array(
+        type_datums, up_type_n, BYTEAOID, -1, false, TYPALIGN_INT));
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(TaxIdxEntry);
+    idmap = hash_create("tax_bfs_up idmap", (cap > 16 ? cap : 16), &ctl,
+                        HASH_ELEM | HASH_BLOBS);
 
     SET_VARSIZE(nodebuf, VARHDRSZ + sizeof(hash128_t));
 
     for (int s = 0; s < seed_n && n < cap; s++)
     {
-        if (tax_find(&nodes[0].id, n, &seeds[s]) >= 0)
+        if (tax_idx_find(idmap, &seeds[s]) >= 0)
             continue;
         nodes[n].id = seeds[s];
         nodes[n].depth = 0;
@@ -102,6 +175,7 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
         nodes[n].via_type = (hash128_t) { 0, 0 };
         nodes[n].rating = 0;
         nodes[n].rd = 0;
+        tax_idx_add(idmap, &nodes[n].id, n);
         queue[tail++] = n++;
     }
 
@@ -114,20 +188,11 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
             continue;
 
         memcpy(VARDATA(nodebuf), &u->id, sizeof(hash128_t));
-        Datum *type_datums = (Datum *) palloc(sizeof(Datum) * up_type_n);
-        for (int ti = 0; ti < up_type_n; ti++)
-            type_datums[ti] = hash128_to_datum(&up_types[ti]);
 
         args[0] = PointerGetDatum(nodebuf);
-        args[1] = PointerGetDatum(construct_array(
-            type_datums, up_type_n, BYTEAOID, -1, false, TYPALIGN_INT));
+        args[1] = types_arr_datum;
 
-        rc = SPI_execute_with_args(
-            "SELECT object_id, type_id, rating, rd "
-            "FROM laplace.consensus_taxonomy_edges($1, $2)",
-            2, argtypes, args, NULL, true, 0);
-        pfree(type_datums);
-        pfree(DatumGetPointer(args[1]));
+        rc = SPI_execute_plan(tax_edges_plan, args, NULL, true, 0);
 
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "graph_geometry_reads: tax walk query failed: %s",
@@ -152,7 +217,7 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
             if (in_ancestor_chain(nodes, cur, &obj_h))
                 continue;
 
-            pi = tax_find(&nodes[0].id, n, &obj_h);
+            pi = tax_idx_find(idmap, &obj_h);
             if (pi >= 0)
             {
                 if (nodes[pi].depth <= walk_depth)
@@ -181,10 +246,14 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
                 SPI_getbinval(tup, td, 3, &isnull));
             nodes[n].rd = DatumGetInt64(
                 SPI_getbinval(tup, td, 4, &isnull));
+            tax_idx_add(idmap, &nodes[n].id, n);
             queue[tail++] = n++;
         }
     }
 
+    hash_destroy(idmap);
+    pfree(DatumGetPointer(types_arr_datum));
+    pfree(type_datums);
     pfree(queue);
     pfree(nodebuf);
     return n;

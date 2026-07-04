@@ -94,6 +94,8 @@ spi_expand(void *ctxp, const hash128_t *node, astar_edge_t *out, int cap)
         out[r].target = *(hash128_t *) VARDATA_ANY(DatumGetByteaPP(nbr));
         out[r].cost   = edge_cost(rating, rd);
     }
+    /* All row data copied into out[] above; free before the next probe. */
+    SPI_freetuptable(SPI_tuptable);
     return (int) r;
 }
 

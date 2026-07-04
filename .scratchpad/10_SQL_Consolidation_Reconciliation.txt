@@ -1,0 +1,151 @@
+================================================================================
+SQL CONSOLIDATION — ZERO-LOSS RECONCILIATION REPORT
+Removing the legacy numbered NN_*.sql.in monolith bundles; single modular
+manifest-driven source of truth; pattern locked out.
+Date: 2026-07-04
+================================================================================
+
+WHAT WAS WRONG
+--------------
+The extension shipped ONLY from the modular tree (sql/manifest.install -> cmake
+SqlManifest.laplace_write_sql_chain -> #include chain -> cpp -> the built
+laplace_substrate--<ver>.sql). Verified directly: laplace_substrate.sql.in is a
+2-line shim; SqlManifest.cmake only emits manifest lines; no numbered file is
+referenced by the build.
+
+In parallel, 44 numbered NN_*.sql.in "migration-legacy" bundles still sat at
+sql/ top level. They shipped nothing, but:
+  * they perturbed EXT_VERSION via a GLOB_RECURSE sql/*.sql.in SHA-256 (footgun);
+  * being tracked-but-never-`git rm`'d, any git checkout/reset resurrected them
+    (the "keeps reverting/sabotaging" effect) — no generator regenerates them;
+  * the migration was INCOMPLETE: real objects were stranded in numbered files
+    and never made it into the manifest, so they silently were NOT shipping.
+
+The incompleteness was proven, not assumed. Independent object-level inventory
+found three stranded objects the "safe to delete" summaries missed:
+  1. finish_consensus_fold_steps  (PROCEDURE, resumable partitioned fold) — only
+     in 14_period_fold.sql.in; absent from the manifest; NOT shipping. Worse, the
+     shipping functions/fold/consensus_fold_swap.sql.in references it in a comment
+     as an existing capability.
+  2. 43_table_tuning.sql.in (planner-stat + autovacuum tuning) — untracked,
+     unique, in no manifest; NOT applied by any build.
+  3. views/refresh_consensus_views.sql.in — a modular-tree file defining
+     v_consensus_resolved + v_consensus_edges, in NO manifest (caught by the new
+     completeness gate on its first run). Duplicate; bodies byte-equal to the
+     shipping views/v_consensus_resolved.sql.in + views/v_consensus_edges.sql.in.
+
+ZERO-LOSS PROOF (mechanical, reproducible)
+------------------------------------------
+Harness: extension/laplace_substrate/test/sql_parity/parity.py
+Dollar-quote/comment-aware tokenizer. For EVERY object in EVERY numbered file it
+asserts one of: IDENTICAL (normalized body == a modular body), CONFLICT
+(reviewed, resolved to modular), FRAGMENT (numbered side truncated/invalid,
+modular complete), MIGRATED (relocated verbatim; also asserts normalized-equal to
+the numbered original), RETIRED (a modular DROP module exists). Anything else =>
+UNACCOUNTED => exit 1.
+
+Result on the pre-deletion tree:
+  IDENTICAL (proven normalized-equal) ....... 122 objects
+  CONFLICT (resolved to modular) ............   4
+  FRAGMENT (numbered truncated) .............   5
+  MIGRATED (finish_consensus_fold_steps) ....   1  (normalized-equal to original)
+  RETIRED (content_descent_novel_ordinals) ..   1  (drop module present)
+  EMPTY numbered files ......................  16
+  UNACCOUNTED ...............................   0   => PASS
+
+THE 4 CONFLICTS — resolved to MODULAR on documented evidence (read personally):
+  consensus_fold_swap:      modular header (24 lines) documents that the numbered
+                            RENAME/identity-swap destroys OID-bound indexes/FKs and
+                            strips pg_extension_config_dump; modular TRUNCATE+refill
+                            keeps the consensus OID stable. Numbered = documented-broken.
+  materialize_period_partition: modular comment — numbered's extra ORDER BY in the
+                            keyed CTE caused live disk-spill at 22.5M rows for an
+                            ordering the INSERT redoes (ORDER BY f.cid kept on both).
+  collocates:               numbered inline "NOT refuted(...)" vs modular
+                            "FROM v_consensus_unrefuted"; the view IS
+                            "SELECT * FROM consensus WHERE NOT refuted(...)"
+                            (read directly) => proven byte-equivalent.
+  table_present_ordinals:   numbered plpgsql IF/ELSIF vs modular PARALLEL SAFE SQL
+                            UNION ALL over *_present_ordinals() helpers (refactor).
+
+5 FRAGMENTS (numbered side is a truncated, non-parseable fragment; modular is the
+only complete copy — no functional content in the numbered side to lose):
+  physicalities (03), render (15), top_relations (17), label (20),
+  consensus_layer_plane (26).
+
+21_seed whole-file DIFF — PROVEN cosmetic (97.83% token-identical). The only
+deltas: (a) 4 provenance path-strings (numbered records retired paths e.g.
+substrate/sql/04_attestations.sql.in; modular records the current modular paths),
+and (b) 2 stale `#include generated/21_seed_*.sql.in` directives that the modular
+tree ships correctly as separate manifest modules
+(generated/seed_relation_types.sql.in, generated/seed_pos.sql.in). No data/object
+loss.
+
+MIGRATIONS PERFORMED
+--------------------
+  * functions/fold/finish_consensus_fold_steps.sql.in  (new) — added to
+    manifest.install + manifest.upgrade after finish_consensus_fold. Body proven
+    normalized-equal to the 14_period_fold original by the parity harness.
+  * schema/tuning/table_tuning.sql.in  (new) — byte-identical copy of
+    43_table_tuning.sql.in; added to manifest.install + manifest.upgrade at end
+    (all 4 target tables exist by then).
+  * Deleted views/refresh_consensus_views.sql.in (dead duplicate; bodies proven
+    identical to the shipping view modules).
+  * git rm of 42 tracked numbered files + rm of untracked 43_table_tuning.sql.in.
+    Only the 3 live shims (laplace_substrate.sql.in, _upgrade, uninstall) remain
+    at sql/ top level.
+
+LOCKOUT (pattern made structurally impossible to reintroduce)
+-------------------------------------------------------------
+  * EXT_VERSION now hashes ONLY manifest-listed modules + shims + sqldefines
+    (CMakeLists.txt), not a filesystem glob. A stray .sql.in can no longer perturb
+    the version.
+  * laplace_check_manifest_complete (cmake/SqlManifest.cmake) FAILS configuration
+    if any sql/**/*.sql.in is neither manifest-referenced nor allow-listed (shims,
+    sqldefines.h.in, sql/.manifest_ignore). GLOB uses CONFIGURE_DEPENDS so a newly
+    added orphan triggers reconfigure + fails.
+  * NEGATIVE TEST (real reconfigure, planted orphan):
+      CMake Error at .../SqlManifest.cmake:83 (message):
+        SQL manifest completeness check failed. ...
+          .../functions/ops/44_i_am_an_orphan.sql.in
+    Configure aborted before build. Orphan removed => configure passes again.
+    This gate is what would have caught all three stranded objects above.
+
+BUILD + SHIPPED-OBJECT VERIFICATION
+-----------------------------------
+  * Clean build (scripts/win/build-extensions.cmd) exit 0; gate passed; version is
+    now manifest-derived: laplace_substrate--8464a70d142c9d4d.sql (was glob-based).
+  * Both migrations present in the built SQL: finish_consensus_fold_steps x1;
+    tuning = 2x SET STATISTICS 0 + 4x autovacuum ALTER; consensus_fold_swap x1
+    (modular version, not double-included).
+  * SHIPPED-OBJECT DIFF, pre-change build (…47a521a0) vs final (…8464a70d):
+      baseline objects: 314   final objects: 315
+      REMOVED in final: (none)          <= nothing lost
+      ADDED in final:   PROCEDURE finish_consensus_fold_steps
+    i.e. the consolidation removed ZERO shipped objects and added exactly the
+    previously-orphaned procedure (confirming it truly was not shipping before).
+    Tuning ALTERs are mutations, not CREATEs — verified separately in the build SQL
+    and by the functional test below.
+
+FUNCTIONAL TESTS
+----------------
+  app/Laplace.Substrate.Tests/Crud/SqlConsolidationTests.cs (Collection substrate-pg,
+  isolated laplace_substratecrud_test DB — never the production laplace DB):
+    - MigratedProcedure_FinishConsensusFoldSteps_IsInstalledAndResumable
+    - MigratedTuning_StatisticsAndAutovacuum_AppliedAtInstall
+    - ConsensusFoldSwap_PreservesIndexesViewsAndExtensionConfig  (the numbered
+      RENAME version would fail this)
+    - Collocates_And_TablePresentOrdinals_AreCallableWithExpectedShape
+  RESULT: 4 / 4 PASSED. The fold+swap test drove a real fold + consensus_fold_swap
+  and confirmed all 6 secondary indexes, all 3 consensus views, and the
+  pg_extension_config_dump registration survived — the behaviour the discarded
+  numbered RENAME body would have broken.
+
+PERMANENT GUARDS LEFT IN THE TREE
+---------------------------------
+  * parity.py — regression guard: if any numbered/legacy bundle reappears, it is
+    re-reconciled or the build/test fails.
+  * laplace_check_manifest_complete — any unwired *.sql.in fails the build.
+Together these make the numbered-monolith / orphaned-module pattern impossible to
+reintroduce silently.
+================================================================================

@@ -5,9 +5,10 @@ CREATE OR REPLACE FUNCTION laplace_ancestry(
 RETURNS TABLE(ancestor_id bytea, depth integer, best_eff_mu numeric)
 LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
     WITH RECURSIVE
-        band_types AS MATERIALIZED (
+        band_types AS (
             SELECT e.id FROM entities e
-            WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+            WHERE e.highway_mask IS NOT NULL
+              AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
         ),
         ancestry(ancestor_id, depth, eff_mu_raw) AS (
             SELECT c.object_id, 1, eff_mu(c.rating, c.rd)

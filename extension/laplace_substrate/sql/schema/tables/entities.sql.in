@@ -6,3 +6,9 @@ CREATE TABLE IF NOT EXISTS entities (
     created_at         timestamptz      NOT NULL DEFAULT now(),
     highway_mask       bytea            CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
 );
+
+-- Storage/statistics tuning (idempotent; applies on install and upgrade). At 100M+ rows the
+-- default 10% autovacuum_analyze_scale_factor needs ~15M changes before autoanalyze fires, so
+-- planner stats went stale during bulk ingest and mis-costed the descent/apply existence probes.
+-- Fire autoanalyze at 2% or 100k changes, whichever comes first.
+ALTER TABLE entities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);

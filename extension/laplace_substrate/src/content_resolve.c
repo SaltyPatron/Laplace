@@ -9,7 +9,9 @@
 
 #include "fmgr.h"
 #include "funcapi.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/hsearch.h"
 
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
@@ -110,31 +112,6 @@ phrase_collect_emit(void *ctx_, uint32_t ordinal,
     ctx->n++;
 }
 
-static bool
-phrase_id_is_entity(hash128_t *id)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1];
-    bool  isnull;
-    int   rc;
-    Datum d;
-
-    /* STORED-row check, deliberately NOT entity_exists(): that helper also
-     * answers true for any valid codepoint via the perfcache axiom, and
-     * under the tier-blind content law (same content = same hash; tier is a
-     * floor) a single-letter word IS its codepoint — the axiom would make
-     * stopwords like 'a' hijack phrase resolution ahead of real lexical
-     * matches. "Is this segment known content" is the stored-row question. */
-    args[0] = hash128_to_datum(id);
-    rc = SPI_execute_with_args(
-        "SELECT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = $1)",
-        1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return false;
-    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    return !isnull && DatumGetBool(d);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_phrase);
 
 Datum
@@ -170,29 +147,120 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     if (ctx.n == 0)
         PG_RETURN_NULL();
 
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "resolve_phrase: SPI_connect failed");
-
-    for (int L = ctx.n; L >= 1 && !found; L--)
+    /*
+     * The candidate span set is fixed and content_root_id is native (no SPI),
+     * so compute every span's root id in C up front, then answer "which of
+     * these ids are stored entities" in ONE batch query instead of an O(n^2)
+     * storm of single-row EXISTS round-trips. The winning span is then chosen
+     * in C using the IDENTICAL nested-loop order (L = n..1 outer, i ascending
+     * inner, first match wins), so the selected id is bit-identical to the old
+     * per-span probe.
+     *
+     * The membership query targets the laplace.entities table directly and is
+     * deliberately NOT entity_exists(): that helper also answers true for any
+     * valid codepoint via the perfcache axiom, and under the tier-blind
+     * content law (same content = same hash; tier is a floor) a single-letter
+     * word IS its codepoint — the axiom would let stopwords like 'a' hijack
+     * phrase resolution ahead of real lexical matches. "Is this segment known
+     * content" is the stored-row question.
+     */
     {
-        for (int i = 0; i + L <= ctx.n && !found; i++)
-        {
-            const uint8_t *sp = base + ctx.off[i];
-            size_t  splen = (size_t) ((ctx.off[i + L - 1] + ctx.len[i + L - 1])
-                                      - ctx.off[i]);
-            hash128_t id;
+        int         n_span = ctx.n * (ctx.n + 1) / 2;
+        hash128_t  *span_id = (hash128_t *) palloc(sizeof(hash128_t) * n_span);
+        bool       *span_ok = (bool *) palloc(sizeof(bool) * n_span);
+        Datum      *elems = (Datum *) palloc(sizeof(Datum) * n_span);
+        int         n_elems = 0;
+        int         s;
 
-            if (laplace_content_root_id(sp, splen, &id) == 0
-                && phrase_id_is_entity(&id))
+        /* Pass 1: compute each span's content_root_id in canonical order. */
+        s = 0;
+        for (int L = ctx.n; L >= 1; L--)
+        {
+            for (int i = 0; i + L <= ctx.n; i++, s++)
             {
-                found_id = id;
-                found = true;
-                break;
+                const uint8_t *sp = base + ctx.off[i];
+                size_t  splen = (size_t) ((ctx.off[i + L - 1] + ctx.len[i + L - 1])
+                                          - ctx.off[i]);
+
+                if (laplace_content_root_id(sp, splen, &span_id[s]) == 0)
+                {
+                    span_ok[s] = true;
+                    elems[n_elems++] = hash128_to_datum(&span_id[s]);
+                }
+                else
+                {
+                    span_ok[s] = false;
+                }
             }
+        }
+
+        if (n_elems > 0)
+        {
+            HTAB      *present;
+            HASHCTL    hctl;
+            ArrayType *arr;
+            Oid        argtypes[1] = { BYTEAARRAYOID };
+            Datum      args[1];
+            int        qrc;
+
+            if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+                elog(ERROR, "resolve_phrase: SPI_connect failed");
+
+            arr = construct_array(elems, n_elems, BYTEAOID, -1, false, TYPALIGN_INT);
+            args[0] = PointerGetDatum(arr);
+            qrc = SPI_execute_with_args(
+                "SELECT e.id FROM laplace.entities e WHERE e.id = ANY($1::bytea[])",
+                1, argtypes, args, NULL, true, 0);
+            if (qrc != SPI_OK_SELECT)
+                elog(ERROR, "resolve_phrase: entity membership query failed: %s",
+                     SPI_result_code_string(qrc));
+
+            memset(&hctl, 0, sizeof(hctl));
+            hctl.keysize = sizeof(hash128_t);
+            hctl.entrysize = sizeof(hash128_t);
+            present = hash_create("resolve_phrase present",
+                                  (SPI_processed > 0 ? (long) SPI_processed : 16),
+                                  &hctl, HASH_ELEM | HASH_BLOBS);
+            for (uint64 r = 0; r < SPI_processed; r++)
+            {
+                bool      isnull;
+                hash128_t h = datum_to_hash128(
+                    SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc,
+                                  1, &isnull));
+                bool      pfound;
+
+                if (!isnull)
+                    hash_search(present, &h, HASH_ENTER, &pfound);
+            }
+
+            /*
+             * Pass 2 runs while SPI is still connected: `present` lives in the
+             * SPI procedure memory context and would be freed by an early
+             * finish. It performs no SPI itself — just the same nested-loop
+             * order (first present span wins).
+             */
+            s = 0;
+            for (int L = ctx.n; L >= 1 && !found; L--)
+            {
+                for (int i = 0; i + L <= ctx.n && !found; i++, s++)
+                {
+                    bool pfound;
+
+                    if (!span_ok[s])
+                        continue;
+                    hash_search(present, &span_id[s], HASH_FIND, &pfound);
+                    if (pfound)
+                    {
+                        found_id = span_id[s];
+                        found = true;
+                    }
+                }
+            }
+
+            laplace_spi_finish(spi_top);
         }
     }
 
-    laplace_spi_finish(spi_top);
     if (!found)
         PG_RETURN_NULL();
     PG_RETURN_DATUM(hash128_to_datum(&found_id));

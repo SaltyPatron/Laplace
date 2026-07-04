@@ -58,6 +58,25 @@ public static class ChessVocabulary
 
 
     public static readonly Hash128 GameType = EntityTypeRegistry.Id("Chess_Game");
+    // Witnessed ply anchor: a per-move node carrying the recorded SAN + annotations, with a
+    // deterministic id (game+ply) the analyzer can reconstruct without a reverse lookup.
+    public static readonly Hash128 PlyType = EntityTypeRegistry.Id("Chess_Ply");
+    public static readonly Hash128 HasMovetextType = EntityTypeRegistry.Id("HAS_MOVETEXT");
+    public static readonly Hash128 HasPlyType = EntityTypeRegistry.Id("HAS_PLY");
+    public static readonly Hash128 HasSanType = EntityTypeRegistry.Id("HAS_SAN");
+    public static readonly Hash128 HasCommentType = EntityTypeRegistry.Id("HAS_COMMENT");
+    public static readonly Hash128 HasSetupType = EntityTypeRegistry.Id("HAS_SETUP");
+    // Analysis watermark: analyzer stamps each game once it has derived at a given version.
+    public static readonly Hash128 AnalyzedAtType = EntityTypeRegistry.Id("ANALYZED_AT");
+    public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
+    public static readonly Hash128 AnalysisSourceId = Hash128.OfCanonical("substrate/source/ChessAnalysis/v1");
+    public static readonly Hash128 AnalysisTrustClass = TrustClass("DerivedCalculation");
+
+    // Deterministic per-(game, analysis version) marker. The analyzer scan bulk-probes these for
+    // existence (EntitiesExistBitmapAsync) to skip games already derived at the current version —
+    // same fast novelty-probe the recorder uses on game ids.
+    public static Hash128 AnalysisMarkerId(Hash128 gameId, int version)
+        => Hash128.OfCanonical($"chess/analyzed/{gameId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
     public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
     public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");
@@ -87,6 +106,11 @@ public static class ChessVocabulary
 
     public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
     => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
+
+    // Deterministic per-ply anchor id — reconstructable by the analyzer from (game, ply) alone,
+    // so witnessed ply annotations attach without a reverse content lookup.
+    public static Hash128 PlyId(Hash128 gameId, int ply)
+    => Hash128.OfCanonical($"chess/ply/{gameId}/{ply}");
 
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
 
@@ -127,6 +151,14 @@ public static class ChessVocabulary
         boot.AddRelationType("OPENING_NAME");
         boot.AddRelationType("HAS_ECO");
         boot.AddType("Chess_Game");
+        boot.AddType("Chess_Ply");
+        boot.AddRelationType("HAS_MOVETEXT");
+        boot.AddRelationType("HAS_PLY");
+        boot.AddRelationType("HAS_SAN");
+        boot.AddRelationType("HAS_COMMENT");
+        boot.AddRelationType("HAS_SETUP");
+        boot.AddRelationType("ANALYZED_AT");
+        boot.AddType("Chess_AnalysisMarker");
         boot.AddRelationType("HAS_WHITE");
         boot.AddRelationType("HAS_BLACK");
         boot.AddRelationType("HAS_EVENT");

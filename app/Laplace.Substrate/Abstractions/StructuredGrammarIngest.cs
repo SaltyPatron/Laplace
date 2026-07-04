@@ -150,22 +150,14 @@ public static class StructuredGrammarIngest
                 FileShare.Read, bufferSize: 4 << 20, useAsync: true);
             var buf = new byte[4 << 20];
             bool eof = false;
-            long framed = 0;
-            long bytesRead = 0;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
             while (!eof)
             {
                 int read = await fs.ReadAsync(buf, ct);
                 if (read <= 0) { eof = true; read = 0; }
-                bytesRead += read;
                 ct.ThrowIfCancellationRequested();
                 foreach (byte[] lineUtf8 in FeedRawLinesForPipeline(iter, buf, read))
                 {
                     if (acceptRow is not null && !acceptRow(lineUtf8)) continue;
-                    if (++framed % 50_000 == 0)
-                        Console.WriteLine(
-                            $"WS_COMPOSE feed: {framed:N0} records framed, {bytesRead >> 20:N0}MB read "
-                            + $"({framed / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} rec/s)");
                     yield return lineUtf8;
                 }
             }

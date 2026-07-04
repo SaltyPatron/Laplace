@@ -10,4 +10,7 @@ CREATE TABLE IF NOT EXISTS consensus (
     last_observed_at  timestamptz NOT NULL
 );
 
+-- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in).
+ALTER TABLE consensus SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+
 SELECT pg_extension_config_dump('consensus', '');

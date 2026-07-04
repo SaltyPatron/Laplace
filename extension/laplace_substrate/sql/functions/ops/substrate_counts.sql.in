@@ -2,26 +2,16 @@ CREATE OR REPLACE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT 'entities',                 count(*) FROM @extschema@.entities
+    -- Planner estimates (pg_class.reltuples), NOT count(*). The tables run 100M+ rows and are
+    -- unvacuumed, so full-scan counts took minutes and hung the tail of every ingest. Estimates
+    -- are instant and directionally correct for a post-ingest summary; run ANALYZE for exact
+    -- numbers, or query a specific source with evidence_count()/source_id() when precision matters.
+    -- (The old per-type/tier breakdowns were filtered full scans -- the slowest part -- dropped.)
+    SELECT 'entities ~',      GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.entities'::regclass))::bigint
     UNION ALL
-    SELECT 'entities/codepoint (T0)',  count(*) FROM @extschema@.entities
-        WHERE type_id = @extschema@.entity_type_id('Codepoint')
-          AND tier = 0
+    SELECT 'physicalities ~', GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.physicalities'::regclass))::bigint
     UNION ALL
-    SELECT 'entities/compositional (T1-T4)', count(*) FROM @extschema@.entities e
-        WHERE e.tier BETWEEN 1 AND 4
-          AND e.type_id = ANY(@extschema@.compositional_type_ids())
+    SELECT 'attestations ~',  GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.attestations'::regclass))::bigint
     UNION ALL
-    
-    
-    SELECT 'entities/vocabulary (by type_id)', count(*) FROM @extschema@.entities e
-        WHERE e.type_id <> ALL(@extschema@.compositional_type_ids())
-    UNION ALL
-    SELECT 'physicalities',            count(*) FROM @extschema@.physicalities
-    UNION ALL
-    SELECT 'physicalities/content',    count(*) FROM @extschema@.physicalities WHERE type = 1
-    UNION ALL
-    SELECT 'attestations (evidence)',  count(*) FROM @extschema@.attestations
-    UNION ALL
-    SELECT 'consensus (relations)',    count(*) FROM @extschema@.consensus
+    SELECT 'consensus ~',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.consensus'::regclass))::bigint
 $$;

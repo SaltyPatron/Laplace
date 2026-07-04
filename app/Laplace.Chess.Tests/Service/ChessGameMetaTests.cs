@@ -5,32 +5,33 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessGameMetaTests
 {
+    // InitialState is now the analyzer's (calculated) FEN->board step; the SetUp/FEN extraction
+    // from PGN text is the recorder's job (ChessPgnDecomposer.RecordStartPosition, covered in
+    // ChessRecorderTests). See .scratchpad/08_Record_vs_Calculate.
     [Fact]
-    public void InitialState_NoSetUpTag_UsesStandardStart()
+    public void InitialState_NoFen_UsesStandardStart()
     {
         var m = new ChessModality();
-        var (initial, standard) = ChessPgnDecomposer.InitialState("[Event \"x\"]\n", m);
+        var (initial, standard) = ChessAnalyze.InitialState(null, m);
         Assert.True(standard);
         Assert.Equal(m.Initial().Board.ToFen(), initial.Board.ToFen());
     }
 
     [Fact]
-    public void InitialState_SetUpWithValidFen_UsesThatPosition()
+    public void InitialState_ValidFen_UsesThatPosition()
     {
         const string fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
-        var gameText = $"[Event \"x\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n";
         var m = new ChessModality();
-        var (initial, standard) = ChessPgnDecomposer.InitialState(gameText, m);
+        var (initial, standard) = ChessAnalyze.InitialState(fen, m);
         Assert.False(standard);
         Assert.Equal(fen, initial.Board.ToFen());
     }
 
     [Fact]
-    public void InitialState_SetUpWithGarbageFen_FallsBackToStandardWithoutThrowing()
+    public void InitialState_GarbageFen_FallsBackToStandardWithoutThrowing()
     {
-        var gameText = "[Event \"x\"]\n[SetUp \"1\"]\n[FEN \"not a real fen\"]\n";
         var m = new ChessModality();
-        var (initial, standard) = ChessPgnDecomposer.InitialState(gameText, m);
+        var (initial, standard) = ChessAnalyze.InitialState("not a real fen", m);
         Assert.True(standard);
         Assert.Equal(m.Initial().Board.ToFen(), initial.Board.ToFen());
     }

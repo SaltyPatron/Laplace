@@ -1,5 +1,6 @@
 import type { MoveScore } from './Board';
 import type { SearchInfo } from '../ChessView';
+import { Panel } from './Panel';
 
 export interface MoveListProps {
   topMoves: MoveScore[];
@@ -16,8 +17,7 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
   return (
     <>
       {search && (
-        <section className="panel search-info">
-          <h3>Last search</h3>
+        <Panel title="Last search" className="search-info">
           <ul className="stats">
             <li>eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b> <span className="muted">pawns, mover&rsquo;s view</span></li>
             <li>depth <b>{search.depth}</b> · nodes <b>{search.nodes.toLocaleString()}</b></li>
@@ -26,11 +26,10 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
             )}
             <li className="muted">{search.substrate ? 'substrate-biased' : 'pure'} alpha-beta</li>
           </ul>
-        </section>
+        </Panel>
       )}
       {history.length > 0 && (
-        <section className="panel">
-          <h3>Move list <span className="muted">({history.length} plies)</span></h3>
+        <Panel title={<>Move list <span className="muted">({history.length} plies)</span></>}>
           <ol className="move-history">
             {Array.from({ length: Math.ceil(history.length / 2) }, (_, i) => (
               <li key={i}>
@@ -40,10 +39,9 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
               </li>
             ))}
           </ol>
-        </section>
+        </Panel>
       )}
-    <section className="panel">
-      <h3>{evalMode ? 'Eval mode — legal move scores' : 'Substrate analysis'}</h3>
+    <Panel title={evalMode ? 'Eval mode — legal move scores' : 'Substrate analysis'}>
       <p className="muted">The bot&rsquo;s rating for each legal move. <b className="lg-star">★</b> = its pick · greener dot = stronger.</p>
       <ul className="moves">
         {topMoves.map((m, i) => (
@@ -56,7 +54,7 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
           </li>
         ))}
       </ul>
-    </section>
+    </Panel>
     </>
   );
 }

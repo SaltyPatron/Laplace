@@ -226,26 +226,70 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 .Select(g => (id: g.Key, label: g.First().label))
                 .ToArray();
 
-            var output = new List<VisualizationNode>(nodes.Length);
-            foreach (var node in nodes)
-            {
-                var physicality = includeGeometry
-                    ? await ReadFirstPhysicalityAsync(conn, node.id, ct)
-                    : null;
-                var evidenceRows = includeEvidence
-                    ? await ReadEvidenceCountForObjectAsync(conn, node.id, ct)
-                    : null;
+            var nodeIds = new byte[nodes.Length][];
+            for (int i = 0; i < nodes.Length; i++)
+                nodeIds[i] = Convert.FromHexString(nodes[i].id);
 
+            // ONE round-trip: first physicality (lowest type) per node, keyed by array ordinal.
+            var geometry = new (double X, double Y, double Z, double M, double Radius, int Constituents)?[nodes.Length];
+            if (includeGeometry && nodes.Length > 0)
+            {
+                const string physSql = """
+                    SELECT u.ord, f.x, f.y, f.z, f.m, f.radius, f.n_constituents
+                    FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord)
+                    JOIN LATERAL (
+                        SELECT x, y, z, m, radius, n_constituents
+                        FROM laplace.entity_physicalities(u.id)
+                        ORDER BY type
+                        LIMIT 1
+                    ) f ON true;
+                    """;
+                await using var cmd = new NpgsqlCommand(physSql, conn);
+                var p = cmd.Parameters.AddWithValue("ids", nodeIds);
+                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    int idx = (int)reader.GetInt64(0) - 1;
+                    geometry[idx] = (
+                        reader.GetDouble(1), reader.GetDouble(2), reader.GetDouble(3),
+                        reader.GetDouble(4), reader.GetDouble(5), reader.GetInt32(6));
+                }
+            }
+
+            // ONE round-trip: evidence count per node over the same array.
+            var evidence = new long?[nodes.Length];
+            if (includeEvidence && nodes.Length > 0)
+            {
+                const string evSql = """
+                    SELECT u.ord, laplace.evidence_count(NULL, NULL, u.id)
+                    FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord);
+                    """;
+                await using var cmd = new NpgsqlCommand(evSql, conn);
+                var p = cmd.Parameters.AddWithValue("ids", nodeIds);
+                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    int idx = (int)reader.GetInt64(0) - 1;
+                    evidence[idx] = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                }
+            }
+
+            var output = new List<VisualizationNode>(nodes.Length);
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                var physicality = geometry[i];
                 output.Add(new VisualizationNode(
-                    IdHex: node.id,
-                    Label: node.label,
+                    IdHex: nodes[i].id,
+                    Label: nodes[i].label,
                     X: physicality?.X,
                     Y: physicality?.Y,
                     Z: physicality?.Z,
                     M: physicality?.M,
                     Radius: physicality?.Radius,
                     Constituents: physicality?.Constituents,
-                    EvidenceRows: evidenceRows));
+                    EvidenceRows: evidence[i]));
             }
 
             return new SubstrateVisualizationGraph(output, edges);
@@ -298,13 +342,58 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 }
             }
 
-            if (!includeEvidence)
+            if (!includeEvidence || rows.Count == 0)
                 return rows;
+
+            // ONE round-trip: batch evidence for every step's entity via LATERAL attestations_out,
+            // then bucket client-side. Distinct ids collapse the (frequently repeated) entity_ids.
+            var distinctHex = rows.Select(r => r.EntityIdHex).Distinct(StringComparer.Ordinal).ToArray();
+            var ids = new byte[distinctHex.Length][];
+            for (int i = 0; i < distinctHex.Length; i++)
+                ids[i] = Convert.FromHexString(distinctHex[i]);
+
+            const string evSql = """
+                SELECT u.ord,
+                    encode(a.type_id, 'hex'),
+                    encode(a.object_id, 'hex'),
+                    encode(a.source_id, 'hex'),
+                    CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
+                    a.outcome,
+                    a.observation_count
+                FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord)
+                CROSS JOIN LATERAL laplace.attestations_out(u.id, 5)
+                    WITH ORDINALITY AS a(type_id, object_id, source_id, context_id, outcome, observation_count, aord)
+                ORDER BY u.ord, a.aord;
+                """;
+            var buckets = new Dictionary<string, List<EvidenceSample>>(StringComparer.Ordinal);
+            await using (var evCmd = new NpgsqlCommand(evSql, conn))
+            {
+                var p = evCmd.Parameters.AddWithValue("ids", ids);
+                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                await using var reader = await evCmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var hex = distinctHex[(int)reader.GetInt64(0) - 1];
+                    if (!buckets.TryGetValue(hex, out var list))
+                    {
+                        list = new List<EvidenceSample>();
+                        buckets[hex] = list;
+                    }
+                    list.Add(new EvidenceSample(
+                        TypeIdHex: reader.GetString(1),
+                        ObjectIdHex: reader.GetString(2),
+                        SourceIdHex: reader.GetString(3),
+                        ContextIdHex: reader.IsDBNull(4) ? null : reader.GetString(4),
+                        Outcome: reader.GetInt16(5),
+                        ObservationCount: reader.GetInt64(6)));
+                }
+            }
 
             var enriched = new List<ExplainTraceStep>(rows.Count);
             foreach (var row in rows)
             {
-                var evidence = await ReadEvidenceSamplesAsync(conn, row.EntityIdHex, 5, ct);
+                IReadOnlyList<EvidenceSample> evidence =
+                    buckets.TryGetValue(row.EntityIdHex, out var list) ? list : Array.Empty<EvidenceSample>();
                 enriched.Add(row with { Evidence = evidence });
             }
 
@@ -351,50 +440,24 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         return edges;
     }
 
-    private static async Task<(double X, double Y, double Z, double M, double Radius, int Constituents)?> ReadFirstPhysicalityAsync(NpgsqlConnection conn, string entityIdHex, CancellationToken ct)
-    {
-        const string sql = """
-            SELECT x, y, z, m, radius, n_constituents
-            FROM laplace.entity_physicalities(decode(@id, 'hex'))
-            ORDER BY type
-            LIMIT 1;
-            """;
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("id", entityIdHex);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            return null;
-        return (
-            reader.GetDouble(0),
-            reader.GetDouble(1),
-            reader.GetDouble(2),
-            reader.GetDouble(3),
-            reader.GetDouble(4),
-            reader.GetInt32(5));
-    }
-
-    private static async Task<long?> ReadEvidenceCountForObjectAsync(NpgsqlConnection conn, string entityIdHex, CancellationToken ct)
-    {
-        await using var cmd = new NpgsqlCommand("SELECT laplace.evidence_count(NULL, NULL, decode(@id, 'hex'));", conn);
-        cmd.Parameters.AddWithValue("id", entityIdHex);
-        var value = await cmd.ExecuteScalarAsync(ct);
-        return value is null or DBNull ? null : Convert.ToInt64(value);
-    }
-
-
 
 
 
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
-        const string resolveSql = """
-            SELECT CASE
-                WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
-                ELSE laplace.word_id(@target)
-            END;
-            """;
-        const string evidenceSql = """
+        // ONE round-trip: resolve CTE feeds both the entity label and the evidence payload.
+        // LEFT JOIN LATERAL keeps a single anchor row when there is no evidence (resolved-but-empty)
+        // and when @target does not resolve (entity_id NULL -> caller returns null).
+        const string sql = """
+            WITH resolved AS (
+                SELECT CASE
+                    WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
+                    ELSE laplace.word_id(@target)
+                END AS id
+            )
             SELECT
+                r.id,
+                COALESCE(laplace.label(r.id), encode(r.id, 'hex')),
                 encode(a.type_id, 'hex'),
                 COALESCE(laplace.label(a.type_id), encode(a.type_id, 'hex')),
                 encode(a.object_id, 'hex'),
@@ -404,51 +467,51 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
                 a.outcome,
                 a.observation_count
-            FROM laplace.attestations_out(@id, @limit) a;
+            FROM resolved r
+            LEFT JOIN LATERAL laplace.attestations_out(r.id, @limit)
+                WITH ORDINALITY AS a(type_id, object_id, source_id, context_id, outcome, observation_count, aord)
+                ON true
+            ORDER BY a.aord;
             """;
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-            byte[]? entityId;
-            await using (var resolve = new NpgsqlCommand(resolveSql, conn))
-            {
-                resolve.Parameters.AddWithValue("target", target.Trim());
-                entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
-            }
-            if (entityId is null)
-                return null;
-
-            string entityLabel;
-            await using (var label = new NpgsqlCommand(
-                "SELECT COALESCE(laplace.label(@id), encode(@id, 'hex'));", conn))
-            {
-                label.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
-                entityLabel = (string)(await label.ExecuteScalarAsync(ct))!;
-            }
-
+            byte[]? entityId = null;
+            string? entityLabel = null;
             var items = new List<Laplace.Api.Contracts.LabeledEvidenceItem>(limit);
-            await using (var cmd = new NpgsqlCommand(evidenceSql, conn))
+
+            await using (var cmd = new NpgsqlCommand(sql, conn))
             {
-                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                cmd.Parameters.AddWithValue("target", target.Trim());
                 cmd.Parameters.AddWithValue("limit", limit);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
+                    if (entityId is null && !reader.IsDBNull(0))
+                    {
+                        entityId = (byte[])reader[0];
+                        entityLabel = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    }
+                    if (reader.IsDBNull(2))
+                        continue; // anchor row with no evidence
                     items.Add(new Laplace.Api.Contracts.LabeledEvidenceItem(
-                        TypeId: reader.GetString(0),
-                        TypeLabel: reader.GetString(1),
-                        ObjectId: reader.GetString(2),
-                        ObjectLabel: reader.GetString(3),
-                        SourceId: reader.GetString(4),
-                        SourceLabel: reader.GetString(5),
-                        ContextId: reader.IsDBNull(6) ? null : reader.GetString(6),
-                        Outcome: reader.GetInt16(7),
-                        ObservationCount: reader.GetInt64(8)));
+                        TypeId: reader.GetString(2),
+                        TypeLabel: reader.GetString(3),
+                        ObjectId: reader.GetString(4),
+                        ObjectLabel: reader.GetString(5),
+                        SourceId: reader.GetString(6),
+                        SourceLabel: reader.GetString(7),
+                        ContextId: reader.IsDBNull(8) ? null : reader.GetString(8),
+                        Outcome: reader.GetInt16(9),
+                        ObservationCount: reader.GetInt64(10)));
                 }
             }
 
-            return new EntityEvidence(Convert.ToHexStringLower(entityId), entityLabel, items);
+            if (entityId is null)
+                return null;
+
+            return new EntityEvidence(Convert.ToHexStringLower(entityId), entityLabel!, items);
         }
         catch (PostgresException pg)
         {
@@ -460,38 +523,6 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
             throw new SubstrateUnavailableException("Substrate evidence query failed.", ex);
         }
     }
-
-    private static async Task<IReadOnlyList<EvidenceSample>> ReadEvidenceSamplesAsync(NpgsqlConnection conn, string entityIdHex, int limit, CancellationToken ct)
-    {
-        const string sql = """
-            SELECT
-                encode(type_id, 'hex'),
-                encode(object_id, 'hex'),
-                encode(source_id, 'hex'),
-                CASE WHEN context_id IS NULL THEN NULL ELSE encode(context_id, 'hex') END,
-                outcome,
-                observation_count
-            FROM laplace.attestations_out(decode(@id, 'hex'), @limit);
-            """;
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("id", entityIdHex);
-        cmd.Parameters.AddWithValue("limit", limit);
-        var samples = new List<EvidenceSample>(limit);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            samples.Add(new EvidenceSample(
-                TypeIdHex: reader.GetString(0),
-                ObjectIdHex: reader.GetString(1),
-                SourceIdHex: reader.GetString(2),
-                ContextIdHex: reader.IsDBNull(3) ? null : reader.GetString(3),
-                Outcome: reader.GetInt16(4),
-                ObservationCount: reader.GetInt64(5)));
-        }
-
-        return samples;
-    }
-
 
 
 
@@ -553,60 +584,73 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
 
     public async Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct)
     {
-        const string resolveSql = """
-            SELECT CASE
-                WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
-                ELSE laplace.word_id(@target)
-            END;
-            """;
-        const string formSql = """
-            SELECT x, y, z, m, radius, n_constituents
-            FROM laplace.entity_physicalities(@id)
-            ORDER BY type
-            LIMIT 1;
-            """;
-        const string meaningSql = """
-            SELECT type, object, eff_mu, witnesses
-            FROM laplace.consensus_out_readable(@id, @limit);
+        // ONE round-trip: resolve CTE feeds both the physical form (kind=0 anchor row) and the
+        // meaning neighbors (kind=1 rows, gated by @include). ORDER BY kind, ord preserves the
+        // form-then-meaning read order and consensus_out_readable's internal ranking.
+        const string sql = """
+            WITH resolved AS (
+                SELECT CASE
+                    WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
+                    ELSE laplace.word_id(@target)
+                END AS id
+            )
+            SELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,
+                   f.x, f.y, f.z, f.m, f.radius, f.n_constituents,
+                   NULL::text, NULL::text, NULL::numeric, NULL::bigint
+            FROM resolved r
+            LEFT JOIN LATERAL (
+                SELECT x, y, z, m, radius, n_constituents
+                FROM laplace.entity_physicalities(r.id)
+                ORDER BY type
+                LIMIT 1
+            ) f ON true
+            UNION ALL
+            SELECT 1 AS kind, m.ord, r.id,
+                   NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::int,
+                   m.type, m.object, m.eff_mu, m.witnesses
+            FROM resolved r
+            CROSS JOIN LATERAL laplace.consensus_out_readable(r.id, @limit)
+                WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)
+            WHERE @include
+            ORDER BY kind, ord;
             """;
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-            byte[]? entityId;
-            await using (var resolve = new NpgsqlCommand(resolveSql, conn))
-            {
-                resolve.Parameters.AddWithValue("target", input.Trim());
-                entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
-            }
-            if (entityId is null)
-                return new EmbeddingResult(null, null, Array.Empty<MeaningNeighbor>());
-
+            byte[]? entityId = null;
             EmbeddingForm? form = null;
-            await using (var cmd = new NpgsqlCommand(formSql, conn))
-            {
-                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (await reader.ReadAsync(ct))
-                    form = new EmbeddingForm(
-                        reader.GetDouble(0), reader.GetDouble(1), reader.GetDouble(2),
-                        reader.GetDouble(3), reader.GetDouble(4), reader.GetInt32(5));
-            }
-
             var meaning = new List<MeaningNeighbor>();
-            if (includeMeaning)
+
+            await using (var cmd = new NpgsqlCommand(sql, conn))
             {
-                await using var cmd = new NpgsqlCommand(meaningSql, conn);
-                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                cmd.Parameters.AddWithValue("target", input.Trim());
                 cmd.Parameters.AddWithValue("limit", Math.Clamp(meaningLimit, 1, 100));
+                cmd.Parameters.AddWithValue("include", includeMeaning);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
-                    meaning.Add(new MeaningNeighbor(
-                        Relation: reader.IsDBNull(0) ? "?" : reader.GetString(0),
-                        ObjectLabel: reader.IsDBNull(1) ? "?" : reader.GetString(1),
-                        EffMu: reader.IsDBNull(2) ? 0m : reader.GetDecimal(2),
-                        Witnesses: reader.IsDBNull(3) ? 0L : reader.GetInt64(3)));
+                {
+                    if (reader.GetInt32(0) == 0)
+                    {
+                        entityId = reader.IsDBNull(2) ? null : (byte[])reader[2];
+                        if (!reader.IsDBNull(3))
+                            form = new EmbeddingForm(
+                                reader.GetDouble(3), reader.GetDouble(4), reader.GetDouble(5),
+                                reader.GetDouble(6), reader.GetDouble(7), reader.GetInt32(8));
+                    }
+                    else
+                    {
+                        meaning.Add(new MeaningNeighbor(
+                            Relation: reader.IsDBNull(9) ? "?" : reader.GetString(9),
+                            ObjectLabel: reader.IsDBNull(10) ? "?" : reader.GetString(10),
+                            EffMu: reader.IsDBNull(11) ? 0m : reader.GetDecimal(11),
+                            Witnesses: reader.IsDBNull(12) ? 0L : reader.GetInt64(12)));
+                    }
+                }
             }
+
+            if (entityId is null)
+                return new EmbeddingResult(null, null, Array.Empty<MeaningNeighbor>());
 
             return new EmbeddingResult(Convert.ToHexStringLower(entityId), form, meaning);
         }

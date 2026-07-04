@@ -2,9 +2,10 @@ CREATE OR REPLACE FUNCTION laplace_translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)
 LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    WITH band_types AS MATERIALIZED (
+    WITH band_types AS (
         SELECT e.id FROM entities e
-        WHERE laplace_highway_match(e.highway_mask, p_band_mask)
+        WHERE e.highway_mask IS NOT NULL
+          AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
     )
     SELECT DISTINCT a2.subject_id, a1.object_id,
            eff_mu_display(a2.rating, a2.rd)

@@ -1,3 +1,5 @@
+import { Panel } from './Panel';
+
 export interface TrainStatus {
   running: boolean; games: number; white: number; black: number; draws: number;
   adjudicated: number; lastOutcome: string; temperature: number; weight: number; maxPlies: number;
@@ -20,8 +22,7 @@ export interface EnginePanelProps {
 
 export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: EnginePanelProps) {
   return (
-    <section className="panel">
-      <h3>Training</h3>
+    <Panel title="Training">
       {train ? (
         <ul className="stats">
           <li>state: <b>{train.running ? 'running' : 'idle'}</b></li>
@@ -46,6 +47,6 @@ export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: En
         <button onClick={onStop} disabled={!train?.running}>Stop</button>
       </div>
       <p className="muted">games 0 = run until Stop · temp = exploration · weight = per-game evidence · folds online.</p>
-    </section>
+    </Panel>
   );
 }

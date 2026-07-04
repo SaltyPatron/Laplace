@@ -10,3 +10,7 @@ CREATE TABLE IF NOT EXISTS attestations (
     observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
 );
+
+-- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in) — this
+-- is the largest table (150M+ rows), where the default scale factor lags worst.
+ALTER TABLE attestations SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);

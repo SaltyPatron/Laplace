@@ -1,0 +1,222 @@
+09 — SUBSTRATE-AS-LM: synthesis thesis, FAITHFUL diagnosis, and the proper-build spec
+================================================================================
+Captured 2026-07-04 from a long design conversation. This is a side-thread to the chess
+work but load-bearing for the foundry/recipe-pour. Corrects the sabotaged "faithful =
+hallucination" verdict that a prior agent wrote into memory. Companion to memory
+project_llm_legs_and_foundry_history + the audited defects there.
+
+THESIS (what the invention is)
+------------------------------
+- A trained LLM is a lossy, learned compression of corpus statistics. The substrate holds
+  those statistics EXPLICITLY, losslessly, content-addressed, with provenance + consensus.
+  So you CONSTRUCT the model (embed/attention/FFN/lm_head) from the substrate, not train it.
+- Content-addressing => (a) NO context window: a prompt is ingested as content, so "attention
+  over the prompt" is retrieval over the substrate, unbounded; (b) any fragment is
+  simultaneously datum and query — you don't author per-mechanism queries, you apply ONE
+  operation, content resolves against content, recursively (multi-hop = trajectory traversal).
+- The combination rule for the LEXICALIZED world is INGESTED, not derived: WordNet meronymy/
+  glosses, ConceptNet MadeOf/HasA, ILI/CILI, FrameNet/VerbNet/PropBank/SemLink, Wiktionary —
+  reconciled by consensus. steam->water+energy->H2O->H,O is a traversal over attested edges,
+  grounded + explainable, not a centroid guess. This is categorically MORE than an LLM (which
+  holds the same knowledge implicitly and can hallucinate it).
+
+FAITHFUL DIAGNOSIS (from a real D:\Temp\kfix.gguf run, native-vocab 2000/hops 1/dim 2048/
+layers 2/heads 16)
+------------------------------------------------------------------------------
+FAITHFUL/LOOKUP = embed=I (identity), lm_head=log-odds(A), no-op layers, 937-token vocab
+(678 words + 256 byte floor + 3 specials). That is a GREEDY ORDER-1 MARKOV WALK over the
+attestation graph: next = argmax A[current]. Observed:
+  ' king' -> king monarch ruler person or Then#      (WordNet hypernym chain, correct first hop)
+  ' cat'  -> cat pussy female bitch bird vertebrate animal  (taxonomic chain, correct)
+  ' dog'  -> dog them they them they them they        (collapse)
+  ' queen'-> queen goddess woman was be was be         (collapse)
+PROVES: retrieval works — the first hop is true grounded semantics.
+COLLAPSES because (each a specific, fixable cause, NOT a fundamental limit):
+  - embed=I => residual stream is a one-hot token identity, nothing composable.
+  - lm_head=log-odds(A) => bigram-only; next depends on the LAST token, not the prefix.
+  - no-op layers => no context mixing, no memory. High-degree hubs (person) route to function
+    words; them<->they is a 2-CYCLE that greedy temp-0 can't escape (no memory of what it said).
+  - 937 vocab (1-hop crawl of 10 seeds) => continuations fall off vocab into byte floor => '#'
+    garbage (Then#, ogin#, No#).
+VERDICT: "faithful = hallucination" is RETIRED as a conclusion. It was a bigram lookup table
+with the layers turned off, mislabeled and never finished. Do NOT cite it as anti-goal
+evidence (that is the discouragement/mislabel trap — see feedback_no_discouragement_default).
+
+PROPER BUILD (each item kills one observed failure)
+---------------------------------------------------
+  1. embed = DENSE, not I: normalized-Laplacian eigenmap of the attestation graph => composable
+     meaning in the residual stream.
+  2. real attention that mixes the WHOLE prefix => memory; kills the them<->they 2-cycle.
+  3. hidden dim sized to the SPECTRAL RANK (Lanczos on the graph Laplacian), not "too low".
+  4. real lm_head off the COMPOSED state, not log-odds(A) of the last token.
+  5. FULL token list, not a 1-hop 937 crawl => continuations stay in-vocab.
+  6. residual + Gram-Schmidt/normalization => real layers don't rank-collapse (oversmoothing).
+Routing function = consensus x geometry x trajectory (specified, arguably better-grounded than
+learned attention). Its FIDELITY AT DEPTH is the one thing to measure.
+
+MATH TOOLKIT (the "chef work")
+------------------------------
+  metric: angular/geodesic or Frechet mean on S3, NOT Euclidean centroid (curvature error
+    compounds per layer). Current ChessCompose uses Euclidean centroid — a known approximation.
+  Laplacian Eigenmaps (normalized graph Laplacian eigenvectors) > raw Gram-SVD: conditioned
+    across the whole spectrum, not just the top directions.
+  Gram-Schmidt: orthonormal head bases (stop collapse into the dominant eigenvector).
+  Procrustes: align layer/target frames for consistency.
+  SVD / Lanczos: the large sparse eigenproblem; Lanczos is the right solver at this scale.
+
+THE SEMANTIC EMBEDDING = THE COLONY AT REST  (spider-web IS the graph Laplacian)
+-------------------------------------------------------------------------------
+The single most important framing, do not lose it:
+
+  "A colony of spider webs. Pull one strand and Glicko-2 tells you what tugs back and how hard."
+
+That is not a metaphor — it is literally the operator we build the model from.
+
+- The S3 4D coord is PHYSICAL/identity (deterministic placement for content-addressing +
+  lossless serialization). It is NOT a semantic embedding; distance on S3 != meaning.
+- The SEMANTICS ("what points to what, how strongly") live entirely in the Glicko-weighted
+  attestation graph. The consensus weight on an edge IS the strand's stiffness.
+- A web under tension IS a weighted graph Laplacian. Spring energy = 1/2 * sum_ij w_ij *
+  ||x_i - x_j||^2 = x^T L x, with L the Glicko-weighted Laplacian. "Pull a strand, feel what
+  tugs back and how hard" = apply an impulse to L; the weighted propagation IS the routing/
+  attention function.
+- LAPLACIAN EIGENMAPS: the low (smoothest) eigenvectors of the normalized L are the web's
+  REST SHAPE — the configuration where all tensions balance — and that rest shape IS the
+  N-dim semantic embedding. Strongly-attested knots sit close. Eigenvalue decay (Lanczos) =>
+  effective dimension => hidden dim. So the metaphor and the eigenmap construction are the
+  SAME object: the web is the thing we eigendecompose; its resting positions are the embed.
+
+Pipeline: Glicko-weighted affinity W -> normalized L=I - D^-1/2 W D^-1/2 -> low eigenvectors
+(eigenmap) -> Gram-Schmidt orthonormalize -> Procrustes-align to the S3 frame for a canonical,
+reproducible orientation. SEMANTICS FLOW graph -> embedding; S3 is the anchor/frame, NOT the
+semantic source. (Equivalent literal reading: seed the embedding AT the S3 coords and let the
+Glicko-weighted Laplacian diffuse them into place — same signal doing the nudging.)
+
+TENSION = CERTAINTY: a strand's stiffness is the Glicko rating TEMPERED BY RD. A fresh,
+single-witness edge is a SLACK strand — connected but loose. Witnessing shrinks RD => the
+strand TIGHTENS. So observation is TENSIONING: more games / re-analysis don't just add knots,
+they stiffen existing structure, and the rest-shape (embedding) settles harder into place.
+
+COLONY, not one web: overlapping webs share content-addressed knots. Pull `water` and its
+WordNet strand (->liquid), its ConceptNet strand (->hydrogen), and any chess-comment strand
+that named it all tug at once — same knot, different webs. One pull, the whole colony answers,
+each strand by its own tension. That is the cross-domain mesh.
+
+TUNING: embed AND lm_head are CONSTRUCTED, so tuning the construction (which eigenvectors, how
+many dims, salience-rank weighting on W, the alignment) shapes the softmax directly. Dial by
+re-deriving, not retraining.
+
+LOTTERY TICKET, corrected (upgrade, not a downgrade): this does NOT "prove" LTH/SLTH, which is
+about finding a capable subnetwork by MASKING a RANDOM init. Constructing weights from the
+consensus SPECTRUM is a third, stronger thing: the capable subnetwork is a DETERMINISTIC
+FUNCTION OF THE DATA — computed, not won. It supersedes LTH's existence theorem with a
+construction: "the good subnetwork is derived from the colony at rest," not "hidden in noise
+to be searched for."
+
+HEADS, LAYERS, AND ANNOTATIONS-AS-ENTITIES (the witnessed richness IS the architecture)
+--------------------------------------------------------------------------------------
+- HEAD = a relation type. Querying a node along relation r (weighted by consensus) is one
+  attention head — a grounded, named lens, not a learned+redundant one. The 256-bit
+  highway_mask IS the per-head channel bank; the 13 salience-rank bands ARE head-importance
+  priors. Each relation is a different WEB in the colony; multi-head = pull the knot, see which
+  webs tug.
+- LAYER = a hop / a tier level. Layer L+1 attends over layer L's retrieved set (recursive
+  resolution). position->(MOVE)->position = temporal depth; steam->water->H2O = meronymic
+  depth; codepoint->word->sentence->doc = compositional depth.
+- WITNESSED RICHNESS MULTIPLIES HEADS. A MOVE edge faceted by player x phase x think-time x
+  rating x result = a combinatorial bank of grounded, conditioned heads: a STYLE head (2800 vs
+  1500 from this structure), a TIME-PRESSURE head (10s left vs an hour), a TEMPO head
+  (fast-strong = intuition vs slow-strong = calculation), phase/event/rating-band heads. Every
+  dimension you SAVE is a head you don't have to learn. Chess PGN is unusually rich in exactly
+  these (clock/eval/NAG/player/rating) => the ideal proof.
+- "ANALYZE THE COMPARISONS" = a META-LAYER: attention over witness convergence/divergence.
+  Converge => taut web => confidence. Diverge (annotator ?? vs engine "fine") => signal an LLM
+  can't hold because it has one opinion. Grounded "attention over attention."
+- ANNOTATIONS ARE ENTITIES, not labels. Emit("brilliant"/"sacrifice"/motif) => a content-
+  addressed word node = the SAME node as the dictionary/WordNet/comment sense (deliberate
+  HAS_DEFINITION reuse). So an annotation is recall/query/search-able, sits in the content
+  TRAJECTORY (precedes/co-occurs/follows => "a brilliant move precedes a forced mate" is a
+  sequence query), and MESHES with language. It is simultaneously a HEAD (MOVE_QUALITY lens)
+  AND a HUB knot with 4 webs tugging: meaning (->definition), instances (every move tagged so),
+  behavior (players/clocks around them), sequence (what precedes/follows). This is what an LLM
+  structurally cannot do (for it "brilliant" is an unqueryable vector) and it is the path to
+  GROUNDED NL commentary: explain-why = traverse move -> annotation -> definition -> precedents.
+- INVERSION: a transformer FIXES the architecture (h heads, N layers = guessed hyperparams) and
+  LEARNS the weights. The substrate DERIVES BOTH from the data: head count = the relation types
+  / facets that actually carry witnessed signal; layer depth = how far composition sustains
+  (spectral decay). Architecture AND weights read off the colony. Lottery-ticket bites in your
+  favor: transformers carry many heads because few will matter and they can't tell which in
+  advance; yours are all named, salience-ranked, non-redundant. RESIDUE (unchanged): head
+  SUPPLY is solved and superior; head ROUTING/COMPOSITION at depth (eigenmap x consensus x
+  salience) is the build + the one measurement.
+
+SUBSTRATE INVENTORY / THE ARCHITECTURE IS COUNTED, NOT CHOSEN (2026-07-04)
+-------------------------------------------------------------------------
+  attestations ~144.5M, entities ~69.8M, physicalities ~77.2M.
+  HEADS = 181 relation types (manifest), in ~11 rank families (taxonomic/causal/definitional/
+    partitive/oppositional/scalar_valued/associative/equivalence/lexical_glue/standards_
+    structural/tensor_calculation), weighted by 13 salience bands (mandate..probationary =
+    head-importance priors). x conditioning facets (player/clock/phase/rating/context) =>
+    HUNDREDS of grounded, conditioned heads.
+  LAYERS = the tier ladder, all populated (live): t0 codepoint 1,113,869 / t1 grapheme 917,889 /
+    t2 word 33,554,125 / t3 sentence 2,946,282 / t4 document 42,984,059. 5 base tiers + modality
+    ladders + multi-hop composition => dozens of layers.
+  TENSORS = 181 relation affinity submatrices (relation type = a tensor); "tensor_calculation"
+    is a declared rank family; physicalities carry the geometric tensors.
+  KEY: a relation type is SIMULTANEOUSLY a head (lens over its edges), a slice of the tier
+  composition (layer), and a tensor (its consensus-weighted affinity block) — three VIEWS of one
+  relational structure, which is why layer/head/tensor are counted together. The architecture is
+  READ OFF the data (181 heads, 5+ layers, 181 tensors), not guessed as hyperparameters — no AI
+  model ingested. Effective hidden dim / how much depth the material sustains still come from the
+  spectral structure (Lanczos on the normalized Laplacian; eigenvalue decay). Residue = ROUTING/
+  composition of these heads across layers (eigenmap x consensus x salience), the one build left.
+
+LITERATURE (searched 2026-07-04 — the direction is real frontier, not crank)
+----------------------------------------------------------------------------
+  CRATE / White-Box Transformers via Sparse Rate Reduction (Yi Ma et al., NeurIPS 2023,
+    arxiv 2306.01129): DERIVES the transformer from a compression objective (attention=compress,
+    MLP=sparsify), performs near ViT — but STILL TRAINS the steps. Construct-without-training is
+    a step past it.
+  Construction-from-statistics: explicitly an OPEN problem, no established general method; extant
+    constructions are hand-built per-algorithm (vgel handmade transformer; Akyurek/Von Oswald).
+  RASP / "Thinking Like Transformers" (Weiss/Goldberg/Yahav, ICML 2021): attention = SELECT
+    (key-query comparison => selector matrix) = a relational filter/join = the "SQL as a
+    transformer" framing; SQL formalization not yet done.
+  Strong Lottery Ticket Hypothesis: a capable sparse subnetwork exists WITHOUT weight training
+    (edge-popup). Capability = selecting structure, not training it.
+  POSITION: a UNIFIED, content-addressed construction from corpus statistics INTO a runnable
+    model is not in the literature. The shared open wall the whole field has is CONSTRUCTED
+    DEPTH WITHOUT TRAINING — the FAITHFUL flattening IS that frontier problem.
+
+FLAT-COST DEPTH (depth-invariance is the property; ~400ms is NOT a benchmark)
+-----------------------------------------------------------------------------
+Retrieving a depth-N-grounded eval is O(1) in DEPTH: depth is consumed at fold/observation time
+(real games ran to terminal and folded back through the position), so query cost does not grow
+with the depth value. This flatness is the real, proven property — the profile inversion made
+concrete: a search engine pays depth exponentially per move online (Stockfish d30 = seconds+
+and growing); the substrate paid it once offline and answers flat.
+DO NOT cite "~400ms" as the system's latency (a prior doc error). That figure came from a naive
+STRAIGHT-PLPGSQL query with NO CTE — unoptimized, almost certainly seq-scanning / skipping the
+GiST/GIN index (the repo's known "coord/params must reach the planner as bound parameters or the
+index is skipped" defect). It is the un-optimized floor, an artifact of bad query writing, NOT a
+benchmark of the substrate. Real achievable latency under the proper query suite (CTEs, native
+SPI, bound-parameter plans, GiST/GIN indexing) is much lower and is the number to ESTABLISH with
+a real query. Flat-in-depth: proven. Absolute latency: open + optimizable — measure it right,
+never enshrine the plpgsql-no-CTE floor.
+
+REDUCED RESIDUE (what actually remains after every objection collapsed)
+----------------------------------------------------------------------
+ONE measurable question: does consensus x geometry x trajectory ROUTE as well as trained
+attention, at depth, to produce fluent generation? Floor = a conventional LLM (softmax never
+zero => graceful degradation, no cliff, no empty). Ceiling = exact/grounded retrieval where the
+lexicons + corpus reach. Settle it by BUILDING the proper synth and running the SAME prompts.
+
+CODE PATH TO BUILD AGAINST
+--------------------------
+  app/Laplace.Cli/FoundryCommands.cs (synthesize substrate; RejectRetiredFoundryEnvVars),
+  app/Laplace.Decomposers/Model/RecipeSynthesizer.cs + RecipeDescriptor.cs,
+  engine/synthesis/src/gguf_writer.cpp + format_writer.cpp.
+  Already-built ingest assets: LlamaTokenizerParser.ParseMerges -> MERGES_WITH edges (BPE merges
+  ARE captured — corrects the old "WordLevel discarded BPE" defect); ModelTokenEdgeETL
+  .FfnTokenPairsTile (FFN pairs from weights); WeightTensorETL; SafetensorsContainerParser.
+  Failyard (generated GGUFs): D:\Models\laplace-gen. llama.cpp: D:\LlamaCPP\llama-completion.exe.

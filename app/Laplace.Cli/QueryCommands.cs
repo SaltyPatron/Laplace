@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
+using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Atomic2020;
 using Laplace.Decomposers.Code;
@@ -346,29 +347,42 @@ internal static class QueryCommands
         var feedbackSource = Hash128.OfCanonical("substrate/source/UserFeedback/v1");
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        await using var conn = await ds.OpenConnectionAsync();
-
-
 
         CodepointPerfcache.LoadDefault();
-        var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
-        foreach (var tok in tokens)
+
+        // Resolve every token first, then test presence in ONE batched round-trip via the
+        // existing entities_exist_bitmap primitive. Pass 2 replays token order so the warn/skip
+        // messages appear in exactly the same sequence as the old per-token EXISTS loop.
+        var resolved = new Hash128?[tokens.Length];
+        var probeIds = new List<Hash128>(tokens.Length);
+        for (int i = 0; i < tokens.Length; i++)
         {
-            Hash128? rid = TextDecomposer.ContentRootId(tok);
+            var rid = TextDecomposer.ContentRootId(tokens[i]);
+            resolved[i] = rid;
+            if (rid is not null) probeIds.Add(rid.Value);
+        }
+
+        var reader = new NpgsqlSubstrateReader(ds);
+        var bitmap = await reader.EntitiesExistBitmapAsync(probeIds);
+
+        var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
+        int probeBit = 0;
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            var rid = resolved[i];
             if (rid is null)
             {
-                Console.WriteLine($"  warn: '{tok}' is empty — skipping");
+                Console.WriteLine($"  warn: '{tokens[i]}' is empty — skipping");
                 continue;
             }
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM laplace.entities e WHERE e.id = @id)";
-            cmd.Parameters.AddWithValue("id", rid.Value.ToBytes());
-            if (await cmd.ExecuteScalarAsync() is not true)
+            bool present = (bitmap[probeBit >> 3] & (1 << (probeBit & 7))) != 0;
+            probeBit++;
+            if (!present)
             {
-                Console.WriteLine($"  warn: '{tok}' has no substrate entity — skipping");
+                Console.WriteLine($"  warn: '{tokens[i]}' has no substrate entity — skipping");
                 continue;
             }
-            ids.Add((tok, rid.Value));
+            ids.Add((tokens[i], rid.Value));
         }
 
         if (ids.Count < 2)
@@ -443,22 +457,54 @@ internal static class QueryCommands
         if (words.Count > 1 || !exists)
         {
             Console.WriteLine("\n  CONSTITUENT KNOWLEDGE (the substrate answering through the parts it knows):");
-            foreach (var (wid, label) in words)
+
+            // ONE round-trip: fan the word ids through consensus_out_readable via LATERAL, then
+            // bucket by input ordinal in C#. ORDER BY u.ord, r.rord keeps each word's rows in the
+            // function's own ranking order, identical to the old per-word loop.
+            var buckets = new Dictionary<int, List<(string Type, string? Obj, decimal Mu, long Wit)>>();
+            if (words.Count > 0)
             {
                 await using var wc = conn.CreateCommand();
-                wc.CommandText = "SELECT type, object, eff_mu, witnesses "
-                               + "FROM laplace.consensus_out_readable(@id, 2)";
-                wc.Parameters.AddWithValue("id", wid.ToBytes());
+                wc.CommandText =
+                    "SELECT u.ord, r.type, r.object, r.eff_mu, r.witnesses "
+                    + "FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord) "
+                    + "CROSS JOIN LATERAL laplace.consensus_out_readable(u.id, 2) "
+                    + "WITH ORDINALITY AS r(type, object, eff_mu, witnesses, rord) "
+                    + "ORDER BY u.ord, r.rord";
+                var idsArr = new byte[words.Count][];
+                for (int i = 0; i < words.Count; i++) idsArr[i] = words[i].Id.ToBytes();
+                var p = wc.Parameters.AddWithValue("ids", idsArr);
+                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
                 await using var wr = await wc.ExecuteReaderAsync();
-                bool any = false;
                 while (await wr.ReadAsync())
                 {
-                    if (!any) Console.WriteLine($"    \"{label}\"");
-                    any = true;
-                    string obj = wr.IsDBNull(1) ? "(unary)" : wr.GetString(1);
-                    Console.WriteLine($"        [{wr.GetString(0)}] → {obj}  μ={wr.GetDecimal(2):F3}  witnesses={wr.GetInt64(3)}");
+                    int ord = (int)wr.GetInt64(0);
+                    if (!buckets.TryGetValue(ord, out var list))
+                    {
+                        list = new List<(string, string?, decimal, long)>();
+                        buckets[ord] = list;
+                    }
+                    list.Add((
+                        wr.GetString(1),
+                        wr.IsDBNull(2) ? null : wr.GetString(2),
+                        wr.GetDecimal(3),
+                        wr.GetInt64(4)));
                 }
-                if (!any) Console.WriteLine($"    \"{label}\"  (no consensus yet)");
+            }
+
+            for (int i = 0; i < words.Count; i++)
+            {
+                var (_, label) = words[i];
+                if (buckets.TryGetValue(i + 1, out var list) && list.Count > 0)
+                {
+                    Console.WriteLine($"    \"{label}\"");
+                    foreach (var (type, obj, mu, wit) in list)
+                        Console.WriteLine($"        [{type}] → {obj ?? "(unary)"}  μ={mu:F3}  witnesses={wit}");
+                }
+                else
+                {
+                    Console.WriteLine($"    \"{label}\"  (no consensus yet)");
+                }
             }
         }
 

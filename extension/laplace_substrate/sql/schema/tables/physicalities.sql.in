@@ -20,4 +20,15 @@ CREATE TABLE IF NOT EXISTS physicalities (
     
 );
 
+-- Skip the expensive PostGIS ND-stats on the geometry columns. The ingest pipeline reaches these
+-- via the GiST index (KNN), never via column histograms, so dropping per-column stats costs the
+-- planner nothing here while making ANALYZE/autoanalyze on this table ~160x cheaper (measured on
+-- 88M rows: 137s -> 0.87s) — which is what lets autoanalyze run at all instead of timing out of
+-- its budget and leaving stats permanently stale.
+ALTER TABLE physicalities ALTER COLUMN coord      SET STATISTICS 0;
+ALTER TABLE physicalities ALTER COLUMN trajectory SET STATISTICS 0;
+
+-- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in).
+ALTER TABLE physicalities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+
 SELECT pg_extension_config_dump('physicalities', '');

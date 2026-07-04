@@ -13,6 +13,7 @@
 #   migrate         Laplace.Migrations up (idempotent; --fresh-db nukes first)
 #   sync-extension  CREATE/ALTER EXTENSION laplace_substrate to built version
 #   tune-pg         machine-sized ALTER SYSTEM tuning (restarts if pending)
+#   tune-laplace    db/table-scoped ALTER TABLE tuning (run after migrate; skips empty DB)
 #   perfcache-guc   point laplace_substrate.perfcache_path at installed blob
 #   api-env         ensure laplace-api.env has current perfcache path
 #   publish         deploy/linux/deploy.sh (API + SPA to $LAPLACE_INSTALL_PREFIX/app)
@@ -157,6 +158,29 @@ phase_tune_pg() {
   echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs cores=$cores"
 }
 
+phase_tune_laplace() {
+  echo "===== PHASE — TUNE LAPLACE ====="
+  # db/table-scoped tuning, distinct from tune-pg's cluster-wide ALTER SYSTEM GUCs: these are
+  # ALTER TABLE settings that need the substrate tables to exist, so run AFTER migrate/install
+  # (skips, not errors, on an empty DB). SET STATISTICS 0 on the geometry columns (read via
+  # GiST/KNN, not histograms) makes autoanalyze on physicalities ~160x cheaper; the 2%/100k
+  # thresholds fire at 100M-row scale instead of the 10% default that lags on bulk ingest.
+  local have
+  have=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SELECT to_regclass('laplace.physicalities') IS NOT NULL" 2>/dev/null || echo f)
+  if [[ "$have" != "t" ]]; then
+    echo "tune-laplace: substrate tables absent -- skipping (run after migrate)."
+    return 0
+  fi
+  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+    -c "ALTER TABLE laplace.physicalities ALTER COLUMN coord SET STATISTICS 0" \
+    -c "ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STATISTICS 0" \
+    -c "ALTER TABLE laplace.entities      SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
+    -c "ALTER TABLE laplace.physicalities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
+    -c "ALTER TABLE laplace.attestations  SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
+    -c "ALTER TABLE laplace.consensus     SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)"
+  echo "tune-laplace: applied per-table stat + autoanalyze tuning."
+}
+
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
   local bin
@@ -226,7 +250,7 @@ while [[ $# -gt 0 ]]; do
     --fresh-db) FRESH_DB=1; shift ;;
     --force) FORCE_FOUNDATION=1; shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|tune-pg|perfcache-guc|api-env|publish|foundation)
+    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -243,6 +267,7 @@ for phase in "${PHASES[@]}"; do
     migrate)        phase_migrate ;;
     sync-extension) phase_sync_extension ;;
     tune-pg)        phase_tune_pg ;;
+    tune-laplace)   phase_tune_laplace ;;
     perfcache-guc)  phase_perfcache_guc ;;
     api-env)        phase_api_env ;;
     publish)        phase_publish ;;

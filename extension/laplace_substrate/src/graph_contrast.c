@@ -22,6 +22,32 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_contrast);
 
+/*
+ * consensus_subject_edges is prepared once (static) and re-executed per
+ * synset/anchor subject instead of re-planning on every call. Same query,
+ * same single bytea argument, same rows read back -- output is unchanged.
+ */
+static SPIPlanPtr subject_edges_plan = NULL;
+
+static void
+ensure_subject_edges_plan(void)
+{
+    if (subject_edges_plan == NULL)
+    {
+        Oid        argtypes[1] = { BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(
+            "SELECT type_id, object_id, rating, rd "
+            "FROM laplace.consensus_subject_edges($1)",
+            1, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "contrast: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "contrast: SPI_keepplan failed");
+        subject_edges_plan = plan;
+    }
+}
+
 typedef struct {
     hash128_t type_id;
     hash128_t object_id;
@@ -104,6 +130,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "contrast: SPI_connect failed");
+    ensure_subject_edges_plan();
 
     up_types[0] = rel_type_id("IS_A");
     up_types[1] = rel_type_id("IS_INSTANCE_OF");
@@ -161,7 +188,6 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
     {
         bytea *subjbuf = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-        Oid    argtypes[1] = { BYTEAOID };
         Datum  args[1];
         SET_VARSIZE(subjbuf, VARHDRSZ + sizeof(hash128_t));
 
@@ -179,10 +205,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
                 int   rc;
 
                 args[0] = subj;
-                rc = SPI_execute_with_args(
-                    "SELECT type_id, object_id, rating, rd "
-                    "FROM laplace.consensus_subject_edges($1)",
-                    1, argtypes, args, NULL, true, 0);
+                rc = SPI_execute_plan(subject_edges_plan, args, NULL, true, 0);
                 if (rc != SPI_OK_SELECT)
                     elog(ERROR, "contrast: consensus query failed");
 

@@ -1,17 +1,41 @@
 set(EXT_NAME laplace_substrate)
 
-file(GLOB_RECURSE _ext_sql_sources CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*/*.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*/*/*.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/inference/*.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/*.sql.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade)
-list(SORT _ext_sql_sources)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SqlManifest.cmake)
+
+# EXT_VERSION and the completeness gate are derived from the MANIFESTS, not a
+# filesystem glob. Two consequences, both deliberate:
+#   1. The version is a function of exactly what ships (the manifest-listed
+#      modules + shims + sqldefines) — a stray/orphaned .sql.in that ships
+#      nothing can no longer perturb the version string (the old glob footgun).
+#   2. laplace_check_manifest_complete FAILS configuration if any *.sql.in under
+#      sql/ is neither manifest-referenced nor allow-listed — which makes the
+#      legacy numbered-monolith / orphaned-module pattern impossible to
+#      reintroduce (a file that isn't wired in breaks the build instead of
+#      rotting unnoticed, as 43_table_tuning and finish_consensus_fold_steps did).
+laplace_manifest_files(_install_modules
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
+laplace_manifest_files(_upgrade_modules
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+
+laplace_check_manifest_complete("${CMAKE_CURRENT_SOURCE_DIR}/sql"
+    ${_install_modules} ${_upgrade_modules})
+
+set(_ext_version_inputs
+    ${_install_modules}
+    ${_upgrade_modules}
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate_upgrade.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+list(REMOVE_DUPLICATES _ext_version_inputs)
+list(SORT _ext_version_inputs)
 set(_ext_sql_hashes "")
-foreach(_f ${_ext_sql_sources})
+foreach(_f ${_ext_version_inputs})
     file(SHA256 ${_f} _fh)
     string(APPEND _ext_sql_hashes "${_fh}")
 endforeach()
@@ -91,7 +115,6 @@ configure_file(
     @ONLY
 )
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SqlManifest.cmake)
 laplace_write_sql_chain(
     "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/install_chain.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"

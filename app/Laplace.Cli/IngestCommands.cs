@@ -175,6 +175,11 @@ internal static class IngestCommands
             "recipe" => await IngestRecipeAsync(cli),
             "chess" => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
+            // Re-runnable by design: no source-completion marker, so it always rescans; the
+            // per-game ANALYZED_AT marker (probed in the decomposer) is the only skip gate.
+            "chess-analyze" => await IngestViaRunnerAsync(
+                new Laplace.Chess.Service.ChessAnalyzeDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli,
+                skipSourceCompletion: true),
             "openings" => await IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
             "omw-probe" => await OmwProbeAsync(cli),

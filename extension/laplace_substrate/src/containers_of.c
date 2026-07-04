@@ -169,6 +169,9 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
                 tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, rnulls);
                 n_output++;
             }
+            /* hit_id/hit_type copied out; hit_tier already materialized into
+             * the tuplestore. Free before the next frontier element's probe. */
+            SPI_freetuptable(SPI_tuptable);
         }
 
         pfree(frontier);

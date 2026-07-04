@@ -4,6 +4,8 @@ import { Board, parseBoard, whiteToMove, useBoardRef, type MoveScore } from './p
 import { MoveList } from './play/MoveList';
 import { EnginePanel, type TrainKnobs, type TrainStatus } from './play/EnginePanel';
 import { PstGrid } from './play/PstGrid';
+import { GameControls } from './play/GameControls';
+import { Sidebar } from './play/Sidebar';
 
 interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; motifs?: string[]; }
 interface BestMove {
@@ -11,10 +13,6 @@ interface BestMove {
   scoreCp: number; depth: number; nodes: number; pv?: string[]; motifs?: string[];
 }
 export interface SearchInfo { scoreCp: number; depth: number; nodes: number; substrate: boolean; pv: string[]; }
-
-const MOTIF_LABEL: Record<string, string> = {
-  fork: 'fork', discovered_check: 'discovered check', hanging_piece_won: 'won material',
-};
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -182,6 +180,8 @@ export function ChessView() {
 
   const sideToMove = whiteToMove(fen) ? 'White' : 'Black';
   const over = status !== 'ongoing';
+  // Which king got mated (loser's king). Draw/ongoing -> no red king.
+  const matedKing = status === 'white wins' ? 'k' : status === 'black wins' ? 'K' : null;
   const statusText = busy
     ? 'thinking…'
     : over
@@ -194,31 +194,6 @@ export function ChessView() {
   return (
     <div className="chess">
       <div className="chess-main">
-        <div className="chess-controls">
-          <div
-            className={`status${busy ? ' thinking' : ''}${over ? (status === 'draw' ? ' over draw' : ' over win') : ''}`}
-            role="status"
-          >{statusText}</div>
-          {motifs.length > 0 && (
-            <div className="motifs">
-              {motifs.map((m) => <span key={m} className="motif-chip">{MOTIF_LABEL[m] ?? m}</span>)}
-            </div>
-          )}
-          {err && <div className="chess-error" role="alert">{err}</div>}
-          <div className="ctl-row">
-            <button onClick={newGame}>New game</button>
-            <button onClick={() => botMove(fen)} disabled={busy || over}>Bot move</button>
-            <label><input type="checkbox" checked={autoReply} onChange={(e) => setAutoReply(e.target.checked)} /> bot auto-replies</label>
-            <label><input type="checkbox" checked={flip} onChange={(e) => setFlip(e.target.checked)} /> flip</label>
-          </div>
-          <div className="ctl-row">
-            <label>depth<input type="number" min={1} max={12} value={searchDepth} onChange={(e) => { const n = parseInt(e.target.value, 10); if (!Number.isNaN(n)) setSearchDepth(Math.min(12, Math.max(1, n))); }} /></label>
-            <label><input type="checkbox" checked={useSubstrate} onChange={(e) => setUseSubstrate(e.target.checked)} /> substrate root bias</label>
-            <label><input type="checkbox" checked={evalMode} onChange={(e) => setEvalMode(e.target.checked)} /> eval mode (legal scores)</label>
-          </div>
-          <span className="hint">drag/click to move · right-drag = arrow · right-click = mark · left-click clears</span>
-          <code className="fen">{fen}</code>
-        </div>
         <Board
           fen={fen}
           legal={legal}
@@ -235,6 +210,7 @@ export function ChessView() {
           boardRef={boardRef}
           flip={flip}
           lastMove={lastMove}
+          matedKing={matedKing}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onDragMove={(x, y) => setDrag((d) => (d ? { ...d, x, y } : d))}
@@ -250,7 +226,18 @@ export function ChessView() {
         )}
       </div>
 
-      <div className="chess-side">
+      {/* Modular sidebar: controls first, then the analysis modules. Reorder or add
+          custom controls by editing this list — each item is a Panel-based UserControl. */}
+      <Sidebar>
+        <GameControls
+          statusText={statusText} busy={busy} over={over} status={status}
+          motifs={motifs} err={err} fen={fen}
+          autoReply={autoReply} flip={flip} searchDepth={searchDepth}
+          useSubstrate={useSubstrate} evalMode={evalMode}
+          onNewGame={() => void newGame()} onBotMove={() => void botMove(fen)}
+          onAutoReply={setAutoReply} onFlip={setFlip} onDepth={setSearchDepth}
+          onSubstrate={setUseSubstrate} onEvalMode={setEvalMode}
+        />
         <EnginePanel
           train={train}
           knobs={knobs}
@@ -260,7 +247,7 @@ export function ChessView() {
         />
         <MoveList topMoves={topMoves} history={history} evalMode={evalMode} search={search} />
         <PstGrid />
-      </div>
+      </Sidebar>
     </div>
   );
 }
