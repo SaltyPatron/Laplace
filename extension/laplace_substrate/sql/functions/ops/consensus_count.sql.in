@@ -2,6 +2,15 @@ CREATE OR REPLACE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT count(*) FROM @extschema@.consensus c
-    WHERE (p_type IS NULL OR c.type_id = p_type)
+    -- Branch on the optional filter so the provided-type path carries a plain
+    -- equality (consensus_type_btree index-only count) instead of the
+    -- `(p_type IS NULL OR type_id = p_type)` OR-form, which a non-inlined SQL
+    -- function (SET search_path blocks inlining) plans generically with p_type
+    -- unbound and therefore cannot index -> full seqscan. Semantics identical:
+    -- p_type NULL counts every row; p_type set counts exactly that type.
+    SELECT CASE
+        WHEN p_type IS NULL
+            THEN (SELECT count(*) FROM @extschema@.consensus)
+            ELSE (SELECT count(*) FROM @extschema@.consensus c WHERE c.type_id = p_type)
+    END
 $$;

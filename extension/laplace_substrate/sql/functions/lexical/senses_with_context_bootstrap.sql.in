@@ -3,19 +3,31 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
                   score numeric)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- Was two correlated subqueries against consensus re-executed per output row (RBAR) --
+    -- replaced with two set-based aggregates over p_context, computed once, then left-joined
+    -- by the object_id they'd have matched on. Mirrors senses_with_context.sql.in.
+    WITH ctx_as_subject AS (
+        SELECT c.object_id, sum(eff_mu(c.rating, c.rd)) AS boost
+        FROM consensus c
+        WHERE c.subject_id = ANY (p_context) AND NOT refuted(c.rating, c.rd)
+        GROUP BY c.object_id
+    ),
+    ctx_as_object AS (
+        SELECT c.subject_id, sum(eff_mu(c.rating, c.rd)) AS boost
+        FROM consensus c
+        WHERE c.object_id = ANY (p_context) AND NOT refuted(c.rating, c.rd)
+        GROUP BY c.subject_id
+    )
     SELECT s.object_id, ss.object_id,
            eff_mu_display(s.rating, s.rd),
            s.witness_count + ss.witness_count,
            round(((eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd)
-             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
-                         WHERE c.subject_id = ANY (p_context) AND c.object_id = ss.object_id
-                           AND NOT refuted(c.rating, c.rd)), 0)
-             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
-                         WHERE c.subject_id = ss.object_id AND c.object_id = ANY (p_context)
-                           AND NOT refuted(c.rating, c.rd)), 0)) / 1e9)::numeric, 3)
+             + COALESCE(cas.boost, 0) + COALESCE(cao.boost, 0)) / 1e9)::numeric, 3)
     FROM consensus s
     JOIN consensus ss ON ss.subject_id = s.object_id
                      AND ss.type_id = relation_type_id('IS_SENSE_OF')
+    LEFT JOIN ctx_as_subject cas ON cas.object_id = ss.object_id
+    LEFT JOIN ctx_as_object cao ON cao.subject_id = ss.object_id
     WHERE s.subject_id = p_word
       AND s.type_id = relation_type_id('HAS_SENSE')
     ORDER BY 5 DESC

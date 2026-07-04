@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
              WHERE e.highway_mask IS NOT NULL
                AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
          ),
-         edges AS MATERIALIZED (
+         edges AS (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
                     bt.rank
              FROM v

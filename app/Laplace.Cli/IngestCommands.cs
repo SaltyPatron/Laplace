@@ -698,9 +698,22 @@ internal static class IngestCommands
                 "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
                 "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
             ];
-            long roleAtts = 0;
-            foreach (var k in tensorRoles)
-                roleAtts += await RelationEvidence(k, srcKey);
+            long roleAtts;
+            // ONE round-trip: sum evidence_count over all ten tensor-role relation types
+            // server-side instead of a per-role query loop. sum() over bigint is numeric,
+            // so cast back to bigint to match the old accumulated long total exactly.
+            await using (var roleCmd = Cmd())
+            {
+                roleCmd.CommandText =
+                    "SELECT COALESCE(sum(laplace.evidence_count("
+                    + "p_type => laplace.relation_type_id(t), "
+                    + "p_source => laplace.source_id($2))), 0)::bigint "
+                    + "FROM unnest($1::text[]) AS t";
+                var pRoles = roleCmd.Parameters.AddWithValue(tensorRoles);
+                pRoles.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text;
+                roleCmd.Parameters.AddWithValue(srcKey);
+                roleAtts = (long)(await roleCmd.ExecuteScalarAsync() ?? 0L);
+            }
             Console.WriteLine($"  check safetensor deposition: {roleAtts:N0} tensor-role attestations "
                             + $"(snapshot witness, trust=AIModelProbe)");
             return;

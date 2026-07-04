@@ -4,6 +4,9 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane(
     LANGUAGE sql STABLE PARALLEL RESTRICTED  
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         -- MATERIALIZED is load-bearing here: edges is referenced twice below
+         -- (rk's DISTINCT type_id scan and ranked's join), so the fence avoids
+         -- re-executing the v->consensus->v join. Do not strip.
          edges AS MATERIALIZED (
              
              

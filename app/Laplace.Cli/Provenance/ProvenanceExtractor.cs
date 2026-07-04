@@ -124,38 +124,50 @@ internal static class ProvenanceExtractor
             ("VerbNet",  "substrate/source/verbnet/v1",  EntityTypeRegistry.VerbNetClass),
             ("PropBank", "substrate/source/propbank/v1", EntityTypeRegistry.PropBankRoleset),
         };
+        // ONE round-trip: count all four probe types at once, then bucket by type_id.
+        // GROUP BY over the ANY-filter only emits rows for types that have entities, so a
+        // type absent from the map is count 0 — identical to the old per-type count>0 gate.
+        var countByType = await CountByTypesAsync(ds, probes.Select(p => p.TypeId).ToArray(), ct);
         foreach (var (label, domain, typeId) in probes)
         {
-            try
+            if (!countByType.TryGetValue(typeId, out long count) || count <= 0)
+                continue;
+            sources.Add(new SourceProvenance
             {
-                long count = await CountByTypeAsync(ds, typeId, ct);
-                if (count > 0)
-                    sources.Add(new SourceProvenance
-                    {
-                        SourceId = Hex(Hash128.OfCanonical(domain)),
-                        Domain = domain,
-                        Kind = "lexical-resource",
-                        Label = label,
-                        Completed = true,
-                        EntityCount = count,
-                        TrustClass = "AcademicCurated",
-                    });
-            }
-            catch { }
+                SourceId = Hex(Hash128.OfCanonical(domain)),
+                Domain = domain,
+                Kind = "lexical-resource",
+                Label = label,
+                Completed = true,
+                EntityCount = count,
+                TrustClass = "AcademicCurated",
+            });
         }
 
         return sources;
     }
 
-    private static async Task<long> CountByTypeAsync(
-        NpgsqlDataSource ds, Hash128 typeId, CancellationToken ct)
+    private static async Task<Dictionary<Hash128, long>> CountByTypesAsync(
+        NpgsqlDataSource ds, IReadOnlyList<Hash128> typeIds, CancellationToken ct)
     {
-        await using var cmd = ds.CreateCommand(
-            "SELECT count(*) FROM laplace.entities WHERE type_id = $1");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
-        cmd.CommandTimeout = 30;
-        var r = await cmd.ExecuteScalarAsync(ct);
-        return r is long l ? l : 0L;
+        var map = new Dictionary<Hash128, long>(typeIds.Count);
+        if (typeIds.Count == 0) return map;
+        try
+        {
+            var raw = new byte[typeIds.Count][];
+            for (int i = 0; i < typeIds.Count; i++) raw[i] = typeIds[i].ToBytes();
+            await using var cmd = ds.CreateCommand(
+                "SELECT type_id, count(*) FROM laplace.entities "
+                + "WHERE type_id = ANY($1) GROUP BY type_id");
+            var p = cmd.Parameters.AddWithValue(raw);
+            p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            cmd.CommandTimeout = 30;
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            while (await rdr.ReadAsync(ct))
+                map[Hash128.FromBytes((byte[])rdr[0])] = rdr.GetInt64(1);
+        }
+        catch { }
+        return map;
     }
 
 

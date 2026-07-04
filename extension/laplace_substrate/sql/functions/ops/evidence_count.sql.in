@@ -3,9 +3,35 @@ CREATE OR REPLACE FUNCTION evidence_count(
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT count(*)
-    FROM @extschema@.attestations a
-    WHERE (p_type   IS NULL OR a.type_id   = p_type)
-      AND (p_source IS NULL OR a.source_id = p_source)
-      AND (p_object IS NULL OR a.object_id = p_object)
+    -- Branch on which optional filters are present so each present filter is a
+    -- plain equality the planner can index (attestations_type_btree /
+    -- _source_btree / _object_btree, bitmap-AND'd when several are set). The
+    -- prior `(p_param IS NULL OR col = p_param)` conjunction is planned once
+    -- with the params unbound (this SQL function is non-inlinable -- SET
+    -- search_path), so the OR-with-NULL kept the index unusable and every call
+    -- (including the per-ingest verify gate `evidence_count(NULL, source_id(..))`
+    -- on 126M+ attestations) seqscanned. Each CASE arm reproduces exactly the
+    -- residual predicate the original conjunction reduces to for that NULL
+    -- combination, so results are byte-identical.
+    SELECT CASE
+        WHEN p_type IS NULL AND p_source IS NULL AND p_object IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations)
+        WHEN p_type IS NULL AND p_source IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.object_id = p_object)
+        WHEN p_type IS NULL AND p_object IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.source_id = p_source)
+        WHEN p_source IS NULL AND p_object IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.type_id = p_type)
+        WHEN p_type IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a
+                  WHERE a.source_id = p_source AND a.object_id = p_object)
+        WHEN p_source IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a
+                  WHERE a.type_id = p_type AND a.object_id = p_object)
+        WHEN p_object IS NULL
+            THEN (SELECT count(*) FROM @extschema@.attestations a
+                  WHERE a.type_id = p_type AND a.source_id = p_source)
+        ELSE (SELECT count(*) FROM @extschema@.attestations a
+              WHERE a.type_id = p_type AND a.source_id = p_source AND a.object_id = p_object)
+    END
 $$;

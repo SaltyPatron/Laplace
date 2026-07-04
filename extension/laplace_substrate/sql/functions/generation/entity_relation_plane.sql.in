@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          t(tid) AS (SELECT relation_type_id(n) FROM unnest(p_rel_names) AS n),
-         edges AS MATERIALIZED (
+         edges AS (
              
              
              

@@ -5,8 +5,8 @@ CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     
     
     
-    SELECT ws.ord, ws.word,
-           (SELECT e.id FROM entities e WHERE e.id = ws.id)
+    SELECT ws.ord, ws.word, e.id
     FROM word_segment(p_text) ws
+    LEFT JOIN entities e ON e.id = ws.id
     ORDER BY ws.ord
 $$;

@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION consensus_adjacency(
     LANGUAGE sql STABLE PARALLEL RESTRICTED  
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
-         edges AS MATERIALIZED (
+         edges AS (
              
              
              
