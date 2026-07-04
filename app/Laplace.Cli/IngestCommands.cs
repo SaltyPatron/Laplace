@@ -615,8 +615,24 @@ internal static class IngestCommands
     {
         await using var conn = await ds.OpenConnectionAsync();
 
-
-
+        // Immediately after a bulk COPY ingest the just-loaded tables can still carry
+        // pre-load planner statistics (autoanalyze has not necessarily caught up). With a
+        // stale reltuples≈0 the planner picks a nested loop for content_count/evidence_count
+        // and — because these validation commands run with CommandTimeout=0 — the query
+        // hangs indefinitely instead of finishing in ~1s. Refresh the stats the validations
+        // depend on before running them. Column-scoped so we skip the minutes-long PostGIS
+        // ND-stats on physicalities.coord/trajectory (never touched by these counts); a
+        // column-list ANALYZE still refreshes pg_class.reltuples, which is the estimate that
+        // matters here.
+        await using (var an = conn.CreateCommand())
+        {
+            an.CommandTimeout = 0;
+            an.CommandText =
+                "ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id); "
+                + "ANALYZE laplace.physicalities (entity_id, type); "
+                + "ANALYZE laplace.entities (id, tier, type_id);";
+            await an.ExecuteNonQueryAsync();
+        }
 
 
         NpgsqlCommand Cmd()
