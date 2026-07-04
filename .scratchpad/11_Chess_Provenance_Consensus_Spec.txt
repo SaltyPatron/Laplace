@@ -1,0 +1,194 @@
+================================================================================
+11 — CHESS GEOMETRY / PROVENANCE / CONSENSUS SPEC
+   "same content = same hash, but Magnus's E2E4 ≠ my E2E4 ≠ Hikaru's E2E4,
+    and it STILL has to form Glicko-2 consensus"
+================================================================================
+
+This is the design for chess decomposition/ingestion done to the substrate's own
+rules: everything decomposable, deterministic, lossless, O(tier) dedup, leaf↔trunk
+reconstruction — WITHOUT mashing distinct real games into one, and WHILE still
+folding into Glicko-2 consensus. Companion to 03_Chess, 08_Record_vs_Calculate.
+
+--------------------------------------------------------------------------------
+0. THE CORE RESOLUTION — THREE LAYERS, THREE JOBS
+--------------------------------------------------------------------------------
+The apparent paradox ("dedup but isolate but still aggregate") dissolves once you
+see these are THREE DIFFERENT TABLES with three different keys:
+
+  CONTENT   (entities/physicalities)  keyed by CONTENT HASH.  Deduped.
+            "Pawn E2→E4" is ONE entity no matter who played it or how often.
+            This is the join surface + the geometry (spatial queries).
+
+  EVIDENCE  (attestations)  keyed by its own id; carries subject, relation,
+            object, SOURCE_ID, CONTEXT_ID, OUTCOME.  One row PER OCCURRENCE.
+            Magnus-plays-E2E4-in-G1 and I-play-E2E4-in-G2 are DISTINCT rows,
+            each provenanced. Nothing is mashed — the log is complete.
+
+  CONSENSUS (consensus)  keyed by consensus_id(subject_id, type_id, object_id)
+            — GROUP BY (subject,type,object), verified in
+            materialize_period_partition.sql.in:27. Folds evidence into literal
+            Glicko-2 (rating, rd, volatility, witness_count). GLOBAL aggregate.
+
+So: the move ENTITY dedupes (content), every PLAY is a preserved attestation
+(provenance: which source, which game, what result), and the fold produces
+Glicko-2 (aggregate). "It can't mash into nothing" → the attestations table IS
+the un-mashed record. "It still has to form consensus/glicko-2" → the fold does
+exactly that. context_id/source_id are NOT in the fold key, so consensus is
+global by default; a filtered (Magnus-only) rating is a re-fold of the filtered
+attestations, not the default.
+
+--------------------------------------------------------------------------------
+1. TWO KINDS OF EDGE — this is what keeps isolation and aggregation both true
+--------------------------------------------------------------------------------
+Every ply of every game emits BOTH:
+
+  (a) PROVENANCE edges — subject/context is GAME-SPECIFIC, so they never
+      aggregate across games; they isolate the occurrence.
+        subject = PlyId(gameId, ply)           (unique per game+ply)
+        context_id = gameId                     (scopes to THIS game)
+        e.g. (PlyId(G,k), HAS_SAN, "e4"), (PlyId(G,k), HAS_CLOCK, t),
+             (PlyId(G,k), HAS_EVAL_TOKEN, ev), (PlyId(G,k), HAS_COMMENT, …),
+             (G, PLAYED_BY_WHITE, player_Magnus), (G, HAS_RESULT, win)
+      These are Magnus-vs-me-vs-Hikaru isolation: filter attestations by
+      context_id=G and the (G, PLAYED_BY, player) edges.
+
+  (b) AGGREGATING edges — subject is a DEDUPED content entity (move / position),
+      so identical edges across millions of games fold into one Glicko-2 row.
+        e.g. (position_P, HAS_MOVE, move_M)         "from P, M was played"
+             (move_M, LEADS_TO, position_P')        "M transitions P→P'"
+             (position_P, HAS_MOVE, move_M) outcome = the GAME's result from the
+                side-to-move's perspective  ← THIS is the Glicko-2 signal
+      A move/position accrues a rating from the results of every game it appears
+      in — the same math that rates a player rates a move. Magnus's win and my
+      loss with E2E4 BOTH fold into E2E4's consensus; witness_count climbs; the
+      rating reflects the aggregate. outcome uses the shared {Loss=0,Draw=1,Win=2}
+      encoding (== PlyOutcome, pinned by OutcomeEncodingPinTests).
+
+The provenance edges answer "who/when/which game"; the aggregating edges answer
+"how good / how common." Neither erases the other.
+
+Glicko nuance (future refinement): Glicko-2 weights by OPPONENT strength. A move
+that wins vs a 2800 should move its rating more than vs a 1200. The default fold
+is context-blind; opponent-aware weighting would carry the opponent rating into
+the fold (a scoped analysis pass, not the base ingest).
+
+--------------------------------------------------------------------------------
+2. THE CHESS LADDER (geometry) — leaf → trunk, all content-addressed
+--------------------------------------------------------------------------------
+Board is its OWN modality ladder, NOT text codepoints (today "Qc5" composes from
+the runes Q,c,5 → codepoint geometry → the 319-dup collision with the text
+"Qc5"; that is the bug). Real ladder:
+
+  tier-0  SQUARE (a1..h8): 64 fixed S³ anchors — the board's "Rosetta stone",
+          analogous to Unicode codepoints. Deterministic, pinned.
+          PIECE (P,N,B,R,Q,K × color): the moving atom's type tag.
+
+  RESOLVED MOVE  "Pawn E2→E4": content = (piece, from-square, to-square, flags).
+          Entity id = Merkle over those. BuildingBlock physicality = the board
+          TRANSITION: a 2-vertex trajectory E2→E4 in board S³, piece-tagged.
+          Deduped: the same resolved move in any game is ONE entity.
+          - INTRINSIC from SAN (witnessed, lossless): piece, target square,
+            capture flag (x), check/mate (+/#), promotion (=Q), castle (O-O),
+            disambiguation (Nbd7). "Qc5" tells you Q, target c5, no-capture,
+            no-check — but NOT the from-square.
+          - FROM-SQUARE is NOT in the SAN → derived by replay (deterministic
+            given the position) → CALCULATED (analyzer), higher-trust witness.
+            So "Pawn E2→E4" is a calc-resolved entity; "e4" (SAN) is the
+            recorded one. Both content-addressed; both dedupe.
+          Uniform across the board: captures (Rxe4), castling (compound K+R
+          transition), promotion (e7→e8 + type change), en passant — each is a
+          resolved-move entity with its own board-transition geometry.
+
+  POSITION  board state after k plies: content = piece placement (a FEN-like
+          canonical). Entity, deduped → TRANSPOSITIONS COLLAPSE to one position
+          entity (two different move orders reaching the same board share it).
+          Physicality = the board's occupied-square geometry. Reached-position
+          search becomes an index hit.
+
+  GAME  entity id = content hash of provenance+line (today
+          ChessVocabulary.GameId(white, black, date, moves); EXTEND to the full
+          7-tag roster Event/Site/Date/Round/White/Black/Result so two games
+          with identical moves but different event/round don't collide).
+          Physicality = the GAME TRAJECTORY: a GeometryZM LINESTRING whose
+          vertices are the resolved moves / positions — the pieces walking the
+          board. The move/position IDS bit-pack into the trajectory mantissa
+          (mantissa.c payload channel), so one GeometryZM carries BOTH the
+          board path (spatial) AND the exact, invertible move sequence
+          (lossless reconstruction). GiST-indexed → "games near this line",
+          maneuver search, opening trees, transposition detection become
+          index-backed spatial queries instead of scans.
+
+O(tier) dedup: a move played in 10M games is stored once; the Sicilian's first
+12 plies (one shared position/prefix) is composed once and referenced by every
+Sicilian; only the per-game PROVENANCE (metadata, clocks, comments, result) is
+per-game. Reconstruction (trunk→leaf): game → trajectory mantissa → resolved
+moves → squares/pieces → replayable board; independently game → HAS_MOVETEXT →
+original SAN. Both lossless.
+
+--------------------------------------------------------------------------------
+3. WHY physId = hash(entity_id, type) IS REQUIRED HERE (already shipped, b8e49dc)
+--------------------------------------------------------------------------------
+The SAME entity carries MULTIPLE physicalities distinguished by TYPE:
+  - "e4" as witnessed text  → Content physicality  (codepoint geometry)
+  - "Pawn E2→E4" resolved   → BuildingBlock physicality (board transition)
+Content-addressed identity with type in the key is exactly what lets one entity
+hold both roles without the geometries colliding — and it kills the float-forged
+dup class (coord/trajectory no longer in the id). Without it, board geometry and
+text geometry of the same token would fight over one physicality row.
+
+--------------------------------------------------------------------------------
+4. RECORD vs CALCULATE (extends 08)
+--------------------------------------------------------------------------------
+  RECORD  (source=ChessPgn, witnessed, lower trust, verbatim): SAN, clock, eval
+          TOKEN (as written), comment, move-quality glyph, result, players,
+          Elos, ECO/Opening headers, SetUp/FEN, movetext, GameId, PlyId. EXISTS
+          (ChessPgnDecomposer.RecordMovetext/RecordPlyAnnotations/etc.).
+  CALC    (source=ChessAnalysis, replayed, higher trust, VERSIONED via
+          Hash128.OfCanonical($"chess/analyzed/{gameId}/{version}")): from-square
+          resolution → resolved-move entities, board positions + geometry, game
+          board-trajectory, legality, engine eval, opening classification,
+          move-strength Glicko contributions. Consensus reconciles recorded vs
+          calculated witnesses. PARTIALLY EXISTS (ChessAnalyzeDecomposer replays;
+          the GEOMETRY layer is the gap).
+
+--------------------------------------------------------------------------------
+5. STATE: EXISTS vs GAP
+--------------------------------------------------------------------------------
+EXISTS and correct — do not rebuild:
+  - GameId content-addressed identity; trunk-to-leaf skip via IsProvenPresent.
+  - PlyId(game,ply) anchors; context_id=gameId scoping on per-ply attestations.
+  - Witnessed record (SAN/clock/eval/comment/quality), players, Elos, ECO,
+    movetext, result. Record-vs-calc separation with a versioned analysis source.
+  - Consensus fold by (subject,type,object); attestation log preserves
+    source_id/context_id/outcome → isolation is already expressible.
+
+GAP — the geometric board layer (this is the "fix everything" for chess):
+  1. Board tier-0: 64 square + piece S³ anchors (a board perfcache analogous to
+     the codepoint perfcache), deterministic & pinned.
+  2. Resolved-move BuildingBlock entities + board-transition geometry (calc pass
+     resolves from-square). Replaces ChessCompose's codepoint-of-notation path.
+  3. Position entities + occupied-square geometry (transposition dedup).
+  4. Game board-trajectory: mantissa-packed GeometryZM linestring; GiST index.
+  5. Aggregating edges carrying game OUTCOME onto move/position subjects so
+     Glicko-2 accrues move/position strength (the ratings engine on the board).
+  6. Extend GameId to the full 7-tag roster for true game uniqueness.
+
+All of it sits ON the unified PhysicalityCompose service (#20) and the
+content-hash identity (shipped). Nothing here reduces the existing provenance
+model — it adds the geometry the current text-token model is missing.
+
+--------------------------------------------------------------------------------
+6. ISOLATION QUERIES (proof the model answers the question)
+--------------------------------------------------------------------------------
+  Global strength of E2E4:            consensus row (position_start, HAS_MOVE, E2E4).
+  Every game that played E2E4:        attestations where object=E2E4 (or the move
+                                      appears in the game trajectory), join to
+                                      context_id=game.
+  Magnus's E2E4 only:                 attestations for E2E4 whose context game has
+                                      (game, PLAYED_BY, Magnus); re-fold for a
+                                      Magnus-scoped Glicko rating.
+  This exact position in G1 vs G2:    PlyId(G1,k) vs PlyId(G2,j) — distinct
+                                      anchors; same underlying position entity if
+                                      the boards match (transposition), different
+                                      provenance attestations.
+================================================================================
