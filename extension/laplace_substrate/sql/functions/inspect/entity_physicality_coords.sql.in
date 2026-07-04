@@ -6,8 +6,17 @@ CREATE OR REPLACE FUNCTION entity_physicality_coords(p_ids bytea[])
     -- Batch tier-1 coordinates for a set of entity ids: the S^3 point of each
     -- entity's primary (type=1) physicality, one row per id. Centralizes the
     -- inline ST_X/Y/Z/M read FoundryExport issued against the base physicalities
-    -- table. DISTINCT ON (entity_id) ... ORDER BY entity_id, p.id keeps the same
-    -- lowest-id physicality the export selected.
+    -- table.
+    --
+    -- The DISTINCT ON is deliberate, not defensive boilerplate: an entity CAN
+    -- have >1 type=1 physicality, because PhysicalityId hashes
+    -- (entity_id, type, coord, trajectory) -- so two ingests that agree on coord
+    -- but diverge on trajectory produce two rows (observed live: 319 entities,
+    -- an original-ingest row and a re-ingest row sharing coord, differing only in
+    -- trajectory). coord is identical across such rows, so DISTINCT ON
+    -- (entity_id) ORDER BY entity_id, p.id returns the one, unambiguous coord
+    -- deterministically. NOTE: the divergent-trajectory rows themselves are an
+    -- upstream trajectory-determinism concern, not something this read resolves.
     SELECT DISTINCT ON (p.entity_id) p.entity_id,
            ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord)
     FROM physicalities p
