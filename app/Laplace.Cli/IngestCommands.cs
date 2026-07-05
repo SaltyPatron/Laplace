@@ -630,7 +630,11 @@ internal static class IngestCommands
             an.CommandText =
                 "ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id); "
                 + "ANALYZE laplace.physicalities (entity_id, type); "
-                + "ANALYZE laplace.entities (id, tier, type_id);";
+                + "ANALYZE laplace.entities (id, tier, type_id); "
+                // consensus is freshly folded here; senses()/define()/edge reads plan against
+                // it, and without stats the planner picks a nested loop that never returns under
+                // CommandTimeout=0 (the WordNet 'dog' confirmation query hung ~17 min on this).
+                + "ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd);";
             await an.ExecuteNonQueryAsync();
         }
 

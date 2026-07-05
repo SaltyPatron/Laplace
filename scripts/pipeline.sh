@@ -229,6 +229,20 @@ phase_api_env() {
     printf '\nLAPLACE_PERFCACHE_BIN=%s\n' "$bin" >> "$env_file"
   fi
   echo "LAPLACE_PERFCACHE_BIN -> $bin"
+
+  # Reconcile the API's database to the one this pipeline actually seeds ($PGDATABASE),
+  # EVERY run. The block above only writes the example (with Database=laplace) when the
+  # env file is absent; an existing laplace-api.env keeps whatever DB it had. A stale
+  # Database=laplace-dev therefore persisted, so the deployed API served an empty DB while
+  # the seed populated laplace — /health/ready reported entities=0 and every smoke failed,
+  # a silent config drift, not a seed failure. Pin it like the perfcache path.
+  local api_db="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}"
+  if grep -q '^LAPLACE_DB=' "$env_file"; then
+    sed -i "s|^LAPLACE_DB=.*|${api_db}|" "$env_file"
+  else
+    printf '\n%s\n' "$api_db" >> "$env_file"
+  fi
+  echo "LAPLACE_DB -> Database=${PGDATABASE:-laplace}"
 }
 
 phase_publish() {
