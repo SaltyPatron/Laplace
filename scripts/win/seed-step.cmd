@@ -17,6 +17,18 @@ if not "%~7"=="" set "EXTRA=%EXTRA% %~7"
 if not "%~8"=="" set "EXTRA=%EXTRA% %~8"
 if not "%~9"=="" set "EXTRA=%EXTRA% %~9"
 
+rem wiktionary corpus selector (2nd positional): "english"/"en" -> English-only
+rem kaikki.org-dictionary-English.jsonl (~2.9 GB, --langs en activates the filter
+rem so WiktionaryDecomposer.ResolveInput picks it); "all"/"multi" -> the full
+rem multilingual raw-wiktextract-data.jsonl (~21.9 GB, no filter). Anything else
+rem (e.g. a literal "--langs de,fr") passes straight through unchanged.
+if /i "%STEP%"=="wiktionary" (
+  if /i "%~2"=="english" set "EXTRA=--langs en"
+  if /i "%~2"=="en"      set "EXTRA=--langs en"
+  if /i "%~2"=="all"     set "EXTRA="
+  if /i "%~2"=="multi"   set "EXTRA="
+)
+
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 
 
