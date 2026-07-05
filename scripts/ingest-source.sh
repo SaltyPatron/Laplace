@@ -61,9 +61,17 @@ case "$source" in
             ingest "$source"
         fi
         ;;
+    chess|openings)
+        # Chess corpora are plain .NET decomposers (ChessPgn / ChessOpenings) like every
+        # other source — cross-platform, not a Windows-only thing. They just take an explicit
+        # corpus dir (no fixed default under DATA_ROOT).
+        build_cli
+        [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
+        ingest "$source" "$path"
+        ;;
     *)
         echo "Unknown source: $source" >&2
-        echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} all safetensors" >&2
+        echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} chess openings all safetensors" >&2
         exit 2
         ;;
 esac

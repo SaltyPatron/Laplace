@@ -197,7 +197,13 @@ jobs:
 
       - name: Clean build tree (dispatch full_clean only)
         if: github.event_name == 'workflow_dispatch' && inputs.full_clean
-        run: bash scripts/pipeline.sh clean
+        run: |
+          # checkout is clean:false, so the persistent runner accumulates untracked cruft.
+          # Purge stale codegen output from prior builds (old generated/NN_*.sql.in linger and
+          # trip the manifest-completeness gate on a fresh configure); pipeline.sh clean then
+          # wipes build/ so the native engine (content_witness_batch.c etc.) truly recompiles.
+          find extension/laplace_substrate/sql/generated -name '[0-9]*_*.sql.in' -delete 2>/dev/null || true
+          bash scripts/pipeline.sh clean
 
       - name: Build
         run: bash scripts/pipeline.sh build

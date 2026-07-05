@@ -21,6 +21,8 @@ on:
           - iso639
           - cili
           - document
+          - chess
+          - openings
           - wordnet
           - omw
           - verbnet
