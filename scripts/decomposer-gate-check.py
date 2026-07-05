@@ -96,8 +96,12 @@ def check_source(
         try:
             exists = psql(
                 dbname,
+                # physicalities are source-agnostic (content-addressed: same content = same
+                # physicality regardless of who witnessed it), so there is no p.source_id column.
+                # Attribute "content physicalities present for this decomposer" via its attestations.
                 f"SELECT EXISTS(SELECT 1 FROM laplace.physicalities p "
-                f"WHERE p.source_id = laplace.source_id('{decomposer}') LIMIT 1);",
+                f"JOIN laplace.attestations a ON a.subject_id = p.entity_id "
+                f"WHERE a.source_id = laplace.source_id('{decomposer}') AND p.type = 1 LIMIT 1);",
                 host=host,
                 user=user,
             ).lower() in ("t", "true")

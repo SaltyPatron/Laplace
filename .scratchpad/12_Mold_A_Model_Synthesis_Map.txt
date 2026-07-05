@@ -1,0 +1,191 @@
+================================================================================
+12 — MOLD-A-MODEL SYNTHESIS MAP
+   every substrate primitive → a transformer component (no gradient descent)
+   "the hand-waved ideal is the target; FoundryCommands is a partial realization"
+================================================================================
+
+This is the AI ingest/export solution stated as a bijection: the substrate is a
+COMPLETE, LOSSLESS representation from which a transformer is MOLDED, not trained.
+INGEST = content → attestations → Glicko-folded consensus + S³/trajectory geometry.
+EXPORT (Mold-A-Model) = that consensus+geometry → embed / heads / FFN / layers /
+lm-head → GGUF, deterministically. If every primitive has a clean target slot,
+the export is solved. It does. Companion to 09_Substrate_LM_Synthesis and the
+current FoundryCommands.SynthesizeMoldAModelAsync (Milestone A).
+
+Two families:
+  A. CONSENSUS / ATTESTATION  → the WEIGHTS and the TOPOLOGY (what connects to
+     what, and how strongly / how sure).
+  B. GEOMETRY (S³, angular, fréchet, intersects, trajectory, hilbert, voronoi)
+     → the HEADS, POSITIONS, and ROUTING (how tokens see each other, where they
+     sit, which expert owns them).
+
+--------------------------------------------------------------------------------
+MASTER TABLE
+--------------------------------------------------------------------------------
+ substrate primitive        transformer slot            mechanism
+ ------------------------    ------------------------    ------------------------
+ attestations               training examples +         each row folds an edge;
+                            supervised signal +         outcome{0,1,2} is the
+                            provenance conditioning      Glicko signal; source/
+                                                        context filter → scoped
+                                                        (per-player) models
+ Glicko-2 (rating,rd,       edge WEIGHTS (calibrated)    eff_mu = rating−2·rd is
+   volatility,witness)                                   the weight; rd = per-edge
+                                                        uncertainty→temperature/
+                                                        dropout; witness = mass
+ consensus graph            attention TOPOLOGY +         A (weighted adjacency)=
+   (subject,type,object)    the LAPLACIAN               folded edges; L=D−A is
+                                                        the operator everything
+                                                        else diffuses over
+ S³ coord (PointZM)         embedding ANCHOR/prior +     seeds BuildBasis; a
+                            content-positional prior     lossless content position
+ angular distance           GEOMETRIC attention head     attn(i,j)=exp(−ang²/2σ²)
+   (laplace_angular_4d)     (semantic proximity)         Gaussian-on-sphere head
+ fréchet distance           SHAPE/structure head         attn(i,j)=f(fréchet(
+   (laplace_frechet_4d)     (compositional similarity)   traj_i,traj_j)); sees
+                                                        cat≠act (same centroid)
+ intersects (PostGIS)       sparse attention MASK +      edge iff trajectories
+                            containment edges            intersect; locality/
+                                                        containment sparsity
+ trajectories (LINESTRING)  sequence POSITION +          ordered vertices=order;
+                            shape input + co-occ planes  feeds fréchet; PRECEDES
+                                                        planes = seq attention
+ hilbert index             POSITIONAL encoding +         locality-preserving 1-D
+                            local-attention key          content position; nearby
+                                                        hilbert = local window
+ voronoi (S³ cells)         MoE expert ROUTING +         token's cell = its
+                            clustering / coarse vocab    expert; cells = experts
+                                                        (Milestone B); coarse-
+                                                        grain vocabulary regions
+ relation types (153)       the HEADS themselves         one head per relation
+   / highway bands                                       band; head_r's pattern =
+                                                        consensus(·,r,·)
+ spectral rank of L         HIDDEN DIM (d_model)         natural truncation of the
+                                                        eigenmap (hidden='auto')
+
+--------------------------------------------------------------------------------
+FAMILY A — CONSENSUS/ATTESTATION → WEIGHTS + TOPOLOGY
+--------------------------------------------------------------------------------
+ATTESTATIONS are the training set, and the FOLD is the training. Each
+(subject,relation,object,source,outcome,context) is one example; folding by
+(subject,type,object) into Glicko-2 IS the optimizer step — but closed-form,
+online, and reversible (§11). The OUTCOME {Loss0,Draw1,Win2} is the supervised
+label (a move/edge that leads to wins rates up). SOURCE/CONTEXT are the knobs for
+CONDITIONAL molding: filter attestations → re-fold → a scoped model (a
+Magnus-weighted net vs the global net) with no retraining.
+
+GLICKO-2 is the calibrated weight, and it is STRICTLY better than a raw
+co-occurrence count for a weight matrix:
+  - rating           = the mean strength (the would-be logit).
+  - rd (uncertainty) = a per-edge temperature: eff_mu=rating−2·rd DISCOUNTS
+                       unsure edges automatically — a built-in confidence prior
+                       gradient descent has to fake with regularization.
+  - volatility       = edge stability (how much it moves) → an update/learning-
+                       rate signal if you keep folding online.
+  - witness_count    = evidence mass → sample weight / attention sharpening.
+So the weights arrive uncertainty-aware and calibrated, not point estimates.
+
+THE CONSENSUS GRAPH is the whole architecture's substrate: adjacency A (folded
+edges, weight eff_mu), degree D, Laplacian L=D−A. EVERYTHING below is an operator
+over L or a kernel over the geometry that L's nodes carry.
+
+--------------------------------------------------------------------------------
+FAMILY B — GEOMETRY → HEADS, POSITIONS, ROUTING
+--------------------------------------------------------------------------------
+Attention is message-passing with a data-dependent adjacency (QKᵀ). A trained net
+LEARNS Q,K to DISCOVER that adjacency. We already KNOW it — from consensus and
+geometry — so we MOLD Q,K to reproduce a known operator instead of learning it.
+For any operator M (a plane or a kernel), project it into the embedding basis E
+(M̂ = Eᵀ M E), then low-rank factor M̂ ≈ (E Wq)(E Wk)ᵀ → that head's Q,K. (This is
+exactly FoundryExport.ProjectOperator + Factor today, for relation planes.)
+
+The OPERATORS, by primitive:
+
+1. RELATION heads (consensus): head_r's operator = consensus(·, r, ·) adjacency.
+   One head per relation type / highway band (IS_A, PRECEDES, EVOKES_FRAME…).
+   BUILT today (opKey="relation:X").
+
+2. ANGULAR-distance head (S³ semantic proximity): operator K_ang[i,j] =
+   exp(−angular(coord_i,coord_j)²/2σ²). A Gaussian-on-the-sphere head: attends to
+   content-near tokens regardless of any explicit relation edge — the "what's
+   semantically close" head. GAP today (only relation/metric planes; add S³ KNN
+   kernel directly). Servable by the coord GiST index (bounded KNN per token).
+
+3. FRÉCHET / HAUSDORFF head (structure): operator K_shp[i,j] =
+   f(fréchet(traj_i,traj_j)). Attends by trajectory SHAPE — discriminates
+   cat/act (identical centroids, different paths). The head that sees
+   COMPOSITION, not just position. Partially present (metric:frechet); elevate to
+   a first-class geometric head with the angular head.
+
+4. INTERSECTS mask (structure/containment): a SPARSITY pattern, not a weight —
+   attention edge exists iff traj_i ∩ traj_j ≠ ∅ (or coord ∈ traj). Gives
+   containment attention (word↦sentence↦document) and a principled sparse mask
+   (only geometrically-related tokens attend), cheaper than dense O(n²). GAP.
+
+5. FFN ← the UNARY / self operator: the per-token map is the residual of the
+   graph operator (mResid=M−I, factored to up/down) PLUS the unary plane (a
+   token's own type/features/attributes). "What this token is on its own." BUILT
+   (unary plane + mResid factoring), can be enriched with feature planes.
+
+6. POSITIONS ← HILBERT + TRAJECTORY:
+   - Sequence position (within a composed entity) = index along its trajectory
+     linestring (the vertices ARE ordered) → the classic positional slot.
+   - Global content position = the HILBERT index: a locality-preserving 1-D
+     address where content-neighbors get near indices → a content-aware absolute
+     PE (and a cheap key for local-window attention in CONTENT space, not token
+     space). GAP (no explicit hilbert/traj PE yet).
+
+7. ROUTING ← VORONOI: partition S³ into cells around anchor coords; a token's
+   cell = its expert. This IS the MoE router (Milestone B) — deterministic,
+   content-addressed routing (no learned gate). Cells also give coarse-grained
+   vocabulary regions (tokenizer merges) and per-region attention neighborhoods.
+   GAP (MoE is Milestone B).
+
+--------------------------------------------------------------------------------
+THE ASSEMBLED ARCHITECTURE (target)
+--------------------------------------------------------------------------------
+  EMBED   E = low-frequency eigenvectors of L (consensus Laplacian), seeded by
+          S³ anchors. d_model = spectral rank (hidden='auto' — the natural cutoff
+          where eigenvalues flatten). "The Glicko-weighted colony at rest."
+  POS     hilbert index (global) + trajectory index (in-sequence).
+  LAYER l (× L, each = one diffusion step over L, scale L^−1/4):
+          heads = { relation_r } ∪ { angular, fréchet } ∪ { intersects-masked }
+                  each = factored projection of its operator into E
+          FFN   = factored (M−I) + unary/feature planes
+          norm  = RMSNorm (keep the diffusion at equilibrium)
+          route = voronoi cell → expert (MoE, Milestone B)
+  LM HEAD unembed = the consensus COMPLETION operator: logit(t→next) =
+          consensus(t, PRECEDES/continuation, next)·eff_mu, in-degree/idf scaled.
+          Same operator as "best move from this position." Tied to E.
+  DEPTH   L layers = L-hop propagation = multi-step reasoning (the A* horizon).
+
+--------------------------------------------------------------------------------
+WHY hand-waved > current impl (the user is right)
+--------------------------------------------------------------------------------
+FoundryCommands (Milestone A) already does the CORE: spectral embed basis
+(BuildBasis/SpectralRank), relation/metric/trajectory planes as head operators
+(ProjectOperator+Factor), diffusion layers (R += scale·(M−I)·R, RMSNorm),
+completion lm-head. What the IDEAL adds (the gaps this map names):
+  - GEOMETRIC heads as first-class: angular (S³ Gaussian), fréchet (shape),
+    intersects (sparse containment mask) — molded straight from the geometry,
+    not only from relation planes.
+  - hidden='auto' = spectral rank of L (the natural d_model), not a hand-set int.
+  - HILBERT/TRAJECTORY positional encoding (content-aware PE), replacing implicit
+    position.
+  - VORONOI MoE routing (Milestone B): deterministic content-addressed experts.
+  - Per-edge UNCERTAINTY from rd as temperature/dropout (use the full Glicko
+    tuple, not just eff_mu).
+These are additive on the existing foundry — same ProjectOperator→Factor→GGUF
+spine, more operators wired in, and the spectral rank driving the dim.
+
+--------------------------------------------------------------------------------
+THE POINT
+--------------------------------------------------------------------------------
+Nothing here is trained. Every weight is a projection of a KNOWN operator
+(consensus edge, S³ kernel, trajectory shape, voronoi cell) into the eigenbasis
+of the consensus Laplacian. Because the operators are folds over a preserved
+attestation log (§11), every weight decomposes back to its witnesses — the
+crystal ball, poured into GGUF shapes. Ingest builds the substrate; export molds
+the model; the geometry is not decoration — it is literally the heads, the
+positions, and the routing.
+================================================================================
