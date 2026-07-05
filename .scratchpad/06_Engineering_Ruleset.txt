@@ -54,12 +54,13 @@ Rule #6: No duplicate/overlapping logic without a documented reason it isn't con
       one of the copies.
     - This is the concrete first target for the "foundational set of functions/views" ask:
       a shared view layer that every consumer joins against instead of re-deriving.
-      STATUS UPDATE (2026-07-02): v_consensus_unrefuted BUILT + deployed to 21 files
-      (02_Identified_Issues Issue 30); still outstanding: v_word_senses, the 4 deferred
-      NOT-refuted inliners (relate_path, consensus_peer, senses_with_context x2), and the
-      missing views identified by the 07 audit (v_word_points — ~25 inline copies of the
-      entity+physicality type=1 join — word_anchor(), v_attestation_readable). See
-      .scratchpad/07_SQL_Surface_Audit.txt for the full list + P0-P3 roadmap.
+      STATUS UPDATE (2026-07-05): v_consensus_unrefuted BUILT + deployed to 21 files
+      (Issue 30); consensus_peer migrated too (ee3bfef); edge_rank() centralized (d061beb).
+      Still outstanding: v_word_senses, the remaining NOT-refuted inliners (relate_path,
+      senses_with_context x2), and the missing views from the 07 audit (v_word_points —
+      ~25 inline copies of the entity+physicality type=1 join — word_anchor(),
+      v_attestation_readable). Roadmap + statuses: 07 §5 re-baseline; execution order:
+      .scratchpad/13 Phase 2.
 
 Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
 chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
@@ -80,14 +81,19 @@ wrong point in the sequence is a violation even if the algorithm itself is corre
     6. The descent output is the filtered write list. Writes are pure bulk COPY of
        known-novel rows in tier order. No anti-join. No ON CONFLICT. No server-side
        re-verification. The server receives records; it does not re-derive novelty.
-    Violations as of 2026-07-02 (why OMW ingests ~20x slower than WordNet despite equal
-    input size): descent runs per flush batch (O(batches x tiers) rounds, interleaved with
-    writes) instead of once per working set; apply_batch anti-joins every staged row anyway
-    (ingest_bulk_novel GUC exists for exactly this and nothing sets it -- no C# setter);
-    attestation observations ship un-merged and are collapsed server-side per batch
-    (array_agg + FOR UPDATE SKIP LOCKED row work); consensus fold runs server-side per batch
-    through staging-lifecycle round trips (matchup math never client-side; even the built+
-    verified native fold, Issue 31, is still server-side and still per batch).
+    STATUS RE-BASELINE (2026-07-05, verified against source — the 2026-07-02 violations
+    list preserved in git history is now HISTORICAL): all five phases of the write-protocol
+    plan LANDED. Working-set mode is the adapter default (one builder per record stream,
+    ids probed at most once per set); apply_batch.c is DELETED (drop-files in both
+    manifests) and the ingest_bulk_novel GUC no longer exists — the write lane is
+    NpgsqlWorkingSetApply (pure parallel binary COPY of client-proven-novel rows,
+    client-side duplicate collapse, journal-idempotent retries); Glicko accumulation AND
+    the consensus fold are client-side (ConsensusAccumulatingWriter + NpgsqlConsensusFold,
+    bit-parity-tested against the retired server fold). Remaining Rule #8 gaps:
+    (a) step 5's O(tiers) BULK descent across the whole working set (Issue 19's
+    architectural half); (b) apply of set N does not overlap compose of N+1 (apply-bound
+    at chess scale); (c) seven adapter lanes feed this one spine — unification is
+    .scratchpad/13 Phase 1 (Issue 45).
 
 Rule #9: The CLI is a server workload — it runs with Server GC (DOTNET_gcServer=1 +
 DOTNET_GCHeapCount=8 in env.cmd, guarded). Grounded in: parallel chess compose measured
@@ -122,4 +128,5 @@ Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - Full audit for other instances of the Rule #1 (05_Substrate_Invariants.txt) OR-combined
       order-sensitive/order-insensitive metric bug: survey did one pass, found no other
       confirmed instance, but explicitly flagged this as not exhaustive.
-    - Shared view layer (see Rule #6) not yet started.
+    - Shared view layer: STARTED, see Rule #6's 2026-07-05 status update (v_consensus_
+      unrefuted deployed; v_word_points/word_anchor et al. still missing).

@@ -1,1284 +1,233 @@
-LAPLACE — IDENTIFIED ISSUES (02)
-Consolidated, actionable issue list as of the same review session as 01_Initial_review.txt,
-after moving from static code reading into live execution (rebuild, db-reset, seed-foundation
-in progress, direct SQL queries against a freshly-seeded database). Each entry has a status.
-Statuses used: OPEN (confirmed, not fixed), FIXED (patched this session, verified), CLOSED-
-NOT-A-BUG (investigated, turned out correct), NEEDS-VERIFICATION (plausible, not yet checked
-against live data).
+LAPLACE — IDENTIFIED ISSUES (02) — COMPACTED CURRENT-TRUTH TRACKER
+================================================================================
+Compacted 2026-07-05 from the original append-only log (1,285 lines). Full sagas,
+evidence transcripts, and dead ends are preserved in this file's git history
+(`git log --follow -p .scratchpad/02_Identified_Issues.txt`); this version keeps
+one authoritative entry per issue: final status first, load-bearing detail kept,
+narrative compressed. Statuses: OPEN / FIXED / FIXED-UNVERIFIED (code done, live
+proof pending) / CLOSED (not-a-bug, superseded, or moot) / RESOLVED.
+
+NUMBER COLLISIONS, disambiguated (the old log reused numbers): 32 = SIMD angular
+kernel; 32b = aggregated_add argument swap. 33 = GiST vectorization scoping;
+33b = apply_batch ANALYZE stall; 33c = word_shape_peers deletion. Cross-doc
+references to "Issue 32/33" predate this split — check both.
 
 ================================================================================
-CODEBASE ISSUES — CONFIRMED
+STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
 ================================================================================
+01  CLOSED     highway_mask NULL — superseded by the 29→35 chain, verified live
+02  CLOSED     ISO639 summary line misleading — data was correct
+03  CLOSED     39_highway.sql.in — replaced by functions/highway/* (11 objects), live
+04  OPEN       feature_extractor.cpp full stub                      → plan 13 Phase 4
+05  OPEN       astar.cpp heuristic hardcoded 0.0 (Dijkstra today)   → plan 13 Phase 4
+06  OPEN       MoE experts/attention bias synthesize all-zero       → plan 13 Phase 4
+07  OPEN       highway_mask type-grained, not value-grained (design decision pending)
+08  RESOLVED   55-project sprawl — two consolidation waves, 13 projects, ids verified
+09  RESOLVED   zero documentation — docs 01-13 + CLAUDE.md + this 2026-07-05 overhaul
+10  FIXED      framenet cmd dispatch — see 21 (the "cosmetic" fix was the regression)
+11  FIXED      env.cmd PATH growth — LAPLACE_ENV_LOADED guard, verified
+12  RESOLVED   'ocal' error — PowerShell 7/Win11 KB5095093 regression; use Bash tool
+13  FIXED      seed-step independent :verify_step (evidence_count per source, exit 3)
+14  CLOSED     layer-marker convention CONFIRMED (p_type/p_source evidence_count shape)
+15  FIXED      concurrent-ingest crash — all 3 layers (lock/guard/disposal-ownership)
+16/18 FIXED    mutex guard wrong process name — Win32_Process command-line match
+17  FIXED      apply_batch write race — advisory lock (lock lives on in the new lane)
+19  SPLIT      per-call O(n²) descent FIXED; O(tiers) BULK descent OPEN → 13 Phase 1.6
+20  CLOSED     content_root_id rc=-2 — a ZIP in the text dir; decomposer glob fixed
+21  FIXED      framenet batch-label error — reverted to call-form dispatch (see below)
+22  CLOSED     word_shape_peers SQL rewrite — superseded by _fast + deletion (33c)
+23  OPEN       generic native KNN DRIVER missing (narrowed by the 0.1 correction:
+               primitives ARE exposed via laplace_geom; _fast is the one driver
+               instance; remaining routers listed in 07 §2.2c)  → plan 13 Phase 3
+24  RESOLVED   decomposer consolidation — folded into Issue 08's waves
+25  FIXED      MarkProven cache poisoning (orphaned trajectories) — verified corpus-wide
+               RESIDUAL OPEN: ~900-row tier-0 entities/physicalities count mismatch
+26  FIXED      anagram false-positive (OR ang branch) — Frechet is sole admission gate
+27  FIXED      GIN large-array probe collapse — native containers_of() hop loop
+28  FIXED      walk_branches exponential blowup — per-level batch + global HTAB dedup;
+               depth6/breadth12: never-completed → 45.8s. Follow-up profiling OPEN
+               (dominant cost at scale unknown: SPI replan vs qsort/HTAB vs repalloc)
+29  FIXED      IntentStage null-vs-zero mask marshal (regression test in place)
+30  RESOLVED   v_consensus_unrefuted built + 21 files migrated; last 4 inliners:
+               consensus_peer DONE (ee3bfef); relate_path + senses_with_context x2 OPEN
+31  RESOLVED   native incremental fold built + proven — then SUPERSEDED: fold is now
+               CLIENT-side (NpgsqlConsensusFold, parity-tested; see Rule #8 note below)
+32  RESOLVED   SIMD angular batch kernel — real but modest end-to-end (lesson kept below)
+32b CLOSED     aggregated_add arg swap — fixed + tripwires; poisoned rows died with old DB
+33  CLOSED     GiST/PostGIS vectorization — premise wrong; bound-param KNN is 50ms (Rule #4)
+33b FIXED      apply_batch ANALYZE stall — then whole lane superseded by working-set apply
+33c FIXED      SQL word_shape_peers deleted (drop-file in both manifests)
+34  CLOSED     anti-join throughput — superseded by the pure-COPY working-set lane;
+               re-baseline gates against the new lane if perf gates are revived
+35  FIXED      rc==1-vs-0 success-code misread — the final highway_mask cause; verified
+               1,632,015/1,632,019 unicode attestations non-zero post-reseed
+36  FIXED      attestations_highway_hash index catastrophe — dropped + removed from source
+37  OPEN       OMW grammar_compose_probe rc=-2 transient — instrumented; wait for repro
+38  FIXED      MSB3027 mixed stale binaries — LESSON: copy-fail ⇒ output tree poisoned
+39  FIXED      chess PGN lane single-threaded + silent — parallel feeder/worker lane
+40  FIXED      workstation GC killed parallel compose — Server GC in env.cmd (Rule #9)
+41  FIXED      unbounded compose→consume channel — bounded workerCount*2 (Rule #10)
+42  FIXED      fixed 8 GiB working-set budget OOM — RAM-derived phys/16 [1,8] GiB (Rule #12)
+43  FIXED      grammar-compose PRECEDES bloat + O(n²) — JSON modalities emit none; O(n) text
+44  VERIFIED   run-scoped index cycling — 2026-07-05 reseed: OMW = 1 drop, 3 batch
+               applies, 1 rebuild bracket. Economics confirmed (coord GiST 17s@2.2M
+               → 130s@14.9M rows — O(table) per rebuild)
+44b OPEN       unicode lane ended its run with indexes DOWN (no rebuild logged);
+               iso639's journal recovery re-created all 26. IngestUnicodeViaRunnerAsync
+               appears to miss the run bracket — Issue 45 biting. Journal safety held.
+45  OPEN       ingestion lane fragmentation — 7 lanes, 4 dual-implementation sources
+               (full map + fix = .scratchpad/13 Phase 1). Live bite: 44b; also
+               WORKING_SET_SUBTRACTION grows per set on OMW (292k→623k claimed-novel
+               rows subtracted — EmitNodes/hot-cache gap reproducing beyond chess)
+46  OPEN       read-side fragmentation — no single gateway; 07 §4 P2 entry points unbuilt
+47  FIXED-IN-SOURCE (deploy pending) — translate_to was 68.6s: synset_members ran
+               lexical_peers (~75ms native KNN) PER ROW via `<> ALL(stable_fn())`
+               pushed into index-scan filters; MATERIALIZED CTE hoist = 65,311ms →
+               349ms (187x), verified live 2026-07-05. Chronic half OPEN: the whole
+               serving chain (senses/synset_members/translate_to/recall_*) is
+               non-inlined SQL functions stacking opaque Function Scans (STRICT +
+               ORDER BY + CTE inlining blockers) — optimizer fences everywhere;
+               the Rule #1 native-SPI cure (translate_to_fast) not built. Detail
+               + lesson L12 below; live profile in doc 14 §8.
+48  OPEN       "substrate counts" seed summary prints planner ESTIMATES (~): consensus
+               showed 0 after iso639 (first fold, never analyzed) and lagged by 1.5M
+               after OMW e2. Real counts verified fine (10,112,876; ISO639-attested
+               consensus 44,745). Fix: real count or label as estimate. Issue 02 family.
+49  OPEN       walk_text (generation lane) TIMES OUT (>90s) at 14.9M physicalities —
+               stuck in corpus_whitespace_vocab_indices → SQL constituents() per row.
+               Retrieval (recall) answers in 150-360ms; GENERATION does not complete.
+               The conversational fallback lane (recall_fallback_walk) rides this.
+50  OPEN       recall intent router extracts topics naively: 'facts about give' takes
+               'facts' as the topic (frame-chains "facts→of→Partitive"). Issue 46's
+               resolve(text,context) entry point is the structural fix.
+NU1903 FIXED   transitive Microsoft.OpenApi pinned 2.7.5, CPM transitive pinning on
 
-ISSUE 01 — highway_mask not populated on real production attestations
-Status: OPEN (upgraded from "read in code" to "confirmed against live data")
-Evidence: after a real ISO639Decomposer ingest (7,929 IS_LANGUAGE_CODE attestations, 184
-HAS_ISO639_1_CODE, 8,336 HAS_DEFINITION, etc. — see substrate query below), a direct query
-against `attestations` shows highway_mask IS NULL on every sampled row:
-    SELECT relation_canonical(a.type_id), encode(a.highway_mask,'hex')
-    FROM attestations a WHERE relation_canonical(a.type_id) IN
-    ('HAS_ISO639_1_CODE','IS_LANGUAGE_CODE') LIMIT 4;
-  -> mask_hex column empty for all 4 rows.
-Mechanism exists (Laplace.SubstrateCRUD/SubstrateChangeBuilder.cs:155-156,
-HighwayPerfcache.MaskForRelationType), but whatever code path ISO639Decomposer's attestations
-go through either never calls it, or the highway perfcache wasn't loaded at ingest time for
-this run. Author confirmed this is real: "its flawed obviously (evidenced by your empty
-rows)." Not yet checked whether this affects only ISO639Decomposer or every decomposer —
-next step is the same query against unicode/cili attestations.
-
-ISSUE 02 — CLI's own "check languages" summary line is misleadingly narrow
-Status: CLOSED-NOT-A-BUG (the underlying data is correct; only the self-report is misleading)
-The ISO639 ingest run prints "check languages: 184 ISO code attestations" as a spot-check.
-184 is exactly the count of HAS_ISO639_1_CODE attestations (ISO 639-1 really does define
-~184 two-letter codes) — but the CLI's own summary line doesn't make clear it's reporting
-one narrow relation type out of many. The real ingest is comprehensive: IS_LANGUAGE_CODE
-7,929, HAS_LANGUAGE_SCOPE 7,929, HAS_LANGUAGE_TYPE 7,929, HAS_DEFINITION 8,336,
-HAS_NAME_ALIAS 8,102, USES_SCRIPT 978, MEMBER_OF_MACROLANGUAGE 459, HAS_ISO639_2T_CODE 420,
-HAS_ISO639_2B_CODE 420, SUPERSEDED_BY 212, HAS_VARIANT_OF 154, IS_A 35. Worth fixing the
-summary line's wording so it doesn't read as under-coverage to whoever runs it next (it read
-that way to the author on first glance, correctly triggering suspicion that led to finding
-Issue 01).
-
-ISSUE 03 — extension/laplace_substrate/sql/39_highway.sql.in is empty
-Status: OPEN (from 01_Initial_review.txt 3.3, author-confirmed as a real gap: "it's a gap")
-0 bytes, tracked, recently touched. Presumably meant to expose highway_mask machinery at the
-SQL level. May be directly related to Issue 01 — if the SQL-level surface for highway_mask
-was never finished, that's consistent with the mask never getting populated end-to-end.
-
-ISSUE 04 — feature_extractor.cpp is a full stub
-Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
-engine/synthesis/src/feature_extractor.cpp: every function either returns an error code,
-nullptr, or 0.
-
-ISSUE 05 — astar.cpp heuristic is hardcoded to 0.0
-Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
-engine/core/src/astar.cpp — currently uniform-cost search / Dijkstra, not true A*.
-
-ISSUE 06 — arch_template.cpp: MoE experts, attention bias, tied to zero
-Status: OPEN (from 01_Initial_review.txt 3.3, unchanged)
-Any recipe with num_local_experts > 0 or attention_bias: true synthesizes tensors that are
-structurally required but silently all-zero.
-
-ISSUE 07 — highway_mask is relation-TYPE grained, not relation-VALUE grained
-Status: OPEN (from 01_Initial_review.txt 3.4, unchanged)
-One bit for "this touches a HAS_POS relation," none for which POS value; all dynamic
-per-label relations (DEP_* deprel labels) collapse onto their family-root bit.
-
-ISSUE 08 — 55-project decomposer sprawl / ~260 dormant tree-sitter grammar submodules
-Status: RESOLVED this session (both halves)
-(a) Decomposer sprawl: 19 decomposer libraries + 12 test projects consolidated into 2
-projects (Laplace.Decomposers + Laplace.Decomposers.Tests) with per-source subfolders;
-namespaces and SourceId/SourceName strings preserved byte-identically. Verified: full
-rebuild-all.cmd, 892 tests green, isolated re-ingest of unicode/iso639/cili/wordnet into a
-fresh DB produced hash-identical content-addressed ids vs canonical laplace DB, and forced
-re-ingest short-circuited with 0 new rows. Also centralized TFM/Nullable/LangVersion into
-Directory.Build.props and package versions into Directory.Packages.props (CPM), deduped
-NumericClassId wrappers / path-probing / CILI UTF-8 helpers, migrated ISO onto
-DecomposerBatch, and deleted dead scripts (decomposer-clone.sh, ladder-ci, thin wrappers,
-scripts/win/_*.sql debug debris, King/lexical one-off cmd cluster).
-(b) Dormant grammar submodules: author decision = KEEP. Tree-sitter is the parsing engine;
-the 299-submodule pool is intentional (wire-on-demand), as are the postgresql/postgis/geos/
-proj/gdal submodules (planned unified Intel/Eigen/Spectra-linked rebuild). Documented in
-engine/core/grammars/README.md, including why generated/sql + generated/swift exist
-(upstream gitignores parser.c; checked-in generated copies keep the build hermetic — with a
-regeneration rule when those submodules are bumped) and that generated/pgn is homegrown.
-(c) Second wave (author-requested, same session): the remaining 28 projects consolidated to
-13. Laplace.Core = Engine.Core + Engine.Dynamics + Engine.Synthesis + Modality (folders
-Core/Dynamics/Synthesis/Modality); Laplace.Substrate = SubstrateCRUD + Ingestion +
-Decomposers.Abstractions + Containers.Abstractions (folders Crud/Ingestion/Abstractions/
-Containers); Laplace.Chess = Modality.Chess + Chess.Service (folders Modality/Service);
-Api.Contracts folded into Endpoints.OpenAICompat/Contracts. 12 test projects -> 5
-(Core.Tests, Substrate.Tests, Decomposers.Tests, Endpoints.OpenAICompat.Tests, Chess.Tests).
-All namespaces preserved byte-identically (assembly names changed; nothing binds to them —
-DllImport targets native DLLs, no reflection-by-assembly-name found). Migrations kept as a
-standalone exe (scripts/pipeline.sh, publish.cmd, Justfile all invoke it directly).
-Laplace.Chess.Uci kept (separate deployable, laplace-uci.exe). One real merge hazard found
-and fixed: GrammarPerfcacheFixture (ex-Abstractions.Tests) called CodepointPerfcache.Unload()
-on dispose — harmless when each suite was its own process, but in the merged Substrate.Tests
-assembly it yanked the process-global native T0 perfcache out from under the ex-Ingestion
-tests running in parallel ("content witness requires the T0 perfcache"). Fixture now loads
-only if not already loaded and never unloads. Verified: 891 tests green across 5 suites
-(old-vs-new discovered-test-list diff on Laplace.Decomposers.Tests is empty; the 892-vs-891
-delta is xunit run-level counting noise, not a lost test), validate-pipeline.py OK.
-
-ISSUE 09 — zero documentation anywhere in the repository
-Status: IN PROGRESS (this review series — 01, 02, and a forthcoming CLAUDE.md are the first
-docs to exist in this repo)
-
-ISSUE 10 — seed-step.cmd "framenet" branch used an anomalous inline parenthesized IF block
-Status: FIXED this session
-Every other step dispatches via `if /i "%STEP%"=="x" goto run_ingest`. framenet alone used
-    if /i "%STEP%"=="framenet" (
-      call :run_ingest_impl
-      exit /b %ERRORLEVEL%
-    )
-— a parenthesized block calling a subroutine that itself contains further parens, a known
-cmd.exe parser trap, and inconsistent with every sibling entry. Rewritten to match the
-working `goto run_ingest` pattern used by unicode/iso639/cili/wordnet/etc. Verified framenet
-ingest runs cleanly after the fix (once combined with Issue 12's real root-cause fix below —
-this edit alone did not resolve the symptom that led to finding it, see Issue 12).
-
-ISSUE 11 — env.cmd has no idempotency guard; PATH grows unboundedly across repeated calls
-Status: FIXED this session, verified
-env.cmd unconditionally prepends 5 PATH segments (plus re-runs Intel oneAPI's own
-setvars.bat, which does the same) every time it is `call`ed, with no guard against being
-sourced more than once in the same process. seed-foundation.cmd — a NEW file, added in the
-same commit range as the other seed-* scripts — calls seed-step.cmd (which calls env.cmd)
-once per foundation source, all inside one cmd.exe process. Measured: PATH grew ~603
-characters per call (4615 -> 5218 -> 5821 -> 6424...), which by the 5th-6th step in a 10-step
-loop pushes past cmd.exe's ~8191-character line-length ceiling, producing "The input line is
-too long" and corrupted/truncated command execution. No caller before seed-foundation.cmd
-ever invoked env.cmd more than once per process, so this was always latent and never
-triggered until now. Fixed by adding to the top of env.cmd:
-    if defined LAPLACE_ENV_LOADED exit /b 0
-    set "LAPLACE_ENV_LOADED=1"
-Verified: PATH length now holds flat (4615) across 4 repeated calls in one process instead of
-growing. This is a real, load-bearing fix — distinct from Issue 12 below, which is a separate
-bug that was actually responsible for the specific 'ocal' symptom chased for most of this
-session.
+RULE #8 PIPELINE STATUS (supersedes several entries above): ALL FIVE PHASES of the
+write-protocol plan are landed. Phase 2 = NpgsqlWorkingSetApply (pure parallel binary
+COPY of client-proven-novel rows, advisory lock, journal-idempotent retries; 2.2x the
+old lane; forced-repeat test proved exact observation-count doubling and 0 novel rows).
+Phase 3 = CLIENT-side consensus fold (NpgsqlConsensusFold — same native glicko2 via
+P/Invoke, bit-parity-tested against the old server fold). Phase 4 = working-set wiring
+(WorkingSetMode.Enabled default across adapters). Phase 5 = apply_batch.c DELETED,
+drop-files in both manifests; ingest_bulk_novel GUC gone. The stale "violations"
+paragraph in 06 Rule #8 is re-baselined as of 2026-07-05. Remaining Rule #8 gap =
+Issue 19's bulk half + Issue 45's lane unification.
 
 ================================================================================
-NOT A CODEBASE ISSUE — TOOLING/ENVIRONMENT (mine, not the author's)
+OPEN ISSUES — DETAIL
 ================================================================================
 
-ISSUE 12 — 'ocal' is not recognized (ROOT CAUSE: PowerShell 7 / Windows 11 regression, not
-a Laplace bug)
-Status: RESOLVED — root cause identified, not fixable in this repo, workaround adopted
-For most of this session, invoking any .cmd file in scripts/win/ via the PowerShell tool
-(cmd /c "...", direct invocation, `$var; cmd /c $var`, all styles tried) produced:
-    'ocal' is not recognized as an internal or external command, operable program or batch
-    file.
-immediately, before any script output, including with zero arguments. Extensive bisection
-wrongly suspected file corruption (raw bytes checked clean via xxd), PATH growth (real bug,
-Issue 11, but not the cause of this specific symptom — it persisted even in a single fresh
-process with no accumulation possible), and the framenet parenthesized block (real anomaly,
-Issue 10, but fixing it did not resolve 'ocal'). Actual root cause, confirmed via web search:
-GitHub issue PowerShell/PowerShell#27634 — "PowerShell & operator fails to invoke .cmd/.bat
-files ... (Windows 11 KB5095093 regression)". After that Windows update, PowerShell 7's
-process-creation logic for launching .cmd/.bat files mis-slices the constructed command
-line. Every .cmd in this repo has `setlocal EnableDelayedExpansion` as line 2 — a
-truncated/mis-sliced launch landing partway into that line reads exactly as
-"'ocal' is not recognized" (a fragment of "setlocal"). Confirmed by elimination: the Bash
-tool (git-bash/MSYS2, a completely different process-spawning code path, not pwsh's
-Process/CreateProcess route) never reproduced the symptom under any invocation style tested.
-Workaround adopted for the rest of this session and recommended going forward on this
-machine: invoke all scripts/win/*.cmd files through the Bash tool (`cmd //c "scripts\\win\\
-x.cmd args"`), never through the PowerShell tool directly. This is an OS/PowerShell defect on
-this Windows 11 build, not something to "fix" in the repo.
-Minor, harmless side-effect noticed once routed through the Bash tool: the
-`tasklist ... | find /I "Laplace.Cli.exe"` mutex-guard and wait-for-exit poll in
-seed-step.cmd's :run_ingest_impl/:wait_cli_exit resolve `find` to git-bash's
-/usr/bin/find.exe (GNU findutils) instead of Windows' System32\find.exe, since MSYS2's PATH
-puts its own /usr/bin ahead of System32 for children spawned that way. This produces
-cosmetic "find: '/I': No such file or directory" / "find: 'Laplace.Cli.exe': No such file or
-directory" lines but does not block ingestion — real ingest work completes successfully
-around it (verified: iso639 ingest completed fully — 43,088 relations materialized,
-layer_complete=True — despite these lines appearing at the tail). Not fixed; flagging as a
-known cosmetic side-effect of the Bash-tool workaround, not worth chasing further unless it
-starts actually blocking something.
+ISSUE 04/05/06 — engine synthesis stubs (feature_extractor all-stub; astar h=0.0;
+MoE/attention-bias tensors memset-zero). Not free-floating debt: all three sit on the
+foundry build path and are scoped inside plan 13 Phase 4 / docs 09+12 (astar heuristic =
+admissible geometric lower bound; MoE = voronoi routing, Milestone B). Do not "fix"
+them out of context.
 
-ISSUE 13 — seed-step.cmd / seed-foundation.cmd run no independent post-step verification
-Status: OPEN
-Unlike seed-full.cmd/seed-everything.cmd/e2e-master.cmd (which all run
-scripts/sql/substrate-audit.sql after finishing — substrate_health(), fake_tier_band_count(),
-identity_law_violations(), per-layer HasLayerCompleted checks, multi_source_entity_count(),
-render_gaps()), seed-step.cmd and seed-foundation.cmd — the scripts actually used for the
-foundation ladder — have no such step. The only "did this work" signal is the ingesting
-CLI's own self-printed summary line (e.g. "layer_complete=True"), never independently
-checked against the database by the script itself. Author's reaction on realizing this had
-to be checked by hand: "there should actually be a query against the db after it." Fix:
-seed-step.cmd should call a status query (at minimum evidence_count() for the layer just
-ingested) after :run_ingest_impl succeeds, the same way the more mature seed-* scripts do.
+ISSUE 07 — highway_mask is relation-TYPE grained (153 canonical types; DEP_*/FEAT_*
+collapse to family-root bits). One bit says "touches HAS_POS", nothing says which POS.
+Author expectation was finer grain. Design decision, not a bug: value-grained masks
+change the mask domain (a reseed-class change). Decide before any mask-consuming
+feature assumes value-level filtering.
 
-ISSUE 14 — layer-completion marker convention is CONFIRMED CORRECT (positive finding)
-Status: CLOSED — verified working
-Independently verified WordNet's layer-2 completion, bypassing the CLI's self-report
-entirely:
-    SELECT evidence_count(
-      p_type => canonical_id('substrate/type/HasLayerCompleted/2/v1'),
-      p_source => source_id('WordNetDecomposer')
-    );  -- returned 1
-Note for future sessions: HasLayerCompleted/{layer}/v1 is the relation TYPE of a generic
-attestation (filter on a.type_id + a.source_id via evidence_count(p_type=>..., p_source=>...)
-— see extension/laplace_substrate/sql/functions/ops/evidence_count.sql.in), not something a
-subject entity gets IS_TYPED_AS'd to. Got this wrong on the first attempt this session
-(used a.subject_id instead of a.type_id, plus a spurious IS_TYPED_AS filter) before checking
-the real convention across ensure-foundation.sh / substrate-audit.sql /
-decomposer-gate-check.py / LayerCompletion.cs, which all agree on the p_type/p_source shape
-above. Worth remembering the pattern rather than re-deriving it next time.
+ISSUE 19 (bulk half) — descent/dedup should be ONE O(tiers) bulk pass across the whole
+in-flight working set (Rule #8 step 5), not per-document probe calls however efficient.
+Working-set mode already caches probed ids per set; the residual is cross-document
+tier-scoped bulk probing. Lands with plan 13 Phase 1.6 (needs the single spine first).
 
-ISSUE 15 — concurrent ingest crash (real, not hypothetical)
-Status: OPEN — needs a decision (guard concurrent ingests properly, or confirm it's safe and
-fix the crash)
-Ran OMW and a document ingest concurrently against the same database as a deliberate test
-("can we run two ingests at the same time? Let's find out"). Both progressed for several
-minutes, then the document ingest hit:
-    PostgresException 23505: duplicate key value violates unique constraint "entities_pkey"
-    Key (id)=(\x533fc56983559b11986ef008b897a2b1) already exists.
-followed immediately by an unhandled ObjectDisposedException on IntentStage
-(IntentStage.get_EntityCount, via NpgsqlSubstrateWriter.ApplyManyAsync ->
-ConsensusAccumulatingWriter), which aborted the whole run rather than being caught/retried.
-The seed-step.cmd mutex guard (see Issue 16) does not prevent this scenario — it does not
-detect the already-running process, so nothing stops two ingest processes from racing on the
-same content-addressed insert path. Two possible fixes worth deciding between: (a) make the
-duplicate-key case a proper retry/skip path instead of a fatal abort (content-addressing
-means a duplicate key here should mean "someone else already wrote this exact content,"
-which is not actually an error), or (b) make the mutex guard actually work so concurrent
-ingests can't happen at all. (a) seems more in the spirit of the content-addressing design;
-(b) is the more conservative fix.
+ISSUE 23 (residual) — no GENERIC native KNN driver (candidate generation + ranking in
+one native call). word_shape_peers_fast (recall.c) is the proven template; still SQL
+routers: structural_neighbors/locale/cluster(+batch), consensus_peer geometric arm,
+metric_edges. All share the Rule #4 correlated-CTE anchor defect class. Plan 13 Phase 3.
 
-ISSUE 16 — seed-step.cmd's concurrency guard and exit-wait poll target the wrong process name
-Status: OPEN
-:run_ingest_impl's "already running" check and :wait_cli_exit's poll loop both do
-`tasklist /FI "IMAGENAME eq Laplace.Cli.exe" | find /I "Laplace.Cli.exe"` — but `dotnet run`
-launches the actual process as `dotnet.exe`, not `Laplace.Cli.exe`. Confirmed empirically:
-`tasklist /FI "IMAGENAME eq dotnet.exe"` showed active processes throughout ingestion while
-the Laplace.Cli.exe-based check reported nothing running, both for the mutex guard (silently
-lets a second ingest start, contributing to Issue 15) and for the post-run wait (returns
-immediately instead of actually waiting for the process to exit, which is why the author
-observed "wordnet's log looked finished but the shell didn't close" — worth noting: that
-specific observation turned out to be a red herring from using tasklist's dotnet.exe count as
-a liveness signal, since dotnet leaves an idle build-server process resident between runs
-which is unrelated to whether ingestion finished; but the underlying wrong-process-name bug
-in :wait_cli_exit is real regardless).
+ISSUE 25 (residual) — tier-0 entities vs physicalities counts mismatched by ~900 rows
+after BuildTier0Seed (suspect: BuildTier0Seed and BuildBatch computing the same
+physicality id via two paths that don't dedup cleanly). No orphaned references —
+redundant rows only. Unverified since; re-check on the next fresh reseed.
 
-ISSUE 17 — apply_batch.c had no protection against concurrent content-addressed writes
-Status: FIXED this session, verified against the original repro
-Root cause of the entities_pkey/physicalities_pkey unique-violation crash first hit when OMW
-and a document ingest ran concurrently (see the original incident above). The anti-join dedup
-(LEFT JOIN ... WHERE id IS NULL, extension/laplace_substrate/src/apply_batch.c) is correct in
-shape but has a check-then-act race: two concurrent apply_batch calls can both see the same
-content-addressed id as "not yet present" before either commits, both attempt the insert, one
-wins, one hits a raw unique-violation. This is not a normal application error to retry around
--- content-addressing means the "conflict" is semantically "we agree," not "something went
-wrong" -- so the fix is prevention, not a retry/ON CONFLICT reaction. Added
-`SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))` immediately after
-SPI_connect() in laplace_apply_batch, serializing concurrent apply_batch calls against each
-other (transaction-scoped, auto-released at commit/rollback, acquired once per already-bulk
-batch call, not per row). Rebuilt, redeployed, reseeded from a fresh database afterward;
-unicode/iso639/cili/wordnet/verbnet/propbank all completed cleanly under the new build with
-no recurrence of the race.
-Note: TransientErrorRetryPolicy.ConcurrencyRetry (app/Laplace.Ingestion/
-TransientErrorRetryPolicy.cs:32-37) already correctly classifies 23505/40001/40P01 as
-transient and was firing correctly (confirmed via log: "Transient ingest error... will retry
-whole batch") -- the retry classification was never the bug. What made the retry itself fail
-was NpgsqlSubstrateWriter.ApplyManyAsync unconditionally disposing the caller-owned
-IntentStage objects (prebuiltStages, i.e. batch's own SubstrateChange.IntentStages) in its
-finally/else branches on every call including a failed one about to be retried by the same
-batch -- an ObjectDisposedException on IntentStage.get_EntityCount masking the real duplicate-
-key issue. This disposal-ownership bug was found but NOT fixed/kept -- superseded by the
-prevention-based fix (the advisory lock), since preventing the race outright removes the need
-for that retry path to ever fire for this specific cause. If 23505/40001/40P01 legitimately
-recur from some other cause, the disposal-ownership bug is still latent and would still need
-fixing separately.
+ISSUE 28 (follow-up) — walk_branches at depth6/breadth12 completes in 45.8s
+(155k nodes, ~3,400 nodes/s vs containers_of's ~45,000/s). Per-subject LATERAL bound
+was tried and REVERTED (didn't help — cost is frontier width, not per-subject volume —
+and it silently re-ranked by the wrong key). Dominant cost unmeasured: per-level SPI
+replan vs C-side qsort/HTAB vs repalloc churn. Needs a profiling pass; don't guess.
 
-ISSUE 18 — seed-step.cmd's mutex guard and exit-wait check the wrong process name (confirmed
-again, contributed to Issue 17's conditions)
-Status: OPEN (unchanged from Issue 16, restated here because it's directly why Issue 17 could
-happen at the .cmd orchestration layer at all -- the guard that should have prevented two
-ingest processes from running at once never fires, since it looks for `Laplace.Cli.exe` and
-the real process is `dotnet.exe`)
+ISSUE 37 — OMW compose rc=-2, transient, non-reproducible (clean identical rerun; all
+1,388 wns files strict-UTF-8-verified; decoder + carry logic audited correct). Prime
+suspect: concurrency-sensitive interleaving under the old Issue-36 slowness.
+Instrumented (per-file path + DescribeContent on compose exceptions) — if it fires
+again it self-identifies. Do NOT chase without a reproduction.
 
-ISSUE 19 — descent_probe.c: O(n^2) traversal in laplace_content_descent_bitmap_core
-Status: FIXED this session, not yet verified against a real ingest (rebuild/redeploy pending)
-extension/laplace_substrate/src/descent_probe.c: the DFS/stack-based descent that clears
-bitmap bits for "not yet present" nodes rescanned the ENTIRE n-length parents[] array to find
-each popped node's children (`for (i = 0; i < n; i++) if (parents[i] == node) ...`), inside
-the while-loop that visits every node once -- O(n^2) total instead of O(n). For a large
-document (tens of thousands of codepoints/graphemes/words per probe call), this is hundreds
-of millions of comparisons per call and gets worse as ingested files get bigger, which matches
-what was observed live: a single content_descent_bitmap call actively running 53+ seconds
-(confirmed via pg_stat_activity: state=active, no wait_event, so genuinely computing, not
-blocked) partway through a real document ingest run. Fixed by building a children-index once
-(bucketed linked-list by parent, O(n) construction) before the traversal instead of rescanning
-per node. IMPORTANT CAVEAT (author's correction, preserved verbatim in spirit): this fixes the
-within-call algorithmic complexity only. It does NOT address the deeper, repeatedly-stated
-architectural point of this session -- that descent probing (and dedup generally) should be a
-genuine BULK, tier-scoped operation across the whole in-flight batch/corpus, not a per-
-document call no matter how efficient each individual call's internal algorithm is. Each of
-the 34 files in a document ingest still gets its own separate probe call and SPI round-trip
-today. The O(n)-per-call fix is real and worth keeping, but it is explicitly NOT the O(tier)
-bulk-dedup architecture the author is asking for -- flagged as still-open, larger scope.
+ISSUE 44 — VERIFIED (2026-07-05 reseed) for the spine lanes; see status index.
+ISSUE 44b — unicode's bespoke lane exited without the run-end rebuild (indexes
+recovered from journal at the NEXT run's begin — designed safety net, but the
+bracket should close on every exit path). Check IngestUnicodeViaRunnerAsync
+wraps BeginBulkRunAsync/CompleteBulkRunAsync like the standard lane; candidate
+first migration for plan-13 Phase 1. Full timing evidence: doc 14 §6.
 
-ISSUE 20 — laplace_content_root_id failing with rc=-2 on the current document ingest
-Status: OPEN, actively blocking verification
-Second attempt at document ingest (after the Issue 17 fix, fresh reseed) crashed with
-`InvalidOperationException: laplace_content_root_id failed (rc=-2)`. Traced the native path
-(engine/core/src/content_witness_batch.c:99-115, content_tree_build): rc=-2 can come from four
-different places collapsed into one code (len==0; laplace_text_decomposer_run failing;
-hash_composer_run failing; or a successfully-built tree with zero nodes) -- the caller cannot
-currently tell which. No "first unit" filename was logged this time (unlike the earlier
-dorian.txt crash), so the specific file/content that triggered it has not yet been identified.
-Next step: instrument or bisect to find the triggering file, then determine which of the four
-collapsed failure modes it actually is; consider giving content_tree_build distinct return
-codes per branch so this doesn't require re-deriving from source every time it happens.
+ISSUE 45 — ingestion lane fragmentation (found 2026-07-05 audit, full map in
+.scratchpad/13 §2.1): seven decomposer→pipeline mechanisms; atomic2020/conceptnet/
+omw/wiktionary each have TWO live implementations (StructuredGrammarIngest vs
+NativeGrammarIngest/ETL), disambiguated only by special-case ordering in
+IngestCommands.cs:131-147. Fix = plan 13 Phase 1 (single spine + architecture gate).
 
-ISSUE 21 — framenet: "The system cannot find the batch label specified - run_ingest"
-Status: OPEN, cause not yet found
-During the post-fix foundation reseed, framenet failed with this cmd.exe error despite
-`:run_ingest` existing in seed-step.cmd (confirmed: only one definition, byte-identical
-`goto run_ingest` dispatch line to its working siblings verbnet/propbank which succeeded
-immediately before it in the same script execution). Not yet reproduced in isolation (an
-isolated re-run was queued but the investigation was redirected before it completed). Unlike
-the original "ocal" saga, this is not obviously a PowerShell-invocation issue since the whole
-foundation run was already going through the Bash-tool workaround. Genuinely unexplained
-right now -- do not assume a cause without reproducing it first.
+ISSUE 46 — read-side fragmentation (07 §4): SubstrateClient and QueryCommands are
+parallel read surfaces; six string→id paths; label() vs render() unresolved; missing
+canonical entry points (resolve/entity_form/decompose/reconstruct_content). Partially
+improved by d061beb/7313fdc/ee3bfef; remainder = plan 13 Phase 2.
 
-ISSUE 22 — word_shape_peers(): unindexed brute-force join + redundant per-row function calls
-Status: FIXED this session (query rewritten), NOT redeployed/verified with EXPLAIN ANALYZE
-after the fix, and explicitly flagged by the author as still not the right architecture
-extension/laplace_substrate/sql/functions/lexical/word_shape_peers.sql.in pre-joined on
-`type_id` (not actually selective -- matches nearly the whole vocabulary, e.g. every "word"-
-tier entity) against the full physicalities table before sorting by KNN distance. EXPLAIN
-ANALYZE on the live substrate: 2,827,871 physicalities rows and 1,246,798 entities rows
-pulled into a 139MB hash join to produce 6,442 real candidates, 1.7s in isolation with no
-contention -- explains how this compounds into a multi-minute hang under real concurrent
-load (see Issue 20's sibling incident, the WordNet "dog" health-check hang from the earlier
-database generation). Also had `word_case_class_surface(p_word)` evaluated once per output
-row (up to 48x) despite p_word being constant across the whole call -- textually called once,
-executed up to 48 times. Rewrote as three CTEs: compute `me` and its case-class once, drive a
-bounded 500-row KNN-index-ordered candidate window off physicalities_coord_gist instead of
-the type_id hash join, then apply type/n_constituents/case-class as post-filters on that small
-window. Author's explicit pushback, preserved: a CTE-based fix is still SQL doing iterative
-work (RBAR/cursors/loops-in-spirit) that "should" be a native C/SPI function -- checked, and
-confirmed there is NO native geometric KNN function anywhere in this codebase; even
-laplace_nearest_entity (assumed to be the canonical native primitive to point at instead) is
-itself pure SQL with the identical `ORDER BY coord <<->> point LIMIT k` pattern. This is a
-systemic gap (see Issue 23), not something specific to word_shape_peers. Open question left
-unresolved: build a real native KNN primitive now, or accept the CTE fix as consistent with
-the codebase's existing (if architecturally thin) pattern and track the native-KNN gap
-separately. Not yet decided; not yet redeployed after the edit; not yet re-verified.
-
-ISSUE 23 — no native (C/SPI) geometric KNN function exists anywhere in the codebase
-Status: OPEN, systemic, not yet scoped as a task
-Confirmed via `api('4d')`, `api('nearest')`, `api('knn')`, `api('l2')`, `api('angular')`,
-`api('frechet')`, `api('geodesic')`, `api('hilbert')` and a source grep across
-extension/laplace_substrate/src and extension/laplace_geom/src for any PG_FUNCTION_INFO_V1
-wrapper touching hilbert4d/math4d/super_fibonacci/procrustes/gram_schmidt/eigenmaps/astar --
-none exist. The real native 4D/geometric code (engine/core/src/hilbert4d.c, math4d.c,
-engine/dynamics/src/procrustes.cpp, engine/core/src/astar.cpp) is never exposed to SQL at all.
-Every SQL-level "nearest neighbor" / "shape peer" / KNN-shaped function (laplace_nearest_entity,
-nearest_neighbors_4d, word_shape_peers) is pure SQL leaning entirely on the physicalities
-GiST index (gist_geometry_ops_nd) for `ORDER BY coord <<->> point LIMIT k`, with zero
-custom native traversal, cursoring, or early-termination logic. This is the concrete,
-specific version of the author's repeated "SQL/C# should be orchestrators, native C/C++/SPI
-should be the heavy lifter" architectural point -- for this entire class of query (arguably
-the single most load-bearing operation in the whole substrate, since it underlies recall,
-converse, and word-relation lookups), there is currently zero native implementation to
-orchestrate. Explicitly not yet decided whether/when to build one.
-
-ISSUE 24 — 55-project solution, ~20+ of them one-project-per-decomposer, no
-Decomposer<T>-shaped consolidation
-Status: OPEN, discussed at length, explicitly deferred by the author (not rejected, not yet
-scheduled -- "not gonna force you to jump right into it")
-Restated/expanded from Issue 08 (01_Initial_review.txt 3.1) with a concrete target shape
-proposed this session: every decomposer already implements the same IDecomposer/
-IIngestInventoryProvider interfaces uniformly -- the logical architecture is already coherent,
-only the physical project boundary is fragmented. Proposed consolidation: one
-`Laplace.Decomposers` library with source-named folders/namespaces instead of source-named
-projects, a `Decomposer<T>` generic base class factoring out the common "parse records of
-type T -> map to SubstrateChange" shape most decomposers share, one `Laplace.Decomposers.Tests`
-project instead of ~14 paired per-source test projects. Would collapse ~28 decomposer-related
-projects down to 2. The per-source CI isolation the gate/promote/matrix scripts want
-(decomposer-gate-check.py, decomposer-isolate.sh, decomposer-ladder-ci.sh) does not require
-project-level (assembly) boundaries -- namespace scoping and test-filter gating give the same
-isolation without the build-graph/IDE cost. Not started; author wants this on record, not
-executed yet.
+CHESS-SCALE OBSERVATIONS (open levers, not defects — from the 909k-game Lumbras runs):
+  - Pipeline is APPLY-bound at scale (~60s compose per ~300-400s apply per ~30k-game
+    set); apply runs synchronously in the consume loop. Lever: pipeline apply of set N
+    with compose of N+1 (IngestRunner change; est. ~85 → 100+ games/s). NOT DONE —
+    belongs with plan 13 Phase 1.6.
+  - EmitNodes doesn't consult the proven-present hot cache → cross-set trunk positions
+    recomposed + staged + subtracted at verify (safe, wasted work). Also the
+    WORKING_SET_SUBTRACTION message blames "a concurrent ingest" — misleading wording.
+  - Client fold rate decays with priors growth (54k → 20.7k rel/s as consensus grows).
+    Watch on full seeds.
+  - Compose lock contention rose 11k→16k/s once server GC stopped masking it — next
+    compose ceiling if one is needed (suspect memo/builder path; unproven).
 
 ================================================================================
-LIVE INGEST STATUS AT TIME OF WRITING (for continuity, not a code issue)
+LESSONS THAT MUST NOT BE RELEARNED (extracted from resolved sagas)
 ================================================================================
-Foundation seeding restarted from a fresh db-reset this session. Completed successfully:
-unicode (1,175,472 entities, 1,631,983 attestations, 1,631,821 consensus relations — run
-directly via dotnet, bypassing the then-still-broken seed-step.cmd path), iso639 (adds
-~43k relations, 7,929 languages, see Issue 02 breakdown), cili. wordnet in progress
-(background) at time of writing. Remaining foundation steps not yet run: verbnet, propbank,
-framenet, mapnet, wordframenet, semlink.
-
-UPDATE (post apply_batch.c concurrency fix, fresh db-reset + rebuild): unicode, iso639, cili,
-wordnet, verbnet, propbank all completed cleanly (verified against real substrate counts, not
-just self-reported log lines). framenet failed with Issue 21 (unexplained batch-label error),
-halting the foundation loop there -- mapnet/wordframenet/semlink not yet attempted this
-generation. Separately, a full document ingest (34 files, D:\Data\Ingest\test-data\text,
-including sherlock.txt which had never been reached in any prior run) was started twice this
-generation: once did not crash on the Issue 17 race (fix confirmed holding under real load
-for the files it got through) but did crash on Issue 20 (content_root_id rc=-2, cause not yet
-isolated). Substrate is therefore currently in a partially-seeded, known-incomplete state:
-foundation layers 0-2 mostly present (minus framenet/mapnet/wordframenet/semlink), document
-layer partially present and its true final row counts not yet re-verified after the second
-crash.
-
+L1  rc==0 is success in this codebase's native lookups. The rc==1-vs-0 misread has
+    THREE independent instances (Issue 35 + two repros). Wrap new native lookups in
+    boolean-shaped helpers.
+L2  A GiST KNN comparison point must reach the planner as a genuine bound parameter
+    (06 Rule #4). Three independent instances found; EXPLAIN before blaming PostGIS.
+L3  After ANY build reporting MSB3027 copy failures, the output tree is poisoned —
+    clean-rebuild before trusting binaries (Issue 38: AV in MoveGen was stale DLLs,
+    not chess bugs).
+L4  Extension DLLs statically import laplace_core_static.lib: extension freshness
+    does NOT imply engine freshness. build-extensions after ANY engine rebuild.
+    Split-hash-universe symptom: word_id() disagrees with seeded data; `senses>0`
+    is the real health check, `id_ok` is near-useless.
+L5  Never edit a .cmd while any invocation is executing (cmd.exe re-reads by byte
+    offset). Recycle PG backends only BETWEEN stages (57P01 kills the seed shell).
+L6  In a backpressured pipeline producer rate == consumer rate by construction —
+    only independent evidence (per-thread CPU, stacks, counters) locates a
+    bottleneck (06 Rule #11; three runs burned).
+L7  Batching isn't a reflex: profile the call site's TOTAL wall-time contribution,
+    not the isolated sub-call, before expecting an end-to-end win (Issue 32's SIMD
+    kernel: 96.5% of a 2.5ms sub-call inside an 80ms function).
+L8  cmd.exe `goto` into/out of parenthesized blocks is a real parser trap; framenet's
+    dispatch NEEDS the `call :run_ingest_impl` form (Issue 21 — the "cosmetic"
+    normalization of Issue 10 caused the failure it later got blamed for).
+L9  Duplicate content-addressed inserts mean "we agree", not "error" — prevention
+    (advisory lock) over retry (Issue 17); and never dispose caller-owned stages on
+    a failed apply the runner will retry (Issue 15's masker).
+L10 An index can be a landmine armed by a correctness fix: attestations_highway_hash
+    was empty (masks all NULL) for the project's whole history until Issue 35
+    populated masks and chain-walks made every write O(duplicates) (Issue 36).
+L11 Fixing a symptom without verifying the fix caused Issue 21 to be misfiled twice.
+    The verification ritual for ingest changes: isolated re-ingest → hash-identical
+    ids; forced re-run → 0 novel rows + exact observation-count doubling.
+L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
+    constant-folds only IMMUTABLE. `= ANY(fn())` on an indexed column is safe
+    (the array becomes the index condition, forced one-shot); `<> ALL(fn())`
+    and plain WHERE-clause calls are not. A simple one-row subselect does NOT
+    fix it (pulled up and re-pushed); a MATERIALIZED CTE does. Grounded: Issue
+    47, 65.3s → 349ms. Related fence: SQL functions that fail inlining (STRICT,
+    ORDER BY, CTEs — Rule #2) appear as opaque Function Scans the planner
+    cannot see through; chains of them compound. Candidate Rule #13 for 06.
 ================================================================================
-UPDATE — Issue 25 (orphaned-entity/missing-trajectory bug) root-caused and fixed;
-Issue 20 root-caused (not a substrate bug); Issue 21 root cause corrected; foundation complete
-================================================================================
-
-ISSUE 25 — FIXED, verified live, corpus-wide.
-Root cause (confirmed via a dedicated multi-agent root-cause pass, not guessed):
-app/Laplace.SubstrateCRUD/TierTreeDescent.cs's ProbeBatchEmitBitmapsAsync called
-reader.MarkProven(ids) unconditionally for every id in a probe batch, BEFORE checking which
-ids the descent bitmap actually confirmed present -- poisoning NpgsqlSubstrateReader's
-process-lifetime `_proven` cache with ids that were genuinely absent. The next lines in the
-same function then re-check `_proven` first, see the false "proven" entry, and report those
-ids as present -- overwriting the correct "absent" result from the real DB probe two lines
-earlier. This flows into merkle_dedup_trunk_shortcircuit (native), which skips emitting the
-entity. Since `_proven` never clears, this is a one-time poisoning per unique id -- explains
-why a single id (a `\r` grapheme, not "Dorian") was referenced 1,622 times in dorian.txt's
-trajectory: it's the most common recurring character in a Windows-line-ended text file, and
-its first-ever probe permanently poisoned the cache for the rest of the run.
-Fix, comprehensive, all verified live/build-checked:
-  - TierTreeDescent.cs: MarkProven gating fixed (root fix).
-  - descent_probe.c: replaced the "assume 0xFF present, clear-on-disproof" scheme with a
-    positive-confirmation-only tier_batch_existence_probe primitive (new SQL/native function),
-    applied uniformly to all tiers including tier-0 (no special-casing).
-  - hash128.c: [REVERTED 2026-07-02 by owner directive] hash128_merkle briefly mixed `tier`
-    into the hash (2026-07-01). That was WRONG and is reverted: the content-addressing law is
-    "same content = same hash" -- the id is a function of the child-id sequence and nothing
-    else. word_id('a') == grapheme 'a' == codepoint 'a' being bit-identical is BY DESIGN, not
-    a collision: same content is the same entity, and tier disambiguation (if ever needed) is
-    a schema-level compound key (id, tier), never part of the id. The tier-mix also broke the
-    converse/word_id pg_regress goldens (regenerated 2026-06-30 under the content-only law)
-    and would have forced a full corpus re-seed as a hash-domain change. Tests updated to
-    assert tier-blindness: test_hash128.cpp (MerkleIsTierBlind, MerkleEmptyChildSetIsAlsoTierBlind),
-    Hash128Tests.cs (Merkle_TierIsNotPartOfIdentity), laplace_geom hash128 regress
-    (tier_is_not_identity).
-  - intent_stage.c: partition-by-content-unit instead of partition-by-each-row's-own-hash, so
-    referentially-connected rows (entity + the physicality/attestation that references it)
-    can no longer be split across independent transactions (the "fake parallelism" issue --
-    real, latent, was dormant only because LAPLACE_APPLY_PARTITIONS defaults to 1).
-  - UnicodeDecomposer.cs: rewritten to bulk-seed the entire tier-0 codepoint space as atomic
-    entity+physicality pairs up front (BuildTier0Seed); StageCodepointTarget now asserts
-    instead of defensively re-staging (tier-0 completeness is a precondition, not a per-call
-    check -- the perfcache is a client-side accelerant, not a substitute for the real row).
-  - 5 more decomposers had the same AddEntity-without-AddPhysicality pattern, found via full
-    sweep and fixed: RepoDecomposer.cs, LlamaTokenizerParser.cs, FnLuSynsetBridgeIngest.cs,
-    MapNetIngest.cs, PredicateMatrixIngest.cs, SemLinkGrammarWitness.cs.
-  - 4 SQL functions fixed to correctly fall back to perfcache-based tier-0 resolution instead
-    of masking a real gap as hex/NULL: render.sql.in, entity_exists.sql.in,
-    entity_tier_of.sql.in, trajectory_unpacked_points.sql.in (all four live-verified against
-    real deleted-row repros in rolled-back transactions).
-  - content_witness_batch.c: content_tree_build's rc=-2 split into distinct codes (-4 empty
-    input, -5 decomposer failure, -6 hash-composer failure, -7 zero-node tree) -- this is what
-    found Issue 20's real cause (see below). TextDecomposer.cs's exception now includes
-    content length + byte preview for the same reason.
-Verification: dorian.txt single-document repro (missing_points 1622->0), repeat-ingest/no-op
-path (0 new rows, 0 orphans), and full 30-document corpus (392,413 total trajectory points,
-0 missing, 0 distinct missing ids) -- all confirmed via direct SQL, not log self-reports.
-Residual, NOT yet fixed: entities/physicalities count still mismatched by ~900 rows at the
-tier-0 layer after the BuildTier0Seed change (likely BuildTier0Seed and BuildBatch's per-chunk
-pass computing the same physicality id via two slightly different paths that don't dedup
-cleanly) -- needs a follow-up look, does not reintroduce orphaned references, just redundant
-rows.
-
-ISSUE 20 — CLOSED, NOT A SUBSTRATE BUG.
-Root cause, found via the Issue 25 fix's granular content_tree_build return codes plus a
-content-preview exception message: the failing file was not corrupted/malformed input at
-all -- it's a real ZIP archive (Project Gutenberg "images" edition, filename
-"pg76404-images.html" visible in the raw zip local-file-header bytes) sitting inside
-D:\Data\Ingest\test-data\text\, which DocumentDecomposer.EnumerateInputFiles was picking up
-via an unfiltered `Directory.EnumerateFiles(path, "*", ...)` glob. The zip is intentionally
-there -- it holds images staged for a future image modality (Pixel/Patch/Region/Image tiers,
-vocabulary already scaffolded in Laplace.Decomposers.Image/ImageDecomposer.cs, decomposition
-logic not yet built). Fix: DocumentDecomposer.cs's EnumerateInputFiles now globs "*.txt"
-instead of "*", so it correctly ignores content meant for a different, not-yet-built
-decomposer instead of choking on it. rc=-5 (decomposer failure on invalid UTF-8) was the
-CORRECT behavior all along -- the native code was never broken here.
-
-ISSUE 21 — FIXED, but the earlier characterization in this log was wrong and needs correcting.
-This entry previously said Issue 10's normalization (framenet's parenthesized inline
-`if (...) { call :run_ingest_impl ; exit /b } ` block replaced with the standard
-`goto run_ingest` matching sibling steps) was an unrelated, independent anomaly fix. That was
-incorrect. Live-reproduced (`seed-step.cmd framenet` standalone, deterministic
-"The system cannot find the batch label specified - run_ingest" with zero preceding output --
-fails before even seed-step.cmd's own first echo). Ruled out via direct testing: not a general
-regression (propbank re-run via the same script succeeded immediately after), not byte-level
-corruption of the dispatch line (xxd-compared byte-identical in structure to the working
-propbank line, just a different literal string), not the Intel oneAPI setvars.bat nested-call
-(bypassing it entirely did not change the failure). Found via a preserved scratchpad artifact
-(.scratchpad/_seed_step_traced.cmd, the pre-Issue-10-fix version of the file, now deleted):
-framenet originally had the parenthesized `call :run_ingest_impl` form, NOT the shared
-`goto run_ingest` label jump every sibling step uses. Issue 10's fix normalized this away as
-if it were purely cosmetic -- it was not. `goto` jumping into/out of a parenthesized `(...)`
-block is a real, documented cmd.exe gotcha, and framenet's position/context in the dispatch
-table apparently triggers it while its siblings' identical-shaped `goto run_ingest` lines
-don't. Fix: reverted framenet's dispatch line in scripts/win/seed-step.cmd back to the direct
-`call :run_ingest_impl` + `exit /b %ERRORLEVEL%` form. Verified: seed-step.cmd framenet now
-runs the full dispatch cleanly (mutex check, header, topology/sizing logs, correct
-already-ingested short-circuit) with zero label error. Lesson: Issue 10 should not have been
-filed as "fixed a cosmetic anomaly" without verifying the normalized form actually still
-worked for the one step that had special-cased itself away from the pattern.
-
-FOUNDATION SEED — now fully complete (all 10 layers: unicode, iso639, cili, wordnet, verbnet,
-propbank, framenet, mapnet, wordframenet, semlink), verified via layer-completion markers and
-real substrate counts, not just log self-reports. End-to-end wall time for the full sequence
-(including the framenet detour/debugging) was under 20 minutes of active working time.
-
-SEPARATE FIX, same session -- chess UI "turn stuck" bug: ChessEngineService.cs held a single
-process-wide singleton `_live` ChessState field (SyncState/SetLive), cached and mutated across
-every /chess/move, /chess/bestmove, and (indirectly) /chess/legal request, even though the
-client already sends its own authoritative fen on every call. Any request overlap (two tabs,
-a double-click landing before the UI's `busy` flag disabled the button) could let one request's
-SetLive clobber another's, desyncing the server's tracked position from what the client
-displayed -- exactly "bot moved, but the turn didn't update." Fix: removed _live/_liveLock/
-SyncState/SetLive entirely; BestMoveAsync/BestMoveSearchAsync/ApplyMoveAsync now all parse the
-client-supplied fen fresh on every call (matching ScoreAsync's already-correct pattern). Build
-verified.
-
-ISSUE 26 -- word_shape_peers()/word_shape_peers_fast() anagram false-positive bug (fixed,
-not yet rebuilt/deployed). Filter was `WHERE k.fr <= p_frechet_max OR k.ang <= 0.115`: fr
-(Frechet, on trajectory) is order-sensitive and correctly discriminating; ang (angular
-distance, on coord/centroid) is mathematically order-INSENSITIVE (centroid = arithmetic mean
-of constituents, and mean is commutative), so ANY anagram pair (verified live: "cat"/"act",
-identical POINT ZM centroid, fr=0.35 correctly above threshold, ang=0) always passed via the
-OR branch regardless of what Frechet said. Confirmed this is a real conceptual gap, not a
-tuning knob, by cross-checking anagrams_of.sql.in -- which already correctly exploits this
-exact centroid/hilbert order-insensitivity for its OWN legitimate purpose (finding anagrams
-via hilbert_index equality), proving the codebase already treats "same parts any order" and
-"similar shape, order matters" as distinct concepts elsewhere. Fix: dropped the OR ang branch
-entirely in both word_shape_peers.sql.in and recall.c's word_shape_peers_fast_impl -- Frechet
-is now the sole admission gate; angular distance remains only as the ORDER BY tie-break among
-already-qualified candidates. Needs rebuild + install-extensions + verification (not done this
-session per explicit instruction -- another agent handling the build).
-
-NEW: .scratchpad/05_Substrate_Invariants.txt and .scratchpad/06_Engineering_Ruleset.txt --
-split out from this file. 05 is substrate axioms (what a collision/bit/equality actually
-certifies -- e.g. Rule #1 formalizes the Issue 26 finding generally). 06 is process/how-to-
-build rules (SQL/C# orchestrate, native does heavy lifting, CTEs block inlining, etc.),
-grounded partly in a full-codebase query-function survey (2026-07-01, ~305 functions/views,
-45+ CTE-blocking files, no shared consensus-filter view layer yet).
-
-ISSUE 27 -- physicalities_constituents_gin defeated by large-array `&&`/`@>` queries (found
-live, fixed via new native function, not yet built/deployed). A single-key GIN probe
-(`laplace_trajectory_constituent_ids(trajectory) @> ARRAY[one_id]`) resolves in ~2ms via
-Bitmap Index Scan regardless of table size -- confirmed live finding entities.id for "chess"
-containing sentences (1226 hits) this way. But the natural second hop (which of ~15,758
-Document entities contain ANY of those 1226 sentence ids, via `&& $1::bytea[]` against the
-same GIN index) made the planner abandon the index for a Parallel Bitmap Heap Scan over every
-Document entity with a per-row recheck filter -- 850ms, 873,366 rows discarded by index
-recheck, for a query that should be sub-millisecond. Confirmed this is a genuine GIN
-cost-estimation defect for large-array multi-key probes, not a bound-parameter/inlining issue
-(retested with a genuine PREPARE'd bytea[] parameter, same bad plan). A SQL-level LATERAL
-rewrite (one correlated single-key probe per frontier element, still expressed as SQL) fared
-worse under concurrent DB load (2+ minutes, had to be killed) -- inconclusive on its own
-merits given the concurrent load, but not worth pursuing regardless since the native fix
-below is strictly better. Fix: new containers_of(entity, max_hops, limit) native function
-(extension/laplace_substrate/src/containers_of.c) -- the reverse of constituents(); walks the
-frontier hop by hop as a tight C loop of SPI_execute_plan calls against ONE SPI_prepare/
-SPI_keepplan'd cached plan (the proven-fast single-key query), never asking the planner to
-cost a large-array probe at all. Code + SQL wrapper (functions/structural/containers_of.sql.in)
-+ CMakeLists.txt + both manifests written; NOT built/deployed this session (explicit
-instruction -- another agent handling the build). Also: consider a plain VACUUM ANALYZE on
-physicalities/entities once concurrent ingestion settles -- recent bulk inserts may be
-contributing stale-statistics pressure to the planner's bad cost estimate, independent of
-containers_of() making the estimate moot for this specific access pattern.
-
-ISSUE 28 -- walk_branches() exponential hang, fixed + deployed + verified live. Root cause
-was two compounding defects in generate_walk.c/consensus_walk_edges.sql.in: (1) no
-cross-branch dedup -- consensus_walk_edges() was called once per frontier NODE via SPI,
-each call doing real work in SQL (fetch + compute an unindexed
-`relation_rank_resolved(type_id) * eff_mu(rating,rd)` sort key per row + ORDER BY + LIMIT,
-plus an O(path length) `= ANY(exclude)` scan per row against a path array that grows every
-level) -- so walk_branches('chess', NULL, 6, 12) hung 4+ minutes (killed, still hadn't hit
-the 1,000,000-node GENERATE_NODE_BUDGET safety cap) where depth=4/breadth=8 took ~1s. Fixed
-in generate_walk.c: pg_laplace_walk_branches now fetches the WHOLE current level's candidate
-edges in ONE batched SPI call (unnest($1) WITH ORDINALITY, same idiom as word_shape_peers_fast/
-containers_of), then does refutation filtering, RelationType-object exclusion, Glicko-2 rank
-scoring (relation_rank_resolved's fast in-memory table lookup called directly in C, zero
-SQL/FunctionCall overhead), and beam selection via qsort entirely in C -- SQL only hands over
-rows now. Also added GLOBAL dedup (HTAB keyed by entity hash128_t, seeded with the root
-entity) -- the original per-path exclusion array never stopped sibling/cousin branches from
-independently re-discovering and re-expanding the same popular hub entity, which is what
-actually drove the exponential blowup; global dedup is the real fix, not just the batching.
-This is a deliberate behavior change (a node can now only appear once anywhere in a walk,
-via whichever branch found it first/best, not once per distinct path) -- documented in code,
-not silent. Verified live: depth=4/breadth=8 now 1876 nodes (was 2301 -- dedup correctly
-removing real duplicate revisits) in 682ms; depth=6/breadth=12 now COMPLETES in 45.8s with
-155,157 nodes (was: never completed). Remaining headroom, not yet pursued: consensus has
-consensus_subject_eff_mu_btree, a (subject_id, (rating-2*rd) DESC) WHERE object_id IS NOT
-NULL index built exactly for per-subject top-K retrieval -- the new batch query doesn't use
-it (pulls all edges per subject, ranks/limits in C), so a high-fan-out hub word (e.g. "the",
-5011 witnesses) still ships its full edge list over SPI before being cut down to beam. That's
-~3,400 nodes/sec today vs containers_of's ~45,000/sec -- a real, separate follow-on, not
-chased this session. pg_laplace_walk_strongest was NOT touched -- its single greedy path is
-bounded linearly by max_depth already, not exponential, so the per-step SPI call there isn't
-the same defect class.
-
-ISSUE 28 UPDATE -- Item 1 (per-subject LATERAL fan-out bound) tried and reverted. Rewrote
-WALK_BATCH_QUERY to CROSS JOIN LATERAL (... ORDER BY (rating-2*rd) DESC LIMIT beam*4) per
-subject, exploiting consensus_subject_eff_mu_btree. EXPLAIN ANALYZE confirmed the index scan
-fired correctly (0.98ms for a single-subject probe). But full-walk wall time did NOT improve:
-walk_branches('chess', NULL, 6, 12) measured 45.6s / 172,196 nodes after the change vs the
-45.8s / 155,157-node baseline before it -- no real change, and node count went UP (see below
-for why). Root cause of the non-improvement: this batch query fires once per LEVEL (max_depth
-times total, i.e. 6 times for this test), not once per subject -- per-subject row volume was
-never actually causing redundant round trips, so bounding it doesn't touch the real cost,
-which is the sheer NUMBER of distinct subjects in a wide frontier (grows with beam^level,
-unaffected by a per-subject LIMIT). Also found a real correctness wrinkle the LATERAL version
-introduced (a reason to be glad it was reverted, not just a wash): the LATERAL LIMIT
-pre-filters candidates by raw (rating-2*rd) DESC, but the actual beam-selection ranking in C
-is relation_rank_resolved(type)*eff_mu -- a DIFFERENT key -- so for high-fan-out subjects the
-LATERAL version could silently exclude a true top-beam candidate (high relation_rank, merely
-mediocre raw eff_mu) that never made the raw-eff_mu top-N cut before the real ranking even
-ran. Reverted WALK_BATCH_QUERY back to the unbounded-per-subject form (still batched across
-the whole frontier in one query per level, which IS the real, valid win from this session's
-earlier work) and confirmed live via install-extensions.cmd DLL hot-swap + smoke test
-(walk_branches('chess', NULL, 4, 8) = 1876 nodes, matches the post-dedup baseline exactly).
-The genuinely unresolved question for a future pass: what IS the dominant cost at
-depth=6/breadth=12 scale, if not per-subject row volume? Candidates not yet measured: sheer
-SPI_execute_plan/query-planning overhead repeated per level against a growing unnest() array,
-C-side qsort/HTAB-dedup cost across 155K+ total candidate rows, or repalloc/memory churn from
-the growing WalkNode array. Needs its own profiling pass, not assumed.
-
-ISSUE 29 -- highway_mask C# bug, FIXED and verified. Root cause confirmed:
-app/Laplace.Engine.Core/IntentStage.cs:150 had `byte* maskPtr = mask.IsZero ? null :
-(byte*)&mask;` -- highwayMask's default parameter value IS Mask256.Zero (default), so this
-conflated "caller didn't compute a mask" with "caller computed a mask and it's legitimately
-all-zero" (no relation bands matched) -- both collapsed to a null pointer, which
-engine/core/src/intent_stage.c (~405-409) correctly-but-consequently wrote as SQL NULL
-instead of 32 zero bytes. Fix: always pass the mask pointer (`byte* maskPtr = (byte*)&mask;`)
--- one line. Verified via a new isolated xunit regression test,
-AddAttestation_DefaultHighwayMaskEmits32ZeroBytesNotNull in
-app/Laplace.Engine.Core.Tests/IntentStageTests.cs, which walks the actual COPY-binary field
-stream (locating highway_mask's ordinal via CopyColumnList) and asserts its length prefix is
-32, not the NULL marker (unchecked((uint)-1)) -- proving the C#-to-native marshal boundary
-now writes a real 32-byte mask for the zero/default case. Chose this over a live DB ingest
-test deliberately: fully isolated (no DB, no risk of racing the other agent's concurrent
-chess PGN ingestion), and more directly targeted at the actual bug (a marshal-boundary
-pointer bug, not a decomposer-logic bug) than an end-to-end ingest would have been. All 8
-tests in IntentStageTests pass. Not yet verified against a live decomposer run producing
-real non-zero highway_mask bits (e.g. re-checking ISO639Decomposer output specifically) --
-that's a natural follow-up once it's safe to coordinate an ingest with the other agent, but
-the isolated test proves the actual code defect is fixed.
-
-ISSUE 30 -- shared v_consensus_unrefuted view, DONE and deployed live. New
-extension/laplace_substrate/sql/views/v_consensus_unrefuted.sql.in (SELECT c.* FROM
-consensus c WHERE NOT refuted(c.rating, c.rd)), added to both manifests alongside the
-existing views section. Mechanically replaced `FROM consensus <alias> ... AND NOT
-refuted(<alias>.rating, <alias>.rd)` with `FROM v_consensus_unrefuted <alias> ...` (refuted
-clause dropped) across 21 files: related_in, walk_completes_floor, shared_objects,
-consensus_walk_edges, related, consensus_subject_edges, salient_facts, consensus_step_edge,
-gaps, consensus_neighbors_undirected (x2), consensus_neighbors_directed,
-translation_sources, synset_gloss, consensus_taxonomy_edges, foundry_vocab_crawl (x3),
-collocates, grapheme_case_target, realize_defines, realize_translation,
-realize_synset_lemma, realize_has_name -- 26 occurrences total across 21 files (some files
-had secondary consensus references for LEFT JOIN lang-tagging that intentionally did NOT
-have their own refuted check and were left untouched). Deliberately did NOT touch
-relate_path.sql.in (RECURSIVE CTE, 4 occurrences), consensus_peer.sql.in (two independent
-refuted checks embedded in JOIN...ON with aliased c/c2), senses_with_context.sql.in, or
-senses_with_context_bootstrap.sql.in -- genuinely different shapes, deferred as a natural
-follow-up. Deployed via build-extensions.cmd --reconfigure (new view file) + direct psql
-application of all 22 objects (sed 's/@extschema@/laplace/g' against the live database,
-bypassing CREATE EXTENSION/ALTER EXTENSION entirely -- same no-data-risk pattern as every
-other fix this session). Verified: consensus_walk_edges/related/salient_facts all return
-correct real results against word_id('chess'); view sanity check confirms
-v_consensus_unrefuted's row count exactly matches raw consensus rows for chess (298 == 298,
-none currently refuted); salient_facts' first post-deploy call measured 8.7s but two
-subsequent calls measured 876ms/447ms -- confirmed cold-cache warming after the redeploy,
-not a real regression from the view swap.
-
-ISSUE 31 -- native incremental consensus fold, BUILT + DEPLOYED + PROVEN CORRECT, but
-deliberately NOT wired into the live call path yet. New
-extension/laplace_substrate/src/consensus_fold_incremental.c
-(pg_laplace_consensus_fold_partition_incremental), SQL wrapper
-functions/fold/consensus_fold_partition_incremental.sql.in, both manifests updated,
-CMakeLists.txt updated. Replaces materialize_period_partition[_fresh].sql.in's PL/pgSQL
-orchestration (GROUP BY merge, LEFT JOIN prior state, UPSERT) with the same
-heap-scan+in-memory-HTAB-merge technique consensus_fold_walks.c already uses for the
-terminal/bulk lane, reusing the SAME native math (consensus_fold_apply_partial ->
-glicko2_fold_uniform_period) and the SAME consensus_id() hash formula
-(blake3(subject||type||object-or-zero), computed natively via hash128_blake3, zero SQL
-round-trips) -- SQL is used only for: reading glicko2_tau() once, one batched
-SELECT ... WHERE id = ANY($1) prior-state read (skipped entirely when p_fresh), one batched
-UPSERT via unnest(...) arrays, and the final DROP TABLE. Correctness verified byte-for-byte
-against the OLD PL/pgSQL path on a synthetic, isolated (word_id('cat'), IS_A, word_id('act'))
-test triple (confirmed zero pre-existing consensus rows for that key before testing, deleted
-after) -- both the fresh path (materialize_period_partition_fresh vs
-consensus_fold_partition_incremental(..., true)) and the incremental/UPSERT path
-(materialize_period_partition vs consensus_fold_partition_incremental(..., false)) produced
-EXACTLY matching (rating, rd, volatility, witness_count) -- 993523429438961/213966596252/
-16727931424/5 for fresh, 1053861628682412/209026398686/61376840704/12 for incremental. No
-real/production consensus data was touched at any point (synthetic row deleted after each
-test). Deliberately did NOT touch app/Laplace.SubstrateCRUD/Npgsql/ConsensusAccumulatingWriter.cs's
-ChainFoldAsync call site (still calls the old materialize_period_partition[_fresh]) -- per
-the plan's explicit gate, this is the live path ChessEngineService.cs's concurrent ingestion
-is actively using right now (persistEvidence: true, stageAsWalks: false), and flipping it
-needs coordination this session can't do unilaterally. Both old and new functions are now
-deployed side by side; old PL/pgSQL functions NOT deleted yet (per plan: only delete once
-verification passes AND the call site is actually switched). Next step for whoever picks
-this up: coordinate a maintenance window (or at minimum confirm no ChainFoldAsync call is
-in-flight), change the two mat.CommandText lines in ChainFoldAsync from
-"SELECT laplace.materialize_period_partition[_fresh]($1)" to
-"SELECT laplace.consensus_fold_partition_incremental($1, <fresh bool>)", verify one real
-ingest still produces sane consensus rows, then delete materialize_period_partition[_fresh]
-.sql.in + their manifest entries.
-
-ISSUE 32 -- SIMD angular_distance batch kernel, BUILT + TESTED + DEPLOYED, real but modest
-end-to-end win (documented honestly, not oversold). Profiling gate (per plan) run first:
-isolated the frechet+angular batch SPI sub-call in word_shape_peers_fast_impl (500 real
-candidates around word_id('chess')) at 2.535ms total vs a 0.089ms no-math control query
-(same row scan, zero function calls) -- math was ~96.5% of THAT sub-call, clearing the >=10%
-gate by a wide margin. Added math4d_angular_distance_batch to engine/core/src/math4d.c /
-math4d.h: runtime-CPUID-gated AVX2 kernel (one _mm256_mul_pd + _mm256_hadd_pd-based
-horizontal-sum computing both dot(a,b) and dot(a,a) per candidate in one vector pass, versus
-8 scalar multiplies+7 adds previously), dispatch resolved once via a cached function pointer
-(mirrors the lazy SPI-plan-init pattern already used elsewhere), scalar fallback always
-compiled and reachable if AVX2 isn't available. Deliberately did NOT vectorize
-math4d_frechet (variable-length DP recurrence, doesn't batch across candidates the same way
--- different-shaped problem, out of scope this pass per the plan). Rewrote
-word_shape_peers_fast_impl's batch step in recall.c: frechet stays SQL-computed
-(public.laplace_frechet_4d via SPI, unchanged), angular distance's raw inputs are now
-extracted via ST_X/Y/Z/M (laplace_substrate doesn't link liblwgeom, so this is the real
-Datum-to-double boundary, not a shortcut) and the actual distance math runs natively via
-math4d_angular_distance_batch -- zero SQL function-call round-trips for the angular
-computation itself. Verified: all 46 pre-existing LaplaceCoreMath4d native tests still pass
-(no regression), cat/act anagram fix (Issue 26) still holds post-rebuild, real shape-peer
-results for 'chess'/'king' unchanged in shape, word_shape_peers_fast/lexical_peers timing
-~78-80ms warm (same ballpark as the pre-SIMD baseline, arguably marginally better -- not a
-dramatic win). Honest finding: the 96.5%-math sub-call is itself only a small slice
-(~2.5ms) of the ~80ms end-to-end word_shape_peers_fast call, which is dominated by the
-initial GiST KNN candidate fetch and other steps, not this specific computation -- so
-while the SIMD kernel itself is real, correct, and a legitimate speedup for the geometric
-math specifically, its END-TO-END impact on this particular call site is modest. The
-profiling gate correctly identified where the math dominates ITS OWN sub-call, which is a
-different question from where the math dominates the WHOLE function -- worth remembering
-for any future "should we SIMD this" decision: profile the actual call site's total wall
-time contribution, not just the isolated sub-call, before expecting a large end-to-end win.
-Two unrelated, pre-existing native test failures noted in passing (not caused by this
-session's work, not chased): LaplaceCoreIntentStage.PartitionRoutesEveryRowDisjointByIdLo,
-LaplaceContentRootId.RejectsEmptyAndNull.
-
-ISSUE 32 -- laplace_attestation_aggregated_add: argument-order swap silently corrupts every
-native grammar-compose PRECEDES attestation (games <-> witness_weight <-> sum_score rotated)
-Status: OPEN -- root-caused this session, code fix is one line, DATA REPAIR NEEDED; verified
-live against the production substrate, blast radius fully scoped.
-The bug: engine/core/src/attestation_engine.c:539-541 forwards its parameters to
-laplace_attestation_aggregated_build in the WRONG ORDER. The add() wrapper's own signature is
-(..., context_is_null, games, sum_score_fp1e9, witness_weight, now_unix_us) but build()'s is
-(..., context_is_null, witness_weight, games, sum_score_fp1e9, now_unix_us). The forwarding
-call passes (games, sum_score_fp1e9, witness_weight, now) positionally into
-(witness_weight, games, sum_score_fp1e9, now). C's implicit int64<->double conversions make
-this compile without a single warning. Net effect per attestation:
-  - observation_count = sum_score_fp1e9 = real_games * 1e9  (billion-fold inflated)
-  - sum_score_fp1e9   = (int64)witness_weight = 0           (every weight < 1.0 truncates)
-  - sum_score(0) < games*half  =>  outcome = REFUTE (0), unconditionally
-  - witness_weight    = (double)games  => witness_phi computed from e.g. 3272.0, not 0.x
-So every sequence observation ingested through this path is recorded as REFUTING evidence
-with a billion-scaled count and a garbage opponent-RD. Verified live: all 11,770
-SemLinkDecomposer PRECEDES attestations have outcome=0 and observation_count in exact 1e9
-multiples (min 1000000000, max 3272000000000); every other source's observation_count max
-is <= 143,840 (ChessOpenings). Sum across SemLink rows: 32,043,000,479,337 "observations."
-Blast radius: laplace_attestation_aggregated_add has exactly ONE caller in the entire tree --
-engine/core/src/grammar_compose.cpp:1182 (the native grammar-compose PRECEDES emitter). The
-managed path (GrammarEntityBuilder/GrammarRowComposer -> NativeAttestation.Aggregated ->
-laplace_attestation_aggregated_build directly) passes arguments CORRECTLY -- which is why
-UserPrompt/document PRECEDES rows (max obs 6,463) are clean. Only sources ingested via the
-native grammar-compose ETL path are affected; in the current database that is SemLink alone.
-Fix shape: reorder the three arguments at attestation_engine.c:539-541 (one line); rebuild
-engine; then repair data -- delete the 11,770 poisoned SemLink PRECEDES attestation rows
-(and any consensus rows folded from them) and re-ingest the SemLink layer, or accept a
-targeted re-fold. Consider also making build() and add() share one parameter order so this
-class of bug is structurally impossible, and/or a debug assert that witness_weight is in
-[0,1] and games < 1e8 (the fold engine already enforces games < 1<<27 per relation --
-1e9-scaled counts would have tripped it at fold time if these rows ever reached the walk/
-engine fold lane).
-
-ISSUE 33 -- Item 6 (GiST/PostGIS vectorization scoping) CONCLUDED: not worth pursuing,
-premise was wrong. Concrete first-step measurement run per plan: EXPLAIN (ANALYZE, BUFFERS)
-on real KNN <<->> queries against the live ~4.6M-row physicalities table.
-  - A plain `FROM physicalities me, physicalities p2 WHERE me.entity_id = word_id(...) ...
-    ORDER BY p2.coord <<->> me.coord LIMIT k` (k=10/100/500/5000, all four tested): NONE
-    used physicalities_coord_gist -- every one fell back to a full Parallel Seq Scan
-    (939,613 rows) + top-N heapsort, 560-800ms flat regardless of k (dominated by the scan,
-    not k).
-  - The SAME query reshaped as `WITH me AS (... LIMIT 1) SELECT ... ORDER BY p2.coord <<->>
-    me.coord` (the shape word_shape_peers.sql.in's CTE uses, believed earlier this session
-    to be index-eligible): STILL fell back to a full seq scan, 1.6s -- worse, not better.
-  - The SAME query with coord passed as a genuine bound parameter via PREPARE/EXECUTE (the
-    shape word_shape_peers_fast_impl's native SPI call actually uses): correctly used
-    `Index Scan using physicalities_coord_gist`, 50.4ms for the same candidate pool --
-    ~10-30x faster than every non-bound-parameter variant tested.
-  - Conclusion: GiST/PostGIS's own KNN implementation is NOT a bottleneck -- confirmed fast
-    (50ms, real index descent, real GiST internals) when queried the way it needs to be
-    queried. The 560ms-1.6s numbers are the SAME "must be a genuine bound parameter, not a
-    CTE/join column reference" defect already fixed multiple times this session (containers_of
-    Issue 27, word_shape_peers_fast Issue 26 context, walk_branches per-level batching),
-    reproducing again in a fresh ad-hoc query -- not new evidence about PostGIS internals.
-    No fork-patch to gserialized_gist_nd.c and no purpose-built native spatial structure are
-    justified by this data; per the plan's own gate ("only if GiST/PostGIS overhead is a
-    real, measured fraction of query time"), it is not.
-  - Real, smaller follow-up this surfaced: word_shape_peers.sql.in (the original SQL
-    function, superseded by word_shape_peers_fast for the actual hot path per
-    lexical_peers.sql.in) almost certainly still has this exact seq-scan-fallback defect
-    live in its `nearest` CTE today, since nothing in this session's fixes touched that
-    original SQL function's query shape (only its post-KNN filter logic, Issue 26). Low
-    priority since it's not on the hot path, but worth a line in a future cleanup: either
-    fix its CTE shape to use a genuine bound parameter, or delete it now that
-    word_shape_peers_fast fully supersedes it.
-
-ISSUE 33 -- apply_batch stall: never-ANALYZEd staging temp tables flip the anti-join plan as
-the target tables grow (33-minute batch at 12.6 GB working set, live incident)
-Status: FIXED in source (extension/laplace_substrate/src/apply_batch.c -- ANALYZE each staged
-temp table right after probe_stage_tables, before any anti-join), NOT yet deployed (extension
-DLL swap pending the post-OMW rebuild); incident mitigated live via pg_cancel_backend.
-Incident (2026-07-01, OMW ingest at ~12% / entities ~5.4M): pid 18444's laplace_apply_batch
-ran 33+ minutes state=active (no wait event -- genuinely computing) at a 12,650 MB working
-set, where identical-shaped batches take ~50s; the second partition writer (pid 13924) sat
-queued behind the advisory lock the whole time, freezing the whole ingest. Diagnosis chain:
-stats on entities/physicalities/attestations were FRESH (autoanalyze completed 17:58-18:01)
-but pid 18444's transaction began 17:57:44 -- planned before/while autoanalyze rewrote stats.
-Deeper root cause: NpgsqlSubstrateWriter creates TEMP staging tables and raw-binary-COPYs
-into them, and neither C# nor apply_batch.c ever runs ANALYZE on them (verified: zero ANALYZE
-anywhere in the write path) -- temp tables have no stats until analyzed, so the planner's
-join-side/strategy choice for `staging LEFT JOIN laplace.entities` rests on a default
-page-based guess. Small target tables forgive this; at 5M+ entities a wrong hash-side choice
-builds the hash over the multi-million-row target (matches the 12.6 GB working set) and the
-batch goes quadratic-feeling. Remedy applied live: pg_cancel_backend(18444) -- SQLSTATE 57014
-is classified transient by TransientErrorRetryPolicy (class 57), so the client retries the
-batch cleanly and replans against current stats. Source fix: three-line ANALYZE of the staged
-temp tables inside apply_batch (milliseconds on bounded staging; comment in code documents
-this incident). Follow-up worth considering, not done: statement_timeout or a watchdog around
-apply_batch calls so a future planner pathology fails fast into the existing retry path
-instead of stalling an entire ingest behind the advisory lock.
-
-ISSUE 34 -- apply_batch anti-join throughput collapses with target-table growth (perf gates
-now failing at 10M-row scale; physicalities worst at 3,174 rows/s vs the 500,000 gate)
-Status: OPEN, observation filed during P0 verification (2026-07-01, post-OMW DB: ~5.4M
-entities / ~10.9M physicalities). WriterThroughputTests' three 500k-rows/s gates fail against
-the current live DB: entity apply 235,994 rows/s, attestation 7,259 rows/s, physicality
-3,174 rows/s (157.5s for 500k staged rows, 3 round trips). These gates presumably passed on
-the smaller DBs they were written against; the anti-join (staging LEFT JOIN target WHERE id
-IS NULL) degrades as the target grows. The new in-apply_batch ANALYZE (Issue 33 fix) gives
-the planner real staging stats but does not change the fundamental cost of probing a
-multi-million-row target per batch. Candidates, not yet decided: (a) EXPLAIN the three
-anti-joins at scale and force/verify index-probe plans (500k pkey lookups should beat a
-10.9M-row scan); (b) under the advisory lock, INSERT ... ON CONFLICT DO NOTHING is
-race-free and skips the anti-join read entirely (the lock already provides the "prevention"
-the original design wanted -- ON CONFLICT here would be belt-and-suspenders, not
-retry-after-collision); (c) partition-local dedup via the merkle/descent bitmaps the client
-already computes, so apply_batch trusts client-proven-novel batches (ingest_bulk_novel
-exists for exactly this and is off by default). Re-baseline these gates after the P0.2 fresh
-reseed and decide.
-
-ISSUE 35 -- the FINAL root cause under the highway_mask saga: HighwayPerfcache checked
-rc == 1 where highway_table_relation_by_hash returns 0 on success
-Status: FIXED + verified live on regenerated data (2026-07-01 fresh reseed).
-The saga had three stacked causes, each masking the next: (1) Issue 01 -- relation types
-absent from relation_types.toml (chess/model vocab), fixed by manifest registration;
-(2) Issue 29 -- IntentStage.cs conflated default-mask with null pointer, writing SQL NULL,
-fixed at the marshal boundary; (3) THIS -- HighwayPerfcache.MaskForRelationType (and
-TryGetRelation) treated the native success code 0 as a miss (`rc == 1 ? Set(bit) : Zero`),
-so even after (1) and (2) every mask ever written was 32 zero bytes. The same rc==1-vs-0
-convention error was independently reproduced in the new highway_mask.c SQL functions this
-session (relation_highway_bit/band returned NULL for every relation) -- which is exactly how
-it was finally caught: the new native SQL surface made the miss visible in one query where
-the C# write path had silently degraded to zero masks for months.
-Verified on the post-fix fresh reseed, unicode layer: 1,632,015/1,632,019 attestations carry
-a non-zero highway_mask; every sampled relation's set bit matches relation_highway_bit() and
-its band mask via laplace_highway_match() (HAS_LINE_BREAK bit 78, HAS_EAST_ASIAN_WIDTH 55,
-HAS_BLOCK 46, HAS_AGE 42, HAS_SCRIPT 92, ...). Remaining 1 NULL + 3 zero-mask rows are the
-SubstrateCanonical bootstrap attestations (written without a perfcache, expected).
-05_Substrate_Invariants Rule #5 is now satisfied on live data for the first time.
-Hardening candidate, not done: give the native by_hash/by_bit lookups a boolean-shaped
-wrapper or an enum so the 0-success C convention can't be misread as truthy again (this
-exact misreading now has three independent instances across C# and C).
-
-ISSUE 34 ADDENDUM (2026-07-01 reseed observations)
-(a) The unqualified ANALYZE added for Issue 33 was itself a ~30x document-ingest regression:
-PostGIS's ND typanalyze over staging coord/trajectory geometries (measured in isolation:
-unqualified ANALYZE on 33K trajectory-bearing staging rows = 2,731ms; column-targeted
-ANALYZE (id) = 11.9ms). Fixed same day: apply_batch now runs ANALYZE <staging> (id) only --
-updates reltuples/relpages + id stats (all the join-side decision needs), never touches a
-geometry column. Deployed mid-reseed via DLL hot-swap + backend recycle (which killed the
-ladder shell -- 57P01 is fatal to seed-step; ladder resumed cleanly via markers/dedup, a
-designed-for recovery worth remembering: recycle backends only between stages).
-(b) Residual: document-stage apply_batch calls still measure 15-20s where the historical
-baseline log (scripts/win/document-text-ingest.log) shows 285K-row batches in 7.9s. Isolated
-measurements EXONERATE: ANALYZE(id) 12ms; the entities/physicalities anti-join 56ms/33K rows;
-gist+GIN index maintenance 163ms/33K physicality inserts. Prime remaining suspect: the
-attestation merge path (FOR UPDATE SKIP LOCKED fold + array_agg last-writer-wins collapse
-over ~100K attestation rows/batch) and/or consensus period-staging writes. ingest_bulk_novel
-has NO C# setter (manual GUC, off) -- if the historical baseline ran with it on, that alone
-could explain the delta. Needs an auto_explain (log_nested_statements) capture in a
-controlled run; not chased mid-reseed. NOTE: document layer_complete=False is DELIBERATE
-(ingest document passes skipSourceCompletion:true; per-document root short-circuit is the
-dedup mechanism for the open-ended corpus) -- not a defect.
-
-ISSUE 36 -- attestations_highway_hash: a hash index over a 66-distinct-value column, armed
-into a per-row catastrophe by the Issue-35 mask fix (root cause of the "2 hours for 240MB"
-OMW ingest and the post-reseed write slowdown)
-Status: FIXED -- indexes dropped live (DROP INDEX CONCURRENTLY) + removed from extension
-source/manifests so no future CREATE EXTENSION recreates them.
-Mechanism, measured: hash indexes degenerate on massive duplicate sets. highway_mask has 66
-distinct values across 12.26M populated rows (~186K duplicates per key); every bucket is a
-huge overflow-page chain, and every INSERT/UPDATE must walk its chain to find a free slot.
-EXPLAIN(BUFFERS) on apply_batch's two attestation statements showed ~700 buffer hits PER ROW
-(42.9M hits to update 60K rows; 30.4M to insert 40K) with the join trees accounting for <3%
-of it. The index had grown to 641MB -- nearly the size of attestations_pkey -- for zero query
-value (equality on a 66-value column is seq-scan territory; bit-overlap queries cannot use a
-hash index at all; plane selection goes through consensus_type_btree / relation-type sets).
-Why it looked fine for the project's whole history: the index is partial (WHERE highway_mask
-IS NOT NULL) and every mask ever written was NULL (Issues 01/29) or would have been all-zero-
-but-NULL -- the index was EMPTY until the Issue-35 rc fix populated masks on the 2026-07-01
-reseed, arming the trap. Fixing correctness exposed the landmine: unicode's floor stage ran
-fast (masks populate but table still small), and each subsequent layer got slower as chains
-grew -- document 530 rows/s, OMW 2 hours for 240MB.
-Measured effect of removal (rollback-txn proof, under concurrent ingest load): fold UPDATE
-10.03s -> 3.40s; array_agg INSERT 8.81s -> 2.94s for the same staging set. Remaining per-row
-cost (FK triggers ~1.5s/40K rows; non-HOT update maintenance across the 8 remaining indexes)
-tracked under Issue 34's candidates.
-Kept: attestations_has_highway / entities_has_highway partial btrees (subject_id, type_id) --
-sane structure, real lookup value.
-
-================================================================================
-UPDATE 2026-07-02 — full SQL-surface audit; Issue 23 corrected
-================================================================================
-
-ISSUE 23 CORRECTION (verified directly against source, not agent hearsay): the claim
-"hilbert4d/math4d/astar are never exposed to SQL" is overstated as written. The separate
-extension/laplace_geom extension (laplace_geom.c:126-573) exposes 18 native functions to
-SQL (hash128 blake3/merkle, distance/angular/dwithin/centroid/frechet/hausdorff 4d,
-hilbert encode/decode, mantissa pack/unpack, vertex/trajectory accessors), and astar.cpp
-IS driven from SQL via astar_path_raw (extension/laplace_substrate/src/astar_path.c:153-169,
-real astar_open/astar_next frontier; edge expansion via SPI). The accurate residual gap:
-no GENERIC native KNN driver (candidate generation + ranking in one native call) —
-word_shape_peers_fast is the single instance; structural_neighbors/locale/cluster,
-consensus_peer, metric_edges, and SQL word_shape_peers remain SQL routers with the Rule #4
-correlated-CTE defect. procrustes + engine/dynamics + engine/synthesis remain C#-only.
-
-NEW: .scratchpad/07_SQL_Surface_Audit.txt — full-repo SQL surface audit (2026-07-02):
-inline SQL in C# (4 chess files inline `rating - 2*rd` bypassing eff_mu(); edge-id formula
-maintained in BOTH laplace.consensus_id and C# ConsensusKeys.EdgeId; ContentRoundtrip's
-hand-rolled recursive PostGIS descent), dead SQL (all 42 top-level NN_*.sql.in never built
-— extension assembles ONLY from manifests via generated/install_chain; orphan
-refresh_consensus_views.sql.in in neither manifest), heavy-SQL violations ranked
-(relate_path recursive BFS worst), ~25 functions inlining the entity+physicality type=1
-join with no view, six different "string -> entity id" implementations, competing
-label()/render() renderers between endpoints and CLI, and a prioritized P0-P3 roadmap.
-
-ISSUE 37 -- OMW grammar_compose_probe rc=-2: transient, NOT a data record; instrumented, not
-root-caused
-Status: OPEN (instrumented) -- does not block; OMW layer complete.
-The 2026-07-02 00:39 crash (rc=-2 at 95.9% of OMW) was NOT reproducible: a full identical
-rerun completed cleanly (3,438,843/3,440,071 records -- delta is comment/header lines --
-failed=0, layer_complete=True, 583s end-to-end post-Issue-36). All 1,388 wns files verified
-byte-perfect strict UTF-8 (Python strict decoder, per line); the native utf8_decode audited
-correct (RFC 3629-strict incl. surrogate/overlong rejection); the row iterator's carry logic
-audited correct (splits only on \n / holds back partial records until finalize). Conclusion:
-the -2 was manufactured transiently -- prime suspect is a concurrency-sensitive path in the
-parallel per-file compose (the original run's pathologically slow timing under Issue 36's
-hash-index tax produced interleavings a healthy run does not). Instrumentation now in place
-so any recurrence self-identifies: OMWGrammarIngest wraps per-file errors with the tab-file
-path; GrammarEntityBuilder/GrammarRowComposer compose exceptions now report content length,
-first-invalid-byte offset, surrounding hex, and a lossy text preview (DescribeContent).
-Do NOT chase further without a reproduction; the diagnostics will hand over the record if it
-ever fires again.
-
-UPDATE 2026-07-02 (later) — Rule #8 Phase 2 landed: the write protocol
-(plan: ~/.claude/plans/enumerated-growing-kay.md; spec: 06 Rule #8)
-apply_batch is NO LONGER CALLED from C#. NpgsqlSubstrateWriter's core
-(Npgsql/NpgsqlWorkingSetApply.cs, partial class) now does: one tx
-[SET LOCAL replica/sync_off/jit_off + pg_advisory_xact_lock('laplace_apply_batch' key,
-same key as before) -> optional flush-journal token claim -> in-tx bulk verification
-probes -> subtract hits -> pure COPY direct into laplace.entities/physicalities/
-attestations (tier order irrelevant within one atomic tx) -> ONE unnest UPDATE merging
-present attestations (counts sum, GREATEST ts)]. No temp tables, no anti-join, no
-ON CONFLICT. CopyTupleParser.cs parses the native IntentStage COPY blobs client-side
-(ids, phys entity refs, attestation ts/count + patch offsets) and re-emits filtered
-row subsets byte-identically (contiguous kept rows coalesce into windowed copies).
-ApplyManyAsync and the new ApplyWorkingSetAsync(change) share this core; the working-set
-lane additionally claims laplace.ingest_flush_journal (working_set_id = intent hash,
-INSERT ON CONFLICT DO NOTHING) so a retry after commit-ambiguity is a no-op instead of
-double-counting the additive attestation merges.
-
-Three new probes (all batch_presence_core, positive-confirmation-only):
-- entities_stored_bitmap: perfcache OFF — the write lane needs "is there a committed
-  ROW", not "is this id resolvable"; the axiom answer would silently drop every tier-0
-  codepoint entity during the unicode seed (they only exist because this lane writes them).
-- physicalities_exist_bitmap: physicality presence decided by its OWN id, never inferred
-  from its entity — projections/building blocks legitimately land after the entity exists
-  (the first draft inferred from entity presence and broke
-  ApplyAsync_PhysicalitiesSameEntityType_DistinctIds_CoexistAndDedupById).
-- attestations_exist_bitmap already existed (Phase 0).
-
-Duplicate semantics preserved exactly from apply_batch: duplicate staged attestation ids
-collapse to the latest-ts representative with summed games (client-side now, count patched
-in the COPY stream); entities/physicalities dedup first-occurrence. Fixed in passing: the
-old managed marshal dropped duplicate attestation ids across changes (seenAtt first-wins)
-LOSING their observation counts — pre-existing data-loss bug, now merged properly.
-
-Perf A/B on the exact 500k-attestation throughput workload (fixture DB, Debug):
-old lane = 537ms COPY-to-temp + 6,812ms apply_batch = 7.3s; new lane = ~330ms client
-(parse 62/group 47/probe 173/emit 49) + 3.0s real COPY = ~3.3s. New lane 2.2x faster.
-The Tier=perf 500k rows/s gates (IngestBaselineGates.MinWriterRowsPerSecond) did not pass
-on the old lane on this machine either — author confirms they are arbitrary metrics tests,
-bypassed for now (already Tier!=perf-excluded in CI/test-app.cmd). New
-BulkApply_RoundTrips_StayConstantInRowCount replaces the retired 1-vs-8 partition test
-(partition fan-out deleted: the advisory lock serialized it anyway).
-
-Suites green post-change: SubstrateCRUD 62/62 (Tier!=perf), Decomposers.Abstractions
-302/302, Engine.Core 105/105, Ingestion 16/16, WorkingSetApplyTests 4/4 (repeat-apply
-subtraction, dup collapse, interior-subtree subtraction, journal replay no-op),
-CopyTupleParserTests 5/5 (incl. byte-identical full re-emission vs native EmitCopyBinary).
-Also fixed: UnicodeSeedIntegrationTests.ResolvePerfcacheBlob threw DirectoryNotFoundException
-on Windows probing the Linux /opt root (pre-existing env bug, masked both unicode tests).
-
-Phase 2 residual: live-gate run (fresh DB, unicode+wordnet seed via new lane, repeat-ingest
-0 inserts) pending; apply_batch native fn + wrapper SQL still installed (deletion is
-Phase 5); IngestRunner still per-batch ApplyManyAsync (working-set wiring is Phase 4).
-
-UPDATE 2026-07-02 (evening) — Phase 2 GATE CLOSED, plus two build-staleness incidents root-caused
-Gate results (fresh DB, unicode + wordnet via seed-step, all through the new write lane):
-- unicode: 1m52s (ingest 76.6s + fold ~34s), 1,632,018 attestations, layer_complete.
-- wordnet: 2m27s (ingest 103.5s + fold 46s), 725,076 novel entities, 2,267,608
-  attestations, 76 round trips across 8 intents. senses('dog')=8, define() returns
-  the real gloss.
-- repeat-ingest: completion-marker short-circuit, 0 intents, 0 RT, 5.9s.
-- FORCED repeat (--force, author-directed): 0e+0p+0a across ALL 2.28M staged rows,
-  59 RT, counts byte-identical, no PK violations; attestation observation_counts
-  exactly doubled (1→2, 2→4, ...) — the merge lane summed exactly once per
-  re-observation. Author: "non-issue but we just proved your fix."
-
-Incident 1 — stale Release binary: seed-step.cmd runs `dotnet run -c Release --no-build`;
-the first post-rewrite seeds executed a pre-Phase-2 binary and resurrected apply_batch,
-which stalled terminally (active query, zero CPU/disk — the recurring stall). Killing the
-backend surfaced the old-lane stack trace. Root fix beyond rebuilding: app/Directory.Build.props
-now DEFAULTS LAPLACE_BUILD_ROOT to D:\Data\Builds\Laplace on Windows (bare dotnet build,
-IDE, and env.cmd builds all share ONE output universe), in-repo obj/bin are glob-excluded
-(DefaultItemExcludes) and were purged (110 dirs) — this also killed the CS0579
-duplicate-AssemblyInfo publish failure.
-
-Incident 2 — split hash universes: extension DLLs import laplace_core_static.lib from
-build-win (extension/CMakeLists.txt:63); the engine static lib predated the a8d344d
-tier-byte revert while the CLI's laplace_core.dll did not. Result: word_id('dog') =
-tier-MIXED hash (ecada9c9...) vs decomposer 'dog' = tier-blind (01cdcce1...) — the seeded
-data was CORRECT; word_id/senses() were the liars (senses=0, "wordnet lexicon not
-queryable"). Proven live via laplace_hash128_merkle(0,[x]) <> merkle(1,[x]) on the deployed
-lib (tier_blind_live=f), then rebuilt extensions against the fresh engine → converged
-(tier_blind_live=t, word_id('dog') == DB id, senses=8). LESSON: build-extensions after ANY
-engine rebuild — the static-lib import means extension DLL freshness does NOT imply engine
-code freshness. The `check wordnet/dog: id_ok` field is near-useless (word_id never returns
-NULL for non-empty input) — it green-lit a broken universe; senses>0 is the real check.
-
-Also fixed in passing: WordNetDecomposer.DescribeInputAsync counted only synset lines
-(117,659) while decompose runs four record streams against one consumed counter →
-input_pct=284%. Inventory now counts index.sense/*.exc/sentidx.vrb too (unit label
-"records"). NOTE: Laplace.Cli Release output still carries the pre-fix decomposer DLL
-(built after the last Cli Release build) — next `dotnet build Laplace.Cli -c Release`
-picks it up; harmless until then (cosmetic percentage only).
-
-Windows scripts: seed-step/deploy-api/seed-everything/seed-post-wiktionary now invoke
-"%SystemRoot%\System32\find.exe" explicitly — git-bash findutils can no longer shadow the
-tasklist|find guards (the cosmetic `find: '/I'` noise is gone; the guard still checks the
-wrong image name Laplace.Cli.exe vs dotnet.exe — known, unchanged).
-
-Phase 2 is DONE. Remaining: Phase 3 (client-side consensus fold — the 34-52s server fold
-per seed is now the dominant cost), Phase 4 (working-set wiring + OMW wall-time target,
-ReadAllBytes fix), Phase 5 (deletions incl. apply_batch itself).
-
-UPDATE 2026-07-02 (late evening) — backlog sweep: 01/03/13/16/18/32 closed, 15's latent
-disposal bug fixed, Issue-33 word_shape_peers follow-up done, NU1903 pinned.
-
-ISSUE 01 — CLOSED, superseded by the 29→35 chain. The "highway_mask NULL on production
-attestations" symptom had three stacked causes, all fixed and verified live on the
-2026-07-01 fresh reseed (see Issue 35: 1,632,015/1,632,019 unicode attestations carry a
-correct non-zero mask). Nothing left of 01 as filed.
-
-ISSUE 03 — CLOSED. extension/laplace_substrate/sql/39_highway.sql.in no longer exists;
-the SQL-level highway surface it was a placeholder for now lives in
-sql/functions/highway/*.sql.in (11 objects + v_entities_highway view) backed by
-src/highway_mask.c, and is live: api('highway') returns laplace_highway_band_mask/
-mask_bits/match/popcount, relation_highway_bit/band.
-
-ISSUE 13 — FIXED. seed-step.cmd now runs an independent :verify_step after every ingest:
-maps the step to its decomposer SourceName (unicode→UnicodeDecomposer ... chess→ChessPgn)
-and queries evidence_count(NULL, source_id('<source>')) directly against %LAPLACE_DBNAME%;
-0/empty ⇒ exit 3. source_id() is a pure hash (verified: bogus name ⇒ hash, count 0), so a
-failed ingest can't false-pass. Steps with no mapping (safetensors/model-*) print
-"verify skipped" and pass through. Verified live against UnicodeDecomposer (1,632,017).
-
-ISSUE 16/18 — FIXED. The tasklist IMAGENAME guard could never fire (`dotnet run` launches
-as dotnet.exe). Replaced in seed-step.cmd (:cli_running, shared by mutex guard and
-:wait_cli_exit), seed-everything.cmd, and seed-post-wiktionary.cmd with a
-Win32_Process COMMAND-LINE match: any dotnet.exe/Laplace.Cli.exe process whose command line
-mentions Laplace.Cli counts as a live ingest (idle dotnet build-server daemons don't match
-— the exact red herring documented under Issue 16). Exit-code convention kept identical to
-the old find-based check (0 = running). Verified live: the guard correctly detected the
-wiktionary ingest running during this session (both the `dotnet run ... ingest wiktionary`
-wrapper and the actual Laplace.Cli.exe child — note the CLI DOES run as Laplace.Cli.exe
-under the new shared-output-root build, but the dotnet.exe wrapper still doesn't, so the
-command-line match covers both shapes).
-
-ISSUE 15 — the latent disposal-ownership bug is now FIXED (the "(a) retry/skip path"
-half). NpgsqlSubstrateWriter.ApplyManyInternalAsync disposed caller-owned prebuilt
-IntentStages in a finally — including on a failed apply about to be retried wholesale by
-IngestRunner's transient-error loop, turning every retry into ObjectDisposedException and
-masking the real error. Now disposes them ONLY on success; stages abandoned by a fatal
-abort are reclaimed by the SafeHandle finalizer. Combined with the Issue 17 advisory lock
-(prevention) and the Issue 16/18 guard fix (orchestration), all three layers of the
-concurrent-ingest incident are addressed. Writer/working-set/retry-policy suites 26/26.
-
-ISSUE 32 — CLOSED (both halves). Code: already fixed in source before this sweep —
-laplace_attestation_aggregated_add forwards (witness_weight, games, sum_score_fp1e9) in
-build()'s order, parameter order deliberately unified, and build() carries argument-swap
-tripwires (games in (0, LAPLACE_ATTESTATION_GAMES_MAX], witness_weight in [0,1] — a
-rotated call now fails loudly instead of writing corrupt evidence). The single caller
-(grammar_compose.cpp:1182) passes correctly. Data repair: MOOT — verified against the
-live post-reseed DB: zero SemLink attestations exist and zero attestations anywhere have
-observation_count >= 1e9 (max is 1,708,836); the poisoned rows died with the old database.
-
-ISSUE 33 follow-up (word_shape_peers seq-scan CTE) — DONE, by deletion. The SQL-level
-word_shape_peers() had no callers (lexical_peers and everything live uses
-word_shape_peers_fast) and still carried the CTE-column-instead-of-bound-parameter KNN
-defect. Removed word_shape_peers.sql.in; added functions/lexical/drop_word_shape_peers.sql.in
-(DROP FUNCTION IF EXISTS) to both manifests per the existing drop-file convention.
-NOT YET DEPLOYED to the live DB — bundles regenerated via build-extensions.cmd, but
-install-extensions deliberately deferred: a wiktionary ingest is running and deploy
-recycles backends (57P01 kills the ingest shell — the Issue 34 addendum lesson).
-Run install-extensions.cmd after the ingest finishes.
-
-NU1903 — FIXED. Microsoft.AspNetCore.OpenApi 10.0.0 pulls Microsoft.OpenApi 2.0.0
-(GHSA-v5pm-xwqc-g5wc, high, stack-overflow DoS on circular schema refs; patched in 2.7.5).
-Directory.Packages.props now sets CentralPackageTransitivePinningEnabled=true and pins
-Microsoft.OpenApi 2.7.5. `dotnet list package --vulnerable --include-transitive` is clean.
-
-Still OPEN after this sweep (the genuinely big engineering items, none quick):
-04 (feature_extractor.cpp stub), 05 (astar heuristic 0.0), 06 (MoE/attention-bias zeros),
-07 (type-grained highway mask — design decision), 19's bulk-descent architectural half,
-23 (native geometric KNN — partially answered by word_shape_peers_fast + Issue 33's
-finding that GiST KNN is fast when bound correctly), 34 (apply-throughput at scale —
-largely superseded by the Rule #8 Phase 2 write lane; re-baseline), 37 (OMW rc=-2,
-instrumented, wait for recurrence), and Rule #8 Phases 3-5.
-
-==== 2026-07-03 session: chess PGN parallel lane (Lumbras 909k-game live debugging) ====
-
-ISSUE 38 — FIXED. Mixed stale binaries after a locked build. A Release rebuild ran while a
-live ingest held file locks; MSB3027 failed to copy exactly Laplace.Chess.dll and
-Laplace.Decomposers.dll into the CLI output, leaving pre-consolidation DLLs (old struct
-layouts) beside post-consolidation ones. First chess runs after the 28->13 merge crashed
-with AccessViolation inside managed MoveGen.GenPawn and Internal CLR error (0x80131506)
-inside HashSet<Hash128> — classic cross-assembly struct-layout mismatch signatures, NOT
-chess bugs. Fix: wipe the CLI Release output dir + full rebuild; both crashes gone on
-identical commands. RULE: after ANY build that reports MSB3027 copy failures, the output
-tree is poisoned — clean-rebuild before handing binaries to anything.
-
-ISSUE 39 — FIXED. Chess PGN lane was single-threaded AND silent in working-set mode.
-Two independent defects compounding: (a) ChessPgnDecomposer fed DecomposerBatch.RunAsync —
-one thread did tree-sitter parse + per-ply board replay + compose for the whole corpus
-(measured 0.98 cores, 235 games/s); (b) in WS mode DecomposerBatch uses ONE spanning
-builder that yields only at the memory budget, so IngestRunner printed no INGEST_PROGRESS
-for 244s (the batch=512 knob in the chess code is dead in WS mode). Fix mirrors the
-wiktionary parallel lane: feeder frames raw game text only (chunked block reads + manual
-line split — the original per-line awaited ReadLineAsync capped framing at ~400 games/s),
-workers own parse+compose via PCoreParallelCompose (tree-sitter parsers are per-thread TLS
-in grammar_decomposer.c — verified, not assumed), hot-cache GameId shortcircuit only
-(bulk DB novelty probe stays on the sequential path), WS_COMPOSE feed heartbeat every 50k.
-
-ISSUE 40 — FIXED, and it was the dominant compose-scaling killer: WORKSTATION GC.
-No ServerGarbageCollection anywhere in the app tree. Measured live via dotnet-counters on
-the parallel chess lane: 1.87 GB/s allocation rate, 73 gen0 + 29 gen1 collections/s, 16%
-of wall time in GC pause — every collection suspends all 7 pinned workers. Per-core
-efficiency: 71 games/core-s parallel vs 235 sequential. Fix: DOTNET_gcServer=1 +
-DOTNET_GCHeapCount=8 (P-core budget) in env.cmd (guarded, defined-check like the rest).
-After: gen0 2.4/s, gen1 1.6/s, pause 6%, ~500-600 games/s compose (~2.1x sequential),
-120 games/core-s. Lock contention ROSE 11k->16k/s once GC stopped masking it — that is
-the next compose ceiling if one is ever needed (suspect memo/builder path; unproven).
-
-ISSUE 41 — FIXED. PCoreParallelCompose output channel was UNBOUNDED: workers outpacing
-the single consumer (runner drains changes through per-attestation consensus Accumulate;
-caught live mid-ConcurrentDictionary.GrowTable at 25M entries) piled fully-staged changes
-into RAM without limit. Now bounded at workerCount*2 with Wait — producers block and the
-pipeline self-limits to the consumer's real pace instead of converting the imbalance into
-memory. (The dedup-window "fix" tried first — recordsPerChange 512->4096 — was WRONG:
-content_witness_batch_add runs content_tree_build BEFORE the per-stage witness_seen check,
-so the expensive tree build is never deduped by builder window anyway, and ChessCompose
-already carries a global PositionMemo. It only fattened in-flight changes 8x. Reverted.)
-
-ISSUE 42 — FIXED. Fixed 8 GiB working-set budget OOM'd the 48 GB box. Staged-bytes
-estimate under-counts true resident ~2.5-3x (managed row objects, memo caches, consensus
-accumulator, server-GC heap slack): 8 GiB staged measured as ~21 GB resident, plus PG's
-locked huge pages, plus a 25.2M-relation fold spike = 0.5 GB free system-wide, everything
-paging, CLI at 0.5 cores (the "disk raped" symptom was pagefile churn, not PG writes).
-WorkingSetMode.BudgetBytes default is now RAM-aware: phys/16 clamped to [1 GiB, 8 GiB]
-(128 GB server keeps 8 GiB; 48 GB box gets 3 GiB). LAPLACE_WORKING_SET_BUDGET_MB still
-overrides. Verified live: sets close ~30k games, applies fire, memory sawtooths.
-
-SCALE OBSERVATIONS from the first full Rule #8 cycles on chess (open, not defects):
-  - Chess explodes to ~690 substrate rows/game (Lumbras 909k games ~= 630M rows). The
-    pipeline is APPLY-bound at scale: ~60s compose per ~300-400s apply per ~30k-game set
-    (apply runs synchronously in the consume loop; workers sit on backpressure). The big
-    remaining lever is pipelining: apply working set N while composing N+1 — IngestRunner
-    change, would take effective rate from ~85 to ~100+ games/s. NOT DONE.
-  - WS1 apply: 20.7M rows in 305s (entities 86k, attestations 94k rows/s, 8 id-range
-    conns); physicalities consistently the slowest (~29k rows/s, geometry payload).
-    WS2 attestations dropped to 61k rows/s — the index-cycle's "staged >= half live"
-    condition stops firing as tables grow; expected decay, re-baseline Issue 34 with this.
-  - Client fold rate decays with priors growth: e1 54k rel/s -> e2 20.7k rel/s (ReadPriors
-    against a growing consensus table). Watch on full seeds.
-  - EmitNodes does not consult the proven-present hot cache (only GameId-level shortcircuit
-    exists), so cross-working-set trunk positions are recomposed and staged again — WS2
-    subtracted 169k entities/164k physicalities at verify. Safe but wasted work; also the
-    WORKING_SET_SUBTRACTION message blames "a concurrent ingest" — misleading wording for
-    plain cross-set self-overlap.
-
-OPS LESSON (cost a run): cmd.exe re-reads live batch files by byte offset — never edit a
-.cmd while any invocation of it is executing. Editing env.cmd is safe while seed-step.cmd
-is blocked inside dotnet run (different file), but kill first anyway. Also: in a
-backpressured pipeline, producer rate == consumer rate BY CONSTRUCTION — a feed heartbeat
-matching the compose rate identifies no bottleneck; only independent evidence (per-thread
-CPU, stacks, counters) does. Three runs were burned re-learning this.
-
-ISSUE 43 — FIXED. Grammar-compose PRECEDES emitter: attestation bloat and the compose CPU
-sink were the SAME code block (grammar_compose.cpp sibling-order loop). Two defects:
-(a) It attested adjacent-sibling order at EVERY level of the AST. For JSON modalities
-    (wiktionary kaikki records) the AST is the JSON parse tree, so sense->sense,
-    field->field, element->element dump-format order became evidence rows — measured
-    ~450k of 455k wiktionary attestations per 1k records were this plumbing vs 2.6k
-    HAS_DEFINITION + 3.2k HAS_EXAMPLE actual knowledge (~1.3% signal). Ordering is
-    already lossless in physicality trajectories; the rows certified nothing.
-(b) It was O(n^2): per AST node it rescanned all n nodes for children, plus a linear
-    scan of the precedes array per pair. Fat kaikki records (thousands of JSON nodes)
-    burned tens of millions of ops each — 6.9 cores busy staging ~5MB/s, which also
-    starved every yield/progress threshold (the "zero telemetry" symptom: the pipeline
-    was fine, compose never produced anything to report).
-Fix: JSON modalities emit ZERO structural-order PRECEDES (is_json_modality gate already
-in scope); text modalities keep word-order PRECEDES via single pass with per-parent
-last-child cursor + open-addressing dedup table (O(n)). Same pair set + games counts as
-the old loop for text, different array order only (COPY re-sorts). Verified: engine
-355/355, regress 14/14 (incl. converse + law suites), drain-parity green. Post-fix the
-byte-bound yields (256MB/worker) + IngestRunner's standard per-change Progress.Report
-produce INGEST_PROGRESS lines with composed= counts — no feeder heartbeat needed (removed).
-Perf-gate note: 4 pre-existing calibration failures on this box (WriterThroughput
-round_trips=13 vs <=12 range at commit_rows=50k; warm-reingest 30s/GB gate) — none touch
-the compose path; not regressions from this fix, not chased.
-
-ISSUE 44 — FIXED (code; live verification pending next bulk seed). Index cycling was
-scoped to the APPLY, not the RUN. NpgsqlWorkingSetApply constructed a fresh
-NpgsqlIndexCycle inside every parallel-copy working-set apply: drop 9 physicalities
-secondaries -> COPY -> rebuild all 9 -> next batch repeats. Each rebuild scans the whole
-LIVE table (coord GiST measured 70.8s at ~8.3M rows during the 2026-07-04 OMW run), so a
-multi-batch run pays O(applies x table size) — quadratic in run length, observed live as
-back-to-back INDEX_CYCLE drop/rebuild pairs per INGEST_BATCH. Worse at both ends: early
-batches pay repeated full rebuilds; once live grows past 2x the staged size the
-staged>=live/2 guard stops qualifying and late batches pay per-tuple maintenance on all 9
-indexes instead. Ownership was also at the wrong layer: the apply lane can only see one
-batch; only the run (IngestRunner, which logs INGEST_START/INGEST_COMPLETE and knows
-input_units up front) can decide the cycle window.
-Fix (run-scoped bracket, pipeline-owned):
-  - ISubstrateWriter gains BeginBulkRunAsync/CompleteBulkRunAsync (default no-op).
-  - NpgsqlSubstrateWriter: run-scoped _runCycle; journal recovery moves to run begin;
-    qualifying applies drop into the run cycle (idempotent — dropped indexes vanish from
-    pg_index) and skip the per-apply rebuild; CompleteBulkRunAsync rebuilds ONCE.
-    Non-bracketed callers keep the old per-apply cycle exactly.
-  - IngestRunner.RunAsync brackets both loop lanes in try/finally; rebuild runs on every
-    exit path INCLUDING fatal apply errors; on cancellation it is skipped (don't block
-    teardown on a minutes-scale rebuild — the index_cycle_journal recovers the drops at
-    the next run's begin). Completion marker + INGEST_COMPLETE land after the rebuild.
-  - ConsensusAccumulatingWriter forwards both bracket calls to inner.
-Safety audit done before widening the down-window to the whole run: every write-lane
-presence probe (entities_stored_bitmap / *_exist_bitmap / *_present_ordinals in
-descent_probe.c) is a PK lookup, and PK/unique/exclusion never cycle; OMW's decomposer
-makes no mid-run substrate reads. Recall-side queries degrade while a seed runs — already
-true during each per-batch window, now for the run's duration; acceptable on a seed box.
-Verified: Laplace.Substrate builds clean. NOT yet verified against a live bulk ingest
-(OMW was mid-flight on the old binary when this was written) — next seed-step run should
-show exactly one INDEX_CYCLE drop line and one rebuild line per run.

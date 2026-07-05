@@ -1,0 +1,236 @@
+13 — STABILIZATION AUDIT + PLAN (current-state truth table and the path to "progress
+comes naturally")
+================================================================================
+Date: 2026-07-05. Reconciles 01-12, MEMORY, CLAUDE.md, and a fresh code survey
+(decomposer→pipeline lane map, write-lane state, CLI dispatch, repo hygiene) into one
+document. Grounding rule inherited from 05/06: every claim below was verified against
+source this session or cites the doc that did; nothing is carried forward on faith.
+
+The frame (why this doc exists): the invention is one arc —
+  content → decomposer records → client dedup/Glicko accumulation → bulk-novel COPY
+  → consensus (the Glicko-weighted colony) → recall/walk serving → Mold-A-Model
+  (consensus spectrum → transformer tensors, no training; docs 09/12).
+Every refactor item below is judged by whether it shortens or de-risks that arc.
+Code hygiene that doesn't serve the arc is not in this plan.
+
+================================================================================
+SECTION 1 — WHAT IS SOLID (protect; do not churn)
+================================================================================
+1.1 SQL source of truth is CONSOLIDATED AND LOCKED (doc 10, 2026-07-04): manifest-driven
+    build, completeness gate fails configure on any orphan .sql.in, parity harness guards
+    against legacy-bundle reintroduction, EXT_VERSION is manifest-derived. The
+    "files keep reverting" class of battle is structurally over. The lockout-gate
+    pattern used here is the template Section 4 reuses for the C# pipeline.
+1.2 Project consolidation is DONE (Issue 08, two waves): 13 projects, namespaces
+    byte-preserved, SourceIds untouched, verified by hash-identical isolated re-ingest.
+1.3 The Rule #8 pipeline CORE EXISTS and is real code, not aspiration:
+      - Working-set mode: one builder spans the record stream, descent probes per
+        interval, one SubstrateChange at the end (IngestPipeline.cs IngestBatchConfig
+        .WorkingSet; adopted as the default in ContentIngestAdapter/DocumentIngestAdapter/
+        StructuredGrammarIngest/DecomposerBatch via WorkingSetMode.Enabled).
+      - Client-side Glicko accumulation: ConsensusAccumulatingWriter merges matchups in
+        memory per edge (Rule #8 step 4). STRONGER FINDING (2026-07-05, post-audit): the
+        FOLD is client-side too (NpgsqlConsensusFold, same native glicko2 via P/Invoke,
+        bit-parity-tested), and apply_batch.c is DELETED with drop-files in both
+        manifests — Rule #8 write-protocol phases 2-5 are ALL landed.
+      - Pure bulk-novel apply: NpgsqlWorkingSetApply — advisory lock, parallel binary
+        COPY over disjoint index ranges, attestation duplicate collapse client-side,
+        run-scoped index cycling (Issue 44). The ingest_bulk_novel GUC named in 06's
+        violations paragraph NO LONGER EXISTS anywhere (grep-verified) — superseded,
+        not still-unwired. 06 Rule #8's "Violations as of 2026-07-02" paragraph is
+        therefore PARTIALLY STALE (see 3.3).
+      - Bounded channels (Rule #10), Server GC (Rule #9), machine-derived sizing
+        (Rule #12) all in place per Issues 40-42.
+1.4 Highway mask is fixed and live-verified (Issues 01→29→35; 05 Rule #5 satisfied).
+1.5 Decomposer production code contains ZERO inline SQL (07 §1, still true) and zero
+    TODO/HACK/FIXME markers exist anywhere in app/ (grep-verified today).
+1.6 Part of the 07 P1 roadmap has ALREADY BEEN EXECUTED since that doc was written —
+    visible in recent commits: edge_rank() centralization (d061beb), 4 cross-layer SQL
+    helpers + deletion of duplicated inline C# SQL (7313fdc), consensus_peer bound-param
+    KNN + v_consensus_unrefuted centralization (ee3bfef), content-derived physId
+    (b8e49dc). 07's P1 list must be re-baselined before executing "the remainder"
+    (Section 4 Phase 2 does this first).
+
+================================================================================
+SECTION 2 — THE ACTUAL MESS (what makes progress a battle)
+================================================================================
+2.1 INGESTION LANE FRAGMENTATION — the core finding. The pipeline core (1.3) is good,
+    but there are AT LEAST SEVEN distinct ways a decomposer reaches it, and lane choice
+    is historical accident, not policy (survey of all of Laplace.Decomposers, 2026-07-05):
+      L1 raw SubstrateChangeBuilder hand-roll: Unicode, Code/Repo/Stack/Tabular/
+         TinyCodes, Model, OpenSubtitles(main), FrameNetLuIngest, SemLink's four
+         sub-ingest files (FnLuSynsetBridge/MapNet/PredicateMatrix/RoleMapping)
+      L2 DecomposerBatch: ISO, FrameNet, PropBank, VerbNet, WordNet
+      L3 StructuredGrammarIngest: Atomic2020, ConceptNet, OMW, Tatoeba, Wiktionary
+      L4 NativeGrammarIngest + EtlWitness/EtlManifest ETL lane: Atomic2020, ConceptNet,
+         OMW, Wiktionary — i.e. FOUR SOURCES HAVE TWO PARALLEL IMPLEMENTATIONS (L3+L4).
+         CLI dispatch (IngestCommands.cs:131-147) resolves the ambiguity by special-
+         casing wiktionary/omw to their L3 decomposers BEFORE the EtlManifest.IsRoutable
+         check, while atomic2020/conceptnet fall through to EtlDecomposer. The losing
+         lane in each pair is live code that looks authoritative and isn't.
+      L5 IngestBatchPipeline direct: UD, SemLinkIngestAdapter
+      L6 ContentWitnessBatch: WordNet, OpenSubtitlesZipIngest, UdIngestAdapter,
+         SemLinkIngestAdapter (overlaps L2/L5 — a second axis of divergence)
+      L7 PCoreParallelCompose: CILI (and the chess lane in Laplace.Chess.Service)
+    Consequences: Rule #8 conformance depends on which lane a source happens to sit in;
+    every new source is written by copying the nearest neighbor, forking further; a
+    pipeline fix (like Issue 44's run bracket) lands in one lane and must be re-verified
+    in seven. This is the "childish school project" smell — not bad code per file, but
+    N parallel half-standards.
+2.2 ABSTRACTIONS GRAB-BAG: Laplace.Substrate/Abstractions is ~70 flat files mixing four
+    different altitudes — the pipeline itself (IngestPipeline, WorkingSetMode), the
+    adapter layer (Content/Document/Grammar/Etl adapters), grammar plumbing
+    (GrammarRowComposer/Reader/EntityBuilder, JsonGrammarHelper), and per-source helpers
+    (IliMap, SenseAnchor, CategoryAnchor, LanguageReference...). Nothing tells a reader
+    which file is load-bearing contract vs convenience helper.
+2.3 READ-SIDE FRAGMENTATION (07 §4, still mostly open): no single gateway; SubstrateClient
+    (endpoints) and QueryCommands (CLI) are parallel read surfaces calling different
+    substrate functions for the same logical ops; six string→id paths; label() vs
+    render(); layer-marker convention hand-built in 4+ places. Partially improved by
+    1.6's commits; the P2 entry-point list (resolve/entity_form/decompose/
+    reconstruct_content) is not built.
+2.4 DOC DRIFT (the docs are the session-to-session memory; drift here IS the battle):
+      - 06 Rule #8 violations paragraph: stale (see 1.3) — working-set mode, client
+        fold accumulation, and bulk-novel apply all exist now; ingest_bulk_novel is gone.
+      - 07 P1: partially executed (1.6) but the doc doesn't say so.
+      - 02 issue tracker: issue NUMBERS ARE REUSED with contradictory statuses in one
+        file (20, 21, 23, 32, 33, 34 each appear twice meaning different things; early
+        statuses contradicted hundreds of lines later). Any reader — human or agent —
+        must read all 1285 lines to know current truth. This file needs compaction, not
+        more appending.
+      - CLAUDE.md "Known gaps" paragraph partially duplicates 02 and drifts on its own.
+2.5 HYGIENE DEBRIS: 670 MB of stale agent worktrees under .claude/worktrees (8
+    registered, 4 already prunable per git worktree list); tmp-bench.cs at repo root
+    (referenced by no csproj — dead); .scratchpad/_raw.log/_unicode.log;
+    NativeTestBootstrap.cs at root is LIVE (wired via app/Directory.Build.targets) but
+    placed where it reads as debris — move or comment-anchor it.
+2.6 THE INVENTION'S OWN OPEN BUILD (docs 09/12 — not mess, but the destination):
+    routing/composition at depth is the one open question. Named gaps: dense eigenmap
+    embed + full vocab + real lm_head (the three FAITHFUL collapse causes), geometric
+    heads (angular/fréchet/intersects), hidden='auto' spectral rank, hilbert/trajectory
+    PE, voronoi MoE (Milestone B), rd-as-temperature. Engine stubs sitting exactly on
+    this path: feature_extractor.cpp (Issue 04), astar h=0.0 (Issue 05), MoE/attention-
+    bias zeros (Issue 06).
+2.7 VERIFICATION DEBT (fixed-but-not-proven, per the verify-don't-guess rule):
+    Issue 44 run-scoped index cycle (needs one INDEX_CYCLE pair per run in the next
+    bulk seed log); Issue 19's narrow O(n) fix vs the real O(tiers) bulk descent
+    (explicitly different fixes — only the narrow one is done); chess consumer/apply
+    single-threaded bottleneck (memory: project_chess_ingest_state).
+
+================================================================================
+SECTION 3 — TARGET STATE (what "stable clean" means, concretely)
+================================================================================
+T1 ONE ingestion spine. A decomposer is a pure function: container bytes → stream of
+   generic records. It knows nothing about batching, probing, dedup, Glicko, COPY, or
+   index cycling. The spine (IngestBatchPipeline working-set mode →
+   ConsensusAccumulatingWriter → NpgsqlWorkingSetApply, bracketed by IngestRunner) is
+   the ONLY door to the database. Adapters become thin, declarative configs over the
+   spine, not parallel implementations.
+T2 One door per read, too: every logical read op has exactly one substrate entry point
+   (07 §4.2's list) and both SubstrateClient and QueryCommands consume the same shared
+   surface.
+T3 Structure tells the truth: Substrate project folders separate contract/spine/
+   adapters/source-support; the losing ETL-vs-Structured lane is deleted, not dormant.
+T4 Gates make regressions structurally impossible (the doc-10 pattern, generalized):
+   an architecture test fails the build if production decomposer code references the
+   writer/apply layer directly or contains inline SQL; the SQL manifest gate already
+   covers the extension side.
+T5 Docs stay load-bearing: 02 compacted to current-truth; 06/07/CLAUDE.md re-baselined;
+   one place per fact.
+T6 The foundry build (09/12 gap list) proceeds on top of a spine that no longer forks
+   under it — architecture read off the data, routing fidelity at depth measured.
+
+================================================================================
+SECTION 4 — THE PLAN (phased; each phase leaves the repo strictly better and shippable)
+================================================================================
+PHASE 0 — clear the decks (hours, ~zero risk)
+  0.1 git worktree prune + delete .claude/worktrees leftovers (670 MB).
+  0.2 Delete tmp-bench.cs (dead); relocate or doc-anchor NativeTestBootstrap.cs;
+      move _raw.log/_unicode.log out of .scratchpad.
+  0.3 Compact 02_Identified_Issues.txt: one entry per issue, current status only,
+      renumber the six reused numbers, move resolved sagas to an appendix. Re-baseline
+      06 Rule #8's violations paragraph and 07's P1 list against 1.3/1.6. Trim
+      CLAUDE.md's duplicated gap list to pointers.
+      [DONE 2026-07-05: 02 compacted (status index, collisions split 32/32b + 33/33b/33c,
+      new Issues 45/46, lessons L1-L11); 06 Rule #8 + Rule #6 re-baselined; 07 §5
+      re-baselined; CLAUDE.md rewritten invention-first with a doc map.]
+  0.4 Close the verification debt that costs nothing to observe: next seed run confirms
+      Issue 44's one-cycle-per-run behavior (already scheduled work, just check the log).
+
+PHASE 1 — one ingestion spine (the core refactor; sequenced to never break seeding)
+  Contract first:
+  1.1 Name the spine explicitly (folder + namespace): Substrate/Pipeline = IngestPipeline
+      + WorkingSetMode + IngestRunner + the two writers. Restructure Abstractions into
+      Pipeline/ Adapters/ Grammar/ SourceSupport/ (file moves, namespaces preserved —
+      same discipline as Issue 08's consolidation).
+  1.2 Define the generic-record contract as THE decomposer output: IDecomposer stays;
+      IIngestRecordHandler<TRecord> + IRecordStream<TRecord> is the blessed shape for
+      record-oriented sources; adapters (Structured/Content/Document) become sealed
+      configs over IngestBatchPipeline with no private batching/probing logic.
+  Then migrate lanes, ONE SOURCE PER STEP, cheapest risk first, each step verified by
+  the proven ritual (isolated re-ingest → hash-identical ids; forced re-run → 0 novel
+  rows; evidence_count via seed-step's :verify_step):
+  1.3 Resolve the four dual-lane sources (atomic2020, conceptnet, omw, wiktionary):
+      pick the winner per source (benchmark once — the ETL/native lane exists for a
+      throughput reason; measure, don't assume), DELETE the loser, remove the CLI
+      special-case ordering so dispatch is table-driven.
+  1.4 Fold L2 (DecomposerBatch) and L5/L6 (IngestBatchPipeline/ContentWitnessBatch
+      direct users) onto the blessed adapter shapes — these are nearest the spine.
+  1.5 Migrate L1 raw-builder decomposers (Code family, Model, OpenSubtitles, SemLink
+      sub-ingests). Unicode stays bespoke BY DOCUMENTED EXCEPTION (tier-0 seeding is
+      genuinely different — Rule #6 requires the documented reason, which this is).
+  1.6 Chess/CILI (L7 PCoreParallelCompose): keep the parallel-compose front end but make
+      its output enter the same spine door; address the single-threaded consumer/apply
+      bottleneck here (memory: project_chess_ingest_state) — this is where Rule #8
+      step-5 bulk descent (Issue 19's REAL fix, O(tiers) across the working set) lands,
+      because it needs the single spine to exist to be implemented once.
+  Lock it:
+  1.7 Architecture gate (T4): a Substrate.Tests test that reflects over
+      Laplace.Decomposers and fails on any direct reference to Npgsql*/ISubstrateWriter
+      or string containing "SELECT " — the C# analogue of laplace_check_manifest_complete.
+
+PHASE 2 — one door on the read side (07 roadmap, re-baselined)
+  2.1 Diff 07's P1/P2 against commits d061beb/7313fdc/ee3bfef/b8e49dc; mark done items.
+  2.2 Build the P2 entry points still missing: v_word_points + word_anchor();
+      resolve(text,context); entity_form(id); decompose(text) (the known CLAUDE.md gap);
+      reconstruct_content(id)→bytea (kills ContentRoundtrip's hand-rolled recursive
+      PostGIS); batch entity_exists (fixes QueryCommands' tier-0-blind EXISTS); bless
+      label() or render(); layer-marker helper.
+  2.3 Extract the shared read surface both SubstrateClient and QueryCommands consume
+      (one library, two thin frontends). EvalCommands' eval kernel and FoundryExport's
+      raw plane SQL move into substrate functions (07 1.5) — this directly serves the
+      foundry, which is why it outranks P3.
+
+PHASE 3 — native backlog (07 P3, profile-first per Rule #5's caveat)
+  relate_path + laplace_ancestry → native graph engine; KNN router family →
+  word_shape_peers_fast template with shared word_anchor; hash128_lo → C;
+  expose math4d_distance_sq; decide the karcher_mean/log_s3/exp_s3 orphans (NOTE:
+  karcher/Fréchet mean on S³ is named by doc 09's math toolkit as the RIGHT mean —
+  the orphan is probably the future centroid upgrade, so EXPOSE, don't delete).
+
+PHASE 4 — the invention's build (docs 09/12; only phase that adds capability)
+  4.1 Proper synth v1 killing the three FAITHFUL collapse causes: full token list,
+      dense Laplacian-eigenmap embed (Lanczos), real lm_head off composed state.
+  4.2 hidden='auto' = spectral rank; geometric heads (angular kernel, fréchet, intersects
+      mask); hilbert/trajectory PE; rd-as-temperature.
+  4.3 Voronoi MoE (Milestone B) — retires Issue 06's zero-expert trap for own recipes.
+  4.4 Measure the ONE question (09): routing fidelity at depth, same prompts,
+      LLM floor vs grounded ceiling. Engine stubs 04/05 get scoped here (astar heuristic
+      = admissible geometric lower bound; feature_extractor per synthesis needs), not as
+      free-floating debt.
+
+ORDERING RATIONALE: hygiene so nothing fights back (0) → one write spine so new sources
+stop forking and pipeline fixes land once (1) → one read door so serving/foundry pull
+from a stable surface (2) → native perf on consolidated call sites, not on copies (3) →
+build the model on ground that holds still (4). Phases 1.3-1.6 are each independently
+committable; a stall anywhere leaves no half-migrated lane because migration is
+per-source, verified by re-ingest identity.
+
+WHAT MAKES PROGRESS "COME NATURALLY" AFTERWARD (the actual deliverable):
+  - New source = write one record-stream + handler, register in the dispatch table.
+    Nothing else to decide. Rule #8 conformance is inherited, not re-implemented.
+  - Pipeline improvements (bulk descent, index cycling, backpressure) land in ONE place.
+  - The gates (SQL manifest, parity.py, the new architecture test) turn yesterday's
+    battles into build failures instead of session-long investigations.
+  - The docs are short enough to be read at session start and true enough to be trusted.
+================================================================================

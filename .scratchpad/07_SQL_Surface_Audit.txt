@@ -278,6 +278,18 @@ no code, and call DIFFERENT substrate functions for the same logical operations.
 
 ================================================================================
 SECTION 5 — PRIORITIZED ROADMAP
+STATUS RE-BASELINE (2026-07-05): P0 DONE (doc 10: numbered files deleted with a
+zero-loss parity proof + manifest completeness gate; word_shape_peers deleted via
+drop-file). P1 PARTIALLY DONE by commits 7313fdc (four chess inline eff_mu sites →
+shared helpers; entity_physicality_coords exposed; SubstrateClient/FoundryExport
+inline SQL deleted) and d061beb (edge_rank() centralized across 8 consensus/converse
+files). ee3bfef migrated consensus_peer onto v_consensus_unrefuted + bound-param KNN
+(part of P2 item 6 / P3 item 9). b8e49dc made physId content-derived. STILL OPEN:
+P1 items 4-5 (entity_count/exists helpers, label-vs-render, layer-marker helper),
+P2 items 6-7 minus consensus_peer (v_word_points, word_anchor, relate_path +
+senses_with_context inliners, v_attestation_readable, resolve/entity_form/decompose/
+reconstruct_content), all of P3. Execution order now governed by .scratchpad/13
+Phases 2-3 (tracked as Issue 46 in 02).
 ================================================================================
 P0 (zero-risk deletions / dead weight):
   1. Delete all 42 top-level NN_*.sql.in (dead since the manifest build) + the orphan

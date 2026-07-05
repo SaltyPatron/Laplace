@@ -21,13 +21,25 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
         FROM consensus c JOIN syn ON c.object_id = syn.id
         WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
     ),
+    -- MATERIALIZED is load-bearing: it forces lexical_peers (a ~75ms native-KNN
+    -- call) to run ONCE per synset_members call. The bare
+    -- `<> ALL(lexical_peers(p_word))` filter form was pushed into the members
+    -- index scans and re-executed PER ROW (STABLE fns are never constant-folded;
+    -- a plain one-row subselect gets pulled up and re-pushed identically):
+    -- measured 65.3s of translate_to('water')'s 68.6s (2026-07-05, 14.9M
+    -- physicalities). `= ANY` callers (senses) are immune only because an
+    -- indexed ANY becomes the index condition itself, which forces one-shot
+    -- evaluation of the array.
+    peers AS MATERIALIZED (
+        SELECT lexical_peers(p_word) AS arr
+    ),
     agg AS (
         SELECT m.w,
                max(eff_mu(m.rating, m.rd)) AS mu,
                sum(m.witness_count)::bigint AS witnesses,
                max(m.sense_mu) AS sense_mu
-        FROM members m
-        WHERE m.w <> ALL(lexical_peers(p_word))
+        FROM members m, peers px
+        WHERE m.w <> ALL(px.arr)
         GROUP BY m.w
     )
     SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu

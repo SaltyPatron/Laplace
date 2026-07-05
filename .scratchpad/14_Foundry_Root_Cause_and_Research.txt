@@ -1,0 +1,360 @@
+14 — FOUNDRY ROOT CAUSE: why no conversation, why heads/layers mash, why the
+substrate's riches don't reach the poured model — with literature + prescriptions
+================================================================================
+Date: 2026-07-05. Method: direct read of the Mold-A-Model pour
+(FoundryCommands.SynthesizeMoldAModelAsync + FoundryExport basis/factor path),
+the 2026-07-05 full-reseed live timings, and a targeted literature pass (links in
+§7). Companion to 09 (thesis/spec) and 12 (primitive→slot map); this doc is the
+DIAGNOSIS layer between them: exactly which mechanisms mash the current pour and
+exactly which substrate primitive, correctly wired, kills each mechanism.
+
+The one-sentence answer to "what is missing": the pour currently uses ~3 of the
+substrate's ~12 information channels (eff_mu edge weights, relation planes,
+PRECEDES adjacency), projects them all through ONE shared hub-dominated basis,
+stacks layers that are LINEAR in content — and every named failure (no
+conversation, mashed heads, mashed layers) is a theorem-grade consequence of
+those three facts, each with a named literature counterpart and a named fix.
+
+================================================================================
+SECTION 1 — WHAT THE POUR DOES TODAY (grounded, FoundryCommands.cs ~979-1400,
+FoundryExport.cs ~923-1530)
+================================================================================
+  1. Vocab: tokenizer-derived word tokens + byte floor (word crawl; the 937-vocab
+     starvation class from 09 is a property of this choice, not of the substrate).
+  2. Basis E: UNION of all operator planes → ONE affinity matrix → raw SVD
+     (BuildBasisAffinity: A[x,y] += w symmetrized, TensorSvdTruncate, rank cap =
+     env LAPLACE_FOUNDRY_BASIS_RANK default 256), rows L2-normalized, last dim =
+     bias. S³ anchors are passed and used for Procrustes orientation
+     (BasisStats.ProcrustesResidual), NOT as the graph normalization.
+  3. Per layer, per operator key (relation:X / metric:frechet / trajectory /
+     unary): m = ProjectOperator(R, plane) (project into the CURRENT residual
+     representation R); mResid = m − I; Q/K = Factor(m, rank ≤ headDim);
+     V/O = Factor(mResid, transposed); FFN up/down = Factor(mResid, rank ≤ ffn).
+  4. Residual construction: update += scale·(M−I)·R summed over ALL of the
+     layer's operators, then R ← RMSNorm(R + update). scale = nLayers^-0.25.
+  5. Norms: every input/post-attention layernorm weight tensor = 1.0
+     (Array.Fill(vals, 1.0f)) — no per-dimension gain anywhere.
+  6. FFN gate: constant-column trick (gateZ=6.0 bias column; upGain =
+     1/silu(gateZ) exactly cancels it) — the gate NEVER depends on the token.
+  7. lm_head: ONE plane (trajectory/PRECEDES stride): lmHead[y] = Σ_x w·R_final[x],
+     in-degree idf, row-normalized. Off the composed state (good), but the plane
+     is word-adjacency-within-documents (bigram-flavored, tier-2 flat).
+  8. "context" head: identity-scaled QK (raw embed similarity), identity V —
+     copies similar-token content forward; the only sequence machinery present.
+  9. Glicko: plane values carry the folded edge weight (eff_mu-derived). rd,
+     volatility, witness_count, source, context, outcome polarity: never read.
+ 10. Salience ranks: used to GROUP relations into head families (rankNames:
+     "taxo+part", "causal+seq", "equivalence") — never as weights or priors.
+
+================================================================================
+SECTION 2 — THE MASHING: five mechanisms, each code-grounded + literature-named
+================================================================================
+M1. THE STACK IS LINEAR IN CONTENT (the single biggest cause).
+    Every poured weight is a linear factor; the one nonlinearity a transformer
+    layer owns (the FFN gate) is constant by construction (§1.6). A stack of
+    linear layers collapses to ONE linear map — depth adds smoothing, never
+    composition. Dong/Cordonnier/Loukas (ICML 2021) prove the sharpened version:
+    pure attention (no MLP nonlinearity, no skip) converges to rank-1 "token
+    uniformity" DOUBLY EXPONENTIALLY with depth; the components that provably
+    stop it are exactly skip connections (we have) and REAL MLPs (we don't).
+    The observed FAITHFUL collapses (them↔they 2-cycle, hub attractors) are this
+    theorem happening on schedule. → Prescription P2.
+
+M2. ALL HEADS SHARE ONE SUBSPACE; RELATIONS RE-MASH IN THE RESIDUAL STREAM.
+    Every operator is projected through the SAME R and truncated to its own top
+    singular directions — but those directions substantially COINCIDE (they are
+    the union graph's dominant/hub directions), so heads become near-parallel
+    perturbations of the same subspace. And V/O factors all write back into the
+    same unallocated residual dimensions — no per-head orthogonal allocation, no
+    Gram-Schmidt across head bases (named in 09's toolkit, never implemented).
+    The knowledge-graph literature learned this lesson a decade ago: a
+    multi-relational graph is a 3-TENSOR (subject, relation, object); collapsing
+    relation slices into one matrix loses the relational structure (RESCAL,
+    Nickel 2011), and every serious multi-relational GNN keeps RELATION-SPECIFIC
+    transforms (R-GCN, Schlichtkrull 2018; r-GAT). The substrate's 181 relation
+    types are the tensor slices; the pour re-flattens them twice (union basis +
+    summed residual). → Prescriptions P3, P4.
+
+M3. THE LAYER UPDATE IS POWER ITERATION TOWARD THE HUB EIGENVECTOR.
+    R += Σ_ops scale·(M−I)·R, then magnitude-only RMSNorm, repeated per layer =
+    diffusion toward the summed operator's dominant eigenvector = GNN
+    OVERSMOOTHING, verbatim: repeated graph convolution makes node embeddings
+    indistinguishable (Li/Han/Wu 2018; Oono & Suzuki 2020). The GNN remedies map
+    one-to-one onto what the pour lacks: PairNorm (preserve total pairwise
+    distances after each propagation — a normalization, cheap), mean-subtraction
+    (recenters the iteration onto the FIEDLER vector, i.e. structure instead of
+    degree), residuals (provably mitigate — present), DropEdge (stochastic — the
+    deterministic analogue is per-layer operator SCHEDULING rather than all-ops-
+    every-layer). RMSNorm controls norm, not DIVERSITY; nothing in the loop
+    preserves pairwise separation. → Prescription P4.
+
+M4. THE BASIS ITSELF IS HUB-DOMINATED FROM STEP ONE.
+    BuildBasisAffinity does raw SVD of the summed affinity A. The top singular
+    directions of an UN-normalized affinity track degree — hubs ("person",
+    "them") own the leading coordinates of every token's embedding before any
+    layer runs. 09 specifies the NORMALIZED Laplacian eigenmap
+    (L = I − D^-1/2 W D^-1/2, LOW eigenvectors = the colony at rest); the code
+    ships the un-normalized, top-directions version. Graph-transformer practice
+    (LapPE — Dwivedi & Bresson 2020; GraphGPS) uses exactly the low Laplacian
+    eigenvectors as structural coordinates, and its known weakness — sign/basis
+    ambiguity of eigenvectors (the Laplacian-canonization problem) — is a
+    weakness the substrate DOESN'T have: Procrustes-to-S³-anchors provides the
+    canonical orientation the literature has to hack around. Also: basis rank is
+    an env var (256), not the eigengap — 'hidden=auto' (12's spectral-rank slot)
+    is unimplemented. → Prescription P1.
+
+M5. THE GLICKO TUPLE IS TRUNCATED TO A SCALAR; TENSION≠CERTAINTY IN THE POUR.
+    Only the folded weight reaches a plane. rd (per-edge uncertainty →
+    temperature), witness_count (evidence mass → sharpening/saturation),
+    volatility (stability → decay), source trust (scoped pours), outcome
+    polarity (refuting vs supporting) are all dropped. Consequence: a
+    single-witness rumor edge and a 10k-witness taut strand differ only in one
+    number, so hubs with MANY WEAK edges outweigh spokes with FEW TAUT ones in
+    every head's attention pattern — the "slack strand" pulls as hard as the
+    tight one. 12 §Family-A names the full mapping (rd→temperature,
+    witness→mass, volatility→update signal); none of it is wired.
+    → Prescriptions P5, P8.
+
+================================================================================
+SECTION 3 — WHY NO CONVERSATION, SPECIFICALLY
+================================================================================
+Conversation is a TIER-3 phenomenon poured from a TIER-2-FLAT model. Inventory:
+
+C1. VOCAB: word-crawl + byte floor starves; the closed vocabulary the substrate
+    actually owns is tier-0 (assigned codepoints under the pinned UCD —
+    deterministic, zero OOV, ~155K assigned; full codespace 1,113,869 live).
+    Tier-floor law means single-codepoint words ARE their codepoints — which is
+    why FAITHFUL "worked for Japanese": kanji codepoint = word entity = same id,
+    so codepoint bigrams were ALREADY word bigrams carrying OMW-ja/Tatoeba
+    consensus. Live proof (2026-07-05 DB): tier-3 sentence 事件のことなんだけど...
+    decomposes directly to tier-1 grapheme constituents — for CJK the ladder
+    already routes sentences onto grapheme/codepoint units. English needs the
+    composition layers (C5) to get the same effect. Field parallel: Meta's Byte
+    Latent Transformer (2024) reaches token-model quality from raw bytes by
+    LEARNING dynamic patches + a hierarchical encoder — the trained
+    approximation of tiers. Consensus-derived merges (witness-weighted word
+    entities as extra tokens) are the substrate-native BPE.
+C2. NO REAL SEQUENCE MACHINERY: the only positional signal is the identity
+    "context" head + a trajectory STRIDE plane. The substrate owns two canonical
+    positional codes, both unused: hilbert_index (global content-locality 1-D
+    address → absolute PE) and trajectory ordinal (exact within-sequence
+    position → sequence PE). Without them, prefix mixing cannot represent order
+    — no discourse state, no anaphora, no "what did you just say".
+C3. THE LM_HEAD SPEAKS DOCUMENT-ADJACENCY, NOT DIALOGUE. One word-tier PRECEDES
+    plane. The substrate HOLDS conversational structure the pour never reads:
+    OpenSubtitles consecutive-turn structure and Tatoeba sentence pairs at
+    tier-3 — a sentence-level turn/response plane is sitting in consensus,
+    unpoured. A conversational lm_head = completion operator over TIER-3
+    PRECEDES/response edges composed with the tier-2 continuation plane.
+C4. NO CONDITIONING: the serving path converses because recall_*_response does
+    intent routing + templated realization server-side. The GGUF gets no
+    analogue of intent, persona, or scope. The mold-native mechanism exists on
+    paper (12: filter attestations by source/context → re-fold → scoped model)
+    and is the "custom-tailored" product feature — unwired.
+C5. NO COMPOSITION LAYERS: with a codepoint/merge vocab, the first layers must
+    IMPLEMENT the tier ladder (grapheme/word membership — already witnessed
+    in trajectories and containment edges, i.e. a KNOWN operator to mold, per
+    BLT's local-encoder role). Blocked by M1 (linear layers can't gate
+    composition) — this is where M-fixes and C-fixes meet.
+
+================================================================================
+SECTION 4 — SUPPLY vs CONSUMPTION (every primitive: holds → pour reads today →
+target slot; extends 12's master table with the "consumed?" truth column)
+================================================================================
+ primitive                 consumed today?          target slot (12) / fix
+ ------------------------- ------------------------ --------------------------
+ relation types (181)      recipe-named planes only  one head per type/band (P3)
+ salience ranks (13)       head GROUPING only        head-importance priors,
+                                                     o_proj scaling (P3)
+ eff_mu edge weight        YES (plane values)        keep
+ rd (uncertainty)          NO                        per-edge temperature (P5)
+ witness_count             NO                        evidence-mass saturation (P5)
+ volatility                NO                        decay/dropout analog (P5)
+ source / trust class      NO                        scoped pours, plane
+                                                     multipliers (P8)
+ context (provenance)      NO                        conditional molding (P8)
+ outcome polarity          via fold only             signed edges: refutation as
+                                                     negative attention (P5)
+ tiers (the ladder)        NO (flat tier-2 vocab)    vocab floor + composition
+                                                     layer schedule (P6, P4)
+ trajectories (order)      stride plane + lm_head    ordinal sequence PE (P7);
+                                                     shape input to fréchet head
+ hilbert_index             NO                        absolute content PE (P7)
+ angular distance          FillCoordHead (raw        Gaussian-on-S³ kernel head
+                           coords in one head)       (P9)
+ fréchet                   metric:frechet plane      elevate: first-class shape
+                           (KNN edges)               head (P9)
+ intersects/containment    NO                        sparse attention mask +
+                                                     composition gate (P9, P2)
+ voronoi cells             NO                        MoE routing, Milestone B
+ highway_mask              NO                        head sparsity gating (bit →
+                                                     which heads can fire)
+ S³ anchors                Procrustes orientation    keep — it SOLVES the LapPE
+                                                     sign/basis problem
+ consensus Laplacian       raw-affinity SVD proxy    normalized-Laplacian
+                                                     eigenmap + eigengap (P1)
+
+================================================================================
+SECTION 5 — PRESCRIPTIONS (ordered; each kills a named mechanism; every one is
+a deterministic construction, no training anywhere)
+================================================================================
+P1 BASIS: normalized-Laplacian eigenmap (D^-1/2 W D^-1/2, Lanczos, LOW
+   eigenvectors), hidden dim = eigengap ('auto'), Procrustes-to-S³ canonical
+   orientation. Kills M4 at the root — hubs stop owning the coordinate system.
+P2 NONLINEARITY: make the FFN gate a real function of content. Mold-native
+   candidates, no gradients: gate rows from band-membership / highway bits
+   (which relation families this token participates in — a genuine step
+   function), or containment-mask gating (token fires its composition FFN only
+   inside its containers). Minimum viable first step: stop canceling silu.
+   Kills M1; unblocks C5.
+P3 HEAD ALLOCATION: block Gram-Schmidt across head value/output subspaces so
+   each relation band OWNS an orthogonal residual slice; scale o_proj by
+   salience rank (the 13 bands become head-importance priors, as designed).
+   Kills M2's write-collision half. R-GCN/RESCAL is the precedent: relation-
+   specific subspaces are what keep a 3-tensor from flattening.
+P4 LAYER DISCIPLINE: (a) PairNorm-style pairwise-distance preservation or
+   mean-subtraction after each diffusion step (recenters onto Fiedler/structure
+   — the oversmoothing literature's cheapest fix); (b) SCHEDULE operators by
+   tier instead of all-ops-every-layer: composition ops in early layers,
+   taxonomic/semantic mid, discourse/sequence late — the tier ladder AS the
+   layer schedule (12's "LAYER = a hop/tier"). Kills M3; realizes tiers.
+P5 GLICKO-COMPLETE WEIGHTS: w_edge = eff_mu · exp(−κ·rd) · sat(witness_count)
+   (sat = log1p or the fold's own mass law); volatility as decay on stale
+   planes; refuted/low-outcome edges as NEGATIVE attention (signed operator).
+   Kills M5 — "tension = certainty" finally reaches the weights.
+P6 CONVERSATIONAL OPERATORS + VOCAB: tier-0 closed floor (assigned codepoints,
+   pinned UCD) + consensus-derived merges; pour the TIER-3 turn/response plane
+   (OpenSubtitles/Tatoeba) as the lm_head's discourse component alongside the
+   tier-2 continuation plane. Kills C1/C3.
+P7 POSITIONS: hilbert_index → absolute PE; trajectory ordinal → sequence PE.
+   Both deterministic, both already stored, zero new computation at pour time.
+   Kills C2. (LapPE literature = external validation that spectral/structural
+   PE carries this load.)
+P8 SCOPED POURS: source/context WHERE-clause conditioning → re-fold → pour;
+   per-trust-class plane multipliers. Delivers the custom-tailoring product
+   AND the persona/register half of conversation (C4).
+P9 GEOMETRIC HEADS: angular Gaussian kernel head (exp(−ang²/2σ²), GiST-servable),
+   fréchet as first-class shape head, intersects containment mask as structured
+   sparsity. Completes 12's Family B.
+P10 MEASUREMENT: extend the behavioral harness (verify-model.cmd) with the ONE
+   metric that adjudicates everything: routing fidelity at depth — same prompts,
+   depth-k grounded-retrieval accuracy + generation fluency vs a conventional-LLM
+   floor. Every P-item above lands with its number or it didn't land.
+   Suggested order of execution: P1+P4a (conditioning — cheap, global),
+   P5 (weights — pure plane math), P3 (allocation), P7 (positions), P6 (vocab +
+   discourse plane — the conversational unlock), P2 (nonlinearity), P8, P9.
+   P2 is deliberately late: with P1/P3/P4/P5 in place, the linear model's depth
+   behavior becomes measurable and the right gate design will be visible.
+
+================================================================================
+SECTION 6 — LIVE BASELINE (2026-07-05 full reseed, timings observed end-to-end)
+================================================================================
+Full ladder wall times: foundation (10 layers) 3m38s; document corpus 38.2s;
+chess openings 4.4s; OMW 302.9s. End state: 9.48M entities / 14.87M
+physicalities / 13.87M attestations / 8.60M consensus in ~10.5 min from empty —
+this is the current cost of "regenerate, never backfill".
+  - COPY lanes: entities up to 900k rows/s (cili) / 776k (omw); attestations
+    591-746k rows/s; physicalities the floor at 49-524k rows/s (geometry payload).
+  - Client fold rate DECAYS with priors growth, reproducing the 02 chess
+    observation on a fresh corpus: 126.7k rel/s (cili e1) → 78.0k (wordnet) →
+    55.7k (omw e1) → 48.3k (omw e2). Watch; budget fold time ∝ consensus size.
+  - Index-cycle economics prove Issue 44's premise: coord GiST rebuild 17.2s at
+    ~2.2M physicalities → 129.6s at ~14.9M; constituents GIN 10.5s → 57.5s.
+    O(table) per rebuild — run-scoping is what keeps this affordable.
+  - ISSUE 44 VERIFIED for spine lanes: OMW = ONE drop (13:00:38, before batch 1
+    of 3), three INGEST_BATCH applies, ONE rebuild bracket at run end
+    (13:02:41→13:04:51). Exactly the designed shape.
+  - NEW FINDING (Issue 44 gap): the UNICODE lane ended its run with indexes
+    DOWN — no rebuild logged; iso639's run-begin journal recovery re-created
+    all 26. The bespoke IngestUnicodeViaRunnerAsync path appears to miss the
+    run bracket (lane fragmentation, Issue 45, biting exactly as predicted).
+    Journal recovery contained it (that safety layer works), but the bracket
+    should close on every lane. Filed as Issue 44b in 02.
+  - WORKING_SET_SUBTRACTION grows across OMW's sets (292k → 338k/473k →
+    623k/607k claimed-novel rows subtracted): the EmitNodes/hot-cache gap (02
+    chess-scale observations) reproducing on lexical data — real wasted
+    compose+stage+probe work, worsening per set. Belongs to plan-13 Phase 1.6.
+  - Misleading log wording confirmed live: subtraction blames "a concurrent
+    ingest" when it is cross-set self-overlap (no concurrent ingest existed).
+  - MERGE_CONFLICT ~440e/~240p at EVERY run start: the bootstrap working set
+    re-stages canonical vocab rows that are always present (~280ms/run probe).
+    Cosmetic but noisy — a bootstrap-presence shortcircuit would silence it.
+
+================================================================================
+SECTION 7 — LITERATURE PANEL (verified links, searched 2026-07-05)
+================================================================================
+Rank collapse / why linear-ish stacks mash:
+  - Dong, Cordonnier, Loukas, "Attention is Not All You Need: Pure Attention
+    Loses Rank Doubly Exponentially with Depth" (ICML 2021)
+    https://arxiv.org/abs/2103.03404 (code: github.com/twistedcubic/attention-rank-collapse)
+Oversmoothing + remedies (the M3 toolbox):
+  - PairNorm (Zhao & Akoglu, ICLR 2020) https://arxiv.org/abs/1909.12223
+  - Residuals provably mitigate oversmoothing https://arxiv.org/pdf/2501.00762
+  - Revisiting Oversmoothing in Deep GCNs (mean-subtraction → Fiedler)
+    https://arxiv.org/pdf/2003.13663
+Spectral embeddings as positions (P1/P7 validation):
+  - Dwivedi & Bresson, "A Generalization of Transformer Networks to Graphs"
+    (LapPE) https://arxiv.org/pdf/2012.09699
+  - Laplacian Canonization (sign/basis ambiguity — the problem S³-Procrustes
+    already solves) https://arxiv.org/pdf/2310.18716
+Multi-relational structure must stay sliced (M2 precedent):
+  - RESCAL three-way tensor factorization (Nickel et al. 2011; survey:
+    GRL Book ch.4 https://www.cs.mcgill.ca/~wlh/grl_book/files/GRL_Book-Chapter_4-Knowledge_Graphs.pdf)
+  - r-GAT relational attention https://arxiv.org/pdf/2109.05922
+Attention = associative memory (the retrieval framing of recall/lm_head):
+  - Ramsauer et al., "Hopfield Networks is All You Need" (exponential-capacity
+    retrieval = transformer attention; unified view:
+    https://arxiv.org/pdf/2411.08590, https://arxiv.org/abs/2502.05164)
+Hierarchy instead of tokenizers (C1/C5 field convergence):
+  - Byte Latent Transformer: Patches Scale Better Than Tokens (Meta 2024)
+    https://arxiv.org/html/2412.09871v1
+  - Dynamic Grouping with Hierarchical BPE https://arxiv.org/pdf/2510.15517
+Construction-without-training remains open (09's position re-verified
+2026-07-05): no published general method constructs runnable LM weights from
+graph/corpus statistics; nearest neighbors are hand-built program-transformers
+("computer inside a transformer") and training-free LOOPING of already-trained
+weights (https://arxiv.org/abs/2605.23872) — neither is this. The lane is clear.
+
+================================================================================
+SECTION 8 — LIVE SERVING-PATH PROFILE (2026-07-05, post-reseed DB: 9.5M entities
+/ 14.9M physicalities / 13.9M attestations / 10.1M consensus)
+================================================================================
+What WORKS, measured (the competence layer is real):
+  recall('what is a dog')      1.17s  correct glosses + IS_A ascent, ranked by
+                                      eff_mu with witness counts
+  recall('hello')              151ms  "an expression of greeting" — DEFINES the
+                                      greeting instead of PERFORMING one
+  recall('how are you?')       252ms  frame chain (how → Means frame + gloss) —
+                                      knowledge ABOUT the utterance, no response act
+  recall('translate water to japanese')  68.6s → root-caused (below); answer
+                                      itself CORRECT: 水 (12 witnesses), お水,
+                                      polysemy trail (尿/おしっこ = pass-water
+                                      sense) — 393 languages reachable from one
+                                      word; the universal translator is REAL
+  recall('synonyms of …'), facts routing: works but topic extraction is naive
+                                      ('facts about give' → topic 'facts';
+                                      Issue 50)
+What DOESN'T:
+  walk_text('the dog', 12)     >90s TIMEOUT in corpus_whitespace_vocab_indices
+                                      → SQL constituents() (Issue 49). Retrieval
+                                      150-360ms; GENERATION does not complete.
+                                      The conversational fallback lane rides this.
+THE 68s TRANSLATE ROOT CAUSE (Issue 47, fixed in source, 65,311ms → 349ms):
+  synset_members' `m.w <> ALL(lexical_peers(p_word))` was pushed into the
+  members index scans as a per-row filter → the ~75ms native-KNN peer fetch
+  executed ~900 times. STABLE ≠ constant-folded; `= ANY` on an indexed column
+  is immune (array becomes the index condition); a plain subselect hoist gets
+  pulled up and re-pushed; MATERIALIZED CTE holds. Lesson L12 in 02.
+  Chronic disease underneath (author-called, confirmed): the serving chain is
+  non-inlined SQL functions (STRICT/ORDER BY/CTE blockers) stacking opaque
+  Function Scans — senses() alone is a 213ms black box the planner cannot see
+  through. Rule #1 cure: native SPI *_fast for the translate/senses chain.
+CONVERSATIONAL VERDICT (empirical form of §3): the substrate answered every
+  KNOWLEDGE question about language in sub-second time, including cross-language
+  identity — and responded to a greeting with its dictionary entry. Competence
+  layer: present, grounded, fast (post-47). Performance layer (utterance-act →
+  response-act pairs, discourse state, realization beyond templates): not
+  attested by any ingested source and not queried by any operator. Chat is not
+  blocked by missing knowledge; it is blocked by the missing TIER-3 DIALOGUE
+  OPERATOR (P6) + the generation lane's perf (Issue 49) + sequencing (P7).
+================================================================================
