@@ -6,7 +6,7 @@ using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
+internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
 

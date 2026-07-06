@@ -1,0 +1,111 @@
+{
+  "text": "hello",
+  "root_id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+  "natural_unit_ordinal": 10,
+  "nodes": [
+    {
+      "ordinal": 0,
+      "id_hex": "c3af7b114121534b19203c45ca316c94",
+      "label": "h",
+      "tier": 0,
+      "text_offset": 0,
+      "text_length": 1
+    },
+    {
+      "ordinal": 1,
+      "id_hex": "27bb492e108bf5e9c724176d7ae75d4c",
+      "label": "e",
+      "tier": 0,
+      "text_offset": 1,
+      "text_length": 1
+    },
+    {
+      "ordinal": 2,
+      "id_hex": "b9f63c83975dadee9b4dc3faeeb669dd",
+      "label": "l",
+      "tier": 0,
+      "text_offset": 2,
+      "text_length": 1
+    },
+    {
+      "ordinal": 3,
+      "id_hex": "b9f63c83975dadee9b4dc3faeeb669dd",
+      "label": "l",
+      "tier": 0,
+      "text_offset": 3,
+      "text_length": 1
+    },
+    {
+      "ordinal": 4,
+      "id_hex": "94aa73e5d53ded06f0dcc593d9fe8a33",
+      "label": "o",
+      "tier": 0,
+      "text_offset": 4,
+      "text_length": 1
+    },
+    {
+      "ordinal": 5,
+      "id_hex": "c3af7b114121534b19203c45ca316c94",
+      "label": "h",
+      "tier": 1,
+      "text_offset": 0,
+      "text_length": 1
+    },
+    {
+      "ordinal": 6,
+      "id_hex": "27bb492e108bf5e9c724176d7ae75d4c",
+      "label": "e",
+      "tier": 1,
+      "text_offset": 1,
+      "text_length": 1
+    },
+    {
+      "ordinal": 7,
+      "id_hex": "b9f63c83975dadee9b4dc3faeeb669dd",
+      "label": "l",
+      "tier": 1,
+      "text_offset": 2,
+      "text_length": 1
+    },
+    {
+      "ordinal": 8,
+      "id_hex": "b9f63c83975dadee9b4dc3faeeb669dd",
+      "label": "l",
+      "tier": 1,
+      "text_offset": 3,
+      "text_length": 1
+    },
+    {
+      "ordinal": 9,
+      "id_hex": "94aa73e5d53ded06f0dcc593d9fe8a33",
+      "label": "o",
+      "tier": 1,
+      "text_offset": 4,
+      "text_length": 1
+    },
+    {
+      "ordinal": 10,
+      "id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+      "label": "hello",
+      "tier": 2,
+      "text_offset": 0,
+      "text_length": 5
+    },
+    {
+      "ordinal": 11,
+      "id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+      "label": "hello",
+      "tier": 3,
+      "text_offset": 0,
+      "text_length": 5
+    },
+    {
+      "ordinal": 12,
+      "id_hex": "f3f83b8ee76a5df2362b12e3b681b484",
+      "label": "hello",
+      "tier": 4,
+      "text_offset": 0,
+      "text_length": 5
+    }
+  ]
+}

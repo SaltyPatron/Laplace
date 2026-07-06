@@ -766,6 +766,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     size_t emitted_entity_n = 0, emitted_entity_cap = 0;
     size_t emitted_type_n   = 0, emitted_type_cap   = 0;
     int rc = 0;
+    uint32_t** children_of  = NULL;
+    uint32_t*  child_counts = NULL;
 
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
@@ -813,6 +815,28 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     if (rc != 0) goto fail_st;
 
     n = st.n;
+
+    /* Node->children adjacency, built ONCE and reused by the emit loop below.
+       The loop used to rescan all n nodes twice per node to re-derive each
+       node's children (O(n^2) on fat JSON records with thousands of nodes);
+       this is the same adjacency compose_ast_nodes builds internally, in the
+       same node order, so the composed ids stay byte-identical. */
+    children_of  = (uint32_t**)calloc(n ? n : 1, sizeof(uint32_t*));
+    child_counts = (uint32_t*)calloc(n ? n : 1, sizeof(uint32_t));
+    if (!children_of || !child_counts) { rc = -3; goto fail_emit; }
+    for (size_t i = 0; i < n; ++i) {
+        laplace_ast_node_t nd;
+        if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
+        if (nd.parent != LAPLACE_AST_ROOT && nd.parent < n) {
+            uint32_t p = nd.parent;
+            uint32_t cc = child_counts[p]++;
+            uint32_t* new_ch = (uint32_t*)realloc(children_of[p], (size_t)(cc + 1) * sizeof(uint32_t));
+            if (!new_ch) { rc = -3; goto fail_emit; }
+            children_of[p] = new_ch;
+            children_of[p][cc] = (uint32_t)i;
+        }
+    }
+
     for (size_t idx = n; idx-- > 0;) {
         if (!st.comp_valid[idx]) continue;
         hash128_t id = st.comp_id[idx];
@@ -833,12 +857,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         hilbert128_t hb;
         hilbert4d_encode(st.comp_coord + idx * 4, &hb);
 
-        uint32_t kid_n = 0;
-        for (size_t i = 0; i < n; ++i) {
-            laplace_ast_node_t nd;
-            if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-            if (nd.parent == (uint32_t)idx) kid_n++;
-        }
+        uint32_t kid_n = child_counts[idx];
         hash128_t* child_ids = NULL;
         uint64_t*  child_flags = NULL;
         size_t m = 0;
@@ -847,12 +866,11 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             child_flags = (uint64_t*)malloc(kid_n * sizeof(uint64_t));
             if (child_ids && child_flags) {
                 size_t w = 0;
-                for (size_t i = 0; i < n; ++i) {
-                    laplace_ast_node_t nd;
-                    if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-                    if (nd.parent != (uint32_t)idx || !st.comp_valid[i]) continue;
-                    child_ids[w] = st.comp_id[i];
-                    child_flags[w] = laplace_vertex_flags(st.comp_tier[i], 0, 0);
+                for (uint32_t j = 0; j < kid_n; ++j) {
+                    uint32_t c = children_of[idx][j];
+                    if (!st.comp_valid[c]) continue;
+                    child_ids[w] = st.comp_id[c];
+                    child_flags[w] = laplace_vertex_flags(st.comp_tier[c], 0, 0);
                     w++;
                 }
                 m = w;
@@ -915,6 +933,10 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
     if (st.comp_valid[0])
         r->root_id = st.comp_id[0];
+
+    for (size_t i = 0; i < n; ++i) free(children_of[i]);
+    free(children_of);  children_of = NULL;
+    free(child_counts); child_counts = NULL;
 
     /* Sibling-order PRECEDES. JSON containers emit none: member/array
        order there is dump-format plumbing, and attesting it duplicated
@@ -993,6 +1015,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     return 0;
 
 fail_emit:
+    if (children_of) { for (size_t i = 0; i < n; ++i) free(children_of[i]); free(children_of); }
+    free(child_counts);
     free(emitted_entity);
     free(emitted_type);
 fail_st:

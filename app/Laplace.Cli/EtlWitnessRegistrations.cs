@@ -9,8 +9,6 @@ internal static class EtlWitnessRegistrations
         if (_done) return;
         _done = true;
         Laplace.Decomposers.OMW.OMWEtlRegistration.Register();
-        Laplace.Decomposers.ConceptNet.ConceptNetEtlRegistration.Register();
-        Laplace.Decomposers.Atomic2020.Atomic2020EtlRegistration.Register();
         Laplace.Decomposers.Wiktionary.WiktionaryEtlRegistration.Register();
     }
 }

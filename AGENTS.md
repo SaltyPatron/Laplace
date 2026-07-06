@@ -1,0 +1,88 @@
+# Agent instructions — Laplace
+
+**Read [CLAUDE.md](CLAUDE.md) first. It is the authoritative entry point** (invention
+summary, doc map, build/seed workflow, non-negotiable working rules). This file only
+adds harness-specific adaptations and quick references; where they overlap, CLAUDE.md wins.
+
+## Agent customization surface (what is wired up for you)
+
+- **Scoped instructions** ([.github/instructions/](.github/instructions)): auto-apply by
+  glob — decomposers, engine-native, sql-substrate, tests, scripts-win, scratchpad-docs.
+- **Skills** ([.claude/skills/](.claude/skills), read by VS Code + Claude Code):
+  `/laplace-health` (full stack check), `/laplace-seed` (user-invoked only),
+  `/substrate-query` (three-layer model + probes), `/foundry-loop` (synthesize→verdict→gate).
+- **MCP**: `laplace-db` — read-only (restricted) Postgres server over the `laplace` DB,
+  configured for VS Code ([.vscode/mcp.json](.vscode/mcp.json)), Claude Code
+  ([.mcp.json](.mcp.json)), and Cursor ([.cursor/mcp.json](.cursor/mcp.json)). Prefer it
+  for exploration; it cannot write, which is the point.
+- **Guard hook** ([.claude/settings.json](.claude/settings.json) →
+  [.claude/hooks/laplace-guard.ps1](.claude/hooks/laplace-guard.ps1)): deterministically
+  DENIES (1) bare `scripts/win/*.cmd` invocations not wrapped in `cmd /c`, and
+  (2) seed/reset/ingest commands while a `Laplace.Cli` ingest is already running. If it
+  blocks you, it is right — fix the command, do not route around it.
+- **Subagents** ([.github/agents/](.github/agents)): `substrate-verifier` (read-only
+  live-data proof of claims), `doc-reconciler` (kills .scratchpad doc drift).
+- **Prompt**: `/next-task` ranks the next highest-leverage work from doc 13 + issue tracker.
+- **Cursor**: [.cursor/rules/](.cursor/rules) mirrors the hard law + scoped rules.
+
+## Terminal adaptation (VS Code / PowerShell harnesses)
+
+CLAUDE.md says "use the Bash tool" for `scripts/win/*.cmd` because this machine's pwsh
+has a confirmed .cmd-launch regression ([PowerShell#27634](https://github.com/PowerShell/PowerShell/issues/27634)).
+If your terminal is PowerShell, never invoke a `.cmd` directly. Wrap it in cmd.exe:
+
+```powershell
+cmd /c "scripts\win\seed-step.cmd wordnet"
+cmd /c "call scripts\win\env.cmd && cd build-win && cmake --build . --target laplace_dynamics"
+```
+
+[scripts/win/env.cmd](scripts/win/env.cmd) is the toolchain source of truth (oneAPI/MKL,
+cmake/ninja, PG 18 paths, DB env, GC tuning). Scripts self-load it; ad-hoc native builds
+must `call` it first, as above.
+
+## Build & test quick reference (Windows, the real workflow)
+
+| Task | Command (wrap in `cmd /c` from pwsh) |
+|------|--------------------------------------|
+| Full clean rebuild + codegen + perfcache | `scripts\win\rebuild-all.cmd` |
+| Engine only / extensions only | `scripts\win\build-engine.cmd` / `scripts\win\build-extensions.cmd` |
+| .NET tests (5 xunit projects, excludes `Tier=perf`) | `scripts\win\test-app.cmd [project-substring]` |
+| Engine gtests | `scripts\win\test-engine.cmd` (ctest over `build-win`) |
+| pg_regress | `scripts\win\regress.cmd` |
+| Everything (toolchain + gtest + regress + dotnet + FK verify) | `scripts\win\test-all.cmd` (logs to `build-win-ext\test-all.log`) |
+| DB reset / foundation seed / one source | `scripts\win\db-reset.cmd` / `seed-foundation.cmd` / `seed-step.cmd <source>` (`--list` to enumerate) |
+
+`Justfile` + root CMake = Linux/CI only; do not use them for local Windows work.
+
+DB: `psql -h localhost -U postgres -d laplace` (password `postgres`), then
+`SET search_path = laplace, public;`. `SELECT * FROM api('<substring>');` lists the
+schema's own helper catalog — check it before assuming something doesn't exist.
+
+## Hard operational law (violations have corrupted state before)
+
+- One ingest at a time; never run parallel agent sessions against Postgres mid-write.
+- Never edit a `.cmd` while it is executing.
+- After ANY engine rebuild, run `build-extensions.cmd`; `senses('dog') > 0` is the real
+  health check. MSB3027 copy failure ⇒ clean-rebuild.
+- `seed-step.cmd` runs an independent `:verify_step` — trust it, not the CLI summary line.
+- Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L11).
+
+## Binding design docs (read before deep work in the area)
+
+- [.scratchpad/05_Substrate_Invariants.txt](.scratchpad/05_Substrate_Invariants.txt) — axioms; binding.
+- [.scratchpad/06_Engineering_Ruleset.txt](.scratchpad/06_Engineering_Ruleset.txt) — Rules #1–#12; Rule #8 = the ingest sequence; binding.
+- [.scratchpad/13_Stabilization_Audit_and_Plan.txt](.scratchpad/13_Stabilization_Audit_and_Plan.txt) — THE active plan; start here for "what next".
+- Full doc map with status: [CLAUDE.md](CLAUDE.md) § Doc map.
+
+## Conventions that differ from common practice
+
+- Decomposers ([app/Laplace.Decomposers](app/Laplace.Decomposers)) are pure
+  content → `SubstrateChange` streams with ZERO inline SQL; the pipeline spine does all
+  batching/dedup/fold/COPY. Putting SQL or the right algorithm at the wrong pipeline
+  stage is a spec violation (Rule #8).
+- C#/SQL orchestrate; native C (`engine/`) does heavy lifting. No GPU code in
+  `engine/` or `extension/` — structural, not an omission.
+- One implementation per fact; duplication requires a documented reason (Rule #6).
+- xunit suites share process-global native state — fixtures must never call
+  `CodepointPerfcache.Unload()`.
+- Verify against live data; never present a narrow patch as the architectural fix.

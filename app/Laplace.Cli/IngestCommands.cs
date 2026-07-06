@@ -141,6 +141,22 @@ internal static class IngestCommands
                 IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli);
 
 
+        // Triple sources are pinned to their lean managed decomposer classes (Issue 45
+        // "pick the winner"): their rows are already-delimited (subject, relation, object),
+        // so the native grammar-compose lane the EtlWitness registration would otherwise
+        // route them through (IsRoutable is true for both) only adds a per-row tree-sitter
+        // parse AND emits edges outside the consensus-fold path. The classes stream + split
+        // managed, content-address via the perfcache, and emit folding attestations.
+        if (sourceKey == "atomic2020")
+            return await IngestViaRunnerAsync(
+                new Laplace.Decomposers.Atomic2020.Atomic2020Decomposer(),
+                IngestDataPaths.Resolve("atomic2020", cli.Path), skipLayerCheck: false, cli);
+
+        if (sourceKey == "conceptnet")
+            return await IngestViaRunnerAsync(
+                new ConceptNetDecomposer(),
+                IngestDataPaths.Resolve("conceptnet", cli.Path), skipLayerCheck: false, cli);
+
         if (EtlManifest.IsRoutable(sourceKey))
             return await IngestViaRunnerAsync(
                 new EtlDecomposer(EtlManifest.Get(sourceKey)),
@@ -429,7 +445,8 @@ internal static class IngestCommands
 
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
-        IngestCliArgs? cli = null, bool skipSourceCompletion = false)
+        IngestCliArgs? cli = null, bool skipSourceCompletion = false,
+        int estBytesPerRecord = IngestSizing.DefaultEstBytesPerRecord)
     {
         IngestTopology.EnsureReady();
         long lastMs = -10_000;
@@ -466,7 +483,8 @@ internal static class IngestCommands
             IngestTopology.Current.FileWorkers,
             IngestTopology.Current.ApplyPartitions,
             recordBatchOverride: batch > 0 ? batch : null,
-            commitRowsOverride: envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : null));
+            commitRowsOverride: envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : null),
+            estBytesPerRecord: estBytesPerRecord);
         if (batch <= 0) batch = sizing.RecordBatchSize;
         int commitRows = envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : sizing.CommitRows);
         var decoOpts = DecomposerOptions.ForWitness(
@@ -524,7 +542,8 @@ internal static class IngestCommands
         var result = await runner.RunAsync(
             dec,
             BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
-                skipSourceCompletion || (cli?.Force ?? false)),
+                skipSourceCompletion || (cli?.Force ?? false),
+                estBytesPerRecord: dec.EstimatedBytesPerRecord),
             CancellationToken.None);
         sw.Stop();
 

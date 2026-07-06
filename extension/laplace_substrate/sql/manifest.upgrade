@@ -264,6 +264,7 @@ functions/realize/realize.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/related.sql.in
 functions/consensus/related_in.sql.in
+functions/consensus/related_objects.sql.in
 functions/consensus/salient_facts.sql.in
 functions/consensus/usage_overlap.sql.in
 functions/consensus/relate_path.sql.in
@@ -291,6 +292,7 @@ functions/recall/recall_languages_response.sql.in
 functions/recall/recall_synonyms_response.sql.in
 functions/recall/recall_examples_response.sql.in
 functions/recall/recall_describe_response.sql.in
+functions/recall/recall_interaction_response.sql.in
 functions/recall/recall_related_response.sql.in
 functions/recall/recall_related_in_response.sql.in
 functions/recall/recall_relation_summary_response.sql.in
@@ -302,6 +304,7 @@ functions/recall/recall_is_a_yes_reply.sql.in
 functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
+functions/corpus/corpus_sentence_constituents_since.sql.in
 functions/corpus/corpus_sentence_constituents.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/structural_cluster.sql.in

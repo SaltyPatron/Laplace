@@ -1,0 +1,21 @@
+---
+alwaysApply: true
+---
+
+Read CLAUDE.md and AGENTS.md at the repo root before any work — they are the binding
+entry points (invention summary, doc map, build law). Where anything conflicts,
+CLAUDE.md wins.
+
+Hard law (violations have corrupted state before):
+
+- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
+  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
+- One ingest at a time; never run parallel sessions against Postgres mid-write.
+- Never edit a `.cmd` while it is executing.
+- After ANY engine rebuild run `scripts\win\build-extensions.cmd`; `senses('dog') > 0`
+  is the real health check. MSB3027 ⇒ clean-rebuild.
+- Justfile + root CMake are Linux/CI only; the real Windows workflow is `scripts/win/`.
+- Verify against live data (`psql -h localhost -U postgres -d laplace`, then
+  `SET search_path=laplace,public;`; check `SELECT * FROM api('<substring>');` before
+  assuming a helper doesn't exist). Never present a narrow patch as the architectural fix.
+- `.scratchpad/05` (invariants) and `06` (rules) are binding; `13` is the active plan.

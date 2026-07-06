@@ -48,6 +48,36 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
             Entities: 0,
             ConsensusRelations: 0,
             PerfcacheReady: false));
+
+    public Task<ExploreCatalogResponse> ExploreCatalogAsync(CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreResolveResponse?> ExploreResolveAsync(string reference, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreEntityPreviewResponse?> ExploreEntityPreviewAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreEntityResponse?> ExploreEntityAsync(
+        string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
+        string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreNeighborsResponse?> ExploreNeighborsAsync(string idHex, int k, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreMembersResponse?> ExploreMembersAsync(string idHex, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExplorePeersResponse?> ExplorePeersAsync(string idHex, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreContainersResponse?> ExploreContainersAsync(
+        string idHex, int maxHops, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -210,6 +240,73 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             Entities: 4_440_000,
             ConsensusRelations: 6_100_000,
             PerfcacheReady: true));
+
+    public Task<ExploreCatalogResponse> ExploreCatalogAsync(CancellationToken ct) =>
+        Task.FromResult(new ExploreCatalogResponse(
+            Counts: [new SubstrateCount("entities", 1_000_000), new SubstrateCount("attestations", 5_000_000)],
+            Consensus: new ConsensusHealth(5_000_000, 1_500_000, 3.33m, 4.2m, 9001),
+            MultiSourceEntityCount: 250_000,
+            TopRelations: [TopEdge()],
+            Sources: [new ExploreSourceRow("WordNet", 1_000_000, 500_000, "knowledge", "L2", "synsets")],
+            Stages: [new ExploreStageRow("knowledge", 2, "WordNet hub", [new ExploreStageSourceRow("wordnet", "L2", "synsets", null)])],
+            FeaturedRefs: ["dog", "whale"]));
+
+    public Task<ExploreResolveResponse?> ExploreResolveAsync(string reference, CancellationToken ct)
+    {
+        if (reference is "unknown-word") return Task.FromResult<ExploreResolveResponse?>(null);
+        return Task.FromResult<ExploreResolveResponse?>(new ExploreResolveResponse(
+            WhaleIdHex, "whale", "word", true,
+            [new SalientFactRow("IS_A", "cetacean", 0.91m, 42)]));
+    }
+
+    public Task<ExploreEntityPreviewResponse?> ExploreEntityPreviewAsync(string idHex, CancellationToken ct) =>
+        Task.FromResult<ExploreEntityPreviewResponse?>(new ExploreEntityPreviewResponse(
+            idHex, "whale", 2, "Word", true, 42,
+            [new SalientFactRow("IS_A", "cetacean", 0.91m, 42)]));
+
+    public Task<ExploreEntityResponse?> ExploreEntityAsync(
+        string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct) =>
+        Task.FromResult<ExploreEntityResponse?>(SampleEntity(idHex));
+
+    public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
+        string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>
+        Task.FromResult<ExploreTrainingExportResponse?>(new ExploreTrainingExportResponse(
+            idHex, "whale", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 42, 2,
+            SampleEntity(idHex)!,
+            includeMembers ? [new ExploreMemberRow(CetaceanIdHex, "cetacean", "synonym", 0.88m, 17)] : [],
+            includePeers ? [new ExplorePeerRow("dolphin", "frame", 0.75)] : []));
+
+    public Task<ExploreNeighborsResponse?> ExploreNeighborsAsync(string idHex, int k, CancellationToken ct) =>
+        Task.FromResult<ExploreNeighborsResponse?>(new ExploreNeighborsResponse(
+            idHex,
+            [new ExploreNeighborRow("cetacean", 0.12, 0.34, "structural")],
+            [new SalientFactRow("IS_A", "cetacean", 0.91m, 42)]));
+
+    public Task<ExploreMembersResponse?> ExploreMembersAsync(string idHex, int limit, CancellationToken ct) =>
+        Task.FromResult<ExploreMembersResponse?>(new ExploreMembersResponse(
+            idHex, [new ExploreMemberRow(CetaceanIdHex, "cetacean", "synonym", 0.88m, 17)]));
+
+    public Task<ExplorePeersResponse?> ExplorePeersAsync(string idHex, int limit, CancellationToken ct) =>
+        Task.FromResult<ExplorePeersResponse?>(new ExplorePeersResponse(
+            idHex, [new ExplorePeerRow("dolphin", "frame", 0.75)]));
+
+    public Task<ExploreContainersResponse?> ExploreContainersAsync(
+        string idHex, int maxHops, int limit, CancellationToken ct) =>
+        Task.FromResult<ExploreContainersResponse?>(new ExploreContainersResponse(
+            idHex, [new ExploreContainerRow(WhaleIdHex, "whale document", 4, "Document", 1)]));
+
+    private static ExploreEntityResponse SampleEntity(string idHex) => new(
+        idHex, "whale", 2, "Word", true, 42,
+        [new ExplorePhysicalityRow(1, 0.5, -0.25, 0.125, 0.8125, 1.0, 5)],
+        [new SalientFactRow("IS_A", "cetacean", 0.91m, 42)],
+        [new ExploreConsensusRow("out", "IS_A", CetaceanIdHex, "cetacean", 0.91m, 42)],
+        [],
+        [],
+        [],
+        [
+            new LabeledEvidenceItem(
+                IsAIdHex, "IS_A", CetaceanIdHex, "cetacean", WordNetIdHex, "WordNet", null, 2, 12)
+        ]);
 
     private static VisualizationEdge TopEdge() => new(
         SubjectIdHex: WhaleIdHex,

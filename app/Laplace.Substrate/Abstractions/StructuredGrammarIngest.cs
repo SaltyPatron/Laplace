@@ -105,20 +105,17 @@ public static class StructuredGrammarIngest
                 var record = new GrammarIngestRecord(
                     lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
 
-                // Hot-cache trunk shortcircuit: a row whose root is already
-                // proven present composes NOTHING — witness-only, microseconds.
-                // This is what makes re-ingest cost scale with novelty
-                // instead of corpus size (Rule #8 step 3).
-                if (containmentReader is not null
-                    && GrammarRowComposer.TryProbeRowRoot(lineUtf8, record.Ast, modalityId, out var probedRoot, out var tier)
-                    && tier >= 2
-                    && containmentReader.IsProvenPresent(probedRoot))
-                {
-                    handler.WalkWitnessWithoutCompose(record, probedRoot, builder);
-                    record.Ast.Dispose();
-                    return;
-                }
-
+                // ONE compose per record. The trunk-shortcircuit that used to sit
+                // here called compose_row_root — a FULL grapheme-floor +
+                // hash-composer + compose_ast_nodes pass (grammar_compose.cpp:1010)
+                // — purely to read the root id, freed the entire compose, then
+                // DrainInto composed the record AGAIN: 2x on every record. It
+                // gated on IsProvenPresent, which on a fresh load never hits, so
+                // the first compose was pure waste corpus-wide; on re-ingest it
+                // still paid one full compose in the probe, so it never actually
+                // beat "compose once." This path's dedup IS the write lane's bulk
+                // in-transaction verify (Rule #8 for novel-heavy corpora), so
+                // compose once and let the apply decide novelty.
                 using var unit = handler.CreateDeferredUnit(record);
                 var root = unit.DrainInto(builder, config.WitnessWeight, null);
                 handler.WalkWitness(record, root, builder, unit);

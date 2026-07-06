@@ -18,6 +18,10 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public string SourceName => "WiktionaryDecomposer";
     public int LayerOrder => 2;
     public Hash128 TrustClassId => TrustClass;
+    // kaikki wiktextract records are fat JSON trees (senses, translations, etymology,
+    // pronunciation) — tens of KB each. Sizing at the 512-byte default would stage ~20×
+    // the memory per batch; the real shape keeps batches small and memory bounded.
+    public int EstimatedBytesPerRecord => 12_000;
 
 
 

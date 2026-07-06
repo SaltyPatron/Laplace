@@ -1,6 +1,8 @@
 @echo off
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
+rem Golden/billing gate tests must not inherit dev bypass from env.cmd
+set "LAPLACE_BILLING_BYPASS="
 cd /d "%LAPLACE_ROOT%\app"
 set "Platform="
 set "PlatformTarget="

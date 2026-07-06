@@ -8,6 +8,17 @@ namespace Laplace.Decomposers.SemLink;
 
 internal static class PredicateMatrixIngest
 {
+    // PredicateMatrix is a DISTINCT resource from SemLink's own JSON maps — it independently
+    // ties VN class + FN frame + PB roleset + WN sense + MCR/ILI per row. Stamping its rows
+    // with this dedicated source (not the SemLink source) lets consensus see PM and SemLink as
+    // two witnesses corroborating the same VN↔FN↔synset links, which is the whole point of the
+    // EVIDENCE layer. Its source id is registered as an entity in SemLinkDecomposer.InitializeAsync
+    // so the attestations' source_id FK is satisfied. See .scratchpad/16 §3a.
+    internal static readonly Hash128 Source =
+        Hash128.OfCanonical("substrate/source/PredicateMatrixDecomposer/v1");
+    internal static readonly Hash128 TrustClass =
+        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+
     private const int ColLang = 0;
     private const int ColPos = 1;
     private const int ColVnClass = 4;
@@ -101,12 +112,12 @@ internal static class PredicateMatrixIngest
                 if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
                     && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
                 {
-                    var vnRoleId = ContentEmitter.Emit(batch, vnRole, SemLinkDecomposer.Source);
-                    var feId = CategoryAnchor.Emit(batch, fnFe, FeTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
+                    var vnRoleId = ContentEmitter.Emit(batch, vnRole, Source);
+                    var feId = CategoryAnchor.Emit(batch, fnFe, FeTypeId, Source, TC.AcademicCurated);
                     if (vnRoleId is { } vr && feId is { } fe
                         && seen.Add((vr, fe)))
                         batch.AddAttestation(NativeAttestation.Categorical(
-                            vr, "ROLE_CORRESPONDS_TO", fe, SemLinkDecomposer.Source, TC.AcademicCurated,
+                            vr, "ROLE_CORRESPONDS_TO", fe, Source, TC.AcademicCurated,
                             contextId: CategoryAnchor.Id(vnClass)));
                 }
             }
@@ -286,16 +297,16 @@ internal static class PredicateMatrixIngest
         // content (entity + physicality) via the real tiered content pipeline. Using
         // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
         // entity minted with no matching physicality.
-        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, SemLinkDecomposer.Source, TC.AcademicCurated);
+        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, Source, TC.AcademicCurated);
         if (subjectId is null) return;
         if (!seen.Add((subjectId.Value, synId))) return;
 
         b.AddAttestation(NativeAttestation.Categorical(
-            subjectId.Value, "CORRESPONDS_TO", synId, SemLinkDecomposer.Source, TC.AcademicCurated));
+            subjectId.Value, "CORRESPONDS_TO", synId, Source, TC.AcademicCurated));
     }
 
     private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(SemLinkDecomposer.Source, unit, null,
+        new(Source, unit, null,
             entityCapacity: batch * 3,
             physicalityCapacity: 0,
             attestationCapacity: batch * 3);

@@ -28,12 +28,14 @@ interface AppState {
   model: string;
   messages: ChatMessage[];
   pendingQuote: QuoteGate | null;
+  exploreSeedPrompt: string | null;
   setTenant: (tenant: string) => void;
   setQuoteId: (quoteId: string) => void;
   setModel: (model: string) => void;
   pushMessage: (message: ChatMessage) => void;
   updateLastAssistant: (update: (m: ChatMessage) => ChatMessage) => void;
   setPendingQuote: (gate: QuoteGate | null) => void;
+  setExploreSeedPrompt: (prompt: string | null) => void;
   clearConversation: () => void;
 }
 
@@ -43,6 +45,7 @@ export const useAppStore = create<AppState>((set) => ({
   model: 'laplace-converse-001',
   messages: [],
   pendingQuote: null,
+  exploreSeedPrompt: null,
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
     set({ tenant });
@@ -62,6 +65,7 @@ export const useAppStore = create<AppState>((set) => ({
       return { messages };
     }),
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
+  setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
   clearConversation: () => set({ messages: [], pendingQuote: null }),
 }));
 

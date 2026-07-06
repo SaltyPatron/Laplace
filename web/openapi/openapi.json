@@ -456,6 +456,549 @@
         }
       }
     },
+    "/v1/explore/catalog": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreCatalogResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/resolve": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreResolveResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/preview": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreEntityPreviewResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "consensus_limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "evidence_limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreEntityDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/decompose": {
+      "post": {
+        "tags": [
+          "explore"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecomposeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecomposeResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/export": {
+      "post": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExploreTrainingExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreTrainingExportDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/neighbors": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreNeighborsDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/members": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreMembersDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/peers": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorePeersDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/containers": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_hops",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreContainersDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing/catalog": {
       "get": {
         "tags": [
@@ -1309,6 +1852,65 @@
           }
         }
       }
+    },
+    "/v1/feedback": {
+      "post": {
+        "tags": [
+          "feedback"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1731,6 +2333,16 @@
           },
           "models": {
             "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "feedback": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CapabilityStatus"
+              }
+            ]
           }
         }
       },
@@ -2507,6 +3119,102 @@
           }
         }
       },
+      "DecomposeNodeRow": {
+        "required": [
+          "ordinal",
+          "id_hex",
+          "label",
+          "tier",
+          "text_offset",
+          "text_length"
+        ],
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "uint32"
+          },
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "uint8"
+          },
+          "text_offset": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "text_length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "DecomposeRequest": {
+        "required": [
+          "text"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "DecomposeResponse": {
+        "required": [
+          "text",
+          "root_id_hex",
+          "natural_unit_ordinal",
+          "nodes"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "root_id_hex": {
+            "type": "string"
+          },
+          "natural_unit_ordinal": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "uint32"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecomposeNodeRow"
+            }
+          }
+        }
+      },
       "EmbeddingData": {
         "required": [
           "object",
@@ -3236,6 +3944,1253 @@
             "items": {
               "$ref": "#/components/schemas/EvidenceSample"
             }
+          }
+        }
+      },
+      "ExploreCatalogResponse": {
+        "required": [
+          "counts",
+          "consensus",
+          "multi_source_entity_count",
+          "top_relations",
+          "sources",
+          "stages",
+          "featured_refs"
+        ],
+        "type": "object",
+        "properties": {
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubstrateCount"
+            }
+          },
+          "consensus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsensusHealth"
+              }
+            ]
+          },
+          "multi_source_entity_count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "top_relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisualizationEdge"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreSourceRow"
+            }
+          },
+          "stages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreStageRow"
+            }
+          },
+          "featured_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExploreConsensusRow": {
+        "required": [
+          "direction",
+          "type",
+          "entity_id_hex",
+          "entity_label",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "entity_id_hex": {
+            "type": "string"
+          },
+          "entity_label": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExploreConstituentRow": {
+        "required": [
+          "ordinal",
+          "child_id_hex",
+          "child_label",
+          "run_length",
+          "flags"
+        ],
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "child_id_hex": {
+            "type": "string"
+          },
+          "child_label": {
+            "type": "string"
+          },
+          "run_length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "flags": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExploreContainerRow": {
+        "required": [
+          "entity_id_hex",
+          "entity_label",
+          "tier",
+          "type",
+          "hops"
+        ],
+        "type": "object",
+        "properties": {
+          "entity_id_hex": {
+            "type": "string"
+          },
+          "entity_label": {
+            "type": "string"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "type": {
+            "type": "string"
+          },
+          "hops": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ExploreContainersDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "containers",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "containers": {
+            "$ref": "#/components/schemas/ExploreContainersResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreContainersResponse": {
+        "required": [
+          "id_hex",
+          "containers"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "containers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreContainerRow"
+            }
+          }
+        }
+      },
+      "ExploreEntityDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "entity",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/ExploreEntityResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreEntityPreviewResponse": {
+        "required": [
+          "id_hex",
+          "label",
+          "tier",
+          "type",
+          "exists",
+          "evidence_count",
+          "preview_facts"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "evidence_count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "preview_facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalientFactRow"
+            }
+          }
+        }
+      },
+      "ExploreEntityResponse": {
+        "required": [
+          "id_hex",
+          "label",
+          "tier",
+          "type",
+          "exists",
+          "evidence_count",
+          "physicalities",
+          "salient_facts",
+          "consensus_out",
+          "consensus_in",
+          "senses",
+          "constituents",
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "evidence_count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "physicalities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplorePhysicalityRow"
+            }
+          },
+          "salient_facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalientFactRow"
+            }
+          },
+          "consensus_out": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreConsensusRow"
+            }
+          },
+          "consensus_in": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreConsensusRow"
+            }
+          },
+          "senses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreSenseRow"
+            }
+          },
+          "constituents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreConstituentRow"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabeledEvidenceItem"
+            }
+          }
+        }
+      },
+      "ExploreMemberRow": {
+        "required": [
+          "member_id_hex",
+          "member_label",
+          "kind",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "member_id_hex": {
+            "type": "string"
+          },
+          "member_label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExploreMembersDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "members",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "members": {
+            "$ref": "#/components/schemas/ExploreMembersResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreMembersResponse": {
+        "required": [
+          "id_hex",
+          "members"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreMemberRow"
+            }
+          }
+        }
+      },
+      "ExploreNeighborRow": {
+        "required": [
+          "neighbor",
+          "geodesic",
+          "frechet",
+          "axis"
+        ],
+        "type": "object",
+        "properties": {
+          "neighbor": {
+            "type": "string"
+          },
+          "geodesic": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "frechet": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "axis": {
+            "type": "string"
+          }
+        }
+      },
+      "ExploreNeighborsDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "neighbors",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "neighbors": {
+            "$ref": "#/components/schemas/ExploreNeighborsResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreNeighborsResponse": {
+        "required": [
+          "id_hex",
+          "structural",
+          "semantic"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "structural": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreNeighborRow"
+            }
+          },
+          "semantic": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalientFactRow"
+            }
+          }
+        }
+      },
+      "ExplorePeerRow": {
+        "required": [
+          "peer",
+          "kind",
+          "strength"
+        ],
+        "type": "object",
+        "properties": {
+          "peer": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "strength": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "ExplorePeersDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "peers",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "peers": {
+            "$ref": "#/components/schemas/ExplorePeersResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExplorePeersResponse": {
+        "required": [
+          "id_hex",
+          "peers"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplorePeerRow"
+            }
+          }
+        }
+      },
+      "ExplorePhysicalityRow": {
+        "required": [
+          "type",
+          "x",
+          "y",
+          "z",
+          "m",
+          "radius",
+          "n_constituents"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "z": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "m": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "radius": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "n_constituents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ExploreResolveResponse": {
+        "required": [
+          "id_hex",
+          "label",
+          "ref_kind",
+          "exists",
+          "preview_facts"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "ref_kind": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "preview_facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalientFactRow"
+            }
+          }
+        }
+      },
+      "ExploreSenseRow": {
+        "required": [
+          "sense_id_hex",
+          "synset_id_hex",
+          "synset_label",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "sense_id_hex": {
+            "type": "string"
+          },
+          "synset_id_hex": {
+            "type": "string"
+          },
+          "synset_label": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExploreSourceRow": {
+        "required": [
+          "key",
+          "evidence",
+          "content",
+          "stage",
+          "layer",
+          "role"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "evidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "content": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "stage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "layer": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "role": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ExploreStageRow": {
+        "required": [
+          "stage",
+          "order",
+          "law",
+          "sources"
+        ],
+        "type": "object",
+        "properties": {
+          "stage": {
+            "type": "string"
+          },
+          "order": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "law": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreStageSourceRow"
+            }
+          }
+        }
+      },
+      "ExploreStageSourceRow": {
+        "required": [
+          "cli",
+          "layer",
+          "role",
+          "links"
+        ],
+        "type": "object",
+        "properties": {
+          "cli": {
+            "type": "string"
+          },
+          "layer": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "role": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "links": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ExploreTrainingExportDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "export",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "export": {
+            "$ref": "#/components/schemas/ExploreTrainingExportResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreTrainingExportRequest": {
+        "required": [
+          "consensus_limit",
+          "evidence_limit",
+          "include_members",
+          "include_peers"
+        ],
+        "type": "object",
+        "properties": {
+          "consensus_limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "evidence_limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "include_members": {
+            "type": "boolean"
+          },
+          "include_peers": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExploreTrainingExportResponse": {
+        "required": [
+          "id_hex",
+          "label",
+          "generated_at",
+          "witness_rows",
+          "consensus_rows",
+          "entity",
+          "members",
+          "peers"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "generated_at": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "witness_rows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consensus_rows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/ExploreEntityResponse"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreMemberRow"
+            }
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplorePeerRow"
+            }
+          }
+        }
+      },
+      "FeedbackConsensusState": {
+        "required": [
+          "rating",
+          "rd",
+          "witness_count"
+        ],
+        "type": "object",
+        "properties": {
+          "rating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "rd": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "witness_count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "FeedbackRequest": {
+        "required": [
+          "verdict"
+        ],
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tokens": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "relation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "object": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "FeedbackResponse": {
+        "required": [
+          "object",
+          "verdict",
+          "mode",
+          "attestations_inserted",
+          "consensus_updated"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "attestations_inserted": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consensus_updated": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "tokens": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/FeedbackTokenStatus"
+            }
+          },
+          "relation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "consensus_before": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FeedbackConsensusState"
+              }
+            ]
+          },
+          "consensus_after": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FeedbackConsensusState"
+              }
+            ]
+          }
+        }
+      },
+      "FeedbackTokenStatus": {
+        "required": [
+          "token",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -4089,6 +6044,39 @@
           }
         }
       },
+      "SalientFactRow": {
+        "required": [
+          "type",
+          "fact",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "fact": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "SubstrateAuditReport": {
         "required": [
           "counts",
@@ -4855,6 +6843,9 @@
       "name": "reports"
     },
     {
+      "name": "explore"
+    },
+    {
       "name": "billing"
     },
     {
@@ -4862,6 +6853,9 @@
     },
     {
       "name": "chess-lab"
+    },
+    {
+      "name": "feedback"
     }
   ]
 }

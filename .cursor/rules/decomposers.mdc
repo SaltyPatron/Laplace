@@ -1,0 +1,12 @@
+---
+globs: app/Laplace.Decomposers/**
+alwaysApply: false
+---
+
+Decomposers are pure content → `SubstrateChange` streams with ZERO inline SQL
+(protected property). The pipeline spine (IngestBatchPipeline working-set →
+ConsensusAccumulatingWriter → NpgsqlWorkingSetApply) does all batching/dedup/Glicko
+fold/COPY. The spec is the SEQUENCE (Rule #8) — right algorithm at the wrong stage is a
+violation. Never change a SourceId. Do not create a new source by copying the nearest
+neighbor: seven historical lanes exist (Issue 45); check `.scratchpad/13` Phase 1 for
+the target lane. Full rules: `.github/instructions/decomposers.instructions.md` — read it.

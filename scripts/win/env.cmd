@@ -25,6 +25,7 @@ if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%;Command Timeout=0"
+if not defined LAPLACE_BILLING_BYPASS set "LAPLACE_BILLING_BYPASS=true"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
 

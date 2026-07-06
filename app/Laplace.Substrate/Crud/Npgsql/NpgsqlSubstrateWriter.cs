@@ -137,18 +137,18 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 physicalitiesSkipped = r.pSkip;
                 roundTrips += r.rt;
 
-                if (workingSetToken is null && (entitiesSkipped > 0 || physicalitiesSkipped > 0))
-                {
-                    _log.LogWarning(
-                        "MERGE_CONFLICT entities_skipped={EntitiesSkipped} physicalities_skipped={PhysicalitiesSkipped} "
-                        + "(staged rows already present — descent dedup should have removed these)",
-                        entitiesSkipped, physicalitiesSkipped);
-                }
-                else if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
+                // The apply-verify is the sole novelty gate: compose stages the
+                // whole working set (content-addressed, deduped in the content
+                // bank), the verify probes which ids the DB already holds, and
+                // present content is skipped from COPY (present attestations fold
+                // instead). Skipped rows are therefore EXPECTED — shared substrate
+                // already committed by an earlier working set or source, not an
+                // error and not a race. Logged at info for volume visibility.
+                if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
                 {
                     _log.LogInformation(
-                        "WORKING_SET_SUBTRACTION entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
-                        + "(claimed-novel rows committed by a concurrent ingest between descent and apply)",
+                        "APPLY_PRESENT_SKIPPED entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
+                        + "(already-present shared-substrate rows skipped from COPY by the apply-verify — expected)",
                         entitiesSkipped, physicalitiesSkipped);
                 }
             }

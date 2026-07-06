@@ -65,6 +65,7 @@ internal static class Program
                 + "  neighbors <word>                  (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
                 + "  walk [prompt]                     (n-gram stride backoff over witnessed trajectories; no prompt: REPL)\n"
                 + "  attest <confirm|refute> <tok1> [tok2...]   (OODA feedback: deposit PRECEDES witness for a token sequence)\n"
+                + "  attest <confirm|refute> <subj> <RELATION_TYPE> <obj>   (OODA feedback: confirm/refute one consensus triple, e.g. dog IS_A animal)\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"

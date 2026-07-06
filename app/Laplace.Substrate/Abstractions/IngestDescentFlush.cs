@@ -25,11 +25,25 @@ internal static class IngestDescentFlush
     {
         if (records.Count == 0) return [];
 
-        var shortcircuited = await IngestExistenceGate.RemovePresentAsync(
-            records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
+        // Working-set mode runs NO client-side novelty probe. Content-addressing
+        // dedups within the set in the builder's content bank (same content =
+        // same id, staged once); the single apply-time verify ("which of these
+        // ids do you already have?") is the one and only novelty gate per
+        // working set — it skips present content from COPY and folds present
+        // attestations. Compose therefore stays pure CPU with zero DB round
+        // trips and streams instead of stalling on a per-32k-record scan.
+        // Evidence is never dropped: every record drains through WalkWitness
+        // below whether or not its content already exists.
+        bool probe = !config.WorkingSet;
 
-        if (records.Count == 0)
-            return shortcircuited;
+        (TRecord Record, long Units)[] shortcircuited = [];
+        if (probe)
+        {
+            shortcircuited = await IngestExistenceGate.RemovePresentAsync(
+                records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
+            if (records.Count == 0)
+                return shortcircuited;
+        }
 
         // Deferred-unit creation is the CPU-heavy client-side stage (grammar
         // parse + tier-tree build + merkle compose per record) — fan it out
@@ -62,25 +76,31 @@ internal static class IngestDescentFlush
             pending.Add((records[i], units[i]));
         records.Clear();
 
-        var flatTrees = new List<TierTree?>();
-        var treeRanges = new List<(int Start, int Count)>(pending.Count);
-        foreach (var (_, unit) in pending)
+        // Client-side descent probe is per-batch (non-working-set) mode only.
+        // In working-set mode flatBitmaps stays null and every node emits.
+        byte[]?[]? flatBitmaps = null;
+        var treeRanges = new List<(int Start, int Count)>(probe ? pending.Count : 0);
+        if (probe)
         {
-            if (unit is IMultiTreeIngestDeferredUnit multi)
+            var flatTrees = new List<TierTree?>();
+            foreach (var (_, unit) in pending)
             {
-                var trees = multi.AllProbeTrees;
-                treeRanges.Add((flatTrees.Count, trees.Count));
-                flatTrees.AddRange(trees);
+                if (unit is IMultiTreeIngestDeferredUnit multi)
+                {
+                    var trees = multi.AllProbeTrees;
+                    treeRanges.Add((flatTrees.Count, trees.Count));
+                    flatTrees.AddRange(trees);
+                }
+                else
+                {
+                    treeRanges.Add((flatTrees.Count, 1));
+                    flatTrees.Add(unit.TreeForBatchProbe);
+                }
             }
-            else
-            {
-                treeRanges.Add((flatTrees.Count, 1));
-                flatTrees.Add(unit.TreeForBatchProbe);
-            }
-        }
 
-        byte[]?[] flatBitmaps = await TierTreeContainmentProbe
-            .ProbeBatchNodeEmitBitmapsAsync(flatTrees, reader, probedAbsent, ct).ConfigureAwait(false);
+            flatBitmaps = await TierTreeContainmentProbe
+                .ProbeBatchNodeEmitBitmapsAsync(flatTrees, reader, probedAbsent, ct).ConfigureAwait(false);
+        }
 
         var drained = new List<(TRecord, long)>(pending.Count + shortcircuited.Length);
         drained.AddRange(shortcircuited);
@@ -88,13 +108,32 @@ internal static class IngestDescentFlush
         for (int i = 0; i < pending.Count; i++)
         {
             var (record, unit) = pending[i];
-            var (start, count) = treeRanges[i];
             try
             {
-                Hash128 root = unit is IMultiTreeIngestDeferredUnit multi
-                    ? multi.DrainInto(builder, config.WitnessWeight, flatBitmaps.AsSpan(start, count))
-                    : unit.DrainInto(builder, config.WitnessWeight,
-                        NormalizeEmitBitmap(flatBitmaps[start]));
+                Hash128 root;
+                if (unit is IMultiTreeIngestDeferredUnit multi)
+                {
+                    if (probe)
+                    {
+                        var (start, count) = treeRanges[i];
+                        root = multi.DrainInto(builder, config.WitnessWeight, flatBitmaps!.AsSpan(start, count));
+                    }
+                    else
+                    {
+                        // All-emit: an empty per-tree bitmap span stages every node
+                        // (DrainInto length-guards and maps missing bitmaps to
+                        // ReadOnlySpan<byte>.Empty = nothing present); the apply-time
+                        // verify decides novelty against stored content.
+                        root = multi.DrainInto(builder, config.WitnessWeight, ReadOnlySpan<byte[]?>.Empty);
+                    }
+                }
+                else
+                {
+                    root = probe
+                        ? unit.DrainInto(builder, config.WitnessWeight,
+                            NormalizeEmitBitmap(flatBitmaps![treeRanges[i].Start]))
+                        : unit.DrainInto(builder, config.WitnessWeight, null);
+                }
                 handler.WalkWitness(record, root, builder, unit);
                 if (root != default)
                     reader.MarkProven([root]);

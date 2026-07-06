@@ -2,16 +2,16 @@ CREATE OR REPLACE FUNCTION lexical_peers(p_word bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH ucd AS (
-        SELECT unnest(word_case_variant_ids(p_word)) AS id
-    ),
-    shape AS (
-        SELECT unnest(word_shape_peers_fast(p_word, 0.02::double precision)) AS id
-    ),
-    merged AS (
+    -- Orthographic identity peers only: the word itself + its case variants
+    -- (dog/Dog/DOG share senses). The frechet-shape scan that used to live
+    -- here (word_shape_peers_fast) is a native buffer scan costing 0.3-2.4s
+    -- per call and returned nothing on exact lookups — measured 99% of
+    -- senses()/top_synset()/define() wall time. Shape-fuzzy matching stays
+    -- available as word_shape_peers_fast for callers that explicitly want it;
+    -- it does NOT belong on the exact sense-lookup hot path.
+    WITH merged AS (
         SELECT p_word AS id
-        UNION SELECT id FROM ucd
-        UNION SELECT id FROM shape WHERE id IS NOT NULL
+        UNION SELECT unnest(word_case_variant_ids(p_word)) AS id
     )
     SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
     FROM merged

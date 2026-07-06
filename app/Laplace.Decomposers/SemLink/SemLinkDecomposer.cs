@@ -17,11 +17,21 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
     public int LayerOrder => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"],
             relationNodeNames: ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"],
             ct: ct);
+
+        // PredicateMatrix rides SemLink's seed step but is a distinct witness: register its
+        // source entity so its attestations' source_id FK resolves. See .scratchpad/16 §3a.
+        await SourceVocabularyBootstrap.RegisterAsync(
+            context, PredicateMatrixIngest.Source, "PredicateMatrixDecomposer", PredicateMatrixIngest.TrustClass,
+            typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame", "FrameNet_FE"],
+            relationNodeNames: ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"],
+            ct: ct);
+    }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

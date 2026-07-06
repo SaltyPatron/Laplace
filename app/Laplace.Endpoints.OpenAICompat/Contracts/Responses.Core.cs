@@ -43,7 +43,8 @@ public sealed record CapabilityEndpoints(
     [property: JsonPropertyName("visualizations")] CapabilityStatus Visualizations,
     [property: JsonPropertyName("explainability_reports")] CapabilityStatus ExplainabilityReports,
     [property: JsonPropertyName("billing")] CapabilityStatus Billing,
-    [property: JsonPropertyName("models")] CapabilityStatus Models);
+    [property: JsonPropertyName("models")] CapabilityStatus Models,
+    [property: JsonPropertyName("feedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? Feedback = null);
 
 public sealed record CapabilityStatus(
     [property: JsonPropertyName("status")] string Status,

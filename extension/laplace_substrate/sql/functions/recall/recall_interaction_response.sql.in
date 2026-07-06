@@ -1,0 +1,47 @@
+-- Commonsense-interaction realizer: given an event/concept, surface what the substrate
+-- knows it ELICITS — intents, wants, reactions, effects, causes — from the ATOMIC-2020
+-- and ConceptNet commonsense relations folded into consensus. This is the "what does
+-- this situation lead to" query, the reasoning primitive under grounded conversation:
+-- one pull on an event knot returns the taut strands (Glicko-ranked) that answer
+-- "and then what / and so others feel". Each relation type maps to a natural connective
+-- so the folded edge reads as an inference, not a table row.
+CREATE OR REPLACE FUNCTION recall_interaction_response(p_topic bytea, p_limit int DEFAULT 8)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH kinds(type_id, phrase) AS (
+        VALUES
+            (relation_type_id('X_INTENT'),         'intends'),
+            (relation_type_id('X_WANT'),           'then wants'),
+            (relation_type_id('X_NEED'),           'first needs'),
+            (relation_type_id('X_REACT'),          'feels'),
+            (relation_type_id('X_EFFECT'),         'then'),
+            (relation_type_id('O_WANT'),           'others then want'),
+            (relation_type_id('O_REACT'),          'others feel'),
+            (relation_type_id('O_EFFECT'),         'for others,'),
+            (relation_type_id('CAUSES'),           'causes'),
+            (relation_type_id('CAUSES_DESIRE'),    'causes a desire for'),
+            (relation_type_id('MOTIVATED_BY_GOAL'),'is motivated by'),
+            (relation_type_id('HAS_PREREQUISITE'), 'requires'),
+            (relation_type_id('HAS_SUBEVENT'),     'involves'),
+            (relation_type_id('OBSTRUCTED_BY'),    'is hindered by')
+    ),
+    -- Best distinct object per relation type; edge_rank folds relation salience into
+    -- the eff_mu ordering so mandate-band relations outrank probationary ones.
+    facts AS (
+        SELECT k.phrase,
+               c.object_id,
+               edge_rank(c.type_id, eff_mu(c.rating, c.rd)) AS rank,
+               eff_mu(c.rating, c.rd) AS mu,
+               c.witness_count AS witnesses
+        FROM v_consensus_unrefuted c
+        JOIN kinds k ON k.type_id = c.type_id
+        WHERE c.subject_id = p_topic AND c.object_id IS NOT NULL
+    )
+    SELECT label(p_topic) || ' — ' || f.phrase || ' ' || render_text(f.object_id, 96) AS reply,
+           f.mu AS eff_mu,
+           f.witnesses
+    FROM facts f
+    ORDER BY f.rank DESC, f.mu DESC
+    LIMIT p_limit
+$$;

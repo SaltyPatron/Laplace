@@ -12,11 +12,16 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
 {
     private readonly TatoebaRowKind _kind;
     private readonly HashSet<long>? _allowedIds;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, Hash128> _idToRoot;
 
-    public TatoebaGrammarWitness(TatoebaRowKind kind, HashSet<long>? allowedIds)
+    public TatoebaGrammarWitness(
+        TatoebaRowKind kind,
+        HashSet<long>? allowedIds,
+        System.Collections.Concurrent.ConcurrentDictionary<long, Hash128> idToRoot)
     {
         _kind = kind;
         _allowedIds = allowedIds;
+        _idToRoot = idToRoot;
     }
 
     public string ModalityId => "tsv";
@@ -52,15 +57,21 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         b.AddEntity(new EntityRow(extId, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
 
+        // The content root is the REAL sentence entity — content-addressed, UAX-tiered,
+        // shared with any other source that ingests the same text (OpenSubtitles, a UAX
+        // parse). The Tatoeba numeric id becomes a mere external-id annotation ON that
+        // root (HAS_EXTERNAL_ID → extId), never the sentence's identity. See .scratchpad/16 §2a.
         if (!ContentWitnessBatch.TryAppendToBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
+
+        // Record id → content root so the link epoch can anchor IS_TRANSLATION_OF on the
+        // real content roots (links.csv carries only numeric ids, no text).
+        _idToRoot[id] = emitted;
 
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-
-
 
         _allowedIds?.Add(id);
     }
@@ -72,12 +83,15 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[0]), out long a)) return;
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[1]), out long bId)) return;
 
-        Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
-        Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
-        b.AddEntity(new EntityRow(ea, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(eb, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        // Anchor translation on the CONTENT ROOTS resolved from the sentence epoch, not on
+        // synthetic per-id ref entities. If either sentence was absent/filtered/empty (no
+        // root recorded), the link cannot be grounded in content — skip it rather than mint
+        // a translation between two id-hashes. See .scratchpad/16 §2a.
+        if (!_idToRoot.TryGetValue(a, out var rootA)) return;
+        if (!_idToRoot.TryGetValue(bId, out var rootB)) return;
+
         b.AddAttestation(NativeAttestation.Categorical(
-            ea, "IS_TRANSLATION_OF", eb, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            rootA, "IS_TRANSLATION_OF", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 
     private static ReadOnlySpan<byte> Slice(ReadOnlySpan<byte> utf8, (uint Start, uint End) sp) =>

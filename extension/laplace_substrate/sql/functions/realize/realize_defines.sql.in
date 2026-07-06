@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION _realize_defines(p_id bytea)
     SELECT render_text(g.object_id, 24)
     FROM v_consensus_unrefuted g
     WHERE g.subject_id = p_id
-      AND g.type_id = relation_type_id('DEFINES')
+      AND g.type_id = relation_type_id('HAS_DEFINITION')
     ORDER BY eff_mu(g.rating, g.rd) DESC
     LIMIT 1
 $$;

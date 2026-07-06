@@ -25,12 +25,15 @@ typedef struct GenCorpus
     MemoryContext cxt;
     int32   *stream;        
     int32    stream_len;
+    int64    stream_cap;    /* allocated int32 slots in stream/sep_after */
     int32   *suffix;        
     int32    n_suffix;
     char   (*ids)[16];      
     int32    n_vocab;
     int32    vocab_cap;
     HTAB    *vocab;         
+    uint8   *is_sep;        /* per-vocab separator flag, persisted for refresh */
+    HTAB    *parents;       /* sequence roots already folded into the stream */
     int32   *sep_after;     
 
 

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Laplace.Api.Contracts;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -656,6 +657,41 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("recipe-quote-200", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task Golden_Explore_Catalog()
+    {
+        using var response = await _client.GetAsync("/v1/explore/catalog");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GoldenJson.Match("explore-catalog-200", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Golden_Explore_Resolve()
+    {
+        using var response = await _client.GetAsync("/v1/explore/resolve?reference=whale");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GoldenJson.Match("explore-resolve-200", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Golden_Explore_Entity()
+    {
+        using var resolve = await _client.GetAsync("/v1/explore/resolve?reference=whale");
+        var hit = await resolve.Content.ReadFromJsonAsync<ExploreResolveResponse>();
+        var quoteId = await ApproveQuoteAsync("inspect", "golden-explore-entity-tenant", "evt_golden_explore_entity");
+        using var response = await GetWithQuoteAsync($"/v1/explore/entities/{hit!.IdHex}", quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GoldenJson.Match("explore-entity-200", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Golden_Explore_Decompose()
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/explore/decompose", new { text = "hello" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GoldenJson.Match("explore-decompose-200", await response.Content.ReadAsStringAsync());
+    }
+
 
 
     private async Task<string> CreateQuoteAsync(string serviceId, string tenant)
@@ -703,6 +739,13 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
         request.Headers.Add("Stripe-Signature", SignedWebhookFactory.Sign(payload));
+        return await _client.SendAsync(request);
+    }
+
+    private async Task<HttpResponseMessage> GetWithQuoteAsync(string path, string quoteId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("X-Laplace-Quote-Id", quoteId);
         return await _client.SendAsync(request);
     }
 

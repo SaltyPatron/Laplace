@@ -22,6 +22,8 @@ internal static class AppComposition
 
         services.AddSingleton<SubstrateClient>();
         services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
+        services.AddSingleton<ExploreDecomposeService>();
+        services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
 

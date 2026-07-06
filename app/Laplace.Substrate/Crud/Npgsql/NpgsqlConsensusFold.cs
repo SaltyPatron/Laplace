@@ -57,6 +57,23 @@ public sealed partial class ConsensusAccumulatingWriter
         for (int i = 0; i < n; i++)
             cids[i] = ConsensusKeys.EdgeId(accs[i].Subject, accs[i].Type, accs[i].Object ?? default);
 
+        // Refresh consensus id-stats before the prior-read. A multi-epoch fold writes
+        // millions of new rows per epoch; between autoanalyze fires (threshold 2% of
+        // n_live) a stale reltuples flips ReadPriorsAsync's `WHERE id = ANY($1)` from a
+        // PK index scan to a seq scan — the non-monotonic fold-rate decay observed live
+        // on the UD run (e4 dropped to 21k rel/s, e5 recovered once autoanalyze caught
+        // up). Column-scoped on id => ANALYZE samples ~30k rows (seconds) and refreshes
+        // pg_class.reltuples, the estimate the plan choice turns on; it never touches the
+        // PostGIS ND-stats on physicalities. Skipped for fresh sources (no priors read).
+        if (!_freshSource)
+        {
+            await using var anConn = await _ds.OpenConnectionAsync(ct);
+            await using var anCmd = anConn.CreateCommand();
+            anCmd.CommandTimeout = 0;
+            anCmd.CommandText = "ANALYZE laplace.consensus (id)";
+            await anCmd.ExecuteNonQueryAsync(ct);
+        }
+
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
         try

@@ -41,9 +41,13 @@ public class GrammarSpineConformanceTests
             ("Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness"]),
             ("SemLink", ["IngestBatchPipeline", "GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
             ("Tatoeba", ["StructuredGrammarIngest", "TatoebaGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
-            ("ConceptNet", ["StructuredGrammarIngest", "ConceptNetGrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            // ConceptNet + Atomic2020 are triple sources on the shared
+            // RelationTripleDecomposerBase → IngestBatchPipeline path (extraction only),
+            // NOT the grammar spine — the base carries the ingestion, so the source
+            // files reference RelationTripleRecord, not a grammar witness.
+            ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync"]),
             ("OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
-            ("Atomic2020", ["StructuredGrammarIngest", "Atomic2020GrammarWitness", "IGrammarWitness", "ContentWitnessBatch"]),
+            ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync"]),
             ("UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
         };
 

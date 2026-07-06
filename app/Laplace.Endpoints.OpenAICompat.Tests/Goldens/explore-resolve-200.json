@@ -1,0 +1,14 @@
+{
+  "id_hex": "00112233445566778899aabbccddeeff",
+  "label": "whale",
+  "ref_kind": "word",
+  "exists": true,
+  "preview_facts": [
+    {
+      "type": "IS_A",
+      "fact": "cetacean",
+      "eff_mu": 0.91,
+      "witnesses": 42
+    }
+  ]
+}

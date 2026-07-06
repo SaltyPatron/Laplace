@@ -333,6 +333,13 @@ public sealed partial class NpgsqlSubstrateWriter
                     ("entities", (long)keptEnts.Count),
                     ("physicalities", (long)keptPhys.Count),
                     ("attestations", (long)keptAtts.Count),
+                    // Consensus is written by the client fold, which has no cycle
+                    // of its own and paid 6 live secondary-index inserts per novel
+                    // row (fold collapsed to ~5K rel/s on the big sources). Drop
+                    // them in the same run-scoped bracket, rebuilt once at run end;
+                    // the fold's prior-read is a PK lookup, unaffected by dropping
+                    // the secondaries. Staged proxied by the attestation count.
+                    ("consensus", (long)keptAtts.Count),
                 }, ct);
 
                 rt += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,

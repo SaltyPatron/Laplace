@@ -52,11 +52,17 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
         var allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
+        // Shared across the sentence + link epochs: maps Tatoeba's numeric sentence id to
+        // the content-addressed UAX root of its text, so links.csv (numeric ids only) can
+        // anchor IS_TRANSLATION_OF on the real content roots. Populated fully during the
+        // sentence epoch (yielded before the link epoch begins). See .scratchpad/16 §2a.
+        var idToRoot = new ConcurrentDictionary<long, Hash128>();
+
         if (File.Exists(sentences))
         {
             if (cap > 0 && consumed >= cap) yield break;
             long fileCap = cap > 0 ? cap - consumed : 0;
-            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Sentence, allowedSentenceIds);
+            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Sentence, allowedSentenceIds, idToRoot);
             Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
                 ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
                 : null;
@@ -79,7 +85,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
         {
             if (cap > 0 && consumed >= cap) yield break;
             long fileCap = cap > 0 ? cap - consumed : 0;
-            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Link, allowedSentenceIds);
+            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Link, allowedSentenceIds, idToRoot);
             Func<ReadOnlySpan<byte>, bool>? acceptLink = allowedSentenceIds is not null
                 ? line => TatoebaRowFilter.MatchesLinkFilter(line, allowedSentenceIds)
                 : null;

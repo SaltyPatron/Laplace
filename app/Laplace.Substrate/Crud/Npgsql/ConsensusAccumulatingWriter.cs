@@ -48,6 +48,13 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
     // write side = the period snapshot swap. The previous plain lock
     // serialized every attestation of every compose worker in the process.
     private readonly ReaderWriterLockSlim _accumLock = new();
+    // Attestations of a working set are accumulated ACROSS CORES, not serially on
+    // the single consumer thread. Accumulate() is thread-safe (read-lock +
+    // ConcurrentDictionary + per-Acc lock), so this removes the Amdahl serial
+    // section where a multi-million-row working set merged one edge at a time.
+    private readonly int _accumulateWorkers =
+        CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
+    private const int ParallelAccumulateMin = 50_000;
     private int _inflightApplies;
     private volatile bool _disposing;
 
@@ -164,6 +171,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
         Dictionary<(Hash128 S, Hash128 K, Hash128? O), Acc>? commitBatchAcc = null;
 
         bool boundary = false;
+        List<SubstrateChange>? accChanges = null;
         foreach (var c in changes)
         {
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
@@ -178,13 +186,16 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                 foreach (var a in c.Attestations)
                     MergeAttestationInto(ref commitBatchAcc, a);
             }
-            else
+            else if (!c.Attestations.IsEmpty)
             {
-                foreach (var a in c.Attestations) Accumulate(a);
+                (accChanges ??= new List<SubstrateChange>(changes.Count)).Add(c);
             }
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
                 foreach (var w in c.TestimonyWalks) BufferWalk(w);
         }
+
+        if (accChanges is not null)
+            AccumulateChangesParallel(accChanges, ct);
 
         if (commitBatchAcc is not null)
         {
@@ -270,6 +281,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
         ArgumentNullException.ThrowIfNull(changes);
 
         bool boundary = false;
+        List<SubstrateChange>? accChanges = null;
         foreach (var c in changes)
         {
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
@@ -279,10 +291,14 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                 boundary = true;
                 continue;
             }
-            foreach (var a in c.Attestations) Accumulate(a);
+            if (!c.Attestations.IsEmpty)
+                (accChanges ??= new List<SubstrateChange>(changes.Count)).Add(c);
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
                 foreach (var w in c.TestimonyWalks) BufferWalk(w);
         }
+
+        if (accChanges is not null)
+            AccumulateChangesParallel(accChanges, ct);
 
         if (_walkBuffered >= WalkFlushRows)
             await FlushWalksAsync(ct);
@@ -376,6 +392,46 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
             _accumLock.ExitReadLock();
         }
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
+    }
+
+    // Accumulate every attestation of a working set across cores. Each change's
+    // attestation array is split into ~4x-worker chunks so even a SINGLE giant
+    // change (one working-set intent with millions of attestations, e.g.
+    // conceptnet/opensubtitles) fans out to all workers instead of one thread.
+    // Accumulate() is thread-safe, so this is a pure parallelization of the merge.
+    private void AccumulateChangesParallel(List<SubstrateChange> accChanges, CancellationToken ct)
+    {
+        long total = 0;
+        foreach (var c in accChanges) total += c.Attestations.Length;
+
+        if (total < ParallelAccumulateMin || _accumulateWorkers <= 1)
+        {
+            foreach (var c in accChanges)
+            {
+                var atts = c.Attestations;
+                for (int i = 0; i < atts.Length; i++) Accumulate(atts[i]);
+            }
+            return;
+        }
+
+        int targetChunks = _accumulateWorkers * 4;
+        int chunkSize = (int)Math.Max(4096, (total + targetChunks - 1) / targetChunks);
+        var work = new List<(ImmutableArray<AttestationRow> Arr, int Start, int End)>();
+        foreach (var c in accChanges)
+        {
+            var atts = c.Attestations;
+            for (int s = 0; s < atts.Length; s += chunkSize)
+                work.Add((atts, s, Math.Min(s + chunkSize, atts.Length)));
+        }
+
+        Parallel.ForEach(
+            work,
+            new ParallelOptions { MaxDegreeOfParallelism = _accumulateWorkers, CancellationToken = ct },
+            wk =>
+            {
+                var atts = wk.Arr;
+                for (int i = wk.Start; i < wk.End; i++) Accumulate(atts[i]);
+            });
     }
 
 

@@ -731,14 +731,14 @@ canonical = "IS_SYNONYM_OF"
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"
-family_root = "RELATED_TO"
+family_root = "SEMANTIC_EQUIVALENCE"
 
 [[relation]]
 canonical = "IS_TRANSLATION_OF"
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"
-family_root = "RELATED_TO"
+family_root = "SEMANTIC_EQUIVALENCE"
 
 [[relation]]
 canonical = "LOCATED_NEAR"
@@ -909,6 +909,23 @@ rank = "associative"
 symmetry = "symmetric"
 parent = null
 family_root = "RELATED_TO"
+
+# SEMANTIC_EQUIVALENCE: the "these two surface forms denote the same meaning" family
+# root. Translation is cross-lingual synonymy; synonymy is monolingual translation —
+# one meaning, scattered today across IS_TRANSLATION_OF (OpenSubtitles/Tatoeba/
+# Wiktionary direct edges) and IS_SYNONYM_OF (WordNet synset co-membership). Rooting
+# them here makes "who asserts A and B are equivalent" ONE family query
+# (relation_in_family(type,'SEMANTIC_EQUIVALENCE')) instead of a per-relation union.
+# It is a READ-TIME grouping only — consensus stays keyed by the distinct relation-type
+# id, so the members are NOT folded into shared consensus nodes (same guarantee that
+# keeps SIMILAR_TO and IS_SIMILAR_TO apart below). parent stays RELATED_TO on the
+# members so they remain in the RELATED_TO family too (family_contains climbs parent).
+[[relation]]
+canonical = "SEMANTIC_EQUIVALENCE"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "SEMANTIC_EQUIVALENCE"
 
 # SIMILAR_TO: model-geometric similarity (embedding-SVD cosine from ingested model weights).
 # Deliberately a SEPARATE canonical from IS_SIMILAR_TO (lexical similarity): model cosine

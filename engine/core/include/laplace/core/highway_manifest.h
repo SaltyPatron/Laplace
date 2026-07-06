@@ -4,7 +4,7 @@
 
 #define LAPLACE_HIGHWAY_MAGIC    0x5957484Cu
 #define LAPLACE_HIGHWAY_VERSION  1u
-#define LAPLACE_HIGHWAY_REL_COUNT   181u
+#define LAPLACE_HIGHWAY_REL_COUNT   182u
 #define LAPLACE_HIGHWAY_BAND_COUNT  13u
 #define HIGHWAY_BUCKET_SIZE         1024u
 #define HIGHWAY_BUCKET_MASK         1023u
@@ -175,22 +175,23 @@
 #define HIGHWAY_BIT_RELATED_TO                                         162u
 #define HIGHWAY_BIT_REQUIRES                                           163u
 #define HIGHWAY_BIT_ROLE_CORRESPONDS_TO                                164u
-#define HIGHWAY_BIT_SIMILAR_TO                                         165u
-#define HIGHWAY_BIT_SUPERSEDED_BY                                      166u
-#define HIGHWAY_BIT_SYMBOL_OF                                          167u
-#define HIGHWAY_BIT_TOKEN_MAPS_TO                                      168u
-#define HIGHWAY_BIT_TRANSCRIBES_AS                                     169u
-#define HIGHWAY_BIT_USED_FOR                                           170u
-#define HIGHWAY_BIT_USES_SCRIPT                                        171u
-#define HIGHWAY_BIT_USES_SCRIPT_EXTENSION                              172u
-#define HIGHWAY_BIT_X_ATTR                                             173u
-#define HIGHWAY_BIT_X_EFFECT                                           174u
-#define HIGHWAY_BIT_X_FILLED_BY                                        175u
-#define HIGHWAY_BIT_X_INTENT                                           176u
-#define HIGHWAY_BIT_X_NEED                                             177u
-#define HIGHWAY_BIT_X_REACT                                            178u
-#define HIGHWAY_BIT_X_REASON                                           179u
-#define HIGHWAY_BIT_X_WANT                                             180u
+#define HIGHWAY_BIT_SEMANTIC_EQUIVALENCE                               165u
+#define HIGHWAY_BIT_SIMILAR_TO                                         166u
+#define HIGHWAY_BIT_SUPERSEDED_BY                                      167u
+#define HIGHWAY_BIT_SYMBOL_OF                                          168u
+#define HIGHWAY_BIT_TOKEN_MAPS_TO                                      169u
+#define HIGHWAY_BIT_TRANSCRIBES_AS                                     170u
+#define HIGHWAY_BIT_USED_FOR                                           171u
+#define HIGHWAY_BIT_USES_SCRIPT                                        172u
+#define HIGHWAY_BIT_USES_SCRIPT_EXTENSION                              173u
+#define HIGHWAY_BIT_X_ATTR                                             174u
+#define HIGHWAY_BIT_X_EFFECT                                           175u
+#define HIGHWAY_BIT_X_FILLED_BY                                        176u
+#define HIGHWAY_BIT_X_INTENT                                           177u
+#define HIGHWAY_BIT_X_NEED                                             178u
+#define HIGHWAY_BIT_X_REACT                                            179u
+#define HIGHWAY_BIT_X_REASON                                           180u
+#define HIGHWAY_BIT_X_WANT                                             181u
 
 /* Band index constants */
 #define HIGHWAY_BAND_MANDATE                                       0u

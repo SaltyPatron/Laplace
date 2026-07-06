@@ -29,7 +29,10 @@ internal sealed class NpgsqlIndexCycle
     public static readonly bool Enabled =
         Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE") != "0";
 
-    /// <summary>Cycle when staged rows ≥ this AND ≥ half the live table.</summary>
+    /// <summary>Cycle when staged rows ≥ this (absolute). The run-scoped cycle
+    /// drops once and rebuilds once at run end, so a bulk source cycles even as
+    /// an increment onto an already-large table — where per-row secondary
+    /// maintenance (esp. the coord GiST) otherwise dominates.</summary>
     private const long MinRowsToCycle = 1_000_000;
 
     public NpgsqlIndexCycle(NpgsqlDataSource ds, ILogger log)
@@ -86,7 +89,6 @@ internal sealed class NpgsqlIndexCycle
                 est.Parameters.AddWithValue($"laplace.{table}");
                 live = (long)(await est.ExecuteScalarAsync(ct) ?? 0L);
             }
-            if (live > 0 && staged < live / 2) continue;
 
             var secondaries = new List<(string Name, string Def)>();
             await using (var list = conn.CreateCommand())

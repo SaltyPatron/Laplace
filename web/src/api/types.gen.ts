@@ -561,6 +561,545 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/explore/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreCatalogResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    reference?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreResolveResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreEntityPreviewResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    consensus_limit?: number | string;
+                    evidence_limit?: number | string;
+                };
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreEntityDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/decompose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DecomposeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DecomposeResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExploreTrainingExportRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreTrainingExportDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/neighbors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    k?: number | string;
+                };
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreNeighborsDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number | string;
+                };
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreMembersDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number | string;
+                };
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExplorePeersDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/explore/entities/{idHex}/containers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    max_hops?: number | string;
+                    limit?: number | string;
+                };
+                header?: never;
+                path: {
+                    idHex: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExploreContainersDetailResponse"];
+                    };
+                };
+                /** @description Payment Required */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaymentRequiredResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/billing/catalog": {
         parameters: {
             query?: never;
@@ -1816,6 +2355,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["FeedbackRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FeedbackResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1925,6 +2530,7 @@ export interface components {
             explainability_reports: components["schemas"]["CapabilityStatus"];
             billing: components["schemas"]["CapabilityStatus"];
             models: components["schemas"]["CapabilityStatus"];
+            feedback?: null | components["schemas"]["CapabilityStatus"];
         };
         CapabilityStatus: {
             status: string;
@@ -2101,6 +2707,28 @@ export interface components {
             period_end: string;
             status: string;
         };
+        DecomposeNodeRow: {
+            /** Format: uint32 */
+            ordinal: number | string;
+            id_hex: string;
+            label: string;
+            /** Format: uint8 */
+            tier: number | string;
+            /** Format: int32 */
+            text_offset: number | string;
+            /** Format: int32 */
+            text_length: number | string;
+        };
+        DecomposeRequest: {
+            text: null | string;
+        };
+        DecomposeResponse: {
+            text: string;
+            root_id_hex: string;
+            /** Format: uint32 */
+            natural_unit_ordinal: number | string;
+            nodes: components["schemas"]["DecomposeNodeRow"][];
+        };
         EmbeddingData: {
             object: string;
             /** Format: int32 */
@@ -2265,6 +2893,269 @@ export interface components {
             /** Format: int64 */
             witnesses: number | string;
             evidence: components["schemas"]["EvidenceSample"][];
+        };
+        ExploreCatalogResponse: {
+            counts: components["schemas"]["SubstrateCount"][];
+            consensus: null | components["schemas"]["ConsensusHealth"];
+            /** Format: int64 */
+            multi_source_entity_count: null | number | string;
+            top_relations: components["schemas"]["VisualizationEdge"][];
+            sources: components["schemas"]["ExploreSourceRow"][];
+            stages: components["schemas"]["ExploreStageRow"][];
+            featured_refs: string[];
+        };
+        ExploreConsensusRow: {
+            direction: string;
+            type: string;
+            entity_id_hex: string;
+            entity_label: string;
+            /** Format: double */
+            eff_mu: number | string;
+            /** Format: int64 */
+            witnesses: number | string;
+        };
+        ExploreConstituentRow: {
+            /** Format: int32 */
+            ordinal: number | string;
+            child_id_hex: string;
+            child_label: string;
+            /** Format: int32 */
+            run_length: number | string;
+            /** Format: int64 */
+            flags: number | string;
+        };
+        ExploreContainerRow: {
+            entity_id_hex: string;
+            entity_label: string;
+            /** Format: int16 */
+            tier: number | string;
+            type: string;
+            /** Format: int32 */
+            hops: number | string;
+        };
+        ExploreContainersDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            containers: components["schemas"]["ExploreContainersResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExploreContainersResponse: {
+            id_hex: string;
+            containers: components["schemas"]["ExploreContainerRow"][];
+        };
+        ExploreEntityDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            entity: components["schemas"]["ExploreEntityResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExploreEntityPreviewResponse: {
+            id_hex: string;
+            label: string;
+            /** Format: int16 */
+            tier: null | number | string;
+            type: null | string;
+            exists: boolean;
+            /** Format: int64 */
+            evidence_count: number | string;
+            preview_facts: components["schemas"]["SalientFactRow"][];
+        };
+        ExploreEntityResponse: {
+            id_hex: string;
+            label: string;
+            /** Format: int16 */
+            tier: null | number | string;
+            type: null | string;
+            exists: boolean;
+            /** Format: int64 */
+            evidence_count: number | string;
+            physicalities: components["schemas"]["ExplorePhysicalityRow"][];
+            salient_facts: components["schemas"]["SalientFactRow"][];
+            consensus_out: components["schemas"]["ExploreConsensusRow"][];
+            consensus_in: components["schemas"]["ExploreConsensusRow"][];
+            senses: components["schemas"]["ExploreSenseRow"][];
+            constituents: components["schemas"]["ExploreConstituentRow"][];
+            evidence: components["schemas"]["LabeledEvidenceItem"][];
+        };
+        ExploreMemberRow: {
+            member_id_hex: string;
+            member_label: string;
+            kind: string;
+            /** Format: double */
+            eff_mu: number | string;
+            /** Format: int64 */
+            witnesses: number | string;
+        };
+        ExploreMembersDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            members: components["schemas"]["ExploreMembersResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExploreMembersResponse: {
+            id_hex: string;
+            members: components["schemas"]["ExploreMemberRow"][];
+        };
+        ExploreNeighborRow: {
+            neighbor: string;
+            /** Format: double */
+            geodesic: number | string;
+            /** Format: double */
+            frechet: null | number | string;
+            axis: string;
+        };
+        ExploreNeighborsDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            neighbors: components["schemas"]["ExploreNeighborsResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExploreNeighborsResponse: {
+            id_hex: string;
+            structural: components["schemas"]["ExploreNeighborRow"][];
+            semantic: components["schemas"]["SalientFactRow"][];
+        };
+        ExplorePeerRow: {
+            peer: string;
+            kind: string;
+            /** Format: double */
+            strength: number | string;
+        };
+        ExplorePeersDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            peers: components["schemas"]["ExplorePeersResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExplorePeersResponse: {
+            id_hex: string;
+            peers: components["schemas"]["ExplorePeerRow"][];
+        };
+        ExplorePhysicalityRow: {
+            /** Format: int16 */
+            type: number | string;
+            /** Format: double */
+            x: number | string;
+            /** Format: double */
+            y: number | string;
+            /** Format: double */
+            z: number | string;
+            /** Format: double */
+            m: number | string;
+            /** Format: double */
+            radius: number | string;
+            /** Format: int32 */
+            n_constituents: number | string;
+        };
+        ExploreResolveResponse: {
+            id_hex: string;
+            label: string;
+            ref_kind: string;
+            exists: boolean;
+            preview_facts: components["schemas"]["SalientFactRow"][];
+        };
+        ExploreSenseRow: {
+            sense_id_hex: string;
+            synset_id_hex: string;
+            synset_label: string;
+            /** Format: double */
+            eff_mu: number | string;
+            /** Format: int64 */
+            witnesses: number | string;
+        };
+        ExploreSourceRow: {
+            key: string;
+            /** Format: int64 */
+            evidence: number | string;
+            /** Format: int64 */
+            content: number | string;
+            stage: null | string;
+            layer: null | string;
+            role: null | string;
+        };
+        ExploreStageRow: {
+            stage: string;
+            /** Format: int32 */
+            order: number | string;
+            law: null | string;
+            sources: components["schemas"]["ExploreStageSourceRow"][];
+        };
+        ExploreStageSourceRow: {
+            cli: string;
+            layer: null | string;
+            role: null | string;
+            links: null | string;
+        };
+        ExploreTrainingExportDetailResponse: {
+            id: string;
+            object: string;
+            /** Format: int64 */
+            created: number | string;
+            export: components["schemas"]["ExploreTrainingExportResponse"];
+            billing: null | components["schemas"]["BillingReceipt"];
+        };
+        ExploreTrainingExportRequest: {
+            /** Format: int32 */
+            consensus_limit: null | number | string;
+            /** Format: int32 */
+            evidence_limit: null | number | string;
+            include_members: boolean;
+            include_peers: boolean;
+        };
+        ExploreTrainingExportResponse: {
+            id_hex: string;
+            label: string;
+            /** Format: int64 */
+            generated_at: number | string;
+            /** Format: int64 */
+            witness_rows: number | string;
+            /** Format: int64 */
+            consensus_rows: number | string;
+            entity: components["schemas"]["ExploreEntityResponse"];
+            members: components["schemas"]["ExploreMemberRow"][];
+            peers: components["schemas"]["ExplorePeerRow"][];
+        };
+        FeedbackConsensusState: {
+            /** Format: int64 */
+            rating: number | string;
+            /** Format: int64 */
+            rd: number | string;
+            /** Format: int64 */
+            witness_count: number | string;
+        };
+        FeedbackRequest: {
+            verdict: null | string;
+            tokens?: null | string[];
+            subject?: null | string;
+            relation?: null | string;
+            object?: null | string;
+        };
+        FeedbackResponse: {
+            object: string;
+            verdict: string;
+            mode: string;
+            /** Format: int64 */
+            attestations_inserted: number | string;
+            /** Format: int64 */
+            consensus_updated: number | string;
+            tokens?: null | components["schemas"]["FeedbackTokenStatus"][];
+            relation?: null | string;
+            consensus_before?: null | components["schemas"]["FeedbackConsensusState"];
+            consensus_after?: null | components["schemas"]["FeedbackConsensusState"];
+        };
+        FeedbackTokenStatus: {
+            token: string;
+            status: string;
         };
         FenRequest: {
             fen: string;
@@ -2473,6 +3364,14 @@ export interface components {
             expires_at: string;
             stripe_checkout_url: null | string;
             next: components["schemas"]["QuoteNextStep"];
+        };
+        SalientFactRow: {
+            type: string;
+            fact: string;
+            /** Format: double */
+            eff_mu: number | string;
+            /** Format: int64 */
+            witnesses: number | string;
         };
         SubstrateAuditReport: {
             counts: components["schemas"]["SubstrateCount"][];

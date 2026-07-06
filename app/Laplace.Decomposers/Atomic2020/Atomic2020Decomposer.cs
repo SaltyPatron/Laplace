@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -6,7 +7,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-[UsesNativeIngest]
 public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
@@ -48,6 +48,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
     public override string SourceName => "Atomic2020Decomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
 
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -96,41 +97,61 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
         }
     }
 
-    protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
+    // Extraction only. ATOMIC-2020 rows are already-delimited `head <TAB> relation
+    // <TAB> tail`; there is no container to unpack, so no tree-sitter. Blanks ('_',
+    // e.g. "PersonX abandons ___ altogether") canonicalize to spaces. Everything
+    // downstream — content-address, dedup, bulk COPY, fold — is the shared pipeline.
+    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         long cap = options.MaxInputUnits;
         long consumed = 0;
 
         foreach (var split in Splits)
         {
-            if (cap > 0 && consumed >= cap) yield break;
-            long fileCap = cap > 0 ? cap - consumed : 0;
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
             if (!File.Exists(file)) continue;
-
-            var witness = new Atomic2020GrammarWitness();
             Hash128 splitId = SplitId(split);
 
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                file,
-                EtlManifest.Get("atomic2020"),
-                witness: witness,
-                batchSize: batch,
-                witnessWeight: 1.0,
-                batchLabelPrefix: $"atomic/{split}",
-                reportUnits: null,
-                contextId: splitId,
-                commitEpoch: 0,
-                maxInputUnits: fileCap,
-                containmentReader: ContainmentReader,
-                ct: ct))
+            await using var stream = new FileStream(
+                file, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream);
+
+            while (true)
             {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
+                ct.ThrowIfCancellationRequested();
+                string? line = await reader.ReadLineAsync(ct);
+                if (line is null) break;
+                if (line.Length == 0) continue;
+
+                int t1 = line.IndexOf('\t');
+                if (t1 <= 0) continue;
+                int t2 = line.IndexOf('\t', t1 + 1);
+                if (t2 <= t1 + 1) continue;
+
+                string rel = line.Substring(t1 + 1, t2 - t1 - 1);
+                if (!RelTypeId.TryGetValue(rel, out var relType)) continue;
+
+                string head = line[..t1];
+                string tail = line[(t2 + 1)..];
+                if (head.Length == 0 || tail.Length == 0) continue;
+
+                yield return new RelationTripleRecord(
+                    Canonicalize(head), relType, Canonicalize(tail), splitId, 1.0);
+
+                if (cap > 0 && ++consumed >= cap) yield break;
             }
         }
+    }
+
+    // '_' blanks read as spaces; '_' is single-byte ASCII so replacement is UTF-8-safe.
+    private static byte[] Canonicalize(string s)
+    {
+        var bytes = Encoding.UTF8.GetBytes(s);
+        for (int i = 0; i < bytes.Length; i++)
+            if (bytes[i] == (byte)'_') bytes[i] = (byte)' ';
+        return bytes;
     }
 }

@@ -21,21 +21,43 @@ CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
         JOIN v_consensus_unrefuted so ON so.subject_id = hs.object_id
                          AND so.type_id = relation_type_id('IS_SENSE_OF')
     ),
+    -- Set-based member expansion: one reverse-edge join per bridge kind over
+    -- ALL anchors at once (consensus_object_btree), replacing the per-anchor
+    -- concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
+    -- 181x for one word (measured 55s -> sub-second). Same three bridges.
+    members AS (
+        SELECT c.subject_id AS member, 'synonym'::text AS kind, eff_mu_display(c.rating, c.rd) AS mu
+        FROM anchors a JOIN v_consensus_unrefuted c ON c.object_id = a.anchor
+                          AND c.type_id = relation_type_id('IS_SYNONYM_OF')
+        UNION ALL
+        SELECT hs.subject_id, 'sense'::text, eff_mu_display(hs.rating, hs.rd)
+        FROM anchors a JOIN v_consensus_unrefuted so ON so.object_id = a.anchor
+                          AND so.type_id = relation_type_id('IS_SENSE_OF')
+                       JOIN v_consensus_unrefuted hs ON hs.object_id = so.subject_id
+                          AND hs.type_id = relation_type_id('HAS_SENSE')
+        UNION ALL
+        SELECT c.subject_id, 'frame'::text, eff_mu_display(c.rating, c.rd)
+        FROM anchors a JOIN v_consensus_unrefuted c ON c.object_id = a.anchor
+                          AND c.type_id = relation_type_id('EVOKES_FRAME')
+    ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu
-        FROM anchors a
-        CROSS JOIN LATERAL concept_members(a.anchor) m
+        FROM members m
         WHERE m.member <> ALL (SELECT id FROM self)
         GROUP BY m.member, m.kind
     ),
+    -- Top-mu PER kind, not global: FrameNet frames have huge, high-mu
+    -- membership that otherwise buries the synonym/sense peers a caller
+    -- actually wants. row_number() per kind surfaces the best of each bridge.
     ranked AS (
-        SELECT member, kind, mu FROM peers
-        ORDER BY mu DESC NULLS LAST, member
-        LIMIT p_limit
+        SELECT member, kind, mu,
+               row_number() OVER (PARTITION BY kind ORDER BY mu DESC NULLS LAST, member) AS rk
+        FROM peers
     )
     SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
     FROM ranked r
     CROSS JOIN LATERAL (SELECT label(r.member) AS txt) l
-    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
-    ORDER BY r.mu DESC NULLS LAST, l.txt
+    WHERE r.rk <= p_limit
+      AND NULLIF(btrim(l.txt), '') IS NOT NULL
+    ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt
 $$;

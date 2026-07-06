@@ -15,7 +15,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 internal static partial class GoldenJson
 {
-    [GeneratedRegex("^(chatcmpl|cmpl|audit|viz|explain)-[0-9a-f]{32}$")]
+    [GeneratedRegex("^(chatcmpl|cmpl|audit|viz|explain|entity|export|neighbors|members|peers|containers)-[0-9a-f]{32}$")]
     private static partial Regex ResponseIdRegex();
 
     [GeneratedRegex("^q_[0-9a-f]{32}$")]

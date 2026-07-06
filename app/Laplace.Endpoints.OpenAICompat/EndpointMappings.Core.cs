@@ -40,7 +40,8 @@ internal static class CoreEndpoints
             Visualizations: new CapabilityStatus("live", Backend: "laplace.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
             ExplainabilityReports: new CapabilityStatus("live", Backend: "laplace.walk_branches + laplace.attestations_out", Billing: "explain.trace"),
             Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
-            Models: new CapabilityStatus("live")))))
+            Models: new CapabilityStatus("live"),
+            Feedback: new CapabilityStatus("live", Backend: "laplace.attestations (confirm/refute) + consensus fold")))))
             .WithTags("core").Produces<CapabilitiesResponse>();
     }
 }

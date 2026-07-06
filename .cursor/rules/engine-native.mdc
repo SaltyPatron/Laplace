@@ -1,0 +1,12 @@
+---
+globs: engine/**,extension/**
+alwaysApply: false
+---
+
+Layer boundaries: engine/dynamics = ingest-side kernels (all dense math, MKL);
+engine/synthesis = output/GGUF export; engine/core = hashing/glicko2/hilbert/perfcache.
+C#/SQL orchestrate only; no GPU code anywhere here (structural). New source file ⇒ add
+to BOTH HEADERS and SOURCES in that target's CMakeLists.txt. After ANY engine rebuild,
+run `cmd /c "scripts\win\build-extensions.cmd"` (static-lib import ⇒ extension freshness
+≠ engine freshness); health check is `senses('dog') > 0`. rc==0 is success in native
+lookups. Full rules: `.github/instructions/engine-native.instructions.md` — read it.

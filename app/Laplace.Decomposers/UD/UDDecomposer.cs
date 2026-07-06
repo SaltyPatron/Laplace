@@ -26,7 +26,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["UD_Feature"],
             relationNodeNames: ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
-                "HAS_XPOS", "HAS_LANGUAGE"],
+                "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
             readbackNames: _canonicalNames, ct: ct);
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

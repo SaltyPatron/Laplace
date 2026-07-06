@@ -1,0 +1,21 @@
+-- The one relation-select primitive. Every realizer that used to hand-roll
+--   SELECT object_id FROM (v_)consensus WHERE subject_id=X
+--     AND type_id=relation_type_id('REL') ORDER BY eff_mu DESC LIMIT N
+-- now calls this. One implementation per fact (06 Rule #6): a relation-name
+-- typo (the DEFINES/HAS_DEFINITION bug) can only exist in the CALLER's name
+-- argument, never re-copied across a dozen bodies. Unrefuted view + eff_mu
+-- ranking are fixed here so the whole realizer layer ranks identically.
+CREATE OR REPLACE FUNCTION related_objects(
+        p_subject bytea, p_relation text, p_limit int DEFAULT 8)
+    RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT g.object_id,
+           (g.rating - 2 * g.rd) AS eff_mu,
+           g.witness_count       AS witnesses
+    FROM v_consensus_unrefuted g
+    WHERE g.subject_id = p_subject
+      AND g.type_id = relation_type_id(p_relation)
+    ORDER BY (g.rating - 2 * g.rd) DESC
+    LIMIT p_limit
+$$;

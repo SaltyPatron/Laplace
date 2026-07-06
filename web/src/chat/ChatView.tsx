@@ -6,8 +6,8 @@ import { ProvenanceBadge } from './ProvenanceBadge';
 import { ReceiptPanel } from './ReceiptPanel';
 
 export function ChatView() {
-  const { tenant, quoteId, model, messages, pendingQuote } = useAppStore();
-  const { setModel, setQuoteId, pushMessage, updateLastAssistant, setPendingQuote, clearConversation } = useAppStore();
+  const { tenant, quoteId, model, messages, pendingQuote, exploreSeedPrompt } = useAppStore();
+  const { setModel, setQuoteId, pushMessage, updateLastAssistant, setPendingQuote, setExploreSeedPrompt, clearConversation } = useAppStore();
   const [models, setModels] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,6 +15,12 @@ export function ChatView() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!exploreSeedPrompt) return;
+    setInput(exploreSeedPrompt);
+    setExploreSeedPrompt(null);
+  }, [exploreSeedPrompt, setExploreSeedPrompt]);
 
   useEffect(() => {
     apiGet<ModelList>('/v1/models')

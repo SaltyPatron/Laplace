@@ -141,11 +141,14 @@ corpus_vocab_intern(GenCorpus *c, const char key[16])
         if (c->n_vocab == c->vocab_cap)
         {
             MemoryContext old = MemoryContextSwitchTo(c->cxt);
+            int32 old_cap = c->vocab_cap;
 
             c->vocab_cap *= 2;
             
 
             c->ids = (char (*)[16]) repalloc_huge(c->ids, sizeof(char[16]) * (Size) c->vocab_cap);
+            c->is_sep = (uint8 *) repalloc_huge(c->is_sep, (Size) c->vocab_cap);
+            memset(c->is_sep + old_cap, 0, (Size) (c->vocab_cap - old_cap));
             MemoryContextSwitchTo(old);
         }
         ve->id = c->n_vocab;
@@ -163,16 +166,253 @@ corpus_orphan_cap(void)
     return laplace_corpus_max_orphan_sentences;
 }
 
+/*
+ * Classify vocab entries [from, n_vocab) as separators via ONE chunked SPI call
+ * per 2M entries (never per row). Persists into c->is_sep so incremental
+ * refreshes only ever classify vocab they introduced.
+ */
+static void
+corpus_classify_separators(GenCorpus *c, int32 from, MemoryContext scratch_parent)
+{
+    const int32   SEP_CHUNK = 2 * 1024 * 1024;
+    Oid           argtypes[1] = { BYTEAARRAYOID };
+    MemoryContext sep_cxt;
+
+    if (c->n_vocab <= from)
+        return;
+
+    sep_cxt = AllocSetContextCreate(scratch_parent,
+                                    "laplace corpus separator chunk",
+                                    ALLOCSET_DEFAULT_SIZES);
+
+    for (int32 base = from; base < c->n_vocab; base += SEP_CHUNK)
+    {
+        int32      len = Min(SEP_CHUNK, c->n_vocab - base);
+        Datum     *elems;
+        ArrayType *arr;
+        Datum      args[1];
+        int        rc;
+        MemoryContext old2 = MemoryContextSwitchTo(sep_cxt);
+
+        elems = (Datum *) palloc(sizeof(Datum) * len);
+        for (int32 i = 0; i < len; i++)
+        {
+            bytea *b = (bytea *) palloc(VARHDRSZ + 16);
+
+            SET_VARSIZE(b, VARHDRSZ + 16);
+            memcpy(VARDATA(b), c->ids[base + i], 16);
+            elems[i] = PointerGetDatum(b);
+        }
+        arr = construct_array(elems, len, BYTEAOID, -1, false, TYPALIGN_INT);
+        args[0] = PointerGetDatum(arr);
+        MemoryContextSwitchTo(old2);
+
+        rc = SPI_execute_with_args(
+            "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)",
+            1, argtypes, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "trajectory_stream: separator classification failed: %s",
+                 SPI_result_code_string(rc));
+        for (uint64 r = 0; r < SPI_processed; r++)
+        {
+            bool  isnull;
+            int32 ord = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[r],
+                                                    SPI_tuptable->tupdesc, 1, &isnull));
+
+            if (ord >= 0 && ord < len)
+            {
+                c->is_sep[base + ord] = 1;
+                c->separators++;
+            }
+        }
+        SPI_freetuptable(SPI_tuptable);
+        MemoryContextReset(sep_cxt);
+    }
+    MemoryContextDelete(sep_cxt);
+}
+
+/*
+ * Enumerate sequence constituents observed at-or-after `since` and APPEND the
+ * resulting token stream to the corpus. Parents already folded (c->parents) are
+ * skipped, which makes same-timestamp batch re-reads and retry-after-error
+ * idempotent. `since = DT_NOBEGIN` is the full build.
+ */
+static void
+corpus_load_and_fold(GenCorpus *c, TimestampTz since, MemoryContext walk_cxt)
+{
+    MemoryContext old;
+    int32   *raw = NULL;
+    int64    raw_len = 0, raw_cap = 65536;
+    int32    vocab_before = c->n_vocab;
+    Portal   portal;
+
+    old = MemoryContextSwitchTo(walk_cxt);
+    raw = (int32 *) palloc(sizeof(int32) * raw_cap);
+    MemoryContextSwitchTo(old);
+
+    {
+        Oid    argtypes[3] = { TEXTOID, INT4OID, TIMESTAMPTZOID };
+        Datum  args[3];
+        char   prev_parent[16];
+        bool   have_parent = false;
+        bool   skipping = false;
+
+        args[0] = CStringGetTextDatum(c->document_source);
+        args[1] = Int32GetDatum(c->build_max_orphans);
+        args[2] = TimestampTzGetDatum(since);
+        portal = SPI_cursor_open_with_args(
+            "corpus_sentences",
+            "SELECT parent_id, child_id, run_length "
+            "FROM laplace.corpus_sentence_constituents_since($1, $2, $3)",
+            3, argtypes, args, NULL, true, 0);
+
+        memset(prev_parent, 0, sizeof(prev_parent));
+        for (;;)
+        {
+            SPI_cursor_fetch(portal, true, 65536);
+            if (SPI_processed == 0)
+                break;
+
+            for (uint64 r = 0; r < SPI_processed; r++)
+            {
+                HeapTuple tup = SPI_tuptable->vals[r];
+                TupleDesc td  = SPI_tuptable->tupdesc;
+                bool      isnull;
+                bytea    *pb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
+                bytea    *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
+                int32     run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
+                char      key[16];
+                int32     vid;
+
+                if (VARSIZE_ANY_EXHDR(pb) != 16 || VARSIZE_ANY_EXHDR(cb) != 16)
+                    ereport(ERROR, (errmsg(
+                        "trajectory_stream: sentence ids must be 16 bytes")));
+
+                if (!have_parent || memcmp(VARDATA_ANY(pb), prev_parent, 16) != 0)
+                {
+                    bool pfound;
+
+                    /* close out the previous (non-skipped) parent */
+                    if (have_parent && !skipping)
+                    {
+                        hash_search(c->parents, prev_parent, HASH_ENTER, &pfound);
+                        if (raw_len + 2 > raw_cap)
+                        {
+                            old = MemoryContextSwitchTo(walk_cxt);
+                            raw_cap *= 2;
+                            raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
+                            MemoryContextSwitchTo(old);
+                        }
+                        raw[raw_len++] = GEN_SENTINEL;
+                        c->sequences++;
+                    }
+                    memcpy(prev_parent, VARDATA_ANY(pb), 16);
+                    have_parent = true;
+                    hash_search(c->parents, prev_parent, HASH_FIND, &pfound);
+                    skipping = pfound;
+                }
+                if (skipping)
+                    continue;
+
+                memcpy(key, VARDATA_ANY(cb), 16);
+                vid = corpus_vocab_intern(c, key);
+                for (int32 k = 0; k < run; k++)
+                {
+                    if (raw_len + 2 > raw_cap)
+                    {
+                        old = MemoryContextSwitchTo(walk_cxt);
+                        raw_cap *= 2;
+                        raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
+                        MemoryContextSwitchTo(old);
+                    }
+                    raw[raw_len++] = vid;
+                }
+                CHECK_FOR_INTERRUPTS();
+            }
+            SPI_freetuptable(SPI_tuptable);
+        }
+        SPI_cursor_close(portal);
+        if (have_parent && !skipping)
+        {
+            bool pfound;
+
+            hash_search(c->parents, prev_parent, HASH_ENTER, &pfound);
+            if (raw_len + 2 > raw_cap)
+            {
+                old = MemoryContextSwitchTo(walk_cxt);
+                raw_cap *= 2;
+                raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
+                MemoryContextSwitchTo(old);
+            }
+            raw[raw_len++] = GEN_SENTINEL;
+            c->sequences++;
+        }
+    }
+
+    /* separators for vocab introduced by THIS load only */
+    corpus_classify_separators(c, vocab_before, walk_cxt);
+
+    /* fold-append raw into the persistent stream */
+    {
+        int64 need = (int64) c->stream_len + raw_len + 2;
+        bool  at_boundary = true;
+
+        if (c->stream == NULL)
+        {
+            c->stream_cap = need;
+            c->stream    = (int32 *) MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) c->stream_cap);
+            c->sep_after = (int32 *) MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) c->stream_cap);
+        }
+        else if (need > c->stream_cap)
+        {
+            c->stream_cap = need;
+            c->stream    = (int32 *) repalloc_huge(c->stream, sizeof(int32) * (Size) c->stream_cap);
+            c->sep_after = (int32 *) repalloc_huge(c->sep_after, sizeof(int32) * (Size) c->stream_cap);
+        }
+
+        for (int64 i = 0; i < raw_len; i++)
+        {
+            int32 t = raw[i];
+
+            if (t == GEN_SENTINEL)
+            {
+                if (!at_boundary)
+                {
+                    c->sep_after[c->stream_len] = -1;
+                    c->stream[c->stream_len++] = GEN_SENTINEL;
+                    at_boundary = true;
+                }
+                continue;
+            }
+            if (c->is_sep[t])
+                continue;                       
+            
+            c->sep_after[c->stream_len] =
+                (i + 1 < raw_len && raw[i + 1] != GEN_SENTINEL && c->is_sep[raw[i + 1]])
+                    ? raw[i + 1] : -1;
+            c->stream[c->stream_len++] = t;
+            at_boundary = false;
+        }
+        if (!at_boundary)
+        {
+            c->sep_after[c->stream_len] = -1;
+            c->stream[c->stream_len++] = GEN_SENTINEL;
+        }
+    }
+
+    /* any append invalidates the suffix array; rebuilt lazily on demand */
+    if (c->suffix != NULL)
+        pfree(c->suffix);
+    c->suffix = NULL;
+    c->n_suffix = 0;
+}
+
 static void
 corpus_build(int64 probe_rows, int64 probe_max_us)
 {
     MemoryContext cxt, walk_cxt, old;
     GenCorpus *c;
     HASHCTL    ctl;
-    int32     *raw = NULL;
-    int64      raw_len = 0, raw_cap = 65536;
-    uint8     *is_sep;
-    Portal     portal;
 
     gen_corpus_free();
 
@@ -201,207 +441,43 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     c->vocab = hash_create("generation vocab", 8192, &ctl,
                            HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     c->ids = (char (*)[16]) palloc(sizeof(char[16]) * c->vocab_cap);
+    c->is_sep = (uint8 *) palloc0((Size) c->vocab_cap);
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize   = 16;
+    ctl.entrysize = 16;
+    ctl.hcxt      = cxt;
+    c->parents = hash_create("generation corpus parents", 8192, &ctl,
+                             HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     MemoryContextSwitchTo(old);
 
-    old = MemoryContextSwitchTo(walk_cxt);
-    raw   = (int32 *) palloc(sizeof(int32) * raw_cap);
-    MemoryContextSwitchTo(old);
-
-    {
-        Oid    argtypes[2] = { TEXTOID, INT4OID };
-        Datum  args[2];
-        char   prev_parent[16];
-        bool   have_parent = false;
-
-        args[0] = CStringGetTextDatum(c->document_source);
-        args[1] = Int32GetDatum(c->build_max_orphans);
-        portal = SPI_cursor_open_with_args(
-            "corpus_sentences",
-            "SELECT parent_id, child_id, run_length "
-            "FROM laplace.corpus_sentence_constituents($1, $2)",
-            2, argtypes, args, NULL, true, 0);
-
-        memset(prev_parent, 0, sizeof(prev_parent));
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 65536);
-            if (SPI_processed == 0)
-                break;
-
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                HeapTuple tup = SPI_tuptable->vals[r];
-                TupleDesc td  = SPI_tuptable->tupdesc;
-                bool      isnull;
-                bytea    *pb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-                bytea    *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
-                int32     run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
-                char      key[16];
-                int32     vid;
-
-                if (VARSIZE_ANY_EXHDR(pb) != 16 || VARSIZE_ANY_EXHDR(cb) != 16)
-                    ereport(ERROR, (errmsg(
-                        "trajectory_stream: sentence ids must be 16 bytes")));
-
-                if (have_parent && memcmp(VARDATA_ANY(pb), prev_parent, 16) != 0)
-                {
-                    if (raw_len + 2 > raw_cap)
-                    {
-                        old = MemoryContextSwitchTo(walk_cxt);
-                        raw_cap *= 2;
-                        raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
-                        MemoryContextSwitchTo(old);
-                    }
-                    raw[raw_len++] = GEN_SENTINEL;
-                    c->sequences++;
-                }
-                memcpy(prev_parent, VARDATA_ANY(pb), 16);
-                have_parent = true;
-
-                memcpy(key, VARDATA_ANY(cb), 16);
-                vid = corpus_vocab_intern(c, key);
-                for (int32 k = 0; k < run; k++)
-                {
-                    if (raw_len + 2 > raw_cap)
-                    {
-                        old = MemoryContextSwitchTo(walk_cxt);
-                        raw_cap *= 2;
-                        raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
-                        MemoryContextSwitchTo(old);
-                    }
-                    raw[raw_len++] = vid;
-                }
-                CHECK_FOR_INTERRUPTS();
-            }
-            SPI_freetuptable(SPI_tuptable);
-        }
-        SPI_cursor_close(portal);
-        if (have_parent)
-        {
-            if (raw_len + 2 > raw_cap)
-            {
-                old = MemoryContextSwitchTo(walk_cxt);
-                raw_cap *= 2;
-                raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
-                MemoryContextSwitchTo(old);
-            }
-            raw[raw_len++] = GEN_SENTINEL;
-            c->sequences++;
-        }
-    }
-
-    old = MemoryContextSwitchTo(walk_cxt);
-    is_sep = (uint8 *) palloc0((Size) Max(c->n_vocab, 1));
-    MemoryContextSwitchTo(old);
-    
-
-
-
-    if (c->n_vocab > 0)
-    {
-        const int32   SEP_CHUNK = 2 * 1024 * 1024;
-        Oid           argtypes[1] = { BYTEAARRAYOID };
-        MemoryContext sep_cxt = AllocSetContextCreate(walk_cxt,
-                                    "laplace corpus separator chunk",
-                                    ALLOCSET_DEFAULT_SIZES);
-
-        for (int32 base = 0; base < c->n_vocab; base += SEP_CHUNK)
-        {
-            int32      len = Min(SEP_CHUNK, c->n_vocab - base);
-            Datum     *elems;
-            ArrayType *arr;
-            Datum      args[1];
-            int        rc;
-            MemoryContext old2 = MemoryContextSwitchTo(sep_cxt);
-
-            elems = (Datum *) palloc(sizeof(Datum) * len);
-            for (int32 i = 0; i < len; i++)
-            {
-                bytea *b = (bytea *) palloc(VARHDRSZ + 16);
-
-                SET_VARSIZE(b, VARHDRSZ + 16);
-                memcpy(VARDATA(b), c->ids[base + i], 16);
-                elems[i] = PointerGetDatum(b);
-            }
-            arr = construct_array(elems, len, BYTEAOID, -1, false, TYPALIGN_INT);
-            args[0] = PointerGetDatum(arr);
-            MemoryContextSwitchTo(old2);
-
-            rc = SPI_execute_with_args(
-                "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)",
-                1, argtypes, args, NULL, true, 0);
-            if (rc != SPI_OK_SELECT)
-                elog(ERROR, "trajectory_stream: separator classification failed: %s",
-                     SPI_result_code_string(rc));
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                bool  isnull;
-                int32 ord = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[r],
-                                                        SPI_tuptable->tupdesc, 1, &isnull));
-
-                if (ord >= 0 && ord < len)
-                {
-                    is_sep[base + ord] = 1;
-                    c->separators++;
-                }
-            }
-            SPI_freetuptable(SPI_tuptable);
-            MemoryContextReset(sep_cxt);
-        }
-        MemoryContextDelete(sep_cxt);
-    }
-
-    
-
-
-
-    c->stream     = (int32 *) MemoryContextAllocHuge(cxt, sizeof(int32) * (Size) (raw_len + 2));
-    c->sep_after  = (int32 *) MemoryContextAllocHuge(cxt, sizeof(int32) * (Size) (raw_len + 2));
-    {
-        bool at_boundary = true;
-
-        for (int64 i = 0; i < raw_len; i++)
-        {
-            int32 t = raw[i];
-
-            if (t == GEN_SENTINEL)
-            {
-                if (!at_boundary)
-                {
-                    c->sep_after[c->stream_len] = -1;
-                    c->stream[c->stream_len++] = GEN_SENTINEL;
-                    at_boundary = true;
-                }
-                continue;
-            }
-            if (is_sep[t])
-                continue;                       
-            
-            c->sep_after[c->stream_len] =
-                (i + 1 < raw_len && raw[i + 1] != GEN_SENTINEL && is_sep[raw[i + 1]])
-                    ? raw[i + 1] : -1;
-            c->stream[c->stream_len++] = t;
-            at_boundary = false;
-        }
-        if (!at_boundary)
-        {
-            c->sep_after[c->stream_len] = -1;
-            c->stream[c->stream_len++] = GEN_SENTINEL;
-        }
-    }
-
-    
-
-
-
-    c->suffix = NULL;
-    c->n_suffix = 0;
+    corpus_load_and_fold(c, DT_NOBEGIN, walk_cxt);
 
     MemoryContextDelete(walk_cxt);
     gen_corpus = c;
 }
 
+/*
+ * Incremental refresh: fold ONLY sequences whose physicalities were observed
+ * at-or-after the previous watermark (index range scan via
+ * physicalities_traj_probe), instead of rebuilding the whole corpus. The
+ * parent set makes the inclusive watermark re-read idempotent.
+ */
+static void
+corpus_refresh(GenCorpus *c, int64 probe_rows, int64 probe_max_us)
+{
+    MemoryContext walk_cxt = AllocSetContextCreate(CurrentMemoryContext,
+                                                   "laplace corpus refresh scratch",
+                                                   ALLOCSET_DEFAULT_SIZES);
+    TimestampTz since = (TimestampTz) c->probe_max_us
+        - (POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * USECS_PER_DAY;
 
+    corpus_load_and_fold(c, since, walk_cxt);
+    MemoryContextDelete(walk_cxt);
+
+    c->probe_rows = probe_rows;
+    c->probe_max_us = probe_max_us;
+}
 
 void
 corpus_ensure_suffix(GenCorpus *c)
@@ -424,16 +500,36 @@ corpus_ensure(void)
     int64 rows, max_us;
 
     corpus_probe(&rows, &max_us);
-    if (rows == 0)
+    if (max_us == 0)
         ereport(ERROR, (errmsg(
             "trajectory_stream: no witnessed trajectories — deposit content first")));
+
+    /* config change or first use ⇒ full build */
     if (gen_corpus == NULL
-        || gen_corpus->probe_rows != rows
-        || gen_corpus->probe_max_us != max_us
         || gen_corpus->build_max_rows != laplace_corpus_max_rows
         || gen_corpus->build_max_orphans != corpus_orphan_cap()
         || strcmp(gen_corpus->document_source, laplace_corpus_document_source) != 0)
+    {
         corpus_build(rows, max_us);
+        return gen_corpus;
+    }
+
+    /* new deposits ⇒ incremental fold of ONLY the new sequences (index range
+     * scan from the previous watermark), never a corpus rescan. On any error
+     * the half-appended corpus is discarded so the next call rebuilds clean. */
+    if (gen_corpus->probe_rows != rows || gen_corpus->probe_max_us != max_us)
+    {
+        PG_TRY();
+        {
+            corpus_refresh(gen_corpus, rows, max_us);
+        }
+        PG_CATCH();
+        {
+            gen_corpus_free();
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+    }
     return gen_corpus;
 }
 
@@ -450,6 +546,7 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
     bool       nulls[6] = { false, false, false, false, false, false };
     HeapTuple  tuple;
     TimestampTz max_ts;
+    int64      total_rows = 0;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         ereport(ERROR, (errmsg("stream_stats: return type must be a row type")));
@@ -459,6 +556,19 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
         elog(ERROR, "stream_stats: SPI_connect failed");
     c = corpus_ensure();
     corpus_ensure_suffix(c);   
+
+    /* The full trajectory count moved OUT of the hot corpus_ensure() staleness
+     * probe (which is now O(1)) and lives here, on the rare stats call only. */
+    {
+        bool isnull;
+
+        if (SPI_execute(
+                "SELECT count(*) FROM laplace.physicalities "
+                "WHERE type = 1 AND trajectory IS NOT NULL",
+                true, 1) == SPI_OK_SELECT && SPI_processed > 0)
+            total_rows = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
+                                                     SPI_tuptable->tupdesc, 1, &isnull));
+    }
     SPI_finish();
 
     max_ts = (TimestampTz) c->probe_max_us
@@ -468,7 +578,7 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
     values[1] = Int64GetDatum((int64) c->n_suffix);
     values[2] = Int32GetDatum(c->n_vocab);
     values[3] = Int64GetDatum(c->separators);
-    values[4] = Int64GetDatum(c->probe_rows);
+    values[4] = Int64GetDatum(total_rows);
     values[5] = TimestampTzGetDatum(max_ts);
 
     tuple = heap_form_tuple(tupdesc, values, nulls);

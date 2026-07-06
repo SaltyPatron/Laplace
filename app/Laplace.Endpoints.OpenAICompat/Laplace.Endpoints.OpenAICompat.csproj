@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Laplace.Endpoints.OpenAICompat</RootNamespace>
     <AssemblyName>Laplace.Endpoints.OpenAICompat</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup>

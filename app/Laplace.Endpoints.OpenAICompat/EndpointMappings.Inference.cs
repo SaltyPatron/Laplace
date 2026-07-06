@@ -304,6 +304,7 @@ internal static class InferenceEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
         app.MapReportEndpoints();
+        app.MapExploreEndpoints();
     }
 
 

@@ -30,13 +30,6 @@ public static class EtlManifest
             ContextIdFromFile: contextIdFromFile,
             RequireIliMap: requireIliMap);
 
-    private static Hash128? AtomicSplit(string filePath)
-    {
-        string stem = Path.GetFileNameWithoutExtension(filePath);
-        return stem.Length == 0 ? null : Hash128.OfCanonical($"atomic/split/{stem}");
-    }
-
-
     private static readonly Dictionary<string, EtlSource> _rows = Build();
 
     public static EtlSource Get(string cliName) =>
@@ -68,16 +61,10 @@ public static class EtlManifest
 
 
 
-            ["conceptnet"] = Row("conceptnet", "ConceptNetDecomposer", 2, "UserCuratedResource", TC.UserCuratedResource,
-                "conceptnet", tsv with { RecordFraming = GrammarRecordFraming.Line }, anchor: AnchorResolver.IliSynset,
-                bootstrapRelations: ConceptNetBootstrap),
-
-
-
-            ["atomic2020"] = Row("atomic2020", "Atomic2020Decomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
-                "atomic2020", tsv with { RecordFraming = GrammarRecordFraming.Line }, glob: "*.tsv",
-                bootstrapRelations: AtomicBootstrap, contextIdFromFile: AtomicSplit),
-
+            // atomic2020 + conceptnet are triple sources pinned to their lean
+            // RelationTripleDecomposerBase classes (dispatched explicitly in
+            // IngestCommands before the IsRoutable check) — they no longer route
+            // through EtlDecomposer/grammar-compose, so they carry no manifest row.
 
             ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
                 "tatoeba", new EtlModality("tsv", Glob: "*.csv", RecordFraming: GrammarRecordFraming.Line),
@@ -177,27 +164,6 @@ public static class EtlManifest
         "BORROWED_FROM", "INHERITED_FROM", "ETYMOLOGICALLY_DERIVED_FROM", "ETYMOLOGICALLY_RELATED_TO",
     };
 
-    private static readonly string[] ConceptNetBootstrap =
-    {
-        "HAS_EXAMPLE", "HAS_LANGUAGE", "HAS_POS", "CORRESPONDS_TO",
-        "RELATED_TO", "FORM_OF", "IS_A", "IS_PART_OF", "HAS_A", "USED_FOR", "CAPABLE_OF",
-        "AT_LOCATION", "CAUSES", "HAS_SUBEVENT", "HAS_FIRST_SUBEVENT", "HAS_LAST_SUBEVENT",
-        "HAS_PREREQUISITE", "HAS_PROPERTY", "MOTIVATED_BY_GOAL", "OBSTRUCTED_BY", "DESIRES",
-        "CREATED_BY", "IS_SYNONYM_OF", "IS_ANTONYM_OF", "DISTINCT_FROM", "DERIVED_FROM", "SYMBOL_OF",
-        "DEFINED_AS", "MANNER_OF", "LOCATED_NEAR", "HAS_CONTEXT", "SIMILAR_TO",
-        "ETYMOLOGICALLY_RELATED_TO", "ETYMOLOGICALLY_DERIVED_FROM", "CAUSES_DESIRE", "MADE_UP_OF",
-        "RECEIVES_ACTION", "IS_INSTANCE_OF", "NOT_DESIRES", "NOT_USED_FOR", "NOT_CAPABLE_OF",
-        "NOT_HAS_PROPERTY", "ENTAILS",
-    };
-
     private static readonly string[] UdBootstrap =
         { "HAS_POS", "IS_LEMMA_OF", "HAS_FEATURE", "HAS_DEPENDENCY" };
-
-    private static readonly string[] AtomicBootstrap =
-    {
-        "O_EFFECT", "O_REACT", "O_WANT", "X_ATTR", "X_EFFECT", "X_INTENT", "X_NEED", "X_REACT",
-        "X_WANT", "X_REASON", "OBSTRUCTED_BY", "IS_AFTER", "IS_BEFORE", "X_FILLED_BY", "CAUSES",
-        "OBJECT_USE", "AT_LOCATION", "HAS_SUBEVENT", "CAPABLE_OF", "DESIRES", "HAS_PROPERTY",
-        "MADE_UP_OF", "NOT_DESIRES",
-    };
 }

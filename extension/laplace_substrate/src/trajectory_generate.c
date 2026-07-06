@@ -217,6 +217,34 @@ typedef struct Continuation
     int32 sep;      
 } Continuation;
 
+/*
+ * Consensus-floor fallback plan (COMPLETES_TO probe when the n-gram well runs
+ * dry). Prepared ONCE per backend and kept (same idiom as generate_walk.c's
+ * edge_plan): the un-prepared SPI_execute_with_args path re-planned this query
+ * on every dry step of every walk.
+ */
+static SPIPlanPtr floor_plan = NULL;
+
+static void
+ensure_floor_plan(void)
+{
+    if (floor_plan == NULL)
+    {
+        Oid        argtypes[2] = { BYTEAOID, INT4OID };
+        SPIPlanPtr plan = SPI_prepare(
+            "SELECT object_id, weight "
+            "FROM laplace.walk_completes_floor($1, $2)",
+            2, argtypes);
+
+        if (plan == NULL)
+            elog(ERROR, "walk_continuations: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_continuations: SPI_keepplan failed");
+        floor_plan = plan;
+    }
+}
+
 
 static int
 continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
@@ -370,19 +398,16 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
 
 
-            Oid    argtypes[2] = { BYTEAOID, INT4OID };
             Datum  args[2];
             bytea *subj = (bytea *) palloc(VARHDRSZ + 16);
             int    rc;
 
+            ensure_floor_plan();
             SET_VARSIZE(subj, VARHDRSZ + 16);
             memcpy(VARDATA(subj), c->ids[ctx[ctx_len - 1]], 16);
             args[0] = PointerGetDatum(subj);
             args[1] = Int32GetDatum(topk);
-            rc = SPI_execute_with_args(
-                "SELECT object_id, weight "
-                "FROM laplace.walk_completes_floor($1, $2)",
-                2, argtypes, args, NULL, true, 0);
+            rc = SPI_execute_plan(floor_plan, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: consensus floor probe failed: %s",
                      SPI_result_code_string(rc));

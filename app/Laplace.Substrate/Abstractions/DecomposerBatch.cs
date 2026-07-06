@@ -1,12 +1,22 @@
-using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
+/// <summary>
+/// Record → SubstrateChange lane for sources that compose imperatively into a builder
+/// (iso, framenet, propbank, verbnet, wordnet). It is now a thin adapter over the ONE
+/// ingestion pipeline: DecomposerBatch.RunAsync wraps the caller's compose callback in a
+/// <see cref="DirectComposeHandler{T}"/> and delegates to IngestBatchPipeline.RunAsync
+/// (working-set mode). It no longer carries its own batch loop, so the run bracket,
+/// working-set budget valve, progress heartbeat, and any future produce-side change land
+/// in exactly one place. These sources compose directly (no content-tree descent probe),
+/// so the handler's unit reports no probe tree and just runs compose in DrainInto — the
+/// apply's working-set subtraction dedups, exactly as before.
+/// </summary>
 public static class DecomposerBatch
 {
-    public static async IAsyncEnumerable<SubstrateChange> RunAsync<T>(
+    public static IAsyncEnumerable<SubstrateChange> RunAsync<T>(
         IAsyncEnumerable<T> records,
         Action<T, SubstrateChangeBuilder> compose,
         Hash128 sourceId,
@@ -14,70 +24,73 @@ public static class DecomposerBatch
         int batchSize,
         ISubstrateReader? reader,
         DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
-        int bn = 0;
+        if (options.DryRun) return Empty();
 
-        // Rule #8 working-set mode: one builder spans the stream (the
-        // builder's own id-dedup and attestation pre-merge ARE the
-        // client-side working-set dedup for this lane); the only mid-stream
-        // yield is the memory-budget valve. The content bank survives builds
-        // — the runner resets it at the working-set boundary after the apply
-        // commits. Per-batch mode remains only behind LAPLACE_WORKING_SET=0.
-        bool workingSet = WorkingSetMode.Enabled;
-        var builder = NewBuilder(sourceId, labelPrefix, bn, batchSize, reader);
-        int inBatch = 0;
-        int sinceBudgetCheck = 0;
-
-        await foreach (var record in records.WithCancellation(ct))
+        int cap = Math.Max(1, batchSize);
+        var config = new IngestBatchConfig
         {
-            ct.ThrowIfCancellationRequested();
-            if (cap > 0 && consumed >= cap) break;
-
-            compose(record, builder);
-            consumed++;
-            inBatch++;
-
-            if (workingSet)
-            {
-                if (++sinceBudgetCheck >= 8_192)
-                {
-                    sinceBudgetCheck = 0;
-                    if (builder.StagedBytesEstimate >= WorkingSetMode.BudgetBytes && !options.DryRun)
-                    {
-                        yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-                        builder = NewBuilder(sourceId, labelPrefix, ++bn, batchSize, reader);
-                        inBatch = 0;
-                    }
-                }
-                continue;
-            }
-
-            if (inBatch >= batchSize)
-            {
-                if (!options.DryRun)
-                {
-                    yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-                    IntentStage.ResetContentBank();
-                }
-                builder = NewBuilder(sourceId, labelPrefix, ++bn, batchSize, reader);
-                inBatch = 0;
-            }
-        }
-
-        if (inBatch > 0 && !options.DryRun)
-        {
-            yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-            if (!workingSet) IntentStage.ResetContentBank();
-        }
+            SourceId = sourceId,
+            BatchLabelPrefix = labelPrefix,
+            BatchSize = cap,
+            ContainmentReader = reader,
+            MaxInputUnits = options.MaxInputUnits,
+            WorkingSet = WorkingSetMode.Enabled,
+            // Preserve the prior builder sizing hints for this lane's row shape.
+            EntityCapacity = cap * 4,
+            PhysicalityCapacity = cap * 2,
+            AttestationCapacity = cap * 8,
+        };
+        return IngestBatchPipeline.RunAsync(
+            new AsyncEnumerableRecordStream<T>(records),
+            new DirectComposeHandler<T>(compose),
+            config, ct);
     }
 
-    private static SubstrateChangeBuilder NewBuilder(
-        Hash128 sourceId, string prefix, int bn, int batchSize, ISubstrateReader? _)
-        => new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
-                entityCapacity: batchSize * 4,
-                physicalityCapacity: batchSize * 2,
-                attestationCapacity: batchSize * 8);
+    private static async IAsyncEnumerable<SubstrateChange> Empty()
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+}
+
+/// <summary>
+/// Handler for the imperative-compose model: no content-tree probe, the record's compose
+/// callback runs in DrainInto against the shared working-set builder. Shared by
+/// DecomposerBatch and available to any source that emits entities/attestations directly
+/// rather than as a probeable content tree.
+/// </summary>
+public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
+{
+    private readonly Action<T, SubstrateChangeBuilder> _compose;
+
+    public DirectComposeHandler(Action<T, SubstrateChangeBuilder> compose) => _compose = compose;
+
+    public ValueTask<bool> TryTrunkShortcircuitAsync(
+        T record, SubstrateChangeBuilder builder, ISubstrateReader reader,
+        double witnessWeight, CancellationToken ct) =>
+        ValueTask.FromResult(false);
+
+    public IIngestDeferredUnit CreateDeferredUnit(T record) => new Unit(record, _compose);
+
+    public void WalkWitness(T record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
+
+    private sealed class Unit(T record, Action<T, SubstrateChangeBuilder> compose) : IIngestDeferredUnit
+    {
+        // No probeable tree: this lane composes imperatively; dedup falls to the apply's
+        // working-set subtraction, exactly as the old DecomposerBatch loop relied on.
+        public TierTree? TreeForBatchProbe => null;
+
+        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
+            Task.FromResult<byte[]?>(null);
+
+        public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
+        {
+            compose(record, builder);
+            return default;
+        }
+
+        public void Dispose() { }
+    }
 }

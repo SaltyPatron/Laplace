@@ -1,0 +1,168 @@
+15 — GÖDEL ENGINE: closing the OODA loop on the SQL transformer
+================================================================================
+Date: 2026-07-05. Status: living spec + build tracker. Scope: the SQL-side
+inference engine (recall/walk/converse) and its feedback mechanisms. The foundry
+(docs 09/12/14) is MODEL EXPORT ONLY and is out of scope here; cross-references
+are one-directional (14 P5/P10 name the same math on the export side).
+
+Every claim below was verified against source this session (files cited inline).
+
+================================================================================
+SECTION 0 — THE THESIS
+================================================================================
+The walk IS the forward pass. Where a conventional transformer walks "the cat
+sat on the" → "mat" through trained attention, this engine walks the same
+continuation through indexed lookups over the consensus substrate — and each
+step has MORE information available than a trained dot-product: the full Glicko
+tuple (rating, rd, volatility, witness_count), relation-type salience, highway
+bits, S³ geometry, trajectory ordinals, hilbert locality, source trust, and
+provenance down to individual witnesses. Inference is C/SPI/recursion/CTE
+against real indexes — microsecond steps, no GPU.
+
+The Gödel property: the engine's own outputs are first-class inputs. A response
+is content-addressed and deposited as a witness (self-reference); feedback on a
+response is an attestation folding into the SAME consensus the next walk reads
+(self-improvement). Evaluation IS ingestion. The loop, in OODA terms:
+
+  OBSERVE  prompt + response witnessed into the substrate
+  ORIENT   prompt_state/resolve_topic → intent routing (recall_route)
+  DECIDE   walk/recall over consensus (eff_mu-ranked, indexed)
+  ACT      respond; deposit the response as a witness
+  FEEDBACK confirm/refute attestations → Glicko fold → the next walk differs
+
+================================================================================
+SECTION 1 — WHAT EXISTS TODAY (verified 2026-07-05)
+================================================================================
+1.1 Serving path: recall_session(prompt, session) (recall.c native intent
+    router) → 12 recall_*_response SQL functions (define/describe/examples/
+    languages/related/synonyms/translate/walk/what_is/relation_summary/...);
+    generation = walk_text() → walk_continuations() (trajectory_generate.c:
+    suffix-array n-gram descent over the corpus stream, max_order..1 backoff,
+    Gumbel top-k sampling, walk_completes_floor() consensus fallback when the
+    n-gram well runs dry). Beam/edge walks = generate_walk.c (batched frontier,
+    ONE SPI query per level, C-side ranking).
+1.2 Self-witnessing (OBSERVE/ACT): CLI chat deposits prompt (UserPromptContent,
+    trust .30) and response (ResponseContent, trust .20, source
+    substrate/source/Response/v1) — QueryCommands.ChatAsync. The endpoint's
+    TurnWitness BackgroundService witnesses every conversation turn (bounded
+    channel, drop-on-full, floor-gated). Response bigrams therefore land as
+    PRECEDES attestations — the n-gram walk's OWN edges are already witnessed.
+1.3 Feedback (the loop close): `laplace attest <confirm|refute> <tok...>`
+    (QueryCommands.AttestAsync) — deposits PRECEDES witnesses for a token
+    chain, source substrate/source/UserFeedback/v1, trust UserPrompt (.30),
+    outcome Confirm/Refute, immediate consensus materialization.
+    [2026-07-05: generalized — see §3 B1/B2, FeedbackContent.cs]
+1.4 What the walk consumes per step: relation_rank × eff_mu(rating − 2rd) as
+    the ranking key; refutation filter (rating + 2rd < neutral); witness_count
+    carried for DISPLAY only (generate_walk.c). walk_continuations consumes
+    corpus counts + temperature only.
+1.5 NOT consumed anywhere on the read side: rd as temperature, witness_count
+    as evidence mass, volatility, highway_mask gating, angular/trajectory/
+    hilbert geometry, source trust classes, session/topic carry-over beyond
+    single-prompt resolve. A* heuristic h=0.0 (Issue 05).
+
+================================================================================
+SECTION 2 — INVARIANTS (binding for this build)
+================================================================================
+I1  Evaluation IS ingestion. Every feedback signal, behavioral verdict, and
+    self-adjudication result is an ATTESTATION from a registered source with a
+    trust class — never a side table, never out-of-band state. Glicko-2 is the
+    only score-keeper.
+I2  Feedback binds to the TRIPLE (subject, type, object) — the same consensus
+    row the walk read — never to response text. Confirming a response =
+    confirming the edges that produced it.
+I3  One relation vocabulary. Feedback uses existing canonical relation types;
+    no new relation types without manifest (relation_types.toml) + highway
+    perfcache regeneration.
+I4  One deposit door. All feedback lanes go through the standard writer spine
+    (SubstrateChangeBuilder → NpgsqlSubstrateWriter → ConsensusAccumulating-
+    Writer). No parallel write path.
+I5  One implementation per fact (Rule #6): CLI and endpoint feedback share ONE
+    resolve/build/apply implementation (FeedbackContent.cs); frontends stay thin.
+I6  The engine's self-signals are OUTRANKED BY DESIGN: Response trust .20,
+    UserFeedback at UserPrompt .30 — one voice among many, like AiModelProbe.
+    Self-confirmation cannot outshout curated sources.
+
+================================================================================
+SECTION 3 — THE BUILD (the user-approved plan sequence is BINDING:
+0 → A → B1 → B2/B3/B4 → C → D; status updated IN PLACE)
+================================================================================
+A   WALK PROVENANCE — RESOLVED AS ALREADY-BUILT (2026-07-05, verified against
+    ResponseContent.cs / QueryCommands.ChatAsync / TurnWitness.cs): the
+    substrate's own primitives certify everything this phase named. The
+    response deposit creates the entities (content-addressed tokens + root),
+    the physicalities (the trajectory IS the ordered walk output), and the
+    PRECEDES attestations with source=Response, parent intent = prompt root.
+    Provenance — where a decision came from — is the attestation layer itself
+    (source/context/outcome), served by attestations_out/walk_branches.
+    Content addressing closes the completion→edges question with NO stored
+    mapping: ContentRootId(text) recomputes the root; edges re-derive from
+    content. A separate "walk run entity" would duplicate what these
+    primitives already certify (Rule #6 violation). Policy params (steps/
+    order/temp/topk) are the ONE thing not deposited — that is B4's slot
+    (policy as content-addressed entity), not a provenance gap.
+    [CLOSED — no new infrastructure; earlier text of this entry specified a
+    redundant run-entity design and was wrong]
+B1  ATTEST GENERALIZATION — shared FeedbackContent lane (Laplace.Substrate/
+    Abstractions/FeedbackContent.cs): source substrate/source/UserFeedback/v1,
+    batched token resolution, PRECEDES-chain + arbitrary-triple builders,
+    apply + fold. CLI: `laplace attest <confirm|refute> <subject>
+    <RELATION_TYPE> <object>` (uppercase canonical name triggers triple mode),
+    prior/posterior consensus state reported.
+    [DONE 2026-07-05 — binding is correct as-is: attesting a token chain
+    attests the response's own PRECEDES edges, because content is the address]
+B2  ENDPOINT FEEDBACK API — POST /v1/feedback: {verdict, tokens[]} (chain) or
+    {verdict, subject, relation, object} (triple), same lane as B1, consensus
+    delta in the response, capability row added.
+    [DONE 2026-07-05 — completion→edges is closed by content addressing:
+    clients send the completion text/tokens back; the same triples re-derive]
+B3  BEHAVIORAL HARNESS AS WITNESS — standing suite for the SQL engine:
+    substrate-derived expected continuations, hub-collapse and empty-output
+    detectors; each verdict deposited as an attestation from
+    substrate/source/BehavioralHarness/v1; Glicko trends verdicts over time.
+    Runs post-seed + on demand.                      [OPEN]
+B4  WALK-POLICY RATING — decode policies (steps/order/temp/topk tuple) as
+    content-addressed entities; each adjudicated response is a matchup outcome
+    for its policy; selection by eff_mu with rd as the exploration bonus.
+    Caller-side selection first; native only if profiling justifies. [OPEN]
+C   RICHER FORWARD PASS (per-step signal; mirrors 14 P5 on the read side):
+    a) Glicko-complete edge score in generate_walk.c:
+       w = eff_mu · exp(−κ·rd) · sat(witness_count); refuted edges negative.
+    b) highway_mask step gating: intent → allowed relation-type bits
+       (perfcache-backed bitmask AND, zero SQL).
+    c) Geometry terms: angular distance on S³, trajectory-ordinal continuity,
+       hilbert locality as additive beam scores; A* admissible geometric lower
+       bound (closes Issue 05).
+    d) Session conditioning: topic carry-over as frontier bias (ORIENT).
+    Profile-first (Rule #5 caveat); EXPLAIN-verified; KNN points stay bound
+    parameters (Rules #1/#4).                        [OPEN]
+D   LOOP-CLOSURE METRICS — depth-k grounded-retrieval accuracy, feedback→
+    next-walk delta (does an attest visibly move the next walk?), µs/step
+    latency budget. B3 is the vehicle.               [OPEN]
+
+Coordination note: B3/B4's shared read surface should ride doc 13 Phase 2's
+one read door rather than fork it — a constraint, not a re-homing of this plan.
+
+================================================================================
+SECTION 4 — LIVE LOOP PROOF (the acceptance test for the minimal loop)
+================================================================================
+On a seeded DB:
+  1. laplace chat "<prompt>"            → response deposited (1.2)
+  2. laplace attest refute <tokA> <tokB>  on a walked bigram
+  3. consensus row (tokA PRECEDES tokB): rating drops / witness_count rises
+     (verify: SELECT ... FROM consensus WHERE subject/type/object)
+  4. re-walk the same prompt with same seed → the refuted continuation ranks
+     lower where the walk consults consensus (walk_completes_floor path;
+     the pure n-gram well is corpus-count-driven and unaffected — that gap is
+     exactly G6a's target).
+Triple form (live-verified target shape, 2026-07-05): word-level taxonomy rows do
+NOT exist ('dog IS_A animal' would be a NEW claim — taxonomy lives at synset
+level). A real existing row on the live DB: dog PRECEDES cart (6 witnesses,
+rating 1870046278723, rd 174127722066). The triple proof targets such a row:
+`laplace attest confirm dog PRECEDES cart` → witness_count+1, rating toward
+confirm — verified via psql before/after, not CLI output.
+CAUTION (learned live): run NO attest/chat and NO CLI rebuild while an ingest is
+in flight (single-ingest law; the CLI exe also locks the build output tree).
+walk_text's first call per backend builds the generation corpus
+(corpus_sentence_constituents scan — minutes on a 20M-entity DB); do not run it
+concurrently with a seed.

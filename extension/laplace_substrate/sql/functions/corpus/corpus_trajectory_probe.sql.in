@@ -1,9 +1,31 @@
+-- Staleness signature for the generation corpus (called on EVERY walk/continuation
+-- request via corpus_ensure): must be O(1), never a corpus scan.
+--
+-- rows   = number of trajectory rows AT the maximum observed_at (top-key range scan)
+-- max_us = maximum observed_at in microseconds (backward index-only scan)
+--
+-- Both legs are served by physicalities_traj_probe (partial btree on observed_at
+-- WHERE type = 1 AND trajectory IS NOT NULL). The pair changes whenever rows are
+-- appended at-or-after the current max — the append-only substrate's normal write
+-- path, including same-timestamp batch inserts (the pg_regress generation_corpus
+-- case). Rows backdated strictly BELOW the current max are the one blind spot;
+-- stream_reset() is the manual override for that pathological case.
+--
+-- The previous body computed count(*) over ALL trajectory rows (parallel scan of
+-- ~3.4M index entries, plan cost ~26k) on every call; this body plans at cost <5.
+-- Total corpus size for display lives in stream_stats(), not here.
 CREATE OR REPLACE FUNCTION corpus_trajectory_probe()
     RETURNS TABLE(rows bigint, max_us bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT count(*)::int8,
-           COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::int8, 0)
-    FROM physicalities
-    WHERE type = 1 AND trajectory IS NOT NULL
+    WITH m AS (
+        SELECT max(observed_at) AS max_at
+        FROM physicalities
+        WHERE type = 1 AND trajectory IS NOT NULL
+    )
+    SELECT COALESCE((SELECT count(*)
+                     FROM physicalities p
+                     WHERE p.type = 1 AND p.trajectory IS NOT NULL
+                       AND p.observed_at = (SELECT max_at FROM m)), 0)::int8,
+           COALESCE((SELECT (extract(epoch FROM max_at) * 1000000)::int8 FROM m), 0)
 $$;

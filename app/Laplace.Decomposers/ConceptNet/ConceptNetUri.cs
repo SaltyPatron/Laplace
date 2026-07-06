@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -91,4 +92,21 @@ public static class ConceptNetUri
     public static bool TryAppendTerm(
         SubstrateChangeBuilder b, ReadOnlySpan<byte> termUnderscored, Hash128 sourceId, out Hash128 rootId) =>
         ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, termUnderscored, sourceId, out rootId);
+
+    /// <summary>Pull ConceptNet's assertion "weight" out of the metadata JSON column
+    /// (defaults to 1.0). Shared by the lean managed lane and the retired grammar
+    /// witness so the magnitude carried into the fold has one definition.</summary>
+    public static double ParseWeight(ReadOnlySpan<byte> json)
+    {
+        if (json.IsEmpty) return 1.0;
+        try
+        {
+            var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
+            while (reader.Read())
+                if (reader.TokenType == JsonTokenType.PropertyName && reader.ValueTextEquals("weight"u8))
+                    return reader.Read() && reader.TokenType == JsonTokenType.Number ? reader.GetDouble() : 1.0;
+        }
+        catch (JsonException) { }
+        return 1.0;
+    }
 }

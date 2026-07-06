@@ -1,0 +1,61 @@
+{
+  "counts": [
+    {
+      "metric": "entities",
+      "value": 1000000
+    },
+    {
+      "metric": "attestations",
+      "value": 5000000
+    }
+  ],
+  "consensus": {
+    "evidenceRows": 5000000,
+    "consensusRows": 1500000,
+    "dedupRatio": 3.33,
+    "avgWitnesses": 4.2,
+    "maxWitnesses": 9001
+  },
+  "multi_source_entity_count": 250000,
+  "top_relations": [
+    {
+      "subjectIdHex": "00112233445566778899aabbccddeeff",
+      "subject": "whale",
+      "typeIdHex": "0123456789abcdef0123456789abcdef",
+      "type": "IS_A",
+      "objectIdHex": "ffeeddccbbaa99887766554433221100",
+      "object": "cetacean",
+      "effectiveMu": 0.91,
+      "witnesses": 42
+    }
+  ],
+  "sources": [
+    {
+      "key": "WordNet",
+      "evidence": 1000000,
+      "content": 500000,
+      "stage": "knowledge",
+      "layer": "L2",
+      "role": "synsets"
+    }
+  ],
+  "stages": [
+    {
+      "stage": "knowledge",
+      "order": 2,
+      "law": "WordNet hub",
+      "sources": [
+        {
+          "cli": "wordnet",
+          "layer": "L2",
+          "role": "synsets",
+          "links": null
+        }
+      ]
+    }
+  ],
+  "featured_refs": [
+    "dog",
+    "whale"
+  ]
+}

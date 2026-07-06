@@ -10,7 +10,11 @@ public static class IngestSizing
 
 
 
-    public const int EstBytesPerRecord = 512;
+    // Fallback only. The real bytes/record is source-specific (a unicode codepoint is
+    // ~tens of bytes, a UD sentence a few KB, a wiktionary record tens of KB), so the
+    // batch is sized from a per-source estimate passed into Resolve — this constant is
+    // just the last resort when a source declares nothing.
+    public const int DefaultEstBytesPerRecord = 512;
 
 
 
@@ -58,11 +62,13 @@ public static class IngestSizing
 
         int? recordBatchOverride = null,
 
-        int? commitRowsOverride = null)
+        int? commitRowsOverride = null,
+
+        int estBytesPerRecord = DefaultEstBytesPerRecord)
 
     {
 
-        int batch = recordBatchOverride ?? ResolveRecordBatch(performanceCoreCount);
+        int batch = recordBatchOverride ?? ResolveRecordBatch(performanceCoreCount, estBytesPerRecord);
 
         int probe = ResolveProbeChunk(batch, fileWorkers);
 
@@ -100,11 +106,15 @@ public static class IngestSizing
 
 
 
-    public static int ResolveRecordBatch(int performanceCoreCount)
+    public static int ResolveRecordBatch(
+        int performanceCoreCount, int estBytesPerRecord = DefaultEstBytesPerRecord)
 
     {
 
-        int fromMem = TargetBytesPerBatch / EstBytesPerRecord;
+        // Records per ~1 MB batch, from the REAL per-source record size: fat records get
+        // small batches (bounded memory), tiny records get large batches (throughput).
+        // The [floor, ceiling] clamps keep round-trip counts sane at both extremes.
+        int fromMem = TargetBytesPerBatch / Math.Max(1, estBytesPerRecord);
 
         if (performanceCoreCount <= 4)
 

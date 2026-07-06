@@ -334,55 +334,44 @@ internal static class QueryCommands
 
     public static async Task<int> AttestAsync(string[] args)
     {
+        const string usage = "usage: laplace attest <confirm|refute> <tok1> [tok2...]\n"
+            + "       laplace attest <confirm|refute> <subject> <RELATION_TYPE> <object>";
         if (args.Length < 2)
-            return Fail("usage: laplace attest <confirm|refute> <tok1> [tok2...]");
+            return Fail(usage);
 
         string mode = args[0].ToLowerInvariant();
         bool confirm = mode == "confirm";
         if (!confirm && mode != "refute")
-            return Fail("usage: laplace attest <confirm|refute> <tok1> [tok2...]");
+            return Fail(usage);
 
         string[] tokens = args[1..];
-
-        var feedbackSource = Hash128.OfCanonical("substrate/source/UserFeedback/v1");
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
         CodepointPerfcache.LoadDefault();
 
-        // Resolve every token first, then test presence in ONE batched round-trip via the
-        // existing entities_exist_bitmap primitive. Pass 2 replays token order so the warn/skip
-        // messages appear in exactly the same sequence as the old per-token EXISTS loop.
-        var resolved = new Hash128?[tokens.Length];
-        var probeIds = new List<Hash128>(tokens.Length);
-        for (int i = 0; i < tokens.Length; i++)
-        {
-            var rid = TextDecomposer.ContentRootId(tokens[i]);
-            resolved[i] = rid;
-            if (rid is not null) probeIds.Add(rid.Value);
-        }
+        // Triple mode: exactly <subject> <RELATION_TYPE> <object> where the middle
+        // token is a canonical relation name (uppercase, e.g. IS_A). Anything else
+        // is the PRECEDES-chain form. Both go through the ONE feedback lane
+        // (FeedbackContent, doc 15 G1/G2).
+        if (tokens.Length == 3 && FeedbackContent.TryResolveRelation(tokens[1], out var rel))
+            return await AttestTripleAsync(ds, tokens[0], rel, tokens[2], confirm);
 
-        var reader = new NpgsqlSubstrateReader(ds);
-        var bitmap = await reader.EntitiesExistBitmapAsync(probeIds);
-
-        var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
-        int probeBit = 0;
-        for (int i = 0; i < tokens.Length; i++)
+        var resolved = await FeedbackContent.ResolveTokensAsync(ds, tokens);
+        var ids = new List<Hash128>(tokens.Length);
+        foreach (var t in resolved)
         {
-            var rid = resolved[i];
-            if (rid is null)
+            if (t.Id is null)
             {
-                Console.WriteLine($"  warn: '{tokens[i]}' is empty — skipping");
+                Console.WriteLine($"  warn: '{t.Token}' is empty — skipping");
                 continue;
             }
-            bool present = (bitmap[probeBit >> 3] & (1 << (probeBit & 7))) != 0;
-            probeBit++;
-            if (!present)
+            if (!t.Present)
             {
-                Console.WriteLine($"  warn: '{tokens[i]}' has no substrate entity — skipping");
+                Console.WriteLine($"  warn: '{t.Token}' has no substrate entity — skipping");
                 continue;
             }
-            ids.Add((tokens[i], rid.Value));
+            ids.Add(t.Id.Value);
         }
 
         if (ids.Count < 2)
@@ -391,23 +380,46 @@ internal static class QueryCommands
             return ids.Count == 0 ? 1 : 0;
         }
 
-        var b = new SubstrateChangeBuilder(feedbackSource, "attest/0", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1);
+        var result = await FeedbackContent.ApplyAsync(ds, FeedbackContent.BuildPrecedesChain(ids, confirm));
+        Console.WriteLine($"  applied: {result.AttestationsInserted} attestation(s) inserted");
+        Console.WriteLine($"  consensus: {result.ConsensusUpdated} relation(s) updated "
+            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} {ids.Count - 1} PRECEDES pair(s))");
+        return 0;
+    }
 
-        for (int i = 0; i + 1 < ids.Count; i++)
-            b.AddAttestation(NativeAttestation.Categorical(
-                ids[i].Id, "PRECEDES", ids[i + 1].Id,
-                feedbackSource, null, SourceTrust.UserPrompt, confirm: confirm));
+    private static async Task<int> AttestTripleAsync(
+        NpgsqlDataSource ds, string subject, RelationTypeRegistry.RelationTypeResolution rel,
+        string obj, bool confirm)
+    {
+        var resolved = await FeedbackContent.ResolveTokensAsync(ds, [subject, obj]);
+        foreach (var t in resolved)
+        {
+            if (t.Usable) continue;
+            Console.WriteLine(t.Id is null
+                ? $"  warn: '{t.Token}' is empty"
+                : $"  warn: '{t.Token}' has no substrate entity");
+            return 1;
+        }
 
-        var change = b.Build();
-        var inner = new NpgsqlSubstrateWriter(ds);
-        await using var acc = new ConsensusAccumulatingWriter(inner, ds);
-        var result = await ((ISubstrateWriter)acc).ApplyAsync(change, CancellationToken.None);
+        Hash128 subjectId = resolved[0].Id!.Value;
+        Hash128 objectId = resolved[1].Id!.Value;
+
+        var before = await FeedbackContent.ConsensusStateAsync(ds, subjectId, rel.Id, objectId);
+        Console.WriteLine(before is null
+            ? $"  target: {subject} {rel.Canonical} {obj} — NEW claim (no consensus row yet)"
+            : $"  target: {subject} {rel.Canonical} {obj} — existing row "
+                + $"(rating {before.Rating}, rd {before.Rd}, witnesses {before.WitnessCount})");
+
+        var result = await FeedbackContent.ApplyAsync(
+            ds, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm));
         Console.WriteLine($"  applied: {result.AttestationsInserted} attestation(s) inserted");
 
-        var materialized = await acc.MaterializeConsensusAsync();
-        Console.WriteLine($"  consensus: {materialized} relation(s) updated "
-            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} {ids.Count - 1} PRECEDES pair(s))");
+        var after = await FeedbackContent.ConsensusStateAsync(ds, subjectId, rel.Id, objectId);
+        Console.WriteLine($"  consensus: {result.ConsensusUpdated} relation(s) updated "
+            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} 1 {rel.Canonical} triple)");
+        if (after is not null)
+            Console.WriteLine($"  now: rating {after.Rating}, rd {after.Rd}, witnesses {after.WitnessCount}"
+                + (before is null ? "" : $" (Δrating {after.Rating - before.Rating:+#;-#;0}, Δwitnesses {after.WitnessCount - before.WitnessCount:+#;-#;0})"));
         return 0;
     }
 

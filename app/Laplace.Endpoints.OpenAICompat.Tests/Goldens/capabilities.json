@@ -37,6 +37,10 @@
     },
     "models": {
       "status": "live"
+    },
+    "feedback": {
+      "status": "live",
+      "backend": "laplace.attestations (confirm/refute) + consensus fold"
     }
   }
 }

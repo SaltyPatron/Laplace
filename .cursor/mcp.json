@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "laplace-db": {
+      "command": "uvx",
+      "args": ["postgres-mcp", "--access-mode=restricted"],
+      "env": {
+        "DATABASE_URI": "postgresql://postgres:postgres@localhost:5432/laplace"
+      }
+    }
+  }
+}

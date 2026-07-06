@@ -27,11 +27,20 @@ internal sealed record WorkEstimate(
     long ItemsPerUnit,
     string UnitName);
 
+internal sealed record ExploreExportSpec(
+    int WitnessRows,
+    int ConsensusRows,
+    bool IncludeMembers,
+    bool IncludePeers);
+
 internal interface IReportQuoteCalculator
 {
     WorkEstimate EstimateAudit(AuditReportSpec spec);
     WorkEstimate EstimateVisualization(VisualizationExportSpec spec);
     WorkEstimate EstimateRecipe(RecipeWorkSpec spec);
+    WorkEstimate EstimateEntityInspect();
+    WorkEstimate EstimateTrainingExport(ExploreExportSpec spec);
+    WorkEstimate EstimateExpandRows(int rowCount);
 }
 
 internal sealed class ReportQuoteCalculator : IReportQuoteCalculator
@@ -122,4 +131,22 @@ internal sealed class ReportQuoteCalculator : IReportQuoteCalculator
 
     private static WorkEstimate Flat(string serviceId, string unitName) =>
         new(serviceId, 1, 1, 1, unitName);
+
+    public WorkEstimate EstimateEntityInspect() => Flat("inspect", "entity");
+
+    public WorkEstimate EstimateTrainingExport(ExploreExportSpec spec)
+    {
+        var items = Math.Max(1, spec.WitnessRows + spec.ConsensusRows);
+        if (spec.IncludeMembers) items += 50;
+        if (spec.IncludePeers) items += 24;
+        return EstimateRecipe(new RecipeWorkSpec("export", items, false, true));
+    }
+
+    public WorkEstimate EstimateExpandRows(int rowCount) =>
+        new(
+            ServiceId: "visualization.deep_export",
+            MeteredItems: Math.Max(1, rowCount),
+            BillableUnits: Math.Max(1L, (Math.Max(1, rowCount) + VisualItemsPerUnit - 1) / VisualItemsPerUnit),
+            ItemsPerUnit: VisualItemsPerUnit,
+            UnitName: "visual_unit");
 }
