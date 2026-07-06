@@ -22,7 +22,7 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
   blocks you, it is right — fix the command, do not route around it.
 - **Subagents** ([.github/agents/](.github/agents)): `substrate-verifier` (read-only
   live-data proof of claims), `doc-reconciler` (kills .scratchpad doc drift).
-- **Prompt**: `/next-task` ranks the next highest-leverage work from doc 13 + issue tracker.
+- **Prompt**: `/next-task` ranks work from binding docs (05/06/09) + code-verified open items — not doc 13 alone.
 - **Cursor**: [.cursor/rules/](.cursor/rules) mirrors the hard law + scoped rules.
 
 ## Terminal adaptation (VS Code / PowerShell harnesses)
@@ -71,7 +71,9 @@ schema's own helper catalog — check it before assuming something doesn't exist
 
 - [.scratchpad/05_Substrate_Invariants.txt](.scratchpad/05_Substrate_Invariants.txt) — axioms; binding.
 - [.scratchpad/06_Engineering_Ruleset.txt](.scratchpad/06_Engineering_Ruleset.txt) — Rules #1–#12; Rule #8 = the ingest sequence; binding.
-- [.scratchpad/13_Stabilization_Audit_and_Plan.txt](.scratchpad/13_Stabilization_Audit_and_Plan.txt) — THE active plan; start here for "what next".
+- [.scratchpad/17_Decomposer_Full_Stack_Audit.md](.scratchpad/17_Decomposer_Full_Stack_Audit.md) — decomposer + ingest-spine audit (code-verified); start here for decomposer work.
+- [.scratchpad/06_Engineering_Ruleset.txt](.scratchpad/06_Engineering_Ruleset.txt) — Rule #8 ingest sequence; binding for pipeline changes.
+- [.scratchpad/13_Stabilization_Audit_and_Plan.txt](.scratchpad/13_Stabilization_Audit_and_Plan.txt) — historical stabilization notes; verify against code before trusting.
 - Full doc map with status: [CLAUDE.md](CLAUDE.md) § Doc map.
 
 ## Conventions that differ from common practice

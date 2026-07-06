@@ -1,23 +1,36 @@
 ---
 name: 'Next task'
-description: 'Determine the next highest-leverage task from the stabilization plan and verification debt'
+description: 'Determine the next highest-leverage task from binding docs and code-verified open work'
 agent: agent
 ---
 Determine the next task to work on in the Laplace repo. Do not start implementing —
 produce a ranked recommendation.
 
-1. Read [.scratchpad/13_Stabilization_Audit_and_Plan.txt](../../.scratchpad/13_Stabilization_Audit_and_Plan.txt)
-   in full — it is THE active plan. Note which phase items are marked done vs open.
-2. Read the status index at the top of [.scratchpad/02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt)
-   for open issues and verification debt (fixed-but-not-proven items).
-3. Check for foundry-frontier context in [.scratchpad/14_Foundry_Root_Cause_and_Research.txt](../../.scratchpad/14_Foundry_Root_Cause_and_Research.txt)
-   (prescriptions P1-P10 and their status).
-4. Judge every candidate by the arc: content → decomposer records → dedup/Glicko →
-   bulk-novel COPY → consensus → recall/walk → Mold-A-Model. Work that doesn't shorten
-   or de-risk that arc is out.
-5. Output: top 3 candidates ranked, each with (a) which doc/phase it comes from,
-   (b) why it's next (dependency or risk argument), (c) the concrete first step,
-   (d) how completion will be verified against live data.
+Trust order (do NOT invert):
+1. Running code (`app/`, `engine/`, `extension/`) — verify claims with file:line or grep.
+2. Binding author docs: `.scratchpad/05`, `06`, `08`, `09`, `11`, `12`.
+3. Operational config: `scripts/win/witness-manifest.json`, `scripts/decomposer-gates.json`.
+4. Do NOT treat as authority: `.scratchpad/13`, compacted `02` status index alone,
+   or the one-line "pipeline chain" — those are agent-written summaries that have drifted.
 
-If the docs contradict each other on status, say so explicitly and recommend a
-doc-reconciler pass first.
+Read for context:
+- [.scratchpad/17_Decomposer_Full_Stack_Audit.md](../../.scratchpad/17_Decomposer_Full_Stack_Audit.md)
+  if decomposer / ingest-spine work is in scope.
+- [.scratchpad/06_Engineering_Ruleset.txt](../../.scratchpad/06_Engineering_Ruleset.txt)
+  Rule #8 ingest sequence and Rule #6 one-implementation-per-fact.
+- [.scratchpad/09_Substrate_LM_Synthesis.txt](../../.scratchpad/09_Substrate_LM_Synthesis.txt)
+  for invention framing (construct-don't-train, spider-web Laplacian).
+- Open items in [.scratchpad/02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt)
+  ONLY after verifying each candidate against code (status index alone is not truth).
+
+Judge candidates by whether they:
+- Put more witnessed attestations through ONE Rule #8 spine door (`IngestBatchPipeline`
+  → `ContentTierSpine` / handlers → fold → `NpgsqlWorkingSetApply`).
+- Remove duplicate C# / native / SQL implementations of the same fact (Rule #6).
+- De-risk Mold-A-Model export by improving consensus supply (honest witnesses), per 09/12.
+
+Output: top 3 candidates ranked, each with (a) code/doc evidence, (b) dependency argument,
+(c) concrete first step, (d) live-data verification (`psql`, `seed-step.cmd :verify_step`,
+or targeted test).
+
+If docs contradict code, code wins — say so explicitly.
