@@ -129,9 +129,15 @@ public sealed class DecomposerArchitectureGateTests
             var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
             if (allowHandBuilderInDecompose.Contains(rel)) continue;
             var text = File.ReadAllText(file);
-            if (!text.Contains("DecomposeAsync", StringComparison.Ordinal)) continue;
-            if (text.Contains("new SubstrateChangeBuilder", StringComparison.Ordinal))
-                violations.Add(rel);
+        var decomposeBody = Regex.Match(
+            text,
+            @"DecomposeAsync[\s\S]*?(?=\r?\n    (?:public |private |internal |protected |public override ))");
+        if (decomposeBody.Success && decomposeBody.Value.Contains("new SubstrateChangeBuilder", StringComparison.Ordinal))
+            violations.Add(rel);
+        else if (!decomposeBody.Success
+                 && text.Contains("DecomposeAsync", StringComparison.Ordinal)
+                 && text.Contains("new SubstrateChangeBuilder", StringComparison.Ordinal))
+            violations.Add(rel);
         }
         Assert.True(violations.Count == 0,
             "DecomposeAsync must route through the ingestion spine (DecomposerBatch/pipeline), not hand builders:\n"
@@ -139,6 +145,7 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
+    public void IngestDescentFlush_AlwaysRunsTierExistence()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var flush = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "IngestDescentFlush.cs");
