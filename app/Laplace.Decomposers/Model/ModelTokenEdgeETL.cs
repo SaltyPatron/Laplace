@@ -26,6 +26,14 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class ModelTokenEdgeETL
 {
+    public readonly record struct EdgeAttestationRecord(
+        Hash128 Subject, Hash128 Object, Hash128 TypeId, long ScoreFp, double Weight);
+
+    public static void StageEdgeAttestation(
+        SubstrateChangeBuilder b, EdgeAttestationRecord rec, Hash128 sourceId) =>
+        b.AddAttestation(NativeAttestation.Aggregated(
+            rec.Subject, rec.TypeId, rec.Object, sourceId, null, 1, rec.ScoreFp, rec.Weight));
+
     private const int RowTile = 256;
     private const int AttsPerChange = 200_000;
     private const int EigTargetDim = 64;
@@ -86,7 +94,10 @@ public sealed class ModelTokenEdgeETL
         RelationTypeRegistry.Resolve(relation).Rank * SourceTrust.AiModelProbe;
 
     public async IAsyncEnumerable<SubstrateChange> EmitAsync(
-        int commitEpoch, [EnumeratorCancellation] CancellationToken ct = default)
+        int commitEpoch,
+        ISubstrateReader? reader,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (_manifest.Coverage == Coverage.Unsupported)
         {
@@ -136,7 +147,7 @@ public sealed class ModelTokenEdgeETL
 
 
         if (RunSimilarity)
-            await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, ct))
+            await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, reader, options, ct))
                 yield return change;
 
         if (!_manifest.TextPlanesRunnable)
@@ -148,7 +159,7 @@ public sealed class ModelTokenEdgeETL
 
 
         if (RunContinues)
-            await foreach (var change in EmitContinuesPlane(Af, ents, rowOfToken, n, d, commitEpoch, refMap, ct))
+            await foreach (var change in EmitContinuesPlane(Af, ents, rowOfToken, n, d, commitEpoch, refMap, reader, options, ct))
                 yield return change;
 
         if (!RunLayers) yield break;
@@ -161,11 +172,11 @@ public sealed class ModelTokenEdgeETL
         for (int L = 0; L < layers; L++)
         {
             ct.ThrowIfCancellationRequested();
-            await foreach (var change in EmitAttentionLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, ct))
+            await foreach (var change in EmitAttentionLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
                 yield return change;
-            await foreach (var change in EmitOvLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, ct))
+            await foreach (var change in EmitOvLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
                 yield return change;
-            await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, ct))
+            await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
                 yield return change;
         }
     }
@@ -173,6 +184,7 @@ public sealed class ModelTokenEdgeETL
 
     private async IAsyncEnumerable<SubstrateChange> EmitSimilarityPlane(
         float[] Af, List<Hash128> ents, int n, int d, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         int kmax = Math.Min(EigTargetDim, Math.Min(d, n));
@@ -207,7 +219,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in EmitBilinearPairs(
             Y, Y, n, rank, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "similarity", RelationName: "SIMILAR_TO"),
-            sampleForDecoder: false, topK: EdgeTopK, ct))
+            sampleForDecoder: false, topK: EdgeTopK, reader, options, ct))
             yield return change;
     }
 
@@ -220,6 +232,7 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitContinuesPlane(
         float[] Af, List<Hash128> ents, List<int> rowOfToken, int n, int d, int commitEpoch,
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
@@ -258,7 +271,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in EmitBilinearPairs(
             Ed, Ud, n, d, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "continues", RelationName: "CONTINUES_TO"),
-            sampleForDecoder: true, topK: EdgeTopK, ct))
+            sampleForDecoder: true, topK: EdgeTopK, reader, options, ct))
             yield return change;
     }
 
@@ -266,6 +279,7 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitAttentionLayer(
         int L, float[] Af, double[] Ad, List<Hash128> ents, int n, int d, int commitEpoch,
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
@@ -329,7 +343,7 @@ public sealed class ModelTokenEdgeETL
             await foreach (var change in EmitBilinearPairs(
                 Qh, Kh, n, hd, typeId, weight, ents, ents, commitEpoch,
                 new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true,
-                topK: perHeadK, ct))
+                topK: perHeadK, reader, options, ct))
                 yield return change;
         }
     }
@@ -338,6 +352,7 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitOvLayer(
         int L, float[] Af, double[] Ad, List<Hash128> ents, int n, int d, int commitEpoch,
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
@@ -390,7 +405,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in EmitBilinearPairs(
             OVout, En, n, d, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(L, -1, "ov", "OV_RELATES"), sampleForDecoder: true,
-            topK: EdgeTopK, ct))
+            topK: EdgeTopK, reader, options, ct))
             yield return change;
     }
 
@@ -398,6 +413,7 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitMlpLayer(
         int L, double[] Ad, List<Hash128> ents, int n, int d, int commitEpoch,
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
@@ -437,28 +453,20 @@ public sealed class ModelTokenEdgeETL
         var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
         var collector = _classifier is null ? null : new TopPairCollector(TopPairsPerCircuit);
 
-        var b = NewChunk(commitEpoch); int inChunk = 0; long edges = 0;
-        for (int rb = 0; rb < n; rb += RowTile)
+        long edges = 0;
+        await foreach (var batch in DecomposerBatch.RunAsync(
+                           EnumerateFfnEdgeRecords(Ad, n, d, gate, up, down, I, ents, typeId, weight,
+                               oR, oC, oV, oS, cap, collector, ct),
+                           (rec, b) => StageEdgeAttestation(b, rec, _source),
+                           _source, $"model/edges/mlp/L{L}", AttsPerChange, reader, options, ct,
+                           commitEpoch, AttsPerChange))
         {
-            ct.ThrowIfCancellationRequested();
-            int re = Math.Min(rb + RowTile, n);
-            int cnt = RunFfnTile(Ad, n, d, gate, up, down, I, rb, re, oR, oC, oV, oS, cap);
-            if (cnt < 0) { _log.LogWarning("phase=edges L{L}: ffn tile failed; skipping MLP", L); yield break; }
-            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, EdgeTopK);
-            for (int e = 0; e < cnt; e++)
-            {
-                if (oC[e] == oR[e]) continue;
-                b.AddAttestation(NativeAttestation.Aggregated(
-                    ents[oR[e]], typeId, ents[oC[e]], _source, null, 1, oS[e], weight));
-                collector?.Offer(ents[oR[e]], ents[oC[e]], oS[e]);
-                edges++;
-                if (++inChunk >= AttsPerChange) { yield return b.Build(); b = NewChunk(commitEpoch); inChunk = 0; await Task.Yield(); }
-            }
+            edges += batch.Attestations.Length;
+            yield return batch;
         }
-        if (inChunk > 0) yield return b.Build();
         _log.LogInformation("phase=edges L{L}: {E:N0} COMPLETES_TO edges folded", L, edges);
 
-        await foreach (var change in ClassifyIfPossible(descriptor, collector, commitEpoch, ct))
+        await foreach (var change in EmitClassifyChange(descriptor, collector, commitEpoch, reader, options, ct))
             yield return change;
     }
 
@@ -468,19 +476,43 @@ public sealed class ModelTokenEdgeETL
         double[] left, double[] right, int n, int r, Hash128 typeId, double weight,
         List<Hash128> rowEnts, List<Hash128> colEnts, int commitEpoch,
         CircuitDescriptor descriptor, bool sampleForDecoder, int topK,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        bool canonicalize = RelationTypeRegistry.Resolve(descriptor.RelationName).Symmetry
+                            == RelationTypeRegistry.Symmetry.Symmetric;
+        var collector = (_classifier is null || !sampleForDecoder) ? null : new TopPairCollector(TopPairsPerCircuit);
+        string label = EdgeBatchLabel(descriptor);
+
+        await foreach (var batch in DecomposerBatch.RunAsync(
+                           EnumerateBilinearEdgeRecords(left, right, n, r, typeId, weight, rowEnts, colEnts,
+                               canonicalize, topK, collector, ct),
+                           (rec, b) => StageEdgeAttestation(b, rec, _source),
+                           _source, label, AttsPerChange, reader, options, ct, commitEpoch, AttsPerChange))
+            yield return batch;
+
+        await foreach (var change in EmitClassifyChange(descriptor, collector, commitEpoch, reader, options, ct))
+            yield return change;
+    }
+
+    private static string EdgeBatchLabel(CircuitDescriptor descriptor)
+    {
+        var label = $"model/edges/{descriptor.Plane}";
+        if (descriptor.Layer >= 0) label += $"/L{descriptor.Layer}";
+        if (descriptor.Head >= 0) label += $".H{descriptor.Head}";
+        return label;
+    }
+
+    private static async IAsyncEnumerable<EdgeAttestationRecord> EnumerateBilinearEdgeRecords(
+        double[] left, double[] right, int n, int r,
+        Hash128 typeId, double weight,
+        List<Hash128> rowEnts, List<Hash128> colEnts,
+        bool canonicalize, int topK,
+        TopPairCollector? collector,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long cap = (long)RowTile * n;
         var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
-        var collector = (_classifier is null || !sampleForDecoder) ? null : new TopPairCollector(TopPairsPerCircuit);
-
-
-
-
-        bool canonicalize = RelationTypeRegistry.Resolve(descriptor.RelationName).Symmetry
-                            == RelationTypeRegistry.Symmetry.Symmetric;
-
-        var b = NewChunk(commitEpoch); int inChunk = 0;
         for (int rb = 0; rb < n; rb += RowTile)
         {
             ct.ThrowIfCancellationRequested();
@@ -492,33 +524,63 @@ public sealed class ModelTokenEdgeETL
             {
                 if (oC[e] == oR[e]) continue;
                 if (canonicalize && oC[e] < oR[e]) continue;
-                b.AddAttestation(NativeAttestation.Aggregated(
-                    rowEnts[oR[e]], typeId, colEnts[oC[e]], _source, null, 1, oS[e], weight));
-                collector?.Offer(rowEnts[oR[e]], colEnts[oC[e]], oS[e]);
-                if (++inChunk >= AttsPerChange) { yield return b.Build(); b = NewChunk(commitEpoch); inChunk = 0; await Task.Yield(); }
+                var subject = rowEnts[oR[e]];
+                var obj = colEnts[oC[e]];
+                collector?.Offer(subject, obj, oS[e]);
+                yield return new EdgeAttestationRecord(subject, obj, typeId, oS[e], weight);
             }
         }
-        if (inChunk > 0) yield return b.Build();
-
-        await foreach (var change in ClassifyIfPossible(descriptor, collector, commitEpoch, ct))
-            yield return change;
     }
 
-    private async IAsyncEnumerable<SubstrateChange> ClassifyIfPossible(
+    private static async IAsyncEnumerable<EdgeAttestationRecord> EnumerateFfnEdgeRecords(
+        double[] Ad, int n, int d, double[]? gate, double[] up, double[] down, int I,
+        List<Hash128> ents, Hash128 typeId, double weight,
+        int[] oR, int[] oC, double[] oV, long[] oS, long cap,
+        TopPairCollector? collector,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        for (int rb = 0; rb < n; rb += RowTile)
+        {
+            ct.ThrowIfCancellationRequested();
+            int re = Math.Min(rb + RowTile, n);
+            int cnt = RunFfnTile(Ad, n, d, gate, up, down, I, rb, re, oR, oC, oV, oS, cap);
+            if (cnt < 0) yield break;
+            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, EdgeTopK);
+            for (int e = 0; e < cnt; e++)
+            {
+                if (oC[e] == oR[e]) continue;
+                var subject = ents[oR[e]];
+                var obj = ents[oC[e]];
+                collector?.Offer(subject, obj, oS[e]);
+                yield return new EdgeAttestationRecord(subject, obj, typeId, oS[e], weight);
+            }
+        }
+    }
+
+    private async IAsyncEnumerable<SubstrateChange> EmitClassifyChange(
         CircuitDescriptor descriptor, TopPairCollector? collector, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (_classifier is null || collector is null) yield break;
         var pairs = collector.Drain();
         if (pairs.Count == 0) yield break;
-        var change = await _classifier.ClassifyAsync(descriptor, pairs, commitEpoch, ct);
-        if (change is { } c) yield return c;
+        var record = await _classifier.TryClassifyRecordAsync(descriptor, pairs, ct);
+        if (record is null) yield break;
+        await foreach (var batch in DecomposerBatch.RunAsync(
+                           SingleClassifyRecordAsync(record.Value, ct),
+                           (rec, b) => HeadClassifier.StageClassifyRecord(b, rec, _source),
+                           _source, "model/decoder-ring", 1, reader, options, ct, commitEpoch))
+            yield return batch;
     }
 
-    private SubstrateChangeBuilder NewChunk(int epoch) =>
-        new SubstrateChangeBuilder(_source, "model/token-edges", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttsPerChange)
-            .SetCommitEpoch(epoch);
+    private static async IAsyncEnumerable<HeadClassifier.CircuitClassifyRecord> SingleClassifyRecordAsync(
+        HeadClassifier.CircuitClassifyRecord record, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return record;
+        await Task.CompletedTask;
+    }
 
     private static int RunSvd(float[] A, int n, int d, int kmax, float[] U, float[] S, float[] Vt, out int rank)
     {

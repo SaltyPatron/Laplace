@@ -139,7 +139,13 @@ public sealed class TabularDecomposer : IDecomposer
             this, isNumeric, witnessWeight, predicts);
 
         if (!options.DryRun)
-            yield return await BuildSchemaChangeAsync(featureCols, ct);
+        {
+            await foreach (var change in DecomposerBatch.RunAsync(
+                               EnumerateSchemaRecords(featureCols, ct),
+                               StageSchemaRecord,
+                               Source, "tabular/schema", 1, context.Reader, options, ct))
+                yield return change;
+        }
 
         await foreach (var change in DecomposerBatch.RunAsync(
                            EnumerateRecords(counts, counts2, ct),
@@ -148,25 +154,39 @@ public sealed class TabularDecomposer : IDecomposer
             yield return change;
     }
 
-    private async Task<SubstrateChange> BuildSchemaChangeAsync(IReadOnlyList<string> featureCols, CancellationToken ct)
+    private readonly record struct TabularSchemaRecord(string Column);
+
+    private void StageSchemaRecord(TabularSchemaRecord rec, SubstrateChangeBuilder b)
     {
-        var b = new SubstrateChangeBuilder(Source, "tabular/schema", null, 256, 0, 512);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-        if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
+        if (rec.Column.Length == 0)
+        {
+            if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
+            if (ContentEmitter.Emit(b, _positiveValue, Source) is { } posValId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    OutcomeId, "IS_INSTANCE_OF", posValId, Source, SourceTrust.StructuredCorpus));
+            return;
+        }
+        b.AddEntity(new EntityRow(ColumnId(rec.Column), EntityTier.Word, ColumnTypeId, Source));
+        _canonicalNames.Add($"tabular/column/{rec.Column}/v1");
+        if (ContentEmitter.Emit(b, rec.Column, Source) is { } colNameId)
             b.AddAttestation(NativeAttestation.Categorical(
-                OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
-        if (ContentEmitter.Emit(b, _positiveValue, Source) is { } posValId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                OutcomeId, "IS_INSTANCE_OF", posValId, Source, SourceTrust.StructuredCorpus));
+                ColumnId(rec.Column), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
+    }
+
+    private static async IAsyncEnumerable<TabularSchemaRecord> EnumerateSchemaRecords(
+        IReadOnlyList<string> featureCols, [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return new TabularSchemaRecord("");
         foreach (var c in featureCols)
         {
-            b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Word, ColumnTypeId, Source));
-            _canonicalNames.Add($"tabular/column/{c}/v1");
-            if (ContentEmitter.Emit(b, c, Source) is { } colNameId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    ColumnId(c), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
+            ct.ThrowIfCancellationRequested();
+            yield return new TabularSchemaRecord(c);
         }
-        return await b.SetInputUnitsConsumed(featureCols.Count).BuildAsync(ct);
+        await Task.CompletedTask;
     }
 
     private static async IAsyncEnumerable<TabularRecord> EnumerateRecords(

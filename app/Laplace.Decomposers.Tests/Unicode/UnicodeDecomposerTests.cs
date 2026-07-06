@@ -33,7 +33,7 @@ public sealed class UnicodeDecomposerTests
     private static UnicodeDecomposer NewDecomposer() => new UnicodeDecomposer();
 
     private static IDecomposerContext Context(ISubstrateWriter writer) =>
-        new FakeContext("/vault/Data/UCD/Public/UCD/latest", writer);
+        new FakeContext(TestIngestPaths.UcdLatest, writer);
 
 
     [Fact]

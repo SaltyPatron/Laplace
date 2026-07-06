@@ -59,27 +59,17 @@ public sealed class ChessPgnDecomposer : IDecomposer
         if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0 && !options.DryRun)
         {
             int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
-            var reader = context.Reader;
-            int bn = -1;
-            await foreach (var change in PCoreParallelCompose.RunAsync(
-                StreamAllGamesWithHeartbeatAsync(context.EcosystemPath, ct),
-                workers,
-                batch,
-                () => new SubstrateChangeBuilder(
-                    ChessVocabulary.PgnSourceId, $"chess/pgn/{Interlocked.Increment(ref bn)}", null,
-                    entityCapacity: batch * 4,
-                    physicalityCapacity: 1,
-                    attestationCapacity: batch * 8),
-                (b, gameText) =>
-                {
-                    if (TryParseGame(gameText) is not { } parsed) return;
-                    // Hot-cache shortcircuit only (same contract as the wiktionary
-                    // parallel lane): a game already proven present is skipped
-                    // outright; DB-level dedup of the rest is the descent's job.
-                    if (reader is not null && reader.IsProvenPresent(parsed.GameId)) return;
-                    RecordGame(parsed, b);
-                },
-                ct))
+            var config = new IngestBatchConfig
+            {
+                SourceId = ChessVocabulary.PgnSourceId,
+                BatchLabelPrefix = "chess/pgn",
+                BatchSize = batch,
+                ContainmentReader = context.Reader,
+                WorkingSet = WorkingSetMode.Enabled,
+            };
+            var stream = new ParallelChessGameRecordStream(context.EcosystemPath, workers, ct);
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                               stream, new ChessGameIngestHandler(), config, ct))
                 yield return change;
             yield break;
         }
@@ -91,30 +81,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
             yield return change;
     }
 
-    private static async IAsyncEnumerable<string> StreamAllGamesWithHeartbeatAsync(
-        string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
-    {
-        long framed = 0;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, ct))
-        {
-            if (++framed % 50_000 == 0)
-                Console.WriteLine(
-                    $"WS_COMPOSE feed: {framed:N0} games framed "
-                    + $"({framed / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} games/s)");
-            yield return gameText;
-        }
-    }
-
-    // Trunk-to-leaf short-circuit: a game's GameId is itself an entity (EmitGame adds it, tier
-    // Document). Parsing far enough to compute that id is cheap relative to full per-ply
-    // decomposition (no board replay, no position composition, no attestation construction) —
-    // so a whole chunk's ids get bulk-probed against the DB in ONE round trip before any of that
-    // expensive work runs, and games already known are skipped outright instead of being fully
-    // recomposed and then silently discarded by the final apply-time anti-join. Matters most
-    // when ingesting overlapping corpora (the same famous games can appear in more than one of
-    // chess.com exports / Lumbras / TWIC).
-    internal static async IAsyncEnumerable<ParsedGame> StreamNovelGamesAsync(
+    private static async IAsyncEnumerable<ParsedGame> StreamNovelGamesAsync(
         string ecosystemPath, ISubstrateReader? reader, int chunkSize,
         [EnumeratorCancellation] CancellationToken ct)
     {

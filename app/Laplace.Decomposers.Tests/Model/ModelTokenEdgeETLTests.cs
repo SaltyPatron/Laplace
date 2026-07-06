@@ -66,7 +66,7 @@ public class ModelTokenEdgeETLTests
             var manifest = ToyManifest(dir, vocab: n, hidden: d);
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var changes = new List<SubstrateChange>();
-            await foreach (var c in etl.EmitAsync(1, ct: default)) changes.Add(c);
+            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default, ct: default)) changes.Add(c);
 
             var atts = changes.SelectMany(c => c.Attestations).ToList();
 
@@ -219,7 +219,7 @@ public class ModelTokenEdgeETLTests
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
             var map = new Dictionary<(int, int), long>();
-            await foreach (var c in etl.EmitAsync(1))
+            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
             {
                 foreach (var a in c.Attestations)
                 {
@@ -327,7 +327,7 @@ public class ModelTokenEdgeETLTests
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var continuesTo = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
             int count = 0;
-            await foreach (var c in etl.EmitAsync(1))
+            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
                 foreach (var a in c.Attestations)
                     if (a.TypeId == continuesTo) count++;
 

@@ -55,7 +55,13 @@ public sealed class RepoDecomposer : IDecomposer
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
 
         if (!options.DryRun)
-            yield return await EmitRepoRootAsync(repoCanonical, repoId, ct);
+        {
+            await foreach (var change in DecomposerBatch.RunAsync(
+                               SingleRepoRootAsync(repoCanonical, repoId, ct),
+                               StageRepoRoot,
+                               Source, "repo/root", 1, context.Reader, options, ct))
+                yield return change;
+        }
 
         var files = EnumerateRepoFiles(root).ToList();
         if (files.Count == 0) yield break;
@@ -73,25 +79,32 @@ public sealed class RepoDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static async Task<SubstrateChange> EmitRepoRootAsync(
-        string repoCanonical, Hash128 repoId, CancellationToken ct)
+    private readonly record struct RepoRootRecord(string Canonical, Hash128 Id);
+
+    private static void StageRepoRoot(RepoRootRecord rec, SubstrateChangeBuilder b)
     {
-        var b = new SubstrateChangeBuilder(Source, "repo/root", null, 4, 4, 4);
-        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
-        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
+        b.AddEntity(new EntityRow(rec.Id, EntityTier.Document, RepoTypeId, Source));
+        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(rec.Canonical),
                 out _, out _, out double cx, out double cy, out double cz, out double cm))
         {
             Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
-            Hash128 physId = PhysicalityId.Compute(repoId, PhysicalityType.Content);
+            Hash128 physId = PhysicalityId.Compute(rec.Id, PhysicalityType.Content);
             b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: repoId, SourceId: Source,
+                Id: physId, EntityId: rec.Id, SourceId: Source,
                 Type: PhysicalityType.Content,
                 CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
                 HilbertIndex: Hilbert128.Encode(coord),
                 TrajectoryXyzm: null, NConstituents: 0,
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
         }
-        return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
+    }
+
+    private static async IAsyncEnumerable<RepoRootRecord> SingleRepoRootAsync(
+        string repoCanonical, Hash128 repoId, [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return new RepoRootRecord(repoCanonical, repoId);
+        await Task.CompletedTask;
     }
 
     private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(

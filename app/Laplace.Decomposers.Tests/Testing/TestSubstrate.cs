@@ -14,7 +14,7 @@ internal sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     public FakeContext(string ecosystemPath, ISubstrateWriter writer) : this(writer)
         => EcosystemPath = ecosystemPath;
 
-    public string EcosystemPath { get; init; } = "/vault/Data";
+    public string EcosystemPath { get; init; } = TestIngestPaths.Root;
     public ISubstrateWriter Writer { get; } = writer;
     public ISubstrateReader Reader { get; init; } = new NullReader();
     public Microsoft.Extensions.Logging.ILogger Logger { get; } = NullLogger.Instance;

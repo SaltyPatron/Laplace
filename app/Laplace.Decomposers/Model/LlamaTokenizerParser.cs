@@ -296,32 +296,6 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    public static IEnumerable<SubstrateChange> BuildBatches(
-        IReadOnlyList<TokenRecord> records,
-        Hash128 sourceId,
-        Hash128 textTypeId,
-        int batchSize = 512)
-    {
-        int total = records.Count;
-        for (int start = 0; start < total; start += batchSize)
-        {
-            int end = Math.Min(start + batchSize, total);
-            int n = end - start;
-
-            var b = new SubstrateChangeBuilder(
-                sourceId,
-                $"tokenizer/vocab/{start}..{end - 1}",
-                entityCapacity: n * 5,
-                physicalityCapacity: n * 5,
-                attestationCapacity: 0);
-
-            for (int i = start; i < end; i++)
-                StageVocabToken(b, records[i], sourceId);
-
-            yield return b.Build();
-        }
-    }
-
     public static void StageVocabToken(SubstrateChangeBuilder b, TokenRecord rec, Hash128 sourceId)
     {
         Span<double> coord = stackalloc double[4];
@@ -482,32 +456,4 @@ public sealed class LlamaTokenizerParser
         return id;
     }
 
-    public static IEnumerable<SubstrateChange> BuildTokenMapsToCategorical(
-        IReadOnlyList<TokenRecord> records,
-        Hash128 sourceId,
-        Hash128 tokenizerEntityId,
-        int batchSize = 8192,
-        int commitEpoch = 0)
-    {
-
-
-
-        int total = records.Count;
-        for (int start = 0; start < total; start += batchSize)
-        {
-            int end = Math.Min(start + batchSize, total);
-            var b = new SubstrateChangeBuilder(
-                sourceId, $"tokenizer/maps-to/{start}..{end - 1}",
-                entityCapacity: 0, physicalityCapacity: 0,
-                attestationCapacity: end - start);
-            b.SetCommitEpoch(commitEpoch);
-            for (int i = start; i < end; i++)
-            {
-                b.AddAttestation(Laplace.Decomposers.Abstractions.NativeAttestation.Categorical(
-                    tokenizerEntityId, "TOKEN_MAPS_TO", records[i].EntityId, sourceId,
-                    Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe));
-            }
-            yield return b.Build();
-        }
-    }
 }

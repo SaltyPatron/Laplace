@@ -13,7 +13,7 @@ public sealed class OpenSubtitlesDecomposerTests
     static OpenSubtitlesDecomposerTests()
     {
         CodepointPerfcache.Load(ResolvePerfcacheBlob());
-        LanguageReference.EnsureLoaded();
+        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     private static string ResolvePerfcacheBlob()
@@ -160,7 +160,7 @@ public sealed class OpenSubtitlesDecomposerTests
     {
         var dec = new OpenSubtitlesDecomposer();
         var writer = new CapturingWriter();
-        await dec.InitializeAsync(new FakeContext("/vault/Data/OpenSubtitles", writer));
+        await dec.InitializeAsync(new FakeContext(TestIngestPaths.OpenSubtitles, writer));
 
         Assert.NotEmpty(writer.Captured);
         var boot = writer.Captured[0];
@@ -175,7 +175,7 @@ public sealed class OpenSubtitlesDecomposerTests
     public async Task Estimate_Reports_Published_Pair_Total()
     {
         var dec = new OpenSubtitlesDecomposer();
-        Assert.Equal(600_995_230L, await dec.EstimateUnitCountAsync(new FakeContext("/vault/Data/OpenSubtitles", new NullWriter())));
+        Assert.Equal(600_995_230L, await dec.EstimateUnitCountAsync(new FakeContext(TestIngestPaths.OpenSubtitles, new NullWriter())));
     }
 
 }

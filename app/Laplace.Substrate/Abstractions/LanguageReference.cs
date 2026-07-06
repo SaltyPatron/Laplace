@@ -14,7 +14,10 @@ public static class LanguageReference
 
     public static string DefaultDir =>
         Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d
-            ? d : "/vault/Data/ISO639";
+            ? d
+            : OperatingSystem.IsWindows()
+                ? Path.Combine(@"D:\Data\Ingest", "ISO639")
+                : "/vault/Data/ISO639";
 
     public static void EnsureLoaded(string? iso639Dir = null)
     {
