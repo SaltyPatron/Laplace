@@ -91,7 +91,7 @@ public static class ConceptNetUri
 
     public static bool TryAppendTerm(
         SubstrateChangeBuilder b, ReadOnlySpan<byte> termUnderscored, Hash128 sourceId, out Hash128 rootId) =>
-        ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, termUnderscored, sourceId, out rootId);
+        ContentTierSpine.TryStageUnderscoredIntoBuilder(b, termUnderscored, sourceId, out rootId);
 
     /// <summary>Pull ConceptNet's assertion "weight" out of the metadata JSON column
     /// (defaults to 1.0). Shared by the lean managed lane and the retired grammar

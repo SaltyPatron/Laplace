@@ -77,7 +77,7 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
     {
         Trim(ref src);
         if (src.IsEmpty) { rootId = default; return false; }
-        return ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, src, sourceId, out rootId);
+        return ContentTierSpine.TryStageUnderscoredIntoBuilder(b, src, sourceId, out rootId);
     }
 
     private static void Trim(ref ReadOnlySpan<byte> src)

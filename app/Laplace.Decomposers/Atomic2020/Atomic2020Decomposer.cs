@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -139,19 +139,10 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase, IIngest
                 if (head.Length == 0 || tail.Length == 0) continue;
 
                 yield return new RelationTripleRecord(
-                    Canonicalize(head), relType, Canonicalize(tail), splitId, 1.0);
+                    UnderscoredUtf8Canonicalize.ToSpacesBytes(head), relType, UnderscoredUtf8Canonicalize.ToSpacesBytes(tail), splitId, 1.0);
 
                 if (cap > 0 && ++consumed >= cap) yield break;
             }
         }
-    }
-
-    // '_' blanks read as spaces; '_' is single-byte ASCII so replacement is UTF-8-safe.
-    private static byte[] Canonicalize(string s)
-    {
-        var bytes = Encoding.UTF8.GetBytes(s);
-        for (int i = 0; i < bytes.Length; i++)
-            if (bytes[i] == (byte)'_') bytes[i] = (byte)' ';
-        return bytes;
     }
 }

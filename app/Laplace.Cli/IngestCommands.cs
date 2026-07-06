@@ -23,8 +23,6 @@ using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
-using Laplace.Decomposers.Image;
-using Laplace.Decomposers.Audio;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;
@@ -617,13 +615,13 @@ internal static class IngestCommands
             return (bool)(await c.ExecuteScalarAsync() ?? false);
         }
 
-        Console.WriteLine("substrate counts:");
+        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE or evidence_count() for exact):");
         {
             await using var counts = Cmd();
             counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
             await using var rdr = await counts.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
-                Console.WriteLine($"  {rdr.GetString(0),-24}: {rdr.GetInt64(1),12:N0}");
+                Console.WriteLine($"  {rdr.GetString(0),-32}: {rdr.GetInt64(1),12:N0}");
         }
 
         if (decomposer is null)

@@ -48,12 +48,12 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
             [EnumeratorCancellation] CancellationToken ct = default)
         {
             var records = GenerateRecords(_unitCount, _bytesPerUnit);
-            await foreach (var change in DecomposerBatch.RunAsync(
+            await foreach (var change in IngestComposePipeline.RunAsync(
                 records,
                 (text, b) =>
                 {
                     var utf8 = Encoding.UTF8.GetBytes(text);
-                    ContentWitnessBatch.TryAppendToBuilder(b, utf8, SourceId, out _);
+                    ContentTierSpine.TryStageIntoBuilder(b, utf8, SourceId, out _);
                 },
                 SourceId,
                 "synthetic",

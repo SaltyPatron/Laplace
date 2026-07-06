@@ -21,4 +21,5 @@ public sealed record LabeledEvidenceItem(
     [property: JsonPropertyName("source_label")] string SourceLabel,
     [property: JsonPropertyName("context_id")] string? ContextId,
     [property: JsonPropertyName("outcome")] short Outcome,
-    [property: JsonPropertyName("observation_count")] long ObservationCount);
+    [property: JsonPropertyName("observation_count")] long ObservationCount,
+    [property: JsonPropertyName("eff_mu")] decimal? EffMu = null);

@@ -76,6 +76,8 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         foreach (int senseObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "senses"))
             WalkSense(composed, builder, wordId, senseObj, posCtx, isVerb);
 
+        TryRouteWordSynsetLinks(composed, builder, wordId, posCtx);
+
         WalkSounds(composed, builder, wordId);
         WalkRootRelations(composed, builder, wordId, isVerb);
         WalkForms(composed, builder, wordId);
@@ -256,4 +258,50 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         b.AddAttestation(NativeAttestation.Categorical(
             subject, typeName, objectId, WiktionaryDecomposer.Source, TC.AcademicCuratedUserInput,
             contextId: context));
+
+    /// <summary>
+    /// Route explicit WordNet/ILI synset keys from wiktextract sense links to the unified hub
+    /// (CORRESPONDS_TO), matching OMW/ConceptNet hub shape. See .scratchpad/16 §4/P6.
+    /// </summary>
+    private static void TryRouteWordSynsetLinks(
+        in GrammarComposeContext composed,
+        SubstrateChangeBuilder b,
+        Hash128 wordId,
+        Hash128? posCtx)
+    {
+        foreach (int senseObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "senses"))
+            TryRouteSenseSynsetLinks(composed, b, wordId, senseObj, posCtx);
+    }
+
+    private static void TryRouteSenseSynsetLinks(
+        in GrammarComposeContext composed,
+        SubstrateChangeBuilder b,
+        Hash128 wordId,
+        int senseObj,
+        Hash128? posCtx)
+    {
+        foreach (int linkPair in JsonGrammarHelper.ChildNodesInObjectArray(composed, senseObj, "links"))
+        {
+            string? targetKey = null;
+            var linkStrings = JsonGrammarHelper.StringNodesInArray(composed.Ast, linkPair).ToList();
+            if (linkStrings.Count >= 2)
+            {
+                var nd = composed.Ast.GetNode(linkStrings[1]);
+                targetKey = JsonGrammarHelper.Utf8ToString(
+                    composed.Utf8.AsSpan((int)nd.StartByte, (int)(nd.EndByte - nd.StartByte)));
+            }
+            if (string.IsNullOrEmpty(targetKey)) continue;
+            var synId = SourceEntityIdConventions.ResolveSynsetAnchor(targetKey);
+            if (synId is not { } syn || syn == default) continue;
+            Attest(b, wordId, "CORRESPONDS_TO", syn, posCtx);
+        }
+
+        if (JsonGrammarHelper.TryPropertyUtf8OnObject(composed, senseObj, "wikidata", out var wdSpan)
+            || JsonGrammarHelper.TryPropertyUtf8OnObject(composed, senseObj, "senseid", out wdSpan))
+        {
+            var synId = SourceEntityIdConventions.ResolveSynsetAnchor(JsonGrammarHelper.Utf8ToString(wdSpan));
+            if (synId is { } syn && syn != default)
+                Attest(b, wordId, "CORRESPONDS_TO", syn, posCtx);
+        }
+    }
 }

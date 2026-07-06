@@ -4,17 +4,10 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Record → SubstrateChange lane for sources that compose imperatively into a builder
-/// (iso, framenet, propbank, verbnet, wordnet). It is now a thin adapter over the ONE
-/// ingestion pipeline: DecomposerBatch.RunAsync wraps the caller's compose callback in a
-/// <see cref="DirectComposeHandler{T}"/> and delegates to IngestBatchPipeline.RunAsync
-/// (working-set mode). It no longer carries its own batch loop, so the run bracket,
-/// working-set budget valve, progress heartbeat, and any future produce-side change land
-/// in exactly one place. These sources compose imperatively (no Merkle content tree),
-/// so the handler's unit reports no tier-tree for batch existence and runs compose in DrainInto — the
-/// apply's working-set subtraction dedups, exactly as before.
+/// Imperative-compose pipeline entry for non-orchestrator code (e.g. ModelTokenEdgeETL).
+/// Orchestrator lanes use <see cref="DecomposerOrchestrator.RunComposePhaseAsync{T}"/>.
 /// </summary>
-public static class DecomposerBatch
+public static class IngestComposePipeline
 {
     public static IAsyncEnumerable<SubstrateChange> RunAsync<T>(
         IAsyncEnumerable<T> records,
@@ -31,19 +24,11 @@ public static class DecomposerBatch
         if (options.DryRun) return Empty();
 
         int cap = Math.Max(1, batchSize);
-        var config = new IngestBatchConfig
-        {
-            SourceId = sourceId,
-            BatchLabelPrefix = labelPrefix,
-            BatchSize = cap,
-            CommitEpoch = commitEpoch,
-            ContainmentReader = reader,
-            MaxInputUnits = options.MaxInputUnits,
-            WorkingSet = WorkingSetMode.Enabled,
-            EntityCapacity = cap * 4,
-            PhysicalityCapacity = cap * 2,
-            AttestationCapacity = attestationCapacity ?? cap * 8,
-        };
+        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.Compose(
+                sourceId, labelPrefix, cap, options, reader,
+                attestationCapacity: attestationCapacity, commitEpoch: commitEpoch),
+            options);
         return IngestBatchPipeline.RunAsync(
             new AsyncEnumerableRecordStream<T>(records),
             new DirectComposeHandler<T>(compose),
@@ -59,9 +44,7 @@ public static class DecomposerBatch
 
 /// <summary>
 /// Handler for the imperative-compose model: no content-tree probe, the record's compose
-/// callback runs in DrainInto against the shared working-set builder. Shared by
-/// DecomposerBatch and available to any source that emits entities/attestations directly
-/// rather than as a probeable content tree.
+/// callback runs in DrainInto against the shared working-set builder.
 /// </summary>
 public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
 {
@@ -80,8 +63,6 @@ public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
 
     private sealed class Unit(T record, Action<T, SubstrateChangeBuilder> compose) : IIngestDeferredUnit
     {
-        // No probeable tree: this lane composes imperatively; dedup falls to the apply's
-        // working-set subtraction, exactly as the old DecomposerBatch loop relied on.
         public TierTree? TreeForBatchProbe => null;
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>

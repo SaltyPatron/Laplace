@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class WordNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
@@ -64,17 +64,17 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
 
     private const long EstimatedSynsets = 117_700L;
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "WordNetDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "WordNetDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
 
     private static readonly string[] PosFiles = ["data.noun", "data.verb", "data.adj", "data.adv"];
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var relTypes = new List<string>(
             ["IS_SYNONYM_OF", "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
@@ -88,7 +88,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
             readbackNames: _vocabularyNames, ct: ct);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -101,33 +101,32 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
         var frames = await LoadVerbFramesAsync(dictDir, ct);
 
 
-        await foreach (var c in DecomposerBatch.RunAsync(
+        await foreach (var c in RunComposePhaseAsync(
             ParseAllSynsetsAsync(dictDir, ct),
             (syn, b) => { EmitSynsetEntities(b, syn, frames); EmitSynsetAttestations(b, syn, frames); },
-            Source, "wordnet/data", batch, reader, options, ct))
+            "data", SourceTrust.StandardsDerived, batch, context, options, ct))
             yield return c;
 
         if (options.MaxInputUnits > 0) yield break;
 
-
         var uncapped = options with { MaxInputUnits = 0 };
 
-        await foreach (var c in DecomposerBatch.RunAsync(
+        await foreach (var c in RunComposePhaseAsync(
             ParseSensesAsync(Path.Combine(dictDir, "index.sense"), ct),
             static (s, b) => ComposeSense(s, b),
-            Source, "wordnet/sense", batch, reader, uncapped, ct))
+            "sense", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
             yield return c;
 
-        await foreach (var c in DecomposerBatch.RunAsync(
+        await foreach (var c in RunComposePhaseAsync(
             ParseExceptionsAsync(dictDir, ct),
             static (exc, b) => ComposeExcLine(exc, b),
-            Source, "wordnet/exc", batch, reader, uncapped, ct))
+            "exc", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
             yield return c;
 
-        await foreach (var c in DecomposerBatch.RunAsync(
+        await foreach (var c in RunComposePhaseAsync(
             ParseVerbSentencesAsync(dictDir, ct),
             static (entry, b) => ComposeVerbSentEntry(entry, b),
-            Source, "wordnet/sents", batch, reader, uncapped, ct))
+            "sents", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
             yield return c;
     }
 
@@ -181,7 +180,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
         return n;
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits ?? EstimatedSynsets;
@@ -209,8 +208,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
         }
         return n;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static async IAsyncEnumerable<WnSynset> ParseAllSynsetsAsync(
         string dictDir, [EnumeratorCancellation] CancellationToken ct)
@@ -377,15 +374,15 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
         if (string.IsNullOrEmpty(surface)) return null;
         var utf8 = System.Text.Encoding.UTF8.GetBytes(surface);
         if (surface.Contains('_'))
-            return ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, utf8, sourceId, out var id) ? id : null;
-        return ContentWitnessBatch.TryAppendToBuilder(b, utf8, sourceId, out var root) ? root : null;
+            return ContentTierSpine.TryStageUnderscoredIntoBuilder(b, utf8, sourceId, out var id) ? id : null;
+        return ContentTierSpine.TryStageIntoBuilder(b, utf8, sourceId, out var root) ? root : null;
     }
 
     private static Hash128? RootSurface(string surface)
     {
         if (string.IsNullOrEmpty(surface)) return null;
         string canonical = surface.Contains('_') ? Surface(surface) : surface;
-        return ContentWitnessBatch.RootId(System.Text.Encoding.UTF8.GetBytes(canonical));
+        return ContentTierSpine.ResolveRoot(System.Text.Encoding.UTF8.GetBytes(canonical));
     }
 
     private static async Task<string?[]> LoadVerbFramesAsync(string dictDir, CancellationToken ct)

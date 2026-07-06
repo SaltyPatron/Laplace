@@ -180,7 +180,7 @@ public static class RelationTypeRegistry
 
 
         foreach (var k in all)
-            if (ContentWitnessBatch.Emit(builder, k.Canonical, sourceId) is { } nameId)
+            if (ContentEmitter.Emit(builder, k.Canonical, sourceId) is { } nameId)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
     }
@@ -212,7 +212,7 @@ public static class RelationTypeRegistry
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
             }
-            if (ContentWitnessBatch.Emit(builder, k.Canonical, sourceId) is { } nameId)
+            if (ContentEmitter.Emit(builder, k.Canonical, sourceId) is { } nameId)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.AcademicCurated));
         }

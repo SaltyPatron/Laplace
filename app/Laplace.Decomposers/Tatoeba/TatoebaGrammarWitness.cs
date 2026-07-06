@@ -61,7 +61,7 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         // shared with any other source that ingests the same text (OpenSubtitles, a UAX
         // parse). The Tatoeba numeric id becomes a mere external-id annotation ON that
         // root (HAS_EXTERNAL_ID → extId), never the sentence's identity. See .scratchpad/16 §2a.
-        if (!ContentWitnessBatch.TryAppendToBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
+        if (!ContentTierSpine.TryStageIntoBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
 
         // Record id → content root so the link epoch can anchor IS_TRANSLATION_OF on the

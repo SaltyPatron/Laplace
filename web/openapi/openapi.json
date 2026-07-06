@@ -136,6 +136,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -5274,6 +5284,15 @@
               "string"
             ],
             "format": "int64"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },
@@ -6834,28 +6853,4 @@
   },
   "tags": [
     {
-      "name": "core"
-    },
-    {
-      "name": "openai"
-    },
-    {
-      "name": "reports"
-    },
-    {
-      "name": "explore"
-    },
-    {
-      "name": "billing"
-    },
-    {
-      "name": "chess"
-    },
-    {
-      "name": "chess-lab"
-    },
-    {
-      "name": "feedback"
-    }
-  ]
-}
+      "na

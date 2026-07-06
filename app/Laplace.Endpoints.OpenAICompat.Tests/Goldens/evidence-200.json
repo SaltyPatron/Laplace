@@ -4,25 +4,15 @@
   "evidence": [
     {
       "type_id": "0123456789abcdef0123456789abcdef",
-      "type_label": "IS_A",
+      "type_label": "is a",
       "object_id": "ffeeddccbbaa99887766554433221100",
       "object_label": "cetacean",
-      "source_id": "fedcba9876543210fedcba9876543210",
-      "source_label": "WordNet",
+      "source_id": "",
+      "source_label": "",
       "context_id": null,
       "outcome": 2,
-      "observation_count": 12
-    },
-    {
-      "type_id": "0123456789abcdef0123456789abcdef",
-      "type_label": "IS_A",
-      "object_id": "ffeeddccbbaa99887766554433221100",
-      "object_label": "cetacean",
-      "source_id": "fedcba9876543210fedcba9876543210",
-      "source_label": "ConceptNet",
-      "context_id": null,
-      "outcome": 2,
-      "observation_count": 7
+      "observation_count": 42,
+      "eff_mu": 1534.7
     }
   ]
 }

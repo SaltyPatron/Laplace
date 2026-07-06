@@ -7,29 +7,29 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "UDDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "UDDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["UD_Feature"],
             relationNodeNames: ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
                 "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
             readbackNames: _canonicalNames, ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -157,13 +157,11 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<IngestInventory?>(new IngestInventory("sentences", total, files));
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static SubstrateChange PeriodBoundary(string stem) =>
         new SubstrateChangeBuilder(Source, $"period-boundary/{stem}", null,

@@ -30,6 +30,8 @@ public readonly record struct RelationTripleRecord(
     double Magnitude = 1.0,
     char? SubjectPos = null,
     char? ObjectPos = null,
+    Hash128? SubjectSynsetId = null,
+    Hash128? ObjectSynsetId = null,
     Hash128? SubjectLangId = null,
     Hash128? ObjectLangId = null,
     string? ContextAnchorKey = null,
@@ -92,7 +94,13 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         {
             if (canonical is null || canonical.Length == 0) return null;
             try { return ContentTierSpine.BuildTree(canonical); }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "RelationTriple: tier-tree build failed ({Bytes} bytes): {Message}",
+                    canonical.Length, ex.Message);
+                return null;
+            }
         }
 
         // Base (single-tree) surface — unused on the multi path, present for the contract.
@@ -138,6 +146,9 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
                 PosReference.Attest(builder, objectRoot, op.ToString(),
                     PosReference.PosTagset.WordNet, _sourceId, null, _sourceTrust);
 
+            EmitSynsetMembership(builder, subjectRoot, _record.SubjectSynsetId);
+            EmitSynsetMembership(builder, objectRoot, _record.ObjectSynsetId);
+
             if (subjectRoot != default && _record.SubjectLangId is { } sl && sl != default)
             {
                 builder.AddEntity(new EntityRow(
@@ -154,6 +165,13 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             }
 
             return subjectRoot;
+        }
+
+        private void EmitSynsetMembership(SubstrateChangeBuilder builder, Hash128 nodeRoot, Hash128? synId)
+        {
+            if (nodeRoot == default || synId is not { } syn || syn == default) return;
+            builder.AddAttestation(NativeAttestation.Categorical(
+                nodeRoot, "CORRESPONDS_TO", syn, _sourceId, _sourceTrust));
         }
 
         private Hash128 EmitTree(SubstrateChangeBuilder builder, TierTree? tree, byte[]? bitmap)

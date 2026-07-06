@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.CILI;
 
-public sealed class CILIDecomposer : IDecomposer
+public sealed class CILIDecomposer : DecomposerOrchestrator
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/CILIDecomposer/v1");
@@ -18,22 +18,22 @@ public sealed class CILIDecomposer : IDecomposer
 
     private const int DefaultBatchSize = 2048;
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "CILIDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "CILIDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
     private readonly object _namesLock = new();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _names;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["WordNet_Synset"],
             relationNodeNames: ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_SYNSET_KEY"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -41,15 +41,14 @@ public sealed class CILIDecomposer : IDecomposer
         string root = context.EcosystemPath;
         if (options.DryRun) yield break;
 
-        var reader = context.Reader;
         int batchSize = options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
 
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseIliTtlAsync(ttl, ct), (rec, b) => EmitConceptRow(b, rec),
-                               Source, "cili/concepts", batchSize, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseIliTtlAsync(ttl, ct), (rec, b) => EmitConceptRow(b, rec),
+                "concepts", TC.AcademicCurated, batchSize, context, options, ct))
                 yield return change;
         }
 
@@ -59,9 +58,9 @@ public sealed class CILIDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(tab);
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseIliMapAsync(tab, version, ct), (rec, b) => EmitMapRow(b, rec),
-                               Source, $"cili/map/{version}", batchSize, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseIliMapAsync(tab, version, ct), (rec, b) => EmitMapRow(b, rec),
+                $"map/{version}", TC.AcademicCurated, batchSize, context, options, ct))
                 yield return change;
         }
 
@@ -71,9 +70,9 @@ public sealed class CILIDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(ttlMap);
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseIliMapTtlAsync(ttlMap, version, ct), (rec, b) => EmitMapRow(b, rec),
-                               Source, $"cili/map/{version}", batchSize, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseIliMapTtlAsync(ttlMap, version, ct), (rec, b) => EmitMapRow(b, rec),
+                $"map/{version}", TC.AcademicCurated, batchSize, context, options, ct))
                 yield return change;
         }
     }
@@ -242,8 +241,6 @@ public sealed class CILIDecomposer : IDecomposer
         return name.StartsWith(prefix, StringComparison.Ordinal) ? name[prefix.Length..] : name;
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(120_000L);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

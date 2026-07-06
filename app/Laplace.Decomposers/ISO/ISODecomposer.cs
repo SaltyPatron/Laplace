@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : IDecomposer
+public sealed class ISODecomposer : DecomposerOrchestrator
 {
 
 
@@ -28,16 +28,16 @@ public sealed class ISODecomposer : IDecomposer
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
     private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "ISO639Decomposer";
-    public int LayerOrder => 1;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "ISO639Decomposer";
+    public override int LayerOrder => 1;
+    public override Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Language", "ISO639Code", "LanguageVariant"],
             relationNodeNames: ["IS_LANGUAGE_CODE", "HAS_ISO639_1_CODE", "USES_SCRIPT",
@@ -45,69 +45,63 @@ public sealed class ISODecomposer : IDecomposer
                 "HAS_LANGUAGE_TYPE", "HAS_VARIANT_OF", "HAS_DEFINITION", "HAS_NAME_ALIAS"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string dataPath = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
-        var reader = context.Reader;
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
         if (File.Exists(dataPath))
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseAsync(dataPath, ct),
-                               StageIsoTabRecord,
-                               Source, "iso639-3", batch, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseAsync(dataPath, ct), StageIsoTabRecord,
+                "iso639-3", SourceTrust.StandardsDerived, batch, context, options, ct))
                 yield return change;
         }
 
-        await foreach (var change in DecomposerBatch.RunAsync(
-                           EnumerateMacrolanguageRecords(context.EcosystemPath, ct),
-                           StageMacrolanguageRecord,
-                           Source, "iso639/macrolanguages", batch, reader, options, ct))
+        await foreach (var change in RunComposePhaseAsync(
+            EnumerateMacrolanguageRecords(context.EcosystemPath, ct), StageMacrolanguageRecord,
+            "iso639/macrolanguages", SourceTrust.StandardsDerived, batch, context, options, ct))
             yield return change;
 
         string unidata = Path.GetFullPath(
             Path.Combine(context.EcosystemPath, "..", "UCD", "Public", "UCD", "latest", "ucd"));
         var scriptName = LanguageGraph.LoadScriptCodeToUcdName(unidata);
-        await foreach (var change in DecomposerBatch.RunAsync(
-                           EnumerateScriptRecords(context.EcosystemPath, scriptName, ct),
-                           StageScriptRecord,
-                           Source, "iso639/scripts", batch, reader, options, ct))
+        await foreach (var change in RunComposePhaseAsync(
+            EnumerateScriptRecords(context.EcosystemPath, scriptName, ct), StageScriptRecord,
+            "iso639/scripts", SourceTrust.StandardsDerived, batch, context, options, ct))
             yield return change;
 
         string retPath = Path.Combine(context.EcosystemPath, "iso-639-3_Retirements.tab");
         if (File.Exists(retPath))
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseRetirementsAsync(retPath, ct),
-                               StageRetirementRecord,
-                               Source, "iso639/retirements", batch, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseRetirementsAsync(retPath, ct), StageRetirementRecord,
+                "iso639/retirements", SourceTrust.StandardsDerived, batch, context, options, ct))
                 yield return change;
         }
 
-        await foreach (var change in DecomposerBatch.RunAsync(
-                           EnumerateVariantRecords(context.EcosystemPath, ct),
-                           StageVariantRecord,
-                           Source, "iso639/variants", batch, reader, options, ct))
+        await foreach (var change in RunComposePhaseAsync(
+            EnumerateVariantRecords(context.EcosystemPath, ct), StageVariantRecord,
+            "iso639/variants", SourceTrust.StandardsDerived, batch, context, options, ct))
             yield return change;
 
         string namePath = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
         if (File.Exists(namePath))
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               ParseNameIndexAsync(namePath, ct),
-                               (rec, nb) =>
-                               {
-                                   var lid = LanguageEntityId.FromIso639_3(rec.Id);
-                                   nb.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
-                                   if (ContentEmitter.Emit(nb, rec.PrintName, Source) is { } nid)
-                                       nb.AddAttestation(NativeAttestation.Categorical(
-                                           lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
-                               },
-                               Source, "iso639/names", batch, reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                ParseNameIndexAsync(namePath, ct),
+                (rec, nb) =>
+                {
+                    var lid = LanguageEntityId.FromIso639_3(rec.Id);
+                    nb.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
+                    if (ContentEmitter.Emit(nb, rec.PrintName, Source) is { } nid)
+                        nb.AddAttestation(NativeAttestation.Categorical(
+                            lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
+                },
+                "iso639/names", SourceTrust.StandardsDerived, batch, context, options, ct))
                 yield return change;
         }
 
@@ -291,10 +285,8 @@ public sealed class ISODecomposer : IDecomposer
         }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(7929L);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static async IAsyncEnumerable<IsoRecord> ParseAsync(
         string path,

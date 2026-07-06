@@ -4,12 +4,13 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class FrameNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
@@ -47,10 +48,10 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
 
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "FrameNetDecomposer";
-    public int LayerOrder => 3;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "FrameNetDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => TrustClass;
 
 
 
@@ -64,7 +65,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
 
 
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["FrameNet_Frame", "FrameNet_FE", "FrameNet_LU", "FrameNet_Coreness"],
@@ -85,7 +86,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -96,22 +97,22 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         var uncapped = options with { MaxInputUnits = 0 };
 
-        await foreach (var change in DecomposerBatch.RunAsync(
+        await foreach (var change in RunComposePhaseAsync(
             ParseAllFramesAsync(frameDir, ct),
             static (frame, b) => { EmitFrameEntities(b, frame); EmitFrameAttestations(b, frame); },
-            Source, "framenet/frame", batch, context.Reader, options, ct))
+            "frame", SourceTrust.AcademicCurated, batch, context, options, ct))
             yield return change;
 
-        await foreach (var change in DecomposerBatch.RunAsync(
+        await foreach (var change in RunComposePhaseAsync(
             FrameNetLuIngest.ParseAllLusAsync(luDir, ct),
             (lu, b) => FrameNetLuIngest.EmitLu(b, lu, Source),
-            Source, "framenet/lu", batch, context.Reader, uncapped, ct))
+            "lu", SourceTrust.AcademicCurated, batch, context, uncapped, ct))
             yield return change;
 
-        await foreach (var change in DecomposerBatch.RunAsync(
+        await foreach (var change in RunComposePhaseAsync(
             ParseAllFulltextAsync(fulltextDir, ct),
             static (ann, b) => ComposeFulltextAnno(ann, b),
-            Source, "framenet/fulltext", batch, context.Reader, uncapped, ct))
+            "fulltext", SourceTrust.AcademicCurated, batch, context, uncapped, ct))
             yield return change;
     }
 
@@ -163,7 +164,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult(IngestInventory.FromFiles("frames", paths, options.MaxInputUnits, ct));
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long frames = 0, lus = 0;
         string frameDir = Path.Combine(context.EcosystemPath, "frame");
@@ -172,10 +173,6 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
         if (Directory.Exists(luDir)) lus = Directory.EnumerateFiles(luDir, "lu*.xml").LongCount();
         return Task.FromResult<long?>(frames + lus);
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
@@ -337,7 +334,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
             string? pos = (string?)lu.Attribute("POS");
             if (string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos)) continue;
             if (!int.TryParse((string?)lu.Attribute("ID"), out int id)) continue;
-            string lemma = LemmaOf(luName);
+            string lemma = FrameNetLemmaHelpers.LemmaOf(luName);
             if (lemma.Length == 0) continue;
             lus.Add(new LexUnit(id, lemma, pos));
         }
@@ -355,12 +352,6 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestInventoryProvider
         }
 
         return new Frame(name, frameDef, frameExamples, elements, lus, relations);
-    }
-
-    private static string LemmaOf(string luName)
-    {
-        int dot = luName.LastIndexOf('.');
-        return (dot > 0 ? luName[..dot] : luName).Trim();
     }
 
     internal static async IAsyncEnumerable<FulltextAnno> ParseFulltextAsync(

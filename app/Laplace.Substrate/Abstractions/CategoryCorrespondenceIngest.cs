@@ -75,7 +75,7 @@ public static class CategoryCorrespondenceIngestSupport
             WorkingSet = WorkingSetMode.Enabled,
         };
 
-    public static IAsyncEnumerable<SubstrateChange> RunAsync(
+    public static IAsyncEnumerable<SubstrateChange> RunPipelineAsync(
         IAsyncEnumerable<CategoryCorrespondenceRecord> records,
         Hash128 sourceId,
         double trust,
@@ -88,8 +88,9 @@ public static class CategoryCorrespondenceIngestSupport
         if (options.DryRun) return Empty();
         var stream = new AsyncEnumerableRecordStream<CategoryCorrespondenceRecord>(records);
         var handler = new CategoryCorrespondenceHandler(sourceId, trust);
-        var config = PipelineConfig(sourceId, batchLabelPrefix, batchSize, reader);
-        if (options.MaxInputUnits > 0) config = config.WithMaxInputUnits(options.MaxInputUnits);
+        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.CategoryCorrespondence(sourceId, batchLabelPrefix, batchSize, options, reader),
+            options);
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 

@@ -29,7 +29,7 @@ internal static class MapNetIngest
         }
 
         var opts = maxInputUnits > 0 ? options with { MaxInputUnits = maxInputUnits } : options;
-        return CategoryCorrespondenceIngestSupport.RunAsync(
+        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
             EnumerateFrameRecordsAsync(path, maxInputUnits, ct),
             MapNetDecomposer.Source, TC.AcademicCurated, "mapnet/frame", batchSize, reader, opts, ct);
     }

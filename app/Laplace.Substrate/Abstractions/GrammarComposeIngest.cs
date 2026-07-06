@@ -169,7 +169,7 @@ public static class GrammarComposeIngestSupport
             WorkingSet = WorkingSetMode.Enabled,
         };
 
-    public static IAsyncEnumerable<SubstrateChange> RunAsync(
+    public static IAsyncEnumerable<SubstrateChange> RunPipelineAsync(
         IAsyncEnumerable<GrammarComposeRecord> records,
         Hash128 sourceId,
         double trust,
@@ -182,8 +182,9 @@ public static class GrammarComposeIngestSupport
         if (options.DryRun) return Empty();
         var stream = new AsyncEnumerableRecordStream<GrammarComposeRecord>(records);
         var handler = new GrammarComposeHandler(sourceId, trust, reader);
-        var config = PipelineConfig(sourceId, batchLabelPrefix, batchSize, reader);
-        if (options.MaxInputUnits > 0) config = config.WithMaxInputUnits(options.MaxInputUnits);
+        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.GrammarCompose(sourceId, batchLabelPrefix, batchSize, options, reader),
+            options);
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 

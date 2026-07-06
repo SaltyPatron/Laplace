@@ -57,10 +57,6 @@ public class SourceIdPinTests
           "584ccc3cce1291ad4ac04ce4f8b33a8c", "d12d1f4f079c1aa7f4826ec4b3266b45" },
         { () => new Laplace.Decomposers.Code.TabularDecomposer(),
           "3f0876af5782433a4991d2d02e93b982", "d12d1f4f079c1aa7f4826ec4b3266b45" },
-        { () => new Laplace.Decomposers.Image.ImageDecomposer(),
-          "49930e95ae66bc87deef54294c25bdc1", "d12d1f4f079c1aa7f4826ec4b3266b45" },
-        { () => new Laplace.Decomposers.Audio.AudioDecomposer(),
-          "2b88601bf3dc0543a8ba8efbdc48b28b", "d12d1f4f079c1aa7f4826ec4b3266b45" },
     };
 
     [Theory]

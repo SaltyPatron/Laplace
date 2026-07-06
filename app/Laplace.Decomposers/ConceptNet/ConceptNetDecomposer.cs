@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -135,27 +136,19 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         if (!ConceptNetRelations.TryResolveType(rel, out var typeName)) return false;
         // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
         // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
-        // suffix (4th out) stays discarded here — hub-linking it is a calculated pass, not
-        // ingest (its synset entity is owned by WordNet/CILI). See .scratchpad/16 §4.
-        if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out _)) return false;
-        if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out _)) return false;
+        // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See .scratchpad/16 §4.
+        if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out var startWn)) return false;
+        if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return false;
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
         if (startTerm.IsEmpty || endTerm.IsEmpty) return false;
 
         record = new RelationTripleRecord(
-            Canonicalize(startTerm), typeName, Canonicalize(endTerm),
+            UnderscoredUtf8Canonicalize.ToSpaces(startTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(endTerm),
             ContextId: null, Magnitude: ConceptNetUri.ParseWeight(meta),
-            SubjectPos: startPos, ObjectPos: endPos);
+            SubjectPos: startPos, ObjectPos: endPos,
+            SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
+            ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos));
         return true;
-    }
-
-    // ConceptNet multi-word terms are underscored; '_' is single-byte ASCII, UTF-8-safe to swap.
-    private static byte[] Canonicalize(ReadOnlySpan<byte> termUnderscored)
-    {
-        var bytes = termUnderscored.ToArray();
-        for (int i = 0; i < bytes.Length; i++)
-            if (bytes[i] == (byte)'_') bytes[i] = (byte)' ';
-        return bytes;
     }
 
     // assertion-uri \t relation \t start-concept \t end-concept \t {metadata-json}

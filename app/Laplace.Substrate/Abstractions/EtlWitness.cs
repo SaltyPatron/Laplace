@@ -55,7 +55,7 @@ public sealed class EtlWitness : IGrammarWitness
         return kind switch
         {
             EdgeRoleKind.Content =>
-                ContentWitnessBatch.TryAppendToBuilder(b, Trim(value), _src.SourceId, out id),
+                ContentTierSpine.TryStageIntoBuilder(b, Trim(value), _src.SourceId, out id),
             EdgeRoleKind.Anchor =>
                 ResolveAnchor(b, value, out id),
             _ => false,

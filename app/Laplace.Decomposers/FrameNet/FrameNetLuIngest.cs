@@ -3,6 +3,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -45,11 +46,11 @@ internal static class FrameNetLuIngest
         if (string.IsNullOrEmpty(frameName) || string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos))
             return null;
 
-        string lemma = LemmaOf(luName);
+        string lemma = FrameNetLemmaHelpers.LemmaOf(luName);
         if (lemma.Length == 0) return null;
         string luKey = SourceEntityIdConventions.FrameNetLuKey(frameName, luName);
 
-        string definition = CollapseWs((string?)root.Element(ns + "definition") ?? "");
+        string definition = FrameNetLemmaHelpers.CollapseWs((string?)root.Element(ns + "definition") ?? "");
 
         var patterns = new List<string>();
         foreach (var vu in root.Descendants(ns + "valenceUnit"))
@@ -79,7 +80,7 @@ internal static class FrameNetLuIngest
         var sentences = new List<LuSentence>();
         foreach (var sent in root.Descendants(ns + "sentence"))
         {
-            string text = CollapseWs((string?)sent.Element(ns + "text") ?? "");
+            string text = FrameNetLemmaHelpers.CollapseWs((string?)sent.Element(ns + "text") ?? "");
             if (text.Length == 0) continue;
 
             string? target = null;
@@ -178,27 +179,6 @@ internal static class FrameNetLuIngest
         if (pt.Length == 0) return $"{gf}/{fe}";
         return $"{gf}/{pt}/{fe}";
     }
-
-    private static string LemmaOf(string luName)
-    {
-        int dot = luName.LastIndexOf('.');
-        return (dot > 0 ? luName[..dot] : luName).Trim();
-    }
-
-    private static string CollapseWs(string s)
-    {
-        var sb = new StringBuilder(s.Length);
-        bool ws = false;
-        foreach (char c in s)
-        {
-            if (char.IsWhiteSpace(c)) { ws = true; continue; }
-            if (ws && sb.Length > 0) sb.Append(' ');
-            ws = false;
-            sb.Append(c);
-        }
-        return sb.ToString().Trim();
-    }
-
 
     internal sealed record LuDocument(
         int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,

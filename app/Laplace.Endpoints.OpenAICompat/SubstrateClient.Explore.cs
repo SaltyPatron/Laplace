@@ -613,12 +613,14 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct)
     {
         const string sql = """
-            SELECT encode(a.type_id, 'hex'), laplace.label_or_hex(a.type_id),
-                   encode(a.object_id, 'hex'), laplace.label_or_hex(a.object_id),
-                   encode(a.source_id, 'hex'), laplace.label_or_hex(a.source_id),
-                   CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
-                   a.outcome, a.observation_count
-            FROM laplace.attestations_out(@id, @limit) a;
+            SELECT encode(c.type_id, 'hex'), laplace.type_label(c.type_id),
+                   encode(c.object_id, 'hex'),
+                   COALESCE(
+                       NULLIF(left(laplace.render_text(c.object_id, 12), ''), ''),
+                       left(encode(c.object_id, 'hex'), 16)),
+                   c.witness_count,
+                   laplace.eff_mu_display(c.rating, c.rd)
+            FROM laplace.consensus_out(@id, @limit) c;
             """;
         var items = new List<LabeledEvidenceItem>(limit);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -632,11 +634,12 @@ internal sealed partial class SubstrateClient
                 TypeLabel: reader.GetString(1),
                 ObjectId: reader.GetString(2),
                 ObjectLabel: reader.GetString(3),
-                SourceId: reader.GetString(4),
-                SourceLabel: reader.GetString(5),
-                ContextId: reader.IsDBNull(6) ? null : reader.GetString(6),
-                Outcome: reader.GetInt16(7),
-                ObservationCount: reader.GetInt64(8)));
+                SourceId: "",
+                SourceLabel: "",
+                ContextId: null,
+                Outcome: 2,
+                ObservationCount: reader.GetInt64(4),
+                EffMu: reader.GetDecimal(5)));
         }
 
         return items;

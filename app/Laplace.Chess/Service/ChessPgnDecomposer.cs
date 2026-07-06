@@ -9,12 +9,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessPgnDecomposer : IDecomposer
+public sealed class ChessPgnDecomposer : DecomposerOrchestrator
 {
-    public Hash128 SourceId => ChessVocabulary.PgnSourceId;
-    public string SourceName => "ChessPgn";
-    public int LayerOrder => 20;
-    public Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
+    public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
+    public override string SourceName => "ChessPgn";
+    public override int LayerOrder => 20;
+    public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
 
 
@@ -23,7 +23,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
 
@@ -32,7 +32,7 @@ public sealed class ChessPgnDecomposer : IDecomposer
     internal sealed record ParsedGame(
         string GameText, PgnMovetext.PgnWalkResult Walk, List<string> Moves, GameOutcome Result, Hash128 GameId);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -74,10 +74,10 @@ public sealed class ChessPgnDecomposer : IDecomposer
             yield break;
         }
 
-        await foreach (var change in DecomposerBatch.RunAsync(
+        await foreach (var change in RunComposePhaseAsync(
             StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
             (parsed, b) => RecordGame(parsed, b),
-            ChessVocabulary.PgnSourceId, "chess/pgn", batch, context.Reader, options, ct))
+            "pgn", SourceTrust.StructuredCorpus, batch, context, options, ct))
             yield return change;
     }
 
@@ -382,20 +382,23 @@ public sealed class ChessPgnDecomposer : IDecomposer
         return canonicalId;
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long games = 0;
         foreach (var f in EnumerateFiles(context.EcosystemPath))
         {
             try
             {
-
                 using var r = new StreamReader(f);
                 string? line;
                 while ((line = r.ReadLine()) is not null)
                     if (line.StartsWith("[Event ", StringComparison.Ordinal)) games++;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "ChessPgnDecomposer: failed to estimate games in {File}: {Message}", f, ex.Message);
+            }
         }
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
@@ -404,8 +407,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
 
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static IEnumerable<string> EnumerateFiles(string path)
     {

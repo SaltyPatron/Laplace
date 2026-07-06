@@ -142,8 +142,9 @@ public static class IngestBatchPipeline
     {
         var reader = config.EffectiveReader ?? AllAbsentSubstrateReader.Instance;
 
-        // Working-set mode: O(tiers) existence every WorkingSetProbeInterval records.
-        // Legacy batch mode uses ProbeChunkSize.
+        // Working-set mode: compose every WorkingSetProbeInterval records; O(tiers)
+        // existence runs once per working set in FinalizeWorkingSetAsync (06 L93-94a).
+        // Legacy batch mode uses ProbeChunkSize and probes every flush.
         int probeInterval = config.WorkingSet
             ? (config.WorkingSetProbeInterval ?? WorkingSetMode.ProbeIntervalRecords)
             : config.ProbeChunkSize;
@@ -183,7 +184,10 @@ public static class IngestBatchPipeline
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
                 if (state.InBatch > 0)
+                {
+                    await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
                     yield return await state.BuildRemainingAsync(ct);
+                }
                 yield break;
             }
 
@@ -203,6 +207,7 @@ public static class IngestBatchPipeline
 
                 if (state.InBatch > 0)
                 {
+                    await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
                     yield return await state.YieldBatchAsync(ct);
                     state.ResetBuilder(config.NewBuilder(state.BatchNumber));
                 }
@@ -225,7 +230,10 @@ public static class IngestBatchPipeline
         }
 
         if (state.InBatch > 0)
+        {
+            await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
             yield return await state.BuildRemainingAsync(ct);
+        }
     }
 
     public static async IAsyncEnumerable<SubstrateChange> RunMultiFileAsync<TRecord>(
@@ -294,16 +302,32 @@ public static class IngestBatchPipeline
         var batch = pending.ToList();
         pending.Clear();
 
-        var drained = await IngestDescentFlush.ProbeAndDrainAsync(
-            batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
-
-        foreach (var (_, units) in drained)
+        if (config.WorkingSet)
         {
-            state.AddUnits(units);
-            if (!config.WorkingSet && state.InBatch >= config.BatchSize)
+            var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
+                ??= new WorkingSetDeferredBatch<TRecord>());
+            var composed = await IngestDescentFlush.ComposeBatchAsync(
+                batch, handler, reader, state.Builder, probedAbsent, ct).ConfigureAwait(false);
+            deferred.Shortcircuited.AddRange(composed.Shortcircuited);
+            deferred.Pending.AddRange(composed.Pending);
+            foreach (var (_, units) in composed.Shortcircuited)
+                state.AddUnits(units);
+            foreach (var (record, _) in composed.Pending)
+                state.AddUnits(handler.UnitsPerRecord(record));
+        }
+        else
+        {
+            var drained = await IngestDescentFlush.ProbeAndDrainAsync(
+                batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
+
+            foreach (var (_, units) in drained)
             {
-                yield return await state.YieldBatchAsync(ct);
-                state.ResetBuilder(config.NewBuilder(state.BatchNumber));
+                state.AddUnits(units);
+                if (state.InBatch >= config.BatchSize)
+                {
+                    yield return await state.YieldBatchAsync(ct);
+                    state.ResetBuilder(config.NewBuilder(state.BatchNumber));
+                }
             }
         }
     }
@@ -313,7 +337,22 @@ public static class IngestBatchPipeline
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
         public int BatchNumber { get; private set; }
+        internal object? WorkingSetDeferred { get; set; }
         private long _rowsInBatch;
+
+        public async Task FinalizeWorkingSetAsync<TRecord>(
+            IIngestRecordHandler<TRecord> handler,
+            ISubstrateReader reader,
+            IngestBatchConfig config,
+            ISet<Hash128>? probedAbsent,
+            CancellationToken ct)
+        {
+            if (WorkingSetDeferred is not WorkingSetDeferredBatch<TRecord> deferred || !deferred.HasWork)
+                return;
+            await IngestDescentFlush.FinalizeWorkingSetAsync(
+                deferred, handler, reader, Builder, config, probedAbsent, ct).ConfigureAwait(false);
+            WorkingSetDeferred = null;
+        }
 
         public void AddUnits(long units)
         {

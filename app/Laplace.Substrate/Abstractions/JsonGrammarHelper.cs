@@ -172,7 +172,7 @@ public static class JsonGrammarHelper
         entityId = default;
         if (!TryDecodedCanonicalBytes(utf8, start, end, out byte[] decoded))
             return false;
-        if (ContentWitnessBatch.RootId(decoded) is not Hash128 root)
+        if (ContentTierSpine.ResolveRoot(decoded) is not Hash128 root)
             return false;
         entityId = root;
         return true;

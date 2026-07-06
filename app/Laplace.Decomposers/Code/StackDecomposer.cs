@@ -1,33 +1,19 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using Parquet;
-using Parquet.Schema;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-
-
-
-
-
-
-
-
-
-
-
-
-public sealed class StackDecomposer : IDecomposer
+public sealed class StackDecomposer : GrammarComposeDecomposer
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/StackDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
-
-
 
     private static readonly Dictionary<string, string?> StackLangToModality =
         new(StringComparer.OrdinalIgnoreCase)
@@ -50,7 +36,6 @@ public sealed class StackDecomposer : IDecomposer
             ["SQL"] = "sql",
             ["JSON"] = "json",
             ["Markdown"] = "markdown",
-
             ["TypeScript JSX"] = null,
             ["JavaScript JSX"] = null,
             ["HTML"] = null,
@@ -61,10 +46,12 @@ public sealed class StackDecomposer : IDecomposer
             ["TOML"] = null,
         };
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "StackDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "StackDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "stack-v2";
 
     private readonly HashSet<string>? _langFilter;
 
@@ -79,48 +66,35 @@ public sealed class StackDecomposer : IDecomposer
         }
     }
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             relationNodeNames: ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = EnumerateParquet(context.EcosystemPath).ToList();
+        var files = ParquetCodeRecordStream.EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
         if (files.Count == 0)
         {
-            if (Directory.Exists(context.EcosystemPath))
+            if (Directory.Exists(ecosystemPath))
                 throw new InvalidOperationException(
-                    $"StackDecomposer: no *.parquet files under '{context.EcosystemPath}' "
+                    $"StackDecomposer: no *.parquet files under '{ecosystemPath}' "
                     + "(expected data/<lang>/train-*.parquet from download-code-data.cmd)");
             yield break;
         }
 
-        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
-                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
-                           "stack-v2", batch, context.Reader, options, ct))
-            yield return change;
-    }
-
-    private async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
-        IReadOnlyList<string> files, [EnumeratorCancellation] CancellationToken ct)
-    {
         foreach (var file in files)
         {
-            await foreach (var row in ReadRowsAsync(file, ct))
+            await foreach (var row in ParquetCodeRecordStream.ReadStackRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
                 string? modality = ResolveModality(row.Language);
                 if (modality is null) continue;
                 if (_langFilter is not null && !_langFilter.Contains(modality)) continue;
                 if (string.IsNullOrWhiteSpace(row.Content)) continue;
-                byte[] codeBytes;
-                try { codeBytes = Encoding.UTF8.GetBytes(row.Content); }
-                catch { continue; }
+                byte[] codeBytes = Encoding.UTF8.GetBytes(row.Content);
                 if (codeBytes.Length == 0) continue;
 
                 IReadOnlyList<string>? segs = null;
@@ -140,82 +114,12 @@ public sealed class StackDecomposer : IDecomposer
         }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static string? ResolveModality(string? lang)
     {
         if (string.IsNullOrEmpty(lang)) return null;
         return StackLangToModality.TryGetValue(lang, out var m) ? m : null;
     }
-
-    private static async IAsyncEnumerable<StackRow> ReadRowsAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var fs = File.OpenRead(path);
-        await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
-
-        DataField[] fields = reader.Schema.GetDataFields();
-        DataField? contentField = FindField(fields, "content");
-        DataField? languageField = FindField(fields, "language") ?? FindField(fields, "lang");
-        DataField? pathField = FindField(fields, "path") ?? FindField(fields, "max_stars_repo_path");
-        DataField? vendorField = FindField(fields, "is_vendor");
-        DataField? generatedField = FindField(fields, "is_generated");
-
-        if (contentField is null || languageField is null) yield break;
-
-        for (int rg = 0; rg < reader.RowGroupCount; rg++)
-        {
-            ct.ThrowIfCancellationRequested();
-            using var rgr = reader.OpenRowGroupReader(rg);
-            int count = (int)rgr.RowCount;
-
-            string[] contents = new string[count];
-            string[] languages = new string[count];
-            string[]? paths = pathField is not null ? new string[count] : null;
-            bool?[]? vendors = vendorField is not null ? new bool?[count] : null;
-            bool?[]? generated = generatedField is not null ? new bool?[count] : null;
-
-            await rgr.ReadAsync(contentField, contents);
-            await rgr.ReadAsync(languageField, languages);
-            if (paths is not null) await rgr.ReadAsync(pathField!, paths);
-            if (vendors is not null) await rgr.ReadAsync<bool>(vendorField!, vendors);
-            if (generated is not null) await rgr.ReadAsync<bool>(generatedField!, generated);
-
-            for (int i = 0; i < count; i++)
-            {
-                if (vendors is not null && vendors[i] == true) continue;
-                if (generated is not null && generated[i] == true) continue;
-                yield return new StackRow(
-                    contents[i],
-                    languages[i],
-                    paths is not null ? paths[i] : null);
-            }
-        }
-    }
-
-    private static DataField? FindField(DataField[] fields, string name)
-    {
-        foreach (var f in fields)
-            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
-                return f;
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateParquet(string root)
-    {
-        if (File.Exists(root))
-        {
-            if (root.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)) yield return root;
-            yield break;
-        }
-        if (!Directory.Exists(root)) yield break;
-        foreach (var f in Directory.EnumerateFiles(root, "*.parquet", SearchOption.AllDirectories)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
-    }
-
-    private readonly record struct StackRow(string? Content, string? Language, string? Path);
 }

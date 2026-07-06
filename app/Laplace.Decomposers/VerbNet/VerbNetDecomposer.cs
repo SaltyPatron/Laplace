@@ -3,11 +3,12 @@ using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.Decomposers.Extractors;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : IDecomposer
+public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
 {
 
 
@@ -25,56 +26,40 @@ public sealed class VerbNetDecomposer : IDecomposer
 
 
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "VerbNetDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
-
     private const long EstimatedClasses = 329L;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "VerbNetDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
+    protected override string BatchLabelPrefix => "verbnet";
+    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
+
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["VerbNet_Class"],
             relationNodeNames: ["IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE",
                 "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME_ALIAS"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
         string classDir = DecomposerFileDiscovery.ResolveSubdir(
-            context.EcosystemPath, "*.xml",
+            ecosystemPath, "*.xml",
             Path.Combine("verbnet-master", "verbnet3.4"), "verbnet3.4");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-
-        await foreach (var change in DecomposerBatch.RunAsync(
-            ParseVnClassesAsync(classDir, ct),
-            static (root, b) => EmitClass(b, root, parentClassId: null),
-            Source, "verbnet", batch, context.Reader, options, ct))
-            yield return change;
-    }
-
-    private static async IAsyncEnumerable<XmlElement> ParseVnClassesAsync(
-        string classDir, [EnumeratorCancellation] CancellationToken ct)
-    {
-        foreach (var file in EnumerateClassFiles(classDir))
-        {
-            ct.ThrowIfCancellationRequested();
-            var doc = new XmlDocument();
-            try { doc.Load(file); }
-            catch (XmlException) { continue; }
-            var root = doc.DocumentElement;
-            if (root is null || !root.Name.Equals("VNCLASS", StringComparison.Ordinal)) continue;
+        await foreach (var root in XmlFramesetStream.ReadRootsAsync(
+                           XmlFramesetStream.EnumerateXmlFiles(classDir), "VNCLASS", ct))
             yield return root;
-        }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EstimatedClasses);
+    protected override void Compose(XmlElement root, SubstrateChangeBuilder b) =>
+        EmitClass(b, root, parentClassId: null);
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(EstimatedClasses);
 
     private static void EmitClass(SubstrateChangeBuilder b, XmlElement el, string? parentClassId)
     {
@@ -105,7 +90,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                     classEntity, "IS_A", parentAnchor.Value, Source, TC.AcademicCurated));
         }
 
-        foreach (var member in ChildElements(el, "MEMBERS", "MEMBER"))
+        foreach (var member in XmlFramesetStream.ChildElements(el, "MEMBERS", "MEMBER"))
         {
             string name = member.GetAttribute("name").Replace('_', ' ').Trim();
             if (name.Length == 0) continue;
@@ -136,7 +121,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             }
         }
 
-        foreach (var role in ChildElements(el, "THEMROLES", "THEMROLE"))
+        foreach (var role in XmlFramesetStream.ChildElements(el, "THEMROLES", "THEMROLE"))
         {
             string type = role.GetAttribute("type").Trim();
             if (type.Length == 0) continue;
@@ -146,7 +131,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                 classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
         }
 
-        foreach (var frame in ChildElements(el, "FRAMES", "FRAME"))
+        foreach (var frame in XmlFramesetStream.ChildElements(el, "FRAMES", "FRAME"))
         {
             string primary = "";
             foreach (XmlNode d in frame.GetElementsByTagName("DESCRIPTION"))
@@ -205,31 +190,8 @@ public sealed class VerbNetDecomposer : IDecomposer
             }
         }
 
-        foreach (var subWrap in DirectChildren(el, "SUBCLASSES"))
-            foreach (var sub in DirectChildren(subWrap, "VNSUBCLASS"))
+        foreach (var subWrap in XmlFramesetStream.DirectChildren(el, "SUBCLASSES"))
+            foreach (var sub in XmlFramesetStream.DirectChildren(subWrap, "VNSUBCLASS"))
                 EmitClass(b, sub, parentClassId: classId);
-    }
-
-
-    private static IEnumerable<string> EnumerateClassFiles(string dir)
-    {
-        if (!Directory.Exists(dir)) yield break;
-        foreach (var f in Directory.EnumerateFiles(dir, "*.xml")
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
-    }
-
-    private static IEnumerable<XmlElement> DirectChildren(XmlElement el, string name)
-    {
-        foreach (XmlNode child in el.ChildNodes)
-            if (child is XmlElement ce && ce.Name.Equals(name, StringComparison.Ordinal))
-                yield return ce;
-    }
-
-    private static IEnumerable<XmlElement> ChildElements(XmlElement el, string wrapper, string item)
-    {
-        foreach (var w in DirectChildren(el, wrapper))
-            foreach (var it in DirectChildren(w, item))
-                yield return it;
     }
 }

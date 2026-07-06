@@ -6,7 +6,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class OMWDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
@@ -14,10 +14,10 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "OMWDecomposer";
-    public int LayerOrder => 3;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "OMWDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => TrustClass;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
@@ -25,12 +25,12 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
     internal static void TrackLanguage(string? langInput) =>
         VocabularyNames.TrackLanguage(LanguageNames, langInput);
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             relationNodeNames: ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS"],
             readbackNames: LanguageNames, ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -61,11 +61,10 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits;
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

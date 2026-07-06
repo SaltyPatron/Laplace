@@ -454,7 +454,7 @@ public sealed class ModelTokenEdgeETL
         var collector = _classifier is null ? null : new TopPairCollector(TopPairsPerCircuit);
 
         long edges = 0;
-        await foreach (var batch in DecomposerBatch.RunAsync(
+        await foreach (var batch in IngestComposePipeline.RunAsync(
                            EnumerateFfnEdgeRecords(Ad, n, d, gate, up, down, I, ents, typeId, weight,
                                oR, oC, oV, oS, cap, collector, ct),
                            (rec, b) => StageEdgeAttestation(b, rec, _source),
@@ -484,7 +484,7 @@ public sealed class ModelTokenEdgeETL
         var collector = (_classifier is null || !sampleForDecoder) ? null : new TopPairCollector(TopPairsPerCircuit);
         string label = EdgeBatchLabel(descriptor);
 
-        await foreach (var batch in DecomposerBatch.RunAsync(
+        await foreach (var batch in IngestComposePipeline.RunAsync(
                            EnumerateBilinearEdgeRecords(left, right, n, r, typeId, weight, rowEnts, colEnts,
                                canonicalize, topK, collector, ct),
                            (rec, b) => StageEdgeAttestation(b, rec, _source),
@@ -567,7 +567,7 @@ public sealed class ModelTokenEdgeETL
         if (pairs.Count == 0) yield break;
         var record = await _classifier.TryClassifyRecordAsync(descriptor, pairs, ct);
         if (record is null) yield break;
-        await foreach (var batch in DecomposerBatch.RunAsync(
+        await foreach (var batch in IngestComposePipeline.RunAsync(
                            SingleClassifyRecordAsync(record.Value, ct),
                            (rec, b) => HeadClassifier.StageClassifyRecord(b, rec, _source),
                            _source, "model/decoder-ring", 1, reader, options, ct, commitEpoch))

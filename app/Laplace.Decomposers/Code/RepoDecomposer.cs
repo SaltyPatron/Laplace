@@ -6,7 +6,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : IDecomposer
+public sealed class RepoDecomposer : DecomposerOrchestrator
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/RepoDecomposer/v1");
@@ -22,16 +22,16 @@ public sealed class RepoDecomposer : IDecomposer
             ["CMakeLists.txt"] = "cmake",
         };
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "RepoDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "RepoDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["RepoRoot", "SourceFile"],
@@ -41,7 +41,7 @@ public sealed class RepoDecomposer : IDecomposer
         _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -56,28 +56,25 @@ public sealed class RepoDecomposer : IDecomposer
 
         if (!options.DryRun)
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               SingleRepoRootAsync(repoCanonical, repoId, ct),
-                               StageRepoRoot,
-                               Source, "repo/root", 1, context.Reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                SingleRepoRootAsync(repoCanonical, repoId, ct), StageRepoRoot,
+                "root", SourceTrust.StructuredCorpus, 1, context, options, ct))
                 yield return change;
         }
 
         var files = EnumerateRepoFiles(root).ToList();
         if (files.Count == 0) yield break;
 
-        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
-                           EnumerateRecordsAsync(files, root, repoId, ct),
-                           Source, SourceTrust.StructuredCorpus, "repo", batch, context.Reader, options, ct))
+        await foreach (var change in RunGrammarComposePhaseAsync(
+            EnumerateRecordsAsync(files, root, repoId, ct),
+            SourceTrust.StructuredCorpus, "repo", batch, context, options, ct))
             yield return change;
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(Directory.Exists(context.EcosystemPath)
             ? EnumerateRepoFiles(context.EcosystemPath).Count()
             : null);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private readonly record struct RepoRootRecord(string Canonical, Hash128 Id);
 

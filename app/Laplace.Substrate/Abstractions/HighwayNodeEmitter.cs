@@ -27,7 +27,7 @@ public static class HighwayNodeEmitter
                 id, parentRelation, parent, sourceId, null, trust));
         }
 
-        if (ContentWitnessBatch.Emit(builder, canonicalName, sourceId) is { } nameId)
+        if (ContentEmitter.Emit(builder, canonicalName, sourceId) is { } nameId)
             builder.AddAttestation(NativeAttestation.Categorical(
                 id, "HAS_NAME_ALIAS", nameId, sourceId, null, trust));
 

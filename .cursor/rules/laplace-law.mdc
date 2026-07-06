@@ -18,4 +18,7 @@ Hard law (violations have corrupted state before):
 - Verify against live data (`psql -h localhost -U postgres -d laplace`, then
   `SET search_path=laplace,public;`; check `SELECT * FROM api('<substring>');` before
   assuming a helper doesn't exist). Never present a narrow patch as the architectural fix.
-- `.scratchpad/05` (invariants) and `06` (rules) are binding; `13` is the active plan.
+- `.scratchpad/05` (invariants) and `06` (rules) are binding. `13` is historical
+  stabilization notes — verify against code before trusting; it is NOT the active plan.
+  Active remediation work: `.cursor/plans/full_stack_remediation_bdaba5c3.plan.md`,
+  evidence in `.scratchpad/16` + `17`.

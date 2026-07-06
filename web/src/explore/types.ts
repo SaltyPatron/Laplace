@@ -108,6 +108,7 @@ export interface LabeledEvidenceItem {
   context_id?: string | null;
   outcome: number;
   observation_count: number;
+  eff_mu?: number | null;
 }
 export interface ExploreEntityResponse {
   id_hex: string;

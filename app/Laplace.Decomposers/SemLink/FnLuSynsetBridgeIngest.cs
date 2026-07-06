@@ -26,7 +26,7 @@ internal static class FnLuSynsetBridgeIngest
         options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
         if (maxInputUnits > 0)
             options = options with { MaxInputUnits = maxInputUnits };
-        return CategoryCorrespondenceIngestSupport.RunAsync(
+        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
             EnumerateTabRecordsAsync(path, synsetVersion, maxInputUnits, ct),
             source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
     }
@@ -45,7 +45,7 @@ internal static class FnLuSynsetBridgeIngest
         options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
         if (maxInputUnits > 0)
             options = options with { MaxInputUnits = maxInputUnits };
-        return CategoryCorrespondenceIngestSupport.RunAsync(
+        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
             EnumerateWfnNativeRecordsAsync(path, synsetVersion, maxInputUnits, ct),
             source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
     }

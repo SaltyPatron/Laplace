@@ -61,7 +61,7 @@ public static class PosReference
             b.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
 
 
-            if (ContentWitnessBatch.Emit(b, tag, sourceId) is { } nameId)
+            if (ContentEmitter.Emit(b, tag, sourceId) is { } nameId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     posId, "HAS_NAME_ALIAS", nameId, sourceId, null, sourceTrust));
         }
@@ -84,7 +84,7 @@ public static class PosReference
             builder.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
 
 
-            if (ContentWitnessBatch.Emit(builder, tag, sourceId) is { } nameId)
+            if (ContentEmitter.Emit(builder, tag, sourceId) is { } nameId)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     posId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
         }

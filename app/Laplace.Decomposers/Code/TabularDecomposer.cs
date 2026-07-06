@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TabularDecomposer : IDecomposer
+public sealed class TabularDecomposer : DecomposerOrchestrator
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TabularDecomposer/v1");
@@ -31,10 +31,10 @@ public sealed class TabularDecomposer : IDecomposer
         _numBins = numBins;
     }
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "TabularDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "TabularDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
@@ -42,7 +42,7 @@ public sealed class TabularDecomposer : IDecomposer
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");
     private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"tabular/value/{col}={tok}/v1");
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["TabularColumn", "TabularValue", "TabularOutcome"],
@@ -55,41 +55,41 @@ public sealed class TabularDecomposer : IDecomposer
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var files = EnumerateCsv(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        var rows = new List<Dictionary<string, string>>();
-        foreach (var f in files)
-        {
-            ct.ThrowIfCancellationRequested();
-            string[]? header = null;
-            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
-                f, EtlManifest.Get("tabular").Modality, ct))
-            {
-                if (header is null) { header = fields; continue; }
-                if (fields.Length != header.Length) continue;
-                var rec = new Dictionary<string, string>(header.Length, StringComparer.Ordinal);
-                for (int i = 0; i < header.Length; i++) rec[header[i]] = fields[i];
-                rows.Add(rec);
-            }
-        }
-        if (rows.Count == 0) yield break;
+        string[]? header = await ReadHeaderAsync(files, ct);
+        if (header is null || header.Length == 0) yield break;
 
-        var featureCols = rows[0].Keys
+        var featureCols = header
             .Where(c => !c.Equals(_targetColumn, StringComparison.Ordinal) && !IdLike.Contains(c))
             .ToList();
+        if (featureCols.Count == 0) yield break;
+
+        // Pass 1 (streaming sample): infer numeric/binning schema without retaining rows.
+        var samples = featureCols.ToDictionary(c => c, _ => new List<string>(64), StringComparer.Ordinal);
+        await StreamRowsAsync(files, header, async (rec, token) =>
+        {
+            foreach (var c in featureCols)
+            {
+                if (!rec.TryGetValue(c, out var v)) continue;
+                var list = samples[c];
+                if (list.Count < 3000) list.Add(v);
+            }
+            await Task.CompletedTask;
+        }, ct);
 
         var isNumeric = new Dictionary<string, bool>(StringComparer.Ordinal);
         var edges = new Dictionary<string, double[]>(StringComparer.Ordinal);
         foreach (var c in featureCols)
         {
-            var vals = rows.Where(r => r.ContainsKey(c)).Select(r => r[c]).ToList();
-            bool numeric = vals.Count > 0 && vals.Take(3000).All(v => double.TryParse(v, out _));
-            int card = vals.Distinct().Take(_numBins * 2 + 1).Count();
+            var vals = samples[c];
+            bool numeric = vals.Count > 0 && vals.All(v => double.TryParse(v, out _));
+            int card = vals.Distinct(StringComparer.Ordinal).Take(_numBins * 2 + 1).Count();
             if (numeric && card > _numBins * 2)
             {
                 isNumeric[c] = true;
@@ -102,14 +102,15 @@ public sealed class TabularDecomposer : IDecomposer
         foreach (var c in featureCols)
         {
             if (isNumeric[c]) { lowCard.Add(c); continue; }
-            if (rows.Where(r => r.ContainsKey(c)).Select(r => r[c]).Distinct().Take(16).Count() <= 15)
+            if (samples[c].Distinct(StringComparer.Ordinal).Take(16).Count() <= 15)
                 lowCard.Add(c);
         }
 
+        // Pass 2 (streaming aggregate): fold row stats into count maps — calculated layer, not row retention.
         var counts = new Dictionary<(string Col, string Tok), (long N, long M)>();
         var counts2 = new Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)>();
         var rowtoks = new List<(string Col, string Tok)>(featureCols.Count);
-        foreach (var rec in rows)
+        await StreamRowsAsync(files, header, async (rec, token) =>
         {
             bool positive = rec.TryGetValue(_targetColumn, out var tv) && tv.Trim() == _positiveValue;
             rowtoks.Clear();
@@ -130,28 +131,65 @@ public sealed class TabularDecomposer : IDecomposer
                     counts2.TryGetValue(k2, out var nm2);
                     counts2[k2] = (nm2.N + 1, nm2.M + (positive ? 1 : 0));
                 }
-        }
+            await Task.CompletedTask;
+        }, ct);
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
-        var emitCtx = new TabularEmitContext(
-            this, isNumeric, witnessWeight, predicts);
+        var emitCtx = new TabularEmitContext(this, isNumeric, witnessWeight, predicts);
 
         if (!options.DryRun)
         {
-            await foreach (var change in DecomposerBatch.RunAsync(
-                               EnumerateSchemaRecords(featureCols, ct),
-                               StageSchemaRecord,
-                               Source, "tabular/schema", 1, context.Reader, options, ct))
+            await foreach (var change in RunComposePhaseAsync(
+                EnumerateSchemaRecords(featureCols, ct), StageSchemaRecord,
+                "schema", SourceTrust.StructuredCorpus, 1, context, options, ct))
                 yield return change;
         }
 
-        await foreach (var change in DecomposerBatch.RunAsync(
-                           EnumerateRecords(counts, counts2, ct),
-                           emitCtx.Emit,
-                           Source, "tabular", batch, context.Reader, options, ct))
+        await foreach (var change in RunComposePhaseAsync(
+            EnumerateRecords(counts, counts2, ct), emitCtx.Emit,
+            "aggregates", SourceTrust.StructuredCorpus, batch, context, options, ct))
             yield return change;
+    }
+
+    private static async Task<string[]?> ReadHeaderAsync(IReadOnlyList<string> files, CancellationToken ct)
+    {
+        foreach (var f in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            string[]? header = null;
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                f, EtlManifest.Get("tabular").Modality, ct))
+            {
+                header = fields;
+                break;
+            }
+            if (header is { Length: > 0 }) return header;
+        }
+        return null;
+    }
+
+    private static async Task StreamRowsAsync(
+        IReadOnlyList<string> files,
+        string[] header,
+        Func<Dictionary<string, string>, CancellationToken, Task> rowHandler,
+        CancellationToken ct)
+    {
+        foreach (var f in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            bool skippedHeader = false;
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                f, EtlManifest.Get("tabular").Modality, ct))
+            {
+                if (!skippedHeader) { skippedHeader = true; continue; }
+                if (fields.Length != header.Length) continue;
+                var rec = new Dictionary<string, string>(header.Length, StringComparer.Ordinal);
+                for (int i = 0; i < header.Length; i++) rec[header[i]] = fields[i];
+                await rowHandler(rec, ct);
+            }
+        }
     }
 
     private readonly record struct TabularSchemaRecord(string Column);
@@ -209,10 +247,8 @@ public sealed class TabularDecomposer : IDecomposer
 
     internal void TrackCanonical(string name) => _canonicalNames.Add(name);
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private string Tokenize(string col, string v,
                             Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)

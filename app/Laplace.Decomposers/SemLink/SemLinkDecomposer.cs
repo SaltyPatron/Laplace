@@ -5,19 +5,19 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class SemLinkDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "SemLinkDecomposer";
-    public int LayerOrder => 3;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "SemLinkDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => TrustClass;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"],
@@ -33,7 +33,7 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
             ct: ct);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -122,7 +122,7 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
         return total is long n ? IngestInventory.Single(n, "records") : null;
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
         long total = 0;
@@ -145,8 +145,6 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
 
         return total > 0 ? total : null;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static IEnumerable<(string Path, SemLinkDocumentKind Kind, string Label)> JsonDocumentSpecs(string dir)
     {

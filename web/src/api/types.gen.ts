@@ -3177,6 +3177,8 @@ export interface components {
             outcome: number | string;
             /** Format: int64 */
             observation_count: number | string;
+            /** Format: double */
+            eff_mu?: null | number | string;
         };
         LabStartRequest: {
             kind: null | string;

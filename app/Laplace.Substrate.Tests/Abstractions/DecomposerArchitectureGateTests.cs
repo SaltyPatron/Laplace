@@ -4,8 +4,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Phase 1.7 architecture gate (doc 13 T4): decomposers are pure record extractors;
-/// they must not embed SQL or bypass the ingestion spine to reach Postgres directly.
+/// Unified ingest pipeline architecture gate: decomposers subclass
+/// <see cref="Decomposer{TRecord}"/> (or documented allowlist); no inline SQL,
+/// no direct pipeline bypass, no hand SubstrateChangeBuilder in DecomposeAsync.
 /// </summary>
 public sealed class DecomposerArchitectureGateTests
 {
@@ -17,31 +18,47 @@ public sealed class DecomposerArchitectureGateTests
         @"\b(Npgsql(?:DataSource|Connection|Command|SubstrateWriter|WorkingSetApply)|ConsensusAccumulatingWriter)\b",
         RegexOptions.Compiled);
 
-    private static readonly string[] RequiredSpineMarkers =
-    [
-        "ContentTierSpine",
-        "IngestBatchPipeline",
-        "RelationTripleDecomposerBase",
-        "DecomposerBatch",
-        "StructuredGrammarIngest",
-        "GrammarComposeIngestSupport",
-        "CategoryCorrespondenceIngestSupport",
-    ];
+    private static readonly Regex DirectPipelineCall = new(
+        @"\bIngestBatchPipeline\.(?:RunAsync|RunMultiFileAsync)\s*\(",
+        RegexOptions.Compiled);
+
+    private static readonly Regex HandBuilderInDecompose = new(
+        @"new\s+SubstrateChangeBuilder\s*\(",
+        RegexOptions.Compiled);
+
+    private static readonly HashSet<string> UnicodeAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Unicode/UnicodeDecomposer.cs",
+    };
+
+    private static readonly HashSet<string> HandBuilderAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Unicode/UnicodeDecomposer.cs",
+    };
+
+    private static IEnumerable<string> DecomposerProjectRoots(string repoRoot)
+    {
+        yield return Path.Combine(repoRoot, "app", "Laplace.Decomposers");
+        yield return Path.Combine(repoRoot, "app", "Laplace.Chess");
+    }
 
     [Fact]
     public void DecomposerProjects_ContainNoInlineSql()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers");
         var violations = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
         {
-            if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-            var text = File.ReadAllText(file);
-            if (InlineSql.IsMatch(text))
-                violations.Add(Path.GetRelativePath(repoRoot, file));
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var text = File.ReadAllText(file);
+                if (InlineSql.IsMatch(text))
+                    violations.Add(Path.GetRelativePath(repoRoot, file));
+            }
         }
         Assert.True(violations.Count == 0,
             "Decomposers must not contain inline SQL:\n" + string.Join("\n", violations));
@@ -51,16 +68,19 @@ public sealed class DecomposerArchitectureGateTests
     public void DecomposerProjects_ContainNoDirectNpgsqlWriterBypass()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers");
         var violations = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
         {
-            if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-            var text = File.ReadAllText(file);
-            if (ForbiddenWriterRefs.IsMatch(text))
-                violations.Add(Path.GetRelativePath(repoRoot, file));
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var text = File.ReadAllText(file);
+                if (ForbiddenWriterRefs.IsMatch(text))
+                    violations.Add(Path.GetRelativePath(repoRoot, file));
+            }
         }
         Assert.True(violations.Count == 0,
             "Decomposers must not reference Npgsql writers/apply directly (use IDecomposerContext):\n"
@@ -68,46 +88,75 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
-    public void SubstrateAbstractions_ExportsCentralContentTierSpine()
+    public void SubstrateAbstractions_ExportsDecomposerBaseAndContentTierSpine()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var decomposer = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "Decomposer.cs");
+        Assert.True(File.Exists(decomposer), "Decomposer.cs must exist as the unified ingest base");
+        var decomposerText = File.ReadAllText(decomposer);
+        Assert.Contains("Decomposer<TRecord>", decomposerText, StringComparison.Ordinal);
+        Assert.Contains("IngestPipelineDefaults", decomposerText, StringComparison.Ordinal);
+
         var spine = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "ContentTierSpine.cs");
         Assert.True(File.Exists(spine), "ContentTierSpine.cs must exist as the single content path");
-        var text = File.ReadAllText(spine);
-        Assert.Contains("MaxExistenceRounds", text, StringComparison.Ordinal);
-        Assert.Contains("BuildTree", text, StringComparison.Ordinal);
-        Assert.Contains("BatchExistenceEmitBitmapsAsync", text, StringComparison.Ordinal);
+        var spineText = File.ReadAllText(spine);
+        Assert.Contains("MaxExistenceRounds", spineText, StringComparison.Ordinal);
+        Assert.Contains("BuildTree", spineText, StringComparison.Ordinal);
+        Assert.Contains("BatchExistenceEmitBitmapsAsync", spineText, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DecomposerProjects_EachDecomposerUsesIngestionSpine()
+    public void DecomposerProjects_EachDecomposerInheritsDecomposerBase()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers");
-            var allowHandBuilder =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Unicode/UnicodeDecomposer.cs",
-                "Atomic2020/Atomic2020Decomposer.cs",
-                "Audio/AudioDecomposer.cs",
-                "Image/ImageDecomposer.cs",
-            };
         var violations = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
         {
-            if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
-            var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
-            if (allowHandBuilder.Contains(rel)) continue;
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                if (UnicodeAllowlist.Contains(rel)) continue;
 
-            var folder = Path.GetDirectoryName(file)!;
-            bool hasSpine = Directory.EnumerateFiles(folder, "*.cs", SearchOption.AllDirectories)
-                .Any(f => RequiredSpineMarkers.Any(m =>
-                    File.ReadAllText(f).Contains(m, StringComparison.Ordinal)));
-            if (!hasSpine)
-                violations.Add(rel);
+                var text = File.ReadAllText(file);
+                bool inheritsBase =
+                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerOrchestrator|Decomposer<)")
+                    || text.Contains(": Decomposer<", StringComparison.Ordinal);
+                if (!inheritsBase)
+                    violations.Add($"{projectRel}/{rel}");
+            }
         }
         Assert.True(violations.Count == 0,
-            "Each decomposer package must route through the ingestion spine (or be on the documented allowlist):\n"
+            "Each decomposer must inherit Decomposer<T> (or documented allowlist):\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void DecomposerProjects_NoDirectPipelineCallsFromDecomposerCode()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                if (UnicodeAllowlist.Contains(rel)) continue;
+                var text = File.ReadAllText(file);
+                if (text.Contains(": DecomposerOrchestrator", StringComparison.Ordinal)) continue;
+                if (DirectPipelineCall.IsMatch(text))
+                    violations.Add($"{projectRel}/{rel}");
+            }
+        }
+        Assert.True(violations.Count == 0,
+            "Decomposer projects must not call IngestBatchPipeline directly (use Decomposer<T> base):\n"
             + string.Join("\n", violations));
     }
 
@@ -115,33 +164,47 @@ public sealed class DecomposerArchitectureGateTests
     public void DecomposerProjects_DecomposeAsync_AvoidsHandSubstrateChangeBuilder()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers");
-        var allowHandBuilderInDecompose =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Unicode/UnicodeDecomposer.cs",
-                "UD/UDDecomposer.cs",
-            };
         var violations = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
         {
-            if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
-            var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
-            if (allowHandBuilderInDecompose.Contains(rel)) continue;
-            var text = File.ReadAllText(file);
-        var decomposeBody = Regex.Match(
-            text,
-            @"DecomposeAsync[\s\S]*?(?=\r?\n    (?:public |private |internal |protected |public override ))");
-        if (decomposeBody.Success && decomposeBody.Value.Contains("new SubstrateChangeBuilder", StringComparison.Ordinal))
-            violations.Add(rel);
-        else if (!decomposeBody.Success
-                 && text.Contains("DecomposeAsync", StringComparison.Ordinal)
-                 && text.Contains("new SubstrateChangeBuilder", StringComparison.Ordinal))
-            violations.Add(rel);
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                if (HandBuilderAllowlist.Contains(rel)) continue;
+
+                var text = File.ReadAllText(file);
+                if (!text.Contains("DecomposeAsync", StringComparison.Ordinal)) continue;
+
+                var decomposeBody = Regex.Match(
+                    text,
+                    @"DecomposeAsync[\s\S]*?(?=\r?\n    (?:public |private |internal |protected |public override |public sealed override ))");
+                if (decomposeBody.Success && HandBuilderInDecompose.IsMatch(decomposeBody.Value))
+                    violations.Add($"{projectRel}/{rel}");
+                else if (!decomposeBody.Success && HandBuilderInDecompose.IsMatch(text))
+                    violations.Add($"{projectRel}/{rel}");
+            }
         }
         Assert.True(violations.Count == 0,
-            "DecomposeAsync must route through the ingestion spine (DecomposerBatch/pipeline), not hand builders:\n"
+            "DecomposeAsync must route through Decomposer<T>, not hand builders:\n"
             + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void IngestPipeline_WorkingSetDefersBulkDescentUntilFinalize()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var pipeline = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "IngestPipeline.cs");
+        var flush = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "IngestDescentFlush.cs");
+        var pipelineText = File.ReadAllText(pipeline);
+        var flushText = File.ReadAllText(flush);
+        Assert.Contains("WorkingSetDeferredBatch", pipelineText, StringComparison.Ordinal);
+        Assert.Contains("FinalizeWorkingSetAsync", pipelineText, StringComparison.Ordinal);
+        Assert.Contains("ComposeBatchAsync", flushText, StringComparison.Ordinal);
+        Assert.Contains("FinalizeWorkingSetAsync", flushText, StringComparison.Ordinal);
+        Assert.Contains("BulkDescent", flushText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,5 +215,6 @@ public sealed class DecomposerArchitectureGateTests
         var text = File.ReadAllText(flush);
         Assert.Contains("ContentTierSpine.BatchExistenceEmitBitmapsAsync", text, StringComparison.Ordinal);
         Assert.DoesNotContain("bool probe = !config.WorkingSet", text, StringComparison.Ordinal);
+        Assert.Contains("BulkDescent", text, StringComparison.Ordinal);
     }
 }

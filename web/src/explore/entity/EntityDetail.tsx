@@ -384,14 +384,13 @@ export function EntityDetail() {
 
           {tab === 'provenance' ? (
             <table className="explore-table">
-              <thead><tr><th>Type</th><th>Object</th><th>Source</th><th>Outcome</th><th>Count</th></tr></thead>
+              <thead><tr><th>Type</th><th>Object</th><th>μ</th><th>Witnesses</th></tr></thead>
               <tbody>
                 {show.evidence.map((e, i) => (
                   <tr key={i}>
                     <td>{e.type_label}</td>
                     <td>{e.object_label}</td>
-                    <td>{e.source_label}</td>
-                    <td>{e.outcome}</td>
+                    <td>{e.eff_mu != null ? Number(e.eff_mu).toFixed(1) : '—'}</td>
                     <td>{e.observation_count}</td>
                   </tr>
                 ))}

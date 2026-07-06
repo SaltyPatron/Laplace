@@ -1,61 +1,52 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class CodeDecomposer : IDecomposer
+public sealed class CodeDecomposer : GrammarComposeDecomposer
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/CodeDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "CodeDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "CodeDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "code";
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             relationNodeNames: ["CALLS", "DEFINES", "REFERENCES"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var files = EnumerateCodeFiles(context.EcosystemPath).ToList();
-        if (files.Count == 0) yield break;
-        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-
-        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
-                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
-                           "code", batch, context.Reader, options, ct))
-            yield return change;
-    }
-
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EnumerateCodeFiles(context.EcosystemPath).Count());
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
-        IReadOnlyList<(string File, string Modality)> files,
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        var files = EnumerateCodeFiles(ecosystemPath).ToList();
         foreach (var (file, modality) in files)
         {
             ct.ThrowIfCancellationRequested();
             byte[] bytes;
             try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch { continue; }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"CodeDecomposer: failed to read '{file}': {ex.Message}", ex);
+            }
             if (bytes.Length == 0) continue;
             yield return new GrammarComposeRecord(bytes, modality);
         }
     }
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(EnumerateCodeFiles(context.EcosystemPath).Count());
 
     private static IEnumerable<(string File, string Modality)> EnumerateCodeFiles(string root)
     {

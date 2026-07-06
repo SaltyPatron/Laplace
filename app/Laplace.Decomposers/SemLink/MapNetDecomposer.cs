@@ -5,25 +5,25 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class MapNetDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class MapNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/MapNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "MapNetDecomposer";
-    public int LayerOrder => 3;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "MapNetDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["FrameNet_Frame", "FrameNet_LU"],
             relationNodeNames: ["CORRESPONDS_TO"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -58,7 +58,7 @@ public sealed class MapNetDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long total = 0;
         foreach (string path in MapNetIngest.ResolvePaths(context.EcosystemPath))
@@ -69,5 +69,4 @@ public sealed class MapNetDecomposer : IDecomposer, IIngestInventoryProvider
         return total > 0 ? total : null;
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

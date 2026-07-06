@@ -6,7 +6,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
@@ -20,18 +20,18 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "TatoebaDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "TatoebaDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Tatoeba_Sentence"],
             relationNodeNames: ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"],
             readbackNames: LanguageNames, ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -120,11 +120,9 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
         return await EtlInventory.TatoebaAsync(context.EcosystemPath, options.Languages, ct);
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

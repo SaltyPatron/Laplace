@@ -12,29 +12,29 @@ namespace Laplace.Chess.Service;
 //
 // Ingest = record (ChessPgnDecomposer, witnessed, no engine). This = analyze (derive, deferred,
 // re-runnable, targetable). Run: `laplace ingest chess-analyze <pgn path>`. See .scratchpad/08.
-public sealed class ChessAnalyzeDecomposer : IDecomposer
+public sealed class ChessAnalyzeDecomposer : DecomposerOrchestrator
 {
-    public Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
-    public string SourceName => "ChessAnalysis";
-    public int LayerOrder => 21; // after ChessPgn (20)
-    public Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
+    public override Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
+    public override string SourceName => "ChessAnalysis";
+    public override int LayerOrder => 21; // after ChessPgn (20)
+    public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
 
     private IReadOnlyCollection<string> _canonicalNames = System.Array.Empty<string>();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.AnalysisSourceId, SourceName, ChessVocabulary.AnalysisTrustClass, ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int batch = System.Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 256, 1, 512);
-        await foreach (var change in DecomposerBatch.RunAsync(
+        await foreach (var change in RunComposePhaseAsync(
             StreamUnanalyzedGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
             (parsed, b) => ChessAnalyze.DeriveFromParsed(b, parsed),
-            ChessVocabulary.AnalysisSourceId, "chess/analysis", batch, context.Reader, options, ct))
+            "analysis", SourceTrust.StructuredCorpus, batch, context, options, ct))
             yield return change;
     }
 
@@ -75,8 +75,6 @@ public sealed class ChessAnalyzeDecomposer : IDecomposer
         }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

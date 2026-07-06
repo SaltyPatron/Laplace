@@ -9,7 +9,7 @@ namespace Laplace.Decomposers.Model;
 
 
 
-public sealed class RecipeDecomposer : IDecomposer
+public sealed class RecipeDecomposer : DecomposerOrchestrator
 {
 
 
@@ -32,18 +32,18 @@ public sealed class RecipeDecomposer : IDecomposer
         _source = Hash128.OfCanonical($"substrate/source/recipe/{_recipe.Name}/v1");
     }
 
-    public Hash128 SourceId => _source;
-    public string SourceName => _sourceName;
-    public int LayerOrder => 5;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => _source;
+    public override string SourceName => _sourceName;
+    public override int LayerOrder => 5;
+    public override Hash128 TrustClassId => TrustClass;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, _source, _sourceName, TrustClass,
             typeNodeNames: ["Model_Recipe", "Scalar"],
             relationNodeNames: ["HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -51,12 +51,12 @@ public sealed class RecipeDecomposer : IDecomposer
         context.Logger.LogInformation(
             "phase=recipe parsed: name={Name} structure={Structure} hidden={Hidden} layers={Layers}",
             _recipe.Name, _recipe.Structure, _recipe.HiddenSize, _recipe.NumLayers);
-        await foreach (var batch in DecomposerBatch.RunAsync(
-                           SingleRecipeAsync(_recipe, ct),
-                           (rec, b) => RecipeExtractor.StageRecipe(
-                               b, rec, _source, EntityTypeRegistry.ModelRecipe,
-                               HasHiddenSizeTypeId, HasNumLayersTypeId),
-                           _source, "recipe/laplace.recipe", 1, context.Reader, options, ct))
+        await foreach (var batch in RunComposePhaseAsync(
+            SingleRecipeAsync(_recipe, ct),
+            (rec, b) => RecipeExtractor.StageRecipe(
+                b, rec, _source, EntityTypeRegistry.ModelRecipe,
+                HasHiddenSizeTypeId, HasNumLayersTypeId),
+            "laplace.recipe", SourceTrust.UserCuratedResource, 1, context, options, ct))
             yield return batch;
     }
 
@@ -68,7 +68,7 @@ public sealed class RecipeDecomposer : IDecomposer
         await Task.CompletedTask;
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1);
 
 
@@ -79,6 +79,4 @@ public sealed class RecipeDecomposer : IDecomposer
         _recipe.HiddenSize,
         _recipe.NumLayers.ToString(),
     };
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

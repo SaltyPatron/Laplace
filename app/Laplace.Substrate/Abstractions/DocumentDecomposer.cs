@@ -1,46 +1,30 @@
-using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-
-
-
-
-public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider
 {
-    public Hash128 SourceId => UserPromptContent.Source;
+    public override Hash128 SourceId => UserPromptContent.Source;
+    public override string SourceName => "UserPrompt";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => UserPromptContent.TrustClass;
+    protected override double SourceTrust => UserPromptContent.WitnessWeight;
 
-
-
-    public string SourceName => "UserPrompt";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => UserPromptContent.TrustClass;
-
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(string ecosystemPath) =>
+        new DocumentMultiFileStream(ecosystemPath);
+
+    protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(string fileLabel) =>
+        new DocumentIngestHandler();
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        string root = context.EcosystemPath;
-        if (string.IsNullOrEmpty(root)) yield break;
-        if (options.DryRun) yield break;
-
-        ISubstrateReader? reader = context.Reader;
-
-        int batchSize = options.BatchSize > 1 ? options.BatchSize : 32;
-
-        await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
-            new DocumentMultiFileStream(root),
-            _ => new DocumentIngestHandler(),
-            label => DocumentIngestSupport.PipelineConfig(label, reader, batchSize),
-            maxTotalUnits: options.MaxInputUnits,
-            ct))
-            yield return change;
+        int batchSize = BatchConfigDefaults.Resolve(options, BatchConfigDefaults.Document);
+        return DocumentIngestSupport.PipelineConfig(fileLabel, reader, batchSize);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -54,13 +38,11 @@ public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<IngestInventory?>(new IngestInventory("documents", paths.Count, specs));
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long n = EnumerateInputFiles(context.EcosystemPath).LongCount();
         return Task.FromResult<long?>(n == 0 ? null : n);
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     internal static IEnumerable<string> EnumerateInputFiles(string path)
     {

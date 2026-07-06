@@ -1,11 +1,9 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Atomic2020;
-using Laplace.Decomposers.Audio;
 using Laplace.Decomposers.CILI;
 using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.FrameNet;
-using Laplace.Decomposers.Image;
 using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.OpenSubtitles;
@@ -87,12 +85,6 @@ internal static class IngestDispatchTable
                 skipLayerCheck: true, cli),
             ["stack"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new StackDecomposer(), IngestDataPaths.Resolve("stack", cli.Path),
-                skipLayerCheck: true, cli),
-            ["image"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new ImageDecomposer(), IngestDataPaths.Resolve("image", cli.Path),
-                skipLayerCheck: true, cli),
-            ["audio"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new AudioDecomposer(), IngestDataPaths.Resolve("audio", cli.Path),
                 skipLayerCheck: true, cli),
             ["document"] = cli => IngestCommands.IngestDocumentAsync(cli),
             ["recipe"] = cli => IngestCommands.IngestRecipeAsync(cli),

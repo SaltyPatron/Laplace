@@ -7,14 +7,6 @@ using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-
-
-
-
-
-
-
-
 internal sealed class TurnWitness : BackgroundService
 {
     private readonly SubstrateClient _substrate;
@@ -23,10 +15,14 @@ internal sealed class TurnWitness : BackgroundService
         new BoundedChannelOptions(4096)
         {
             SingleReader = true,
-            FullMode = BoundedChannelFullMode.DropWrite
+            FullMode = BoundedChannelFullMode.Wait
         });
 
     private readonly record struct TurnItem(string Text, string Label);
+
+    public bool IsOnline { get; private set; }
+
+    public bool IsAvailable => IsOnline;
 
     public TurnWitness(SubstrateClient substrate, ILogger<TurnWitness> log)
     {
@@ -34,12 +30,18 @@ internal sealed class TurnWitness : BackgroundService
         _log = log;
     }
 
+    /// <summary>Record-or-fail: returns false when witness lane is offline (caller → 503).</summary>
+    public bool TryEnqueue(string text, string label)
+    {
+        if (!IsOnline || string.IsNullOrWhiteSpace(text))
+            return false;
+        return _queue.Writer.TryWrite(new TurnItem(text.Trim(), label));
+    }
+
     public void Enqueue(string text, string label)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-        if (!_queue.Writer.TryWrite(new TurnItem(text.Trim(), label)))
-            _log.LogWarning("turn-witness queue full; {Label} turn dropped", label);
+        if (!TryEnqueue(text, label))
+            _log.LogWarning("turn-witness rejected {Label} turn (lane offline or queue full)", label);
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -56,9 +58,9 @@ internal sealed class TurnWitness : BackgroundService
 
         var writer = new NpgsqlSubstrateWriter(_substrate.DataSource);
         bool floorPresent = false;
-        bool floorWarned = false;
         bool bootstrapped = false;
         int consecutiveFailures = 0;
+        IsOnline = true;
         _log.LogInformation("turn-witness online");
 
         await foreach (var item in _queue.Reader.ReadAllAsync(ct))
@@ -69,12 +71,10 @@ internal sealed class TurnWitness : BackgroundService
                     item.Label, item.Text.Length);
                 if (!floorPresent && !(floorPresent = await FloorPresentAsync(ct)))
                 {
-                    if (!floorWarned)
-                    {
-                        floorWarned = true;
-                        _log.LogWarning("substrate floor missing (no Codepoint entities); turns will not be witnessed until it is seeded");
-                    }
-                    continue;
+                    _log.LogWarning(
+                        "substrate floor missing (no Codepoint entities); witness lane offline until unicode seed");
+                    IsOnline = false;
+                    return;
                 }
 
                 var utf8 = Encoding.UTF8.GetBytes(item.Text);
@@ -96,12 +96,14 @@ internal sealed class TurnWitness : BackgroundService
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
+                IsOnline = false;
                 return;
             }
             catch (Exception ex)
             {
                 if (++consecutiveFailures >= 8)
                 {
+                    IsOnline = false;
                     _log.LogError(ex, "turn-witness disabled after {Count} consecutive failures", consecutiveFailures);
                     return;
                 }
@@ -121,9 +123,6 @@ internal sealed class TurnWitness : BackgroundService
 
     private async Task<bool> AlreadyWitnessedAsync(Hash128 rootId, CancellationToken ct)
     {
-
-
-
         await using var conn = await _substrate.DataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
             "SELECT 1 FROM laplace.physicalities WHERE entity_id = @e AND type = 1 LIMIT 1", conn);

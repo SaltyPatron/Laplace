@@ -1,14 +1,14 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using Parquet;
-using Parquet.Schema;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TinyCodesDecomposer : IDecomposer
+public sealed class TinyCodesDecomposer : GrammarComposeDecomposer
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TinyCodesDecomposer/v1");
@@ -35,16 +35,17 @@ public sealed class TinyCodesDecomposer : IDecomposer
             ["cypher"] = null,
         };
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "TinyCodesDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "TinyCodesDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "tiny-codes";
 
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
-
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["CodeConcept"],
@@ -53,51 +54,23 @@ public sealed class TinyCodesDecomposer : IDecomposer
         _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = EnumerateParquet(context.EcosystemPath).ToList();
+        var files = ParquetCodeRecordStream.EnumerateParquet(ecosystemPath, SearchOption.TopDirectoryOnly).ToList();
         if (files.Count == 0)
         {
-            if (Directory.Exists(context.EcosystemPath))
+            if (Directory.Exists(ecosystemPath))
                 throw new InvalidOperationException(
-                    $"TinyCodesDecomposer: no *.parquet files under '{context.EcosystemPath}' "
+                    $"TinyCodesDecomposer: no *.parquet files under '{ecosystemPath}' "
                     + "(expected top-level shards from download-code-data.cmd)");
             yield break;
         }
 
-        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
-                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
-                           "tiny-codes", batch, context.Reader, options, ct))
-            yield return change;
-    }
-
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "that", "this", "with", "from", "have", "will", "been", "they", "what",
-        "when", "which", "your", "into", "more", "some", "than", "then", "also",
-        "does", "each", "just", "here", "make", "only", "like", "over", "even",
-        "should", "could", "would", "using", "given", "takes", "returns", "given",
-        "write", "create", "generates", "implement", "function", "method", "code",
-        "program", "script", "snippet", "example", "simple", "basic", "following",
-        "python", "javascript", "typescript", "ruby", "julia", "rust", "bash",
-        "java", "golang", "csharp", "cplusplus", "sql",
-    };
-
-    private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
-        IReadOnlyList<string> files, [EnumeratorCancellation] CancellationToken ct)
-    {
         foreach (var file in files)
         {
-            await foreach (var (conceptKey, lang, prompt, response) in ReadRowsAsync(file, ct))
+            await foreach (var (conceptKey, lang, prompt, response) in ParquetCodeRecordStream.ReadTinyCodesRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(response)) continue;
@@ -105,9 +78,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 string? modality = ResolveModality(lang);
                 if (modality is null) continue;
 
-                byte[] codeBytes;
-                try { codeBytes = Encoding.UTF8.GetBytes(response); }
-                catch { continue; }
+                byte[] codeBytes = Encoding.UTF8.GetBytes(response);
                 if (codeBytes.Length == 0) continue;
 
                 IReadOnlyList<string>? keywords = string.IsNullOrWhiteSpace(prompt)
@@ -123,6 +94,21 @@ public sealed class TinyCodesDecomposer : IDecomposer
             }
         }
     }
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
+
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "that", "this", "with", "from", "have", "will", "been", "they", "what",
+        "when", "which", "your", "into", "more", "some", "than", "then", "also",
+        "does", "each", "just", "here", "make", "only", "like", "over", "even",
+        "should", "could", "would", "using", "given", "takes", "returns", "given",
+        "write", "create", "generates", "implement", "function", "method", "code",
+        "program", "script", "snippet", "example", "simple", "basic", "following",
+        "python", "javascript", "typescript", "ruby", "julia", "rust", "bash",
+        "java", "golang", "csharp", "cplusplus", "sql",
+    };
 
     private static IEnumerable<string> ExtractKeywords(string prompt)
     {
@@ -153,73 +139,5 @@ public sealed class TinyCodesDecomposer : IDecomposer
         if (lang.Contains("cypher", StringComparison.OrdinalIgnoreCase)) return null;
         if (lang.Contains("sql", StringComparison.OrdinalIgnoreCase)) return "sql";
         return null;
-    }
-
-    private static async IAsyncEnumerable<(string? ConceptKey, string? Lang, string? Prompt, string? Response)> ReadRowsAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var fs = File.OpenRead(path);
-        await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
-
-        DataField[] fields = reader.Schema.GetDataFields();
-        DataField? taskField = FindField(fields, "task_id");
-        DataField? langField = FindField(fields, "programming_language");
-        DataField? promptField = FindField(fields, "prompt");
-        DataField? respField = FindField(fields, "response");
-        string fileStem = Path.GetFileNameWithoutExtension(path);
-        long rowBase = 0;
-        if (promptField is null || respField is null || (taskField is null && langField is null))
-            throw new InvalidOperationException(
-                $"TinyCodesDecomposer: unrecognized parquet schema in '{path}' — "
-                + $"need prompt+response and task_id or programming_language; found: "
-                + string.Join(", ", fields.Select(f => f.Name)));
-
-        for (int rg = 0; rg < reader.RowGroupCount; rg++)
-        {
-            ct.ThrowIfCancellationRequested();
-            using var rgr = reader.OpenRowGroupReader(rg);
-            int count = (int)rgr.RowCount;
-
-            string[]? taskIds = null;
-            string[]? langs = null;
-            string[] prompts = new string[count];
-            string[] resps = new string[count];
-
-            if (taskField is not null)
-                await rgr.ReadAsync(taskField, taskIds = new string[count]);
-            if (langField is not null)
-                await rgr.ReadAsync(langField, langs = new string[count]);
-            await rgr.ReadAsync(promptField, prompts);
-            await rgr.ReadAsync(respField, resps);
-
-            for (int i = 0; i < count; i++)
-            {
-                string? lang = langs?[i];
-                string? key = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
-                yield return (key, lang, prompts[i], resps[i]);
-            }
-            rowBase += count;
-        }
-    }
-
-    private static DataField? FindField(DataField[] fields, string name)
-    {
-        foreach (var f in fields)
-            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
-                return f;
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateParquet(string root)
-    {
-        if (File.Exists(root))
-        {
-            if (root.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)) yield return root;
-            yield break;
-        }
-        if (!Directory.Exists(root)) yield break;
-        foreach (var f in Directory.EnumerateFiles(root, "*.parquet", SearchOption.TopDirectoryOnly)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
     }
 }

@@ -22,8 +22,6 @@ using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
-using Laplace.Decomposers.Image;
-using Laplace.Decomposers.Audio;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;

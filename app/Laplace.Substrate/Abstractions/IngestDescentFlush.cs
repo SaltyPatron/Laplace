@@ -3,6 +3,15 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
+/// <summary>Compose-only batch accumulated across flush intervals within one working set.</summary>
+internal sealed class WorkingSetDeferredBatch<TRecord>
+{
+    internal readonly List<(TRecord Record, IIngestDeferredUnit Unit)> Pending = new();
+    internal readonly List<(TRecord Record, long Units)> Shortcircuited = new();
+
+    internal bool HasWork => Pending.Count > 0 || Shortcircuited.Count > 0;
+}
+
 internal static class IngestDescentFlush
 {
     internal static Task<(TRecord Record, long Units)[]> ProbeAndDrainAsync<TRecord>(
@@ -23,15 +32,40 @@ internal static class IngestDescentFlush
         ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
-        if (records.Count == 0) return [];
+        var batch = await ComposeBatchAsync(records, handler, reader, builder, probedAbsent, ct)
+            .ConfigureAwait(false);
+        if (batch.Pending.Count == 0)
+            return batch.Shortcircuited.ToArray();
 
-        // Root-level gate (cheap ContentRootId) then O(tiers) Merkle existence on
-        // every flush batch — working-set mode included. At most five tier rounds
-        // per batch regardless of document length; perfcache resolves tier-0 before SPI.
+        var pendingRecords = batch.Pending.Select(p => p.Record).ToList();
+        await FinalizePendingAsync(batch.Pending, handler, reader, builder, config, probedAbsent, ct)
+            .ConfigureAwait(false);
+        var drained = new List<(TRecord, long)>(batch.Shortcircuited.Count + pendingRecords.Count);
+        drained.AddRange(batch.Shortcircuited);
+        foreach (var record in pendingRecords)
+            drained.Add((record, handler.UnitsPerRecord(record)));
+        return drained.ToArray();
+    }
+
+    /// <summary>
+    /// Working-set mode: root gate + parallel compose only — no O(tiers) descent until
+    /// <see cref="FinalizeWorkingSetAsync"/> (Rule #8 step 5 once per working set).
+    /// </summary>
+    internal static async Task<WorkingSetDeferredBatch<TRecord>> ComposeBatchAsync<TRecord>(
+        List<TRecord> records,
+        IIngestRecordHandler<TRecord> handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
+    {
+        var batch = new WorkingSetDeferredBatch<TRecord>();
+        if (records.Count == 0) return batch;
+
         var shortcircuited = await IngestExistenceGate.RemovePresentAsync(
             records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
-        if (records.Count == 0)
-            return shortcircuited;
+        batch.Shortcircuited.AddRange(shortcircuited);
+        if (records.Count == 0) return batch;
 
         var units = new IIngestDeferredUnit[records.Count];
         int composeWorkers = Math.Min(
@@ -55,10 +89,36 @@ internal static class IngestDescentFlush
             }, ct).ConfigureAwait(false);
         }
 
-        var pending = new List<(TRecord Record, IIngestDeferredUnit Unit)>(records.Count);
         for (int i = 0; i < records.Count; i++)
-            pending.Add((records[i], units[i]));
+            batch.Pending.Add((records[i], units[i]));
         records.Clear();
+        return batch;
+    }
+
+    internal static async Task FinalizeWorkingSetAsync<TRecord>(
+        WorkingSetDeferredBatch<TRecord> batch,
+        IIngestRecordHandler<TRecord> handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        IngestBatchConfig config,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
+    {
+        if (batch.Pending.Count == 0) return;
+        await FinalizePendingAsync(batch.Pending, handler, reader, builder, config, probedAbsent, ct)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task FinalizePendingAsync<TRecord>(
+        List<(TRecord Record, IIngestDeferredUnit Unit)> pending,
+        IIngestRecordHandler<TRecord> handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        IngestBatchConfig config,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
+    {
+        if (pending.Count == 0) return;
 
         var flatTrees = new List<TierTree?>();
         var treeRanges = new List<(int Start, int Count)>(pending.Count);
@@ -77,13 +137,10 @@ internal static class IngestDescentFlush
             }
         }
 
-        byte[]?[]? flatBitmaps = flatTrees.Count > 0
-            ? await ContentTierSpine.BatchExistenceEmitBitmapsAsync(
-                flatTrees, reader, probedAbsent, ct).ConfigureAwait(false)
-            : null;
-
-        var drained = new List<(TRecord, long)>(pending.Count + shortcircuited.Length);
-        drained.AddRange(shortcircuited);
+        // Rule #8 step 5: one O(tiers) cross-working-set existence probe — distinct ids
+        // deduped per tier round inside TierTreeDescent (06 L93-94a).
+        byte[]?[]? flatBitmaps = await BulkDescent.ProbeFlushBatchAsync(
+            flatTrees, reader, probedAbsent, ct).ConfigureAwait(false);
 
         for (int i = 0; i < pending.Count; i++)
         {
@@ -113,9 +170,8 @@ internal static class IngestDescentFlush
             {
                 unit.Dispose();
             }
-            drained.Add((record, handler.UnitsPerRecord(record)));
         }
-        return drained.ToArray();
+        pending.Clear();
     }
 
     private static byte[]? NormalizeEmitBitmap(byte[]? bm)
@@ -124,5 +180,25 @@ internal static class IngestDescentFlush
         for (int i = 0; i < bm.Length; i++)
             if (bm[i] != 0) return bm;
         return null;
+    }
+}
+
+/// <summary>
+/// P5 cross-batch O(tiers) bulk descent: one
+/// <see cref="ContentTierSpine.BatchExistenceEmitBitmapsAsync"/> call per flush
+/// batch regardless of record count — at most five tier rounds total.
+/// </summary>
+internal static class BulkDescent
+{
+    internal static Task<byte[]?[]> ProbeFlushBatchAsync(
+        IReadOnlyList<TierTree?> flatTrees,
+        ISubstrateReader reader,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
+    {
+        if (flatTrees.Count == 0)
+            return Task.FromResult(Array.Empty<byte[]?>());
+        return ContentTierSpine.BatchExistenceEmitBitmapsAsync(
+            flatTrees, reader, probedAbsent, ct);
     }
 }

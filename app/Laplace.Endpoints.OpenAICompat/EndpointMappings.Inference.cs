@@ -34,6 +34,8 @@ internal static class InferenceEndpoints
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
+            if (RequireTurnWitness(turnWitness) is { } chatWitnessErr) return chatWitnessErr;
+
 
 
 
@@ -165,7 +167,8 @@ internal static class InferenceEndpoints
         .Accepts<ChatCompletionsRequest>("application/json")
         .Produces<ChatCompletionResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
         {
@@ -185,6 +188,8 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            if (RequireTurnWitness(turnWitness) is { } witnessErr) return witnessErr;
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
@@ -352,4 +357,10 @@ internal static class InferenceEndpoints
         }
         return list;
     }
+
+    private static IResult? RequireTurnWitness(TurnWitness turnWitness) =>
+        turnWitness.IsAvailable
+            ? null
+            : EndpointJson.ServiceUnavailable(
+                "witness_unavailable", "Turn witness is unavailable; prompt turns cannot be recorded.");
 }

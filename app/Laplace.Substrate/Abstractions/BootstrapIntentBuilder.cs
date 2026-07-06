@@ -46,7 +46,7 @@ public sealed class BootstrapIntentBuilder
 
 
 
-        if (ContentWitnessBatch.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
+        if (ContentEmitter.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
             _inner.AddAttestation(NativeAttestation.Categorical(
                 id, "HAS_NAME_ALIAS", nameId, _sourceId, null, SourceTrust.SubstrateMandate));
         return id;

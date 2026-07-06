@@ -2,16 +2,14 @@ CREATE OR REPLACE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    -- Planner estimates (pg_class.reltuples), NOT count(*). The tables run 100M+ rows and are
-    -- unvacuumed, so full-scan counts took minutes and hung the tail of every ingest. Estimates
-    -- are instant and directionally correct for a post-ingest summary; run ANALYZE for exact
-    -- numbers, or query a specific source with evidence_count()/source_id() when precision matters.
-    -- (The old per-type/tier breakdowns were filtered full scans -- the slowest part -- dropped.)
-    SELECT 'entities ~',      GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.entities'::regclass))::bigint
+    -- Planner estimates (pg_class.reltuples), NOT count(*). Full scans on 100M+ unvacuumed
+    -- tables hung every ingest tail; these numbers are directionally correct post-ingest.
+    -- Run ANALYZE for exact counts, or evidence_count()/source_id() for source precision.
+    SELECT 'entities (ESTIMATE)',      GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.entities'::regclass))::bigint
     UNION ALL
-    SELECT 'physicalities ~', GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.physicalities'::regclass))::bigint
+    SELECT 'physicalities (ESTIMATE)', GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.physicalities'::regclass))::bigint
     UNION ALL
-    SELECT 'attestations ~',  GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.attestations'::regclass))::bigint
+    SELECT 'attestations (ESTIMATE)',  GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.attestations'::regclass))::bigint
     UNION ALL
-    SELECT 'consensus ~',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.consensus'::regclass))::bigint
+    SELECT 'consensus (ESTIMATE)',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.consensus'::regclass))::bigint
 $$;

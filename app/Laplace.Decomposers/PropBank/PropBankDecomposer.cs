@@ -4,11 +4,12 @@ using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.Decomposers.Extractors;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-public sealed class PropBankDecomposer : IDecomposer
+public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 {
 
 
@@ -29,10 +30,13 @@ public sealed class PropBankDecomposer : IDecomposer
 
     internal static Hash128 OrdinalId(string n) => Hash128.OfCanonical($"ordinal/{n}/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "PropBankDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "PropBankDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
+    protected override string BatchLabelPrefix => "propbank";
+    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
 
     private const long EstimatedFramesets = 7_567L;
@@ -41,44 +45,30 @@ public sealed class PropBankDecomposer : IDecomposer
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["PropBank_Roleset", "VerbNet_Class", "FrameNet_Frame", "Ordinal"],
             relationNodeNames: ["HAS_SENSE", "HAS_DEFINITION", "HAS_SEMANTIC_ROLE", "HAS_EXAMPLE",
                 "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_FEATURE"],
             readbackNames: _canonicalNames, ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
         string framesDir = DecomposerFileDiscovery.ResolveSubdir(
-            context.EcosystemPath, "*.xml",
+            ecosystemPath, "*.xml",
             Path.Combine("propbank-frames-main", "frames"), "frames");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-
-        await foreach (var change in DecomposerBatch.RunAsync(
-            ParseFramesetsAsync(framesDir, context.EcosystemPath, ct),
-            static (root, b) => ComposeFrameset(root, b),
-            Source, "propbank", batch, context.Reader, options, ct))
-            yield return change;
-    }
-
-    private static async IAsyncEnumerable<XmlElement> ParseFramesetsAsync(
-        string framesDir, string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
-    {
-        foreach (var file in EnumerateFramesetFiles(framesDir, ecosystemPath))
-        {
-            ct.ThrowIfCancellationRequested();
-            var doc = new XmlDocument();
-            try { doc.Load(file); }
-            catch (XmlException) { continue; }
-            var root = doc.DocumentElement;
-            if (root is null || !root.Name.Equals("frameset", StringComparison.Ordinal)) continue;
+        await foreach (var root in XmlFramesetStream.ReadRootsAsync(
+                           XmlFramesetStream.EnumerateFramesetFiles(framesDir, ecosystemPath),
+                           "frameset", ct))
             yield return root;
-        }
     }
+
+    protected override void Compose(XmlElement root, SubstrateChangeBuilder b) => ComposeFrameset(root, b);
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(EstimatedFramesets);
 
     private static void ComposeFrameset(XmlElement root, SubstrateChangeBuilder b)
     {
@@ -86,11 +76,6 @@ public sealed class PropBankDecomposer : IDecomposer
             if (pNode is XmlElement predicate)
                 EmitPredicate(b, predicate);
     }
-
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EstimatedFramesets);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static void EmitPredicate(SubstrateChangeBuilder b, XmlElement predicate)
     {
@@ -130,7 +115,7 @@ public sealed class PropBankDecomposer : IDecomposer
 
     private static void EmitRoles(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
-        foreach (var role in DescendantElements(roleset, "role"))
+        foreach (var role in XmlFramesetStream.DescendantElements(roleset, "role"))
         {
             string descr = role.GetAttribute("descr").Trim();
             string num = role.GetAttribute("n").Trim();
@@ -163,7 +148,7 @@ public sealed class PropBankDecomposer : IDecomposer
                         roleId.Value, "HAS_FEATURE", funcId.Value, Source, TC.AcademicCurated));
             }
 
-            foreach (var link in DescendantElements(role, "rolelink"))
+            foreach (var link in XmlFramesetStream.DescendantElements(role, "rolelink"))
             {
                 string resource = link.GetAttribute("resource");
                 string cls = link.GetAttribute("class").Trim();
@@ -206,8 +191,8 @@ public sealed class PropBankDecomposer : IDecomposer
 
     private static void EmitExamples(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
-        foreach (var example in DescendantElements(roleset, "example"))
-            foreach (var text in DescendantElements(example, "text"))
+        foreach (var example in XmlFramesetStream.DescendantElements(roleset, "example"))
+            foreach (var text in XmlFramesetStream.DescendantElements(example, "text"))
             {
                 string ex = text.InnerText.Trim();
                 if (ex.Length == 0) continue;
@@ -219,11 +204,6 @@ public sealed class PropBankDecomposer : IDecomposer
     }
 
 
-    private static IEnumerable<XmlElement> DescendantElements(XmlElement el, string name)
-    {
-        foreach (XmlNode node in el.GetElementsByTagName(name))
-            if (node is XmlElement ce) yield return ce;
-    }
 
 
 
@@ -232,24 +212,4 @@ public sealed class PropBankDecomposer : IDecomposer
 
 
 
-
-    private static IEnumerable<string> EnumerateFramesetFiles(string framesDir, string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        string? parent = string.Equals(
-            Path.GetFullPath(framesDir).TrimEnd(Path.DirectorySeparatorChar),
-            Path.GetFullPath(ecosystemPath).TrimEnd(Path.DirectorySeparatorChar),
-            StringComparison.OrdinalIgnoreCase)
-            ? null
-            : Path.GetDirectoryName(framesDir);
-
-        foreach (var d in new[] { framesDir, parent })
-        {
-            if (string.IsNullOrEmpty(d) || !Directory.Exists(d)) continue;
-            foreach (var f in Directory.EnumerateFiles(d, "*.xml")
-                                       .OrderBy(p => p, StringComparer.Ordinal))
-                if (seen.Add(Path.GetFullPath(f)))
-                    yield return f;
-        }
-    }
 }

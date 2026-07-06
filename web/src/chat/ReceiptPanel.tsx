@@ -2,15 +2,11 @@ import { useState } from 'react';
 import { apiGet, ApiError, type EvidenceResponse } from '../api/client';
 import { asNum, useAppStore } from '../store';
 
-const OUTCOME = ['refute', 'draw', 'confirm'] as const;
-
-function outcomeName(outcome: string | number | null | undefined): (typeof OUTCOME)[number] {
-  return OUTCOME[asNum(outcome ?? 1)] ?? 'draw';
+function formatMu(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n.toFixed(1) : null;
 }
-
-
-
-
 
 export function ReceiptPanel() {
   const tenant = useAppStore((s) => s.tenant);
@@ -38,7 +34,7 @@ export function ReceiptPanel() {
   return (
     <aside className="receipt-panel">
       <h2>Evidence</h2>
-      <p className="hint">Every claim decomposes into named witnesses. Look one up.</p>
+      <p className="hint">Ranked consensus facts for an entity — one row per relation, μ and witness count.</p>
       <div className="row">
         <input
           value={target}
@@ -57,20 +53,25 @@ export function ReceiptPanel() {
             {evidence.entity_label}
             <span className="entity-id">{evidence.entity_id}</span>
           </h3>
-          {evidence.evidence.length === 0 && <p className="hint">No outbound attestations.</p>}
+          {evidence.evidence.length === 0 && <p className="hint">No outbound consensus yet.</p>}
           <ul>
-            {evidence.evidence.map((item, i) => (
-              <li key={i} className={`outcome-${item.outcome}`}>
-                <span className="relation">{item.type_label}</span>{' '}
-                <span className="object">{item.object_label}</span>
-                <span className="source" title={item.source_id ?? undefined}>
-                  {item.source_label}
-                </span>
-                <span className={`chip chip-${outcomeName(item.outcome)}`}>
-                  {outcomeName(item.outcome)} ×{item.observation_count}
-                </span>
-              </li>
-            ))}
+            {evidence.evidence.map((item, i) => {
+              const mu = formatMu(item.eff_mu);
+              const witnesses = asNum(item.observation_count);
+              return (
+                <li key={`${item.type_id}-${item.object_id}-${i}`}>
+                  <span className="relation">{item.type_label}</span>{' '}
+                  <span className="object">{item.object_label}</span>
+                  {(mu || witnesses > 0) && (
+                    <span className="chip chip-confirm">
+                      {mu ? `μ ${mu}` : null}
+                      {mu && witnesses > 0 ? ' · ' : null}
+                      {witnesses > 0 ? `${witnesses} wit` : null}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Model;
 
 
 
-public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
@@ -80,10 +80,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     }
 
     public Hash128 Source => _source;
-    public Hash128 SourceId => _source;
-    public string SourceName => _sourceName;
-    public int LayerOrder => 10;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => _source;
+    public override string SourceName => _sourceName;
+    public override int LayerOrder => 10;
+    public override Hash128 TrustClassId => TrustClass;
 
 
 
@@ -98,7 +98,12 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             if (!File.Exists(configPath)) return Array.Empty<string>();
             LlamaRecipeExtractor.RecipeInfo r;
             try { r = LlamaRecipeExtractor.Parse(configPath); }
-            catch (Exception) { return Array.Empty<string>(); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "ModelDecomposer: config parse failed for readback: {Message}", ex.Message);
+                return Array.Empty<string>();
+            }
             return new[]
             {
                 LlamaArchitectureCanonical,
@@ -109,7 +114,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         }
     }
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
                 "Ngram", "Model_Layer", "Model_Circuit"],
@@ -119,7 +124,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
                 "HAS_INTERMEDIATE_SIZE", "HAS_VOCAB_SIZE", "IS_A"],
             ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -176,11 +181,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
-        await foreach (var batch in DecomposerBatch.RunAsync(
-                           SingleIdAsync(tokEntityId, ct),
-                           (id, b) => b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId,
-                               firstObservedBy: Source),
-                           Source, "tokenizer/entity", 1, context.Reader, options, ct))
+        await foreach (var batch in RunComposePhaseAsync(
+            SingleIdAsync(tokEntityId, ct),
+            (id, b) => b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId, firstObservedBy: Source),
+            "tokenizer/entity", SourceTrust.AiModelProbe, 1, context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -193,10 +197,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         int batchSz = Math.Max(options.BatchSize, 8192);
         phaseSw.Restart();
         int vocabBatches = 0;
-        await foreach (var batch in DecomposerBatch.RunAsync(
-                           LlamaTokenizerParser.EnumerateVocabRecordsAsync(tokens, ct),
-                           (rec, b) => LlamaTokenizerParser.StageVocabToken(b, rec, Source),
-                           Source, "tokenizer/vocab", batchSz, context.Reader, options, ct))
+        await foreach (var batch in RunComposePhaseAsync(
+            LlamaTokenizerParser.EnumerateVocabRecordsAsync(tokens, ct),
+            (rec, b) => LlamaTokenizerParser.StageVocabToken(b, rec, Source),
+            "tokenizer/vocab", SourceTrust.AiModelProbe, batchSz, context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -208,10 +212,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         phaseSw.Restart();
         var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
         int mergeBatches = 0;
-        await foreach (var batch in DecomposerBatch.RunAsync(
-                           LlamaTokenizerParser.EnumerateMergeRecordsAsync(merges, ct),
-                           (rec, b) => LlamaTokenizerParser.StageMergeRecord(b, rec, Source, TextTypeId),
-                           Source, "tokenizer/merges", batchSz, context.Reader, options, ct))
+        await foreach (var batch in RunComposePhaseAsync(
+            LlamaTokenizerParser.EnumerateMergeRecordsAsync(merges, ct),
+            (rec, b) => LlamaTokenizerParser.StageMergeRecord(b, rec, Source, TextTypeId),
+            "tokenizer/merges", SourceTrust.AiModelProbe, batchSz, context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -221,10 +225,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
         int mapsBatches = 0;
-        await foreach (var batch in DecomposerBatch.RunAsync(
-                           LlamaTokenizerParser.EnumerateMapsToRecordsAsync(tokens, tokEntityId, ct),
-                           (rec, b) => LlamaTokenizerParser.StageMapsToRecord(b, rec, Source),
-                           Source, "tokenizer/maps-to", batchSz, context.Reader, options, ct))
+        await foreach (var batch in RunComposePhaseAsync(
+            LlamaTokenizerParser.EnumerateMapsToRecordsAsync(tokens, tokEntityId, ct),
+            (rec, b) => LlamaTokenizerParser.StageMapsToRecord(b, rec, Source),
+            "tokenizer/maps-to", SourceTrust.AiModelProbe, batchSz, context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -270,7 +274,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<IngestInventory?>(new("matchups", matchups, files));
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long n = EstimateMatchupUnits();
         return Task.FromResult<long?>(n > 0 ? n : null);
@@ -286,7 +290,12 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         if (!File.Exists(configPath)) return 0;
         LlamaRecipeExtractor.RecipeInfo r;
         try { r = LlamaRecipeExtractor.Parse(configPath); }
-        catch (Exception) { return 0; }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "ModelDecomposer: config parse failed for unit estimate: {Message}", ex.Message);
+            return 0;
+        }
 
         long distinctVocab = r.VocabSize;
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
@@ -298,8 +307,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
                 foreach (var t in LlamaTokenizerParser.Parse(tokenizerPath)) ids.Add(t.EntityId);
                 distinctVocab = ids.Count;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceWarning(
+                    "ModelDecomposer: tokenizer parse failed for unit estimate: {Message}", ex.Message);
             }
         }
 
@@ -322,7 +333,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
             yield break;
         }
-        await foreach (var batch in DecomposerBatch.RunAsync(
+        await foreach (var batch in IngestComposePipeline.RunAsync(
                            SingleLegacyRecipeAsync(recipe, ct),
                            (rec, b) => LlamaRecipeExtractor.StageLegacyRecipe(
                                b, rec, source, ModelRecipeTypeId,
@@ -347,7 +358,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
             yield break;
         }
-        await foreach (var batch in DecomposerBatch.RunAsync(
+        await foreach (var batch in IngestComposePipeline.RunAsync(
                            SingleSynthRecipeAsync(synth, ct),
                            (rec, b) => RecipeExtractor.StageRecipe(
                                b, rec, source, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId),
@@ -378,6 +389,4 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         yield return id;
         await Task.CompletedTask;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

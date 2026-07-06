@@ -7,17 +7,17 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCuratedWithUserInput/v1");
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "WiktionaryDecomposer";
-    public int LayerOrder => 2;
-    public Hash128 TrustClassId => TrustClass;
+    public override Hash128 SourceId => Source;
+    public override string SourceName => "WiktionaryDecomposer";
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => TrustClass;
     // kaikki wiktextract records are fat JSON trees (senses, translations, etymology,
     // pronunciation) — tens of KB each. Sizing at the 512-byte default would stage ~20×
     // the memory per batch; the real shape keeps batches small and memory bounded.
@@ -30,7 +30,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             relationNodeNames: ["HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_ETYMOLOGY",
                 "HAS_HYPERNYM", "HAS_HYPONYM", "IS_PART_OF", "IS_SYNONYM_OF", "IS_ANTONYM_OF",
@@ -41,7 +41,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
                 "FORM_OF", "HAS_FEATURE", "MANNER_OF"],
             readbackNames: VocabularyNames, ct: ct);
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -88,14 +88,12 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         return CountInventoryAsync(context.EcosystemPath, options.Languages, ct);
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(
             context, DecomposerOptions.ForWitness(SourceName), ct).ConfigureAwait(false);
         return inv?.TotalInputUnits;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {

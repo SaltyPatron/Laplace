@@ -445,30 +445,31 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
-        // ONE round-trip: resolve CTE feeds both the entity label and the evidence payload.
-        // LEFT JOIN LATERAL keeps a single anchor row when there is no evidence (resolved-but-empty)
-        // and when @target does not resolve (entity_id NULL -> caller returns null).
+        // Ranked consensus neighborhood — one row per (type, object), not raw attestations
+        // (which repeat the same fact once per source/context and read as a cartesian product).
         const string sql = """
             WITH resolved AS (
                 SELECT laplace.resolve_ref(@target) AS id
             )
             SELECT
                 r.id,
-                laplace.label_or_hex(r.id),
-                encode(a.type_id, 'hex'),
-                laplace.label_or_hex(a.type_id),
-                encode(a.object_id, 'hex'),
-                laplace.label_or_hex(a.object_id),
-                encode(a.source_id, 'hex'),
-                laplace.label_or_hex(a.source_id),
-                CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
-                a.outcome,
-                a.observation_count
+                CASE
+                    WHEN @target ~ '^[0-9a-f]{32}$' THEN COALESCE(
+                        NULLIF(left(laplace.render_text(r.id, 12), ''), ''),
+                        left(encode(r.id, 'hex'), 16))
+                    ELSE @target
+                END,
+                encode(c.type_id, 'hex'),
+                laplace.type_label(c.type_id),
+                encode(c.object_id, 'hex'),
+                COALESCE(
+                    NULLIF(left(laplace.render_text(c.object_id, 12), ''), ''),
+                    left(encode(c.object_id, 'hex'), 16)),
+                c.witness_count,
+                laplace.eff_mu_display(c.rating, c.rd)
             FROM resolved r
-            LEFT JOIN LATERAL laplace.attestations_out(r.id, @limit)
-                WITH ORDINALITY AS a(type_id, object_id, source_id, context_id, outcome, observation_count, aord)
-                ON true
-            ORDER BY a.aord;
+            LEFT JOIN LATERAL laplace.consensus_out(r.id, @limit) c ON true
+            WHERE r.id IS NOT NULL;
             """;
         try
         {
@@ -497,11 +498,12 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                         TypeLabel: reader.GetString(3),
                         ObjectId: reader.GetString(4),
                         ObjectLabel: reader.GetString(5),
-                        SourceId: reader.GetString(6),
-                        SourceLabel: reader.GetString(7),
-                        ContextId: reader.IsDBNull(8) ? null : reader.GetString(8),
-                        Outcome: reader.GetInt16(9),
-                        ObservationCount: reader.GetInt64(10)));
+                        SourceId: "",
+                        SourceLabel: "",
+                        ContextId: null,
+                        Outcome: 2,
+                        ObservationCount: reader.GetInt64(6),
+                        EffMu: reader.GetDecimal(7)));
                 }
             }
 

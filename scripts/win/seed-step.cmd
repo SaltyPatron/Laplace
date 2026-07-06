@@ -69,7 +69,8 @@ if /i "%STEP%"=="model-qwen"     goto run_model_qwen
 if /i "%STEP%"=="safetensors"    goto run_ingest_path
 
 echo ERROR: unknown seed step '%STEP%'
-goto usage
+if defined LAPLACE_SKIP_VERIFY exit /b 0
+exit /b 3
 
 :run_ingest
 call :run_ingest_impl
@@ -168,8 +169,9 @@ if /i "%STEP%"=="tiny-codes"    set "STEP_SOURCE=TinyCodesDecomposer"
 if /i "%STEP%"=="chess"         set "STEP_SOURCE=ChessPgn"
 if /i "%STEP%"=="openings"      set "STEP_SOURCE=ChessOpenings"
 if not defined STEP_SOURCE (
-  echo ==== seed-step verify: no source mapping for '%STEP%' — skipped ====
-  exit /b 0
+  echo ERROR: seed-step verify: no source mapping for '%STEP%'
+  if defined LAPLACE_SKIP_VERIFY exit /b 0
+  exit /b 3
 )
 set "STEP_EVIDENCE="
 for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
