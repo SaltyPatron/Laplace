@@ -116,8 +116,9 @@ public sealed class SemLinkDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(new FakeContext(writer));
 
-        Assert.Single(writer.Captured);
-        var boot = writer.Captured[0];
+        Assert.Equal(2, writer.Captured.Count);
+        var boot = writer.Captured.First(c =>
+            c.Metadata.SourceContentUnitName == "bootstrap/SemLinkDecomposer");
         Assert.Contains(boot.Entities, e =>
             e.Id == SemLinkDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
@@ -126,6 +127,11 @@ public sealed class SemLinkDecomposerTests
             a.SubjectId == SemLinkDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == SemLinkDecomposer.TrustClass);
+
+        var pmBoot = writer.Captured.First(c =>
+            c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");
+        Assert.Contains(pmBoot.Entities, e =>
+            e.Id == PredicateMatrixIngest.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
     }
 
     [Fact]

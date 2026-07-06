@@ -35,7 +35,7 @@ public sealed class DocumentIngestPipelineTests
 
         Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.InRange(reader.FlatProbeCalls, 1,
-            MaxProbeCallsFor(ExpectedDescentProbeChunks(docCount, docCount)));
+            MaxProbeCallsFor(ExpectedExistenceRoundChunks(docCount, docCount)));
     }
 
     [Fact]

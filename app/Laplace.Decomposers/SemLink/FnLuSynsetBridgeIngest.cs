@@ -12,25 +12,54 @@ internal static class FnLuSynsetBridgeIngest
 
     internal const string MultiWordNetVersion = SourceEntityIdConventions.MultiWordNetWnVersion;
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
+    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         Hash128 source,
         string labelPrefix,
         int batchSize,
         string synsetVersion = "pwn30",
         long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        ISubstrateReader? reader = null,
+        DecomposerOptions? options = null,
+        CancellationToken ct = default)
     {
-        if (batchSize <= 0) batchSize = 4096;
+        options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
+        if (maxInputUnits > 0)
+            options = options with { MaxInputUnits = maxInputUnits };
+        return CategoryCorrespondenceIngestSupport.RunAsync(
+            EnumerateTabRecordsAsync(path, synsetVersion, maxInputUnits, ct),
+            source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
+    }
 
+    internal static IAsyncEnumerable<SubstrateChange> StreamWfnNativeAsync(
+        string path,
+        Hash128 source,
+        string labelPrefix,
+        int batchSize,
+        string synsetVersion = "pwn30",
+        long maxInputUnits = 0,
+        ISubstrateReader? reader = null,
+        DecomposerOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
+        if (maxInputUnits > 0)
+            options = options with { MaxInputUnits = maxInputUnits };
+        return CategoryCorrespondenceIngestSupport.RunAsync(
+            EnumerateWfnNativeRecordsAsync(path, synsetVersion, maxInputUnits, ct),
+            source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
+    }
+
+    internal static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateTabRecordsAsync(
+        string path,
+        string synsetVersion,
+        long maxInputUnits,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         await using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var reader = new StreamReader(stream);
-
-        var batch = NewBuilder(source, $"{labelPrefix}/0", batchSize);
-        var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
-        int count = 0, batchNum = 0;
         long rowsTotal = 0;
 
         while (true)
@@ -52,42 +81,22 @@ internal static class FnLuSynsetBridgeIngest
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, source, luKey, LuTypeId, synId.Value);
-
-            if (++count >= batchSize)
-            {
-                yield return batch.SetInputUnitsConsumed(count).Build();
-                batch = NewBuilder(source, $"{labelPrefix}/{++batchNum}", batchSize);
-                seen.Clear();
-                count = 0;
-            }
+            yield return new CategoryCorrespondenceRecord(luKey, LuTypeId, synId.Value);
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
-
-        if (count > 0)
-            yield return batch.SetInputUnitsConsumed(count).Build();
     }
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamWfnNativeAsync(
-    string path,
-    Hash128 source,
-    string labelPrefix,
-    int batchSize,
-    string synsetVersion = "pwn30",
-    long maxInputUnits = 0,
-    [EnumeratorCancellation] CancellationToken ct = default)
+    internal static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateWfnNativeRecordsAsync(
+        string path,
+        string synsetVersion,
+        long maxInputUnits,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        if (batchSize <= 0) batchSize = 4096;
-
         await using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var reader = new StreamReader(stream);
-
-        var batch = NewBuilder(source, $"{labelPrefix}/0", batchSize);
-        var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
-        int count = 0, batchNum = 0;
         long rowsTotal = 0;
         string? currentFrame = null;
 
@@ -118,21 +127,10 @@ internal static class FnLuSynsetBridgeIngest
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, source, luKey, LuTypeId, synId.Value);
-
-            if (++count >= batchSize)
-            {
-                yield return batch.SetInputUnitsConsumed(count).Build();
-                batch = NewBuilder(source, $"{labelPrefix}/{++batchNum}", batchSize);
-                seen.Clear();
-                count = 0;
-            }
+            yield return new CategoryCorrespondenceRecord(luKey, LuTypeId, synId.Value);
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
-
-        if (count > 0)
-            yield return batch.SetInputUnitsConsumed(count).Build();
     }
 
     internal static bool TryParseWfnNativeFrameHeader(string line, out string frame)
@@ -153,10 +151,6 @@ internal static class FnLuSynsetBridgeIngest
         lemma = "";
         pos = "";
         synRaw = "";
-
-
-
-
 
         var tok = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         if (tok.Length < 2) return false;
@@ -251,30 +245,4 @@ internal static class FnLuSynsetBridgeIngest
             yield return line;
         }
     }
-
-    private static void StageCorrespondsTo(
-        SubstrateChangeBuilder b,
-        HashSet<(Hash128 Subject, Hash128 Object)> seen,
-        Hash128 source,
-        string subjectKey,
-        Hash128 subjectType,
-        Hash128 synId)
-    {
-        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
-        // content (entity + physicality) via the real tiered content pipeline. Using
-        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
-        // entity minted with no matching physicality.
-        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, source, TC.AcademicCurated);
-        if (subjectId is null) return;
-        if (!seen.Add((subjectId.Value, synId))) return;
-
-        b.AddAttestation(NativeAttestation.Categorical(
-            subjectId.Value, "CORRESPONDS_TO", synId, source, TC.AcademicCurated));
-    }
-
-    private static SubstrateChangeBuilder NewBuilder(Hash128 source, string unit, int batch) =>
-        new(source, unit, null,
-            entityCapacity: batch * 2,
-            physicalityCapacity: 0,
-            attestationCapacity: batch * 2);
 }

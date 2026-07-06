@@ -10,8 +10,8 @@ namespace Laplace.Decomposers.Abstractions;
 /// <see cref="DirectComposeHandler{T}"/> and delegates to IngestBatchPipeline.RunAsync
 /// (working-set mode). It no longer carries its own batch loop, so the run bracket,
 /// working-set budget valve, progress heartbeat, and any future produce-side change land
-/// in exactly one place. These sources compose directly (no content-tree descent probe),
-/// so the handler's unit reports no probe tree and just runs compose in DrainInto — the
+/// in exactly one place. These sources compose imperatively (no Merkle content tree),
+/// so the handler's unit reports no tier-tree for batch existence and runs compose in DrainInto — the
 /// apply's working-set subtraction dedups, exactly as before.
 /// </summary>
 public static class DecomposerBatch
@@ -24,7 +24,9 @@ public static class DecomposerBatch
         int batchSize,
         ISubstrateReader? reader,
         DecomposerOptions options,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int commitEpoch = 0,
+        int? attestationCapacity = null)
     {
         if (options.DryRun) return Empty();
 
@@ -34,13 +36,13 @@ public static class DecomposerBatch
             SourceId = sourceId,
             BatchLabelPrefix = labelPrefix,
             BatchSize = cap,
+            CommitEpoch = commitEpoch,
             ContainmentReader = reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
-            // Preserve the prior builder sizing hints for this lane's row shape.
             EntityCapacity = cap * 4,
             PhysicalityCapacity = cap * 2,
-            AttestationCapacity = cap * 8,
+            AttestationCapacity = attestationCapacity ?? cap * 8,
         };
         return IngestBatchPipeline.RunAsync(
             new AsyncEnumerableRecordStream<T>(records),

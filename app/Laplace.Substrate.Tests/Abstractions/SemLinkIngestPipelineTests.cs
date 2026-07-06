@@ -28,7 +28,7 @@ public sealed class SemLinkIngestPipelineTests
 
             Assert.Equal(0, reader.LegacyContentDescentCalls);
             Assert.InRange(reader.FlatProbeCalls, 1,
-                MaxProbeCallsFor(ExpectedDescentProbeChunks(pairCount, pairCount)));
+                MaxProbeCallsFor(ExpectedExistenceRoundChunks(pairCount, pairCount)));
         }
         finally
         {

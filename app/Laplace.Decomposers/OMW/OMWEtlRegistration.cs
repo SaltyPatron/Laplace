@@ -4,6 +4,9 @@ namespace Laplace.Decomposers.OMW;
 
 public static class OMWEtlRegistration
 {
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void EnsureRegistered() => Register();
+
     public static void Register() =>
         EtlWitnessFactory.Register(
             "OMWDecomposer",

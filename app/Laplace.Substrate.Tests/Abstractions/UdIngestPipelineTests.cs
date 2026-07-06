@@ -42,7 +42,7 @@ public sealed class UdIngestPipelineTests
 
         Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.InRange(reader.FlatProbeCalls, 1,
-            MaxProbeCallsFor(ExpectedDescentProbeChunks(sentenceCount, sentenceCount)));
+            MaxProbeCallsFor(ExpectedExistenceRoundChunks(sentenceCount, sentenceCount)));
     }
 
     [Fact]

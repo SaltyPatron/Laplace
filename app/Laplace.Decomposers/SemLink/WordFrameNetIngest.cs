@@ -24,11 +24,13 @@ internal static class WordFrameNetIngest
         "XWFN",
     ];
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
+    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
+        ISubstrateReader? reader,
+        DecomposerOptions options,
         long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         string baseName = Path.GetFileName(path);
         string label = baseName.Equals("lu_synset.map", StringComparison.OrdinalIgnoreCase)
@@ -36,15 +38,13 @@ internal static class WordFrameNetIngest
             ? "wordframenet/lu"
             : $"wordframenet/{baseName}";
 
-        var stream = LooksLikeNativeWfn(path)
+        return LooksLikeNativeWfn(path)
             ? FnLuSynsetBridgeIngest.StreamWfnNativeAsync(
                   path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct)
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct)
             : FnLuSynsetBridgeIngest.StreamAsync(
                   path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct);
-        await foreach (var change in stream)
-            yield return change;
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct);
     }
 
     internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct) =>

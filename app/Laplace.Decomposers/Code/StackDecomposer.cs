@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
@@ -101,78 +100,43 @@ public sealed class StackDecomposer : IDecomposer
         }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        var reader = context.Reader;
-        var b = NewBuilder(0, reader);
-        int inBatch = 0, bn = 0;
+        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
+                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
+                           "stack-v2", batch, context.Reader, options, ct))
+            yield return change;
+    }
 
+    private async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
+        IReadOnlyList<string> files, [EnumeratorCancellation] CancellationToken ct)
+    {
         foreach (var file in files)
         {
             await foreach (var row in ReadRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
-
                 string? modality = ResolveModality(row.Language);
                 if (modality is null) continue;
                 if (_langFilter is not null && !_langFilter.Contains(modality)) continue;
-
-                IntPtr recipe = GrammarDecomposer.LookupById(modality);
-                if (recipe == IntPtr.Zero) continue;
-
                 if (string.IsNullOrWhiteSpace(row.Content)) continue;
                 byte[] codeBytes;
                 try { codeBytes = Encoding.UTF8.GetBytes(row.Content); }
                 catch { continue; }
                 if (codeBytes.Length == 0) continue;
 
-                ImmutableArray<EntityRow> ents;
-                ImmutableArray<PhysicalityRow> phys;
-                ImmutableArray<AttestationRow> atts;
-                Hash128 codeRootId;
-                try
-                {
-                    using var ast = GrammarDecomposer.Parse(codeBytes, recipe);
-                    var geb = new GrammarEntityBuilder(
-                        codeBytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
-                    (ents, phys, atts, codeRootId) = await geb.BuildAsync(
-                        SourceTrust.StructuredCorpus, context.Reader, ct);
-                }
-                catch { continue; }
-
-                if (codeRootId == default) continue;
-
-                foreach (var e in ents) b.AddEntity(e);
-                foreach (var p in phys) b.AddPhysicality(p);
-                foreach (var a in atts) b.AddAttestation(a);
-
-
+                IReadOnlyList<string>? segs = null;
                 if (!string.IsNullOrWhiteSpace(row.Path))
                 {
                     var filename = Path.GetFileNameWithoutExtension(row.Path);
-                    foreach (var seg in filename.Split(
-                        new char[] { '_', '-', '.', '/', '\\' },
-                        StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        if (seg.Length < 3) continue;
-                        var segId = ContentEmitter.Emit(b, seg.ToLowerInvariant(), Source);
-                        if (segId.HasValue)
-                            b.AddAttestation(NativeAttestation.Categorical(
-                                segId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
-                    }
+                    segs = filename.Split(
+                            ['_', '-', '.', '/', '\\'],
+                            StringSplitOptions.RemoveEmptyEntries)
+                        .Where(s => s.Length >= 3)
+                        .Select(s => s.ToLowerInvariant())
+                        .ToList();
                 }
 
-                if (++inBatch >= batch)
-                {
-                    if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct); IntentStage.ResetContentBank(); }
-                    b = NewBuilder(++bn, reader);
-                    inBatch = 0;
-                }
+                yield return new GrammarComposeRecord(codeBytes, modality, segs);
             }
-        }
-
-        if (inBatch > 0 && !options.DryRun)
-        {
-            yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-            IntentStage.ResetContentBank();
         }
     }
 
@@ -252,10 +216,6 @@ public sealed class StackDecomposer : IDecomposer
                                    .OrderBy(p => p, StringComparer.Ordinal))
             yield return f;
     }
-
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
-        new SubstrateChangeBuilder(Source, $"stack-v2/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
 
     private readonly record struct StackRow(string? Content, string? Language, string? Path);
 }

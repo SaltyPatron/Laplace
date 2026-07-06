@@ -71,7 +71,7 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestInventoryProvider
             int pmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
             long fileCap = cap > 0 ? cap - consumed : 0;
             await foreach (var change in PredicateMatrixIngest.StreamAsync(
-                               pmPath, pmBatch, options.Languages, fileCap, ct))
+                               pmPath, pmBatch, options.Languages, context.Reader, options, fileCap, ct))
             {
                 if (!options.DryRun)
                 {

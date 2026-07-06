@@ -28,14 +28,12 @@ public readonly record struct RelationTripleRecord(
     byte[] ObjectCanonical,
     Hash128? ContextId = null,
     double Magnitude = 1.0,
-    // Optional WordNet-convention POS char (n/v/a/r/s) the source encodes for each phrase
-    // (e.g. ConceptNet's /c/en/dog/n). When present, DrainInto attaches HAS_POS to the
-    // corresponding content root, folding onto the unified POS hub. Atomic leaves these null.
-    // The synset (/wn/) hub-link is deliberately NOT here: it's a cross-source join whose
-    // object entity this source does not own, so it belongs to a calculated pass, not ingest.
-    // See .scratchpad/16 §4.
     char? SubjectPos = null,
-    char? ObjectPos = null);
+    char? ObjectPos = null,
+    Hash128? SubjectLangId = null,
+    Hash128? ObjectLangId = null,
+    string? ContextAnchorKey = null,
+    Hash128? ContextCategoryTypeId = null);
 
 /// <summary>
 /// The single ingestion handler for ALL relation-triple sources. Each record becomes a
@@ -93,7 +91,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         private static TierTree? TryBuild(byte[] canonical)
         {
             if (canonical is null || canonical.Length == 0) return null;
-            try { return IntentStage.BuildContentTree(canonical); }
+            try { return ContentTierSpine.BuildTree(canonical); }
             catch { return null; }
         }
 
@@ -103,7 +101,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             _subjectTree is null
                 ? Task.FromResult<byte[]?>(null)
-                : TierTreeContainmentProbe.ProbeNodeEmitBitmapAsync(_subjectTree, reader, ct);
+                : ContentTierSpine.ExistenceEmitBitmapAsync(_subjectTree, reader, ct);
 
         public IReadOnlyList<TierTree?> AllProbeTrees => _trees;
 
@@ -119,9 +117,17 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             Hash128 objectRoot = EmitTree(builder, _objectTree, perTreeBitmaps.Length > 1 ? perTreeBitmaps[1] : null);
 
             if (subjectRoot != default && objectRoot != default)
+            {
+                Hash128? ctx = _record.ContextId;
+                if (_record.ContextAnchorKey is { Length: > 0 } ctxKey
+                    && _record.ContextCategoryTypeId is { } ctxType && ctxType != default)
+                {
+                    ctx = CategoryAnchor.Emit(builder, ctxKey, ctxType, _sourceId, _sourceTrust) ?? ctx;
+                }
                 builder.AddAttestation(NativeAttestation.Categorical(
                     subjectRoot, _record.RelationType, objectRoot, _sourceId, _sourceTrust,
-                    magnitude: _record.Magnitude, arenaScale: 1.0, contextId: _record.ContextId));
+                    magnitude: _record.Magnitude, arenaScale: 1.0, contextId: ctx));
+            }
 
             // Fold source-encoded POS onto the unified POS hub (n/v/a/r/s → canonical via the
             // WordNet tagset). POS entities are foundation-seeded, so this is FK-safe.
@@ -132,14 +138,29 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
                 PosReference.Attest(builder, objectRoot, op.ToString(),
                     PosReference.PosTagset.WordNet, _sourceId, null, _sourceTrust);
 
+            if (subjectRoot != default && _record.SubjectLangId is { } sl && sl != default)
+            {
+                builder.AddEntity(new EntityRow(
+                    sl, EntityTier.Word, EntityTypeRegistry.Language, _sourceId));
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    subjectRoot, "HAS_LANGUAGE", sl, _sourceId, _sourceTrust));
+            }
+            if (objectRoot != default && _record.ObjectLangId is { } ol && ol != default)
+            {
+                builder.AddEntity(new EntityRow(
+                    ol, EntityTier.Word, EntityTypeRegistry.Language, _sourceId));
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    objectRoot, "HAS_LANGUAGE", ol, _sourceId, _sourceTrust));
+            }
+
             return subjectRoot;
         }
 
         private Hash128 EmitTree(SubstrateChangeBuilder builder, TierTree? tree, byte[]? bitmap)
         {
             if (tree is null) return default;
-            return builder.ContentStage.EmitContentTree(
-                tree, _sourceId, bitmap ?? ReadOnlySpan<byte>.Empty, out var root) ? root : default;
+            return ContentTierSpine.EmitTree(
+                builder, tree, _sourceId, bitmap ?? ReadOnlySpan<byte>.Empty, out var root) ? root : default;
         }
 
         public void Dispose()

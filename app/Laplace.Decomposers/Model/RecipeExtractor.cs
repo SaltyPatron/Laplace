@@ -78,7 +78,18 @@ public sealed class RecipeExtractor
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/laplace.recipe",
             entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 4);
+        StageRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId);
+        return b.Build();
+    }
 
+    public static void StageRecipe(
+        SubstrateChangeBuilder b,
+        RecipeInfo recipe,
+        Hash128 sourceId,
+        Hash128 modelRecipeTypeId,
+        Hash128 hasHiddenSizeTypeId,
+        Hash128 hasNumLayersTypeId)
+    {
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
         void AddScalar(Hash128 typeId, string value)
@@ -91,11 +102,7 @@ public sealed class RecipeExtractor
 
         AddScalar(hasHiddenSizeTypeId, recipe.HiddenSize);
         AddScalar(hasNumLayersTypeId, recipe.NumLayers.ToString());
-
-        return b.Build();
     }
-
-
 
     public static string CanonicalName(RecipeInfo recipe) =>
         Encoding.UTF8.GetString(recipe.CanonicalJson);

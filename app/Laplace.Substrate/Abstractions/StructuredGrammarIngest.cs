@@ -42,17 +42,9 @@ public static class StructuredGrammarIngest
     }
 
     /// <summary>
-    /// Record-level parallel compose for MONOLITHIC files. A per-file worker
-    /// pool covers multi-file sources (UD, OMW), but a single multi-GB file
-    /// runs one pipeline — one core — no matter how many workers the
-    /// topology declares. Here one reader frames records and N pinned
-    /// P-core workers compose them into per-worker builders
-    /// (PCoreParallelCompose); no per-interval probing — the write lane's
-    /// bulk in-transaction verification is the single dedup pass, which is
-    /// the Rule #8 shape for novel-heavy corpora. Yields flow continuously
-    /// (one change per <paramref name="recordsPerChange"/> per worker), so
-    /// progress counters tick and the runner's working-set accumulation +
-    /// budget valve handle the rest.
+    /// Record-level parallel parse for monolithic files, then the same
+    /// IngestBatchPipeline + working-set spine as IngestFileAsync. Parse
+    /// fans out across P-cores; existence/dedup/COPY stay on the shared lane.
     /// </summary>
     public static IAsyncEnumerable<SubstrateChange> IngestFileParallelAsync(
         string filePath,
@@ -70,67 +62,25 @@ public static class StructuredGrammarIngest
         ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
     {
-        // The feeder only FRAMES records — the native grammar parse is the
-        // expensive half for fat JSON records, and parsing on the feeder
-        // starves every worker (measured: 8 workers, exactly one busy core).
-        // Each worker owns a private row iterator and does parse + compose.
+        var stream = new ParallelGrammarFileRecordStream(
+            filePath, modalityId, acceptRow, recordFraming, workerCount, ct);
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
         var config = new IngestBatchConfig
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = recordsPerChange,
+            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
+            ContainmentReader = containmentReader,
+            WorkingSet = WorkingSetMode.Enabled,
         };
-        var workerIters = new ThreadLocal<IntPtr>(() =>
-        {
-            IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
-            return recipe == IntPtr.Zero ? IntPtr.Zero : CreateRowIterForPipeline(recipe);
-        }, trackAllValues: true);
-        long rowSeq = 0;
-
-        return PCoreParallelCompose.RunAsync(
-            RawRecordsAsync(filePath, modalityId, acceptRow, ct),
-            workerCount,
-            recordsPerChange,
-            NewBuilderFactory(config),
-            (builder, lineUtf8) =>
-            {
-                IntPtr iter = workerIters.Value;
-                if (iter == IntPtr.Zero) return;
-                if (!TryParseRowForPipeline(iter, lineUtf8, out IntPtr astPtr) || astPtr == IntPtr.Zero)
-                    return;
-                long seq = Interlocked.Increment(ref rowSeq);
-                var record = new GrammarIngestRecord(
-                    lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
-
-                // ONE compose per record. The trunk-shortcircuit that used to sit
-                // here called compose_row_root — a FULL grapheme-floor +
-                // hash-composer + compose_ast_nodes pass (grammar_compose.cpp:1010)
-                // — purely to read the root id, freed the entire compose, then
-                // DrainInto composed the record AGAIN: 2x on every record. It
-                // gated on IsProvenPresent, which on a fresh load never hits, so
-                // the first compose was pure waste corpus-wide; on re-ingest it
-                // still paid one full compose in the probe, so it never actually
-                // beat "compose once." This path's dedup IS the write lane's bulk
-                // in-transaction verify (Rule #8 for novel-heavy corpora), so
-                // compose once and let the apply decide novelty.
-                using var unit = handler.CreateDeferredUnit(record);
-                var root = unit.DrainInto(builder, config.WitnessWeight, null);
-                handler.WalkWitness(record, root, builder, unit);
-            },
-            ct);
-    }
-
-    private static Func<SubstrateChangeBuilder> NewBuilderFactory(IngestBatchConfig config)
-    {
-        int batchNum = -1;
-        return () => config.NewBuilder(Interlocked.Increment(ref batchNum));
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
 
     /// <summary>Frame-only record stream: raw record bytes out, no parsing.</summary>
-    private static async IAsyncEnumerable<byte[]> RawRecordsAsync(
+    internal static async IAsyncEnumerable<byte[]> RawRecordsAsync(
         string filePath,
         string modalityId,
         Func<ReadOnlySpan<byte>, bool>? acceptRow,

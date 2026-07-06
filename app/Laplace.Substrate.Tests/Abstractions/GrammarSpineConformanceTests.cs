@@ -45,9 +45,9 @@ public class GrammarSpineConformanceTests
             // RelationTripleDecomposerBase → IngestBatchPipeline path (extraction only),
             // NOT the grammar spine — the base carries the ingestion, so the source
             // files reference RelationTripleRecord, not a grammar witness.
-            ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync"]),
+            ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
             ("OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
-            ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync"]),
+            ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
             ("UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
         };
 
@@ -65,7 +65,7 @@ public class GrammarSpineConformanceTests
     }
 
     [Fact]
-    public void OpenSubtitles_UsesContentWitnessBatch_NotHandRolledTabularParse()
+    public void OpenSubtitles_UsesIngestPipeline_NotHandRolledBuilderLoop()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "OpenSubtitles");
@@ -73,7 +73,9 @@ public class GrammarSpineConformanceTests
             .Where(p => !p.Contains("bin") && !p.Contains("obj"))
             .Select(File.ReadAllText));
         Assert.Contains("OpenSubtitlesZipIngest", text, StringComparison.Ordinal);
-        Assert.Contains("ContentWitnessBatch", text, StringComparison.Ordinal);
+        Assert.Contains("RelationTripleDecomposerBase", text, StringComparison.Ordinal);
+        Assert.Contains("ExtractRecordsAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenSubtitlesIngestHandler", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenSubtitlesFastIngest", text, StringComparison.Ordinal);
     }
 }

@@ -88,7 +88,26 @@ public sealed class LlamaRecipeExtractor
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
             entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8);
+        StageLegacyRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId,
+            hasNumHeadsTypeId, hasNumKvHeadsTypeId, hasIntermSizeTypeId, hasVocabSizeTypeId,
+            isATypeId, architectureEntityId);
+        return b.Build();
+    }
 
+    public static void StageLegacyRecipe(
+        SubstrateChangeBuilder b,
+        RecipeInfo recipe,
+        Hash128 sourceId,
+        Hash128 modelRecipeTypeId,
+        Hash128 hasHiddenSizeTypeId,
+        Hash128 hasNumLayersTypeId,
+        Hash128 hasNumHeadsTypeId,
+        Hash128 hasNumKvHeadsTypeId,
+        Hash128 hasIntermSizeTypeId,
+        Hash128 hasVocabSizeTypeId,
+        Hash128 isATypeId,
+        Hash128 architectureEntityId)
+    {
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
         void AddAttestation(Hash128 typeId, Hash128? objectId)
@@ -112,8 +131,6 @@ public sealed class LlamaRecipeExtractor
 
         b.AddEntity(architectureEntityId, EntityTier.Word, EntityTypeRegistry.Architecture, sourceId);
         AddAttestation(isATypeId, architectureEntityId);
-
-        return b.Build();
     }
 
     private static int GetInt(JsonElement root, string key, int def)

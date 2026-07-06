@@ -42,7 +42,7 @@ public sealed class IngestBatchPipelineTests
         Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
         Assert.True(reader.FlatProbeCalls >= 2, "root bulk IN then tier rounds");
         Assert.InRange(reader.FlatProbeCalls, 2,
-            MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, probeChunk)));
+            MaxProbeCallsFor(ExpectedExistenceRoundChunks(rowCount, probeChunk)));
         Assert.True(ContentEntityCount(changes) > 0);
     }
 
@@ -332,7 +332,7 @@ public sealed class IngestBatchPipelineTests
             Assert.True(reader.FlatProbeCalls < rowCount,
                 "grammar ingest must batch probe within pending chunks, not one probe call per row");
             Assert.InRange(reader.FlatProbeCalls, 1,
-                MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, 1024)));
+                MaxProbeCallsFor(ExpectedExistenceRoundChunks(rowCount, 1024)));
         }
         finally
         {

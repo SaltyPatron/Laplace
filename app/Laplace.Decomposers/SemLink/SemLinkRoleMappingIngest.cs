@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -10,9 +11,6 @@ namespace Laplace.Decomposers.SemLink;
 internal static class SemLinkRoleMappingIngest
 {
     internal const string FileName = "VN-FNRoleMapping.txt";
-
-    private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
-    private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
 
     internal static bool ExistsLocally(string dir) => File.Exists(Path.Combine(dir, FileName));
 
@@ -40,20 +38,35 @@ internal static class SemLinkRoleMappingIngest
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
-
-        var doc = new XmlDocument();
-        using (var stream = new FileStream(
-                   path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                   bufferSize: 1 << 16, FileOptions.SequentialScan))
+        var stream = new AsyncEnumerableRecordStream<RelationTripleRecord>(EnumerateRecordsAsync(path, ct));
+        var handler = new RelationTripleHandler(SemLinkDecomposer.Source, TC.AcademicCurated);
+        var config = new IngestBatchConfig
         {
+            SourceId = SemLinkDecomposer.Source,
+            BatchLabelPrefix = "semlink/vn-fn-role-mapping",
+            BatchSize = batchSize,
+            ProbeChunkSize = Math.Clamp(batchSize, 64, 4096),
+            ContainmentReader = containmentReader,
+            WorkingSet = WorkingSetMode.Enabled,
+        };
+        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
+            yield return change;
+    }
+
+    private static async IAsyncEnumerable<RelationTripleRecord> EnumerateRecordsAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var doc = new XmlDocument();
+        await Task.Run(() =>
+        {
+            using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 1 << 16, FileOptions.SequentialScan);
             doc.Load(stream);
-        }
+        }, ct);
 
         var root = doc.DocumentElement;
         if (root is null) yield break;
-
-        var batch = NewBuilder("semlink/vn-fn-role-mapping/0", batchSize, containmentReader);
-        int count = 0, batchNum = 0;
 
         foreach (XmlNode clsNode in root.ChildNodes)
         {
@@ -62,13 +75,8 @@ internal static class SemLinkRoleMappingIngest
                 continue;
 
             string vnClass = cls.GetAttribute("class").Trim();
-            string fnFrame = cls.GetAttribute("fnframe").Trim();
-            if (vnClass.Length == 0 || fnFrame.Length == 0) continue;
-
-            Hash128? vnClassId = CategoryAnchor.Emit(
-                batch, SourceEntityIdConventions.NumericVerbNetClassId(vnClass), VnClassTypeId,
-                SemLinkDecomposer.Source, TC.AcademicCurated);
-            if (vnClassId is null) continue;
+            if (vnClass.Length == 0) continue;
+            string vnClassKey = SourceEntityIdConventions.NumericVerbNetClassId(vnClass);
 
             foreach (XmlNode rolesNode in cls.ChildNodes)
             {
@@ -84,35 +92,14 @@ internal static class SemLinkRoleMappingIngest
                     string vnRole = role.GetAttribute("vnrole").Trim();
                     if (fnRole.Length == 0 || vnRole.Length == 0) continue;
 
-                    Hash128? feId = CategoryAnchor.Emit(
-                        batch, fnRole, FeTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
-                    if (feId is null) continue;
-
-                    Hash128? vnRoleId = ContentEmitter.Emit(batch, vnRole, SemLinkDecomposer.Source);
-                    if (vnRoleId is null) continue;
-
-                    batch.AddAttestation(NativeAttestation.Categorical(
-                        vnRoleId.Value, "ROLE_CORRESPONDS_TO", feId.Value,
-                        SemLinkDecomposer.Source, TC.AcademicCurated,
-                        contextId: vnClassId.Value));
-
-                    if (++count >= batchSize)
-                    {
-                        batch.SetInputUnitsConsumed(count);
-                        yield return await batch.BuildAsync(ct);
-                        IntentStage.ResetContentBank();
-                        batch = NewBuilder($"semlink/vn-fn-role-mapping/{++batchNum}", batchSize, containmentReader);
-                        count = 0;
-                    }
+                    yield return new RelationTripleRecord(
+                        Encoding.UTF8.GetBytes(vnRole),
+                        "ROLE_CORRESPONDS_TO",
+                        Encoding.UTF8.GetBytes(fnRole),
+                        ContextAnchorKey: vnClassKey,
+                        ContextCategoryTypeId: EntityTypeRegistry.VerbNetClass);
                 }
             }
-        }
-
-        if (count > 0)
-        {
-            batch.SetInputUnitsConsumed(count);
-            yield return await batch.BuildAsync(ct);
-            IntentStage.ResetContentBank();
         }
     }
 
@@ -125,7 +112,7 @@ internal static class SemLinkRoleMappingIngest
             doc.Load(path);
             var root = doc.DocumentElement;
             if (root is null) return;
-            foreach (XmlNode roleNode in root.GetElementsByTagName("role"))
+            foreach (XmlNode _ in root.GetElementsByTagName("role"))
             {
                 ct.ThrowIfCancellationRequested();
                 total++;
@@ -133,10 +120,4 @@ internal static class SemLinkRoleMappingIngest
         }, ct);
         return total > 0 ? total : null;
     }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
-        new SubstrateChangeBuilder(SemLinkDecomposer.Source, unit, null,
-            entityCapacity: batch * 2,
-            physicalityCapacity: 0,
-            attestationCapacity: batch * 2);
 }

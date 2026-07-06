@@ -45,8 +45,11 @@ public sealed class HeadClassifier
         return Hash128.OfCanonical($"substrate/entity/{_modelName}/circuit/{layer}{head}.{c.Plane}/v1");
     }
 
-    public async Task<SubstrateChange?> ClassifyAsync(
-        CircuitDescriptor descriptor, IReadOnlyList<CircuitPair> topPairs, int commitEpoch,
+    public readonly record struct CircuitClassifyRecord(
+        CircuitDescriptor Descriptor, Hash128 CircuitId, Hash128 WinnerTypeId, double WitnessWeight);
+
+    public async Task<CircuitClassifyRecord?> TryClassifyRecordAsync(
+        CircuitDescriptor descriptor, IReadOnlyList<CircuitPair> topPairs,
         CancellationToken ct = default)
     {
         if (topPairs.Count == 0) return null;
@@ -67,7 +70,6 @@ public sealed class HeadClassifier
         }
         if (hits.Count == 0) return null;
 
-
         var votes = new Dictionary<Hash128, double>();
         double total = 0;
         foreach (var h in hits)
@@ -87,15 +89,16 @@ public sealed class HeadClassifier
         double witnessWeight = SourceTrust.AiModelProbe * dominance;
         var circuit = CircuitEntityId(descriptor);
 
-        var b = new SubstrateChangeBuilder(_source, "model/decoder-ring",
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
-            .SetCommitEpoch(commitEpoch);
-        b.AddEntity(circuit, EntityTier.Word, ModelCircuitTypeId, firstObservedBy: _source);
-        b.AddAttestation(NativeAttestation.CategoricalResolved(
-            circuit, EncodesTypeId, winner, _source, null, witnessWeight));
-
         _log.LogInformation("decoder-ring: {Plane} L{L}H{H} ENCODES (dominance {Dom:P0}, {N} seed hits)",
             descriptor.Plane, descriptor.Layer, descriptor.Head, dominance, hits.Count);
-        return b.Build();
+        return new CircuitClassifyRecord(descriptor, circuit, winner, witnessWeight);
+    }
+
+    public static void StageClassifyRecord(
+        SubstrateChangeBuilder b, CircuitClassifyRecord rec, Hash128 sourceId)
+    {
+        b.AddEntity(rec.CircuitId, EntityTier.Word, ModelCircuitTypeId, firstObservedBy: sourceId);
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            rec.CircuitId, EncodesTypeId, rec.WinnerTypeId, sourceId, null, rec.WitnessWeight));
     }
 }

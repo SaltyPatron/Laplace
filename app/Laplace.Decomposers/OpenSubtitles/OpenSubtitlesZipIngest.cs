@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
@@ -54,39 +53,6 @@ internal static class OpenSubtitlesZipIngest
         }
     }
 
-    public static bool TryAppendPair(
-        SubstrateChangeBuilder b,
-        OpenSubtitlesLinePair pair,
-        out Hash128 rootA)
-    {
-        rootA = default;
-        if (!ContentWitnessBatch.TryAppendToBuilder(
-                b, pair.LineA, OpenSubtitlesDecomposer.Source, out var idA))
-            return false;
-        if (!ContentWitnessBatch.TryAppendToBuilder(
-                b, pair.LineB, OpenSubtitlesDecomposer.Source, out var idB))
-            return false;
-
-        b.AddAttestation(NativeAttestation.Categorical(
-            idA, "IS_TRANSLATION_OF", idB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-        b.AddAttestation(NativeAttestation.Categorical(
-            idA, "HAS_LANGUAGE", pair.LangA, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-        b.AddAttestation(NativeAttestation.Categorical(
-            idB, "HAS_LANGUAGE", pair.LangB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-        rootA = idA;
-        return true;
-    }
-
-    public static void Absorb(SubstrateChangeBuilder acc, SubstrateChange micro)
-    {
-        foreach (var e in micro.Entities) acc.AddEntity(e);
-        foreach (var p in micro.Physicalities) acc.AddPhysicality(p);
-        foreach (var a in micro.Attestations) acc.AddAttestation(a);
-        foreach (var s in micro.IntentStages)
-            if (s is { IsInvalid: false })
-                acc.AddIntentStage(s);
-    }
-
     private static int TrimCr(ReadOnlyMemory<byte> line)
     {
         int len = line.Length;
@@ -130,17 +96,5 @@ internal static class OpenSubtitlesZipIngest
         string baseName = Path.GetFileNameWithoutExtension(entryName);
         int dot = baseName.LastIndexOf('.');
         return dot >= 0 ? baseName[(dot + 1)..] : baseName;
-    }
-
-    internal static SubstrateChangeBuilder NewBuilder(
-        string unit, int batch, Hash128 langA, Hash128 langB, ISubstrateReader? reader = null)
-    {
-        var b = new SubstrateChangeBuilder(OpenSubtitlesDecomposer.Source, unit, null,
-            entityCapacity: batch * 4,
-            physicalityCapacity: batch * 8,
-            attestationCapacity: batch * 4);
-        b.AddEntity(new EntityRow(langA, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
-        b.AddEntity(new EntityRow(langB, EntityTier.Word, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
-        return b;
     }
 }

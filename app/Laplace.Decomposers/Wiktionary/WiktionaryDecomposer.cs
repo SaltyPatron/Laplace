@@ -55,44 +55,20 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             ? line => WiktionaryJsonFilter.MatchesLanguageFilter(line, langs)
             : null;
 
-        // One 22GB file = one pipeline = one core on the sequential lane.
-        // Record-parallel compose across the P-cores unless a unit cap asks
-        // for the sequential, exactly-bounded path.
-        if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0)
-        {
-            var source = EtlManifest.Get("wiktionary");
-            int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
-            await foreach (var change in StructuredGrammarIngest.IngestFileParallelAsync(
-                file,
-                source.Modality.GrammarId,
-                source.SourceId,
-                witness: witness,
-                witnessWeight: 0.7,
-                batchLabelPrefix: "wiktionary",
-                workerCount: workers,
-                acceptRow: acceptRow,
-                recordFraming: source.Modality.RecordFraming,
-                containmentReader: context.Reader,
-                ct: ct))
-            {
-                if (!options.DryRun) yield return change;
-            }
-            yield break;
-        }
-
-        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-            file,
-            EtlManifest.Get("wiktionary"),
-            witness: witness,
-            batchSize: options.BatchSize > 1 ? options.BatchSize : 1024,
-            witnessWeight: 0.7,
-            batchLabelPrefix: "wiktionary",
-            reportUnits: null,
-            acceptRow: acceptRow,
-            maxInputUnits: options.MaxInputUnits,
-
-            containmentReader: null,
-            ct: ct))
+        var source = EtlManifest.Get("wiktionary");
+        int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
+        await foreach (var change in StructuredGrammarIngest.IngestFileParallelAsync(
+                           file,
+                           source.Modality.GrammarId,
+                           source.SourceId,
+                           witness: witness,
+                           witnessWeight: 0.7,
+                           batchLabelPrefix: "wiktionary",
+                           workerCount: workers,
+                           acceptRow: acceptRow,
+                           recordFraming: source.Modality.RecordFraming,
+                           containmentReader: context.Reader,
+                           ct: ct))
         {
             if (!options.DryRun) yield return change;
         }
@@ -140,18 +116,8 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         foreach (var name in new[] { "raw-wiktextract-data.jsonl", "kaikki.org-dictionary-English.jsonl" })
         {
             string p = Path.Combine(dir, name);
-            if (File.Exists(p))
-            {
-                Console.Error.WriteLine($"[WiktionaryDecomposer] Using input corpus '{p}'.");
-                return p;
-            }
+            if (File.Exists(p)) return p;
         }
-        if (Directory.Exists(dir))
-            foreach (var p in Directory.EnumerateFiles(dir, "*.jsonl"))
-            {
-                Console.Error.WriteLine($"[WiktionaryDecomposer] Falling back to first *.jsonl in dir: '{p}'.");
-                return p;
-            }
         return null;
     }
 

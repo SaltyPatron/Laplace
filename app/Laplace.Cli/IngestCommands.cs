@@ -41,7 +41,7 @@ namespace Laplace.Cli;
 
 internal static class IngestCommands
 {
-    private sealed record IngestCliArgs(
+    internal sealed record IngestCliArgs(
         string Source,
         string Path,
         LanguageFilter? LangOverride,
@@ -120,90 +120,15 @@ internal static class IngestCommands
         CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
-
-
-        EtlWitnessRegistrations.RegisterAll();
-
         string sourceKey = cli.Source.ToLowerInvariant();
 
+        if (IngestDispatchTable.TryDispatch(sourceKey, cli, out var task))
+            return await task;
 
-
-        if (sourceKey == "wiktionary")
-            return await IngestViaRunnerAsync(
-                new WiktionaryDecomposer(),
-                IngestDataPaths.Resolve("wiktionary", cli.Path), skipLayerCheck: false, cli);
-
-
-
-        if (sourceKey == "omw")
-            return await IngestViaRunnerAsync(
-                new OMWDecomposer(),
-                IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli);
-
-
-        // Triple sources are pinned to their lean managed decomposer classes (Issue 45
-        // "pick the winner"): their rows are already-delimited (subject, relation, object),
-        // so the native grammar-compose lane the EtlWitness registration would otherwise
-        // route them through (IsRoutable is true for both) only adds a per-row tree-sitter
-        // parse AND emits edges outside the consensus-fold path. The classes stream + split
-        // managed, content-address via the perfcache, and emit folding attestations.
-        if (sourceKey == "atomic2020")
-            return await IngestViaRunnerAsync(
-                new Laplace.Decomposers.Atomic2020.Atomic2020Decomposer(),
-                IngestDataPaths.Resolve("atomic2020", cli.Path), skipLayerCheck: false, cli);
-
-        if (sourceKey == "conceptnet")
-            return await IngestViaRunnerAsync(
-                new ConceptNetDecomposer(),
-                IngestDataPaths.Resolve("conceptnet", cli.Path), skipLayerCheck: false, cli);
-
-        if (EtlManifest.IsRoutable(sourceKey))
-            return await IngestViaRunnerAsync(
-                new EtlDecomposer(EtlManifest.Get(sourceKey)),
-                IngestDataPaths.Resolve(sourceKey, cli.Path), skipLayerCheck: false, cli);
-
-        return sourceKey switch
-        {
-            "unicode" => await IngestUnicodeViaRunnerAsync(cli),
-            "iso639" => await IngestISO639Async(cli),
-            "cili" => await IngestViaRunnerAsync(new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path), skipLayerCheck: false, cli),
-            "wordnet" => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
-            "ud" => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
-            "tatoeba" => await IngestViaRunnerAsync(new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path), skipLayerCheck: false, cli),
-            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), IngestDataPaths.Resolve("framenet", cli.Path), skipLayerCheck: false, cli),
-            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), IngestDataPaths.Resolve("opensubtitles", cli.Path), skipLayerCheck: false, cli),
-            "verbnet" => await IngestViaRunnerAsync(new VerbNetDecomposer(), IngestDataPaths.Resolve("verbnet", cli.Path), skipLayerCheck: false, cli),
-            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), IngestDataPaths.Resolve("propbank", cli.Path), skipLayerCheck: false, cli),
-            "semlink" => await IngestViaRunnerAsync(new SemLinkDecomposer(), IngestDataPaths.Resolve("semlink", cli.Path), skipLayerCheck: false, cli),
-            "mapnet" => await IngestViaRunnerAsync(new MapNetDecomposer(), IngestDataPaths.Resolve("mapnet", cli.Path), skipLayerCheck: false, cli),
-            "wordframenet" => await IngestViaRunnerAsync(new WordFrameNetDecomposer(), IngestDataPaths.Resolve("wordframenet", cli.Path), skipLayerCheck: false, cli),
-            "code" => await IngestCodeAsync(cli),
-            "repo" => await IngestRepoAsync(cli),
-            "tabular" => await IngestTabularAsync(cli),
-            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(),
-                IngestDataPaths.Resolve("tiny-codes", cli.Path), skipLayerCheck: true, cli),
-            "stack" => await IngestViaRunnerAsync(new StackDecomposer(),
-                IngestDataPaths.Resolve("stack", cli.Path), skipLayerCheck: true, cli),
-            "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
-            "image" => await IngestViaRunnerAsync(new ImageDecomposer(), IngestDataPaths.Resolve("image", cli.Path), skipLayerCheck: true, cli),
-            "audio" => await IngestViaRunnerAsync(new AudioDecomposer(), IngestDataPaths.Resolve("audio", cli.Path), skipLayerCheck: true, cli),
-            "document" => await IngestDocumentAsync(cli),
-            "recipe" => await IngestRecipeAsync(cli),
-            "chess" => await IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
-            // Re-runnable by design: no source-completion marker, so it always rescans; the
-            // per-game ANALYZED_AT marker (probed in the decomposer) is the only skip gate.
-            "chess-analyze" => await IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessAnalyzeDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli,
-                skipSourceCompletion: true),
-            "openings" => await IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "", skipLayerCheck: true, cli),
-            "omw-probe" => await OmwProbeAsync(cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, omw-probe, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
-        };
+        return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
     }
 
-    private static async Task<int> OmwProbeAsync(IngestCliArgs cli)
+    internal static async Task<int> OmwProbeAsync(IngestCliArgs cli)
     {
         string wns = IngestDataPaths.Resolve("omw", cli.Path);
         if (!Directory.Exists(wns))
@@ -229,7 +154,7 @@ internal static class IngestCommands
         return 1;
     }
 
-    private static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
+    internal static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(modelDir))
             return Fail("usage: laplace ingest safetensors <snapshot-dir>\n"
@@ -362,7 +287,7 @@ internal static class IngestCommands
         return 0;
     }
 
-    private static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(cli.Path))
             return Fail("usage: laplace ingest document <file-or-directory>\n"
@@ -379,7 +304,7 @@ internal static class IngestCommands
             skipSourceCompletion: true);
     }
 
-    private static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(cli.Path))
             return Fail("usage: laplace ingest recipe <recipe.json>\n"
@@ -395,10 +320,10 @@ internal static class IngestCommands
             skipSourceCompletion: true);
     }
 
-    private static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
         => await IngestViaRunnerAsync(new UnicodeDecomposer(), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
 
-    private static async Task<int> IngestISO639Async(IngestCliArgs cli)
+    internal static async Task<int> IngestISO639Async(IngestCliArgs cli)
         => await IngestViaRunnerAsync(new ISODecomposer(), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
 
     private static string ResolveIngestPath(string? cliPath, string defaultPath)
@@ -407,7 +332,7 @@ internal static class IngestCommands
     private static string? ResolveRequiredIngestPath(string? cliPath)
         => string.IsNullOrWhiteSpace(cliPath) ? null : Path.GetFullPath(cliPath);
 
-    private static async Task<int> IngestCodeAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestCodeAsync(IngestCliArgs cli)
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
@@ -415,7 +340,7 @@ internal static class IngestCommands
         return await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true, cli);
     }
 
-    private static async Task<int> IngestRepoAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestRepoAsync(IngestCliArgs cli)
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
@@ -423,7 +348,7 @@ internal static class IngestCommands
         return await IngestViaRunnerAsync(new RepoDecomposer(), path, skipLayerCheck: true, cli);
     }
 
-    private static async Task<int> IngestTabularAsync(IngestCliArgs cli)
+    internal static async Task<int> IngestTabularAsync(IngestCliArgs cli)
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
@@ -511,7 +436,7 @@ internal static class IngestCommands
     private static bool IsEnvEnabled(string name) =>
         Environment.GetEnvironmentVariable(name) is "1" or "true" or "True" or "yes" or "YES";
 
-    private static async Task<int> IngestViaRunnerAsync(
+    internal static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {

@@ -37,7 +37,8 @@ public sealed class WordFrameNetDecomposer : IDecomposer, IIngestInventoryProvid
         {
             if (cap > 0 && consumed >= cap) yield break;
             long fileCap = cap > 0 ? cap - consumed : 0;
-            await foreach (var change in WordFrameNetIngest.StreamAsync(path, batchSize, fileCap, ct))
+            await foreach (var change in WordFrameNetIngest.StreamAsync(
+                               path, batchSize, context.Reader, options, fileCap, ct))
             {
                 if (!options.DryRun)
                 {

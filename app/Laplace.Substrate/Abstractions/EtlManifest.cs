@@ -13,7 +13,8 @@ public static class EtlManifest
         string dataKey, EtlModality modality, EdgeRule[]? edges = null,
         AnchorResolver anchor = AnchorResolver.None, string? glob = null,
         string[]? bootstrapRelations = null, bool acceptCommentRows = true,
-        Func<string, Hash128?>? contextIdFromFile = null, bool requireIliMap = false) =>
+        Func<string, Hash128?>? contextIdFromFile = null, bool requireIliMap = false,
+        bool hasDedicatedDecomposer = false) =>
         new(
             Name: decomposerName,
             SourceId: Src(decomposerName),
@@ -28,7 +29,8 @@ public static class EtlManifest
             BootstrapRelations: bootstrapRelations,
             AcceptCommentRows: acceptCommentRows,
             ContextIdFromFile: contextIdFromFile,
-            RequireIliMap: requireIliMap);
+            RequireIliMap: requireIliMap,
+            HasDedicatedDecomposer: hasDedicatedDecomposer);
 
     private static readonly Dictionary<string, EtlSource> _rows = Build();
 
@@ -39,7 +41,8 @@ public static class EtlManifest
 
     public static bool TryGet(string cliName, out EtlSource src) => _rows.TryGetValue(cliName, out src!);
 
-    public static bool IsRoutable(string cliName) => _rows.TryGetValue(cliName, out var r) && r.IsComplete;
+    public static bool IsRoutable(string cliName) =>
+        _rows.TryGetValue(cliName, out var r) && r.IsRoutableViaEtl;
 
     public static IReadOnlyCollection<string> Names => _rows.Keys;
 
@@ -68,12 +71,12 @@ public static class EtlManifest
 
             ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
                 "tatoeba", new EtlModality("tsv", Glob: "*.csv", RecordFraming: GrammarRecordFraming.Line),
-                bootstrapRelations: TatoebaBootstrap),
+                bootstrapRelations: TatoebaBootstrap, hasDedicatedDecomposer: true),
 
 
             ["wiktionary"] = Row("wiktionary", "WiktionaryDecomposer", 2, "AcademicCuratedUserInput", TC.AcademicCuratedUserInput,
                 "wiktionary", new EtlModality("json", Glob: "*.json*", RecordFraming: GrammarRecordFraming.Line),
-                bootstrapRelations: WiktionaryBootstrap),
+                bootstrapRelations: WiktionaryBootstrap, hasDedicatedDecomposer: true),
 
 
             ["ud"] = Row("ud", "UDDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
@@ -105,7 +108,7 @@ public static class EtlManifest
             ["omw"] = Row("omw", "OMWDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "omw", new EtlModality("tsv", Glob: "*.tab", RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset, acceptCommentRows: false,
-                bootstrapRelations: OmwBootstrap, requireIliMap: true),
+                bootstrapRelations: OmwBootstrap, requireIliMap: true, hasDedicatedDecomposer: true),
 
 
 

@@ -158,7 +158,7 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>
                 ReadOnlySpan<byte> bm = perTreeBitmaps.Length > i && perTreeBitmaps[i] is { } b
                     ? b
                     : ReadOnlySpan<byte>.Empty;
-                if (ContentWitnessBatch.TryEmitTree(builder, e.Tree, _sourceId, bm, out var rootId))
+                if (ContentTierSpine.EmitTree(builder, e.Tree, _sourceId, bm, out var rootId))
                     ctx.RegisterRoot(e.Canonical, rootId);
             }
             _handler.SetEmitContext(ctx);
@@ -182,7 +182,7 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>
             var trees = new List<TierTree?>(canonicals.Count);
             foreach (var canonical in canonicals)
             {
-                var tree = IntentStage.BuildContentTree(canonical);
+                var tree = ContentTierSpine.BuildTree(canonical);
                 if (tree is null) continue;
                 trees.Add(tree);
                 _entries.Add(new ContentTreeEntry(canonical, tree));

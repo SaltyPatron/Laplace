@@ -12,33 +12,37 @@ internal static class MapNetIngest
     private const string LuMappingFile = "mapping_lus_synsets.txt";
 
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
-    private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
+    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
+        ISubstrateReader? reader,
+        DecomposerOptions options,
         long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         if (Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase))
         {
-            await foreach (var change in FnLuSynsetBridgeIngest.StreamAsync(
-                               path, MapNetDecomposer.Source, "mapnet/lu", batchSize,
-                               FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, ct))
-                yield return change;
-            yield break;
+            return FnLuSynsetBridgeIngest.StreamAsync(
+                path, MapNetDecomposer.Source, "mapnet/lu", batchSize,
+                FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct);
         }
 
-        if (batchSize <= 0) batchSize = 4096;
+        var opts = maxInputUnits > 0 ? options with { MaxInputUnits = maxInputUnits } : options;
+        return CategoryCorrespondenceIngestSupport.RunAsync(
+            EnumerateFrameRecordsAsync(path, maxInputUnits, ct),
+            MapNetDecomposer.Source, TC.AcademicCurated, "mapnet/frame", batchSize, reader, opts, ct);
+    }
 
+    private static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateFrameRecordsAsync(
+        string path,
+        long maxInputUnits,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         await using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var reader = new StreamReader(stream);
-
-        var batch = NewBuilder("mapnet/frame/0", batchSize);
-        var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
-        int count = 0, batchNum = 0;
         long rowsTotal = 0;
 
         while (true)
@@ -61,20 +65,10 @@ internal static class MapNetIngest
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
 
-            StageCorrespondsTo(batch, seen, frame, FrameTypeId, synId.Value);
+            yield return new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value);
 
-            if (++count >= batchSize)
-            {
-                yield return batch.SetInputUnitsConsumed(count).Build();
-                batch = NewBuilder($"mapnet/frame/{++batchNum}", batchSize);
-                seen.Clear();
-                count = 0;
-            }
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
-
-        if (count > 0)
-            yield return batch.SetInputUnitsConsumed(count).Build();
     }
 
     internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
@@ -183,29 +177,4 @@ internal static class MapNetIngest
             : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
                                      FnLuSynsetBridgeIngest.MultiWordNetVersion);
     }
-
-    private static void StageCorrespondsTo(
-        SubstrateChangeBuilder b,
-        HashSet<(Hash128 Subject, Hash128 Object)> seen,
-        string subjectKey,
-        Hash128 subjectType,
-        Hash128 synId)
-    {
-        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
-        // content (entity + physicality) via the real tiered content pipeline. Using
-        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
-        // entity minted with no matching physicality.
-        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, MapNetDecomposer.Source, TC.AcademicCurated);
-        if (subjectId is null) return;
-        if (!seen.Add((subjectId.Value, synId))) return;
-
-        b.AddAttestation(NativeAttestation.Categorical(
-            subjectId.Value, "CORRESPONDS_TO", synId, MapNetDecomposer.Source, TC.AcademicCurated));
-    }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(MapNetDecomposer.Source, unit, null,
-            entityCapacity: batch * 2,
-            physicalityCapacity: 0,
-            attestationCapacity: batch * 2);
 }

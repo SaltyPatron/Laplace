@@ -7,8 +7,6 @@ public sealed class EtlManifestRecordFramingTests
 {
     [Theory]
     [InlineData("omw", GrammarRecordFraming.Line)]
-    [InlineData("atomic2020", GrammarRecordFraming.Line)]
-    [InlineData("conceptnet", GrammarRecordFraming.Line)]
     [InlineData("tatoeba", GrammarRecordFraming.Line)]
     [InlineData("wiktionary", GrammarRecordFraming.Line)]
     [InlineData("tabular", GrammarRecordFraming.Line)]

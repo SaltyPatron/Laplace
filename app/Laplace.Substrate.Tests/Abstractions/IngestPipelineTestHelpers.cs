@@ -20,7 +20,7 @@ internal static class IngestPipelineTestHelpers
         changes.Sum(c => (long)c.Attestations.Length +
             (c.IntentStages.IsDefaultOrEmpty ? 0L : c.IntentStages.Sum(s => (long)s.AttestationCount)));
 
-    internal static int ExpectedDescentProbeChunks(int rowCount, int probeChunkSize) =>
+    internal static int ExpectedExistenceRoundChunks(int rowCount, int probeChunkSize) =>
         rowCount == 0 ? 0 : (rowCount + probeChunkSize - 1) / probeChunkSize;
 
     /// <summary>

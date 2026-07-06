@@ -5,20 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 public sealed class TabularDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -76,7 +62,6 @@ public sealed class TabularDecomposer : IDecomposer
         var files = EnumerateCsv(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-
         var rows = new List<Dictionary<string, string>>();
         foreach (var f in files)
         {
@@ -93,7 +78,6 @@ public sealed class TabularDecomposer : IDecomposer
             }
         }
         if (rows.Count == 0) yield break;
-
 
         var featureCols = rows[0].Keys
             .Where(c => !c.Equals(_targetColumn, StringComparison.Ordinal) && !IdLike.Contains(c))
@@ -114,7 +98,6 @@ public sealed class TabularDecomposer : IDecomposer
             else isNumeric[c] = false;
         }
 
-
         var lowCard = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in featureCols)
         {
@@ -122,7 +105,6 @@ public sealed class TabularDecomposer : IDecomposer
             if (rows.Where(r => r.ContainsKey(c)).Select(r => r[c]).Distinct().Take(16).Count() <= 15)
                 lowCard.Add(c);
         }
-
 
         var counts = new Dictionary<(string Col, string Tok), (long N, long M)>();
         var counts2 = new Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)>();
@@ -150,17 +132,26 @@ public sealed class TabularDecomposer : IDecomposer
                 }
         }
 
-
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
-        var reader = context.Reader;
+        var emitCtx = new TabularEmitContext(
+            this, isNumeric, witnessWeight, predicts);
 
-        var b = NewBuilder(0, reader);
+        if (!options.DryRun)
+            yield return await BuildSchemaChangeAsync(featureCols, ct);
+
+        await foreach (var change in DecomposerBatch.RunAsync(
+                           EnumerateRecords(counts, counts2, ct),
+                           emitCtx.Emit,
+                           Source, "tabular", batch, context.Reader, options, ct))
+            yield return change;
+    }
+
+    private async Task<SubstrateChange> BuildSchemaChangeAsync(IReadOnlyList<string> featureCols, CancellationToken ct)
+    {
+        var b = new SubstrateChangeBuilder(Source, "tabular/schema", null, 256, 0, 512);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-
-
-
         if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
             b.AddAttestation(NativeAttestation.Categorical(
                 OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
@@ -171,84 +162,37 @@ public sealed class TabularDecomposer : IDecomposer
         {
             b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Word, ColumnTypeId, Source));
             _canonicalNames.Add($"tabular/column/{c}/v1");
-
-
-
-
             if (ContentEmitter.Emit(b, c, Source) is { } colNameId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     ColumnId(c), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
         }
+        return await b.SetInputUnitsConsumed(featureCols.Count).BuildAsync(ct);
+    }
 
-        int emitted = 0, bn = 0;
+    private static async IAsyncEnumerable<TabularRecord> EnumerateRecords(
+        Dictionary<(string Col, string Tok), (long N, long M)> counts,
+        Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)> counts2,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         foreach (var ((col, tok), nm) in counts)
         {
             ct.ThrowIfCancellationRequested();
-            var cq = ValueId(col, tok);
-            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
-            _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
-
-
-            b.AddAttestation(NativeAttestation.Aggregated(
-                cq, predicts, OutcomeId, Source, contextId: ColumnId(col),
-                games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
-
-            b.AddAttestation(NativeAttestation.Categorical(
-                cq, "IS_VALUE_IN", ColumnId(col), Source, SourceTrust.StructuredCorpus));
-
-            if (!isNumeric[col])
-            {
-                var bare = ContentEmitter.Emit(b, tok, Source);
-                if (bare is { } bid)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        cq, "IS_INSTANCE_OF", bid, Source, SourceTrust.StructuredCorpus));
-            }
-
-            if (++emitted >= batch)
-            {
-                if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct); IntentStage.ResetContentBank(); }
-                b = NewBuilder(++bn, reader);
-                emitted = 0;
-            }
+            yield return TabularRecord.Value(col, tok, nm.N, nm.M);
         }
-
-
-
         foreach (var ((pa, ta, pb, tb), nm) in counts2)
         {
             ct.ThrowIfCancellationRequested();
-
-
-
-            var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
-            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
-            _canonicalNames.Add($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
-            b.AddAttestation(NativeAttestation.Aggregated(
-                cq, predicts, OutcomeId, Source, contextId: null,
-                games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
-            if (++emitted >= batch)
-            {
-                if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct); IntentStage.ResetContentBank(); }
-                b = NewBuilder(++bn, reader);
-                emitted = 0;
-            }
+            yield return TabularRecord.Pair(pa, ta, pb, tb, nm.N, nm.M);
         }
-
-        if (emitted > 0 && !options.DryRun)
-        {
-            yield return await b.SetInputUnitsConsumed(emitted).BuildAsync(ct);
-            IntentStage.ResetContentBank();
-        }
+        await Task.CompletedTask;
     }
+
+    internal void TrackCanonical(string name) => _canonicalNames.Add(name);
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
-        new SubstrateChangeBuilder(Source, $"tabular/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384);
 
     private string Tokenize(string col, string v,
                             Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)
@@ -291,4 +235,64 @@ public sealed class TabularDecomposer : IDecomposer
             yield return f;
     }
 
+    private readonly record struct TabularRecord(
+        TabularRecordKind Kind,
+        string Col,
+        string Tok,
+        string ColB,
+        string TokB,
+        long N,
+        long M)
+    {
+        public static TabularRecord Value(string col, string tok, long n, long m) =>
+            new(TabularRecordKind.Value, col, tok, "", "", n, m);
+        public static TabularRecord Pair(string pa, string ta, string pb, string tb, long n, long m) =>
+            new(TabularRecordKind.Pair, pa, ta, pb, tb, n, m);
+    }
+
+    private enum TabularRecordKind { Value, Pair }
+
+    private sealed class TabularEmitContext(
+        TabularDecomposer owner,
+        Dictionary<string, bool> isNumeric,
+        double witnessWeight,
+        Hash128 predictsType)
+    {
+        public void Emit(TabularRecord rec, SubstrateChangeBuilder b)
+        {
+            if (rec.Kind == TabularRecordKind.Value)
+                EmitValue(rec, b);
+            else
+                EmitPair(rec, b);
+        }
+
+        private void EmitValue(TabularRecord rec, SubstrateChangeBuilder b)
+        {
+            var cq = ValueId(rec.Col, rec.Tok);
+            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
+            owner.TrackCanonical($"tabular/value/{rec.Col}={rec.Tok}/v1");
+            b.AddAttestation(NativeAttestation.Aggregated(
+                cq, predictsType, owner.OutcomeId, Source, contextId: ColumnId(rec.Col),
+                games: rec.N, sumScoreFp1e9: checked(rec.M * Glicko2.FpScale), witnessWeight: witnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(
+                cq, "IS_VALUE_IN", ColumnId(rec.Col), Source, SourceTrust.StructuredCorpus));
+            if (!isNumeric[rec.Col])
+            {
+                var bare = ContentEmitter.Emit(b, rec.Tok, Source);
+                if (bare is { } bid)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        cq, "IS_INSTANCE_OF", bid, Source, SourceTrust.StructuredCorpus));
+            }
+        }
+
+        private void EmitPair(TabularRecord rec, SubstrateChangeBuilder b)
+        {
+            var cq = Hash128.OfCanonical($"tabular/pair/{rec.Col}={rec.Tok}&{rec.ColB}={rec.TokB}/v1");
+            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
+            owner.TrackCanonical($"tabular/pair/{rec.Col}={rec.Tok}&{rec.ColB}={rec.TokB}/v1");
+            b.AddAttestation(NativeAttestation.Aggregated(
+                cq, predictsType, owner.OutcomeId, Source, contextId: null,
+                games: rec.N, sumScoreFp1e9: checked(rec.M * Glicko2.FpScale), witnessWeight: witnessWeight));
+        }
+    }
 }

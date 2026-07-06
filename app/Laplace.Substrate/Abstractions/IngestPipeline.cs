@@ -56,19 +56,14 @@ public sealed class IngestBatchConfig
     public double WitnessWeight { get; init; } = 1.0;
 
     /// <summary>
-    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder
-    /// spans the entire record stream: descent probes still run per
-    /// ProbeChunkSize interval (each distinct id probed at most once per
-    /// working set — proven-present via the reader's cache, probed-absent
-    /// via a working-set cache), but NOTHING is yielded mid-stream; the
-    /// pipeline emits exactly one SubstrateChange at the end, carrying the
-    /// whole novel frontier (stage witness-dedup makes cross-interval
-    /// duplicate emission a no-op). BatchSize is ignored in this mode.
+    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder spans
+    /// the record stream; O(tiers) existence runs every flush interval (at most
+    /// five tier rounds per batch); one SubstrateChange per working set unless
+    /// the memory budget valve splits it. BatchSize is ignored in this mode.
     /// </summary>
     public bool WorkingSet { get; init; }
 
-    /// <summary>Records per descent interval in working-set mode; tests pin
-    /// this — production uses WorkingSetMode.ProbeIntervalRecords.</summary>
+    /// <summary>Records per O(tiers) existence interval in working-set mode.</summary>
     public int? WorkingSetProbeInterval { get; init; }
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
@@ -147,14 +142,10 @@ public static class IngestBatchPipeline
     {
         var reader = config.EffectiveReader ?? AllAbsentSubstrateReader.Instance;
 
-        // Working-set mode: descent runs at LARGE accumulation intervals
-        // (probe round trips scale with distinct ids / interval, never rows);
-        // one builder spans the stream; the only mid-stream yield is the
-        // memory-budget valve, which closes one working set and opens the
-        // next through the same path. probedAbsent spans this run only.
+        // Working-set mode: O(tiers) existence every WorkingSetProbeInterval records.
+        // Legacy batch mode uses ProbeChunkSize.
         int probeInterval = config.WorkingSet
-            ? Math.Max(config.ProbeChunkSize,
-                config.WorkingSetProbeInterval ?? WorkingSetMode.ProbeIntervalRecords)
+            ? (config.WorkingSetProbeInterval ?? WorkingSetMode.ProbeIntervalRecords)
             : config.ProbeChunkSize;
         var pending = new List<TRecord>(Math.Min(probeInterval, 65_536));
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
@@ -197,13 +188,20 @@ public static class IngestBatchPipeline
             }
 
             pending.Add(record);
+
             if (pending.Count >= probeInterval)
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
+            }
 
-                if (config.WorkingSet && state.InBatch > 0
-                    && state.Builder.StagedBytesEstimate >= WorkingSetMode.BudgetBytes)
+            if (config.WorkingSet && pending.Count > 0
+                && state.Builder.StagedBytesEstimate >= WorkingSetMode.BudgetBytes)
+            {
+                await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+                    yield return change;
+
+                if (state.InBatch > 0)
                 {
                     yield return await state.YieldBatchAsync(ct);
                     state.ResetBuilder(config.NewBuilder(state.BatchNumber));

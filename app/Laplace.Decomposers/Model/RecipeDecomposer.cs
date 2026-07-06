@@ -51,9 +51,20 @@ public sealed class RecipeDecomposer : IDecomposer
         context.Logger.LogInformation(
             "phase=recipe parsed: name={Name} structure={Structure} hidden={Hidden} layers={Layers}",
             _recipe.Name, _recipe.Structure, _recipe.HiddenSize, _recipe.NumLayers);
-        yield return RecipeExtractor.BuildChange(
-            _recipe, _source, EntityTypeRegistry.ModelRecipe,
-            HasHiddenSizeTypeId, HasNumLayersTypeId);
+        await foreach (var batch in DecomposerBatch.RunAsync(
+                           SingleRecipeAsync(_recipe, ct),
+                           (rec, b) => RecipeExtractor.StageRecipe(
+                               b, rec, _source, EntityTypeRegistry.ModelRecipe,
+                               HasHiddenSizeTypeId, HasNumLayersTypeId),
+                           _source, "recipe/laplace.recipe", 1, context.Reader, options, ct))
+            yield return batch;
+    }
+
+    private static async IAsyncEnumerable<RecipeExtractor.RecipeInfo> SingleRecipeAsync(
+        RecipeExtractor.RecipeInfo recipe, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return recipe;
         await Task.CompletedTask;
     }
 

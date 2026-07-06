@@ -1,16 +1,9 @@
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
-
-
-
-
-
-
 
 public sealed class CodeDecomposer : IDecomposer
 {
@@ -38,56 +31,31 @@ public sealed class CodeDecomposer : IDecomposer
         if (files.Count == 0) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
 
-        var b = NewBuilder(0);
-        int inBatch = 0, bn = 0;
-
-        foreach (var (file, modality) in files)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch { continue; }
-            if (bytes.Length == 0) continue;
-
-            IntPtr recipe = GrammarDecomposer.LookupById(modality);
-            if (recipe == IntPtr.Zero) continue;
-
-            ImmutableArray<EntityRow> ents;
-            ImmutableArray<PhysicalityRow> phys;
-            ImmutableArray<AttestationRow> atts;
-            try
-            {
-                using var ast = GrammarDecomposer.Parse(bytes, recipe);
-                var geb = new GrammarEntityBuilder(
-                    bytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
-                (ents, phys, atts, _) = await geb.BuildAsync(
-                    SourceTrust.StructuredCorpus, context.Reader, ct);
-            }
-            catch
-            {
-                continue;
-            }
-
-            foreach (var e in ents) b.AddEntity(e);
-            foreach (var p in phys) b.AddPhysicality(p);
-            foreach (var a in atts) b.AddAttestation(a);
-
-            if (++inBatch >= batch)
-            {
-                if (!options.DryRun) { yield return b.SetInputUnitsConsumed(inBatch).Build(); }
-                b = NewBuilder(++bn);
-                inBatch = 0;
-            }
-        }
-
-        if (inBatch > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(inBatch).Build();
+        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
+                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
+                           "code", batch, context.Reader, options, ct))
+            yield return change;
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(EnumerateCodeFiles(context.EcosystemPath).Count());
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
+        IReadOnlyList<(string File, string Modality)> files,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var (file, modality) in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            byte[] bytes;
+            try { bytes = await File.ReadAllBytesAsync(file, ct); }
+            catch { continue; }
+            if (bytes.Length == 0) continue;
+            yield return new GrammarComposeRecord(bytes, modality);
+        }
+    }
 
     private static IEnumerable<(string File, string Modality)> EnumerateCodeFiles(string root)
     {
@@ -113,11 +81,6 @@ public sealed class CodeDecomposer : IDecomposer
     {
         string ext = Path.GetExtension(path);
         if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-
         return ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant());
     }
-
-    private static SubstrateChangeBuilder NewBuilder(int n) =>
-        new(Source, $"code/{n}", null,
-            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 2048);
 }

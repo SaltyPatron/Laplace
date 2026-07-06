@@ -68,7 +68,7 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
-        using var tree = IntentStage.BuildContentTree(record.CanonicalUtf8);
+        using var tree = ContentTierSpine.BuildTree(record.CanonicalUtf8);
         if (tree is null) return;
         foreach (var att in TextEntityBuilder.BuildDistributionalAttestations(
                      tree, UserPromptContent.Source, UserPromptContent.WitnessWeight))

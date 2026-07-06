@@ -36,7 +36,7 @@ public sealed class IngestPipelineWrongPatternTests
 
         Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.InRange(reader.FlatProbeCalls, 1,
-            MaxProbeCallsFor(ExpectedDescentProbeChunks(rowCount, probeChunk)));
+            MaxProbeCallsFor(ExpectedExistenceRoundChunks(rowCount, probeChunk)));
         Assert.True(reader.FlatCandidateCounts.Count >= 1);
         Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
         Assert.True(reader.MaxFlatCandidates > rowCount,

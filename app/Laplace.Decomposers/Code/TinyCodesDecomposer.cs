@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
@@ -9,13 +8,6 @@ using Parquet.Schema;
 
 namespace Laplace.Decomposers.Code;
 
-
-
-
-
-
-
-
 public sealed class TinyCodesDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -24,8 +16,6 @@ public sealed class TinyCodesDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
     private static readonly Hash128 CodeConceptTypeId = EntityTypeRegistry.CodeConcept;
-
-
 
     private static readonly Dictionary<string, string?> LangModality =
         new(StringComparer.OrdinalIgnoreCase)
@@ -79,94 +69,10 @@ public sealed class TinyCodesDecomposer : IDecomposer
         }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        var reader = context.Reader;
-        var b = NewBuilder(0, reader);
-        int inBatch = 0, bn = 0;
-
-        foreach (var file in files)
-        {
-            await foreach (var (conceptKey, lang, prompt, response) in ReadRowsAsync(file, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(response)) continue;
-
-                string? modality = ResolveModality(lang);
-                if (modality is null) continue;
-
-                IntPtr recipe = GrammarDecomposer.LookupById(modality);
-                if (recipe == IntPtr.Zero) continue;
-
-                byte[] codeBytes;
-                try { codeBytes = Encoding.UTF8.GetBytes(response); }
-                catch { continue; }
-                if (codeBytes.Length == 0) continue;
-
-                ImmutableArray<EntityRow> ents;
-                ImmutableArray<PhysicalityRow> phys;
-                ImmutableArray<AttestationRow> atts;
-                Hash128 codeRootId;
-                try
-                {
-                    using var ast = GrammarDecomposer.Parse(codeBytes, recipe);
-                    var geb = new GrammarEntityBuilder(
-                        codeBytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
-                    (ents, phys, atts, codeRootId) = await geb.BuildAsync(
-                        SourceTrust.StructuredCorpus, context.Reader, ct);
-                    _canonicalNames.UnionWith(geb.NodeTypeCanonicalNames);
-                }
-                catch { continue; }
-
-                if (codeRootId == default) continue;
-
-                foreach (var e in ents) b.AddEntity(e);
-                foreach (var p in phys) b.AddPhysicality(p);
-                foreach (var a in atts) b.AddAttestation(a);
-
-
-
-
-
-
-
-                if (!string.IsNullOrEmpty(conceptKey)
-                    && CategoryAnchor.Emit(b, conceptKey, CodeConceptTypeId, Source, SourceTrust.StructuredCorpus) is { } conceptId)
-                {
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        conceptId, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        codeRootId, "HAS_DEFINITION", conceptId, Source, SourceTrust.StructuredCorpus));
-                }
-
-
-
-
-
-
-                if (!string.IsNullOrWhiteSpace(prompt))
-                {
-                    foreach (var kw in ExtractKeywords(prompt))
-                    {
-                        var wordId = ContentEmitter.Emit(b, kw, Source);
-                        if (wordId.HasValue)
-                            b.AddAttestation(NativeAttestation.Categorical(
-                                wordId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
-                    }
-                }
-
-                if (++inBatch >= batch)
-                {
-                    if (!options.DryRun) { yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct); IntentStage.ResetContentBank(); }
-                    b = NewBuilder(++bn, reader);
-                    inBatch = 0;
-                }
-            }
-        }
-
-        if (inBatch > 0 && !options.DryRun)
-        {
-            yield return await b.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
-            IntentStage.ResetContentBank();
-        }
+        await foreach (var change in GrammarComposeIngestSupport.RunAsync(
+                           EnumerateRecordsAsync(files, ct), Source, SourceTrust.StructuredCorpus,
+                           "tiny-codes", batch, context.Reader, options, ct))
+            yield return change;
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -186,19 +92,48 @@ public sealed class TinyCodesDecomposer : IDecomposer
         "java", "golang", "csharp", "cplusplus", "sql",
     };
 
+    private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
+        IReadOnlyList<string> files, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var file in files)
+        {
+            await foreach (var (conceptKey, lang, prompt, response) in ReadRowsAsync(file, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(response)) continue;
+
+                string? modality = ResolveModality(lang);
+                if (modality is null) continue;
+
+                byte[] codeBytes;
+                try { codeBytes = Encoding.UTF8.GetBytes(response); }
+                catch { continue; }
+                if (codeBytes.Length == 0) continue;
+
+                IReadOnlyList<string>? keywords = string.IsNullOrWhiteSpace(prompt)
+                    ? null
+                    : ExtractKeywords(prompt).ToList();
+
+                yield return new GrammarComposeRecord(
+                    codeBytes,
+                    modality,
+                    ConceptAnchorKey: string.IsNullOrEmpty(conceptKey) ? null : conceptKey,
+                    ConceptCategoryTypeId: CodeConceptTypeId,
+                    KeywordExamples: keywords);
+            }
+        }
+    }
+
     private static IEnumerable<string> ExtractKeywords(string prompt)
     {
-
-
         int count = 0;
         foreach (var raw in prompt.Split(
-            new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_' },
+            [' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_'],
             StringSplitOptions.RemoveEmptyEntries))
         {
             if (count >= 20) break;
             if (raw.Length < 4) continue;
             var w = raw.ToLowerInvariant();
-
             var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
             if (!StopWords.Contains(w) && !StopWords.Contains(stem))
             {
@@ -215,8 +150,6 @@ public sealed class TinyCodesDecomposer : IDecomposer
         if (slash > 0) lang = lang[..slash];
         lang = lang.Trim();
         if (LangModality.TryGetValue(lang, out var m)) return m;
-
-
         if (lang.Contains("cypher", StringComparison.OrdinalIgnoreCase)) return null;
         if (lang.Contains("sql", StringComparison.OrdinalIgnoreCase)) return "sql";
         return null;
@@ -229,8 +162,6 @@ public sealed class TinyCodesDecomposer : IDecomposer
         await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
 
         DataField[] fields = reader.Schema.GetDataFields();
-
-
         DataField? taskField = FindField(fields, "task_id");
         DataField? langField = FindField(fields, "programming_language");
         DataField? promptField = FindField(fields, "prompt");
@@ -291,8 +222,4 @@ public sealed class TinyCodesDecomposer : IDecomposer
                                    .OrderBy(p => p, StringComparer.Ordinal))
             yield return f;
     }
-
-    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? _) =>
-        new SubstrateChangeBuilder(Source, $"tiny-codes/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
 }

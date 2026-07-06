@@ -43,35 +43,15 @@ public sealed class CILIDecomposer : IDecomposer
 
         var reader = context.Reader;
         int batchSize = options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
-        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
-
 
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
-            var changes = PCoreParallelCompose.RunAsync(
-                ParseIliTtlAsync(ttl, ct),
-                workers, batchSize,
-                () => NewBuilder("cili/concepts", 0, batchSize, reader),
-                (b, rec) =>
-                {
-                    var (ili, def) = rec;
-                    if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
-                    if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
-                    {
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
-                    }
-                },
-                ct);
-            await foreach (var change in changes.WithCancellation(ct))
+            await foreach (var change in DecomposerBatch.RunAsync(
+                               ParseIliTtlAsync(ttl, ct), (rec, b) => EmitConceptRow(b, rec),
+                               Source, "cili/concepts", batchSize, reader, options, ct))
                 yield return change;
         }
-
 
         var tabs = Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories)
                             .OrderBy(p => p, StringComparer.Ordinal);
@@ -79,16 +59,11 @@ public sealed class CILIDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(tab);
-            var changes = PCoreParallelCompose.RunAsync(
-                ParseIliMapAsync(tab, version, ct),
-                workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize, reader),
-                EmitMapRow,
-                ct);
-            await foreach (var change in changes.WithCancellation(ct))
+            await foreach (var change in DecomposerBatch.RunAsync(
+                               ParseIliMapAsync(tab, version, ct), (rec, b) => EmitMapRow(b, rec),
+                               Source, $"cili/map/{version}", batchSize, reader, options, ct))
                 yield return change;
         }
-
 
         var ttlMaps = Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories)
                                .OrderBy(p => p, StringComparer.Ordinal);
@@ -96,18 +71,30 @@ public sealed class CILIDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(ttlMap);
-            var changes = PCoreParallelCompose.RunAsync(
-                ParseIliMapTtlAsync(ttlMap, version, ct),
-                workers, batchSize,
-                () => NewBuilder($"cili/map/{version}", 0, batchSize, reader),
-                EmitMapRow,
-                ct);
-            await foreach (var change in changes.WithCancellation(ct))
+            await foreach (var change in DecomposerBatch.RunAsync(
+                               ParseIliMapTtlAsync(ttlMap, version, ct), (rec, b) => EmitMapRow(b, rec),
+                               Source, $"cili/map/{version}", batchSize, reader, options, ct))
                 yield return change;
         }
     }
 
-    private static void EmitMapRow(SubstrateChangeBuilder mb, (byte[] Ili, byte[] OffsetPos, string Version) rec)
+    private static void EmitConceptRow(SubstrateChangeBuilder b, (byte[] Ili, byte[]? Def) rec)
+    {
+        var (ili, def) = rec;
+        if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
+        if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
+        {
+            b.AddAttestation(NativeAttestation.Categorical(
+                id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
+            b.AddAttestation(NativeAttestation.Categorical(
+                id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
+        }
+    }
+
+    private static void EmitMapRow(
+        SubstrateChangeBuilder mb, (byte[] Ili, byte[] OffsetPos, string Version) rec)
     {
         var (ili, offsetPos, version) = rec;
         if (ContentEmitter.Emit(mb, ili, Source) is not { } id) return;
@@ -116,8 +103,6 @@ public sealed class CILIDecomposer : IDecomposer
         mb.AddAttestation(NativeAttestation.Categorical(
             id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
     }
-
-
 
     private static async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ParseIliMapAsync(
         string tab, string version, [EnumeratorCancellation] CancellationToken ct)
@@ -138,9 +123,6 @@ public sealed class CILIDecomposer : IDecomposer
         ReadOnlySpan<byte> iliSpan = TrimAscii(span[..sep]);
         ReadOnlySpan<byte> rest = span[(sep + 1)..];
         int sep2 = rest.IndexOf((byte)'\t');
-
-
-
         ReadOnlySpan<byte> offsetPosSpan = TrimAscii(sep2 >= 0 ? rest[..sep2] : rest);
         if (iliSpan.IsEmpty || offsetPosSpan.IsEmpty || iliSpan[0] != (byte)'i') return false;
         ili = iliSpan.ToArray();
@@ -252,11 +234,6 @@ public sealed class CILIDecomposer : IDecomposer
 
     private static byte[]? ExtractTurtleStringBytes(ReadOnlySpan<byte> span) =>
         Utf8TextHelpers.ExtractTurtleStringBytes(span);
-
-    private static SubstrateChangeBuilder NewBuilder(string label, int bn, int batchSize, ISubstrateReader? _) =>
-        new SubstrateChangeBuilder(Source, $"{label}-{bn}", null,
-            entityCapacity: batchSize * 4, physicalityCapacity: batchSize * 4,
-            attestationCapacity: batchSize * 4);
 
     private static string VersionLabel(string path)
     {

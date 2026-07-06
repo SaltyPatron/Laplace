@@ -315,45 +315,52 @@ public sealed class LlamaTokenizerParser
                 physicalityCapacity: n * 5,
                 attestationCapacity: 0);
 
-            Span<double> coord = stackalloc double[4];
             for (int i = start; i < end; i++)
-            {
-                var rec = records[i];
-
-                if (!rec.Role.HasFlag(TokenRole.Special)
-                    && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
-                {
-                    foreach (var e in treeEntities) b.AddEntity(e);
-                    foreach (var p in treePhys) b.AddPhysicality(p);
-                }
-                else
-                {
-                    b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
-                        firstObservedBy: sourceId);
-                    // Parse() already computed a real coordinate for this fallback path
-                    // (single-byte atoms via ByteAtoms.Coord) -- reuse it instead of leaving
-                    // this Word-tier content entity without a matching physicality. Genuinely
-                    // non-geometric sentinels (e.g. special tokens) have HasContentCoord=false
-                    // and correctly get no physicality.
-                    if (rec.HasContentCoord)
-                    {
-                        coord[0] = rec.ContentX; coord[1] = rec.ContentY;
-                        coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
-                        Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
-                        b.AddPhysicality(new PhysicalityRow(
-                            Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
-                            Type: PhysicalityType.Content,
-                            CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
-                            HilbertIndex: Hilbert128.Encode(coord),
-                            TrajectoryXyzm: null, NConstituents: 0,
-                            AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
-                    }
-                }
-
-            }
+                StageVocabToken(b, records[i], sourceId);
 
             yield return b.Build();
         }
+    }
+
+    public static void StageVocabToken(SubstrateChangeBuilder b, TokenRecord rec, Hash128 sourceId)
+    {
+        Span<double> coord = stackalloc double[4];
+        if (!rec.Role.HasFlag(TokenRole.Special)
+            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
+        {
+            foreach (var e in treeEntities) b.AddEntity(e);
+            foreach (var p in treePhys) b.AddPhysicality(p);
+        }
+        else
+        {
+            b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
+                firstObservedBy: sourceId);
+            if (rec.HasContentCoord)
+            {
+                coord[0] = rec.ContentX; coord[1] = rec.ContentY;
+                coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
+                Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
+                b.AddPhysicality(new PhysicalityRow(
+                    Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
+                    Type: PhysicalityType.Content,
+                    CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
+                    HilbertIndex: Hilbert128.Encode(coord),
+                    TrajectoryXyzm: null, NConstituents: 0,
+                    AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+            }
+        }
+    }
+
+    public static async IAsyncEnumerable<TokenRecord> EnumerateVocabRecordsAsync(
+        IReadOnlyList<TokenRecord> records,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        for (int i = 0; i < records.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return records[i];
+        }
+        await Task.CompletedTask;
     }
 
     public static List<(byte[] Left, byte[] Right)> ParseMerges(string tokenizerJsonPath)
@@ -392,38 +399,56 @@ public sealed class LlamaTokenizerParser
         return merges;
     }
 
-    public static IEnumerable<SubstrateChange> BuildMergesBatches(
+    public readonly record struct MergeRecord(byte[] Left, byte[] Right, int Index, double ArenaScale);
+
+    public static async IAsyncEnumerable<MergeRecord> EnumerateMergeRecordsAsync(
         List<(byte[] Left, byte[] Right)> merges,
-        Hash128 sourceId,
-        Hash128 textTypeId,
-        int batchSize = 8192)
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (merges.Count == 0) yield break;
         double sumSq = 0;
         for (int i = 0; i < merges.Count; i++) sumSq += (double)i * i;
         double m = Math.Sqrt(sumSq / merges.Count);
         if (m <= 0) yield break;
-
-        for (int start = 0; start < merges.Count; start += batchSize)
+        for (int i = 0; i < merges.Count; i++)
         {
-            int end = Math.Min(start + batchSize, merges.Count);
-            var b = new SubstrateChangeBuilder(
-                sourceId, $"tokenizer/merges/{start}..{end - 1}",
-                entityCapacity: (end - start) * 6,
-                physicalityCapacity: (end - start) * 6,
-                attestationCapacity: end - start);
-            for (int i = start; i < end; i++)
-            {
-                var (l, r) = merges[i];
-                Hash128 lid = ResolveMergeSide(b, l, sourceId, textTypeId);
-                Hash128 rid = ResolveMergeSide(b, r, sourceId, textTypeId);
-                b.AddAttestation(Laplace.Decomposers.Abstractions.NativeAttestation.Categorical(
-                    lid, "MERGES_WITH", rid, sourceId,
-                    Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe,
-                    magnitude: m - i, arenaScale: m));
-            }
-            yield return b.Build();
+            ct.ThrowIfCancellationRequested();
+            var (l, r) = merges[i];
+            yield return new MergeRecord(l, r, i, m);
         }
+    }
+
+    public static void StageMergeRecord(
+        SubstrateChangeBuilder b, MergeRecord rec, Hash128 sourceId, Hash128 textTypeId)
+    {
+        Hash128 lid = ResolveMergeSide(b, rec.Left, sourceId, textTypeId);
+        Hash128 rid = ResolveMergeSide(b, rec.Right, sourceId, textTypeId);
+        b.AddAttestation(NativeAttestation.Categorical(
+            lid, "MERGES_WITH", rid, sourceId, SourceTrust.AiModelProbe,
+            magnitude: rec.ArenaScale - rec.Index, arenaScale: rec.ArenaScale));
+    }
+
+    public readonly record struct TokenMapsToRecord(Hash128 TokenizerEntityId, TokenRecord Token);
+
+    public static async IAsyncEnumerable<TokenMapsToRecord> EnumerateMapsToRecordsAsync(
+        IReadOnlyList<TokenRecord> records,
+        Hash128 tokenizerEntityId,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        for (int i = 0; i < records.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new TokenMapsToRecord(tokenizerEntityId, records[i]);
+        }
+        await Task.CompletedTask;
+    }
+
+    public static void StageMapsToRecord(
+        SubstrateChangeBuilder b, TokenMapsToRecord rec, Hash128 sourceId)
+    {
+        b.AddAttestation(NativeAttestation.Categorical(
+            rec.TokenizerEntityId, "TOKEN_MAPS_TO", rec.Token.EntityId, sourceId,
+            SourceTrust.AiModelProbe));
     }
 
     private static Hash128 ResolveMergeSide(

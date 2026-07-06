@@ -49,8 +49,12 @@ public sealed record EtlSource(
     IReadOnlyList<string>? BootstrapRelations = null,
     bool AcceptCommentRows = true,
     Func<string, Hash128?>? ContextIdFromFile = null,
-    bool RequireIliMap = false)
+    bool RequireIliMap = false,
+    bool HasDedicatedDecomposer = false)
 {
     public bool IsComplete =>
         Modality.GrammarReady && (NodeEdgeMap.Count > 0 || EtlWitnessFactory.IsRegistered(Name));
+
+    /// <summary>True when CLI dispatch must use the source's own IDecomposer, never EtlDecomposer.</summary>
+    public bool IsRoutableViaEtl => !HasDedicatedDecomposer && IsComplete;
 }

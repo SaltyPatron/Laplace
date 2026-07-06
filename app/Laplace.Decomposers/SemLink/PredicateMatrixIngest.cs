@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -34,17 +35,40 @@ internal static class PredicateMatrixIngest
     private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
-    private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
+    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
         LanguageFilter? langs,
+        ISubstrateReader? reader,
+        DecomposerOptions options,
         long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
+        if (options.DryRun) return EmptyAsync();
         if (batchSize <= 0) batchSize = 4096;
+        var opts = maxInputUnits > 0 ? options with { MaxInputUnits = maxInputUnits } : options;
+        var stream = new AsyncEnumerableRecordStream<PredicateMatrixEdge>(
+            EnumerateEdgesAsync(path, langs, maxInputUnits, ct));
+        var handler = new PredicateMatrixEdgeHandler(Source, TC.AcademicCurated);
+        var config = CategoryCorrespondenceIngestSupport.PipelineConfig(
+            Source, "semlink/predicate-matrix", batchSize, reader);
+        if (opts.MaxInputUnits > 0) config = config.WithMaxInputUnits(opts.MaxInputUnits);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+    }
 
+    private static async IAsyncEnumerable<SubstrateChange> EmptyAsync()
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    private static async IAsyncEnumerable<PredicateMatrixEdge> EnumerateEdgesAsync(
+        string path,
+        LanguageFilter? langs,
+        long maxInputUnits,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         await using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -53,9 +77,6 @@ internal static class PredicateMatrixIngest
         string? header = await reader.ReadLineAsync(ct);
         if (header is null) yield break;
 
-        var batch = NewBuilder("semlink/predicate-matrix/0", batchSize);
-        var seen = new HashSet<(Hash128 Subject, Hash128 Object)>();
-        int count = 0, batchNum = 0;
         long rowsTotal = 0;
 
         while (true)
@@ -88,21 +109,30 @@ internal static class PredicateMatrixIngest
 
             if (TryRoleset(fields[ColPbRoleset], out string? roleset) && roleset is not null)
             {
-                StageCorrespondsTo(batch, seen, roleset, RolesetTypeId, synId.Value);
-                if (senseId is { } rs) StageCorrespondsTo(batch, seen, roleset, RolesetTypeId, rs);
+                yield return PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(roleset, RolesetTypeId, synId.Value));
+                if (senseId is { } rs)
+                    yield return PredicateMatrixEdge.FromCategory(
+                        new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs));
             }
 
             if (TryFrame(fields[ColFnFrame], out string? frame) && frame is not null)
             {
-                StageCorrespondsTo(batch, seen, frame, FrameTypeId, synId.Value);
-                if (senseId is { } fs) StageCorrespondsTo(batch, seen, frame, FrameTypeId, fs);
+                yield return PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value));
+                if (senseId is { } fs)
+                    yield return PredicateMatrixEdge.FromCategory(
+                        new CategoryCorrespondenceRecord(frame, FrameTypeId, fs));
             }
 
             string? vnClass = VerbNetClassKey(fields);
             if (vnClass is not null)
             {
-                StageCorrespondsTo(batch, seen, vnClass, VnClassTypeId, synId.Value);
-                if (senseId is { } vs) StageCorrespondsTo(batch, seen, vnClass, VnClassTypeId, vs);
+                yield return PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, synId.Value));
+                if (senseId is { } vs)
+                    yield return PredicateMatrixEdge.FromCategory(
+                        new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vs));
             }
 
             if (vnClass is not null && fields.Length > ColFnFe)
@@ -112,28 +142,17 @@ internal static class PredicateMatrixIngest
                 if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
                     && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
                 {
-                    var vnRoleId = ContentEmitter.Emit(batch, vnRole, Source);
-                    var feId = CategoryAnchor.Emit(batch, fnFe, FeTypeId, Source, TC.AcademicCurated);
-                    if (vnRoleId is { } vr && feId is { } fe
-                        && seen.Add((vr, fe)))
-                        batch.AddAttestation(NativeAttestation.Categorical(
-                            vr, "ROLE_CORRESPONDS_TO", fe, Source, TC.AcademicCurated,
-                            contextId: CategoryAnchor.Id(vnClass)));
+                    yield return PredicateMatrixEdge.FromTriple(new RelationTripleRecord(
+                        Encoding.UTF8.GetBytes(vnRole),
+                        "ROLE_CORRESPONDS_TO",
+                        Encoding.UTF8.GetBytes(fnFe),
+                        ContextAnchorKey: vnClass,
+                        ContextCategoryTypeId: VnClassTypeId));
                 }
             }
 
-            if (++count >= batchSize)
-            {
-                yield return batch.SetInputUnitsConsumed(count).Build();
-                batch = NewBuilder($"semlink/predicate-matrix/{++batchNum}", batchSize);
-                seen.Clear();
-                count = 0;
-            }
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
         }
-
-        if (count > 0)
-            yield return batch.SetInputUnitsConsumed(count).Build();
     }
 
     internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
@@ -286,28 +305,37 @@ internal static class PredicateMatrixIngest
                                       parsed.Value.WnVersion ?? "pwn30");
     }
 
-    private static void StageCorrespondsTo(
-        SubstrateChangeBuilder b,
-        HashSet<(Hash128 Subject, Hash128 Object)> seen,
-        string subjectKey,
-        Hash128 subjectType,
-        Hash128 synId)
+    internal readonly record struct PredicateMatrixEdge(
+        CategoryCorrespondenceRecord? Category,
+        RelationTripleRecord? Triple)
     {
-        // CategoryAnchor.Emit both derives the content-addressed id AND stages the underlying
-        // content (entity + physicality) via the real tiered content pipeline. Using
-        // CategoryAnchor.Id alone (as before) only derived the id, leaving this Word-tier
-        // entity minted with no matching physicality.
-        Hash128? subjectId = CategoryAnchor.Emit(b, subjectKey, subjectType, Source, TC.AcademicCurated);
-        if (subjectId is null) return;
-        if (!seen.Add((subjectId.Value, synId))) return;
-
-        b.AddAttestation(NativeAttestation.Categorical(
-            subjectId.Value, "CORRESPONDS_TO", synId, Source, TC.AcademicCurated));
+        public static PredicateMatrixEdge FromCategory(CategoryCorrespondenceRecord c) => new(c, null);
+        public static PredicateMatrixEdge FromTriple(RelationTripleRecord t) => new(null, t);
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
-            entityCapacity: batch * 3,
-            physicalityCapacity: 0,
-            attestationCapacity: batch * 3);
+    private sealed class PredicateMatrixEdgeHandler : IIngestRecordHandler<PredicateMatrixEdge>
+    {
+        private readonly CategoryCorrespondenceHandler _category;
+        private readonly RelationTripleHandler _triple;
+
+        public PredicateMatrixEdgeHandler(Hash128 sourceId, double trust)
+        {
+            _category = new CategoryCorrespondenceHandler(sourceId, trust);
+            _triple = new RelationTripleHandler(sourceId, trust);
+        }
+
+        public ValueTask<bool> TryTrunkShortcircuitAsync(
+            PredicateMatrixEdge record, SubstrateChangeBuilder builder, ISubstrateReader reader,
+            double witnessWeight, CancellationToken ct) =>
+            ValueTask.FromResult(false);
+
+        public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixEdge record) =>
+            record.Category is { } cat
+                ? _category.CreateDeferredUnit(cat)
+                : _triple.CreateDeferredUnit(record.Triple!.Value);
+
+        public void WalkWitness(
+            PredicateMatrixEdge record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+        { }
+    }
 }
