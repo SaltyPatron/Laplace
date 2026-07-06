@@ -356,18 +356,6 @@ internal static class IngestCommands
         return await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true, cli);
     }
 
-    private static int ResolveCommitRows(string sourceName)
-    {
-        var raw = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS");
-        if (int.TryParse(raw, out var env) && env >= 0)
-            return Math.Min(env, 250_000);
-        return sourceName switch
-        {
-            "ConceptNetDecomposer" => 4_000_000,
-            _ => 250_000,
-        };
-    }
-
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false,
@@ -411,7 +399,7 @@ internal static class IngestCommands
             commitRowsOverride: envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : null),
             estBytesPerRecord: estBytesPerRecord);
         if (batch <= 0) batch = sizing.RecordBatchSize;
-        int commitRows = envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : sizing.CommitRows);
+        int commitRows = sizing.CommitRows;
         var decoOpts = DecomposerOptions.ForWitness(
             sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);
         if (maxUnits > 0)
