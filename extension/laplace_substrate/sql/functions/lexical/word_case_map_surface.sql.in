@@ -2,11 +2,28 @@ CREATE OR REPLACE FUNCTION word_case_map_surface(p_word bytea, p_map text)
     RETURNS text
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- 'title' is a word-level map: title the first grapheme, lower the rest.
+    -- Applying the grapheme title map to every position degenerates to 'upper'
+    -- (per-letter titlecase == uppercase), which made word_case_variant_ids
+    -- asymmetric: variants('captain') never produced witnessed 'Captain'.
     SELECT string_agg(
-               repeat(
-                   COALESCE(render_text(grapheme_case_target(c.child_id, p_map)),
-                            render_text(c.child_id)),
-                   GREATEST(c.run_length, 1)),
+               CASE
+                   WHEN p_map = 'title' AND c.ordinal = first.o THEN
+                       COALESCE(render_text(grapheme_case_target(c.child_id, 'title')),
+                                render_text(c.child_id))
+                       || repeat(
+                              COALESCE(render_text(grapheme_case_target(c.child_id, 'lower')),
+                                       render_text(c.child_id)),
+                              GREATEST(c.run_length, 1) - 1)
+                   ELSE
+                       repeat(
+                           COALESCE(render_text(grapheme_case_target(
+                                        c.child_id,
+                                        CASE WHEN p_map = 'title' THEN 'lower' ELSE p_map END)),
+                                    render_text(c.child_id)),
+                           GREATEST(c.run_length, 1))
+               END,
                '' ORDER BY c.ordinal)
-    FROM constituents(p_word) c
+    FROM constituents(p_word) c,
+         (SELECT min(ordinal) AS o FROM constituents(p_word)) first
 $$;

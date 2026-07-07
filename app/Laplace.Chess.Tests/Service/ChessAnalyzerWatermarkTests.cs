@@ -4,9 +4,6 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-// The analyzer's watermark: FilterUnanalyzedAsync must yield only games whose per-(game, version)
-// AnalysisMarker isn't already present — that's how re-running skips already-derived games and
-// picks up only new/unanalyzed ones. Live run proved apply + marker creation; this proves the skip.
 public sealed class ChessAnalyzerWatermarkTests
 {
     private const string GameA =
@@ -35,16 +32,15 @@ public sealed class ChessAnalyzerWatermarkTests
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
-        // A is already analyzed at the current version; B is not.
         reader.Present.Add(ChessVocabulary.AnalysisMarkerId(a.GameId, ChessAnalyze.Version));
 
-        var kept = new List<ChessPgnDecomposer.ParsedGame>();
-        await foreach (var g in ChessAnalyzeDecomposer.FilterUnanalyzedAsync(
-            new List<ChessPgnDecomposer.ParsedGame> { a, b }, reader, CancellationToken.None))
-            kept.Add(g);
+        var kept = new List<Hash128>();
+        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedGameIdsAsync(
+            [a.GameId, b.GameId], reader, CancellationToken.None))
+            kept.Add(id);
 
         Assert.Single(kept);
-        Assert.Equal(b.GameId, kept[0].GameId);
+        Assert.Equal(b.GameId, kept[0]);
     }
 
     [Fact]
@@ -52,10 +48,10 @@ public sealed class ChessAnalyzerWatermarkTests
     {
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
-        var kept = new List<ChessPgnDecomposer.ParsedGame>();
-        await foreach (var g in ChessAnalyzeDecomposer.FilterUnanalyzedAsync(
-            new List<ChessPgnDecomposer.ParsedGame> { a, b }, new FakeReader(), CancellationToken.None))
-            kept.Add(g);
+        var kept = new List<Hash128>();
+        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedGameIdsAsync(
+            [a.GameId, b.GameId], new FakeReader(), CancellationToken.None))
+            kept.Add(id);
         Assert.Equal(2, kept.Count);
     }
 }

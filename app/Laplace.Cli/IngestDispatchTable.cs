@@ -88,17 +88,28 @@ internal static class IngestDispatchTable
                 skipLayerCheck: true, cli),
             ["document"] = cli => IngestCommands.IngestDocumentAsync(cli),
             ["recipe"] = cli => IngestCommands.IngestRecipeAsync(cli),
-            ["chess"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "",
-                skipLayerCheck: true, cli, skipSourceCompletion: true),
+            ["chess"] = IngestChessRecordAndAnalyzeAsync,
             ["chess-analyze"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessAnalyzeDecomposer(), cli.Path ?? "",
+                new Laplace.Chess.Service.ChessAnalyzeDecomposer(), "",
                 skipLayerCheck: true, cli, skipSourceCompletion: true),
             ["openings"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "",
                 skipLayerCheck: true, cli),
             ["omw-probe"] = cli => IngestCommands.OmwProbeAsync(cli),
         };
+
+    private static async Task<int> IngestChessRecordAndAnalyzeAsync(IngestCommands.IngestCliArgs cli)
+    {
+        int rc = await IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true);
+        if (rc != 0 || cli.NoAnalyze) return rc;
+
+        Console.WriteLine("chess record complete — running substrate analyze pass on witnessed games…");
+        return await IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessAnalyzeDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true);
+    }
 
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {

@@ -14,7 +14,11 @@ internal static class CopyBlobValidator
 {
 
 
-    public static readonly bool Enabled = false;
+    // Armed via env because the corruption is intermittent: LAPLACE_COPY_BLOB_VALIDATE=1
+    // makes every CollectBlobs pass walk the native COPY blobs and fail AT the corrupting
+    // phase instead of 6MB downstream in CopyTupleParser.
+    public static readonly bool Enabled =
+        Environment.GetEnvironmentVariable("LAPLACE_COPY_BLOB_VALIDATE") == "1";
 
 
 

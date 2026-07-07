@@ -36,7 +36,9 @@ import styles from './ChessView.module.css';
 
 
 
-interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; motifs?: string[]; }
+interface PlayStart { sessionId: string; fen: string; }
+
+interface PlayMoveResult { fen: string; terminal: boolean; status: string; legal: boolean; ply: number; motifs?: string[]; }
 
 interface LegalResponse { moves: MoveScore[]; inCheck: boolean; status: string; }
 
@@ -91,6 +93,8 @@ export function ChessView() {
   const [searchDepth, setSearchDepth] = useState(4);
 
   const [useSubstrate, setUseSubstrate] = useState(true);
+  const [recordToSubstrate, setRecordToSubstrate] = useState(true);
+  const [playSessionId, setPlaySessionId] = useState<string | null>(null);
 
   const [evalMode, setEvalMode] = useState(false);
 
@@ -320,6 +324,22 @@ export function ChessView() {
 
 
 
+  const startPlaySession = useCallback(async (record: boolean) => {
+    if (!record) {
+      setPlaySessionId(null);
+      return;
+    }
+    try {
+      const r = await apiPost<PlayStart>('/chess/play/start', { record: true });
+      setPlaySessionId(r.sessionId);
+    } catch (e) {
+      setErr(`play session failed: ${msg(e)}`);
+      setPlaySessionId(null);
+    }
+  }, []);
+
+  useEffect(() => { void startPlaySession(recordToSubstrate); }, [recordToSubstrate, startPlaySession]);
+
   const appendSnapshot = useCallback((uci: string, nextFen: string, nextStatus: string) => {
     setPositions((p) => {
       const next = [...p, snapshotFromMove(nextFen, nextStatus, uci)];
@@ -336,7 +356,11 @@ export function ChessView() {
 
     try {
 
-      const r = await apiPost<BestMove>('/chess/bestmove', { fen: f, depth: searchDepth, substrate: useSubstrate });
+      const r = recordToSubstrate && playSessionId
+        ? await apiPost<BestMove>('/chess/play/bestmove', {
+            sessionId: playSessionId, fen: f, depth: searchDepth, substrate: useSubstrate,
+          })
+        : await apiPost<BestMove>('/chess/bestmove', { fen: f, depth: searchDepth, substrate: useSubstrate });
 
       if (r.uci) appendSnapshot(r.uci, r.fen, r.status);
 
@@ -350,7 +374,7 @@ export function ChessView() {
 
     finally { setBusy(false); }
 
-  }, [searchDepth, useSubstrate, appendSnapshot]);
+  }, [searchDepth, useSubstrate, appendSnapshot, recordToSubstrate, playSessionId]);
 
 
 
@@ -368,7 +392,9 @@ export function ChessView() {
 
     try {
 
-      const r = await apiPost<ApplyResult>('/chess/move', { fen: liveFen, uci });
+      const r = recordToSubstrate && playSessionId
+        ? await apiPost<PlayMoveResult>('/chess/play/move', { sessionId: playSessionId, fen: liveFen, uci })
+        : await apiPost<PlayMoveResult>('/chess/move', { fen: liveFen, uci });
 
       if (!r.legal) { setErr(`illegal move: ${uci}`); return; }
 
@@ -384,7 +410,7 @@ export function ChessView() {
 
     finally { setBusy(false); }
 
-  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing]);
+  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing, recordToSubstrate, playSessionId]);
 
 
 
@@ -483,6 +509,11 @@ export function ChessView() {
 
 
   const newGame = async () => {
+    if (playSessionId && status !== 'ongoing') {
+      try {
+        await apiPost('/chess/play/finish', { sessionId: playSessionId, status });
+      } catch { /* best effort */ }
+    }
 
     const r = await apiGet<{ fen: string }>('/chess/new');
 
@@ -494,6 +525,7 @@ export function ChessView() {
 
     setSearch(null); setMotifs([]); setPositionEval(null); setErr(null);
 
+    await startPlaySession(recordToSubstrate);
   };
 
 
@@ -680,13 +712,13 @@ export function ChessView() {
 
           autoReply={autoReply} flip={flip} searchDepth={searchDepth}
 
-          useSubstrate={useSubstrate} evalMode={evalMode}
+          useSubstrate={useSubstrate} recordToSubstrate={recordToSubstrate} evalMode={evalMode}
 
           onNewGame={() => void newGame()} onBotMove={() => void botMove(liveFen)}
 
           onAutoReply={setAutoReply} onFlip={setFlip} onDepth={setSearchDepth}
 
-          onSubstrate={setUseSubstrate} onEvalMode={setEvalMode}
+          onSubstrate={setUseSubstrate} onRecordToSubstrate={setRecordToSubstrate} onEvalMode={setEvalMode}
 
         />
 

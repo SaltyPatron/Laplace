@@ -57,25 +57,10 @@ echo ===== PHASE 4 — BUILD EXTENSIONS =====
 call "%~dp0build-extensions.cmd" %NATIVE_FLAGS% || exit /b 1
 
 echo.
-echo ===== PHASE 5 — DEPLOY / INSTALL =====
-call "%~dp0install-extensions.cmd" || exit /b 1
-
-if "%SKIP_APP%"=="0" (
-  echo.
-  echo ===== PHASE 6 — BUILD APP =====
-  cd "%LAPLACE_ROOT%\app"
-  echo dotnet clean Release ...
-  dotnet clean Laplace.slnx -c Release --nologo -v minimal || exit /b 1
-  echo dotnet build Release ...
-  dotnet build Laplace.slnx -c Release -v minimal || exit /b 1
-  cd /d "%LAPLACE_ROOT%"
-)
-
-echo.
-echo ===== PHASE 7 — PERF CACHE =====
+echo ===== PHASE 5 — PERF CACHE (before deploy — install-extensions copies these) =====
 cmake --build build-win --target laplace_t0_perfcache laplace_highway_perfcache || exit /b 1
 if not exist "%LAPLACE_PERFCACHE_BIN%" (
-  echo ERROR: perf-cache blob missing at %LAPLACE_PERFCACHE_BIN%
+  echo ERROR: T0 perfcache blob missing at %LAPLACE_PERFCACHE_BIN%
   exit /b 1
 )
 if not exist "%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin" (
@@ -84,6 +69,21 @@ if not exist "%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.
 )
 for %%F in ("%LAPLACE_PERFCACHE_BIN%") do echo T0 perfcache ready: %%~zF bytes — %%F
 for %%F in ("%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin") do echo highway perfcache ready: %%~zF bytes — %%F
+
+echo.
+echo ===== PHASE 6 — DEPLOY / INSTALL =====
+call "%~dp0install-extensions.cmd" || exit /b 1
+
+if "%SKIP_APP%"=="0" (
+  echo.
+  echo ===== PHASE 7 — BUILD APP =====
+  cd "%LAPLACE_ROOT%\app"
+  echo dotnet clean Release ...
+  dotnet clean Laplace.slnx -c Release --nologo -v minimal || exit /b 1
+  echo dotnet build Release ...
+  dotnet build Laplace.slnx -c Release -v minimal || exit /b 1
+  cd /d "%LAPLACE_ROOT%"
+)
 
 echo.
 echo ===== REBUILD-ALL COMPLETE =====

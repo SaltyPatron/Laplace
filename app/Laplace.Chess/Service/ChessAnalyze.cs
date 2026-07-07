@@ -12,9 +12,8 @@ namespace Laplace.Chess.Service;
 // inputs (movetext + start FEN + per-ply annotation tokens the recorder stored). Emitted under the
 // analysis source and stamped ANALYZED_AT=Version so the analyzer scan skips already-derived games.
 //
-// This is the logic that used to run inline during ingest (ChessPgnDecomposer.AppendGame) — moved
-// here so ingest is pure recording. The scan/watermark runner that reads the witnessed layer from
-// the DB and calls DeriveGame per un-analyzed game is the remaining piece (see .scratchpad/08).
+// Scan driver: <see cref="ChessWitnessHydrator"/> reads witnessed attestations from Postgres.
+// PGN path is legacy bootstrap only when an explicit file path is passed.
 public static class ChessAnalyze
 {
     public const int Version = 1;
@@ -28,44 +27,50 @@ public static class ChessAnalyze
     // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
     // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
     internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessPgnDecomposer.ParsedGame parsed)
+        => DeriveFromWitnessed(b, WitnessedFromParsed(parsed));
+
+    /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
+    internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed)
     {
-        var (gameText, walk, moves, result, gameId) = parsed;
-
-        string whiteName = PgnGames.TagStr(gameText, "White");
-        string blackName = PgnGames.TagStr(gameText, "Black");
-        Hash128? wp = ValidName(whiteName) ? ChessVocabulary.PlayerId(whiteName) : null;
-        Hash128? bp = ValidName(blackName) ? ChessVocabulary.PlayerId(blackName) : null;
-
-        string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
-            ? NullIfBlank(PgnGames.TagStr(gameText, "FEN")) : null;
+        var (gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens) = witnessed;
 
         int mc = moves.Count;
-        var clockTokens = PgnClocks.ClockTokens(gameText, mc);
         var clocks = clockTokens is not null
-            ? clockTokens.Select(ParseClockSeconds).ToArray()
+            ? clockTokens.Select(t => t is null ? 0.0 : ParseClockSeconds(t)).ToArray()
             : System.Array.Empty<double>();
         double medianDrop = PgnClocks.MedianDrop(clocks);
-        var evalTokens = PgnEvals.EvalTokens(gameText, mc);
         var evals = evalTokens is not null
-            ? evalTokens.Select(PgnEvals.ParseToken).ToArray()
-            : PgnEvals.Centipawns(gameText, mc);
+            ? evalTokens.Select(t => t is null ? 0 : PgnEvals.ParseToken(t)).ToArray()
+            : null;
 
-        var qualityTokens = new string?[walk.Mainline.Count];
-        for (int i = 0; i < walk.Mainline.Count; i++)
-            qualityTokens[i] = MoveQuality.FromStream(walk.Mainline[i]);
-
-        // Opt-in: run our OWN engine eval per position (a higher-trust witness competing with the
-        // PGN's eval on the same position). Off by default (structural derivation only); set
-        // LAPLACE_CHESS_ANALYZE_DEPTH>0 to dedicate compute to it. This is "target given games,
-        // dedicate compute to analysis."
         int engineDepth = 0;
 
         DeriveGame(b, gameId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth);
 
-        // Fast-probe watermark anchor: this (game, version) is now derived; the scan skips it next run.
         b.AddEntity(ChessVocabulary.AnalysisMarkerId(gameId, Version), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, SourceId);
+    }
+
+    internal static ChessWitnessedGame WitnessedFromParsed(ChessPgnDecomposer.ParsedGame parsed)
+    {
+        var (gameText, walk, moves, result, gameId) = parsed;
+        string whiteName = PgnGames.TagStr(gameText, "White");
+        string blackName = PgnGames.TagStr(gameText, "Black");
+        Hash128? wp = ValidName(whiteName) ? ChessVocabulary.PlayerId(whiteName) : null;
+        Hash128? bp = ValidName(blackName) ? ChessVocabulary.PlayerId(blackName) : null;
+        string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
+            ? NullIfBlank(PgnGames.TagStr(gameText, "FEN")) : null;
+
+        int mc = moves.Count;
+        var clockTokens = PgnClocks.ClockTokens(gameText, mc);
+        var evalTokens = PgnEvals.EvalTokens(gameText, mc);
+        var qualityTokens = new string?[walk.Mainline.Count];
+        for (int i = 0; i < walk.Mainline.Count; i++)
+            qualityTokens[i] = MoveQuality.FromStream(walk.Mainline[i]);
+
+        return new ChessWitnessedGame(
+            gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens);
     }
 
     private static bool ValidName(string n) => !string.IsNullOrWhiteSpace(n) && n != "?";

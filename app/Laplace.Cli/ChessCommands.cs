@@ -300,8 +300,10 @@ internal static class ChessCommands
         Action<ChessTrainStatus> report = st =>
             Console.WriteLine($"  [{st.Games}] W={st.White} B={st.Black} D={st.Draws} (adj {st.Adjudicated}); last {st.LastOutcome}");
 
+        await using var liveHost = await ChessLiveGameHost.CreateAsync(
+            ArgDouble(args, "--weight", 0.5d), ct: default);
         await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(),
-            ArgDouble(args, "--weight", 0.5d));
+            ArgDouble(args, "--weight", 0.5d), liveHost);
 
         if (weak)
         {
@@ -330,7 +332,8 @@ internal static class ChessCommands
         var fen = string.Join(' ', args).Trim();
         if (fen.Length == 0) return Fail("usage: laplace chess move <fen>");
 
-        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString());
+        await using var liveHost = await ChessLiveGameHost.CreateAsync();
+        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(), 0.5d, liveHost);
         var best = await svc.BestMoveAsync(fen, 0d);
         if (best.Uci is null) { Console.WriteLine($"terminal: {best.Status}"); return 0; }
         Console.WriteLine($"bestmove {best.Uci}  (eff_mu {best.EffMu:F1}, {(best.Rated ? "rated" : "unrated-prior")})");
@@ -428,7 +431,12 @@ internal static class ChessCommands
             cts.Cancel();
         };
 
-        await using var bot = new LichessBot(token, depth, bias, mg, eg, acceptSpeeds);
+        await using var liveHost = await ChessLiveGameHost.CreateAsync();
+        await using var bot = new LichessBot(
+            token,
+            liveHost,
+            maxDepth: depth,
+            acceptSpeeds: acceptSpeeds);
         await bot.RunAsync(maxConcurrent, cts.Token);
 
         if (ds is not null) await ds.DisposeAsync();

@@ -2,41 +2,192 @@
   .lab {
     height: 100%;
     overflow-y: auto;
-    padding: 1rem 1.2rem;
+    padding: 1rem 1.2rem 2rem;
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
+    max-width: 72rem;
   }
 
-  .title {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-3);
-    flex-wrap: wrap;
+  .hero h3 {
+    margin: 0 0 0.25rem;
   }
 
-  .title h3 {
-    margin: 0;
-  }
-
-  .engines {
+  .engineBar {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem 0.5rem;
-    margin: 0.5rem 0 0.7rem;
+    align-items: center;
+    gap: 0.45rem 0.55rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: var(--radius-md, 8px);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel-2);
     font-size: var(--text-sm);
+  }
+
+  .engineBarLabel {
+    font-weight: 600;
+    margin-right: 0.25rem;
+    color: var(--color-text-muted);
+  }
+
+  .categoryBlock {
+    margin-bottom: 1.25rem;
+  }
+
+  .categoryBlock:last-child {
+    margin-bottom: 0;
+  }
+
+  .categoryHead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .experimentGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+    gap: 0.5rem;
+  }
+
+  .experimentCard {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md, 8px);
+    background: var(--color-bg-panel-2);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .experimentCard:hover {
+    border-color: var(--color-accent);
+    background: var(--color-bg-panel);
+  }
+
+  .experimentCardSelected {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+  }
+
+  .experimentCardBlocked {
+    opacity: 0.72;
+  }
+
+  .experimentTitle {
+    font-weight: 600;
+    font-size: var(--text-sm);
+    line-height: 1.25;
+  }
+
+  .experimentTagline {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    line-height: 1.3;
+  }
+
+  .experimentBadge,
+  .experimentBadgeWarn {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.45rem;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.05rem 0.35rem;
+    border-radius: 99px;
+    border: 1px solid var(--color-border-default);
+    color: var(--color-confirm);
+  }
+
+  .experimentBadgeWarn {
+    color: var(--color-draw);
+  }
+
+  .detailPanel {
+    border-color: var(--color-accent);
+  }
+
+  .detailHead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.65rem;
+  }
+
+  .detailTitle {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+
+  .detailTagline {
+    margin: 0.2rem 0 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .detailDesc {
+    margin: 0 0 0.85rem;
+    line-height: 1.5;
+    font-size: var(--text-sm);
+    max-width: 52rem;
+  }
+
+  .detailCols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem 1.5rem;
+  }
+
+  .detailSubhead {
+    margin: 0 0 0.35rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+  }
+
+  .detailList {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: var(--text-sm);
+    line-height: 1.45;
+  }
+
+  .detailList li + li {
+    margin-top: 0.25rem;
   }
 
   .form {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-    gap: 0.5rem 0.8rem;
-    margin: 0.2rem 0 0.7rem;
+    gap: 0.65rem 0.9rem;
+    margin-bottom: 0.85rem;
   }
 
-  .noParams {
+  .fieldWide {
     grid-column: 1 / -1;
-    margin: 0.2rem 0;
+  }
+
+  .fieldHint {
+    margin-top: 0.25rem;
+    display: block;
+    font-size: 0.78rem;
   }
 
   .actions {
@@ -44,6 +195,8 @@
     align-items: center;
     gap: var(--space-3);
     flex-wrap: wrap;
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--color-border-default);
   }
 
   .blocked {
@@ -107,11 +260,43 @@
     color: var(--color-text-muted);
   }
 
+  .progressWrap {
+    position: relative;
+    height: 1.25rem;
+    background: var(--color-bg-panel-2);
+    border-radius: 99px;
+    overflow: hidden;
+    margin: 0.5rem 0 0.65rem;
+    border: 1px solid var(--color-border-default);
+  }
+
+  .progressBar {
+    height: 100%;
+    background: var(--color-accent);
+    opacity: 0.55;
+    transition: width 0.25s ease;
+  }
+
+  .progressLabel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+  }
+
   .feed {
     flex: 1 1 auto;
     min-height: 12rem;
     display: flex;
     flex-direction: column;
+  }
+
+  .feedHint {
+    margin-bottom: 0.5rem;
+    font-size: var(--text-sm);
   }
 
   .events {
@@ -168,6 +353,7 @@
     gap: var(--space-3);
     align-items: center;
     flex-wrap: wrap;
+    margin-top: 0.5rem;
   }
 
   .tableRow {

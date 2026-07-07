@@ -6,7 +6,7 @@
 param([switch]$Kill)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$deployLib = 'D:\Data\Postgres\laplace\lib'
+$deployLib = 'D:\Data\Laplace\deploy\lib'
 $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()

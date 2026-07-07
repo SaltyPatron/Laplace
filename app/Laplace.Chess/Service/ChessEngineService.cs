@@ -31,10 +31,17 @@ public sealed record ChessTrainStatus(
     bool Running, long Games, int White, int Black, int Draws, int Adjudicated,
     string LastOutcome, double Temperature, double Weight, int MaxPlies);
 
+public sealed record ChessPlayStart(Guid SessionId, string Fen);
+
+public sealed record ChessPlayMoveResult(
+    string Fen, bool Terminal, string Status, bool Legal, int Ply,
+    IReadOnlyList<string>? Motifs = null);
+
 public sealed class ChessEngineService : IAsyncDisposable
 {
     private readonly string _connString;
     private readonly double _witnessWeight;
+    private readonly ChessLiveGameHost _liveHost;
     private readonly ILogger _log;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -52,10 +59,12 @@ public sealed class ChessEngineService : IAsyncDisposable
     private string _lastOutcome = "";
     private double _trainTemp = 120d, _trainWeight; private int _trainMaxPlies = 400;
 
-    public ChessEngineService(string connString, double witnessWeight = 0.5d, ILogger? log = null)
+    public ChessEngineService(
+        string connString, double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
     {
         _connString = connString;
         _witnessWeight = witnessWeight;
+        _liveHost = liveHost;
         _trainWeight = witnessWeight;
         _log = log ?? NullLogger.Instance;
     }
@@ -261,6 +270,96 @@ public sealed class ChessEngineService : IAsyncDisposable
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games)) onReport(Status());
         }
     }
+
+    public ChessPlayStart StartPlaySession(bool recordToSubstrate = true)
+    {
+        var id = _liveHost.StartPlaySession(recordToSubstrate);
+        return new ChessPlayStart(id, NewGameFen());
+    }
+
+    public async Task<ChessPlayMoveResult> PlayMoveAsync(
+        Guid sessionId, string fen, string uci, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var state = _modality!.FromFen(fen);
+        ChessMove? mv = null;
+        foreach (var m in _modality!.LegalActions(state))
+            if (m.ToUci() == uci) { mv = m; break; }
+        if (mv is null)
+            return new ChessPlayMoveResult(fen, false, "illegal move", Legal: false, Ply: 0);
+
+        string fromKey = _modality.StateKey(state);
+        var next = _modality.Apply(state, mv.Value);
+        string toKey = _modality.StateKey(next);
+        var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
+        var motifs = ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board).ToList();
+
+        if (_liveHost.GetPlaySession(sessionId) is { } session && session.RecordToSubstrate)
+        {
+            session.PlyCount++;
+            await _liveHost.RecordPlayPlyAsync(
+                sessionId, session.PlyCount, fromKey, toKey, uci, moverPlayerId: null, ct);
+        }
+
+        if (status != "ongoing" && _liveHost.GetPlaySession(sessionId) is { } fin)
+        {
+            var outcome = ParseTerminalStatus(status);
+            await _liveHost.FinishPlaySessionAsync(sessionId, outcome, adjudicated: false, ct);
+        }
+
+        return new ChessPlayMoveResult(next.Board.ToFen(), status != "ongoing", status, Legal: true,
+            Ply: _liveHost.GetPlaySession(sessionId)?.PlyCount ?? 0, Motifs: motifs);
+    }
+
+    public async Task<ChessBestMove> PlayBestMoveAsync(
+        Guid sessionId, string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var state = _modality!.FromFen(fen);
+        if (_modality!.Terminal(state) is { } term)
+            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
+
+        var search = _liveHost.BuildSearch(substrate);
+        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        if (result.BestMove is not { } mv)
+            return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
+
+        string fromKey = _modality.StateKey(state);
+        var next = _modality.Apply(state, mv);
+        string toKey = _modality.StateKey(next);
+        var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
+        var pv = search.ExtractPv(state.Board);
+        var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
+        int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
+
+        if (_liveHost.GetPlaySession(sessionId) is { } session && session.RecordToSubstrate)
+        {
+            session.PlyCount++;
+            await _liveHost.RecordPlayPlyAsync(
+                sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ChessVocabulary.LaplacePlayerId, ct);
+        }
+
+        if (status != "ongoing" && _liveHost.GetPlaySession(sessionId) is not null)
+        {
+            await _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
+        }
+
+        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
+            status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
+            Pv: pv, Motifs: motifs);
+    }
+
+    public Task FinishPlaySessionAsync(
+        Guid sessionId, string status, bool adjudicated = false, CancellationToken ct = default)
+        => _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated, ct);
+
+    private static GameOutcome ParseTerminalStatus(string status) => status switch
+    {
+        "draw" => GameOutcome.Draw,
+        "white wins" => GameOutcome.WonBy(0),
+        "black wins" => GameOutcome.WonBy(1),
+        _ => GameOutcome.Draw,
+    };
 
     public async Task<ChessApplyResult> ApplyMoveAsync(string fen, string uci, CancellationToken ct = default)
     {

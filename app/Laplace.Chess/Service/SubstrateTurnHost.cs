@@ -93,12 +93,8 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, _learnContext);
 
-
-        // SelfPlayTrustClass = "ResponseContent" — the player-name claim must carry the same low
-        // trust as the rest of this self-play source, not the curated-corpus default.
         ChessVocabulary.EmitPlayer(
             b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);
-
 
         bool hasWin = false;
         foreach (var e in edges) if (e.MoverOutcome == PlyOutcome.Win) { hasWin = true; break; }
@@ -116,4 +112,13 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         await _writer.ApplyAsync(change, ct);
         await _writer.FoldIncrementalAsync(ct);
     }
+
+    Task ITurnLearner.RecordPlyAsync(
+        Hash128 gameId, int ply, string fromKey, string toKey, string moveToken,
+        Hash128? moverPlayerId, CancellationToken ct)
+        => throw new NotSupportedException("Use ChessLiveGameHost for per-ply live recording.");
+
+    Task ITurnLearner.CompleteGameAsync(
+        Hash128 gameId, GameOutcome result, bool adjudicated, CancellationToken ct)
+        => throw new NotSupportedException("Use ChessLiveGameHost for terminal live recording.");
 }

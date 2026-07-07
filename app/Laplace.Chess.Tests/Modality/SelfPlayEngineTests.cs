@@ -58,6 +58,15 @@ public sealed class SelfPlayEngineTests
             return Task.CompletedTask;
         }
 
+        public Task RecordPlyAsync(
+            Hash128 gameId, int ply, string fromKey, string toKey, string moveToken,
+            Hash128? moverPlayerId, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task CompleteGameAsync(
+            Hash128 gameId, GameOutcome result, bool adjudicated, CancellationToken ct = default)
+            => Task.CompletedTask;
+
         private static double EffMu(long games, long sumScore)
         {
             double mean = (double)sumScore / games / 1e9;

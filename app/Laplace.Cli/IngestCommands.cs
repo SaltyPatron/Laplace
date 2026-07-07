@@ -46,7 +46,8 @@ internal static class IngestCommands
         bool? EmitCrossLanguageLinks,
         bool SkipEvidence,
         bool RegisterOnly,
-        bool Force = false);
+        bool Force = false,
+        bool NoAnalyze = false);
 
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
@@ -57,6 +58,7 @@ internal static class IngestCommands
         bool skipEvidence = false;
         bool registerOnly = false;
         bool force = false;
+        bool noAnalyze = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -85,6 +87,11 @@ internal static class IngestCommands
                 force = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--no-analyze")
+            {
+                noAnalyze = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -94,7 +101,8 @@ internal static class IngestCommands
             emitCross,
             skipEvidence,
             registerOnly,
-            force);
+            force,
+            noAnalyze);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)

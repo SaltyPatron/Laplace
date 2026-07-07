@@ -51,6 +51,10 @@ REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS
 if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
 if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
+if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin"
+rem Extension deploy MUST stay outside PGDATA (fsync/sharing-violation if under D:\Data\Postgres\laplace).
+if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=D:\Data\Laplace\deploy"
+if not defined LAPLACE_PGDATA set "LAPLACE_PGDATA=D:\Data\Postgres"
 if not defined INGEST set "INGEST=D:\Data\Ingest"
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"
 if not defined REPOS set "REPOS=D:\Repositories"

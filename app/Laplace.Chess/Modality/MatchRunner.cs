@@ -1,4 +1,6 @@
 using System.Threading;
+using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Laplace.Modality;
 
 namespace Laplace.Modality.Chess;
@@ -66,12 +68,15 @@ public static class MatchRunner
     private static PlayOneResult PlayOneCore(
         ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies,
         ChessState? start = null, List<ChessMove>? record = null, CancellationToken ct = default,
-        bool captureEdges = false)
+        bool captureEdges = false,
+        Hash128? substrateGameId = null,
+        Action<Hash128, int, string, string, int>? plyRecordSink = null)
     {
         var s = start ?? m.Initial();
         var subjects = captureEdges ? new List<string>() : null;
         var objects = captureEdges ? new List<string>() : null;
         var movers = captureEdges ? new List<int>() : null;
+        int plyNum = 0;
 
         for (int ply = 0; ; ply++)
         {
@@ -100,7 +105,12 @@ public static class MatchRunner
             s = m.Apply(s, mv);
 
             if (captureEdges)
+            {
                 objects!.Add(m.StateKey(s));
+                plyNum++;
+                if (substrateGameId is { } gid && plyRecordSink is not null)
+                    plyRecordSink(gid, plyNum, subjects![^1], objects[^1], movers![^1]);
+            }
         }
     }
 
@@ -148,11 +158,14 @@ public static class MatchRunner
         System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null,
         IProgress<(int Done, int AWins, int Draws, int BWins)>? progress = null,
         CancellationToken ct = default,
-        Action<RecordedEdge[], bool>? recordSink = null)
+        Action<RecordedEdge[], bool>? recordSink = null,
+        ChessLiveGameHost? liveHost = null,
+        string? liveLearnContext = null)
     {
         bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0, done = 0;
         int reportEvery = Math.Max(1, games / 500);
+        string learnCtx = liveLearnContext ?? "chess/lab/match";
         Parallel.For(0, games, new ParallelOptions
         {
             MaxDegreeOfParallelism = ResolveParallelism(concurrency),
@@ -167,11 +180,31 @@ public static class MatchRunner
             bool aWhite = (g % 2 == 0);
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var pgnMoves = pgnSink is not null ? new List<ChessMove>() : null;
+            Hash128? gameId = liveHost is not null
+                ? Hash128.OfCanonical($"{learnCtx}/{seed}/{g}")
+                : null;
+            if (liveHost is not null && gameId is { } gidOpen)
+                liveHost.OpenGameAsync(gidOpen, learnCtx, ct: ct).GetAwaiter().GetResult();
+
             var played = PlayOneCore(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
-                book ? 0 : openingPlies, start, pgnMoves, ct, captureEdges: recordSink is not null);
+                book ? 0 : openingPlies, start, pgnMoves, ct,
+                captureEdges: recordSink is not null || liveHost is not null,
+                substrateGameId: gameId,
+                plyRecordSink: liveHost is null ? null : (gid, ply, sub, obj, mover) =>
+                {
+                    liveHost.RecordPlyAsync(gid, ply, sub, obj, "?", null, ct)
+                        .GetAwaiter().GetResult();
+                });
             int outcome = played.Outcome;
             if (recordSink is not null && played.Edges.Length > 0)
                 recordSink(played.Edges, played.Adjudicated);
+            if (liveHost is not null && gameId is { } gidDone)
+            {
+                var terminal = played.Adjudicated ? GameOutcome.Draw
+                    : outcome == 2 ? GameOutcome.Draw : GameOutcome.WonBy(outcome);
+                liveHost.CompleteGameAsync(gidDone, terminal, played.Adjudicated, ct)
+                    .GetAwaiter().GetResult();
+            }
             if (pgnMoves is not null)
                 pgnSink!.Add((pgnMoves, outcome, start.Board.ToFen()));
             if (outcome == 2) Interlocked.Increment(ref draws);

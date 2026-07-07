@@ -17,6 +17,7 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
     public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
     public int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
+    public IngestSourceProfile SizingProfile => IngestSourceProfile.ChessPgn;
     public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
 
 

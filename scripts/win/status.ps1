@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$deployLib = 'D:\Data\Postgres\laplace\lib'
+$deployLib = 'D:\Data\Laplace\deploy\lib'
 $psql = if (Get-Command psql) { 'psql' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
 $env:PGPASSWORD = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'postgres' }
 $env:PGCONNECT_TIMEOUT = '3'
@@ -43,25 +43,29 @@ foreach ($tree in 'build-win', 'build-win-ext', 'build-win-asan') {
     }
 }
 
-Section 'DEPLOY (D:\Data\Postgres\laplace vs build outputs)'
+Section 'DEPLOY (D:\Data\Laplace\deploy vs build outputs)'
+$deployLib = 'D:\Data\Laplace\deploy\lib'
+$deployShare = 'D:\Data\Laplace\deploy\share'
 $pairs = @(
-    @{ src = 'build-win-ext\laplace_geom\laplace_geom.dll'; dst = 'laplace_geom.dll' },
-    @{ src = 'build-win-ext\laplace_substrate\laplace_substrate.dll'; dst = 'laplace_substrate.dll' },
-    @{ src = 'build-win\core\laplace_core.dll'; dst = 'laplace_core.dll' },
-    @{ src = 'build-win\dynamics\laplace_dynamics.dll'; dst = 'laplace_dynamics.dll' }
+    @{ src = 'build-win-ext\laplace_geom\laplace_geom.dll'; dst = Join-Path $deployLib 'laplace_geom.dll'; label = 'laplace_geom.dll' },
+    @{ src = 'build-win-ext\laplace_substrate\laplace_substrate.dll'; dst = Join-Path $deployLib 'laplace_substrate.dll'; label = 'laplace_substrate.dll' },
+    @{ src = 'build-win\core\laplace_core.dll'; dst = Join-Path $deployLib 'laplace_core.dll'; label = 'laplace_core.dll' },
+    @{ src = 'build-win\dynamics\laplace_dynamics.dll'; dst = Join-Path $deployLib 'laplace_dynamics.dll'; label = 'laplace_dynamics.dll' },
+    @{ src = 'build-win\core\perfcache\laplace_t0_perfcache.bin'; dst = Join-Path $deployShare 'laplace_t0_perfcache.bin'; label = 'laplace_t0_perfcache.bin' },
+    @{ src = 'build-win\core\perfcache\laplace_highway_perfcache.bin'; dst = Join-Path $deployShare 'laplace_highway_perfcache.bin'; label = 'laplace_highway_perfcache.bin' }
 )
 foreach ($pair in $pairs) {
     $s = Join-Path $root $pair.src
-    $d = Join-Path $deployLib $pair.dst
-    if (-not (Test-Path $s)) { Write-Host ("{0,-26} NOT BUILT" -f $pair.dst); continue }
-    if (-not (Test-Path $d)) { Write-Host ("{0,-26} NOT DEPLOYED (install-extensions.cmd)" -f $pair.dst); continue }
+    $d = $pair.dst
+    if (-not (Test-Path $s)) { Write-Host ("{0,-32} NOT BUILT" -f $pair.label); continue }
+    if (-not (Test-Path $d)) { Write-Host ("{0,-32} NOT DEPLOYED (install-extensions.cmd)" -f $pair.label); continue }
     
     
     $h1 = (Get-FileHash $s -Algorithm SHA256).Hash
     $h2 = (Get-FileHash $d -Algorithm SHA256).Hash
-    if (-not $h1 -or -not $h2) { Write-Host ("{0,-26} HASH FAILED (PSModulePath pollution? see env.cmd)" -f $pair.dst); continue }
+    if (-not $h1 -or -not $h2) { Write-Host ("{0,-32} HASH FAILED (PSModulePath pollution? see env.cmd)" -f $pair.label); continue }
     $same = $h1 -eq $h2
-    Write-Host ("{0,-26} {1}" -f $pair.dst, $(if ($same) { 'deployed = built' } else { 'STALE DEPLOY (install-extensions.cmd)' }))
+    Write-Host ("{0,-32} {1}" -f $pair.label, $(if ($same) { 'deployed = built' } else { 'STALE DEPLOY (install-extensions.cmd)' }))
 }
 $stale = Get-ChildItem (Join-Path $deployLib '*.stale~*') 2>$null
 if ($stale) { Write-Host ("{0} hot-swap leftover(s) pending cleanup (next install-extensions run)" -f $stale.Count) }
@@ -70,6 +74,12 @@ Section 'POSTGRES'
 $svc = Get-Service postgresql-x64-18
 Write-Host "service postgresql-x64-18: $($svc.Status)"
 if ($svc.Status -eq 'Running') {
+    $gucT0 = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.perfcache_path;" 2>&1 | Where-Object { $_ })
+    $gucHw = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;" 2>&1 | Where-Object { $_ })
+    $wantT0 = 'D:/Data/Laplace/deploy/share/laplace_t0_perfcache.bin'
+    $wantHw = 'D:/Data/Laplace/deploy/share/laplace_highway_perfcache.bin'
+    Write-Host "perfcache_path GUC: $(if ($gucT0 -eq $wantT0) { 'OK' } else { "STALE ($gucT0)" })"
+    Write-Host "highway_perfcache_path GUC: $(if ($gucHw -eq $wantHw) { 'OK' } else { "STALE ($gucHw)" })"
     $ext = & $psql -h localhost -U postgres -d postgres -tAc "SELECT name || ' ' || default_version FROM pg_available_extensions WHERE name LIKE 'laplace%' ORDER BY 1;" 2>&1
     Write-Host "available extensions: $(($ext | Where-Object { $_ }) -join ', ')"
     $dbs = & $psql -h localhost -U postgres -d postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'laplace%' ORDER BY 1;" 2>&1

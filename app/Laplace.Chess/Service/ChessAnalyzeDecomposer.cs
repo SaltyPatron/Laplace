@@ -5,19 +5,18 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-// The CALCULATED pass. A second decomposer over the SAME PGN, gated by the analysis-version
-// watermark: for each game NOT yet analyzed at the current version, it replays the movetext and
-// derives positions / geometry / move edges / motifs / opening / consensus (ChessAnalyze) under
-// the ChessAnalysis source, and stamps a per-(game, version) marker so the next run skips it.
-//
-// Ingest = record (ChessPgnDecomposer, witnessed, no engine). This = analyze (derive, deferred,
-// re-runnable, targetable). Run: `laplace ingest chess-analyze <pgn path>`. See .scratchpad/08.
+// CALCULATED pass: scan witnessed Chess_Game rows in Postgres (HAS_MOVETEXT under ChessPgn),
+// hydrate via content roundtrip, derive geometry/consensus, stamp AnalysisMarker.
+// Run: `laplace ingest chess-analyze`  (no path — substrate is the source of truth)
 public sealed class ChessAnalyzeDecomposer : DecomposerOrchestrator
 {
     public override Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
     public override string SourceName => "ChessAnalysis";
-    public override int LayerOrder => 21; // after ChessPgn (20)
+    public override int LayerOrder => 21;
     public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
+
+    public int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
+    public IngestSourceProfile SizingProfile => IngestSourceProfile.ChessAnalyze;
 
     private IReadOnlyCollection<string> _canonicalNames = System.Array.Empty<string>();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -30,51 +29,65 @@ public sealed class ChessAnalyzeDecomposer : DecomposerOrchestrator
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
+            throw new InvalidOperationException(
+                "ChessAnalysis requires a live Postgres substrate (NpgsqlSubstrateReader). "
+                + "Record games first: laplace ingest chess <pgn>");
+
+        var profile = IngestSourceProfile.ChessAnalyze;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options, BatchConfigDefaults.Chess);
+
+        if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0 && !options.DryRun)
+        {
+            int workers = IngestTopology.Current.ComposeWorkers;
+            var config = new IngestBatchConfig
+            {
+                SourceId = ChessVocabulary.AnalysisSourceId,
+                BatchLabelPrefix = "chess/analysis",
+                BatchSize = ws.Batch,
+                ProbeChunkSize = ws.ProbeChunk,
+                ContainmentReader = context.Reader,
+                WorkingSet = WorkingSetMode.Enabled,
+                WorkingSetProbeInterval = ws.ProbeInterval,
+                WorkingSetRecordCap = ws.RecordCap,
+                WorkingSetProfile = profile,
+            };
+            var stream = new ParallelChessWitnessRecordStream(ds, context.Reader, ws.ProbeInterval, workers, ct);
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                               stream, new ChessAnalyzeIngestHandler(), config, ct))
+                yield return change;
+            yield break;
+        }
+
         int batch = System.Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 256, 1, 512);
         await foreach (var change in RunComposePhaseAsync(
-            StreamUnanalyzedGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
-            (parsed, b) => ChessAnalyze.DeriveFromParsed(b, parsed),
+            ChessWitnessHydrator.StreamUnanalyzedFromSubstrateAsync(ds, context.Reader, batch, ct),
+            (witnessed, b) => ChessAnalyze.DeriveFromWitnessed(b, witnessed),
             "analysis", SourceTrust.StructuredCorpus, batch, context, options, ct))
             yield return change;
     }
 
-    // Stream games not yet analyzed at the current version. Same chunked bulk-probe pattern the
-    // recorder uses for novelty, but keyed on the analysis marker rather than the game id.
-    private static async IAsyncEnumerable<ChessPgnDecomposer.ParsedGame> StreamUnanalyzedGamesAsync(
-        string ecosystemPath, ISubstrateReader? reader, int chunkSize,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var chunk = new List<ChessPgnDecomposer.ParsedGame>(chunkSize);
-        await foreach (var gameText in ChessPgnDecomposer.StreamAllGamesAsync(ecosystemPath, ct))
-        {
-            if (ChessPgnDecomposer.TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
-            if (chunk.Count < chunkSize) continue;
-            await foreach (var g in FilterUnanalyzedAsync(chunk, reader, ct)) yield return g;
-            chunk.Clear();
-        }
-        await foreach (var g in FilterUnanalyzedAsync(chunk, reader, ct)) yield return g;
-    }
-
-    internal static async IAsyncEnumerable<ChessPgnDecomposer.ParsedGame> FilterUnanalyzedAsync(
-        List<ChessPgnDecomposer.ParsedGame> chunk, ISubstrateReader? reader,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        if (chunk.Count == 0) yield break;
-        if (reader is null) { foreach (var g in chunk) yield return g; yield break; }
-
-        var markers = new Hash128[chunk.Count];
-        for (int i = 0; i < chunk.Count; i++)
-            markers[i] = ChessVocabulary.AnalysisMarkerId(chunk[i].GameId, ChessAnalyze.Version);
-
-        byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
-        long bits = (long)bm.Length * 8;
-        for (int i = 0; i < chunk.Count; i++)
-        {
-            bool present = i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0;
-            if (!present) yield return chunk[i];
-        }
-    }
-
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
+    {
+        if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
+            return Task.FromResult<long?>(null);
+        return CountRecordedGamesAsync(ds, ct);
+    }
+
+    private static async Task<long?> CountRecordedGamesAsync(Npgsql.NpgsqlDataSource ds, CancellationToken ct)
+    {
+        await using var cmd = ds.CreateCommand(@"
+            SELECT count(DISTINCT e.id)
+            FROM laplace.entities e
+            JOIN laplace.attestations mt
+              ON mt.subject_id = e.id
+             AND mt.type_id = $2
+             AND mt.source_id = $3
+            WHERE e.type_id = $1");
+        cmd.Parameters.AddWithValue(ChessVocabulary.GameType.ToBytes());
+        cmd.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT").ToBytes());
+        cmd.Parameters.AddWithValue(ChessVocabulary.PgnSourceId.ToBytes());
+        var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return total is long n ? n : 0L;
+    }
 }

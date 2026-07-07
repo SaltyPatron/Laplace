@@ -36,6 +36,11 @@ public sealed record IngestSourceProfile(
     /// </summary>
     public static readonly IngestSourceProfile ChessPgn = new(4_000_000, 1);
 
+    /// <summary>
+    /// Chess analysis derive — replays witnessed movetext into positions/geometry per game.
+    /// </summary>
+    public static readonly IngestSourceProfile ChessAnalyze = new(4_000_000, 1);
+
     /// <summary>WordNet synset/sense line — small text, many emitted rows per line.</summary>
     public static readonly IngestSourceProfile WordNet = new(4_096, 4);
 

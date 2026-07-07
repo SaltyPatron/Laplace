@@ -26,6 +26,13 @@ public interface IStateValuer
 public interface ITurnLearner
 {
     Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default);
+
+    Task RecordPlyAsync(
+        Hash128 gameId, int ply, string fromKey, string toKey, string moveToken,
+        Hash128? moverPlayerId, CancellationToken ct = default);
+
+    Task CompleteGameAsync(
+        Hash128 gameId, GameOutcome result, bool adjudicated, CancellationToken ct = default);
 }
 
 public static class GlickoPriors

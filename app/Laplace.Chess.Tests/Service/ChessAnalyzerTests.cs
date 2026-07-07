@@ -23,6 +23,21 @@ public sealed class ChessAnalyzerTests
     }
 
     [Fact]
+    public void WitnessedFromParsed_MatchesDirectDeriveOutput()
+    {
+        CodepointPerfcache.LoadDefault();
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+        var direct = Analyze(Game);
+        var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/witnessed");
+        ChessAnalyze.DeriveFromWitnessed(b, ChessAnalyze.WitnessedFromParsed(parsed));
+        var viaWitness = b.SetInputUnitsConsumed(1).Build();
+
+        Assert.Equal(direct.Entities.Length, viaWitness.Entities.Length);
+        Assert.Equal(direct.Physicalities.Length, viaWitness.Physicalities.Length);
+        Assert.Contains(viaWitness.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+    }
+
+    [Fact]
     public void Analyzer_EmitsPositionsAndGeometry()
     {
         var change = Analyze(Game);

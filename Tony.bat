@@ -12,6 +12,8 @@ cmd /c ".\scripts\win\db-reset.cmd" 2>&1 > D:\Data\Output\db-reset.log
 cmd /c ".\scripts\win\seed-foundation.cmd" 2>&1 > D:\Data\Output\seed-foundation.log
 cmd /c ".\scripts\win\seed-step.cmd document D:\Data\Ingest\test-data\text" 2>&1 > D:\Data\Output\documents.log
 cmd /c ".\scripts\win\seed-step.cmd openings D:\Data\Ingest\Games\Chess\openings" 2>&1 > D:\Data\Output\openings.log
+cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn" 2>&1 > D:\Data\Output\chess-Anthony-Hart-chesscom.log
+cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\D:\Data\Ingest\Games\Chess\MagnusCarlsen_chesscom.pgn" 2>&1 > D:\Data\Output\chess-MagnusCarlsen-chesscom.log
 cmd /c ".\scripts\win\seed-step.cmd atomic2020" 2>&1 > D:\Data\Output\atomic2020.log
 cmd /c ".\scripts\win\seed-step.cmd omw" 2>&1 > D:\Data\Output\omw.log
 cmd /c ".\scripts\win\seed-step.cmd conceptnet" 2>&1 > D:\Data\Output\conceptnet.log
@@ -19,4 +21,4 @@ cmd /c ".\scripts\win\seed-step.cmd ud" 2>&1 > D:\Data\Output\ud.log
 cmd /c ".\scripts\win\seed-step.cmd wiktionary" 2>&1 > D:\Data\Output\wiktionary.log
 cmd /c ".\scripts\win\seed-step.cmd tatoeba" 2>&1 > D:\Data\Output\tatoeba.log
 cmd /c ".\scripts\win\seed-step.cmd opensubtitles" 2>&1 > D:\Data\Output\opensubtitles.log
-cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\Lumbras\otb" 2>&1 > D:\Data\Output\chess-otb.log
+cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\Lumbras\otb\LumbrasGigaBase_OTB_1900-1949.pgn" 2>&1 > D:\Data\Output\chess-otb-1900-1949.log

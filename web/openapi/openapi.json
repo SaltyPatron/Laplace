@@ -1721,6 +1721,162 @@
         }
       }
     },
+    "/chess/play/start": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/play/move": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/play/bestmove": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayBestMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/play/finish": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lichess/games/{gameId}/chat": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "parameters": [
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lichess/status": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lichess/start": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LichessStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/lichess/stop": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/chess/lab/catalog": {
       "get": {
         "tags": [
@@ -5381,6 +5537,50 @@
           }
         }
       },
+      "LichessStartRequest": {
+        "required": [
+          "depth",
+          "maxConcurrent",
+          "substrate",
+          "speeds"
+        ],
+        "type": "object",
+        "properties": {
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "maxConcurrent": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "substrate": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "speeds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "MeaningNeighborView": {
         "required": [
           "relation",
@@ -5677,6 +5877,99 @@
           },
           "active": {
             "type": "boolean"
+          }
+        }
+      },
+      "PlayBestMoveRequest": {
+        "required": [
+          "sessionId",
+          "fen",
+          "depth",
+          "substrate"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fen": {
+            "type": "string"
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "substrate": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "PlayFinishRequest": {
+        "required": [
+          "sessionId",
+          "status",
+          "adjudicated"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "adjudicated": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "PlayMoveRequest": {
+        "required": [
+          "sessionId",
+          "fen",
+          "uci"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fen": {
+            "type": "string"
+          },
+          "uci": {
+            "type": "string"
+          }
+        }
+      },
+      "PlayStartRequest": {
+        "required": [
+          "record"
+        ],
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         }
       },

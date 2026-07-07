@@ -20,11 +20,17 @@ internal static class AppComposition
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
 
         const double chessWeight = 0.5d;
+        services.AddSingleton(_ =>
+            ChessLiveGameHost.CreateAsync(chessWeight).ConfigureAwait(false).GetAwaiter().GetResult());
         services.AddSingleton(sp => new ChessEngineService(
             LaplaceInstall.PostgresConnectionString(), chessWeight,
+            sp.GetRequiredService<ChessLiveGameHost>(),
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
+        services.AddSingleton(sp => new LichessConnectivityService(
+            sp.GetRequiredService<ChessLiveGameHost>(),
+            sp.GetService<ILoggerFactory>()?.CreateLogger("lichess")));
 
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();

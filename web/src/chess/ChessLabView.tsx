@@ -9,62 +9,73 @@ import {
   Muted,
   Panel,
   SegmentedControl,
-  Select,
   SliderField,
   Toggle,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@ui';
+import {
+  ENGINE_LABELS,
+  experimentFor,
+  experimentsInCategory,
+  LAB_CATEGORIES,
+  type LabExperiment,
+} from './lab/experiments';
 import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './lab/sse';
+import { LichessPanel } from './LichessPanel';
 import styles from './ChessLabView.module.css';
 
 type FieldDef =
-  | { key: string; label: string; type: 'number'; min: number; max?: number; step?: number; unit?: string; help?: string }
-  | { key: string; label: string; type: 'text' | 'password'; help?: string }
-  | { key: string; label: string; type: 'select'; options: string[]; help?: string }
+  | { key: string; label: string; type: 'number'; min: number; max?: number; step?: number; unit?: string; help?: string; placeholder?: string }
+  | { key: string; label: string; type: 'text' | 'password'; help?: string; placeholder?: string }
+  | { key: string; label: string; type: 'select'; options: string[]; help?: string; optionLabels?: Record<string, string> }
   | { key: string; label: string; type: 'bool'; help?: string };
 
 const JOB_FIELDS: Record<string, FieldDef[]> = {
   'substrate-test': [
-    { key: 'mode', label: 'bias mode', type: 'select', options: ['fold', 'edge', 'off'], help: 'substrate root-bias source (off = pure search baseline)' },
-    { key: 'games', label: 'games', type: 'number', min: 1, help: 'no upper limit' },
-    { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
-    { key: 'maxPlies', label: 'max plies', type: 'number', min: 10, max: 400, help: 'adjudicate a draw past this length' },
-    { key: 'concurrency', label: 'concurrency', type: 'number', min: 0, help: 'parallel games (0 = all performance cores)' },
-    { key: 'openings', label: 'opening book', type: 'bool', help: 'seed games from the opening set' },
+    {
+      key: 'mode',
+      label: 'Bias mode',
+      type: 'select',
+      options: ['fold', 'edge', 'off'],
+      optionLabels: {
+        fold: 'Fold — substructure consensus (recommended)',
+        edge: 'Edge — raw move popularity',
+        off: 'Off — sanity (pure vs pure)',
+      },
+      help: 'Where root-move bias comes from. Fold is the honest transfer test.',
+    },
+    { key: 'games', label: 'Games', type: 'number', min: 1, help: 'More games = tighter Elo estimate. No upper limit.', placeholder: '100' },
+    { key: 'depth', label: 'Search depth', type: 'number', min: 1, max: 12, help: 'Fixed depth for both sides. Higher = slower, stronger.' },
+    { key: 'maxPlies', label: 'Max plies', type: 'number', min: 10, max: 400, help: 'Declare a draw if the game exceeds this length.' },
+    { key: 'concurrency', label: 'Parallel games', type: 'number', min: 0, help: '0 = use all performance CPU cores.', placeholder: '0' },
+    { key: 'openings', label: 'Opening book', type: 'bool', help: 'Seed from ingested ECO positions instead of random starts.' },
   ],
   ladder: [
-    { key: 'games', label: 'games / term', type: 'number', min: 1, help: 'no upper limit' },
-    { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
-    { key: 'maxPlies', label: 'max plies', type: 'number', min: 10, max: 400, help: 'adjudicate a draw past this length' },
-    { key: 'concurrency', label: 'core budget', type: 'number', min: 0, help: 'total parallel workers across all terms (0 = all performance cores)' },
+    { key: 'games', label: 'Games per term', type: 'number', min: 1, help: 'Each of 6 eval terms runs this many games. Total = ×6.', placeholder: '100' },
+    { key: 'depth', label: 'Search depth', type: 'number', min: 1, max: 12 },
+    { key: 'maxPlies', label: 'Max plies', type: 'number', min: 10, max: 400, help: 'Draw adjudication cutoff.' },
+    { key: 'concurrency', label: 'Core budget', type: 'number', min: 0, help: 'Shared across all 6 terms in parallel. 0 = all performance cores.', placeholder: '0' },
   ],
-  tactics: [{ key: 'depth', label: 'depth', type: 'number', min: 1, max: 16 }],
+  tactics: [
+    { key: 'depth', label: 'Search depth', type: 'number', min: 1, max: 16, help: 'Depth for each mate puzzle.' },
+  ],
   review: [
-    { key: 'path', label: 'PGN path', type: 'text', help: 'server-side path to a .pgn file' },
-    { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
-    { key: 'maxGames', label: 'max games', type: 'number', min: 1, max: 100 },
+    { key: 'path', label: 'PGN path (server)', type: 'text', help: 'Absolute path on the API host.', placeholder: 'D:\\Data\\…\\games.pgn' },
+    { key: 'depth', label: 'Analysis depth', type: 'number', min: 1, max: 12 },
+    { key: 'maxGames', label: 'Max games', type: 'number', min: 1, max: 100 },
   ],
   'learned-pst': [],
   cutechess: [
-    { key: 'rounds', label: 'rounds', type: 'number', min: 1, max: 100 },
-    { key: 'depth', label: 'depth', type: 'number', min: 1, max: 20 },
-  ],
-  'lichess-bot': [
-    { key: 'token', label: 'API token', type: 'password', help: 'lichess bot OAuth token (or set LICHESS_API)' },
-    { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
-    { key: 'maxConcurrent', label: 'max games', type: 'number', min: 1, max: 8 },
+    { key: 'rounds', label: 'Rounds', type: 'number', min: 1, max: 100, help: 'Each round = 2 games (color swap).' },
+    { key: 'depth', label: 'UCI depth', type: 'number', min: 1, max: 20, help: 'Fixed depth sent to both engines.' },
   ],
   'lichess-fetch': [
-    { key: 'user', label: 'username', type: 'text' },
-    { key: 'site', label: 'site', type: 'select', options: ['lichess', 'chesscom'] },
-    { key: 'max', label: 'max games', type: 'number', min: 1, max: 1000, step: 10 },
+    { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
+    { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
+    { key: 'max', label: 'Max games', type: 'number', min: 1, max: 1000, step: 10, help: 'Leave at default for provider limit.' },
   ],
-};
-
-const REQUIRES: Record<string, string[]> = {
-  cutechess: ['cutechess', 'stockfish', 'qt', 'laplaceUci'],
 };
 
 const FALLBACK_JOBS: LabJobSpec[] = [{ kind: 'substrate-test', label: 'Substrate test', default: { games: '20', depth: '4', mode: 'fold' } }];
@@ -79,6 +90,10 @@ function paramsFor(kind: string, spec: LabJobSpec | undefined): Record<string, s
   const out: Record<string, string> = {};
   for (const f of JOB_FIELDS[kind] ?? []) out[f.key] = spec?.default?.[f.key] ?? fieldDefault(f);
   return out;
+}
+
+function requiresFor(exp: LabExperiment | undefined): string[] {
+  return exp?.requires ?? [];
 }
 
 export function ChessLabView() {
@@ -107,6 +122,7 @@ export function ChessLabView() {
 
   const jobSpecs = catalog?.jobs ?? FALLBACK_JOBS;
   const activeSpec = useMemo(() => jobSpecs.find((j) => j.kind === kind), [jobSpecs, kind]);
+  const experiment = experimentFor(kind);
   const fields = JOB_FIELDS[kind] ?? [];
 
   const seededRef = useRef<string | null>(null);
@@ -117,11 +133,16 @@ export function ChessLabView() {
   }, [kind, catalog, activeSpec]);
 
   const engines = catalog?.engines ?? {};
-  const missingEngines = (REQUIRES[kind] ?? []).filter((name) => !engines[name]?.found);
-  const blockedReason = missingEngines.length > 0 ? `needs ${missingEngines.join(', ')}` : null;
+  const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
+  const blockedReason = missingEngines.length > 0
+    ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
+    : null;
 
   const active = jobs.find((j) => j.id === activeId) ?? jobs[0];
   const activeRunning = active?.state === 'Running' || active?.state === 'Pending';
+  const progressPct = active && active.summary.total > 0
+    ? Math.min(100, Math.round((100 * active.summary.done) / active.summary.total))
+    : 0;
 
   const openJob = useCallback((job: LabJob) => {
     setActiveId(job.id);
@@ -167,57 +188,116 @@ export function ChessLabView() {
 
   return (
     <div className={styles.lab}>
-      <Panel>
-        <div className={styles.title}>
+      <header className={styles.hero}>
+        <div>
           <h3>Chess Lab</h3>
-          <Muted>headless experiments over the substrate & external engines</Muted>
+          <Muted>Run experiments against the substrate and external engines — every result streams live below.</Muted>
         </div>
-        {catalog && (
-          <div className={styles.engines}>
-            {Object.entries(engines).map(([name, e]) => (
-              <Tooltip key={name}>
-                <TooltipTrigger asChild>
-                  <Chip variant={e.found ? 'engineOk' : 'engineMissing'}>
-                    <b>{name}</b> {e.found ? '✓' : '✗'}
-                  </Chip>
-                </TooltipTrigger>
-                <TooltipContent>{e.path || 'not found'}</TooltipContent>
-              </Tooltip>
+      </header>
+
+      {catalog && (
+        <section className={styles.engineBar} aria-label="Server engine status">
+          <span className={styles.engineBarLabel}>Server tools</span>
+          {Object.entries(engines).map(([name, e]) => (
+            <Tooltip key={name}>
+              <TooltipTrigger asChild>
+                <Chip variant={e.found ? 'engineOk' : 'engineMissing'}>
+                  {ENGINE_LABELS[name] ?? name} {e.found ? '✓' : '✗'}
+                </Chip>
+              </TooltipTrigger>
+              <TooltipContent>
+                {e.found ? e.path : 'Not found — check deploy/secrets/chess-lab.env'}
+                {e.source ? ` (${e.source})` : ''}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+          {Object.keys(engines).length === 0 && <Muted>No engine paths reported by the server.</Muted>}
+        </section>
+      )}
+
+      {err && <Alert>{err}</Alert>}
+
+      <LichessPanel />
+
+      <Panel title="Choose an experiment">
+        {LAB_CATEGORIES.map((cat) => (
+          <div key={cat.id} className={styles.categoryBlock}>
+            <div className={styles.categoryHead}>
+              <strong>{cat.label}</strong>
+              <Muted>{cat.blurb}</Muted>
+            </div>
+            <div className={styles.experimentGrid} role="listbox" aria-label={cat.label}>
+              {experimentsInCategory(cat.id).map((exp) => (
+                <ExperimentCard
+                  key={exp.kind}
+                  exp={exp}
+                  selected={kind === exp.kind}
+                  blocked={requiresFor(exp).some((n) => !engines[n]?.found)}
+                  onSelect={() => setKind(exp.kind)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </Panel>
+
+      {experiment && (
+        <Panel className={styles.detailPanel}>
+          <div className={styles.detailHead}>
+            <div>
+              <h4 className={styles.detailTitle}>{experiment.title}</h4>
+              <p className={styles.detailTagline}>{experiment.tagline}</p>
+            </div>
+            <div className={styles.badges}>
+              {experiment.recordsLive && <Chip variant="engineOk">Records live</Chip>}
+              {!experiment.recordsLive && <Chip>Read-only</Chip>}
+              {blockedReason && requiresFor(experiment).length > 0 && (
+                <Chip variant="engineMissing">Missing deps</Chip>
+              )}
+            </div>
+          </div>
+          <p className={styles.detailDesc}>{experiment.description}</p>
+          <div className={styles.detailCols}>
+            <div>
+              <h5 className={styles.detailSubhead}>What to expect</h5>
+              <ul className={styles.detailList}>
+                {experiment.expect.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+            <div>
+              <h5 className={styles.detailSubhead}>Tips</h5>
+              <ul className={styles.detailList}>
+                {experiment.tips.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      <Panel title="Parameters">
+        {fields.length === 0 ? (
+          <Muted>No parameters — this experiment reads directly from the substrate.</Muted>
+        ) : (
+          <div className={styles.form}>
+            {fields.map((f) => (
+              <LabField key={f.key} field={f} value={params[f.key] ?? ''}
+                        onChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))} />
             ))}
-            {Object.keys(engines).length === 0 && <Muted>no engines reported</Muted>}
           </div>
         )}
-        {err && <Alert>{err}</Alert>}
-
-        <div className={styles.form}>
-          <Field label="experiment">
-            <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-              {jobSpecs.map((j) => <option key={j.kind} value={j.kind}>{j.label ?? j.kind}</option>)}
-            </Select>
-          </Field>
-          {fields.map((f) => (
-            <LabField key={f.key} field={f} value={params[f.key] ?? ''}
-                      onChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))} />
-          ))}
-          {fields.length === 0 && <Muted className={styles.noParams}>no parameters — reads directly from the substrate.</Muted>}
-        </div>
-
         <div className={styles.actions}>
           {blockedReason ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  onClick={() => void startJob()}
-                  visuallyDisabled
-                >
-                  {starting ? '…' : activeRunning ? 'Running…' : 'Start'}
+                <Button onClick={() => void startJob()} visuallyDisabled>
+                  {starting ? 'Starting…' : activeRunning ? 'Running…' : 'Start experiment'}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{blockedReason}</TooltipContent>
             </Tooltip>
           ) : (
             <Button onClick={() => void startJob()} disabled={starting || activeRunning} loading={starting}>
-              {starting ? '…' : activeRunning ? 'Running…' : 'Start'}
+              {starting ? 'Starting…' : activeRunning ? 'Running…' : 'Start experiment'}
             </Button>
           )}
           <Button variant="ghost" onClick={() => void stopJob()} disabled={!activeRunning}>Stop</Button>
@@ -226,40 +306,81 @@ export function ChessLabView() {
       </Panel>
 
       {jobs.length > 0 && (
-        <Panel className={styles.jobs} title="Jobs">
+        <Panel className={styles.jobs} title="Recent jobs">
           <ul className={styles.jobList}>
-            {jobs.map((j) => (
-              <li key={j.id} className={j.id === active?.id ? styles.jobItemSelected : undefined}>
-                <Button variant="ghost" className={styles.jobBtn} onClick={() => openJob(j)}>
-                  <span className={stateStyle(j.state)}>{j.state}</span>
-                  <span className={styles.jobKind}>{j.kind}</span>
-                  <Muted className={styles.jobSummary}>{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</Muted>
-                </Button>
-              </li>
-            ))}
+            {jobs.map((j) => {
+              const title = experimentFor(j.kind)?.title ?? j.kind;
+              return (
+                <li key={j.id} className={j.id === active?.id ? styles.jobItemSelected : undefined}>
+                  <Button variant="ghost" className={styles.jobBtn} onClick={() => openJob(j)}>
+                    <span className={stateStyle(j.state)}>{j.state}</span>
+                    <span className={styles.jobKind}>{title}</span>
+                    <Muted className={styles.jobSummary}>{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</Muted>
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         </Panel>
       )}
 
       {active && (
-        <Panel title={<>{active.kind} <Muted className={stateStyle(active.state)}>{active.state}</Muted></>}>
-          <Muted>{active.summary.message ?? `${active.summary.done}/${active.summary.total}`}</Muted>
+        <Panel title={<>{experimentFor(active.kind)?.title ?? active.kind} <Muted className={stateStyle(active.state)}>{active.state}</Muted></>}>
+          {active.summary.total > 0 && (
+            <div className={styles.progressWrap} aria-label="Job progress">
+              <div className={styles.progressBar} style={{ width: `${progressPct}%` }} />
+              <span className={styles.progressLabel}>{active.summary.done} / {active.summary.total} ({progressPct}%)</span>
+            </div>
+          )}
+          {active.summary.message && <Muted>{active.summary.message}</Muted>}
           {active.artifacts?.['games.pgn'] && (
             <div className={styles.artifactRow}>
-              <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>Download PGN</a>
-              <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest to substrate</Button>
+              <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>Download games.pgn</a>
+              {experimentFor(active.kind)?.recordsLive ? (
+                <Muted>Games were recorded to substrate during the run. PGN is for archival.</Muted>
+              ) : (
+                <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest PGN to substrate</Button>
+              )}
             </div>
           )}
         </Panel>
       )}
 
       <Panel className={styles.feed} title="Live feed">
+        <Muted className={styles.feedHint}>Logs, progress, metrics, and result tables appear here as the job runs.</Muted>
         <ul className={styles.events}>
           {events.map((e, i) => <LabRow key={i} e={e} />)}
-          {events.length === 0 && <li><Muted>no events yet — Start an experiment above.</Muted></li>}
+          {events.length === 0 && <li><Muted>Select a job or start an experiment to see live output.</Muted></li>}
         </ul>
       </Panel>
     </div>
+  );
+}
+
+function ExperimentCard({
+  exp,
+  selected,
+  blocked,
+  onSelect,
+}: {
+  exp: LabExperiment;
+  selected: boolean;
+  blocked: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className={[styles.experimentCard, selected && styles.experimentCardSelected, blocked && styles.experimentCardBlocked].filter(Boolean).join(' ')}
+      onClick={onSelect}
+    >
+      <span className={styles.experimentTitle}>{exp.title}</span>
+      <span className={styles.experimentTagline}>{exp.tagline}</span>
+      {exp.recordsLive && <span className={styles.experimentBadge}>records</span>}
+      {blocked && <span className={styles.experimentBadgeWarn}>needs setup</span>}
+    </button>
   );
 }
 
@@ -267,21 +388,34 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
   if (field.type === 'bool') {
     const on = value === 'true';
     return (
-      <Field label={field.label} help={field.help} layout="row">
+      <Field label={field.label} help={field.help} layout="row" className={styles.fieldWide}>
         <Toggle checked={on} onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')} />
       </Field>
     );
   }
 
   if (field.type === 'select') {
+    const labeled = field.optionLabels
+      ? field.options.map((o) => ({ value: o, label: field.optionLabels![o] ?? o }))
+      : field.options;
+    if (labeled.length <= 3 && !field.optionLabels) {
+      return (
+        <Field label={field.label} help={field.help} className={styles.fieldWide}>
+          <SegmentedControl value={value} onValueChange={onChange} options={field.options} label={field.label} />
+        </Field>
+      );
+    }
     return (
-      <Field label={field.label} help={field.help}>
+      <Field label={field.label} help={field.help} className={styles.fieldWide}>
         <SegmentedControl
           value={value}
           onValueChange={onChange}
-          options={field.options}
+          options={labeled.map((o) => (typeof o === 'string' ? o : o.value))}
           label={field.label}
         />
+        {field.optionLabels && (
+          <Muted className={styles.fieldHint}>{field.optionLabels[value] ?? value}</Muted>
+        )}
       </Field>
     );
   }
@@ -289,42 +423,23 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
   if (field.type === 'number') {
     if (field.max !== undefined) {
       return (
-        <Field
-          label={field.label}
-          help={field.help}
-          valueDisplay={`${value || '—'}${field.unit ?? ''}`}
-        >
-          <SliderField
-            min={field.min}
-            max={field.max}
-            step={field.step ?? 1}
-            value={value}
-            onChange={onChange}
-          />
+        <Field label={field.label} help={field.help} valueDisplay={`${value || '—'}${field.unit ?? ''}`}>
+          <SliderField min={field.min} max={field.max} step={field.step ?? 1} value={value} onChange={onChange} />
         </Field>
       );
     }
-
     return (
       <Field label={field.label} help={field.help}>
-        <Input
-          type="number"
-          min={field.min}
-          step={field.step ?? 1}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <Input type="number" min={field.min} step={field.step ?? 1} value={value} placeholder={field.placeholder}
+               onChange={(e) => onChange(e.target.value)} />
       </Field>
     );
   }
 
   return (
-    <Field label={field.label} help={field.help}>
-      <Input
-        type={field.type === 'password' ? 'password' : 'text'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
+    <Field label={field.label} help={field.help} className={styles.fieldWide}>
+      <Input type={field.type === 'password' ? 'password' : 'text'} value={value} placeholder={field.placeholder}
+             onChange={(e) => onChange(e.target.value)} />
     </Field>
   );
 }

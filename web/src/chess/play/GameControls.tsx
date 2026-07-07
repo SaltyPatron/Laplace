@@ -18,6 +18,7 @@ export interface GameControlsProps {
   flip: boolean;
   searchDepth: number;
   useSubstrate: boolean;
+  recordToSubstrate: boolean;
   evalMode: boolean;
   onNewGame: () => void;
   onBotMove: () => void;
@@ -25,6 +26,7 @@ export interface GameControlsProps {
   onFlip: (v: boolean) => void;
   onDepth: (v: number) => void;
   onSubstrate: (v: boolean) => void;
+  onRecordToSubstrate: (v: boolean) => void;
   onEvalMode: (v: boolean) => void;
 }
 
@@ -90,6 +92,12 @@ export function GameControls(p: GameControlsProps) {
           checked={p.useSubstrate}
           onChange={(e) => p.onSubstrate(e.target.checked)}
           label="substrate root bias"
+        />
+        <Checkbox
+          id="record-substrate"
+          checked={p.recordToSubstrate}
+          onChange={(e) => p.onRecordToSubstrate(e.target.checked)}
+          label="record to substrate"
         />
         <Checkbox
           id="eval-mode"

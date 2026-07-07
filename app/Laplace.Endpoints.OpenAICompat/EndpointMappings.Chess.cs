@@ -37,6 +37,40 @@ internal static class ChessEndpoints
         app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
+        app.MapPost("/chess/play/start", (PlayStartRequest req, ChessEngineService svc) =>
+            Results.Json(svc.StartPlaySession(req.Record ?? true))).WithTags("chess");
+
+        app.MapPost("/chess/play/move", async (PlayMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
+            Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))).WithTags("chess");
+
+        app.MapPost("/chess/play/bestmove", async (PlayBestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
+            Results.Json(await svc.PlayBestMoveAsync(req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)))
+            .WithTags("chess");
+
+        app.MapPost("/chess/play/finish", async (PlayFinishRequest req, ChessEngineService svc, CancellationToken ct) =>
+        {
+            await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
+            return Results.Json(new { finished = true });
+        }).WithTags("chess");
+
+        app.MapGet("/chess/lichess/games/{gameId}/chat", (string gameId, LichessConnectivityService lichess) =>
+            Results.Json(lichess.ChatForGame(gameId))).WithTags("chess");
+
+        app.MapGet("/chess/lichess/status", (LichessConnectivityService lichess) =>
+            Results.Json(lichess.Status())).WithTags("chess");
+
+        app.MapPost("/chess/lichess/start", (LichessStartRequest req, LichessConnectivityService lichess) =>
+        {
+            IReadOnlySet<string>? speeds = req.Speeds is { Length: > 0 }
+                ? new HashSet<string>(req.Speeds, StringComparer.OrdinalIgnoreCase)
+                : null;
+            var ok = lichess.Start(req.Depth ?? 4, req.MaxConcurrent ?? 2, req.Substrate ?? false, speeds);
+            return ok ? Results.Json(lichess.Status()) : Results.BadRequest(lichess.Status());
+        }).WithTags("chess");
+
+        app.MapPost("/chess/lichess/stop", (LichessConnectivityService lichess) =>
+            Results.Json(new { stopped = lichess.Stop(), status = lichess.Status() })).WithTags("chess");
+
         app.MapGet("/chess/lab/catalog", () =>
         {
             var engines = ChessLabPaths.Catalog.ToDictionary(
@@ -52,7 +86,6 @@ internal static class ChessEndpoints
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
                     new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", depth = "8" } },
-                    new { kind = "lichess-bot", label = "Lichess bot", @default = new { depth = "4", maxConcurrent = "2" } },
                     new { kind = "lichess-fetch", label = "Fetch player PGN", @default = new { site = "lichess" } },
                 },
                 engines,
@@ -129,4 +162,9 @@ internal static class ChessEndpoints
     private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
+    private sealed record LichessStartRequest(int? Depth, int? MaxConcurrent, bool? Substrate, string[]? Speeds);
+    private sealed record PlayStartRequest(bool? Record);
+    private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
+    private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
+    private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);
 }

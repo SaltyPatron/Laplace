@@ -57,14 +57,16 @@ if ($envNode) { [void]$aspNetCore.RemoveChild($envNode) }
 $envNode = $xml.CreateElement("environmentVariables")
 $envVars = [ordered]@{}
 $chessLabEnv = Join-Path $RepoRoot "deploy\secrets\chess-lab.env"
+$lichessEnv = Join-Path $RepoRoot "deploy\secrets\lichess.env"
 # laplace-uci is NOT configured here — ChessLabPaths resolves InstallRoot\laplace-uci.exe.
 $skipChessLabKeys = [System.Collections.Generic.HashSet[string]]::new(
   [StringComparer]::OrdinalIgnoreCase
 )
 [void]$skipChessLabKeys.Add('LAPLACE_UCI')
-foreach ($file in @($EnvFile, $chessLabEnv)) {
+foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv)) {
   if (-not (Test-Path $file)) {
     if ($file -eq $chessLabEnv) { Write-Warning "No $chessLabEnv — cutechess/stockfish/qt must be set for chess lab gauntlets." }
+    if ($file -eq $lichessEnv) { Write-Warning "No $lichessEnv — set LICHESS_API for Lichess connectivity." }
     continue
   }
   Get-Content $file | ForEach-Object {

@@ -9,7 +9,7 @@
 
 \pset pager off
 \timing on
-SET laplace_substrate.perfcache_path = 'D:/Data/Postgres/laplace/share/laplace_t0_perfcache.bin';
+SET laplace_substrate.perfcache_path = 'D:/Data/Laplace/deploy/share/laplace_t0_perfcache.bin';
 
 \echo
 \echo ===== SUBSTRATE STATE (plain text folded to consensus) =====

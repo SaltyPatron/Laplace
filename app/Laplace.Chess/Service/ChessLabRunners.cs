@@ -52,7 +52,8 @@ public static class ChessLabRunners
         var r = await Task.Run(() => MatchRunner.Play(
             guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
             openingFens: book, pgnSink: pgnSink, progress: progress, ct: ct,
-            recordSink: (edges, adj) => recorder.RecordGameBlocking(edges, adj)), ct);
+            liveHost: recorder.Host,
+            liveLearnContext: $"chess/lab/substrate-test/{slot.Job.Id}"), ct);
 
         var pgnPath = Path.Combine(workDir, "games.pgn");
         ChessPgnWriter.WriteFile(pgnPath, pgnSink, white: "Laplace-guided", black: "Laplace-pure",
@@ -60,11 +61,11 @@ public static class ChessLabRunners
         lab.AddArtifact(slot, "games.pgn", pgnPath);
 
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.GamesRecorded));
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.Host.GamesCompleted));
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorder.GamesRecorded} recorded"));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorder.Host.GamesCompleted} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -126,7 +127,8 @@ public static class ChessLabRunners
 
                 var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm,
                     pgnSink: pgnSink, progress: progress, ct: ct,
-                    recordSink: (edges, adj) => recorder.RecordGameBlocking(edges, adj));
+                    liveHost: recorder.Host,
+                    liveLearnContext: $"chess/lab/ladder/{slot.Job.Id}");
                 string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
                 rows[ti] = [term.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo];
                 lab.Publish(slot, new ChessLabLogEvent("info", $"{term}: {r.AWins}-{r.Draws}-{r.BWins} Elo {elo}"));
@@ -138,11 +140,11 @@ public static class ChessLabRunners
             @event: "chess-lab/ladder");
         lab.AddArtifact(slot, "games.pgn", pgnPath);
 
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.GamesRecorded));
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.Host.GamesCompleted));
         lab.Publish(slot, new ChessLabTableEvent("overlay ladder", ["term", "W-D-L", "Elo"],
             rows.Select(r => r!).ToList()));
         lab.UpdateSummary(slot, new ChessLabJobSummary(totalGames, totalGames,
-            $"complete · {recorder.GamesRecorded} recorded"));
+            $"complete · {recorder.Host.GamesCompleted} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -215,11 +217,21 @@ public static class ChessLabRunners
             Finish(lab, slot, ChessLabJobState.Failed, "no token");
             return;
         }
-        int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
+        int depth = int.Parse(Config(slot.Job.Config, "depth", "8"));
         int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent", "2"));
-        await using var bot = new LichessBot(token, depth, log: new LabLogger(lab, slot));
-        lab.Publish(slot, new ChessLabLogEvent("info", "lichess bot starting"));
+        await using var host = await ChessLiveGameHost.CreateAsync(
+            defaultLearnContext: $"chess/lab/lichess-bot/{slot.Job.Id}", ct: ct);
+
+        await using var bot = new LichessBot(
+            token,
+            host,
+            substrate: true,
+            record: true,
+            maxDepth: depth,
+            log: new LabLogger(lab, slot));
+        lab.Publish(slot, new ChessLabLogEvent("info", "lichess bot starting (per-ply fold + recording)"));
         await bot.RunAsync(maxConcurrent, ct);
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", host.GamesCompleted));
         Finish(lab, slot, ChessLabJobState.Cancelled, "stopped");
     }
 

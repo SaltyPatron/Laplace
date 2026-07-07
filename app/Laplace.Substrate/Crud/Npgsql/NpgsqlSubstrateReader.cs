@@ -8,6 +8,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 {
     private readonly NpgsqlDataSource _ds;
 
+    public NpgsqlDataSource DataSource => _ds;
+
     public NpgsqlSubstrateReader(NpgsqlDataSource dataSource)
         => _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
 
