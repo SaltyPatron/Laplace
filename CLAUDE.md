@@ -25,9 +25,35 @@ everything (this is the load-bearing mental model, from `.scratchpad/11` §0):
   is the conservative estimate everything ranks by. Chess is the proving domain because
   its ground truth is objectively checkable.
 
-Retrieval/reasoning is graph search over that consensus-weighted graph (`recall()`,
-`generate_walk()`, native A* frontier) — not vector similarity. There is no GPU code in
-`engine/` or `extension/` and that is structural.
+This is a reinvention of AI, not a knowledge warehouse. It replaces the two primitives
+modern ML is built on — GEMM (similarity via matrix multiply) and nearest-neighbor search
+in a *trained* embedding space — with graph search over a Glicko-weighted evidence graph
+and a deterministic, lossless, content-addressed identity system standing in for the
+embedding. There is no GPU code in `engine/` or `extension/` and that is structural, not an
+omission. If you find yourself describing this as "ETL into a database you can query," you
+have lost the invention: ingestion is one leg of three.
+
+**Three legs, one system** (do not collapse to the first):
+1. **Ingest** — content → attestations → Glicko-folded consensus + S³/trajectory geometry
+   (the substrate; Rule #8 spine, decomposers).
+2. **Foundry / Mold-A-Model** — that consensus+geometry is MOLDED into a runnable
+   transformer, deterministically, no gradient descent. The consensus graph IS a weighted
+   graph Laplacian; its eigenmap (the "colony at rest") IS the semantic embedding,
+   CONSTRUCTED from the spectrum, never trained. Architecture is READ OFF the data — heads =
+   relation types, layers = tiers/hops, hidden dim = spectral rank — not chosen as
+   hyperparameters. The bridge is bidirectional: a trained neural net decomposes INTO
+   attestations (a witness on equal epistemic footing with WordNet) and a fresh GGUF molds
+   OUT (`engine/dynamics` eigenmaps/gram_schmidt/procrustes, `engine/synthesis`,
+   `FoundryCommands`). Every exported weight decomposes back to its witnesses.
+3. **Inference (the Gödel/OODA engine, doc 15)** — the walk IS the forward pass, run as
+   indexed graph search (`recall()`, `generate_walk()`, native A* frontier) with MORE
+   information per step than a trained dot-product: the full Glicko tuple, relation
+   salience, highway bits, S³ geometry, provenance down to witnesses. No context window —
+   a prompt is ingested as content, so "attention over the prompt" is unbounded retrieval.
+   Explainability is a literal returned field (`eff_mu`, witness count), not a metaphor. And
+   it CLOSES: the engine's own responses are content-addressed and deposited as witnesses;
+   feedback folds into the same consensus the next walk reads. **Evaluation IS ingestion.**
+   That self-reference + self-improvement loop is what makes this a mind and not a lookup.
 
 **The trap every fresh reader falls into** (it happened twice in doc 01; do not repeat it):
 `physicalities.coord`/`trajectory` geometry is **NOT a semantic embedding**. It is
@@ -74,10 +100,19 @@ same fact; trust binds to source/method, and their divergence is itself signal.
 | 12 Mold-A-Model map | Substrate primitive → transformer slot bijection | living spec |
 | 13 Stabilization audit + plan | Current-state truth table + phased refactor plan (THE active plan) | living — start here for "what next" |
 | 14 Foundry root cause | Why heads/layers mash + why no conversation: 5 mechanisms (M1-M5), supply-vs-consumption table, prescriptions P1-P10, live reseed baseline, literature panel | living — the foundry build's working doc |
+| 15 Gödel engine / OODA loop | The RUNNING inference engine: the walk IS the forward pass; evaluation IS ingestion; the engine's own outputs are witnesses folding into the same consensus the next walk reads — a closed self-improving loop. This is the AI, not a query layer. | living spec — the read/serve side |
+| 16 Tier-correct attestation + hub unification | "Record each fact once, at the tier/identity/provenance the source asserts it"; decomposer tier/identity/provenance defect audit + fix sequence | living spec |
+| 17 Decomposer full-stack audit | Code-verified inventory of every decomposer vs the Rule #8 spine; trust order (code > binding docs > ops > doc 13); spine-brand fork map | living; input to an unwritten doc 18 |
 
-Current state in one line: substrate + Rule #8 pipeline core are solid; the mess is
-seven ingestion lanes (Issue 45), read-side fragmentation (Issue 46), and the foundry
-gaps (Issues 04/05/06) — all sequenced in doc 13.
+Current state in one line: the invention is whole and largely built — a content-addressed
+attestation substrate (ingest), a consensus-Laplacian model foundry (Mold-A-Model export,
+`engine/dynamics`+`synthesis`), and a running graph-walk inference engine with a closed
+self-improvement loop (docs 09/12/15, `extension/.../recall.c`+`generate_walk.c`). The
+OPEN FRONTIER is one research question (doc 09): does consensus × geometry × trajectory
+ROUTE as well as trained attention at depth. Everything else — seven ingestion lanes
+(Issue 45), read-side fragmentation (Issue 46), foundry gaps (Issues 04/05/06), sequenced
+in doc 13 — is plumbing UNDER the invention, not the invention. Do not mistake the cleanup
+backlog for the thing.
 
 ## Build / deploy / seed — READ BEFORE RUNNING ANYTHING
 
