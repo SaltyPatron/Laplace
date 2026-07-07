@@ -175,7 +175,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (refresh) _learnedTried = false;
         if (_learnedTried) return (_lpMg, _lpEg);
         _learnedTried = true;
-        try { var (lm, le) = LearnedPst.BuildTables(_ds!, 1.0); (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le); }
+        try { var (lm, le) = LearnedPst.BuildTables(_ds!); (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le); }
         catch { _lpMg = null; _lpEg = null; }
         return (_lpMg, _lpEg);
     }
@@ -319,7 +319,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        var search = _liveHost.BuildSearch(substrate);
+        var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");

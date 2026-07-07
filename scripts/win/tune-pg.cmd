@@ -8,6 +8,7 @@ set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_ST
 
 set "PCORES=8"
 pushd "%LAPLACE_ROOT%\app" >nul 2>&1
+dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q --nologo >nul 2>&1
 for /f "usebackq delims=" %%i in (`dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --p-cores 2^>nul`) do set "PCORES=%%i"
 popd >nul 2>&1
 set /a "PCORES=PCORES" 2>nul || set "PCORES=8"

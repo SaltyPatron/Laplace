@@ -100,6 +100,8 @@ if not errorlevel 1 (
   echo ERROR: a Laplace.Cli ingest is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
 )
+echo ==== seed-step: build CLI Release ====
+dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q --nologo || exit /b 1
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %STEP% %EXTRA%
 set "RC=%ERRORLEVEL%"

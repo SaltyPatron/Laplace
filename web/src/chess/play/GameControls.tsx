@@ -1,4 +1,4 @@
-import { Button, Checkbox, cn, ErrorText, Field, Input, Muted, Panel } from '@ui';
+import { Button, Checkbox, cn, ErrorText, Field, Muted, Panel, SliderField } from '@ui';
 import shared from './playShared.module.css';
 import styles from './GameControls.module.css';
 
@@ -74,17 +74,16 @@ export function GameControls(p: GameControlsProps) {
         />
       </div>
       <div className={shared.ctlRow}>
-        <Field label="depth" layout="row" htmlFor="search-depth">
-          <Input
-            id="search-depth"
-            type="number"
+        <Field label="Search depth" layout="row" valueDisplay={String(p.searchDepth)}>
+          <SliderField
             min={1}
             max={12}
-            value={p.searchDepth}
-            onChange={(e) => {
-              const n = parseInt(e.target.value, 10);
+            value={String(p.searchDepth)}
+            onChange={(v) => {
+              const n = parseInt(v, 10);
               if (!Number.isNaN(n)) p.onDepth(Math.min(12, Math.max(1, n)));
             }}
+            disabled={p.busy}
           />
         </Field>
         <Checkbox

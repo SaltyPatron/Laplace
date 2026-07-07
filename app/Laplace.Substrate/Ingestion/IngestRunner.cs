@@ -508,9 +508,15 @@ public sealed class IngestRunner
                 {
                     RecordBatchFailure(batch, decomposer.SourceName, ex,
                                        wasTransient: false, attempt, failures, counters);
-                    log.LogError(ex, "Fatal ingest error in batch of {Count} intents "
-                        + "(first unit {Unit}); aborting run.",
-                        batch.Count, batch[0].Metadata.SourceContentUnitName);
+                    log.LogError(ex,
+                        "Fatal ingest error in batch of {Count} intents "
+                        + "(first unit {FirstUnit}, last unit {LastUnit}, "
+                        + "~{Rows} staged rows, ~{Atts} managed attestations); aborting run.",
+                        batch.Count,
+                        batch[0].Metadata.SourceContentUnitName,
+                        batch[^1].Metadata.SourceContentUnitName,
+                        BatchRowEstimate(batch),
+                        BatchManagedAttestations(batch));
                     throw;
                 }
                 log.LogWarning(ex, "Transient ingest error in batch of {Count} intents "
@@ -522,6 +528,33 @@ public sealed class IngestRunner
         RecordBatchFailure(batch, decomposer.SourceName, lastEx,
                            wasTransient: true, attempt, failures, counters);
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
+    }
+
+    private static long BatchManagedAttestations(IReadOnlyList<SubstrateChange> batch)
+    {
+        long total = 0;
+        for (int i = 0; i < batch.Count; i++)
+            total += batch[i].Attestations.Length;
+        return total;
+    }
+
+    private static long BatchRowEstimate(IReadOnlyList<SubstrateChange> batch)
+    {
+        long total = 0;
+        for (int i = 0; i < batch.Count; i++)
+        {
+            var c = batch[i];
+            total += c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
+            if (!c.IntentStages.IsDefaultOrEmpty)
+            {
+                foreach (var s in c.IntentStages)
+                {
+                    if (s.IsInvalid) continue;
+                    total += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
+                }
+            }
+        }
+        return total;
     }
 
     private void RecordBatchFailure(

@@ -25,7 +25,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private readonly ConcurrentDictionary<Hash128, LiveGameSession> _games = new();
     private readonly ConcurrentDictionary<Guid, PlaySession> _playSessions = new();
 
+    private bool _learnedTried;
+    private int[][]? _lpMg, _lpEg;
+
     public long GamesCompleted { get; private set; }
+
+    public void InvalidateLearnedPst() => _learnedTried = false;
 
     private ChessLiveGameHost(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, SubstrateTurnHost turnHost)
@@ -91,6 +96,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
             await _writer.FoldIncrementalAsync(ct);
+            InvalidateLearnedPst();
         }
         finally
         {
@@ -128,6 +134,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
             await _writer.FoldIncrementalAsync(ct);
+            InvalidateLearnedPst();
             GamesCompleted++;
         }
         finally
@@ -169,22 +176,22 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public Search BuildSearch(bool substrate, int ttBits = 20, int maxDepth = 8)
     {
         IRootBias? bias = substrate ? new SubstructureFoldBias(_ds) : null;
-        int[][]? mg = null, eg = null;
-        if (substrate)
-        {
-            try
-            {
-                (mg, eg) = LearnedPst.BuildTables(_ds, 1.0);
-                (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
-            }
-            catch
-            {
-                mg = null;
-                eg = null;
-            }
-        }
-
+        var (mg, eg) = LearnedPstBlend();
+        if (!substrate) { mg = null; eg = null; }
         return new Search(EvalTerm.All, bias, ttBits, mg, eg);
+    }
+
+    private (int[][]? Mg, int[][]? Eg) LearnedPstBlend()
+    {
+        if (_learnedTried) return (_lpMg, _lpEg);
+        _learnedTried = true;
+        try
+        {
+            var (lm, le) = LearnedPst.BuildTables(_ds);
+            (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le);
+        }
+        catch { _lpMg = null; _lpEg = null; }
+        return (_lpMg, _lpEg);
     }
 
     public NpgsqlDataSource DataSource => _ds;

@@ -185,6 +185,22 @@ public class SubstrateChangeTests
     }
 
     [Fact]
+    public void Builder_FoldOutcome_HugeGameCount_DoesNotOverflowOnDrawThreshold()
+    {
+        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var b = new SubstrateChangeBuilder(src, "unit-huge-games");
+        var row = new AttestationRow(
+            H(4), H(1), H(50), H(2), src, null,
+            AttestationOutcome.Confirm, 0L, 1L, Glicko2.ScoreWin, 30_000_000_000L);
+        b.AddAttestation(row with { ObservationCount = 20_000_000_000L, SumScoreFp1e9 = 20_000_000_000_000_000_000L });
+        b.AddAttestation(row with { ObservationCount = 1L });
+
+        var a = Assert.Single(b.Build().Attestations);
+        Assert.Equal(20_000_000_000_001L, a.ObservationCount);
+        Assert.Equal(AttestationOutcome.Confirm, a.Outcome);
+    }
+
+    [Fact]
     public void Builder_FoldRejectsMixedPhi()
     {
         var src = Hash128.OfCanonical("substrate/source/Test/v1");

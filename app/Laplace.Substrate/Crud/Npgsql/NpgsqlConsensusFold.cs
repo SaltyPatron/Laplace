@@ -28,8 +28,6 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public sealed partial class ConsensusAccumulatingWriter
 {
     private const int FoldProbeChunkIds = 131_072;
-    private static readonly long PgEpochTicks =
-        new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
     private async Task FoldChainClientAsync(Task prev, int epoch, ICollection<Acc> edges)
     {
@@ -331,5 +329,5 @@ public sealed partial class ConsensusAccumulatingWriter
     }
 
     private static DateTime TsFromUnixUs(long unixUs) =>
-        new(checked((unixUs - PgEpochDeltaUs) * 10 + PgEpochTicks), DateTimeKind.Utc);
+        AttestationMergeMath.TimestampFromUnixMicros(unixUs, PgEpochDeltaUs);
 }

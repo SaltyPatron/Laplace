@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiGet } from '../../api/client';
 import {
   Alert,
+  Button,
   cn,
   IconButton,
   LoadingText,
@@ -37,13 +38,17 @@ export function PstGrid() {
   const maxAbs = useMemo(
     () => Math.max(1e-9, ...forPiece.map((s) => Math.abs(s.devPoints))),
     [forPiece]);
+  const covered = useMemo(() => forPiece.filter((s) => s.witness > 0).length, [forPiece]);
   const totalWitness = useMemo(() => forPiece.reduce((a, s) => a + s.witness, 0), [forPiece]);
 
   const at = (file: number, rank: number) => forPiece.find((s) => s.file === file && s.rank === rank);
 
   return (
-    <Panel title="Learned PST" actions={
+    <Panel title="Learned PST (PeSTO + corpus)" actions={
       <div className={styles.pieces}>
+        <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading}>
+          {loading ? '…' : 'Refresh'}
+        </Button>
         {PIECES.map((p) => (
           <Tooltip key={p}>
             <TooltipTrigger asChild>
@@ -89,8 +94,9 @@ export function PstGrid() {
             )}
           </div>
           <Muted className={styles.foot}>
-            deviation from PeSTO prior, learned by witnessed self-play · green = better square, red = worse ·{' '}
-            {totalWitness.toFixed(0)} witnesses on {PIECE_NAME[piece]}
+            All 64 squares queried from consensus (384 piece-square edges total). PeSTO floor + learned
+            deviation · green = better square, red = worse ·{' '}
+            {covered}/64 squares with evidence ({totalWitness.toFixed(0)} witnesses) on {PIECE_NAME[piece]}
           </Muted>
         </>
       )}

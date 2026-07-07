@@ -40,9 +40,6 @@ public sealed partial class NpgsqlSubstrateWriter
 
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
 
-    private static readonly long PgEpochTicks =
-        new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
-
     /// <summary>
     /// Run-scoped index cycle, active between BeginBulkRunAsync and
     /// CompleteBulkRunAsync. While active, qualifying applies drop
@@ -131,7 +128,7 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
             {
-                long games = checked(g.Games + atts.Counts[i]);
+                long games = AttestationMergeMath.SafeAddGames(g.Games, atts.Counts[i]);
                 attGroups[atts.Ids[i]] = atts.TimestampsPgUs[i] > g.MaxTs
                     ? (i, atts.TimestampsPgUs[i], games)
                     : (g.RepIdx, g.MaxTs, games);
@@ -249,7 +246,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     mergeIds.Add(id.ToBytes());
                     mergeGames.Add(g.Games);
-                    mergeTs.Add(new DateTime(checked(g.MaxTs * 10 + PgEpochTicks), DateTimeKind.Utc));
+                    mergeTs.Add(AttestationMergeMath.TimestampFromPgMicros(g.MaxTs));
                 }
                 else
                 {

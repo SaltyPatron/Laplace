@@ -539,11 +539,27 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             {
                 while (await reader.ReadAsync(ct))
                 {
-                    switch (reader.GetString(0))
-                    {
-                        case "entities": entities = reader.GetInt64(1); break;
-                        case "consensus (relations)": consensus = reader.GetInt64(1); break;
-                    }
+                    var metric = reader.GetString(0);
+                    var value = reader.GetInt64(1);
+                    if (metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+                        entities = Math.Max(entities, value);
+                    else if (metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+                        consensus = Math.Max(consensus, value);
+                }
+            }
+
+            if (entities == 0 || consensus == 0)
+            {
+                await using var probe = new NpgsqlCommand(
+                    """
+                    SELECT EXISTS (SELECT 1 FROM laplace.entities LIMIT 1),
+                           EXISTS (SELECT 1 FROM laplace.consensus LIMIT 1)
+                    """, conn);
+                await using var existsReader = await probe.ExecuteReaderAsync(ct);
+                if (await existsReader.ReadAsync(ct))
+                {
+                    if (entities == 0 && existsReader.GetBoolean(0)) entities = 1;
+                    if (consensus == 0 && existsReader.GetBoolean(1)) consensus = 1;
                 }
             }
 

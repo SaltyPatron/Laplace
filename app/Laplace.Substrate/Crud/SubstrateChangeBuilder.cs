@@ -153,14 +153,11 @@ public sealed class SubstrateChangeBuilder
                 throw new InvalidOperationException(
                     $"attestation fold invariant violated: relation observed with φ={row.OpponentRdFp1e9} after φ={prior.OpponentRdFp1e9} in one intent");
 
-            long games = checked(prior.ObservationCount + row.ObservationCount);
-            long sum = checked(
-                (prior.SumScoreFp1e9 ?? checked(prior.ScoreFp1e9 * prior.ObservationCount))
-                + (row.SumScoreFp1e9 ?? checked(row.ScoreFp1e9 * row.ObservationCount)));
-            long draws = checked(games * 500_000_000L);
-            var net = sum > draws ? AttestationOutcome.Confirm
-                    : sum < draws ? AttestationOutcome.Refute
-                                  : AttestationOutcome.Draw;
+            long games = AttestationMergeMath.SafeAddGames(prior.ObservationCount, row.ObservationCount);
+            long sum = AttestationMergeMath.SafeAddScores(
+                AttestationMergeMath.RowScoreTotal(prior),
+                AttestationMergeMath.RowScoreTotal(row));
+            var net = AttestationMergeMath.ClassifyOutcome(games, sum);
             _attestations[at] = prior with
             {
                 Outcome = net,
@@ -224,11 +221,18 @@ public sealed class SubstrateChangeBuilder
         ImmutableArray<AttestationRow> attestations)
     {
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
-        int total = 16 + nameByteCount
-                    + 4 + entities.Length * 16
-                    + 4 + physicalities.Length * 16
-                    + 4 + attestations.Length * 16;
-        var buf = new byte[total];
+        long total = 16L + nameByteCount
+                     + 4L + (long)entities.Length * 16
+                     + 4L + (long)physicalities.Length * 16
+                     + 4L + (long)attestations.Length * 16;
+        if (total > int.MaxValue)
+        {
+            throw new OverflowException(
+                $"intent '{unitName}' too large to hash: {entities.Length} entities, "
+                + $"{physicalities.Length} physicalities, {attestations.Length} attestations");
+        }
+
+        var buf = new byte[(int)total];
         int offset = 0;
         sourceId.WriteBytes(buf.AsSpan(offset, 16)); offset += 16;
         System.Text.Encoding.UTF8.GetBytes(unitName, 0, unitName.Length, buf, offset);

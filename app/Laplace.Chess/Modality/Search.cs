@@ -54,6 +54,7 @@ public sealed class Search
     private readonly IRootBias? _rootBias;
     private readonly int[][]? _mgPst;
     private readonly int[][]? _egPst;
+    private Dictionary<string, int>? _rootBonusByUci;
 
     public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
         int[][]? mgPst = null, int[][]? egPst = null)
@@ -80,6 +81,8 @@ public sealed class Search
         var b = board.Clone();
         ChessMove? best = null;
         int bestScore = 0, reached = 0;
+
+        _rootBonusByUci = null;
 
         for (int depth = 1; depth <= limits.MaxDepth; depth++)
         {
@@ -152,7 +155,13 @@ public sealed class Search
             return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0;
 
         Order(b, moves, ttMove, ply);
-        int[]? rootBonus = (ply == 0 && _rootBias is not null) ? _rootBias.Bonus(b, moves) : null;
+        if (ply == 0 && _rootBias is not null && _rootBonusByUci is null)
+        {
+            var bonus = _rootBias.Bonus(b, moves);
+            _rootBonusByUci = new Dictionary<string, int>(moves.Count);
+            for (int i = 0; i < moves.Count; i++)
+                if (bonus[i] != 0) _rootBonusByUci[moves[i].ToUci()] = bonus[i];
+        }
 
         _path.Add(key);
         int best = -Inf;
@@ -165,7 +174,9 @@ public sealed class Search
             MoveApply.Unmake(b, m, undo);
             if (_aborted) { _path.RemoveAt(_path.Count - 1); return 0; }
 
-            if (rootBonus is not null) score += rootBonus[mi];
+            if (_rootBonusByUci is not null && ply == 0
+                && _rootBonusByUci.TryGetValue(m.ToUci(), out int bon))
+                score += bon;
             if (score > best) { best = score; bestMove = m; }
             if (best > alpha) alpha = best;
             if (alpha >= beta) { RecordKiller(b, m, ply); break; }

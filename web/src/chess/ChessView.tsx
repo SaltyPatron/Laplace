@@ -103,6 +103,7 @@ export function ChessView() {
   const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
 
   const [search, setSearch] = useState<SearchInfo | null>(null);
+  const [searchPickUci, setSearchPickUci] = useState<string | null>(null);
 
   const [positionEval, setPositionEval] = useState<PositionEval | null>(null);
 
@@ -226,9 +227,13 @@ export function ChessView() {
 
   useEffect(() => {
 
-    if (status !== 'ongoing') {
+    if (status !== 'ongoing' || busy) {
 
-      setPositionEval({ whiteScoreCp: terminalWhiteCp(status), depth: 0, nodes: 0 });
+      if (status !== 'ongoing') {
+
+        setPositionEval({ whiteScoreCp: terminalWhiteCp(status), depth: 0, nodes: 0 });
+
+      }
 
       return;
 
@@ -236,15 +241,19 @@ export function ChessView() {
 
     let cancelled = false;
 
-    void apiPost<PositionEval>('/chess/eval', { fen, depth: searchDepth, substrate: useSubstrate })
+    const timer = setTimeout(() => {
 
-      .then((r) => { if (!cancelled) setPositionEval(r); })
+      void apiPost<PositionEval>('/chess/eval', { fen, depth: searchDepth, substrate: useSubstrate })
 
-      .catch(() => { if (!cancelled) setPositionEval(null); });
+        .then((r) => { if (!cancelled) setPositionEval(r); })
 
-    return () => { cancelled = true; };
+        .catch(() => { if (!cancelled) setPositionEval(null); });
 
-  }, [fen, searchDepth, useSubstrate, status]);
+    }, 200);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+
+  }, [fen, searchDepth, useSubstrate, status, busy]);
 
 
 
@@ -366,6 +375,8 @@ export function ChessView() {
 
       setSearch({ scoreCp: r.scoreCp, depth: r.depth, nodes: r.nodes, substrate: useSubstrate, pv: r.pv ?? [] });
 
+      setSearchPickUci(r.uci);
+
       setMotifs(r.motifs ?? []);
 
       setErr(null);
@@ -399,6 +410,8 @@ export function ChessView() {
       if (!r.legal) { setErr(`illegal move: ${uci}`); return; }
 
       appendSnapshot(uci, r.fen, r.status);
+
+      setSearchPickUci(null);
 
       setMotifs(r.motifs ?? []);
 
@@ -523,7 +536,7 @@ export function ChessView() {
 
     setSel(null); setMarks(new Set()); setUserArrows([]);
 
-    setSearch(null); setMotifs([]); setPositionEval(null); setErr(null);
+    setSearch(null); setSearchPickUci(null); setMotifs([]); setPositionEval(null); setErr(null);
 
     await startPlaySession(recordToSubstrate);
   };
@@ -550,23 +563,21 @@ export function ChessView() {
 
   const topMoves = [...legal].sort((a, b) => b.effMu - a.effMu).slice(0, 8);
 
+  const hintUci = searchPickUci ?? search?.pv?.[0] ?? null;
+
+  const hintMove = hintUci && legal.some((m) => m.uci === hintUci) ? hintUci : null;
+
+  const botBestFrom = hintMove?.slice(0, 2);
+
+  const botBestTo = hintMove?.slice(2, 4);
+
+  const showPick = !reviewing && !!botBestTo && ((!sel && !drag) || sel === botBestFrom);
+
   const whiteCp = positionEval?.whiteScoreCp ?? 0;
 
   const { lead: evalLead, detail: evalDetail } = formatPositionEval(whiteCp);
 
   const evalFrac = whiteCpToBarFraction(whiteCp);
-
-
-
-  const botBest = topMoves[0];
-
-  const botBestFrom = botBest?.uci.slice(0, 2);
-
-  const botBestTo = botBest?.uci.slice(2, 4);
-
-  const showPick = !reviewing && !!botBestTo && ((!sel && !drag) || sel === botBestFrom);
-
-
 
   const sideToMove = whiteToMove(fen) ? 'White' : 'Black';
 
@@ -749,6 +760,10 @@ export function ChessView() {
           evalMode={evalMode}
 
           search={search}
+
+          searchDepth={searchDepth}
+
+          searchPickUci={hintMove}
 
         />
 

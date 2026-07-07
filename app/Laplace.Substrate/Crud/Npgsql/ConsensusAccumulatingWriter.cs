@@ -221,7 +221,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                 PhiFp1e9 = a.OpponentRdFp1e9,
                 Games = a.ObservationCount,
                 SumScoreFp1e9 = a.SumScoreFp1e9
-                    ?? checked(a.ScoreFp1e9 * a.ObservationCount),
+                    ?? AttestationMergeMath.SafeScoreTimesCount(a.ScoreFp1e9, a.ObservationCount),
                 MaxTsUnixUs = a.LastObservedAtUnixUs,
             };
             batch[key] = acc;
@@ -231,9 +231,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
         if (acc.PhiFp1e9 != a.OpponentRdFp1e9)
             throw new InvalidOperationException(
                 $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same commit");
-        acc.Games = checked(acc.Games + a.ObservationCount);
-        acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
-            + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
+        acc.Games = AttestationMergeMath.SafeAddGames(acc.Games, a.ObservationCount);
+        acc.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+            acc.SumScoreFp1e9,
+            a.SumScoreFp1e9 ?? AttestationMergeMath.SafeScoreTimesCount(a.ScoreFp1e9, a.ObservationCount));
         if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
@@ -353,9 +354,10 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                     throw new InvalidOperationException(
                         $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same period");
                 }
-                acc.Games += a.ObservationCount;
-                acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
-                    + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
+                acc.Games = AttestationMergeMath.SafeAddGames(acc.Games, a.ObservationCount);
+                acc.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+                    acc.SumScoreFp1e9,
+                    AttestationMergeMath.RowScoreTotal(a));
                 if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
             }
         }

@@ -94,6 +94,12 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         {
             if (canonical is null || canonical.Length == 0) return null;
             try { return ContentTierSpine.BuildTree(canonical); }
+            catch (OverflowException ex)
+            {
+                throw new OverflowException(
+                    $"RelationTriple: tier-tree build overflow ({canonical.Length} byte phrase)", ex);
+            }
+            catch (OutOfMemoryException) { throw; }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
