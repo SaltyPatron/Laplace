@@ -35,4 +35,8 @@
     <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="laplace.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

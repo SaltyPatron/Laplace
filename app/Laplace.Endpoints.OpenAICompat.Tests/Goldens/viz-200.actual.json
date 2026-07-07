@@ -1,0 +1,47 @@
+{
+  "id": "<id>",
+  "object": "laplace.visualization.graph",
+  "created": 0,
+  "format": "json",
+  "include_geometry": true,
+  "include_evidence": true,
+  "graph": {
+    "nodes": [
+      {
+        "idHex": "00112233445566778899aabbccddeeff",
+        "label": "whale",
+        "x": 0.5,
+        "y": -0.25,
+        "z": 0.125,
+        "m": 0.8125,
+        "radius": 1,
+        "constituents": 5,
+        "evidenceRows": 42
+      },
+      {
+        "idHex": "ffeeddccbbaa99887766554433221100",
+        "label": "cetacean",
+        "x": -0.5,
+        "y": 0.25,
+        "z": -0.125,
+        "m": 0.8125,
+        "radius": 1,
+        "constituents": 8,
+        "evidenceRows": 17
+      }
+    ],
+    "edges": [
+      {
+        "subjectIdHex": "00112233445566778899aabbccddeeff",
+        "subject": "whale",
+        "typeIdHex": "0123456789abcdef0123456789abcdef",
+        "type": "IS_A",
+        "objectIdHex": "ffeeddccbbaa99887766554433221100",
+        "object": "cetacean",
+        "effectiveMu": 0.91,
+        "witnesses": 42
+      }
+    ]
+  },
+  "billing": null
+}

@@ -445,8 +445,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
-        // Ranked consensus neighborhood — one row per (type, object), not raw attestations
-        // (which repeat the same fact once per source/context and read as a cartesian product).
+        // Provenance receipts: deduped (type, object) claims with named sources — not
+        // consensus_out (that duplicates chat/salient-facts) or raw attestations_out
+        // (one row per source/context cartesian product).
         const string sql = """
             WITH resolved AS (
                 SELECT laplace.resolve_ref(@target) AS id
@@ -455,20 +456,19 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 r.id,
                 CASE
                     WHEN @target ~ '^[0-9a-f]{32}$' THEN COALESCE(
-                        NULLIF(left(laplace.render_text(r.id, 12), ''), ''),
+                        NULLIF(laplace.render_text(r.id, 12), ''),
                         left(encode(r.id, 'hex'), 16))
                     ELSE @target
                 END,
-                encode(c.type_id, 'hex'),
-                laplace.type_label(c.type_id),
-                encode(c.object_id, 'hex'),
-                COALESCE(
-                    NULLIF(left(laplace.render_text(c.object_id, 12), ''), ''),
-                    left(encode(c.object_id, 'hex'), 16)),
-                c.witness_count,
-                laplace.eff_mu_display(c.rating, c.rd)
+                encode(e.type_id, 'hex'),
+                e.type_label,
+                encode(e.object_id, 'hex'),
+                e.object_label,
+                e.source_labels,
+                e.witness_count,
+                e.eff_mu
             FROM resolved r
-            LEFT JOIN LATERAL laplace.consensus_out(r.id, @limit) c ON true
+            LEFT JOIN LATERAL laplace.evidence_receipt(r.id, @limit) e ON true
             WHERE r.id IS NOT NULL;
             """;
         try
@@ -499,11 +499,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                         ObjectId: reader.GetString(4),
                         ObjectLabel: reader.GetString(5),
                         SourceId: "",
-                        SourceLabel: "",
+                        SourceLabel: reader.IsDBNull(6) ? "" : reader.GetString(6),
                         ContextId: null,
                         Outcome: 2,
-                        ObservationCount: reader.GetInt64(6),
-                        EffMu: reader.GetDecimal(7)));
+                        ObservationCount: reader.GetInt64(7),
+                        EffMu: reader.GetDecimal(8)));
                 }
             }
 
@@ -666,16 +666,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         await _dataSource.DisposeAsync();
     }
 
-    private static string BuildConnectionString()
-    {
-        var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
-            ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev";
-        if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
-            s += ";Include Error Detail=true";
-        if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
-            s += ";Search Path=laplace,public";
-        return s;
-    }
+    private static string BuildConnectionString() => LaplaceEndpointDefaults.ConnectionString;
 }
 
 internal sealed class SubstrateUnavailableException : Exception

@@ -357,7 +357,7 @@ internal static class IngestCommands
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false,
-        int estBytesPerRecord = IngestSizing.DefaultEstBytesPerRecord)
+        IngestSourceProfile? sizingProfile = null)
     {
         IngestTopology.EnsureReady();
         long lastMs = -10_000;
@@ -389,13 +389,14 @@ internal static class IngestCommands
         long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
         int? envCommit = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS"), out var cr) && cr >= 0
             ? Math.Min(cr, 250_000) : null;
+        var profile = sizingProfile ?? IngestSourceProfile.Default;
         var sizing = IngestSizing.Resolve(
             IngestTopology.Current.PerformanceCoreCount,
             IngestTopology.Current.FileWorkers,
             IngestTopology.Current.ApplyPartitions,
             recordBatchOverride: batch > 0 ? batch : null,
-            commitRowsOverride: envCommit ?? (sourceName == "ConceptNetDecomposer" ? 4_000_000 : null),
-            estBytesPerRecord: estBytesPerRecord);
+            commitRowsOverride: envCommit,
+            profile: profile);
         if (batch <= 0) batch = sizing.RecordBatchSize;
         int commitRows = sizing.CommitRows;
         var decoOpts = DecomposerOptions.ForWitness(
@@ -454,7 +455,7 @@ internal static class IngestCommands
             dec,
             BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
                 skipSourceCompletion || (cli?.Force ?? false),
-                estBytesPerRecord: dec.EstimatedBytesPerRecord),
+                sizingProfile: dec.SizingProfile),
             CancellationToken.None);
         sw.Stop();
 

@@ -1,0 +1,90 @@
+CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 25)
+    RETURNS TABLE(
+        type_id bytea,
+        object_id bytea,
+        type_label text,
+        object_label text,
+        eff_mu numeric,
+        witness_count bigint,
+        source_labels text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (
+        SELECT p_id
+        UNION
+        SELECT sn.synset_id FROM senses(p_id) sn
+    ), filtered AS (
+        SELECT a.type_id, a.object_id, a.source_id,
+               sum(a.observation_count) AS obs
+        FROM attestations a
+        WHERE a.subject_id IN (SELECT id FROM subj)
+          AND a.object_id IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM entities et
+              WHERE et.id = a.type_id AND et.type_id = entity_type_id('RelationType'))
+          AND NOT relation_type_in_family(a.type_id, 'HAS_POS')
+          AND a.type_id NOT IN (
+              relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+              relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
+              relation_type_id('FOLLOWS'), relation_type_id('CO_OCCURS_WITH'),
+              relation_type_id('OCCURS_IN_CONTEXT'), relation_type_id('HAS_LEX_CATEGORY'),
+              relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
+              relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'),
+              relation_type_id('HAS_EXAMPLE'), relation_type_id('EVOKES_FRAME'),
+              relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
+              relation_type_id('HAS_NAME_ALIAS'))
+          AND NOT EXISTS (
+              SELECT 1 FROM entities et
+              WHERE et.id = a.object_id AND et.type_id = entity_type_id('RelationType'))
+          AND NOT (
+              a.type_id = relation_type_id('IS_SYNONYM_OF')
+              AND a.object_id IN (SELECT id FROM subj))
+        GROUP BY a.type_id, a.object_id, a.source_id
+    ), folded AS (
+        SELECT f.type_id, f.object_id,
+               sum(f.obs) AS witness_count,
+               string_agg(
+                   DISTINCT regexp_replace(render(f.source_id),
+                       '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1'),
+                   ', ' ORDER BY regexp_replace(render(f.source_id),
+                       '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1')) AS source_labels
+        FROM filtered f
+        GROUP BY f.type_id, f.object_id
+    ), labeled AS (
+        SELECT fo.type_id, fo.object_id, fo.witness_count, fo.source_labels,
+               type_label(fo.type_id) AS rel,
+               COALESCE(
+                   NULLIF(_realize_synset_lemma(fo.object_id, word_language(p_id)), ''),
+                   NULLIF(render_text(fo.object_id, 12), ''),
+                   left(encode(fo.object_id, 'hex'), 16)) AS obj
+        FROM folded fo
+        WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
+    )
+    SELECT lb.type_id, lb.object_id, lb.rel, lb.obj,
+           COALESCE((
+               SELECT eff_mu_display(c.rating, c.rd)
+               FROM consensus c
+               WHERE c.subject_id IN (SELECT id FROM subj)
+                 AND c.type_id = lb.type_id
+                 AND c.object_id = lb.object_id
+               ORDER BY eff_mu(c.rating, c.rd) DESC
+               LIMIT 1
+           ), 0),
+           lb.witness_count,
+           lb.source_labels
+    FROM labeled lb
+    WHERE lb.obj IS NOT NULL AND lb.obj <> ''
+      AND right(lb.obj, 1) <> U&'\2026'
+      AND right(lb.rel, 1) <> U&'\2026'
+    ORDER BY edge_rank(lb.type_id, COALESCE((
+               SELECT eff_mu(c.rating, c.rd)
+               FROM consensus c
+               WHERE c.subject_id IN (SELECT id FROM subj)
+                 AND c.type_id = lb.type_id
+                 AND c.object_id = lb.object_id
+               ORDER BY eff_mu(c.rating, c.rd) DESC
+               LIMIT 1
+           ), 0)) DESC,
+             lb.witness_count DESC
+    LIMIT GREATEST(1, p_limit)
+$$;

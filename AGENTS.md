@@ -24,6 +24,7 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
   live-data proof of claims), `doc-reconciler` (kills .scratchpad doc drift).
 - **Prompt**: `/next-task` ranks work from binding docs (05/06/09) + code-verified open items — not doc 13 alone.
 - **Cursor**: [.cursor/rules/](.cursor/rules) mirrors the hard law + scoped rules.
+- **Ingest sizing**: batch/commit/working-set defaults are source-aware in `IngestSizing` — do not override via `LAPLACE_INGEST_*` env vars unless debugging a one-off run.
 
 ## Terminal adaptation (VS Code / PowerShell harnesses)
 

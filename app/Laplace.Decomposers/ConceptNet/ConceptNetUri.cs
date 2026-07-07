@@ -106,7 +106,11 @@ public static class ConceptNetUri
                 if (reader.TokenType == JsonTokenType.PropertyName && reader.ValueTextEquals("weight"u8))
                     return reader.Read() && reader.TokenType == JsonTokenType.Number ? reader.GetDouble() : 1.0;
         }
-        catch (JsonException) { }
+        catch (JsonException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "ConceptNetUri: failed to parse weight from metadata JSON: {Message}", ex.Message);
+        }
         return 1.0;
     }
 }

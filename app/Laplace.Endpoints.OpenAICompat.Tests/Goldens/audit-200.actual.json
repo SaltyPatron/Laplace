@@ -1,0 +1,43 @@
+{
+  "id": "<id>",
+  "object": "laplace.audit.report",
+  "created": 0,
+  "scope": "full",
+  "academic": true,
+  "include_evidence": true,
+  "include_consensus": true,
+  "include_convergence": true,
+  "report": {
+    "counts": [
+      {
+        "metric": "entities",
+        "value": 1000000
+      },
+      {
+        "metric": "attestations",
+        "value": 5000000
+      }
+    ],
+    "consensus": {
+      "evidenceRows": 5000000,
+      "consensusRows": 1500000,
+      "dedupRatio": 3.33,
+      "avgWitnesses": 4.2,
+      "maxWitnesses": 9001
+    },
+    "multiSourceEntityCount": 250000,
+    "topRelations": [
+      {
+        "subjectIdHex": "00112233445566778899aabbccddeeff",
+        "subject": "whale",
+        "typeIdHex": "0123456789abcdef0123456789abcdef",
+        "type": "IS_A",
+        "objectIdHex": "ffeeddccbbaa99887766554433221100",
+        "object": "cetacean",
+        "effectiveMu": 0.91,
+        "witnesses": 42
+      }
+    ]
+  },
+  "billing": null
+}

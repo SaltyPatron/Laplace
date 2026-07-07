@@ -1,0 +1,60 @@
+@layer components {
+  .home {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .hero h2 {
+    margin: 0 0 var(--space-2);
+  }
+
+  .statGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 0.75rem;
+  }
+
+  .stageGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: 0.6rem;
+  }
+
+  .stageCard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    background: var(--color-bg-panel);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--color-text-primary);
+  }
+
+  .stageCard:hover {
+    border-color: var(--color-accent);
+  }
+
+  .chipRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .chip {
+    padding: 0.3rem 0.75rem;
+    border-radius: 99px;
+    background: var(--color-bg-panel-2);
+    border: 1px solid var(--color-border-default);
+    color: var(--color-text-primary);
+    text-decoration: none;
+    font-size: var(--text-sm);
+  }
+
+  .sectionTitle {
+    margin: 0 0 var(--space-3);
+    font-size: 0.95rem;
+  }
+}

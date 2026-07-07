@@ -1,4 +1,5 @@
-import { MuBadge } from './MuBadge';
+import { ConsensusBadge } from '@ui';
+import styles from './RelationChip.module.css';
 
 export function RelationChip({
   type,
@@ -12,11 +13,11 @@ export function RelationChip({
   witnesses?: number;
 }) {
   return (
-    <span className="relation-chip">
+    <span className={styles.chip}>
       <strong>{type}</strong>
       {label ? <> → {label}</> : null}
       {(mu !== undefined || witnesses !== undefined) ? (
-        <> <MuBadge mu={mu} witnesses={witnesses} /></>
+        <ConsensusBadge mu={mu} witnesses={witnesses} tone="explore" />
       ) : null}
     </span>
   );

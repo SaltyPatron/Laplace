@@ -1,4 +1,4 @@
-import { Panel } from './Panel';
+import { Button, Field, Input, Muted, Panel } from '@ui';
 
 export interface TrainStatus {
   running: boolean; games: number; white: number; black: number; draws: number;
@@ -31,22 +31,30 @@ export function EnginePanel({ train, knobs, onKnobsChange, onStart, onStop }: En
           <li>adjudicated: {train.adjudicated}</li>
           <li>last: {train.lastOutcome || '—'}</li>
         </ul>
-      ) : <div className="muted">no status</div>}
+      ) : <Muted>no status</Muted>}
       <div className="knobs">
-        <label>games<input type="number" min={0} value={knobs.games}
-          onChange={(e) => onKnobsChange({ ...knobs, games: +e.target.value })} /></label>
-        <label>temp<input type="number" min={0} step={10} value={knobs.temp}
-          onChange={(e) => onKnobsChange({ ...knobs, temp: +e.target.value })} /></label>
-        <label>max plies<input type="number" min={2} value={knobs.maxPlies}
-          onChange={(e) => onKnobsChange({ ...knobs, maxPlies: +e.target.value })} /></label>
-        <label>weight<input type="number" min={0} step={0.1} value={knobs.weight}
-          onChange={(e) => onKnobsChange({ ...knobs, weight: +e.target.value })} /></label>
+        <Field label="games" layout="row" htmlFor="train-games">
+          <Input id="train-games" type="number" min={0} value={knobs.games}
+            onChange={(e) => onKnobsChange({ ...knobs, games: +e.target.value })} />
+        </Field>
+        <Field label="temp" layout="row" htmlFor="train-temp">
+          <Input id="train-temp" type="number" min={0} step={10} value={knobs.temp}
+            onChange={(e) => onKnobsChange({ ...knobs, temp: +e.target.value })} />
+        </Field>
+        <Field label="max plies" layout="row" htmlFor="train-max-plies">
+          <Input id="train-max-plies" type="number" min={2} value={knobs.maxPlies}
+            onChange={(e) => onKnobsChange({ ...knobs, maxPlies: +e.target.value })} />
+        </Field>
+        <Field label="weight" layout="row" htmlFor="train-weight">
+          <Input id="train-weight" type="number" min={0} step={0.1} value={knobs.weight}
+            onChange={(e) => onKnobsChange({ ...knobs, weight: +e.target.value })} />
+        </Field>
       </div>
-      <div className="row">
-        <button onClick={onStart} disabled={train?.running}>{knobs.games > 0 ? `Run ${knobs.games}` : 'Run ∞'}</button>
-        <button onClick={onStop} disabled={!train?.running}>Stop</button>
+      <div className="ctl-row">
+        <Button onClick={onStart} disabled={train?.running}>{knobs.games > 0 ? `Run ${knobs.games}` : 'Run ∞'}</Button>
+        <Button onClick={onStop} disabled={!train?.running}>Stop</Button>
       </div>
-      <p className="muted">games 0 = run until Stop · temp = exploration · weight = per-game evidence · folds online.</p>
+      <Muted>games 0 = run until Stop · temp = exploration · weight = per-game evidence · folds online.</Muted>
     </Panel>
   );
 }

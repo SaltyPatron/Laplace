@@ -3,8 +3,8 @@ cmd /c ".\scripts\win\build-engine-asan.cmd" 2>&1 > D:\Data\Output\build-engine-
 cmd /c ".\scripts\win\build-engine-libs.cmd" 2>&1 > D:\Data\Output\build-engine-libs.log
 cmd /c ".\scripts\win\build-engine.cmd" 2>&1 > D:\Data\Output\build-engine.log
 cmd /c ".\scripts\win\build-extensions.cmd" 2>&1 > D:\Data\Output\build-extensions.log
-cmd /c ".\scripts\win\build-web.cmd" 2>&1 > D:\Data\Output\build-web.log
 cmd /c ".\scripts\win\rebuild-all.cmd" 2>&1 > D:\Data\Output\rebuild-all.log
+cmd /c ".\scripts\win\build-web.cmd" 2>&1 > D:\Data\Output\build-web.log
 cmd /c ".\scripts\win\deploy-api.cmd" 2>&1 > D:\Data\Output\deploy-api.log
 cmd /c ".\scripts\win\publish.cmd" 2>&1 > D:\Data\Output\publish.log
 cmd /c ".\scripts\win\db-reset.cmd" 2>&1 > D:\Data\Output\db-reset.log

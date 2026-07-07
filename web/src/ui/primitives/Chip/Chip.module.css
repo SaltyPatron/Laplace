@@ -1,0 +1,49 @@
+@layer components {
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.68rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--color-border-default);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .confirm {
+    background: rgba(62, 207, 142, 0.15);
+    color: var(--color-confirm);
+    border-color: rgba(62, 207, 142, 0.4);
+  }
+
+  .refute {
+    background: rgba(255, 107, 107, 0.15);
+    color: var(--color-refute);
+  }
+
+  .draw {
+    background: rgba(232, 179, 57, 0.15);
+    color: var(--color-draw);
+  }
+
+  .engineOk {
+    color: var(--color-confirm);
+    border-color: rgba(62, 207, 142, 0.4);
+    background: rgba(62, 207, 142, 0.08);
+    padding: 0.12rem 0.55rem;
+    font-size: var(--text-sm);
+  }
+
+  .engineMissing {
+    color: var(--color-text-muted);
+    opacity: 0.85;
+    padding: 0.12rem 0.55rem;
+    font-size: var(--text-sm);
+  }
+
+  .source {
+    background: rgba(120, 160, 220, 0.15);
+    color: var(--color-text-muted);
+    margin-left: 0.25rem;
+  }
+}

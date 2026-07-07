@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Muted, Stack } from '@ui';
 import type { BillingReceipt } from '../types';
 
 export function ExportPanel({
@@ -17,28 +18,28 @@ export function ExportPanel({
   const [confirmed, setConfirmed] = useState(false);
 
   return (
-    <section className="export-panel">
-      <p>
+    <Stack gap={3}>
+      <Muted>
         Download a JSON training bundle: entity, consensus neighborhood, evidence, geometry, and optional cross-links.
-      </p>
+      </Muted>
       {(witnessRows != null || consensusRows != null) ? (
-        <p className="muted">
+        <Muted>
           Estimated pack: {consensusRows?.toLocaleString() ?? '—'} consensus rows,{' '}
           {witnessRows?.toLocaleString() ?? '—'} witness rows (recipe.export metered).
-        </p>
+        </Muted>
       ) : null}
       {!confirmed ? (
-        <button type="button" onClick={() => setConfirmed(true)}>Review export estimate</button>
+        <Button variant="ghost" onClick={() => setConfirmed(true)}>Review export estimate</Button>
       ) : (
-        <button type="button" disabled={busy} onClick={onExport}>
+        <Button disabled={busy} loading={busy} onClick={onExport}>
           {busy ? 'Exporting…' : 'Confirm download (recipe.export)'}
-        </button>
+        </Button>
       )}
       {receipt ? (
-        <p className="receipt-hint muted">
+        <Muted>
           Charged {receipt.amount_cents / 100} {receipt.currency} — {receipt.service_id} ({receipt.quote_id.slice(0, 12)}…)
-        </p>
+        </Muted>
       ) : null}
-    </section>
+    </Stack>
   );
 }

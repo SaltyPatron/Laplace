@@ -41,8 +41,10 @@ public static class ModelConfigReader
             raw = File.ReadAllBytes(configJsonPath);
             doc = JsonDocument.Parse(raw);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning(
+                "ModelConfigReader: failed to read/parse '{Path}': {Message}", configJsonPath, ex.Message);
             return Unsupported("(unparseable config.json)", "(unknown)");
         }
 

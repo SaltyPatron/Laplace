@@ -663,7 +663,7 @@ internal static class FoundryCommands
         }
         else
         {
-            bool affBasis = attnMetric == "" && (affRaw == "1" || (affRaw != "0" && vocab <= 3000));
+            bool affBasis = attnMetric == "" && affRaw == "1";
             Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
             E = affBasis
                 ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats)
@@ -1178,6 +1178,17 @@ internal static class FoundryCommands
                         }
                     });
             }
+            // Context head: trajectory plane for prefix/sequence mixing (doc 14 P7) when
+            // available; identity QK/V remains the fallback when no trajectory edges exist.
+            if (trajPlane.Nnz > 0)
+            {
+                var ctxM = FoundryExport.ProjectOperator(R, vocab, dModel, trajPlane);
+                var ctxResid = (double[])ctxM.Clone();
+                for (int d = 0; d < dModel; d++) ctxResid[(long)d * dModel + d] -= 1.0;
+                fa["context"] = FoundryExport.Factor(ctxM, dModel, headDim, relTol, transpose: false);
+                fo["context"] = FoundryExport.Factor(ctxResid, dModel, headDim, relTol, transpose: true);
+            }
+
             fAttnL.Add(fa); fOvL.Add(fo); fFfnL.Add(ff);
 
 
@@ -1294,7 +1305,10 @@ internal static class FoundryCommands
                         for (int h = 0; h < nHeads; h++)
                         {
                             var key = layer.Heads[h].Key;
-                            if (key == "context") FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
+                            if (key == "context" && fAttnL[layerIdx].TryGetValue("context", out var ctxQ) && ctxQ.Rank > 0)
+                                FoundryExport.FillHead(vals, tr, tc, h, headDim, ctxQ, ctxQk);
+                            else if (key == "context")
+                                FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
                             else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
                         }
                         break;
@@ -1302,7 +1316,10 @@ internal static class FoundryCommands
                         for (int h = 0; h < nKv; h++)
                         {
                             var key = layer.Heads[h].Key;
-                            if (key == "context") FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
+                            if (key == "context" && fAttnL[layerIdx].TryGetValue("context", out var ctxK) && ctxK.Rank > 0)
+                                FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, ctxK, ctxQk);
+                            else if (key == "context")
+                                FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
                             else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
                         }
                         break;
@@ -1310,7 +1327,10 @@ internal static class FoundryCommands
                         for (int h = 0; h < nKv; h++)
                         {
                             var key = layer.Heads[h].Key;
-                            if (key == "context") FoundryExport.FillHeadIdentity(vals, tr, tc, h, headDim);
+                            if (key == "context" && fOvL[layerIdx].TryGetValue("context", out var ctxV) && ctxV.Rank > 0)
+                                FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, ctxV, layerScale);
+                            else if (key == "context")
+                                FoundryExport.FillHeadIdentity(vals, tr, tc, h, headDim);
                             else { double s = OpResidScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
                         }
                         break;
@@ -1318,7 +1338,10 @@ internal static class FoundryCommands
                         for (int h = 0; h < nHeads; h++)
                         {
                             var key = layer.Heads[h].Key;
-                            if (key == "context") FoundryExport.FillColsHeadIdentity(vals, tr, tc, h, headDim);
+                            if (key == "context" && fOvL[layerIdx].TryGetValue("context", out var ctxO) && ctxO.Rank > 0)
+                                FoundryExport.FillColsHead(vals, tr, tc, h, headDim, ctxO, layerScale);
+                            else if (key == "context")
+                                FoundryExport.FillColsHeadIdentity(vals, tr, tc, h, headDim);
                             else { double s = OpResidScale(key); if (s > 0) FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
                         }
                         break;

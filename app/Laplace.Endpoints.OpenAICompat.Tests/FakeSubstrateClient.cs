@@ -199,7 +199,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     ObjectId: CetaceanIdHex,
                     ObjectLabel: "cetacean",
                     SourceId: "",
-                    SourceLabel: "",
+                    SourceLabel: "WordNetDecomposer",
                     ContextId: null,
                     Outcome: 2,
                     ObservationCount: 42,
@@ -296,7 +296,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         [],
         [
             new LabeledEvidenceItem(
-                IsAIdHex, "is a", CetaceanIdHex, "cetacean", "", "", null, 2, 42, 1534.7m)
+                IsAIdHex, "is a", CetaceanIdHex, "cetacean", "", "WordNetDecomposer", null, 2, 42, 1534.7m)
         ]);
 
     private static VisualizationEdge TopEdge() => new(

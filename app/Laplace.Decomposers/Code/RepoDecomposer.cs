@@ -115,7 +115,12 @@ public sealed class RepoDecomposer : DecomposerOrchestrator
             ct.ThrowIfCancellationRequested();
             byte[] bytes;
             try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch (IOException) { continue; }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "RepoDecomposer: failed to read '{File}': {Message}", file, ex.Message);
+                continue;
+            }
             if (bytes.Length == 0) continue;
 
             string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');

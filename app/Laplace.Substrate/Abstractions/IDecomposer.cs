@@ -28,5 +28,11 @@ public interface IDecomposer : IAsyncDisposable
     /// far from the neutral default; the sizer clamps round-trip counts at both extremes.</summary>
     int EstimatedBytesPerRecord => 512;
 
+    /// <summary>Tier-tree compose units staged per input record (relation triples = 2).</summary>
+    int EstimatedComposeUnitsPerRecord => 1;
+
+    IngestSourceProfile SizingProfile =>
+        new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
+
     IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 }

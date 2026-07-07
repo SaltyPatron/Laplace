@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LookupRow } from '@ui';
 import { exploreResolve } from '../api';
 
 export function SearchBar({ placeholder = 'word, ILI, frame, or id hex…' }: { placeholder?: string }) {
@@ -8,8 +9,7 @@ export function SearchBar({ placeholder = 'word, ILI, frame, or id hex…' }: { 
   const [err, setErr] = useState<string | null>(null);
   const nav = useNavigate();
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit() {
     const ref = q.trim();
     if (!ref || busy) return;
     setBusy(true);
@@ -25,10 +25,16 @@ export function SearchBar({ placeholder = 'word, ILI, frame, or id hex…' }: { 
   }
 
   return (
-    <form className="explore-search" onSubmit={submit}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
-      <button type="submit" disabled={busy}>{busy ? '…' : 'Resolve'}</button>
-      {err ? <span className="error">{err}</span> : null}
-    </form>
+    <div className="explore-search">
+      <LookupRow
+        value={q}
+        onChange={setQ}
+        onSubmit={() => void submit()}
+        placeholder={placeholder}
+        submitLabel={busy ? '…' : 'Resolve'}
+        disabled={busy}
+        error={err}
+      />
+    </div>
   );
 }

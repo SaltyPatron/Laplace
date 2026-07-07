@@ -1,0 +1,14 @@
+@layer components {
+  .gate {
+    margin: var(--space-4) 0;
+    padding: 1rem;
+    background: var(--color-bg-panel);
+    border: 1px dashed var(--color-border-default);
+    border-radius: var(--radius-md);
+  }
+
+  .quoteDetail {
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+  }
+}

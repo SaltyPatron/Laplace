@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Button, ErrorText, Muted, Stack, Text } from '@ui';
 import { apiGet, type PreflightQuoteResponse } from '../../api/client';
 import { useAppStore } from '../../store';
 import { preflight } from '../api';
 import { useExploreStore } from '../store';
 import type { BillingReceipt } from '../types';
+import styles from './GatePrompt.module.css';
 
 export function GatePrompt({
   serviceId,
@@ -55,36 +57,36 @@ export function GatePrompt({
     }
   }
 
-  const displayReceipt = receipt ?? (bypassed ? null : null);
-
   return (
-    <div className="gate-prompt">
-      <p>{label}</p>
-      {planHint ? <p className="muted plan-hint">{planHint}</p> : null}
-      <button type="button" disabled={busy} onClick={() => void unlock()}>
-        {busy ? 'Preflight…' : `Unlock (${serviceId})`}
-      </button>
-      {quote ? (
-        <div className="quote-detail muted">
-          {(Number(quote.amount_cents ?? 0) / 100).toFixed(2)} {quote.currency} — status {quote.status}
-          {quote.stripe_checkout_url ? (
-            <>
-              {' '}
-              <a href={quote.stripe_checkout_url} target="_blank" rel="noreferrer">Stripe checkout</a>
-            </>
-          ) : quote.status === 'awaiting_manual_approval' ? (
-            <span> (awaiting manual approval)</span>
-          ) : null}
-        </div>
-      ) : null}
-      {displayReceipt ? (
-        <p className="receipt-hint">
-          Receipt: {displayReceipt.amount_cents / 100} {displayReceipt.currency} — {displayReceipt.service_id}
-        </p>
-      ) : bypassed ? (
-        <p className="receipt-hint muted">Billing bypass active — no charge applied.</p>
-      ) : null}
-      {err ? <p className="error">{err}</p> : null}
+    <div className={styles.gate}>
+      <Stack gap={3}>
+        <Text>{label}</Text>
+        {planHint ? <Muted>{planHint}</Muted> : null}
+        <Button type="button" disabled={busy} loading={busy} onClick={() => void unlock()}>
+          {busy ? 'Preflight…' : `Unlock (${serviceId})`}
+        </Button>
+        {quote ? (
+          <Muted className={styles.quoteDetail}>
+            {(Number(quote.amount_cents ?? 0) / 100).toFixed(2)} {quote.currency} — status {quote.status}
+            {quote.stripe_checkout_url ? (
+              <>
+                {' '}
+                <a href={quote.stripe_checkout_url} target="_blank" rel="noreferrer">Stripe checkout</a>
+              </>
+            ) : quote.status === 'awaiting_manual_approval' ? (
+              <span> (awaiting manual approval)</span>
+            ) : null}
+          </Muted>
+        ) : null}
+        {receipt ? (
+          <Muted>
+            Receipt: {receipt.amount_cents / 100} {receipt.currency} — {receipt.service_id}
+          </Muted>
+        ) : bypassed ? (
+          <Muted>Billing bypass active — no charge applied.</Muted>
+        ) : null}
+        {err ? <ErrorText>{err}</ErrorText> : null}
+      </Stack>
     </div>
   );
 }

@@ -1,0 +1,19 @@
+@layer components {
+  .link {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+
+  .link:hover {
+    text-decoration: underline;
+  }
+
+  .brand {
+    color: inherit;
+    font-weight: inherit;
+  }
+
+  .brand:hover {
+    color: var(--color-accent);
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "id": "<id>",
+  "object": "laplace.explore.entity",
+  "created": 0,
+  "entity": {
+    "id_hex": "00112233445566778899aabbccddeeff",
+    "label": "whale",
+    "tier": 2,
+    "type": "Word",
+    "exists": true,
+    "evidence_count": 42,
+    "physicalities": [
+      {
+        "type": 1,
+        "x": 0.5,
+        "y": -0.25,
+        "z": 0.125,
+        "m": 0.8125,
+        "radius": 1,
+        "n_constituents": 5
+      }
+    ],
+    "salient_facts": [
+      {
+        "type": "IS_A",
+        "fact": "cetacean",
+        "eff_mu": 0.91,
+        "witnesses": 42
+      }
+    ],
+    "consensus_out": [
+      {
+        "direction": "out",
+        "type": "IS_A",
+        "entity_id_hex": "ffeeddccbbaa99887766554433221100",
+        "entity_label": "cetacean",
+        "eff_mu": 0.91,
+        "witnesses": 42
+      }
+    ],
+    "consensus_in": [],
+    "senses": [],
+    "constituents": [],
+    "evidence": [
+      {
+        "type_id": "0123456789abcdef0123456789abcdef",
+        "type_label": "is a",
+        "object_id": "ffeeddccbbaa99887766554433221100",
+        "object_label": "cetacean",
+        "source_id": "",
+        "source_label": "WordNetDecomposer",
+        "context_id": null,
+        "outcome": 2,
+        "observation_count": 42,
+        "eff_mu": 1534.7
+      }
+    ]
+  },
+  "billing": null
+}

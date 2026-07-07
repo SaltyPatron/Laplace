@@ -1,0 +1,35 @@
+@layer components {
+  .group {
+    display: inline-flex;
+    border: 1px solid var(--color-border-default);
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--color-bg-elevated);
+  }
+
+  .option {
+    flex: 1 1 auto;
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 0.28rem 0.6rem;
+    font-size: var(--text-sm);
+    border-radius: 0;
+    font-family: inherit;
+  }
+
+  .option + .option {
+    border-left: 1px solid var(--color-border-default);
+  }
+
+  .selected {
+    background: var(--color-accent);
+    color: #fff;
+  }
+
+  .option:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+}

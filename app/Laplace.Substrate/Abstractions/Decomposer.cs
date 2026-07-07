@@ -11,17 +11,29 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class IngestPipelineDefaults
 {
+    /// <summary>
+    /// Relation-triple lane: each record composes subject + object tier trees (see
+    /// <see cref="RelationTripleHandler"/>). Batch and probe interval come from
+    /// <see cref="IngestSourceProfile.RelationTriple"/>, not HighVolume.
+    /// </summary>
     public static IngestBatchConfig RelationTriple(
-        Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options, ISubstrateReader? reader) =>
-        new()
+        Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options, ISubstrateReader? reader)
+    {
+        var profile = IngestSourceProfile.RelationTriple;
+        int defaultBatch = IngestSizing.ResolveRecordBatch(
+            IngestTopology.Current.PerformanceCoreCount, profile.EstBytesPerRecord);
+        int batch = BatchConfigDefaults.Resolve(options, defaultBatch);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = BatchConfigDefaults.Resolve(options, BatchConfigDefaults.HighVolume),
+            BatchSize = batch,
+            WorkingSetProbeInterval = IngestSizing.ResolveWorkingSetProbeInterval(batch, profile),
             ContainmentReader = reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
         };
+    }
 
     public static IngestBatchConfig Compose(
         Hash128 sourceId,
@@ -227,6 +239,11 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
 
 public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord>
 {
+    public int EstimatedBytesPerRecord => IngestSourceProfile.RelationTriple.EstBytesPerRecord;
+
+    public int EstimatedComposeUnitsPerRecord =>
+        IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
+
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
         new RelationTripleHandler(SourceId, SourceTrust);
 

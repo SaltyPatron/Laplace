@@ -1,0 +1,24 @@
+@layer components {
+  .breadcrumb {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  .crumb {
+    display: inline;
+  }
+
+  .sep {
+    margin: 0 0.35rem;
+  }
+
+  .link {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+
+  .link:hover {
+    text-decoration: underline;
+  }
+}

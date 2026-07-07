@@ -392,6 +392,7 @@ build-cutechess/
 app/Laplace.Endpoints.OpenAICompat/wwwroot/
 web/node_modules/
 web/dist/
+web/storybook-static/
 *.tsbuildinfo
 out/
 

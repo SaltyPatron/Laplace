@@ -1,0 +1,26 @@
+@layer components {
+  .card {
+    background: var(--color-bg-panel);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+  }
+
+  .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0;
+  }
+
+  .value {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin: 0.25rem 0 0;
+  }
+
+  .sub {
+    margin: 0.2rem 0 0;
+    font-size: var(--text-sm);
+  }
+}

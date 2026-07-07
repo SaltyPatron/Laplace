@@ -1,0 +1,3 @@
+@layer legacy, reset, tokens, base, components, utilities;
+
+@import url('../styles.css') layer(legacy);

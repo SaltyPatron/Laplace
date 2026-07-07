@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, ErrorText, Field, Input, Muted } from '@ui';
 import { apiPost, type ApiOptions } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
@@ -53,19 +54,19 @@ export function WalkPanel() {
         <GatePrompt serviceId="explain.trace" label="Beam search trace over consensus graph." onReady={() => setUnlocked(true)} />
       ) : (
         <>
-          <div className="row walk-controls">
-            <input value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Prompt" />
-            <label>
-              depth
-              <input type="number" min={1} max={8} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
-            </label>
-            <label>
-              beam
-              <input type="number" min={1} max={16} value={beam} onChange={(e) => setBeam(Number(e.target.value))} />
-            </label>
-            <button type="button" onClick={() => void run()}>Run walk</button>
+          <div className="walk-controls">
+            <Field label="prompt" layout="row" htmlFor="walk-prompt">
+              <Input id="walk-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Prompt" />
+            </Field>
+            <Field label="depth" layout="row" htmlFor="walk-depth">
+              <Input id="walk-depth" type="number" min={1} max={8} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
+            </Field>
+            <Field label="beam" layout="row" htmlFor="walk-beam">
+              <Input id="walk-beam" type="number" min={1} max={16} value={beam} onChange={(e) => setBeam(Number(e.target.value))} />
+            </Field>
+            <Button type="button" onClick={() => void run()}>Run walk</Button>
           </div>
-          <p className="muted">Path overlays Graph and Glome tabs on open entity pages.</p>
+          <Muted>Path overlays Graph and Glome tabs on open entity pages.</Muted>
           <ol>
             {trace.map((s, i) => (
               <li key={i}>d{s.depth} {s.entity_label} path μ {s.path_mu.toFixed(2)} ({s.witnesses} wit)</li>
@@ -73,7 +74,7 @@ export function WalkPanel() {
           </ol>
         </>
       )}
-      {err ? <p className="error">{err}</p> : null}
+      {err ? <ErrorText>{err}</ErrorText> : null}
     </div>
   );
 }

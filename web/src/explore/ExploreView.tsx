@@ -8,6 +8,7 @@ import { ConstellationView } from './glome/ConstellationView';
 import { WalkPanel } from './walk/WalkPanel';
 import { Breadcrumb } from './components/Breadcrumb';
 import { useExploreStore } from './store';
+import styles from './ExploreView.module.css';
 
 function ExploreBreadcrumb() {
   const { pathname } = useLocation();
@@ -35,17 +36,17 @@ function ExploreBreadcrumb() {
 
 export function ExploreView() {
   return (
-    <div className="explore-layout">
-      <aside className="explore-sidebar">
-        <nav>
-          <Link to="/explore">Warehouse</Link>
-          <Link to="/explore/constellation">Constellation</Link>
-          <Link to="/explore/walk">Walk</Link>
-          <Link to="/explore/audit">Audit</Link>
-          <Link to="/">← App</Link>
+    <div className={styles.layout}>
+      <aside className={styles.sidebar}>
+        <nav className={styles.nav}>
+          <Link className={styles.navLink} to="/explore">Warehouse</Link>
+          <Link className={styles.navLink} to="/explore/constellation">Constellation</Link>
+          <Link className={styles.navLink} to="/explore/walk">Walk</Link>
+          <Link className={styles.navLink} to="/explore/audit">Audit</Link>
+          <Link className={styles.navLink} to="/">← App</Link>
         </nav>
       </aside>
-      <div className="explore-content">
+      <div className={styles.content}>
         <ExploreBreadcrumb />
         <Routes>
           <Route index element={<WarehouseHome />} />

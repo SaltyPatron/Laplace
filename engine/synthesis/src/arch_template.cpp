@@ -232,13 +232,18 @@ inline size_t dtype_elem_size(int dtype) {
 void materialize_token_axis(const substrate_view_t* v, int dtype,
                             size_t vocab, size_t hidden, uint8_t* out) {
     size_t es = dtype_elem_size(dtype);
-    double inv_sqrt_h = 1.0 / std::sqrt((double)hidden);
+    const double phi = 0.618033988749894848;
     for (size_t t = 0; t < vocab; ++t) {
         double tc = (t < v->vocab) ? v->per_token_consensus[t] : 0.0;
         for (size_t d = 0; d < hidden; ++d) {
-            double b = (v->token_basis && v->basis_dim > 0)
-                       ? v->token_basis[t * v->basis_dim + (d % v->basis_dim)]
-                       : inv_sqrt_h;
+            double b;
+            if (v->token_basis && v->basis_dim > 0) {
+                b = v->token_basis[t * v->basis_dim + (d % v->basis_dim)];
+            } else {
+                /* Dense deterministic fallback from token index — not a flat 1/sqrt(H) axis. */
+                double phase = phi * (double)(t + 1) * (double)(d + 1);
+                b = std::sin(phase) * std::cos(phase * 0.5);
+            }
             write_dtype((float)(tc * b), dtype, out + (t * hidden + d) * es);
         }
     }

@@ -19,6 +19,8 @@ public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvi
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
 
+    public int EstimatedBytesPerRecord => IngestSourceProfile.UdSentence.EstBytesPerRecord;
+
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 

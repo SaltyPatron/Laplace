@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet } from '../../api/client';
-import { Panel } from './Panel';
+import {
+  Alert,
+  IconButton,
+  LoadingText,
+  Muted,
+  Panel,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@ui';
+import { PIECE_NAME, PIECES } from './pstConstants';
 
 interface LearnedSquare { piece: string; file: number; rank: number; devPoints: number; witness: number; }
-
-const PIECES = ['P', 'N', 'B', 'R', 'Q', 'K'] as const;
-const PIECE_NAME: Record<string, string> = { P: 'Pawn', N: 'Knight', B: 'Bishop', R: 'Rook', Q: 'Queen', K: 'King' };
 
 export function PstGrid() {
   const [squares, setSquares] = useState<LearnedSquare[] | null>(null);
@@ -36,12 +43,23 @@ export function PstGrid() {
     <Panel className="pst" title="Learned PST" actions={
       <div className="pst-pieces">
         {PIECES.map((p) => (
-          <button key={p} className={p === piece ? 'active' : 'ghost'} onClick={() => setPiece(p)} title={PIECE_NAME[p]}>{p}</button>
+          <Tooltip key={p}>
+            <TooltipTrigger asChild>
+              <IconButton
+                aria-label={PIECE_NAME[p]}
+                className={p === piece ? 'active' : ''}
+                onClick={() => setPiece(p)}
+              >
+                {p}
+              </IconButton>
+            </TooltipTrigger>
+            <TooltipContent>{PIECE_NAME[p]}</TooltipContent>
+          </Tooltip>
         ))}
       </div>
     }>
-      {err && <div className="chess-error">{err}</div>}
-      {loading && !squares && <p className="muted">loading…</p>}
+      {err && <Alert>{err}</Alert>}
+      {loading && !squares && <LoadingText>loading…</LoadingText>}
       {squares && (
         <>
           <div className="pst-grid" role="img" aria-label={`Learned piece-square deviations for ${PIECE_NAME[piece]}`}>
@@ -53,19 +71,25 @@ export function PstGrid() {
                 const mag = Math.min(1, Math.abs(dev) / maxAbs);
                 const hue = dev >= 0 ? 130 : 0;
                 const bg = wit > 0 ? `hsl(${hue} 70% 45% / ${(0.12 + 0.6 * mag).toFixed(3)})` : 'transparent';
+                const square = `${String.fromCharCode(97 + file)}${rank + 1}`;
+                const tip = `${square} · dev ${dev >= 0 ? '+' : ''}${dev.toFixed(1)} · ${wit.toFixed(0)}w`;
                 return (
-                  <div key={`${file}-${rank}`} className="pst-cell" style={{ background: bg }}
-                       title={`${String.fromCharCode(97 + file)}${rank + 1} · dev ${dev >= 0 ? '+' : ''}${dev.toFixed(1)} · ${wit.toFixed(0)}w`}>
-                    {wit > 0 ? Math.round(dev) : ''}
-                  </div>
+                  <Tooltip key={`${file}-${rank}`}>
+                    <TooltipTrigger asChild>
+                      <div className="pst-cell" style={{ background: bg }} tabIndex={wit > 0 ? 0 : -1}>
+                        {wit > 0 ? Math.round(dev) : ''}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{tip}</TooltipContent>
+                  </Tooltip>
                 );
               }),
             )}
           </div>
-          <p className="muted pst-foot">
+          <Muted className="pst-foot">
             deviation from PeSTO prior, learned by witnessed self-play · green = better square, red = worse ·{' '}
             {totalWitness.toFixed(0)} witnesses on {PIECE_NAME[piece]}
-          </p>
+          </Muted>
         </>
       )}
     </Panel>

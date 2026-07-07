@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { LoadingText, Muted, Panel, Stack } from '@ui';
 import { exploreCatalog } from '../api';
 import { useExploreStore } from '../store';
 import type { ExploreStageRow } from '../types';
@@ -18,20 +19,22 @@ export function StageBrowse() {
     });
   }, [stageId, setBreadcrumb]);
 
-  if (!stage) return <p className="muted">Loading stage…</p>;
+  if (!stage) return <LoadingText>Loading stage…</LoadingText>;
 
   return (
-    <div>
-      <h2>{stage.stage}</h2>
-      {stage.law ? <p className="muted">{stage.law}</p> : null}
-      <ul className="source-list">
-        {stage.sources.map((s) => (
-          <li key={s.cli}>
-            <Link to={`/explore/source/${encodeURIComponent(s.cli)}`}>{s.cli}</Link>
-            <span className="muted">{s.layer} — {s.role ?? s.links}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Stack gap={4}>
+      <Panel title={stage.stage}>
+        {stage.law ? <Muted>{stage.law}</Muted> : null}
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {stage.sources.map((s) => (
+            <li key={s.cli}>
+              <Link to={`/explore/source/${encodeURIComponent(s.cli)}`}>{s.cli}</Link>
+              <br />
+              <Muted>{s.layer} — {s.role ?? s.links}</Muted>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </Stack>
   );
 }

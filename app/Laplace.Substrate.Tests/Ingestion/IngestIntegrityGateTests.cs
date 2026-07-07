@@ -51,7 +51,8 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
         var seedStep = Path.Combine(repoRoot, "scripts", "win", "seed-step.cmd");
         var text = File.ReadAllText(seedStep);
         Assert.Contains("unknown seed step", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("LAPLACE_SKIP_VERIFY", text, StringComparison.Ordinal);
+        Assert.Contains("goto unknown_step", text, StringComparison.Ordinal);
+        Assert.Contains(":unknown_step", text, StringComparison.Ordinal);
         Assert.Contains("exit /b 3", text, StringComparison.Ordinal);
     }
 

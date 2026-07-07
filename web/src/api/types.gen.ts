@@ -202,6 +202,15 @@ export interface paths {
                         "application/json": components["schemas"]["PaymentRequiredResponse"];
                     };
                 };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;

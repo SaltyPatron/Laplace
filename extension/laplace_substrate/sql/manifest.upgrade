@@ -100,8 +100,10 @@ functions/inspect/entity_facets.sql.in
 functions/inspect/entity_physicalities.sql.in
 functions/inspect/entity_physicality_coords.sql.in
 functions/inspect/attestations_out.sql.in
+functions/inspect/evidence_receipt.sql.in
 functions/inspect/attestations_in.sql.in
 functions/inspect/consensus_out_readable.sql.in
+functions/inspect/consensus_out_labeled.sql.in
 functions/inspect/top_relations_readable.sql.in
 functions/inspect/attestation_response.sql.in
 functions/inspect/attestation_response_type.sql.in

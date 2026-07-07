@@ -1,0 +1,15 @@
+@layer components {
+  .content {
+    z-index: var(--z-tooltip);
+    max-width: 18rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm);
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    border: 1px solid var(--color-border-default);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+}

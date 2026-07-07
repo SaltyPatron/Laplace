@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  Banner,
+  Button,
+  ConsensusBadge,
+  Select,
+  TextArea,
+} from '@ui';
 import { apiGet, apiPost, PaymentRequiredError, type ModelList, type PreflightQuoteResponse, type ChatCompletionResponse } from '../api/client';
 import { streamChat } from '../api/sse';
 import { asNum, provenanceFromMetadata, useAppStore, type ProvenanceEntry } from '../store';
-import { ProvenanceBadge } from './ProvenanceBadge';
 import { ReceiptPanel } from './ReceiptPanel';
 
 export function ChatView() {
@@ -31,8 +37,6 @@ export function ChatView() {
   useEffect(() => {
     const el = transcriptRef.current;
     if (!el) return;
-    // Only auto-follow if the user is already near the bottom; otherwise a token stream
-    // yanks them down every chunk while they're trying to read earlier replies.
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     if (nearBottom) el.scrollTo({ top: el.scrollHeight });
   }, [messages]);
@@ -110,7 +114,6 @@ export function ChatView() {
     }
   }
 
-  
   async function retryWithQuote() {
     const history = messages
       .filter((m) => !m.streaming && !m.error)
@@ -143,12 +146,12 @@ export function ChatView() {
     <div className="chat-layout">
       <section className="chat-main">
         <div className="chat-toolbar">
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
+          <Select value={model} onChange={(e) => setModel(e.target.value)}>
             {(models.length ? models : [model]).map((id) => (
               <option key={id} value={id}>{id}</option>
             ))}
-          </select>
-          <button className="ghost" onClick={clearConversation}>Clear</button>
+          </Select>
+          <Button variant="ghost" onClick={clearConversation}>Clear</Button>
         </div>
 
         <div className="transcript" ref={transcriptRef}>
@@ -162,12 +165,18 @@ export function ChatView() {
             <div key={i} className={`message ${m.role}`}>
               <div className="content">
                 {m.content || (m.streaming ? '…' : '')}
-                {m.error && <span className="error"> [{m.error}]</span>}
+                {m.error && <span className="message-error"> [{m.error}]</span>}
               </div>
               {m.provenance.length > 0 && (
                 <div className="badges">
                   {m.provenance.map((p, j) => (
-                    <ProvenanceBadge key={j} entry={p} />
+                    <ConsensusBadge
+                      key={j}
+                      tone="chat"
+                      ordUsed={p.ordUsed}
+                      mu={p.effMu}
+                      witnesses={p.witnesses}
+                    />
                   ))}
                 </div>
               )}
@@ -176,7 +185,7 @@ export function ChatView() {
         </div>
 
         {pendingQuote && (
-          <div className="quote-banner">
+          <Banner>
             <strong>Quote required for {pendingQuote.serviceId}.</strong>{' '}
             {pendingQuote.quote ? (
               <>
@@ -187,16 +196,18 @@ export function ChatView() {
                     Pay with Stripe
                   </a>
                 )}{' '}
-                <button onClick={retryWithQuote} disabled={busy}>Retry with quote</button>
+                <Button size="sm" onClick={retryWithQuote} disabled={busy} loading={busy}>
+                  Retry with quote
+                </Button>
               </>
             ) : (
               <span>{pendingQuote.message}</span>
             )}
-          </div>
+          </Banner>
         )}
 
         <div className="composer">
-          <textarea
+          <TextArea
             value={input}
             placeholder="Ask about anything the witnesses attest to…"
             rows={2}
@@ -208,9 +219,9 @@ export function ChatView() {
               }
             }}
           />
-          <button onClick={() => void send()} disabled={busy || !input.trim()}>
+          <Button onClick={() => void send()} disabled={busy || !input.trim()} loading={busy}>
             {busy ? '…' : 'Send'}
-          </button>
+          </Button>
         </div>
       </section>
       <ReceiptPanel />

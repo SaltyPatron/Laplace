@@ -12,7 +12,12 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@ui": ["src/ui/index.ts"],
+      "@ui/*": ["src/ui/*"]
+    }
   },
   "include": ["src"]
 }

@@ -48,7 +48,7 @@
         "object_id": "ffeeddccbbaa99887766554433221100",
         "object_label": "cetacean",
         "source_id": "",
-        "source_label": "",
+        "source_label": "WordNetDecomposer",
         "context_id": null,
         "outcome": 2,
         "observation_count": 42,

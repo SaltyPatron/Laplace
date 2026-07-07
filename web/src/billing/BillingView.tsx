@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
+  Banner,
+  Button,
+  ErrorText,
+  Muted,
+  Table,
+  TableScroll,
+  Td,
+  Th,
+} from '@ui';
+import {
   apiGet,
   apiPost,
   type BillingCatalogResponse,
@@ -47,7 +57,7 @@ export function BillingView() {
 
   return (
     <div className="billing">
-      {error && <p className="error">{error}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
 
       <h2>Plans</h2>
       <div className="plan-grid">
@@ -55,7 +65,7 @@ export function BillingView() {
           <div key={p.plan_id} className="plan-card">
             <h3>{p.name}</h3>
             <p className="price">${(((p.monthly_price_cents ?? 0) as number) / 100).toFixed(0)}/mo</p>
-            <p className="hint">{p.description}</p>
+            <Muted>{p.description}</Muted>
             <ul className="credits">
               {Object.entries(p.monthly_credits ?? {}).map(([service, credits]) => (
                 <li key={service}>
@@ -64,13 +74,13 @@ export function BillingView() {
                 </li>
               ))}
             </ul>
-            <button onClick={() => void subscribe(p.plan_id ?? '')}>Subscribe</button>
+            <Button onClick={() => void subscribe(p.plan_id ?? '')}>Subscribe</Button>
           </div>
         ))}
       </div>
 
       {checkout && (
-        <div className="quote-banner">
+        <Banner>
           <strong>{checkout.plan_id}</strong> — {(((checkout.amount_cents ?? 0) as number) / 100).toFixed(2)}{' '}
           {checkout.currency}, status {checkout.status}.{' '}
           {checkout.stripe_checkout_url ? (
@@ -78,48 +88,52 @@ export function BillingView() {
           ) : (
             <span>Stripe is not configured; the quote awaits manual approval.</span>
           )}
-        </div>
+        </Banner>
       )}
 
       <h2>Metered services</h2>
-      <table className="catalog">
-        <thead>
-          <tr><th>Service</th><th>Unit</th><th>Unit price</th><th>Base fee</th></tr>
-        </thead>
-        <tbody>
-          {services.map((s) => (
-            <tr key={s.service_id}>
-              <td>{s.display_name}</td>
-              <td>{s.unit}</td>
-              <td>{(((s.unit_price_cents ?? 0) as number) / 100).toFixed(2)} {s.currency}</td>
-              <td>{s.base_fee_cents ? `${((s.base_fee_cents as number) / 100).toFixed(2)} ${s.currency}` : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <TableScroll>
+        <Table className="catalog">
+          <thead>
+            <tr><Th>Service</Th><Th>Unit</Th><Th>Unit price</Th><Th>Base fee</Th></tr>
+          </thead>
+          <tbody>
+            {services.map((s) => (
+              <tr key={s.service_id}>
+                <Td>{s.display_name}</Td>
+                <Td>{s.unit}</Td>
+                <Td>{(((s.unit_price_cents ?? 0) as number) / 100).toFixed(2)} {s.currency}</Td>
+                <Td>{s.base_fee_cents ? `${((s.base_fee_cents as number) / 100).toFixed(2)} ${s.currency}` : '—'}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </TableScroll>
 
       <h2>Usage — {tenant}</h2>
       {usage && usage.entries && usage.entries.length > 0 ? (
         <>
           <p>Total: {(((usage.total_amount_cents ?? 0) as number) / 100).toFixed(2)} usd</p>
-          <table className="catalog">
-            <thead>
-              <tr><th>Service</th><th>Units</th><th>Amount</th><th>Executed</th></tr>
-            </thead>
-            <tbody>
-              {usage.entries.map((u, i) => (
-                <tr key={i}>
-                  <td>{u.serviceId}</td>
-                  <td>{u.units}</td>
-                  <td>{(((u.amountCents ?? 0) as number) / 100).toFixed(2)}</td>
-                  <td>{u.executedAt ? new Date(u.executedAt).toLocaleString() : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TableScroll>
+            <Table className="catalog">
+              <thead>
+                <tr><Th>Service</Th><Th>Units</Th><Th>Amount</Th><Th>Executed</Th></tr>
+              </thead>
+              <tbody>
+                {usage.entries.map((u, i) => (
+                  <tr key={i}>
+                    <Td>{u.serviceId}</Td>
+                    <Td>{u.units}</Td>
+                    <Td>{(((u.amountCents ?? 0) as number) / 100).toFixed(2)}</Td>
+                    <Td>{u.executedAt ? new Date(u.executedAt).toLocaleString() : ''}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableScroll>
         </>
       ) : (
-        <p className="hint">No usage recorded for this tenant.</p>
+        <Muted>No usage recorded for this tenant.</Muted>
       )}
     </div>
   );

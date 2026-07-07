@@ -51,10 +51,10 @@ if /i "%STEP%"=="framenet"      goto run_ingest
 if /i "%STEP%"=="semlink"       goto run_ingest
 if /i "%STEP%"=="mapnet"        goto run_ingest
 if /i "%STEP%"=="wordframenet" goto run_ingest
-if /i "%STEP%"=="conceptnet"    goto run_ingest_ud_commit
+if /i "%STEP%"=="conceptnet"    goto run_ingest
 if /i "%STEP%"=="atomic2020"    goto run_ingest
-if /i "%STEP%"=="ud"            goto run_ingest_ud_commit
-if /i "%STEP%"=="wiktionary"    goto run_ingest_wikt_commit
+if /i "%STEP%"=="ud"            goto run_ingest
+if /i "%STEP%"=="wiktionary"    goto run_ingest
 if /i "%STEP%"=="tatoeba"       goto run_ingest
 if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
@@ -69,37 +69,17 @@ if /i "%STEP%"=="model-qwen"     goto run_model_qwen
 if /i "%STEP%"=="safetensors"    goto run_ingest_path
 
 echo ERROR: unknown seed step '%STEP%'
-if defined LAPLACE_SKIP_VERIFY exit /b 0
-exit /b 3
+goto unknown_step
 
 :run_ingest
+rem Batch/commit/working-set sizing is source-aware in IngestSizing (CLI/decomposer).
+rem Do not override LAPLACE_INGEST_* here except LAPLACE_INGEST_MAX_UNITS smoke caps.
 call :run_ingest_impl
 exit /b %ERRORLEVEL%
-
-:run_ingest_ud_commit
-set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
-if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
-if /i "%STEP%"=="conceptnet" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
-  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=16384"
-)
-call :run_ingest_impl
-set "RC=%ERRORLEVEL%"
-if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
-exit /b %RC%
 
 :run_ingest_opensubtitles_commit
 call :run_ingest_impl
 exit /b %ERRORLEVEL%
-
-:run_ingest_wikt_commit
-set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
-if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
-call :run_ingest_impl
-set "RC=%ERRORLEVEL%"
-if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
-exit /b %RC%
 
 :run_ingest_path
 if "%EXTRA%"=="" (
@@ -255,3 +235,7 @@ echo   seed-step.cmd wordnet
 echo   seed-step.cmd document "%INGEST%\test-data\text"
 echo   seed-step.cmd repo "%REPOS%\Laplace"
 exit /b 2
+
+:unknown_step
+if defined LAPLACE_SKIP_VERIFY exit /b 0
+exit /b 3

@@ -16,14 +16,17 @@ public static class WorkingSetMode
         Environment.GetEnvironmentVariable("LAPLACE_WORKING_SET") != "0";
 
     /// <summary>
-    /// Records accumulated between descent-probe rounds. Large on purpose:
-    /// probe round trips scale with (distinct ids / interval), never with
-    /// row count — hot caches and the working-set absent cache make each
-    /// distinct id probe at most once per working set regardless.
+    /// Records accumulated between descent-probe rounds when a pipeline config
+    /// does not set <see cref="IngestBatchConfig.WorkingSetProbeInterval"/>.
+    /// Scales with the default record batch and source profile; per-lane configs
+    /// override this (relation triples probe more often — two trees per record).
     /// </summary>
     public static readonly int ProbeIntervalRecords =
         int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_WS_PROBE_INTERVAL"), out var n) && n > 0
-            ? n : 32_768;
+            ? n
+            : IngestSizing.ResolveWorkingSetProbeInterval(
+                IngestSizing.ResolveRecordBatch(CpuTopology.PerformanceCoreCount),
+                IngestSourceProfile.Default);
 
     /// <summary>
     /// Safety valve, not a second architecture: when a working set's staged
@@ -33,12 +36,11 @@ public static class WorkingSetMode
     /// row objects, memo caches, the consensus accumulator, server-GC heap
     /// slack), and Postgres holds its own locked share of the same RAM. A
     /// fixed 8 GiB budget measured out as ~21 GB resident and drove a 48 GB
-    /// box to 0.5 GB free mid-fold; phys/16 keeps the same 8 GiB on a 128 GB
-    /// server and backs off proportionally on smaller machines.
+    /// box to 0.5 GB free mid-fold. Default is phys/32 capped at 2 GiB unless
+    /// <c>LAPLACE_WORKING_SET_BUDGET_MB</c> is set explicitly.
     /// </summary>
     public static readonly long BudgetBytes =
         long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_WORKING_SET_BUDGET_MB"), out var mb) && mb > 0
             ? mb * 1024L * 1024L
-            : Math.Clamp(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 16,
-                1024L * 1024L * 1024L, 8_192L * 1024L * 1024L);
+            : IngestSizing.ResolveWorkingSetBudgetBytes();
 }

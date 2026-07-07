@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost } from '../api/client';
+import {
+  Alert,
+  Button,
+  Chip,
+  Field,
+  Input,
+  Muted,
+  Panel,
+  SegmentedControl,
+  Select,
+  SliderField,
+  Toggle,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@ui';
 import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './lab/sse';
 
-// Field metadata for every param each job kind actually reads server-side (ChessLabRunners.cs).
-// The catalog only advertises a subset as `default`; this is the full, typed set so the form
-// stops hiding real knobs (maxPlies/concurrency/openings/… were unreachable before).
-type Field =
+type FieldDef =
   | { key: string; label: string; type: 'number'; min: number; max: number; step?: number; unit?: string; help?: string }
   | { key: string; label: string; type: 'text' | 'password'; help?: string }
   | { key: string; label: string; type: 'select'; options: string[]; help?: string }
   | { key: string; label: string; type: 'bool'; help?: string };
 
-const JOB_FIELDS: Record<string, Field[]> = {
+const JOB_FIELDS: Record<string, FieldDef[]> = {
   'substrate-test': [
     { key: 'mode', label: 'bias mode', type: 'select', options: ['fold', 'edge', 'off'], help: 'substrate root-bias source (off = pure search baseline)' },
     { key: 'games', label: 'games', type: 'number', min: 1, max: 500 },
@@ -47,20 +60,18 @@ const JOB_FIELDS: Record<string, Field[]> = {
   ],
 };
 
-// Engines a kind cannot run without. Start is gated when any are missing.
 const REQUIRES: Record<string, string[]> = {
   cutechess: ['cutechess', 'stockfish', 'qt', 'laplaceUci'],
 };
 
 const FALLBACK_JOBS: LabJobSpec[] = [{ kind: 'substrate-test', label: 'Substrate test', default: { games: '20', depth: '4', mode: 'fold' } }];
 
-function fieldDefault(f: Field): string {
+function fieldDefault(f: FieldDef): string {
   if (f.type === 'bool') return 'false';
   if (f.type === 'select') return f.options[0];
   return f.type === 'number' ? String(f.min) : '';
 }
 
-// Seed the form: catalog-advertised default wins, else the field's own default.
 function paramsFor(kind: string, spec: LabJobSpec | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of JOB_FIELDS[kind] ?? []) out[f.key] = spec?.default?.[f.key] ?? fieldDefault(f);
@@ -88,9 +99,6 @@ export function ChessLabView() {
     }
   }, []);
 
-  // Fetch the catalog + job list once. The catalog (engines/specs) is static, and running-job
-  // progress arrives over the SSE stream — no polling heartbeat. The list is refreshed on
-  // explicit actions (start/stop) and when a stream ends.
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => () => esRef.current?.abort(), []);
 
@@ -98,15 +106,11 @@ export function ChessLabView() {
   const activeSpec = useMemo(() => jobSpecs.find((j) => j.kind === kind), [jobSpecs, kind]);
   const fields = JOB_FIELDS[kind] ?? [];
 
-  // Seed the form once per kind — NOT on every catalog poll. `refresh()` replaces `catalog`
-  // (and therefore `activeSpec`) every 5s with a fresh object; keying the re-seed on
-  // activeSpec wiped whatever the user had typed on each poll. Track the kind we last
-  // seeded for a real spec and only re-seed on an actual kind switch or first spec arrival.
   const seededRef = useRef<string | null>(null);
   useEffect(() => {
-    if (seededRef.current === kind) return;          // already seeded this kind; leave edits alone
+    if (seededRef.current === kind) return;
     setParams(paramsFor(kind, activeSpec));
-    if (catalog) seededRef.current = kind;           // only "lock in" once real defaults exist
+    if (catalog) seededRef.current = kind;
   }, [kind, catalog, activeSpec]);
 
   const engines = catalog?.engines ?? {};
@@ -154,139 +158,151 @@ export function ChessLabView() {
 
   return (
     <div className="chess-lab">
-      <section className="panel">
+      <Panel>
         <div className="lab-title">
           <h3>Chess Lab</h3>
-          <span className="muted">headless experiments over the substrate & external engines</span>
+          <Muted>headless experiments over the substrate & external engines</Muted>
         </div>
         {catalog && (
           <div className="lab-engines">
             {Object.entries(engines).map(([name, e]) => (
-              <span key={name} className={`engine-chip ${e.found ? 'ok' : 'missing'}`} title={e.path || 'not found'}>
-                <b>{name}</b> {e.found ? '✓' : '✗'}
-              </span>
+              <Tooltip key={name}>
+                <TooltipTrigger asChild>
+                  <Chip variant={e.found ? 'engineOk' : 'engineMissing'}>
+                    <b>{name}</b> {e.found ? '✓' : '✗'}
+                  </Chip>
+                </TooltipTrigger>
+                <TooltipContent>{e.path || 'not found'}</TooltipContent>
+              </Tooltip>
             ))}
-            {Object.keys(engines).length === 0 && <span className="muted">no engines reported</span>}
+            {Object.keys(engines).length === 0 && <Muted>no engines reported</Muted>}
           </div>
         )}
-        {err && <div className="chess-error" role="alert">{err}</div>}
+        {err && <Alert>{err}</Alert>}
 
         <div className="lab-form">
-          <label className="lab-field">
-            <span>experiment</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          <Field label="experiment">
+            <Select value={kind} onChange={(e) => setKind(e.target.value)}>
               {jobSpecs.map((j) => <option key={j.kind} value={j.kind}>{j.label ?? j.kind}</option>)}
-            </select>
-          </label>
+            </Select>
+          </Field>
           {fields.map((f) => (
             <LabField key={f.key} field={f} value={params[f.key] ?? ''}
                       onChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))} />
           ))}
-          {fields.length === 0 && <p className="muted lab-noparams">no parameters — reads directly from the substrate.</p>}
+          {fields.length === 0 && <Muted className="lab-noparams">no parameters — reads directly from the substrate.</Muted>}
         </div>
 
         <div className="row lab-actions">
-          <button onClick={() => void startJob()} disabled={starting || activeRunning || !!blockedReason} title={blockedReason ?? undefined}>
-            {starting ? '…' : activeRunning ? 'Running…' : 'Start'}
-          </button>
-          <button className="ghost" onClick={() => void stopJob()} disabled={!activeRunning}>Stop</button>
+          {blockedReason ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => void startJob()}
+                  visuallyDisabled
+                >
+                  {starting ? '…' : activeRunning ? 'Running…' : 'Start'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{blockedReason}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button onClick={() => void startJob()} disabled={starting || activeRunning} loading={starting}>
+              {starting ? '…' : activeRunning ? 'Running…' : 'Start'}
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => void stopJob()} disabled={!activeRunning}>Stop</Button>
           {blockedReason && <span className="lab-blocked">{blockedReason}</span>}
         </div>
-      </section>
+      </Panel>
 
       {jobs.length > 0 && (
-        <section className="panel lab-jobs">
-          <h3>Jobs</h3>
+        <Panel className="lab-jobs" title="Jobs">
           <ul className="lab-job-list">
             {jobs.map((j) => (
               <li key={j.id} className={j.id === active?.id ? 'sel' : ''}>
-                <button className="ghost" onClick={() => openJob(j)}>
+                <Button variant="ghost" className="lab-job-btn" onClick={() => openJob(j)}>
                   <span className={`state state-${j.state.toLowerCase()}`}>{j.state}</span>
                   <span className="jk">{j.kind}</span>
-                  <span className="muted">{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</span>
-                </button>
+                  <Muted>{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</Muted>
+                </Button>
               </li>
             ))}
           </ul>
-        </section>
+        </Panel>
       )}
 
       {active && (
-        <section className="panel">
-          <h3>{active.kind} <span className={`muted state-${active.state.toLowerCase()}`}>{active.state}</span></h3>
-          <p className="muted">{active.summary.message ?? `${active.summary.done}/${active.summary.total}`}</p>
+        <Panel title={<>{active.kind} <Muted className={`state-${active.state.toLowerCase()}`}>{active.state}</Muted></>}>
+          <Muted>{active.summary.message ?? `${active.summary.done}/${active.summary.total}`}</Muted>
           {active.artifacts?.['games.pgn'] && (
             <div className="row">
               <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>Download PGN</a>
-              <button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest to substrate</button>
+              <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest to substrate</Button>
             </div>
           )}
-        </section>
+        </Panel>
       )}
 
-      <section className="panel lab-feed">
-        <h3>Live feed</h3>
+      <Panel className="lab-feed" title="Live feed">
         <ul className="lab-events">
           {events.map((e, i) => <LabRow key={i} e={e} />)}
-          {events.length === 0 && <li className="muted">no events yet — Start an experiment above.</li>}
+          {events.length === 0 && <li><Muted>no events yet — Start an experiment above.</Muted></li>}
         </ul>
-      </section>
+      </Panel>
     </div>
   );
 }
 
-function LabField({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
-  // bool -> toggle switch
+function LabField({ field, value, onChange }: { field: FieldDef; value: string; onChange: (v: string) => void }) {
   if (field.type === 'bool') {
     const on = value === 'true';
     return (
-      <div className="lab-field lab-field-row" title={field.help}>
-        <span>{field.label}</span>
-        <button type="button" role="switch" aria-checked={on} className={`toggle${on ? ' on' : ''}`}
-                onClick={() => onChange(on ? 'false' : 'true')}><i /></button>
-      </div>
+      <Field label={field.label} help={field.help} layout="row">
+        <Toggle checked={on} onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')} />
+      </Field>
     );
   }
-  // small choice set -> segmented pills
+
   if (field.type === 'select') {
     return (
-      <div className="lab-field" title={field.help}>
-        <span>{field.label}</span>
-        <div className="seg" role="radiogroup" aria-label={field.label}>
-          {field.options.map((o) => (
-            <button type="button" key={o} role="radio" aria-checked={value === o}
-                    className={value === o ? 'on' : ''} onClick={() => onChange(o)}>{o}</button>
-          ))}
-        </div>
-      </div>
+      <Field label={field.label} help={field.help}>
+        <SegmentedControl
+          value={value}
+          onValueChange={onChange}
+          options={field.options}
+          label={field.label}
+        />
+      </Field>
     );
   }
-  // numeric -> slider + editable number box, both bound to the same value
+
   if (field.type === 'number') {
-    const clamp = (n: number) => Math.min(field.max, Math.max(field.min, n));
-    const set = (raw: string) => {
-      if (raw === '') { onChange(''); return; }
-      const n = Number(raw);
-      onChange(Number.isFinite(n) ? String(clamp(Math.round(n))) : raw);
-    };
     return (
-      <div className="lab-field" title={field.help}>
-        <span className="lab-field-head">{field.label}<b>{value || '—'}{field.unit ?? ''}</b></span>
-        <div className="lab-slider">
-          <input type="range" min={field.min} max={field.max} step={field.step ?? 1}
-                 value={value === '' ? field.min : value} onChange={(e) => onChange(e.target.value)} />
-          <input type="number" className="lab-num" min={field.min} max={field.max} step={field.step ?? 1}
-                 value={value} onChange={(e) => set(e.target.value)} onBlur={(e) => set(e.target.value || String(field.min))} />
-        </div>
-      </div>
+      <Field
+        label={field.label}
+        help={field.help}
+        valueDisplay={`${value || '—'}${field.unit ?? ''}`}
+      >
+        <SliderField
+          min={field.min}
+          max={field.max}
+          step={field.step ?? 1}
+          value={value}
+          onChange={onChange}
+        />
+      </Field>
     );
   }
-  // free text / secret
+
   return (
-    <div className="lab-field" title={field.help}>
-      <span>{field.label}</span>
-      <input type={field.type === 'password' ? 'password' : 'text'} value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
+    <Field label={field.label} help={field.help}>
+      <Input
+        type={field.type === 'password' ? 'password' : 'text'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </Field>
   );
 }
 
@@ -325,5 +341,5 @@ function LabRow({ e }: { e: LabEvent }) {
   if (e.level !== undefined && e.message !== undefined) {
     return <li className={`lab-log lvl-${e.level}`}>[{e.level}] {e.message}</li>;
   }
-  return <li className="muted">{JSON.stringify(e)}</li>;
+  return <li><Muted>{JSON.stringify(e)}</Muted></li>;
 }

@@ -66,7 +66,11 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
                 while ((line = await r.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
                     if (ParseRow(line) is not null) lines++;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "ChessOpeningsDecomposer: failed to estimate rows in {File}: {Message}", f, ex.Message);
+            }
         }
         return lines == 0 ? null : lines;
     }

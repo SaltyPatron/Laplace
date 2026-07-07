@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ErrorText } from '@ui';
 import { apiPost } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
@@ -37,7 +38,7 @@ export function AuditPanel() {
           ))}
         </ul>
       )}
-      {err ? <p className="error">{err}</p> : null}
+      {err ? <ErrorText>{err}</ErrorText> : null}
     </div>
   );
 }

@@ -1,0 +1,16 @@
+@layer components {
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    flex: 0 1 20rem;
+    min-width: 0;
+  }
+
+  @media (max-width: 900px) {
+    .sidebar {
+      flex: 1 1 auto;
+      width: 100%;
+    }
+  }
+}

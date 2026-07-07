@@ -1,0 +1,13 @@
+@layer components {
+  .label {
+    display: block;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    text-transform: lowercase;
+  }
+
+  .required::after {
+    content: ' *';
+    color: var(--color-error);
+  }
+}

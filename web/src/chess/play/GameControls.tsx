@@ -1,4 +1,4 @@
-import { Panel } from './Panel';
+import { Button, Checkbox, ErrorText, Field, Input, Muted, Panel } from '@ui';
 
 const MOTIF_LABEL: Record<string, string> = {
   fork: 'fork', discovered_check: 'discovered check', hanging_piece_won: 'won material',
@@ -38,20 +38,51 @@ export function GameControls(p: GameControlsProps) {
           {p.motifs.map((m) => <span key={m} className="motif-chip">{MOTIF_LABEL[m] ?? m}</span>)}
         </div>
       )}
-      {p.err && <div className="chess-error" role="alert">{p.err}</div>}
+      {p.err && <ErrorText role="alert">{p.err}</ErrorText>}
       <div className="ctl-row">
-        <button onClick={p.onNewGame}>New game</button>
-        <button onClick={p.onBotMove} disabled={p.busy || p.over}>Bot move</button>
-        <label><input type="checkbox" checked={p.autoReply} onChange={(e) => p.onAutoReply(e.target.checked)} /> bot auto-replies</label>
-        <label><input type="checkbox" checked={p.flip} onChange={(e) => p.onFlip(e.target.checked)} /> flip</label>
+        <Button onClick={p.onNewGame}>New game</Button>
+        <Button onClick={p.onBotMove} disabled={p.busy || p.over}>Bot move</Button>
+        <Checkbox
+          id="auto-reply"
+          checked={p.autoReply}
+          onChange={(e) => p.onAutoReply(e.target.checked)}
+          label="bot auto-replies"
+        />
+        <Checkbox
+          id="flip-board"
+          checked={p.flip}
+          onChange={(e) => p.onFlip(e.target.checked)}
+          label="flip"
+        />
       </div>
       <div className="ctl-row">
-        <label>depth<input type="number" min={1} max={12} value={p.searchDepth}
-          onChange={(e) => { const n = parseInt(e.target.value, 10); if (!Number.isNaN(n)) p.onDepth(Math.min(12, Math.max(1, n))); }} /></label>
-        <label><input type="checkbox" checked={p.useSubstrate} onChange={(e) => p.onSubstrate(e.target.checked)} /> substrate root bias</label>
-        <label><input type="checkbox" checked={p.evalMode} onChange={(e) => p.onEvalMode(e.target.checked)} /> eval mode</label>
+        <Field label="depth" layout="row" htmlFor="search-depth">
+          <Input
+            id="search-depth"
+            type="number"
+            min={1}
+            max={12}
+            value={p.searchDepth}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              if (!Number.isNaN(n)) p.onDepth(Math.min(12, Math.max(1, n)));
+            }}
+          />
+        </Field>
+        <Checkbox
+          id="substrate-bias"
+          checked={p.useSubstrate}
+          onChange={(e) => p.onSubstrate(e.target.checked)}
+          label="substrate root bias"
+        />
+        <Checkbox
+          id="eval-mode"
+          checked={p.evalMode}
+          onChange={(e) => p.onEvalMode(e.target.checked)}
+          label="eval mode"
+        />
       </div>
-      <span className="hint">drag/click to move · right-drag = arrow · right-click = mark · left-click clears</span>
+      <Muted>drag/click to move · right-drag = arrow · right-click = mark · left-click clears</Muted>
       <code className="fen">{p.fen}</code>
     </Panel>
   );

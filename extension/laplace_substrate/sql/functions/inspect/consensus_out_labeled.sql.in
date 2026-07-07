@@ -1,0 +1,29 @@
+CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(
+        type_id bytea,
+        object_id bytea,
+        type_label text,
+        object_label text,
+        eff_mu numeric,
+        witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (
+        SELECT p_id
+        UNION
+        SELECT sn.synset_id FROM senses(p_id) sn
+    )
+    SELECT c.type_id, c.object_id,
+           type_label(c.type_id),
+           COALESCE(
+               NULLIF(_realize_synset_lemma(c.object_id, word_language(p_id)), ''),
+               NULLIF(render_text(c.object_id, 12), ''),
+               left(encode(c.object_id, 'hex'), 16)),
+           c.eff_mu,
+           c.witness_count
+    FROM v_consensus_resolved c
+    WHERE c.subject_id IN (SELECT id FROM subj)
+      AND c.object_id IS NOT NULL
+    ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
+    LIMIT GREATEST(1, p_limit)
+$$;

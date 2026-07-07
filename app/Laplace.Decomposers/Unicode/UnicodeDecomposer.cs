@@ -42,6 +42,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
     public Hash128 SourceId => Source;
     public string SourceName => "UnicodeDecomposer";
+    public int EstimatedBytesPerRecord => IngestSourceProfile.Unicode.EstBytesPerRecord;
     public int LayerOrder => 0;
     public Hash128 TrustClassId => TrustClass;
 

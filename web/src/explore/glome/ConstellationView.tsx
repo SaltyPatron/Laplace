@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ErrorText, LoadingText, Muted } from '@ui';
 
 import { apiPost, type ApiOptions, type Schemas } from '../../api/client';
 
@@ -121,7 +122,7 @@ export function ConstellationView() {
 
       <h2>Substrate constellation</h2>
 
-      <p className="muted">Warehouse-scale S³ sample via visualization.deep_export.</p>
+      <Muted>Warehouse-scale S³ sample via visualization.deep_export.</Muted>
 
       {!unlocked ? (
 
@@ -145,11 +146,11 @@ export function ConstellationView() {
 
       ) : err ? (
 
-        <p className="error">{err}</p>
+        <ErrorText>{err}</ErrorText>
 
       ) : (
 
-        <p className="muted">Loading constellation…</p>
+        <LoadingText>Loading constellation…</LoadingText>
 
       )}
 
