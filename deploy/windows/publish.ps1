@@ -18,7 +18,13 @@ if (-not (Test-Path $EnvFile)) {
 
 Write-Host "==> [1/6] build front-end (web/ -> dist)" -ForegroundColor Cyan
 Push-Location "$RepoRoot\web"
-try { npm ci; if ($LASTEXITCODE) { throw "npm ci failed" }; npm run build; if ($LASTEXITCODE) { throw "npm build failed" } }
+try {
+  npm ci; if ($LASTEXITCODE) { throw "npm ci failed" }
+  if (-not (Test-Path "openapi\openapi.json")) { throw "web/openapi/openapi.json missing — dotnet build Laplace.Endpoints.OpenAICompat first" }
+  Write-Host "    generating src/api/types.gen.ts from openapi/openapi.json"
+  npm run gen:api; if ($LASTEXITCODE) { throw "npm gen:api failed" }
+  npm run build; if ($LASTEXITCODE) { throw "npm build failed" }
+}
 finally { Pop-Location }
 
 Write-Host "==> [2/6] publish API -> staging" -ForegroundColor Cyan

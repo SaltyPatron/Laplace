@@ -9,6 +9,9 @@ trap 'rm -rf "$STAGE"' EXIT
 echo "==> [1/3] build front-end (web/ -> dist)"
 pushd "$REPO_ROOT/web" >/dev/null
 npm ci --no-audit --no-fund
+test -f openapi/openapi.json || { echo "::error::web/openapi/openapi.json missing — run pipeline.sh build first"; exit 1; }
+echo "    generating src/api/types.gen.ts from openapi/openapi.json"
+npm run gen:api
 npm run build
 popd >/dev/null
 
