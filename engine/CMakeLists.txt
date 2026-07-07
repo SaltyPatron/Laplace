@@ -27,7 +27,14 @@ endif()
 # to Release/RelWithDebInfo because Debug already carries its own /Zi (mutually exclusive
 # with /Z7).
 if(WIN32)
-    add_compile_options($<$<CONFIG:Release,RelWithDebInfo>:/Z7>)
+    # /Z7 embeds CodeView ONLY on C translation units. Applying it to the Eigen-heavy C++
+    # math (dynamics/gram_schmidt.cpp etc.) blew icx's compile memory past an internal
+    # crash (ICE) under the clean parallel build. The ingest corruptor and every observed
+    # native crash live in C code (intent_stage.c, content_witness_batch.c, chess) — so
+    # C-only debug info covers exactly what needs symbolizing, deterministically avoiding
+    # the C++ template ICE. C++ frames still resolve to function names via the linker's
+    # public-symbol table; only per-line info is absent for them.
+    add_compile_options($<$<AND:$<CONFIG:Release,RelWithDebInfo>,$<COMPILE_LANGUAGE:C>>:/Z7>)
     # icx forwards linker flags ONLY via /Qoption,link,<flag>; a bare /DEBUG hits the
     # compiler driver and is silently dropped (never reaches link → no PDB). /OPT:REF,ICF
     # must also be forwarded because /DEBUG otherwise disables them and bloats the binary.

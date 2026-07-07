@@ -21,4 +21,4 @@ cmd /c ".\scripts\win\seed-step.cmd ud" 2>&1 > D:\Data\Output\ud.log
 cmd /c ".\scripts\win\seed-step.cmd wiktionary" 2>&1 > D:\Data\Output\wiktionary.log
 cmd /c ".\scripts\win\seed-step.cmd tatoeba" 2>&1 > D:\Data\Output\tatoeba.log
 cmd /c ".\scripts\win\seed-step.cmd opensubtitles" 2>&1 > D:\Data\Output\opensubtitles.log
-cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\Lumbras\otb\LumbrasGigaBase_OTB_1900-1949.pgn" 2>&1 > D:\Data\Output\chess-otb-1900-1949.log
+cmd /c ".\scripts\win\seed-step.cmd chess D:\Data\Ingest\Games\Chess\Lumbras\otb\" 2>&1 > D:\Data\Output\chess-otb.log

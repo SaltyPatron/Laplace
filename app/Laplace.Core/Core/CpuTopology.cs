@@ -480,7 +480,17 @@ public static class CpuTopology
 
         }
 
-        catch { }
+        catch (Exception ex)
+        {
+            // NEVER silent: a swallowed detection failure collapses the topology to a
+            // uniform fallback, which silently mis-sizes every ingest worker pool
+            // (apply partitions, compose/commit workers) and single-threads the pipeline
+            // with no visible cause. Surface it so a wrong core count is diagnosable.
+            Console.Error.WriteLine(
+                $"cpu_topology: detection FAILED, falling back to uniform logical "
+                + $"({Environment.ProcessorCount} cores) — worker pools will be mis-sized. "
+                + $"{ex.GetType().Name}: {ex.Message}");
+        }
 
 
 
