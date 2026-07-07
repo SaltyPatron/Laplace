@@ -24,17 +24,21 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Equal(Nfc(bytes), rebuilt);
     }
 
-    private static readonly string GalileoPath =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_TEXT") is { Length: > 0 } dir
-            ? Path.Combine(dir, "galileo.txt")
-            : (OperatingSystem.IsWindows()
+    private static string GalileoPath()
+    {
+        try { return Path.Combine(LaplaceInstall.ResolveIngestRoot(), "test-data", "text", "galileo.txt"); }
+        catch (InvalidOperationException)
+        {
+            return OperatingSystem.IsWindows()
                 ? @"D:\Data\Ingest\test-data\text\galileo.txt"
-                : "/vault/Data/test-data/text/galileo.txt");
+                : "/vault/Data/test-data/text/galileo.txt";
+        }
+    }
 
     [Fact]
     public void FullGalileo_InMemory_RoundtripsFromPhysicalities()
     {
-        byte[] bytes = File.ReadAllBytes(GalileoPath);
+        byte[] bytes = File.ReadAllBytes(GalileoPath());
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
         byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
         Assert.Equal(Nfc(bytes), rebuilt);

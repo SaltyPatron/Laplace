@@ -1,11 +1,20 @@
+using Laplace.Engine.Core;
+
 namespace Laplace.Decomposers.Tests;
 
 internal static class TestIngestPaths
 {
-    public static string Root =>
-        Environment.GetEnvironmentVariable("LAPLACE_INGEST_ROOT") is { Length: > 0 } r
-            ? r
-            : OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
+    public static string Root
+    {
+        get
+        {
+            try { return LaplaceInstall.ResolveIngestRoot(); }
+            catch (InvalidOperationException)
+            {
+                return OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
+            }
+        }
+    }
 
     public static string UcdLatest => Path.Combine(Root, "UCD", "Public", "UCD", "latest");
 

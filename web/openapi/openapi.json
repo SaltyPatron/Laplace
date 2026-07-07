@@ -1579,6 +1579,28 @@
         }
       }
     },
+    "/chess/eval": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/chess/bestmove": {
       "post": {
         "tags": [
@@ -3558,6 +3580,34 @@
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "EvalRequest": {
+        "required": [
+          "fen",
+          "depth",
+          "substrate"
+        ],
+        "type": "object",
+        "properties": {
+          "fen": {
+            "type": "string"
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "substrate": {
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         }
       },

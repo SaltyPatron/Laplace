@@ -1,5 +1,6 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Model;
+using Laplace.Engine.Core;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -19,7 +20,7 @@ internal static class BenchCommands
 
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
             return Fail("usage: laplace svd-exact-bench [model-dir] [tensor]\n" +
-                        "  set $LAPLACE_TINYLLAMA_DIR or pass a model dir; none resolved.");
+                        "  pass a model dir or rely on install-discovered TinyLlama under the model hub.");
 
         bool pass = SvdExactBench.Run(modelDir, tensor);
         return pass ? 0 : 1;
@@ -37,12 +38,15 @@ internal static class BenchCommands
             models = new() { arg! };
         else
         {
-            string hub = !string.IsNullOrEmpty(arg) ? arg!
-                : Environment.GetEnvironmentVariable("LAPLACE_MODEL_HUB")
-                  ?? (Directory.Exists(@"D:\Models\hub") ? @"D:\Models\hub" : "");
+            string hub;
+            try { hub = !string.IsNullOrEmpty(arg) ? arg! : LaplaceInstall.ResolveModelHub(); }
+            catch (InvalidOperationException)
+            {
+                hub = "";
+            }
             if (string.IsNullOrEmpty(hub) || !Directory.Exists(hub))
                 return Fail("usage: laplace model-bench [model-dir | hub-root]\n" +
-                            "  pass a model dir, a hub root, or set $LAPLACE_MODEL_HUB; none resolved.");
+                            "  pass a model dir or a hub root (default: install-discovered model hub).");
             models = EnumerateHubModels(hub).ToList();
             if (models.Count == 0)
                 return Fail($"model-bench: no models with weights found under {hub}");
@@ -103,22 +107,21 @@ internal static class BenchCommands
 
     private static string ResolveTinyLlamaDir()
     {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_TINYLLAMA_DIR");
-        if (!string.IsNullOrEmpty(env)) return env;
-
-        const string root = "/vault/models";
-        if (!Directory.Exists(root)) return "";
-        var families = Directory.GetDirectories(root, "models--TinyLlama--*");
-        foreach (var fam in families.OrderBy(f => f, StringComparer.Ordinal))
+        try
         {
-            var snapsDir = Path.Combine(fam, "snapshots");
-            if (!Directory.Exists(snapsDir)) continue;
-            foreach (var snap in Directory.GetDirectories(snapsDir)
-                                          .OrderByDescending(Directory.GetLastWriteTimeUtc))
+            string hub = LaplaceInstall.ResolveModelHub();
+            foreach (var fam in Directory.GetDirectories(hub, "models--TinyLlama--*"))
             {
-                if (SafetensorSnapshotWitness.IsComplete(snap)) return snap;
+                var snapsDir = Path.Combine(fam, "snapshots");
+                if (!Directory.Exists(snapsDir)) continue;
+                foreach (var snap in Directory.GetDirectories(snapsDir)
+                                              .OrderByDescending(Directory.GetLastWriteTimeUtc))
+                {
+                    if (SafetensorSnapshotWitness.IsComplete(snap)) return snap;
+                }
             }
         }
+        catch (InvalidOperationException) { }
         return "";
     }
 }

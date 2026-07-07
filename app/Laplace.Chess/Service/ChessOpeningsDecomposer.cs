@@ -23,7 +23,7 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
     private const double OpeningWitnessWeight = 0.7;
 
     private static long OpeningGames =>
-        Math.Clamp(long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_OPENING_GAMES"), out var v) ? v : 4, 1, 64);
+        Math.Clamp(4L, 1, 64);
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -13,29 +14,20 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 {
     public const string DatabaseName = "laplace_unicode_seed_test";
 
-    public static readonly string PgHost =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGHOST")
-        ?? (OperatingSystem.IsWindows() ? "localhost" : "/var/run/postgresql");
+    private static readonly NpgsqlConnectionStringBuilder Conn =
+        new(LaplaceInstall.PostgresConnectionString(DatabaseName));
 
-    public static readonly string PgUser =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGUSER")
-        ?? (OperatingSystem.IsWindows() ? "postgres" : "laplace_admin");
+    public static readonly string PgHost = Conn.Host!;
+    public static readonly string PgUser = Conn.Username!;
+    public static readonly string? PgPassword = Conn.Password;
 
-    public static readonly string? PgPassword =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGPASSWORD")
-        ?? (OperatingSystem.IsWindows() ? "postgres" : null);
-
-    public static readonly string EcosystemPath =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_UCD")
-        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest\UCD\Public\UCD\latest" : "/vault/Data/UCD/Public/UCD/latest");
+    public static readonly string EcosystemPath = TestIngestPaths.UcdLatest;
 
     private const int TotalCodepoints = 1_114_112;
 
     private NpgsqlDataSource _ds = null!;
 
-    public string ConnectionString =>
-        $"Host={PgHost};Username={PgUser};Database={DatabaseName}"
-        + (PgPassword is null ? "" : $";Password={PgPassword}");
+    public string ConnectionString => Conn.ConnectionString;
 
     public async Task InitializeAsync()
     {
@@ -69,7 +61,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
 
 
-        CodepointPerfcache.Load(ResolvePerfcacheBlob());
+        CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
         IntentStage.ResetContentBank();
 
         var writer = new NpgsqlSubstrateWriter(_ds);
@@ -120,34 +112,6 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.InRange(Math.Sqrt(x * x + y * y + z * z + m * m), 1.0 - 1e-9, 1.0 + 1e-9);
     }
 
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        foreach (var root in new[] { "/opt/laplace/share/laplace", AppContext.BaseDirectory })
-        {
-            var dir = new DirectoryInfo(root);
-            while (dir is not null && dir.Exists)
-            {
-                foreach (var build in dir.EnumerateDirectories("build*"))
-                {
-                    var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache*.bin",
-                        SearchOption.AllDirectories).OrderBy(f => f).LastOrDefault();
-                    if (hit is not null) return hit;
-                }
-                if (root != AppContext.BaseDirectory) break;
-                dir = dir.Parent;
-            }
-        }
-        var installed = Directory.Exists("/opt/laplace/share/laplace")
-            ? Directory.EnumerateFiles("/opt/laplace/share/laplace", "laplace_t0_perfcache*.bin")
-                .OrderBy(f => f).LastOrDefault()
-            : null;
-        if (installed is not null) return installed;
-        throw new InvalidOperationException(
-            "perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
-
     private async Task<long> ScalarLong(string sql, params (string, object)[] ps)
     {
         await using var conn = await _ds.OpenConnectionAsync();
@@ -181,9 +145,8 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     private static string ResolvePgTool(string program)
     {
         if (!OperatingSystem.IsWindows()) return program;
-        string exe = Path.Combine(
-            Environment.GetEnvironmentVariable("PGBIN") ?? @"C:\Program Files\PostgreSQL\18\bin",
-            program + ".exe");
+        const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
+        string exe = Path.Combine(pgBin, program + ".exe");
         return File.Exists(exe) ? exe : program;
     }
 

@@ -10,13 +10,13 @@ public sealed class Pwn16CiliIntegrationTests
     [Fact]
     public void Pwn16_And_Pwn30_Resolve_MapNet_Test_Offset_To_Different_Anchors()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        string cili = TestPathHelpers.CiliOrFallback();
         string pwn16Path = Path.Combine(cili, "older-wn-mappings", "ili-map-pwn16.tab");
         if (!File.Exists(Path.Combine(cili, IliMap.MapFileName)) || !File.Exists(pwn16Path))
             return;
+        if (IliMap.Load(cili).Count < 100_000) return;
 
-        string? saved = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
-        Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", cili);
+        SourceEntityIdConventions.TestCiliDirOverride = cili;
         SourceEntityIdConventions.ResetIliMapCacheForTests();
         try
         {
@@ -33,7 +33,6 @@ public sealed class Pwn16CiliIntegrationTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", saved);
             SourceEntityIdConventions.ResetIliMapCacheForTests();
         }
     }

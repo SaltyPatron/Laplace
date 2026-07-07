@@ -11,10 +11,18 @@ namespace Laplace.Chess.Service;
 
 public readonly record struct ChessMoveScore(string Uci, double EffMu, bool Rated);
 
+public sealed record ChessLegalResponse(
+    IReadOnlyList<ChessMoveScore> Moves,
+    bool InCheck,
+    string Status);
+
 public sealed record ChessBestMove(
     string? Uci, string Fen, double EffMu, bool Rated, bool Terminal, string Status,
     int ScoreCp = 0, int Depth = 0, long Nodes = 0,
     IReadOnlyList<string>? Pv = null, IReadOnlyList<string>? Motifs = null);
+
+public sealed record ChessPositionEval(
+    int WhiteScoreCp, int Depth, long Nodes, bool Substrate, bool Terminal, string Status);
 
 public sealed record ChessApplyResult(
     string Fen, bool Terminal, string Status, bool Legal, IReadOnlyList<string>? Motifs = null);
@@ -52,19 +60,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         _log = log ?? NullLogger.Instance;
     }
 
-    public static string ResolveConnString()
-    {
-        var s = Environment.GetEnvironmentVariable("LAPLACE_CHESS_DB")
-            ?? Environment.GetEnvironmentVariable("LAPLACE_DB")
-            ?? throw new InvalidOperationException(
-                "Chess requires LAPLACE_CHESS_DB or LAPLACE_DB (Npgsql connection string).");
-
-        if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
-            s += ";Include Error Detail=true";
-        if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
-            s += ";Search Path=laplace,public";
-        return s;
-    }
+    public static string ResolveConnString() => LaplaceInstall.PostgresConnectionString();
 
     public string NewGameFen() => ChessModality.StartFen;
 
@@ -117,26 +113,26 @@ public sealed class ChessEngineService : IAsyncDisposable
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private static void LoadPerfcache()
+    private static void LoadPerfcache() => CodepointPerfcache.LoadDefault();
+
+    public async Task<ChessLegalResponse> LegalAsync(string fen, CancellationToken ct = default)
     {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) { CodepointPerfcache.Load(env); return; }
-        CodepointPerfcache.LoadDefault();
+        var engine = await EngineAsync(ct);
+        var state = _modality!.FromFen(fen);
+        var terminal = _modality!.Terminal(state);
+        var status = terminal is { } t ? Describe(t) : "ongoing";
+        var inCheck = MoveGen.InCheck(state.Board, state.Board.WhiteToMove);
+        var cands = await engine.ScoreMovesAsync(state, ct);
+        var moves = cands
+            .OrderByDescending(c => c.EffMu)
+            .Select(c => new ChessMoveScore(c.Action.ToUci(), c.EffMu / 1e9, c.Rated))
+            .ToList();
+        return new ChessLegalResponse(moves, inCheck, status);
     }
 
     public async Task<IReadOnlyList<ChessMoveScore>> ScoreAsync(string fen, CancellationToken ct = default)
     {
-        var engine = await EngineAsync(ct);
-
-
-
-
-        var state = _modality!.FromFen(fen);
-        var cands = await engine.ScoreMovesAsync(state, ct);
-        return cands
-            .OrderByDescending(c => c.EffMu)
-            .Select(c => new ChessMoveScore(c.Action.ToUci(), c.EffMu / 1e9, c.Rated))
-            .ToList();
+        return (await LegalAsync(fen, ct)).Moves;
     }
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
@@ -181,6 +177,23 @@ public sealed class ChessEngineService : IAsyncDisposable
         return new Search(EvalTerm.All, substrate ? FoldBias() : null, ttBits, mg, eg);
     }
 
+    public async Task<ChessPositionEval> EvalPositionAsync(
+        string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var state = _modality!.FromFen(fen);
+        if (_modality!.Terminal(state) is { } term)
+        {
+            int whiteCp = term.IsDraw ? 0 : term.Winner == 0 ? 30_000 : -30_000;
+            return new ChessPositionEval(whiteCp, 0, 0, substrate, true, Describe(term));
+        }
+
+        var search = BuildEngine(substrate);
+        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        int score = state.Board.WhiteToMove ? result.Score : -result.Score;
+        return new ChessPositionEval(score, result.Depth, result.Nodes, substrate, false, "ongoing");
+    }
+
     public async Task<ChessBestMove> BestMoveSearchAsync(
         string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
     {
@@ -198,9 +211,10 @@ public sealed class ChessEngineService : IAsyncDisposable
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         var pv = search.ExtractPv(state.Board);
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
+        int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
 
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
-            status != "ongoing", status, ScoreCp: result.Score, Depth: result.Depth, Nodes: result.Nodes,
+            status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
     }
 

@@ -551,24 +551,17 @@ public sealed class LocalPgFixture : IAsyncLifetime
 
     public const string DatabaseName = "laplace_ingest_test";
 
-    public static readonly string PgHost =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGHOST")
-        ?? (OperatingSystem.IsWindows() ? "localhost" : "/var/run/postgresql");
+    private static readonly NpgsqlConnectionStringBuilder Conn =
+        new(LaplaceInstall.PostgresConnectionString(DatabaseName));
 
-    public static readonly string PgUser =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGUSER")
-        ?? (OperatingSystem.IsWindows() ? "postgres" : "laplace_admin");
-
-    public static readonly string? PgPassword =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGPASSWORD")
-        ?? (OperatingSystem.IsWindows() ? "postgres" : null);
+    public static readonly string PgHost = Conn.Host!;
+    public static readonly string PgUser = Conn.Username!;
+    public static readonly string? PgPassword = Conn.Password;
 
     private NpgsqlDataSource? _ds;
     public NpgsqlDataSource DataSource =>
         _ds ?? throw new InvalidOperationException("Fixture not initialized");
-    public string ConnectionString =>
-        $"Host={PgHost};Username={PgUser};Database={DatabaseName}"
-        + (PgPassword is null ? "" : $";Password={PgPassword}");
+    public string ConnectionString => Conn.ConnectionString;
 
     public async Task InitializeAsync()
     {
@@ -637,9 +630,8 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static string ResolvePgTool(string program)
     {
         if (!OperatingSystem.IsWindows()) return program;
-        string exe = Path.Combine(
-            Environment.GetEnvironmentVariable("PGBIN") ?? @"C:\Program Files\PostgreSQL\18\bin",
-            program + ".exe");
+        const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
+        string exe = Path.Combine(pgBin, program + ".exe");
         return File.Exists(exe) ? exe : program;
     }
 }

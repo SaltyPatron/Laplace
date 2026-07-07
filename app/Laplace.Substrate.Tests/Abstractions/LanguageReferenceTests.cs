@@ -9,9 +9,7 @@ public class LanguageReferenceTests
 {
 
 
-    private static string IsoDir =>
-        Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d ? d
-        : OperatingSystem.IsWindows() ? @"D:\Data\Ingest\ISO639" : "/vault/Data/ISO639";
+    private static string IsoDir => TestPathHelpers.Iso639OrFallback();
     private static bool RefPresent => File.Exists(Path.Combine(IsoDir, "iso-639-3.tab"));
 
     private static bool Ensure()

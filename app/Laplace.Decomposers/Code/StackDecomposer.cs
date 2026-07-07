@@ -53,18 +53,9 @@ public sealed class StackDecomposer : GrammarComposeDecomposer
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "stack-v2";
 
-    private readonly HashSet<string>? _langFilter;
+    private readonly HashSet<string>? _langFilter = null;
 
-    public StackDecomposer()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_STACK_LANGS");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            _langFilter = new HashSet<string>(
-                env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                StringComparer.OrdinalIgnoreCase);
-        }
-    }
+    public StackDecomposer() { }
 
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
@@ -92,6 +83,7 @@ public sealed class StackDecomposer : GrammarComposeDecomposer
                 ct.ThrowIfCancellationRequested();
                 string? modality = ResolveModality(row.Language);
                 if (modality is null) continue;
+                if (options.Languages?.IsActive == true && !options.Languages.MatchesRaw(modality)) continue;
                 if (_langFilter is not null && !_langFilter.Contains(modality)) continue;
                 if (string.IsNullOrWhiteSpace(row.Content)) continue;
                 byte[] codeBytes = Encoding.UTF8.GetBytes(row.Content);

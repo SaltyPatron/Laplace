@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Model.Tests;
 public class RealModelManifestTests
 {
     private static string HubRoot =>
-        Environment.GetEnvironmentVariable("LAPLACE_MODEL_HUB") ?? @"D:\Models\hub";
+        TestInstall.ResolveModelHubOrFallback();
 
     public sealed record Expect(
         string HubDir, string ModelType, int Vocab, int Hidden, int Layers, int Heads, int KvHeads,

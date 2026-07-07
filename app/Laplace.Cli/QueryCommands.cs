@@ -137,7 +137,7 @@ internal static class QueryCommands
     public static async Task<int> NeighborsAsync(string word)
     {
         if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace neighbors <word>");
-        int k = EnvInt("LAPLACE_NN_K", 10, 1);
+        int k = 10;
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
@@ -211,11 +211,11 @@ internal static class QueryCommands
 
     public static async Task<int> WalkAsync(string[] args)
     {
-        int steps = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
-        int order = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
-        int topk = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
-        double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
-        bool verbose = Environment.GetEnvironmentVariable("LAPLACE_GEN_VERBOSE") == "1";
+        const int steps = 20;
+        const int order = 5;
+        const int topk = 8;
+        const double temp = 0.6;
+        const bool verbose = false;
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
@@ -277,10 +277,10 @@ internal static class QueryCommands
 
         CodepointPerfcache.Load(ResolveBlob());
 
-        int steps = EnvInt("LAPLACE_GEN_STEPS", 48, 1);
-        int order = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
-        int topk = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
-        double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
+        const int steps = 48;
+        const int order = 5;
+        const int topk = 8;
+        const double temp = 0.6;
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();

@@ -14,8 +14,7 @@ internal static class CopyBlobValidator
 {
 
 
-    public static readonly bool Enabled =
-        Environment.GetEnvironmentVariable("LAPLACE_COPY_VALIDATE") == "1";
+    public static readonly bool Enabled = false;
 
 
 

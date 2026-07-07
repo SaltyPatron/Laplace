@@ -1,11 +1,9 @@
+using Laplace.Engine.Core;
+
 namespace Laplace.Cli;
 
 internal static class IngestDataPaths
 {
-    private static string DataRoot =>
-        Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT")
-        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data");
-
     private static readonly Dictionary<string, string> RelativeByCli = new(StringComparer.OrdinalIgnoreCase)
     {
         ["unicode"] = "UCD/Public/UCD/latest",
@@ -40,7 +38,6 @@ internal static class IngestDataPaths
         if (!RelativeByCli.TryGetValue(cliSource, out var relative))
             throw new InvalidOperationException($"no manifest path for ingest source '{cliSource}'");
 
-        var path = Path.Combine(DataRoot, relative);
-        return Path.GetFullPath(path);
+        return LaplaceInstall.ResolvePathUnderIngest(relative);
     }
 }

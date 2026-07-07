@@ -71,8 +71,8 @@ public static unsafe class GrammarTags
         _repoSubpath.TryGetValue(modality, out var sub);
 
 
-        var root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
-        if (!string.IsNullOrEmpty(root))
+        var root = LaplaceInstall.TryRepoRoot(out var repo) ? repo : null;
+        if (root is not null)
         {
             string rootRepo = Path.Combine(Path.GetFullPath(root), "external", "tree-sitter-grammars",
                                            $"tree-sitter-{modality}");

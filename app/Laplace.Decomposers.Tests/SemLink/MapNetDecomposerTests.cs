@@ -35,8 +35,8 @@ public sealed class MapNetDecomposerTests
     [Fact]
     public async Task MapNet_Links_Lu_To_Synset_When_Cili_Present()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectAttestationsAsync();
         var luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey("Accoutrements", "helmet.n"))!.Value;
@@ -48,8 +48,8 @@ public sealed class MapNetDecomposerTests
     [Fact]
     public async Task MapNet_Links_Frame_To_Synset_When_Cili_Present()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectAttestationsAsync();
         var frameId = CategoryAnchor.Id("Accoutrements")!.Value;

@@ -698,7 +698,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
     public async Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct)
     {
         if (_options.Bypass)
-            return new QuoteExecutionGate(true, "bypass", "Billing bypass active (LAPLACE_BILLING_BYPASS=true).", null);
+            return new QuoteExecutionGate(true, "bypass", "Billing bypass active (local endpoint).", null);
 
         var quote = await _store.TryGetAsync(quoteId, ct);
         if (quote is null)

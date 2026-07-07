@@ -91,7 +91,6 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
 
     private static IngestRunner NewRunner(NpgsqlDataSource ds)
     {
-        Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", "1");
         IngestTopology.EnsureReady();
         var reader = new NpgsqlSubstrateReader(ds);
         var writer = new NpgsqlSubstrateWriter(ds);

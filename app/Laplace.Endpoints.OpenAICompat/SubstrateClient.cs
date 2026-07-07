@@ -666,7 +666,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         await _dataSource.DisposeAsync();
     }
 
-    private static string BuildConnectionString() => LaplaceEndpointDefaults.ConnectionString;
+    private static string BuildConnectionString() => LaplaceInstall.PostgresConnectionString();
 }
 
 internal sealed class SubstrateUnavailableException : Exception

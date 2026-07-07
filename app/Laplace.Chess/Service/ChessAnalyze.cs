@@ -58,8 +58,7 @@ public static class ChessAnalyze
         // PGN's eval on the same position). Off by default (structural derivation only); set
         // LAPLACE_CHESS_ANALYZE_DEPTH>0 to dedicate compute to it. This is "target given games,
         // dedicate compute to analysis."
-        int engineDepth = int.TryParse(
-            System.Environment.GetEnvironmentVariable("LAPLACE_CHESS_ANALYZE_DEPTH"), out var d) ? d : 0;
+        int engineDepth = 0;
 
         DeriveGame(b, gameId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth);

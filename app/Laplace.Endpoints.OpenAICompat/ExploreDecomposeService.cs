@@ -45,26 +45,7 @@ internal sealed class ExploreDecomposeService
     {
         if (Interlocked.CompareExchange(ref _perfcacheLoaded, 1, 0) != 0)
             return;
-        CodepointPerfcache.Load(ResolvePerfcacheBlob());
-    }
-
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                    SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        }
-
-        throw new InvalidOperationException(
-            "T0 perfcache not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
+        CodepointPerfcache.Load(LaplaceInstall.ResolveT0Perfcache());
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

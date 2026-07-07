@@ -21,7 +21,7 @@ public class EtlMarshallingTests
 
     [Fact]
     public void EtlConfigNative_MatchesNativeAbiSize()
-        => Assert.Equal(112, Marshal.SizeOf<NativeInterop.EtlConfigNative>());
+        => Assert.Equal(120, Marshal.SizeOf<NativeInterop.EtlConfigNative>());
 
     [Fact]
     public void EtlEdgeRuleNative_MatchesNativeAbiSize()

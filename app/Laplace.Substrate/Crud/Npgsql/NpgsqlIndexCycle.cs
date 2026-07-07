@@ -26,8 +26,7 @@ internal sealed class NpgsqlIndexCycle
     private readonly ILogger _log;
     private readonly List<(string Name, string Def)> _dropped = new();
 
-    public static readonly bool Enabled =
-        Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE") != "0";
+    public static readonly bool Enabled = true;
 
     /// <summary>Cycle when staged rows ≥ this (absolute). The run-scoped cycle
     /// drops once and rebuilds once at run end, so a bulk source cycles even as

@@ -36,8 +36,7 @@ public static class IngestClock
     /// </summary>
     public const long GenesisEpochUnixUs = 1_577_836_800_000_000L;
 
-    private static readonly long? EnvEpochUs = ParseEpoch(
-        Environment.GetEnvironmentVariable("LAPLACE_DETERMINISTIC_TIME"));
+    private static readonly long? EnvEpochUs = null;
 
     /// <summary>True when a deterministic epoch is in effect for this process.</summary>
     public static bool IsDeterministic => EnvEpochUs is not null;

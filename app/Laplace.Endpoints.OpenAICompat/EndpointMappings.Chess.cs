@@ -13,10 +13,13 @@ internal static class ChessEndpoints
             Results.Json(new { fen = svc.NewGameFen() })).WithTags("chess");
 
         app.MapPost("/chess/legal", async (FenRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.ScoreAsync(req.Fen, ct))).WithTags("chess");
+            Results.Json(await svc.LegalAsync(req.Fen, ct))).WithTags("chess");
 
         app.MapPost("/chess/move", async (MoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, ct))).WithTags("chess");
+
+        app.MapPost("/chess/eval", async (EvalRequest req, ChessEngineService svc, CancellationToken ct) =>
+            Results.Json(await svc.EvalPositionAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
 
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
@@ -123,6 +126,7 @@ internal static class ChessEndpoints
 
     private sealed record FenRequest(string Fen);
     private sealed record MoveRequest(string Fen, string Uci);
+    private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
 }

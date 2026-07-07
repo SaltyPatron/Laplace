@@ -16,25 +16,13 @@ public sealed class OpenSubtitlesDecomposerTests
         LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 
     private static readonly string[] En = { "Hello there.", "What is your name?", "" };
     private static readonly string[] Es = { "Hola allí.", "¿Cómo te llamas?", "" };
 
     [Fact]
-    public async Task Pair_Allowlist_Filters_Zips()
+    public async Task DescribeInput_Includes_All_Pairs_By_Default()
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace-opensub-pairs-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -43,19 +31,10 @@ public sealed class OpenSubtitlesDecomposerTests
             WriteFixtureZip(dir, "en-es");
             WriteFixtureZip(dir, "en-fr");
 
-            Environment.SetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS", "en-es");
-            try
-            {
-                var dec = new OpenSubtitlesDecomposer();
-                var inv = await dec.DescribeInputAsync(new FakeContext(dir, new NullWriter()), DecomposerOptions.Default);
-                Assert.NotNull(inv);
-                Assert.Single(inv!.Files);
-                Assert.Equal("en-es", inv.Files[0].Id);
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS", null);
-            }
+            var dec = new OpenSubtitlesDecomposer();
+            var inv = await dec.DescribeInputAsync(new FakeContext(dir, new NullWriter()), DecomposerOptions.Default);
+            Assert.NotNull(inv);
+            Assert.Equal(2, inv!.Files.Count);
         }
         finally
         {

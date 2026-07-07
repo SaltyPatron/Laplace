@@ -7,13 +7,16 @@ import { EnginePanel, type TrainKnobs, type TrainStatus } from './play/EnginePan
 import { PstGrid } from './play/PstGrid';
 import { GameControls } from './play/GameControls';
 import { Sidebar } from './play/Sidebar';
+import { formatPositionEval, terminalWhiteCp, whiteCpToBarFraction } from './evalDisplay';
 import styles from './ChessView.module.css';
 
 interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; motifs?: string[]; }
+interface LegalResponse { moves: MoveScore[]; inCheck: boolean; status: string; }
 interface BestMove {
   uci: string | null; fen: string; effMu: number; rated: boolean; terminal: boolean; status: string;
   scoreCp: number; depth: number; nodes: number; pv?: string[]; motifs?: string[];
 }
+interface PositionEval { whiteScoreCp: number; depth: number; nodes: number; }
 export interface SearchInfo { scoreCp: number; depth: number; nodes: number; substrate: boolean; pv: string[]; }
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -26,6 +29,9 @@ export function ChessView() {
   const [fen, setFen] = useState(START);
   const [status, setStatus] = useState('ongoing');
   const [legal, setLegal] = useState<MoveScore[]>([]);
+  const [legalFen, setLegalFen] = useState('');
+  const [legalLoading, setLegalLoading] = useState(false);
+  const [inCheck, setInCheck] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [autoReply, setAutoReply] = useState(true);
@@ -40,6 +46,7 @@ export function ChessView() {
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
   const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
   const [search, setSearch] = useState<SearchInfo | null>(null);
+  const [positionEval, setPositionEval] = useState<PositionEval | null>(null);
   const [motifs, setMotifs] = useState<string[]>([]);
 
   const [marks, setMarks] = useState<Set<string>>(new Set());
@@ -48,12 +55,51 @@ export function ChessView() {
   const rdrag = useRef<string | null>(null);
   const boardRef = useBoardRef();
 
-  const refreshLegal = useCallback(async (f: string) => {
-    try { setLegal(await apiPost<MoveScore[]>('/chess/legal', { fen: f })); setErr(null); }
-    catch (e) { setLegal([]); setErr(`scoring failed: ${msg(e)}`); }
+  const refreshLegal = useCallback(async (f: string, cancelled?: () => boolean) => {
+    setLegalLoading(true);
+    try {
+      const res = await apiPost<LegalResponse | MoveScore[]>('/chess/legal', { fen: f });
+      if (cancelled?.()) return;
+      if (Array.isArray(res)) {
+        setLegal(res);
+        setLegalFen(f);
+        setInCheck(false);
+      } else {
+        setLegal(res.moves);
+        setLegalFen(f);
+        setInCheck(res.inCheck);
+        if (res.status !== 'ongoing') setStatus(res.status);
+      }
+      setErr(null);
+    } catch (e) {
+      if (cancelled?.()) return;
+      setLegal([]);
+      setLegalFen('');
+      setInCheck(false);
+      setErr(`scoring failed: ${msg(e)}`);
+    } finally {
+      if (!cancelled?.()) setLegalLoading(false);
+    }
   }, []);
 
-  useEffect(() => { void refreshLegal(fen); }, [fen, refreshLegal]);
+  useEffect(() => {
+    let cancelled = false;
+    setLegalLoading(true);
+    void refreshLegal(fen, () => cancelled);
+    return () => { cancelled = true; };
+  }, [fen, refreshLegal]);
+
+  useEffect(() => {
+    if (status !== 'ongoing') {
+      setPositionEval({ whiteScoreCp: terminalWhiteCp(status), depth: 0, nodes: 0 });
+      return;
+    }
+    let cancelled = false;
+    void apiPost<PositionEval>('/chess/eval', { fen, depth: searchDepth, substrate: useSubstrate })
+      .then((r) => { if (!cancelled) setPositionEval(r); })
+      .catch(() => { if (!cancelled) setPositionEval(null); });
+    return () => { cancelled = true; };
+  }, [fen, searchDepth, useSubstrate, status]);
 
   const fetchTrain = useCallback(async () => {
     try { setTrain(await apiGet<TrainStatus>('/chess/train/status')); } catch { }
@@ -114,15 +160,23 @@ export function ChessView() {
 
   const playFromTo = useCallback(async (from: string, to: string) => {
     if (busy || status !== 'ongoing' || from === to) return;
-    const cands = legal.filter((m) => m.uci.slice(0, 4) === from + to);
+    const moves = legalFen === fen ? legal : [];
+    const cands = moves.filter((m) => m.uci.slice(0, 4) === from + to);
     if (cands.length > 1 && cands.some((m) => m.uci.length === 5)) {
       setPromo({ from, to });
       return;
     }
-    const uci = cands[0]?.uci;
-    if (!uci) return;
+    let uci = cands[0]?.uci;
+    if (!uci) {
+      if (legalLoading || legalFen !== fen) {
+        setErr('Legal moves still loading — try again');
+        return;
+      }
+      // Trust server validation when substrate scoring returned nothing unexpected.
+      uci = from + to;
+    }
     await applyUci(uci);
-  }, [busy, status, legal, applyUci]);
+  }, [busy, status, legal, legalFen, fen, legalLoading, applyUci]);
 
   const onPointerDown = (e: React.PointerEvent, sq: string) => {
     if (e.button === 2) {
@@ -154,7 +208,7 @@ export function ChessView() {
   const newGame = async () => {
     const r = await apiGet<{ fen: string }>('/chess/new');
     setFen(r.fen); setStatus('ongoing'); setSel(null); setMarks(new Set()); setUserArrows([]);
-    setHistory([]); setLastMove(null); setSearch(null); setMotifs([]);
+    setHistory([]); setLastMove(null); setSearch(null); setMotifs([]); setPositionEval(null);
   };
   const startTrain = () => {
     const q = new URLSearchParams({
@@ -166,14 +220,9 @@ export function ChessView() {
   const stopTrain = () => apiPost('/chess/train/stop', {}).then(fetchTrain).catch(() => {});
 
   const topMoves = [...legal].sort((a, b) => b.effMu - a.effMu).slice(0, 8);
-  const stmEval = topMoves[0]?.effMu ?? 1500;
-  const whiteEval = whiteToMove(fen) ? stmEval - 1500 : 1500 - stmEval;
-  const evalFrac = 1 / (1 + Math.exp(-whiteEval / 200));
-  const winPct = Math.round(evalFrac * 100);
-  // whiteEval is a Glicko rating delta (not centipawns) — label it as rating points so it
-  // doesn't read as a second, conflicting pawn eval next to the search readout.
-  const leadTxt = Math.abs(whiteEval) < 12 ? 'Even'
-    : whiteEval > 0 ? `White +${Math.round(whiteEval)}` : `Black +${Math.round(-whiteEval)}`;
+  const whiteCp = positionEval?.whiteScoreCp ?? 0;
+  const { lead: evalLead, detail: evalDetail } = formatPositionEval(whiteCp);
+  const evalFrac = whiteCpToBarFraction(whiteCp);
 
   const botBest = topMoves[0];
   const botBestFrom = botBest?.uci.slice(0, 2);
@@ -182,8 +231,9 @@ export function ChessView() {
 
   const sideToMove = whiteToMove(fen) ? 'White' : 'Black';
   const over = status !== 'ongoing';
-  // Which king got mated (loser's king). Draw/ongoing -> no red king.
+  const kingPiece = whiteToMove(fen) ? 'K' : 'k';
   const matedKing = status === 'white wins' ? 'k' : status === 'black wins' ? 'K' : null;
+  const checkedKing = !over && inCheck ? kingPiece : null;
   const statusText = busy
     ? 'thinking…'
     : over
@@ -191,7 +241,9 @@ export function ChessView() {
         : status === 'white wins' ? 'Checkmate — White wins'
         : status === 'black wins' ? 'Checkmate — Black wins'
         : status)
-      : `${sideToMove} to move`;
+      : inCheck
+        ? `${sideToMove} in check`
+        : `${sideToMove} to move`;
 
   return (
     <div className={styles.layout}>
@@ -205,14 +257,14 @@ export function ChessView() {
           userArrows={userArrows}
           showPick={showPick && !evalMode}
           botBestTo={botBestTo}
-          whiteEval={whiteEval}
+          whiteEval={evalLead}
           evalFrac={evalFrac}
-          leadTxt={leadTxt}
-          winPct={winPct}
+          evalDetail={evalDetail}
           boardRef={boardRef}
           flip={flip}
           lastMove={lastMove}
           matedKing={matedKing}
+          checkedKing={checkedKing}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onDragMove={(x, y) => setDrag((d) => (d ? { ...d, x, y } : d))}

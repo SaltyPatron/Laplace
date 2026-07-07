@@ -135,8 +135,6 @@ public static class ChessGraph
     private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
         b.AddEntity(n.Id, n.Tier, typeId, src);
-        if (Environment.GetEnvironmentVariable("LAPLACE_CHESS_NOPHYS") == "1") return;
-        bool noTraj = Environment.GetEnvironmentVariable("LAPLACE_CHESS_NOTRAJ") == "1";
         b.AddPhysicality(new PhysicalityRow(
             Id: n.PhysId,
             EntityId: n.Id,
@@ -144,8 +142,8 @@ public static class ChessGraph
             Type: PhysicalityType.Content,
             CoordX: n.Coord[0], CoordY: n.Coord[1], CoordZ: n.Coord[2], CoordM: n.Coord[3],
             HilbertIndex: n.Hb,
-            TrajectoryXyzm: noTraj ? System.Array.Empty<double>() : n.Trajectory,
-            NConstituents: noTraj ? 0 : n.NConstituents,
+            TrajectoryXyzm: n.Trajectory,
+            NConstituents: n.NConstituents,
             AlignmentResidual: null,
             SourceDim: null,
             ObservedAtUnixUs: nowUs));

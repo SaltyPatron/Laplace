@@ -5,7 +5,7 @@ test.describe('chess UI', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Play' }).click();
     await expect(page.getByRole('button', { name: 'New game' })).toBeVisible();
-    await expect(page.locator('.board')).toBeVisible();
+    await expect(page.getByRole('grid')).toBeVisible();
   });
 
   test('lab tab starts and stops a short job', async ({ page }) => {

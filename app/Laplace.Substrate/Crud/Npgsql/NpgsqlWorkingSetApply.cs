@@ -38,9 +38,7 @@ public sealed partial class NpgsqlSubstrateWriter
     /// </summary>
     private const int ParallelCopyMinRows = 65_536;
 
-    internal static readonly int ApplyParallelism =
-        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARALLEL"), out var ap) && ap > 0
-            ? ap : CpuTopology.ResolveApplyPartitions();
+    internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
 
     private static readonly long PgEpochTicks =
         new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;

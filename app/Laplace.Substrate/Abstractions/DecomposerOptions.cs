@@ -20,14 +20,7 @@ public sealed record DecomposerOptions(
         bool? emitCrossLanguageLinks = null)
     {
         var langs = languageOverride ?? LanguageFilter.ForSource(sourceKey);
-        bool crossLang = emitCrossLanguageLinks ?? (
-            langs?.IsActive != true
-            || string.Equals(
-                Environment.GetEnvironmentVariable("LAPLACE_EMIT_CROSS_LANG"),
-                "1", StringComparison.Ordinal)
-            || string.Equals(
-                Environment.GetEnvironmentVariable("LAPLACE_EMIT_CROSS_LANG"),
-                "true", StringComparison.OrdinalIgnoreCase));
+        bool crossLang = emitCrossLanguageLinks ?? (langs?.IsActive != true);
         return Default with
         {
             BatchSize = batchSize,

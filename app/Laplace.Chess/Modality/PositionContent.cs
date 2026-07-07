@@ -4,6 +4,8 @@ namespace Laplace.Modality.Chess;
 
 public static class PositionContent
 {
+    public static bool IncludeFeatureTokens { get; set; }
+
     public static string Surface(Board b, string canonicalEp)
     {
         var bb = Bitboards.FromBoard(b);
@@ -46,7 +48,7 @@ public static class PositionContent
           .Append('r').Append(Bitboards.Count(bb.Of(Piece.BRook)))
           .Append('q').Append(Bitboards.Count(bb.Of(Piece.BQueen)));
 
-        if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY"), "1", StringComparison.Ordinal))
+        if (IncludeFeatureTokens)
             AppendFeatureTokens(sb, b, bb);
 
         return sb.ToString();

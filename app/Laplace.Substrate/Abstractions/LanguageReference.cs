@@ -12,12 +12,7 @@ public static class LanguageReference
     public static long ResolveMisses => Interlocked.Read(ref _resolveMisses);
     public static int AliasCount => _canon?.Count ?? 0;
 
-    public static string DefaultDir =>
-        Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d
-            ? d
-            : OperatingSystem.IsWindows()
-                ? Path.Combine(@"D:\Data\Ingest", "ISO639")
-                : "/vault/Data/ISO639";
+    public static string DefaultDir => LaplaceInstall.ResolveIso639Dir();
 
     public static void EnsureLoaded(string? iso639Dir = null)
     {

@@ -45,7 +45,8 @@ typedef struct {
     uint8_t     context_is_null;
     uint8_t     skip_comment_rows;
     uint8_t     line_framed;
-    uint8_t     _pad_cfg[5];
+    uint8_t     _pad_cfg[2];
+    const char* ili_map_path;
 } laplace_etl_config_t;
 
 typedef struct laplace_etl_session laplace_etl_session_t;

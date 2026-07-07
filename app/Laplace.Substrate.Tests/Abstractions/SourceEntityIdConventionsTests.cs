@@ -14,21 +14,17 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 [Collection("GrammarPerfcache")]
 public class SourceEntityIdConventionsTests
 {
-    private static string? _savedCiliDir;
-    private static string? _savedDataRoot;
+    private static string? _savedCiliOverride;
 
     private static void WithCiliDir(string dir, Action body)
     {
-        _savedCiliDir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
-        _savedDataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
-        Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", dir);
-        Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", null);
+        _savedCiliOverride = SourceEntityIdConventions.TestCiliDirOverride;
+        SourceEntityIdConventions.TestCiliDirOverride = dir;
         SourceEntityIdConventions.ResetIliMapCacheForTests();
         try { body(); }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _savedCiliDir);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", _savedDataRoot);
+            SourceEntityIdConventions.TestCiliDirOverride = _savedCiliOverride;
             SourceEntityIdConventions.ResetIliMapCacheForTests();
         }
     }
@@ -229,9 +225,11 @@ public class SourceEntityIdConventionsTests
     [Fact]
     public void ResolveSynsetAnchor_Parses_Mcr_WnRdf_And_SenseKeys()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (File.Exists(Path.Combine(cili, IliMap.MapFileName)))
+        string dir = NewTempDir();
+        WithCiliDir(dir, () =>
         {
+            File.WriteAllText(Path.Combine(dir, IliMap.MapFileName),
+                "i23456\t02244956-v\n");
             CodepointPerfcache.LoadDefault();
             Hash128? ili = SourceEntityIdConventions.ResolveSynsetAnchor("30-02244956-v");
             Assert.NotNull(ili);
@@ -240,7 +238,7 @@ public class SourceEntityIdConventionsTests
                 ConceptAnchor.SynsetId(2244956, 'v'),
                 SourceEntityIdConventions.ResolveSynsetAnchor(
                     "http://wordnet-rdf.princeton.edu/wn31/02244956-v"));
-        }
+        });
 
         Hash128? sense = SourceEntityIdConventions.ResolveSynsetAnchor("give%2:40:03::");
         Assert.NotNull(sense);
@@ -300,24 +298,13 @@ public class SourceEntityIdConventionsTests
     }
 
     [Fact]
-    public void CiliMapPath_Defaults_To_DataRoot_Cili()
+    public void CiliMapPath_UsesOverride()
     {
-        _savedCiliDir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
-        _savedDataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
-        try
+        var dir = NewTempDir();
+        WithCiliDir(dir, () =>
         {
-            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", null);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", @"D:\Data\Ingest");
-            SourceEntityIdConventions.ResetIliMapCacheForTests();
-            Assert.Equal(
-                Path.Combine(@"D:\Data\Ingest", "CILI", IliMap.MapFileName),
-                SourceEntityIdConventions.CiliMapPath());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _savedCiliDir);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", _savedDataRoot);
-            SourceEntityIdConventions.ResetIliMapCacheForTests();
-        }
+            Assert.Equal(Path.Combine(dir, IliMap.MapFileName), SourceEntityIdConventions.CiliMapPath());
+        });
+        Directory.Delete(dir, true);
     }
 }

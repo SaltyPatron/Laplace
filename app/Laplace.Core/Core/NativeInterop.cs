@@ -671,9 +671,7 @@ public static unsafe partial class NativeInterop
         public byte LineFramed;
         public byte Pad0;
         public byte Pad1;
-        public byte Pad2;
-        public byte Pad3;
-        public byte Pad4;
+        public IntPtr IliMapPath;
     }
 
     [StructLayout(LayoutKind.Sequential)]

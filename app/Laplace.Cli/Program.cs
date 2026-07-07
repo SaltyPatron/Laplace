@@ -43,11 +43,8 @@ internal static class Program
         if (args.Length == 0 || args[0] != "cpu-topology")
         {
             NativeRuntimeEnv.ApplyFromTopologyIfUnset();
-            if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MKL_CHECK") != "1")
-            {
-                Laplace.Engine.Dynamics.MklAvailability.EnsureOrThrow();
-                Laplace.Engine.Synthesis.MklAvailability.EnsureOrThrow();
-            }
+            Laplace.Engine.Dynamics.MklAvailability.EnsureOrThrow();
+            Laplace.Engine.Synthesis.MklAvailability.EnsureOrThrow();
         }
 
         if (args.Length == 0)

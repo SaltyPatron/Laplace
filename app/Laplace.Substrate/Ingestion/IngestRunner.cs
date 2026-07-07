@@ -149,7 +149,7 @@ public sealed class IngestRunner
 
 
 
-        bool syncIngest = Environment.GetEnvironmentVariable("LAPLACE_INGEST_SYNC") == "1";
+        bool syncIngest = false;
 
         // The RUN is the index-cycle scope. Rebuilding an index scans the
         // whole live table, so per-apply cycling costs

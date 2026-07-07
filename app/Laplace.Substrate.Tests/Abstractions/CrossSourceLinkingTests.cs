@@ -60,7 +60,7 @@ public sealed class CrossSourceLinkingTests
     [Fact]
     public void ConceptAnchor_SynsetId_Requires_Cili_Map()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        string cili = TestPathHelpers.CiliOrFallback();
         if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
 
         CodepointPerfcache.LoadDefault();

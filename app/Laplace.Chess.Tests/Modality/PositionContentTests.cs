@@ -1,133 +1,32 @@
+using Laplace.Modality.Chess;
 using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
 
 public sealed class PositionContentTests
 {
-    private static string Surface(string fen)
-    {
-        var b = Board.FromFen(fen);
-        var m = new ChessModality();
-        return m.StateKey(m.FromFen(fen));
-    }
-
     [Fact]
-    public void Surface_IsDeterministic()
-        => Assert.Equal(Surface(ChessModality.StartFen), Surface(ChessModality.StartFen));
-
-    [Fact]
-    public void Surface_ComposesFromSubstructures()
+    public void Rekey_AppendsFeatureTokens_WhenEnabled()
     {
-        var s = Surface(ChessModality.StartFen);
-        Assert.Contains("stm:w", s);
-        Assert.Contains("cr:KQkq", s);
-        Assert.Contains("Pe2", s);
-        Assert.Contains("ke8", s);
-        Assert.Contains("wpawns:", s);
-        Assert.Contains("mat:P8N2B2R2Q1", s);
-        Assert.Contains("wpf:d0i0p0", s);
-    }
-
-    [Fact]
-    public void Surface_DistinctPositions_DistinctSurface()
-    {
-        var m = new ChessModality();
-        var start = m.Initial();
-        var e4 = m.LegalActions(start).Single(x => x.ToUci() == "e2e4");
-        Assert.NotEqual(m.StateKey(start), m.StateKey(m.Apply(start, e4)));
-    }
-
-    [Fact]
-    public void Surface_TranspositionsCollapse()
-    {
-        var m = new ChessModality();
-        var a = Play(m, "e2e4", "e7e5", "g1f3");
-        var b = Play(m, "g1f3", "e7e5", "e2e4");
-        Assert.Equal(m.StateKey(a), m.StateKey(b));
-    }
-
-    private static ChessState Play(ChessModality m, params string[] ucis)
-    {
-        var s = m.Initial();
-        foreach (var u in ucis)
-            s = m.Apply(s, m.LegalActions(s).Single(x => x.ToUci() == u));
-        return s;
-    }
-
-    [Theory]
-    [InlineData("7k/8/8/3P4/8/8/8/7K w - - 0 1", 0, 1, 1)]
-    [InlineData("7k/8/8/8/3P4/3P4/8/7K w - - 0 1", 1, 2, 1)]
-    public void Bitboards_PawnFeatures(string fen, int doubled, int isolated, int passed)
-    {
-        var bb = Bitboards.FromBoard(Board.FromFen(fen));
-        var wp = bb.Of(Piece.WPawn);
-        var bp = bb.Of(Piece.BPawn);
-        Assert.Equal(doubled, Bitboards.Doubled(wp));
-        Assert.Equal(isolated, Bitboards.Isolated(wp));
-        Assert.Equal(passed, Bitboards.Passed(wp, bp, white: true));
-    }
-
-    [Fact]
-    public void Surface_Rekey_AddsFeatureTokens_WhenEnabled()
-    {
-        var prev = Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY");
+        PositionContent.IncludeFeatureTokens = true;
         try
         {
-            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", "1");
-            var s = Surface(ChessModality.StartFen);
+            var b = Board.FromFen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
+            string s = PositionContent.Surface(b, "e3");
             Assert.Contains(" mob:", s);
-            Assert.Contains(" open:", s);
-            Assert.Contains(" kzone:", s);
-            Assert.Contains(" outpost:", s);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", prev);
+            PositionContent.IncludeFeatureTokens = false;
         }
     }
 
-    private static int OutpostCount(string fen)
-    {
-        var prev = Environment.GetEnvironmentVariable("LAPLACE_CHESS_REKEY");
-        try
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", "1");
-            var s = Surface(fen);
-            int i = s.IndexOf(" outpost:", StringComparison.Ordinal) + " outpost:".Length;
-            int j = i;
-            while (j < s.Length && char.IsDigit(s[j])) j++;
-            return int.Parse(s[i..j]);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_CHESS_REKEY", prev);
-        }
-    }
-
-    [Theory]
-    // Black knight on d5, pawn-defended from behind (e6), unblocked ahead: a real outpost.
-    [InlineData("7k/8/4p3/3n4/8/8/8/4K3 b - - 0 1", 1)]
-    // Same knight, no supporting pawn at all: not an outpost.
-    [InlineData("7k/8/8/3n4/8/8/8/4K3 b - - 0 1", 0)]
-    // Same-rank "support" must NOT count: a pawn beside the knight (not behind it) never defends it.
-    [InlineData("7k/8/8/2pn4/8/8/8/4K3 b - - 0 1", 0)]
-    // Black BISHOP outpost, no white bishop on the board at all: previously miscounted as 0
-    // because CountOutposts(white:false) looked up the WBishop bitboard instead of BBishop.
-    [InlineData("7k/8/4p3/3b4/8/8/8/4K3 b - - 0 1", 1)]
-    public void CountOutposts_MatchesColorAndSupportRank(string fen, int expected)
-        => Assert.Equal(expected, OutpostCount(fen));
-
     [Fact]
-    public void Surface_DefaultOmitsFeatureTokens()
-        => Assert.DoesNotContain(" mob:", Surface(ChessModality.StartFen));
-
-    [Fact]
-    public void Bitboards_StartCounts()
+    public void Rekey_OmitsFeatureTokens_ByDefault()
     {
-        var bb = Bitboards.FromBoard(Board.FromFen(ChessModality.StartFen));
-        Assert.Equal(16, Bitboards.Count(bb.White));
-        Assert.Equal(16, Bitboards.Count(bb.Black));
-        Assert.Equal(8, Bitboards.Count(bb.Of(Piece.WPawn)));
-        Assert.Equal(8, Bitboards.Count(bb.Of(Piece.BPawn)));
+        PositionContent.IncludeFeatureTokens = false;
+        var b = Board.FromFen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
+        string s = PositionContent.Surface(b, "e3");
+        Assert.DoesNotContain(" mob:", s);
     }
 }

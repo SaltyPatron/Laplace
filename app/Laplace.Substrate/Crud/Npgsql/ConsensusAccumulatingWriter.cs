@@ -92,28 +92,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
 
 
-        _stagingThreshold = stagingThresholdRelations
-            ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
-                ? t : 4_000_000);
+        _stagingThreshold = stagingThresholdRelations ?? 4_000_000;
         _partitions = foldWorkers
             ?? CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 24);
 
-
-
-        _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
-            ? bl : 12;
-
-
-
-
-
-        var lane = Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE");
-        _terminalFold = string.Equals(lane, "terminal", StringComparison.OrdinalIgnoreCase)
-                     || string.Equals(lane, "bulk", StringComparison.OrdinalIgnoreCase);
-        if (_terminalFold)
-            _log.LogInformation(
-                "LAPLACE_FOLD_LANE=terminal: flat periods now fold client-side per epoch regardless "
-                + "(no staging to defer); the flag only affects the walk-journal lane");
+        _maxFoldBacklog = 12;
+        _terminalFold = false;
         if (_partitions is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(foldWorkers), _partitions,
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
@@ -320,19 +304,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
     public Task CompleteBulkRunAsync(CancellationToken ct = default)
         => _inner.CompleteBulkRunAsync(ct);
 
-    public static bool ResolvePersistEvidence()
-    {
-        string? persist = Environment.GetEnvironmentVariable("LAPLACE_PERSIST_EVIDENCE");
-        if (!string.IsNullOrEmpty(persist))
-            return !IsEnvDisabled(persist);
-        string? evidence = Environment.GetEnvironmentVariable("LAPLACE_EVIDENCE");
-        if (!string.IsNullOrEmpty(evidence))
-            return !IsEnvDisabled(evidence);
-        return true;
-    }
-
-    private static bool IsEnvDisabled(string value) =>
-        value is "0" or "false" or "False" or "no" or "NO" or "off" or "OFF";
+    public static bool ResolvePersistEvidence() => true;
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
     {
@@ -697,9 +669,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
 
         if (_stageAsWalks
-            && _partitions > 1
-            && (Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine") != "sql"
-            && Environment.GetEnvironmentVariable("LAPLACE_FOLD_PARALLEL") != "0")
+            && _partitions > 1)
         {
             return await ParallelWalkFoldAsync(ct);
         }
@@ -715,7 +685,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
             if (!_terminalFold)
                 _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
-            string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
+            const string impl = "engine";
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await using var conn = await _ds.OpenConnectionAsync(ct);
             conn.Notice += (_, e) =>

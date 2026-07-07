@@ -1,12 +1,11 @@
+using System.Diagnostics;
+using Laplace.Engine.Core;
+
 namespace Laplace.Chess.Service;
 
 public static class ChessLabPaths
 {
-    public const string EnvCutechess = "LAPLACE_CUTECHESS";
-    public const string EnvStockfish = "LAPLACE_STOCKFISH";
-    public const string EnvQtBin = "LAPLACE_QT_BIN";
-    public const string EnvUci = "LAPLACE_UCI";
-    public const string EnvLabDir = "LAPLACE_CHESS_LAB_DIR";
+    private const string ChessLabEnvFile = "chess-lab.env";
 
     private static readonly string[] CutechessPathNames = ["cutechess-cli.exe", "cutechess-cli"];
     private static readonly string[] StockfishPathNames = ["stockfish.exe", "stockfish"];
@@ -14,42 +13,29 @@ public static class ChessLabPaths
 
     public readonly record struct Probe(string? Path, bool Found, string Source);
 
-    public static void LoadEnvFile(string? path = null)
+    public static string LabDir
     {
-        foreach (var candidate in EnvFileCandidates(path))
+        get
         {
-            if (!File.Exists(candidate)) continue;
-            foreach (var line in File.ReadLines(candidate))
-            {
-                if (line.TrimStart().StartsWith('#')) continue;
-                var eq = line.IndexOf('=');
-                if (eq < 0) continue;
-                var key = line[..eq].Trim();
-                var val = line[(eq + 1)..].Trim();
-                if (string.IsNullOrEmpty(key)) continue;
-                if (Environment.GetEnvironmentVariable(key) is null)
-                    Environment.SetEnvironmentVariable(key, val);
-            }
-            return;
+            var fromSecret = LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, "LAPLACE_CHESS_LAB_DIR");
+            return !string.IsNullOrWhiteSpace(fromSecret)
+                ? fromSecret.Trim()
+                : Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
         }
     }
 
-    public static string LabDir =>
-        Environment.GetEnvironmentVariable(EnvLabDir)
-        ?? Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
-
     public static Probe Cutechess => ResolveExecutable(
-        EnvCutechess,
+        "LAPLACE_CUTECHESS",
         repoRoot => Path.Combine(repoRoot, "build-cutechess", "cutechess-cli.exe"),
         CutechessPathNames);
 
     public static Probe Stockfish => ResolveExecutable(
-        EnvStockfish,
-        _ => null,
+        "LAPLACE_STOCKFISH",
+        repoRoot => Path.Combine(repoRoot, "build-cutechess", "stockfish.exe"),
         StockfishPathNames);
 
     public static Probe LaplaceUci => ResolveExecutable(
-        EnvUci,
+        "LAPLACE_UCI",
         repoRoot =>
         {
             foreach (var rel in new[]
@@ -66,7 +52,7 @@ public static class ChessLabPaths
         LaplaceUciPathNames,
         Path.Combine(AppContext.BaseDirectory, "laplace-uci.exe"));
 
-    public static Probe QtBin => ResolveDirectory(EnvQtBin);
+    public static Probe QtBin => ResolveQtBin();
 
     public static IReadOnlyDictionary<string, Probe> Catalog => new Dictionary<string, Probe>(StringComparer.OrdinalIgnoreCase)
     {
@@ -89,26 +75,42 @@ public static class ChessLabPaths
         string? assemblyNeighbor = null)
         => ResolveExecutableCore(envValue, repoCandidate, pathNames, assemblyNeighbor);
 
+    internal static Probe ResolveQtBinForTest(string? configValue)
+    {
+        if (!string.IsNullOrWhiteSpace(configValue))
+        {
+            var p = configValue.Trim();
+            return new Probe(p, Directory.Exists(p), "config");
+        }
+
+        return new Probe(null, false, "missing");
+    }
+
     private static Probe ResolveExecutable(
-        string envName,
+        string configKey,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
         string? assemblyNeighbor = null)
-        => ResolveExecutableCore(Environment.GetEnvironmentVariable(envName), repoCandidate, pathNames, assemblyNeighbor);
+        => ResolveExecutableCore(
+            LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, configKey),
+            repoCandidate,
+            pathNames,
+            assemblyNeighbor);
 
     private static Probe ResolveExecutableCore(
-        string? envValue,
+        string? explicitPath,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
         string? assemblyNeighbor)
     {
-        if (!string.IsNullOrWhiteSpace(envValue))
+        if (!string.IsNullOrWhiteSpace(explicitPath))
         {
-            var p = envValue.Trim();
-            return new Probe(p, File.Exists(p), "env");
+            var p = explicitPath.Trim();
+            if (File.Exists(p))
+                return new Probe(p, true, "config");
         }
 
-        if (TryRepoRoot(out var root) && repoCandidate is not null)
+        if (LaplaceInstall.TryRepoRoot(out var root) && repoCandidate is not null)
         {
             var repoPath = repoCandidate(root);
             if (!string.IsNullOrEmpty(repoPath))
@@ -121,84 +123,57 @@ public static class ChessLabPaths
         if (TryFindOnPath(pathNames, out var pathHit))
             return new Probe(pathHit, true, "path");
 
-        var missing = repoCandidate is not null && TryRepoRoot(out root)
+        var missing = repoCandidate is not null && LaplaceInstall.TryRepoRoot(out root)
             ? repoCandidate(root)
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
     }
 
-    private static Probe ResolveDirectory(string envName)
+    private static Probe ResolveQtBin()
     {
-        var envValue = Environment.GetEnvironmentVariable(envName);
-        if (!string.IsNullOrWhiteSpace(envValue))
+        var fromSecret = LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, "LAPLACE_QT_BIN");
+        if (!string.IsNullOrWhiteSpace(fromSecret))
         {
-            var p = envValue.Trim();
-            return new Probe(p, Directory.Exists(p), "env");
+            var p = fromSecret.Trim();
+            if (Directory.Exists(p))
+                return new Probe(p, true, "config");
         }
 
         return new Probe(null, false, "missing");
     }
 
-    private static IEnumerable<string> EnvFileCandidates(string? explicitPath)
-    {
-        if (!string.IsNullOrWhiteSpace(explicitPath))
-            yield return explicitPath;
-
-        var fromBase = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "deploy", "secrets", "chess-lab.env"));
-        yield return fromBase;
-
-        if (TryRepoRoot(out var root))
-            yield return Path.Combine(root, "deploy", "secrets", "chess-lab.env");
-    }
-
-    private static bool TryRepoRoot(out string root)
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
-        if (!string.IsNullOrWhiteSpace(env) && Directory.Exists(env))
-        {
-            root = Path.GetFullPath(env);
-            return true;
-        }
-
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null)
-        {
-            if (Directory.Exists(Path.Combine(dir, "app")) && Directory.Exists(Path.Combine(dir, "engine")))
-            {
-                root = dir;
-                return true;
-            }
-            dir = Directory.GetParent(dir)?.FullName;
-        }
-
-        root = "";
-        return false;
-    }
-
     private static bool TryFindOnPath(string[] names, out string found)
     {
-        var pathVar = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrEmpty(pathVar))
-        {
-            found = "";
-            return false;
-        }
+        found = "";
+        if (!OperatingSystem.IsWindows()) return false;
 
-        foreach (var dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var name in names)
         {
-            foreach (var name in names)
+            try
             {
-                var candidate = Path.Combine(dir, name);
-                if (File.Exists(candidate))
+                using var proc = Process.Start(new ProcessStartInfo
                 {
-                    found = candidate;
+                    FileName = "where.exe",
+                    Arguments = name,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                if (proc is null) continue;
+                var line = proc.StandardOutput.ReadLine()?.Trim();
+                proc.WaitForExit();
+                if (!string.IsNullOrEmpty(line) && File.Exists(line))
+                {
+                    found = line;
                     return true;
                 }
             }
+            catch
+            {
+                // ignore — fall through to missing probe
+            }
         }
 
-        found = "";
         return false;
     }
 }

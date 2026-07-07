@@ -200,9 +200,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             PhysicalitiesSkippedAtMerge: physicalitiesSkipped);
     }
 
-    private static readonly long RtBudgetPer10K =
-        long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_RT_BUDGET_PER_10K"), out var b) && b >= 0
-            ? b : 64;
-    private static readonly bool RtBudgetEnforce =
-        Environment.GetEnvironmentVariable("LAPLACE_RT_BUDGET_ENFORCE") == "1";
+    private static readonly long RtBudgetPer10K = 64;
+    private static readonly bool RtBudgetEnforce = false;
 }

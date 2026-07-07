@@ -19,9 +19,9 @@ public static class SourceEntityIdConventions
     public static long SynsetHits => Interlocked.Read(ref _synsetHits);
     public static long SynsetMisses => Interlocked.Read(ref _synsetMisses);
 
-    public static string CiliDirectory() =>
-        Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR")
-        ?? Path.Combine(DataRoot(), "CILI");
+    internal static string? TestCiliDirOverride { get; set; }
+
+    public static string CiliDirectory() => TestCiliDirOverride ?? LaplaceInstall.ResolveCiliDir();
 
     public static string CiliMapPath() => Path.Combine(CiliDirectory(), IliMap.MapFileName);
 
@@ -76,9 +76,7 @@ public static class SourceEntityIdConventions
         }
     }
 
-    private static string DataRoot() =>
-        Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT")
-        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data");
+    private static string DataRoot() => LaplaceInstall.ResolveDataRoot();
 
 
 

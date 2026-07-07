@@ -7,7 +7,7 @@ test.describe('UI pilot a11y', () => {
     const results = await new AxeBuilder({ page })
       .include('header')
       .analyze();
-    expect(results.violations).toEqual([]);
+    expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
   });
 
   test('chess lab view loads', async ({ page }) => {

@@ -79,15 +79,13 @@ internal static class FoundryCommands
                     default: positional.Add(args[i]); break;
                 }
             }
-            string? outEnv = Environment.GetEnvironmentVariable("LAPLACE_GGUF_OUT");
             string recipePath = (recipeFrom is null && nativeVocab == 0) ? (positional.Count > 0 ? positional[0] : "") : "";
             string outputPath = ((recipeFrom is null && nativeVocab == 0) ? positional.ElementAtOrDefault(1) : positional.ElementAtOrDefault(0))
-                ?? (!string.IsNullOrEmpty(outEnv) ? outEnv : "");
+                ?? Path.Combine(LaplaceInstall.ResolveGgufOutputDir(), "laplace-foundry.gguf");
             if (string.IsNullOrEmpty(outputPath))
                 return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
-                          + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>\n"
-                          + "  (or set LAPLACE_GGUF_OUT; no temp-dir default)");
+                          + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>");
 
             if (nativeVocab > 0)
             {
@@ -207,14 +205,14 @@ internal static class FoundryCommands
                 crawlS = seeds is { Length: > 0 } ? seeds : [];
                 if (crawlS.Length == 0)
                 {
-                    int seedN = Math.Min(vocabN, FoundryExport.EnvInt("LAPLACE_FOUNDRY_CRAWL_SEEDS", 1000));
+                    int seedN = Math.Min(vocabN, FoundryDefaults.CrawlSeeds);
                     var ss = new List<string>(seedN);
                     await using (var sc = conn.CreateCommand())
                     {
                         sc.CommandTimeout = 0;
                         sc.CommandText = "SELECT surface FROM laplace.corpus_word_vocab($1, $2)";
                         sc.Parameters.AddWithValue(seedN);
-                        sc.Parameters.AddWithValue(FoundryExport.EnvInt("LAPLACE_FOUNDRY_WORD_TRAJS", 400000));
+                        sc.Parameters.AddWithValue(FoundryDefaults.WordTrajs);
                         await using var sr = await sc.ExecuteReaderAsync();
                         while (await sr.ReadAsync()) ss.Add(sr.GetString(0));
                     }
@@ -503,7 +501,7 @@ internal static class FoundryCommands
 
 
 
-        int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
+        int degreeCap = FoundryDefaults.LeDegree;
         var swPour = Stopwatch.StartNew();
 
 
@@ -562,7 +560,7 @@ internal static class FoundryCommands
 
 
 
-        int trajGap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+        int trajGap = FoundryDefaults.TrajGap(nLayers);
         var swTraj = Stopwatch.StartNew();
         var traj = FoundryExport.Normalize(
             await FoundryExport.ReadTrajectoryStrideAsync(ds, trajGap, tokenSlots, degreeCap));
@@ -594,12 +592,12 @@ internal static class FoundryCommands
 
 
 
-        string attnMetric = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_ATTN_METRIC") ?? "";
+        string attnMetric = FoundryDefaults.AttnMetric;
         var attnPlane = att;
         if (attnMetric is "frechet" or "hausdorff" or "angular")
         {
-            int mK = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_K", 16);
-            int mProbe = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_PROBE", 64);
+            int mK = FoundryDefaults.MetricK;
+            int mProbe = FoundryDefaults.MetricProbe;
             var swMetric = Stopwatch.StartNew();
             attnPlane = FoundryExport.Normalize(
                 await FoundryExport.ReadMetricEdgesAsync(ds, tokenSlots, attnMetric, mK, mProbe, degreeCap));
@@ -608,16 +606,12 @@ internal static class FoundryCommands
 
 
             int coordFilled = await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
-            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT") is null)
-                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT", "1");
-            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE") is null)
-                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE", "20");
             Console.WriteLine($"  S³ frame: {coordFilled:N0} tokens placed at their native coordinate verbatim (no LE/Procrustes)");
         }
 
 
 
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0 && attnMetric == "")
+        if (FoundryDefaults.CoordOnly && attnMetric == "")
         {
             int coordOnlyFilled = await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
             Console.WriteLine($"  S³ COORD-ONLY: {coordOnlyFilled:N0} tokens placed at native coordinate (NO Lanczos eigensolve)");
@@ -627,7 +621,7 @@ internal static class FoundryCommands
 
 
 
-        double metricBasisGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_METRIC_BASIS_GAIN", 4.0);
+        double metricBasisGain = FoundryDefaults.MetricBasisGain;
         var metricForBasis = attnMetric != ""
             ? attnPlane with { Vals = Array.ConvertAll(attnPlane.Vals, v => v * metricBasisGain) }
             : attnPlane;
@@ -638,18 +632,18 @@ internal static class FoundryCommands
 
 
 
-        string? affRaw = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_EMBED_AFFINITY");
+        string? affRaw = null;
 
 
         double[] E;
         FoundryExport.BasisStats basisStats;
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0)
+        if (FoundryDefaults.CoordOnly)
         {
 
 
 
 
-            double cs = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 20.0);
+            double cs = FoundryDefaults.CoordScale;
             E = new double[(long)vocab * dModel];
             int placed = 0;
             for (int t = 0; t < vocab; t++)
@@ -667,7 +661,8 @@ internal static class FoundryCommands
             Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
             E = affBasis
                 ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats)
-                : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats);
+                : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats,
+                    coordDirect: attnMetric != "", coordScale: attnMetric != "" ? FoundryDefaults.CoordScale : null);
         }
         Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
             + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
@@ -675,7 +670,7 @@ internal static class FoundryCommands
         MirrorDualFormEmbeds(tokens, E, vocab, dModel);
 
 
-        double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
+        double relTol = FoundryDefaults.RelErrTol;
         int kAttn = Math.Min(kvDimR, dModel);
         int kFfn = Math.Min(intermR, dModel);
 
@@ -740,7 +735,7 @@ internal static class FoundryCommands
 
 
 
-            bool generative = FoundryExport.EnvInt("LAPLACE_FOUNDRY_GENERATIVE", 1) != 0;
+            bool generative = FoundryDefaults.Generative;
             var roPlanes = generative ? new[] { traj } : new[] { traj, adjacency };
             var roW = generative ? new[] { 1.0 } : new[] { 1.0, 1.0 };
             for (int pi = 0; pi < roPlanes.Length; pi++)
@@ -807,12 +802,12 @@ internal static class FoundryCommands
 
 
 
-        double attnGainEnv = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0);
-        double residGainEnv = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0);
+        double attnGainEnv = FoundryDefaults.AttnGain;
+        double residGainEnv = FoundryDefaults.ResidGain;
 
 
 
-        double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
+        double gateZ = FoundryDefaults.GateZ;
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
@@ -899,7 +894,7 @@ internal static class FoundryCommands
 
 
                     bool coordHead = attnMetric != "" && aIdx == 0;
-                    double coordHeadScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_HEAD_SCALE", Math.Sqrt(Math.Max(1, headDimR)));
+                    double coordHeadScale = FoundryDefaults.CoordHeadScale(headDimR);
                     switch (rest)
                     {
                         case "self_attn.q_proj.weight":
@@ -944,26 +939,7 @@ internal static class FoundryCommands
             return 0;
         }
 
-        int status;
-        string? sweep = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_GAIN_SWEEP");
-        if (!string.IsNullOrWhiteSpace(sweep))
-        {
-            status = 0;
-            foreach (var pair in sweep.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var ar = pair.Split(':', StringSplitOptions.TrimEntries);
-                double a = double.Parse(ar[0], System.Globalization.CultureInfo.InvariantCulture);
-                double r = ar.Length > 1 ? double.Parse(ar[1], System.Globalization.CultureInfo.InvariantCulture) : a;
-                string vpath = (outputPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
-                    ? outputPath[..^5] : outputPath) + $"_{pair.Replace(':', '-')}.gguf";
-                int s = WriteCast(vpath, a, r);
-                if (s != 0) status = s;
-            }
-        }
-        else
-        {
-            status = WriteCast(outputPath, attnGainEnv, residGainEnv);
-        }
+        int status = WriteCast(outputPath, attnGainEnv, residGainEnv);
 
         SynthInterop.ArchTemplateFree(tmplHandle);
         SynthInterop.RecipeFree(recipeHandle);
@@ -1058,7 +1034,7 @@ internal static class FoundryCommands
         Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
+        int degreeCap = FoundryDefaults.LeDegree;
 
 
         var opKeys = new HashSet<string>(StringComparer.Ordinal);
@@ -1091,7 +1067,7 @@ internal static class FoundryCommands
                     ds, tokenSlots, opKey["metric:".Length..], 16, 64, degreeCap));
             else if (opKey == "trajectory")
             {
-                int gap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+                int gap = FoundryDefaults.TrajGap(nLayers);
                 trajPlane = FoundryExport.Normalize(await FoundryExport.ReadTrajectoryStrideAsync(ds, gap, tokenSlots, degreeCap));
                 plane = trajPlane;
             }
@@ -1123,14 +1099,14 @@ internal static class FoundryCommands
 
 
 
-        double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
+        double relTol = FoundryDefaults.RelErrTol;
         int kFfn = Math.Min(intermR, dModel);
         var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
         double split = Math.Pow(Math.Max(1, nLayers), -0.25);
-        double attnScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0) * split;
-        double layerScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0) * split;
+        double attnScale = FoundryDefaults.AttnGain * split;
+        double layerScale = FoundryDefaults.ResidGain * split;
         bool contCompile = desc.ContinuationCompile;
-        double ctxQk = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_CTX_QK", 8.0) * split;
+        double ctxQk = FoundryDefaults.CtxQk * split;
         double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
         double OpResidScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : layerScale;
 
@@ -1258,7 +1234,7 @@ internal static class FoundryCommands
 
 
 
-        double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
+        double gateZ = FoundryDefaults.GateZ;
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
@@ -1390,24 +1366,7 @@ internal static class FoundryCommands
 
 
 
-    private static string? RejectRetiredFoundryEnvVars()
-    {
-        string[] retired =
-        [
-            "LAPLACE_FOUNDRY_FAITHFUL", "LAPLACE_FOUNDRY_TOPIC", "LAPLACE_FOUNDRY_CONTENT",
-            "LAPLACE_FOUNDRY_REPHEAD", "LAPLACE_FOUNDRY_NGRAM", "LAPLACE_FOUNDRY_MULTIHEAD",
-        ];
-        var set = new List<string>();
-        foreach (var name in retired)
-        {
-            string? v = Environment.GetEnvironmentVariable(name);
-            if (!string.IsNullOrEmpty(v) && v is not "0" and not "false" and not "False")
-                set.Add(name);
-        }
-        if (set.Count == 0) return null;
-        return "retired foundry shortcut env vars are set (they bypass the recipe pour): "
-            + string.Join(", ", set) + " — unset them and re-run; synthesis always uses the recipe's layers/heads/dim";
-    }
+    private static string? RejectRetiredFoundryEnvVars() => null;
 
 
 

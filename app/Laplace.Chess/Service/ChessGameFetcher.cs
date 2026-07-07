@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
 
@@ -15,9 +16,7 @@ public static class ChessGameFetcher
     }
 
     public static string DefaultOut(string user, string site)
-        => Path.Combine(
-            Environment.GetEnvironmentVariable("LAPLACE_CHESS_GAMES_DIR") ?? @"D:\Data\Ingest\Games\Chess",
-            $"{Sanitize(user)}_{site}.pgn");
+        => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), $"{Sanitize(user)}_{site}.pgn");
 
     public static Task<int> FetchAsync(
         string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)

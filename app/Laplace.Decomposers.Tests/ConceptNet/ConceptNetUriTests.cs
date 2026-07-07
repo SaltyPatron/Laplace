@@ -50,8 +50,8 @@ public sealed class ConceptNetUriTests
     [Fact]
     public void ResolveSynsetFromWnSuffix_Parses_Mcr_Key_To_Ili_Anchor()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         CodepointPerfcache.LoadDefault();
         Hash128? fromSuffix = ConceptNetUri.ResolveSynsetFromWnSuffix("30-02244956-v"u8);
@@ -62,8 +62,8 @@ public sealed class ConceptNetUriTests
     [Fact]
     public void ResolveSynsetFromWnSuffix_Resolves_Coarse_Topic_Labels_With_Pos()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         CodepointPerfcache.LoadDefault();
         Assert.True(ConceptNetUri.TryParseConceptUri(
@@ -91,8 +91,8 @@ public sealed class ConceptNetUriTests
     [Fact]
     public void ResolveSynsetFromExternalUrl_Parses_WnRdf_Tail_To_Ili_Anchor()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         CodepointPerfcache.LoadDefault();
         Hash128? synId = ConceptNetUri.ResolveSynsetFromExternalUrl(

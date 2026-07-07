@@ -14,12 +14,7 @@ public sealed class LanguageFilter
     public bool IsActive => _canon.Count > 0;
 
 
-    public static LanguageFilter? ForSource(string sourceKey)
-    {
-        string? spec = PerSourceEnv(sourceKey) ?? GlobalEnv();
-        if (string.IsNullOrWhiteSpace(spec)) return null;
-        return FromSpec(spec);
-    }
+    public static LanguageFilter? ForSource(string sourceKey) => null;
 
     public static LanguageFilter FromSpec(string commaSeparated)
     {
@@ -106,24 +101,5 @@ public sealed class LanguageFilter
         var parts = pairToken.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2) return MatchesRaw(parts.Length == 1 ? parts[0] : null);
         return MatchesAny(parts[0], parts[1]);
-    }
-
-    private static string? GlobalEnv() =>
-        Environment.GetEnvironmentVariable("LAPLACE_INGEST_LANGS");
-
-    private static string? PerSourceEnv(string sourceName)
-    {
-        string key = SourceEnvKey(sourceName);
-        return Environment.GetEnvironmentVariable($"LAPLACE_{key}_LANGS")
-            ?? Environment.GetEnvironmentVariable($"LAPLACE_INGEST_LANGS_{key}");
-    }
-
-    private static string SourceEnvKey(string sourceName)
-    {
-        const string suffix = "Decomposer";
-        string s = sourceName.Trim();
-        if (s.EndsWith(suffix, StringComparison.Ordinal))
-            s = s[..^suffix.Length];
-        return s.ToUpperInvariant().Replace('-', '_');
     }
 }

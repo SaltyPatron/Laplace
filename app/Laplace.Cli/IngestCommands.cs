@@ -109,8 +109,8 @@ internal static class IngestCommands
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
                         + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
-                        + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
-                        + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
+                        + "  --langs: language scope for this run\n"
+                        + "  --no-evidence: fold consensus only; skip laplace.attestations");
 
 
 
@@ -132,8 +132,8 @@ internal static class IngestCommands
         if (!Directory.Exists(wns))
             return Fail($"OMW path not found: {wns}");
 
-        long start = EnvLong("LAPLACE_OMW_PROBE_START", 0, min: 0);
-        long max = EnvLong("LAPLACE_OMW_PROBE_MAX", 0, min: 0);
+        long start = 0;
+        long max = 0;
         CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
@@ -235,9 +235,12 @@ internal static class IngestCommands
                 BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli)
                 with
                 {
-                    DecomposerOptions = DecomposerOptions.ForWitness(
+                    DecomposerOptions =                     DecomposerOptions.ForWitness(
                     dec.SourceName,
-                    EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1),
+                    IngestSizing.Resolve(
+                        IngestTopology.Current.PerformanceCoreCount,
+                        IngestTopology.Current.FileWorkers,
+                        IngestTopology.Current.ApplyPartitions).RecordBatchSize,
                     cli.LangOverride,
                     cli.EmitCrossLanguageLinks)
                 },
@@ -384,18 +387,16 @@ internal static class IngestCommands
                 + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
-        int batch = EnvInt("LAPLACE_INGEST_BATCH", 0, min: 0);
+        int batch = 0;
         int workers = IngestTopology.Current.CommitWorkers;
-        long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
-        int? envCommit = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS"), out var cr) && cr >= 0
-            ? Math.Min(cr, 250_000) : null;
+        long maxUnits = 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
         var sizing = IngestSizing.Resolve(
             IngestTopology.Current.PerformanceCoreCount,
             IngestTopology.Current.FileWorkers,
             IngestTopology.Current.ApplyPartitions,
-            recordBatchOverride: batch > 0 ? batch : null,
-            commitRowsOverride: envCommit,
+            recordBatchOverride: null,
+            commitRowsOverride: null,
             profile: profile);
         if (batch <= 0) batch = sizing.RecordBatchSize;
         int commitRows = sizing.CommitRows;
@@ -419,9 +420,6 @@ internal static class IngestCommands
             AbortOnTransientExhaustion = true,
         };
     }
-
-    private static bool IsEnvEnabled(string name) =>
-        Environment.GetEnvironmentVariable(name) is "1" or "true" or "True" or "yes" or "YES";
 
     internal static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,

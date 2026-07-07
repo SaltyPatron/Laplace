@@ -58,30 +58,7 @@ public static unsafe class HighwayPerfcache
         Load(ResolveDefaultPath());
     }
 
-    public static string ResolveDefaultPath()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_HIGHWAY_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        var perfEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(perfEnv))
-        {
-            var dir = Path.GetDirectoryName(perfEnv);
-            if (!string.IsNullOrEmpty(dir))
-            {
-                var hit = Path.Combine(dir, "laplace_highway_perfcache.bin");
-                if (File.Exists(hit)) return hit;
-            }
-        }
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName,
-                    "laplace_highway_perfcache.bin", SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException(
-            "highway perfcache not found; build the engine or set LAPLACE_HIGHWAY_BIN.");
-    }
+    public static string ResolveDefaultPath() => LaplaceInstall.ResolveHighwayPerfcache();
 
     public static void Unload()
     {

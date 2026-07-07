@@ -42,10 +42,7 @@ public sealed class ModelTokenEdgeETL
 
 
 
-    private static readonly double Theta =
-        double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_MODEL_EDGE_FLOOR"),
-            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
-            out var tf) ? tf : 0.0;
+    private const double Theta = 0.0;
 
     // Per-subject-row edge budget per plane. Without this, a zero floor emits every
     // positive-scoring pair — O(V²) per plane, per head — which is computationally
@@ -54,25 +51,21 @@ public sealed class ModelTokenEdgeETL
     // the strongest partners, and makes EstimateMatchupUnits' partner assumption true
     // instead of 3-6 orders optimistic. ATTENDS divides the budget across heads so a
     // layer's total attention budget matches the other planes'.
-    internal static readonly int EdgeTopK =
-        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_MODEL_EDGE_TOPK"), out var tk) && tk > 0
-            ? tk : 64;
+    internal const int EdgeTopK = 64;
 
 
 
 
 
 
-    private static readonly string PlanesMode =
-        (Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all").ToLowerInvariant();
+    private const string PlanesMode = "all";
     private static bool RunSimilarity => PlanesMode is "all" or "similarity" or "shallow";
     private static bool RunContinues => PlanesMode is "all" or "continues" or "shallow";
     private static bool RunLayers => PlanesMode == "all";
 
 
 
-    private static readonly bool NormFold =
-        !string.Equals(Environment.GetEnvironmentVariable("LAPLACE_MODEL_NORMFOLD"), "0", StringComparison.Ordinal);
+    private const bool NormFold = true;
 
     private readonly string _modelDir;
     private readonly ModelManifest _manifest;

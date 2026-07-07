@@ -7,33 +7,9 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class IngestWriterConfigTests
 {
     [Fact]
-    public void ResolveApplyPartitions_Default_IsOneBulkApply()
+    public void ResolveApplyPartitions_IsAlwaysOne()
     {
-        var prev = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
-        try
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", null);
-            Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", prev);
-        }
-    }
-
-    [Fact]
-    public void ResolveApplyPartitions_EnvOverride_IsHonored()
-    {
-        var prev = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
-        try
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", "4");
-            Assert.Equal(4, IngestTopology.ResolveApplyPartitions());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", prev);
-        }
+        Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
     }
 
     [Fact]

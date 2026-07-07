@@ -13,9 +13,7 @@ public sealed class ChessLabService
     // The /chess/lab/* HTTP surface has no request-level auth (see EndpointMappings.Chess.cs) —
     // this cap is the actual mitigation against an unbounded number of concurrent cutechess/
     // Stockfish process spawns or self-play jobs, independent of caller identity.
-    private static readonly int MaxConcurrentJobs =
-        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CHESS_LAB_MAX_CONCURRENT"), out var n) && n > 0
-            ? n : 4;
+    private const int MaxConcurrentJobs = 4;
 
     public ChessLabService(ILogger? log = null) => _log = log ?? NullLogger.Instance;
 

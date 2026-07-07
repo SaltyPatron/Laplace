@@ -11,19 +11,7 @@ public sealed class SemLinkDecomposerTests
 {
     static SemLinkDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
 
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 
     private const string PbVnJson =
         """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}, "abdicate.01": {"10.11-2": {}}}""";
@@ -159,8 +147,8 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task PredicateMatrix_Links_Roleset_VnClass_And_Frame_To_Synset_When_Cili_Present()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectPredicateMatrixAttestationsAsync();
         var rsId = CategoryAnchor.Id("give.01")!.Value;
@@ -177,8 +165,8 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task PbWn_Json_Links_Roleset_To_Synset_When_Cili_Present()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        string cili = TestInstall.ResolveCiliOrFallback();
+        if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectPbWnAttestationsAsync();
         var rsId = CategoryAnchor.Id("give.01")!.Value;

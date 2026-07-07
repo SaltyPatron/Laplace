@@ -21,7 +21,7 @@ public sealed class AnchorResolverParityTests : IDisposable
     private static extern int LpResolveSynsetAnchor(IntPtr map, byte[] raw, nuint n, out Hash128 outId);
 
     private readonly string _dir;
-    private readonly string? _prevCiliDir;
+    private readonly string? _prevCiliOverride;
 
     public AnchorResolverParityTests()
     {
@@ -32,8 +32,8 @@ public sealed class AnchorResolverParityTests : IDisposable
             "i23456\t02244956-v\n" +
             "i34567\t02164298-s\n");
 
-        _prevCiliDir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
-        Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _dir);
+        _prevCiliOverride = SourceEntityIdConventions.TestCiliDirOverride;
+        SourceEntityIdConventions.TestCiliDirOverride = _dir;
         SourceEntityIdConventions.ResetIliMapCacheForTests();
     }
 
@@ -75,7 +75,7 @@ public sealed class AnchorResolverParityTests : IDisposable
 
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _prevCiliDir);
+        SourceEntityIdConventions.TestCiliDirOverride = _prevCiliOverride;
         SourceEntityIdConventions.ResetIliMapCacheForTests();
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }

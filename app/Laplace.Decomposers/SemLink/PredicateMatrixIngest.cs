@@ -231,12 +231,8 @@ internal static class PredicateMatrixIngest
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        string? env = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            string full = Path.GetFullPath(env);
-            if (seen.Add(full)) yield return full;
-        }
+        string ingest = LaplaceInstall.ResolveIngestRoot();
+        if (seen.Add(ingest)) yield return ingest;
 
         string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
         if (seen.Add(platformDefault)) yield return platformDefault;

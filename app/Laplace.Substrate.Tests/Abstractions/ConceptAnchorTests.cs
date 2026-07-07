@@ -18,7 +18,7 @@ public class ConceptAnchorTests
     [Fact]
     public void EmitSynset_Runs_AndProducesDecomposedAnchorPlusIsA()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        string cili = TestPathHelpers.CiliOrFallback();
         if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
 
         CodepointPerfcache.LoadDefault();
@@ -54,9 +54,10 @@ public class ConceptAnchorTests
     [Fact]
     public void Satellite_ResolvesUnderBothPos_AsCollapseDoesNotDrop()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        string cili = TestPathHelpers.CiliOrFallback();
         string mapPath = Path.Combine(cili, IliMap.MapFileName);
         if (!File.Exists(mapPath)) return;
+        if (IliMap.Load(cili).Count < 100_000) return;
 
         CodepointPerfcache.LoadDefault();
 

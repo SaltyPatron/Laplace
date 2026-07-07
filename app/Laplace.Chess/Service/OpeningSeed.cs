@@ -1,12 +1,12 @@
 using System.IO;
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
 public static class OpeningSeed
 {
-    public static string DefaultDir => Path.Combine(
-        Environment.GetEnvironmentVariable("INGEST") ?? @"D:\Data\Ingest", "Games", "Chess", "openings");
+    public static string DefaultDir => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "openings");
 
     public static IReadOnlyList<string> Fens(string? path = null, int plies = 10, int max = 0)
     {

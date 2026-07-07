@@ -678,12 +678,9 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         return -3;
     }
     {
-        const char* cili = getenv("LAPLACE_CILI_DIR");
-        if (cili && cili[0]) {
-            char mp[4096];
-            int wn = snprintf(mp, sizeof(mp), "%s/ili-map-pwn30.tab", cili);
-            if (wn > 0 && (size_t)wn < sizeof(mp)) s->ili_map = lp_ili_map_load(mp);
-        }
+        const char* ili_path = cfg->ili_map_path;
+        if (ili_path && ili_path[0])
+            s->ili_map = lp_ili_map_load(ili_path);
     }
 
     memset(&s->total, 0, sizeof(s->total));

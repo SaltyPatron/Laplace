@@ -1,6 +1,7 @@
 using System.Net;
 using System.Threading.RateLimiting;
 using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Microsoft.AspNetCore.HttpOverrides;
 using Laplace.Endpoints.OpenAICompat;
 using Npgsql;
@@ -9,51 +10,27 @@ using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Formatting.Compact;
 
-ChessLabPaths.LoadEnvFile();
-LaplaceEndpointDefaults.Initialize();
-
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
-    ContentRootPath = LaplaceEndpointDefaults.ContentRoot,
-    WebRootPath = LaplaceEndpointDefaults.WebRoot,
+    ContentRootPath = LaplaceInstall.InstallRoot,
+    WebRootPath = LaplaceInstall.WebRoot,
 });
 
-
+builder.WebHost.ConfigureKestrel(options =>
+    options.ListenLocalhost(LaplaceInstall.EndpointPort));
 
 builder.Host.UseSerilog((_, lc) =>
 {
     lc.MinimumLevel.Information().Enrich.FromLogContext();
-    if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_LOG_JSON"), "true", StringComparison.OrdinalIgnoreCase))
-        lc.WriteTo.Console(new CompactJsonFormatter());
-    else
-        lc.WriteTo.Console();
-    var logDir = Environment.GetEnvironmentVariable("LAPLACE_LOG_DIR");
-    if (!string.IsNullOrWhiteSpace(logDir))
-        lc.WriteTo.File(new CompactJsonFormatter(), Path.Combine(logDir, "endpoint-.json"),
-            rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14);
+    lc.WriteTo.Console();
 });
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddOpenApi();
 
-
-
-var corsOrigins = (Environment.GetEnvironmentVariable("LAPLACE_CORS_ORIGINS") ?? string.Empty)
-    .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-if (corsOrigins.Length > 0)
-{
-    builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
-        .WithOrigins(corsOrigins)
-        .AllowAnyMethod()
-        .WithHeaders("Content-Type", "Authorization", "X-Laplace-Tenant", "X-Laplace-Quote-Id", "X-Correlation-Id")
-        .WithExposedHeaders("X-Correlation-Id")));
-}
-
-
-
-var perTenantPerMinute = ReadIntEnv("LAPLACE_RATELIMIT_PERMIN", 300);
-var webhookPerMinute = ReadIntEnv("LAPLACE_RATELIMIT_WEBHOOK_PERMIN", 120);
+const int perTenantPerMinute = 300;
+const int webhookPerMinute = 120;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -86,24 +63,13 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
-
-
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics => metrics
         .AddAspNetCoreInstrumentation()
         .AddPrometheusExporter())
-    .WithTracing(tracing =>
-    {
-        tracing.AddAspNetCoreInstrumentation();
-        tracing.AddNpgsql();
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")))
-            tracing.AddOtlpExporter();
-    });
+    .WithTracing(tracing => tracing.AddAspNetCoreInstrumentation().AddNpgsql());
 
 var app = builder.Build();
-
-
-
 
 var forwardedHeaders = new ForwardedHeadersOptions
 {
@@ -115,13 +81,9 @@ forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
 forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
 
-if (corsOrigins.Length > 0)
-    app.UseCors();
 app.UseRateLimiter();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionEnvelopeMiddleware>();
-
-
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
@@ -143,7 +105,6 @@ app.MapBillingEndpoints();
 app.MapChessEndpoints();
 app.MapFeedbackEndpoints();
 
-
 app.MapFallback("/v1/{*path}", () => Results.Json(
     new Laplace.Api.Contracts.ErrorResponse(
         new Laplace.Api.Contracts.ErrorBody("not_found", "unknown_route", "No such API route.")),
@@ -151,8 +112,5 @@ app.MapFallback("/v1/{*path}", () => Results.Json(
 app.MapFallbackToFile("index.html");
 
 app.Run();
-
-static int ReadIntEnv(string name, int fallback) =>
-    int.TryParse(Environment.GetEnvironmentVariable(name), out var value) && value > 0 ? value : fallback;
 
 public partial class Program;

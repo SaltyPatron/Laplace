@@ -1,7 +1,7 @@
 using System.Linq;
 using DbUp;
 using DbUp.Engine;
-using Microsoft.Extensions.Configuration;
+using Laplace.Engine.Core;
 using Npgsql;
 
 namespace Laplace.Migrations;
@@ -94,7 +94,6 @@ internal static class Program
     private static bool Confirmed(string token)
     {
         if (Environment.GetCommandLineArgs().Contains("--yes")) return true;
-        if (Environment.GetEnvironmentVariable("LAPLACE_CONFIRM") == token) return true;
         Console.Write($"Type '{token}' to confirm: ");
         return Console.ReadLine() == token;
     }
@@ -197,28 +196,10 @@ internal static class Program
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (args[i] == "--connection-string") return args[i + 1];
+            if (args[i] == "--database") return LaplaceInstall.PostgresConnectionString(args[i + 1]);
         }
 
-        var config = new ConfigurationBuilder().AddEnvironmentVariables().Build();
-
-        var fromEnv = config["DATABASE_URL"];
-        if (!string.IsNullOrWhiteSpace(fromEnv))
-        {
-            return fromEnv.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
-                ? ParsePostgresUrl(fromEnv)
-                : fromEnv;
-        }
-
-        var builder = new NpgsqlConnectionStringBuilder
-        {
-            Host = config["PGHOST"] ?? "/var/run/postgresql",
-            Username = config["PGUSER"] ?? "laplace_admin",
-            Database = config["PGDATABASE"] ?? "laplace-dev",
-        };
-        if (int.TryParse(config["PGPORT"], out var port)) builder.Port = port;
-        if (!string.IsNullOrWhiteSpace(config["PGPASSWORD"])) builder.Password = config["PGPASSWORD"];
-
-        return builder.ConnectionString;
+        return LaplaceInstall.PostgresConnectionString();
     }
 
     private static string ParsePostgresUrl(string url)

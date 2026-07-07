@@ -4,48 +4,9 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Cli;
 
-
-
-
-
-
-
 internal static class CliRuntime
 {
-    public static string ConnString
-    {
-        get
-        {
-            var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
-                ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev";
-            if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
-                s += ";Include Error Detail=true";
-            if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
-                s += ";Search Path=laplace,public";
-            if (!s.Contains("Command Timeout", StringComparison.OrdinalIgnoreCase)
-                && !s.Contains("Timeout", StringComparison.OrdinalIgnoreCase))
-                s += ";Command Timeout=0";
-            return s;
-        }
-    }
-
-    public static int EnvInt(string name, int fallback, int min)
-    {
-        var raw = Environment.GetEnvironmentVariable(name);
-        return int.TryParse(raw, out var v) && v >= min ? v : fallback;
-    }
-
-    public static long EnvLong(string name, long fallback, long min)
-    {
-        var raw = Environment.GetEnvironmentVariable(name);
-        return long.TryParse(raw, out var v) && v >= min ? v : fallback;
-    }
-
-    public static double EnvDouble(string name, double fallback)
-    {
-        var raw = Environment.GetEnvironmentVariable(name);
-        return double.TryParse(raw, out var v) && v >= 0 ? v : fallback;
-    }
+    public static string ConnString => LaplaceInstall.PostgresConnectionString();
 
     public static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
 
@@ -64,23 +25,5 @@ internal static class CliRuntime
         return 0;
     }
 
-    public static string ResolveBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        const string share = "/opt/laplace/share/laplace";
-        if (Directory.Exists(share))
-        {
-            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin").FirstOrDefault();
-            if (hit is not null) return hit;
-        }
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    public static string ResolveBlob() => LaplaceInstall.ResolveT0Perfcache();
 }

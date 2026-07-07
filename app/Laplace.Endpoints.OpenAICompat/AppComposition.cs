@@ -1,6 +1,6 @@
 using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat.Auth;
-using Laplace.Endpoints.OpenAICompat.BillingPostgres;
+using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -10,15 +10,7 @@ internal static class AppComposition
 {
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
-
-
-        var authMode = Environment.GetEnvironmentVariable("LAPLACE_AUTH_MODE") ?? "header";
-        services.AddSingleton<ITenantResolver>(authMode.ToLowerInvariant() switch
-        {
-            "header" => new HeaderTenantResolver(),
-            _ => throw new InvalidOperationException(
-                $"Unknown LAPLACE_AUTH_MODE '{authMode}' (supported: header).")
-        });
+        services.AddSingleton<ITenantResolver, HeaderTenantResolver>();
 
         services.AddSingleton<SubstrateClient>();
         services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
@@ -27,13 +19,13 @@ internal static class AppComposition
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
 
-
-        var chessWeight = double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CHESS_WEIGHT"), out var w) ? w : 0.5d;
+        const double chessWeight = 0.5d;
         services.AddSingleton(sp => new ChessEngineService(
-            ChessEngineService.ResolveConnString(), chessWeight,
+            LaplaceInstall.PostgresConnectionString(), chessWeight,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
+
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
@@ -43,40 +35,18 @@ internal static class AppComposition
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
 
-
-
-
-        var billingStore = Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE") ?? "memory";
-        if (string.Equals(billingStore, "postgres", StringComparison.OrdinalIgnoreCase))
-        {
-            services.AddSingleton<IStripePriceMap>(sp => new PostgresStripePriceMap(sp.GetRequiredService<SubstrateClient>().DataSource));
-            services.AddSingleton<IBillingEntitlementStore>(sp => new PostgresBillingEntitlementStore(sp.GetRequiredService<SubstrateClient>().DataSource));
-            services.AddSingleton<IBillingWebhookEventStore>(sp => new PostgresBillingWebhookEventStore(sp.GetRequiredService<SubstrateClient>().DataSource));
-            services.AddSingleton<IBillingLedger>(sp => new PostgresBillingLedger(sp.GetRequiredService<SubstrateClient>().DataSource));
-            services.AddSingleton<IBillingQuoteStore>(sp => new PostgresBillingQuoteStore(sp.GetRequiredService<SubstrateClient>().DataSource));
-        }
-        else if (string.Equals(billingStore, "memory", StringComparison.OrdinalIgnoreCase))
-        {
-            services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
-            services.AddSingleton<IBillingEntitlementStore, InMemoryBillingEntitlementStore>();
-            services.AddSingleton<IBillingWebhookEventStore, InMemoryBillingWebhookEventStore>();
-            services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
-            services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
-        }
-        else
-        {
-            throw new InvalidOperationException(
-                $"Unknown LAPLACE_BILLING_STORE '{billingStore}' (supported: memory, postgres).");
-        }
+        services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
+        services.AddSingleton<IBillingEntitlementStore, InMemoryBillingEntitlementStore>();
+        services.AddSingleton<IBillingWebhookEventStore, InMemoryBillingWebhookEventStore>();
+        services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
+        services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
 
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {
-            options.ApiKey = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_API_KEY");
-            options.WebhookSecret = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_WEBHOOK_SECRET");
-            options.SuccessUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_SUCCESS_URL") ?? "http://localhost:5187/billing/success";
-            options.CancelUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_CANCEL_URL") ?? "http://localhost:5187/billing/cancel";
-            options.Currency = Environment.GetEnvironmentVariable("LAPLACE_BILLING_CURRENCY") ?? "usd";
-            options.Bypass = LaplaceEndpointDefaults.BillingBypass;
+            options.Currency = "usd";
+            options.SuccessUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/success";
+            options.CancelUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/cancel";
+            options.Bypass = true;
         });
 
         return services;

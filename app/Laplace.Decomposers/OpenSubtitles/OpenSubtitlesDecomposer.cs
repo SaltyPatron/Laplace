@@ -86,13 +86,7 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase, IIng
         return inv?.TotalInputUnits;
     }
 
-    internal static HashSet<string>? ResolvePairAllowlist()
-    {
-        string? env = Environment.GetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS");
-        if (string.IsNullOrWhiteSpace(env)) return null;
-        return env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                  .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
+    internal static HashSet<string>? ResolvePairAllowlist() => null;
 
     private static List<(string Path, string Stem)> SelectZips(string dir, DecomposerOptions options)
     {

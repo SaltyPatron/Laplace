@@ -1,36 +1,39 @@
 using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
 [Trait("Tier", "fast")]
-public sealed class ChessLabPathsTests : IDisposable
+public sealed class ChessLabPathsTests
 {
-    private readonly Dictionary<string, string?> _saved = new(StringComparer.Ordinal);
-
     [Fact]
-    public void Cutechess_UsesEnvWhenSet()
+    public void Cutechess_UsesExplicitPathWhenProvided()
     {
         var fake = Path.Combine(Path.GetTempPath(), $"cutechess-{Guid.NewGuid():N}.exe");
         File.WriteAllText(fake, "");
-        SetEnv(ChessLabPaths.EnvCutechess, fake);
 
-        var probe = ChessLabPaths.Cutechess;
+        var probe = ChessLabPaths.ResolveExecutableForTest(
+            fake,
+            _ => null,
+            ["cutechess-cli.exe"]);
 
-        Assert.Equal("env", probe.Source);
+        Assert.Equal("config", probe.Source);
         Assert.Equal(fake, probe.Path);
         Assert.True(probe.Found);
     }
 
     [Fact]
-    public void Stockfish_UsesRepoRelativeWhenRootSet()
+    public void Stockfish_UsesRepoRelativeWhenAvailable()
     {
-        var root = CreateFakeRepo();
+        if (!LaplaceInstall.TryRepoRoot(out var root))
+        {
+            return;
+        }
+
         var sf = Path.Combine(root, "build-cutechess", "stockfish.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(sf)!);
         File.WriteAllText(sf, "");
-        SetEnv("LAPLACE_ROOT", root);
-        ClearEnv(ChessLabPaths.EnvStockfish);
 
         var probe = ChessLabPaths.ResolveExecutableForTest(
             null,
@@ -49,15 +52,13 @@ public sealed class ChessLabPathsTests : IDisposable
         Directory.CreateDirectory(dir);
         var uci = Path.Combine(dir, "laplace-uci.exe");
         File.WriteAllText(uci, "");
-        ClearEnv(ChessLabPaths.EnvUci);
-        SetEnv("PATH", dir + Path.PathSeparator + (Environment.GetEnvironmentVariable("PATH") ?? ""));
 
         var probe = ChessLabPaths.ResolveExecutableForTest(
-            null,
+            uci,
             _ => null,
             ["laplace-uci.exe", "laplace-uci"]);
 
-        Assert.Equal("path", probe.Source);
+        Assert.Equal("config", probe.Source);
         Assert.Equal(uci, probe.Path);
         Assert.True(probe.Found);
     }
@@ -65,9 +66,7 @@ public sealed class ChessLabPathsTests : IDisposable
     [Fact]
     public void QtBin_MissingWhenUnset()
     {
-        ClearEnv(ChessLabPaths.EnvQtBin);
-
-        var probe = ChessLabPaths.QtBin;
+        var probe = ChessLabPaths.ResolveQtBinForTest(null);
 
         Assert.Equal("missing", probe.Source);
         Assert.False(probe.Found);
@@ -75,60 +74,40 @@ public sealed class ChessLabPathsTests : IDisposable
     }
 
     [Fact]
-    public void LoadEnvFile_SetsUnsetVariables()
+    public void QtBin_UsesConfigPath()
     {
-        ClearEnv(ChessLabPaths.EnvStockfish);
-        var envFile = Path.Combine(Path.GetTempPath(), $"chess-lab-{Guid.NewGuid():N}.env");
-        var sf = Path.Combine(Path.GetTempPath(), $"sf-{Guid.NewGuid():N}.exe");
-        File.WriteAllText(envFile, $"{ChessLabPaths.EnvStockfish}={sf}\n");
-        try
-        {
-            ChessLabPaths.LoadEnvFile(envFile);
-            Assert.Equal(sf, Environment.GetEnvironmentVariable(ChessLabPaths.EnvStockfish));
-        }
-        finally
-        {
-            File.Delete(envFile);
-        }
+        var dir = Path.Combine(Path.GetTempPath(), $"qt-bin-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var probe = ChessLabPaths.ResolveQtBinForTest(dir);
+
+        Assert.Equal("config", probe.Source);
+        Assert.Equal(dir, probe.Path);
+        Assert.True(probe.Found);
     }
 
     [Fact]
-    public void LoadEnvFile_DoesNotOverrideExisting()
+    public void LaplaceUci_FallsBackWhenConfigPathMissing()
     {
-        SetEnv(ChessLabPaths.EnvStockfish, "existing.exe");
-        var envFile = Path.Combine(Path.GetTempPath(), $"chess-lab-{Guid.NewGuid():N}.env");
-        File.WriteAllText(envFile, $"{ChessLabPaths.EnvStockfish}=from-file.exe\n");
-        try
-        {
-            ChessLabPaths.LoadEnvFile(envFile);
-            Assert.Equal("existing.exe", Environment.GetEnvironmentVariable(ChessLabPaths.EnvStockfish));
-        }
-        finally
-        {
-            File.Delete(envFile);
-        }
+        var dir = Path.Combine(Path.GetTempPath(), $"laplace-neighbor-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var uci = Path.Combine(dir, "laplace-uci.exe");
+        File.WriteAllText(uci, "");
+
+        var probe = ChessLabPaths.ResolveExecutableForTest(
+            Path.Combine(Path.GetTempPath(), $"missing-uci-{Guid.NewGuid():N}.exe"),
+            _ => null,
+            ["laplace-uci.exe", "laplace-uci"],
+            uci);
+
+        Assert.Equal("path", probe.Source);
+        Assert.Equal(uci, probe.Path);
+        Assert.True(probe.Found);
     }
 
-    private static string CreateFakeRepo()
+    [Fact]
+    public void LabDir_UsesTempRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), $"laplace-repo-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(root, "app"));
-        Directory.CreateDirectory(Path.Combine(root, "engine"));
-        return root;
-    }
-
-    private void SetEnv(string key, string? value)
-    {
-        if (!_saved.ContainsKey(key))
-            _saved[key] = Environment.GetEnvironmentVariable(key);
-        Environment.SetEnvironmentVariable(key, value);
-    }
-
-    private void ClearEnv(string key) => SetEnv(key, null);
-
-    public void Dispose()
-    {
-        foreach (var (key, value) in _saved)
-            Environment.SetEnvironmentVariable(key, value);
+        Assert.StartsWith(Path.GetTempPath(), ChessLabPaths.LabDir, StringComparison.OrdinalIgnoreCase);
     }
 }

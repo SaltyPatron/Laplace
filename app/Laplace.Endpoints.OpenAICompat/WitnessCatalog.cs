@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Laplace.Api.Contracts;
 
+using Laplace.Engine.Core;
+
 namespace Laplace.Endpoints.OpenAICompat;
 
 internal sealed class WitnessCatalog
@@ -91,9 +93,8 @@ internal sealed class WitnessCatalog
 
     private static IEnumerable<string> CandidatePaths()
     {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
-        if (!string.IsNullOrWhiteSpace(env))
-            yield return Path.Combine(env, "scripts", "win", "witness-manifest.json");
+        if (LaplaceInstall.TryRepoRoot(out var root))
+            yield return Path.Combine(root, "scripts", "win", "witness-manifest.json");
 
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
             yield return Path.Combine(dir.FullName, "scripts", "win", "witness-manifest.json");

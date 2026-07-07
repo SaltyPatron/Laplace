@@ -14,7 +14,7 @@ test('Chess Lab tab loads with accessible form controls', async ({ page }) => {
   await page.getByRole('button', { name: 'Lab' }).click();
   await expect(page.getByRole('heading', { name: 'Chess Lab' })).toBeVisible();
   const results = await new AxeBuilder({ page })
-    .include('.chess-lab')
+    .include('main')
     .analyze();
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
 });

@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
@@ -202,9 +203,7 @@ public sealed class PostgresBillingStoreContractTests : BillingStoreContractTest
 
     private static NpgsqlDataSource? TryBuild()
     {
-        var connString = Environment.GetEnvironmentVariable("LAPLACE_DB");
-        if (string.IsNullOrWhiteSpace(connString))
-            return null;
+        var connString = LaplaceInstall.PostgresConnectionString();
         try
         {
             var dataSource = new NpgsqlDataSourceBuilder(connString).Build();

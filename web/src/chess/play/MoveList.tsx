@@ -1,6 +1,6 @@
 import type { MoveScore } from './Board';
-
 import type { SearchInfo } from '../ChessView';
+import { formatSubstrateMoveDelta } from '../evalDisplay';
 
 import { cn, Muted, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
 
@@ -46,7 +46,7 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
 
           <ul className={shared.stats}>
 
-            <li>eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b> <Muted>pawns, mover&rsquo;s view</Muted></li>
+            <li>eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b> <Muted>pawns, white&rsquo;s view</Muted></li>
 
             <li>depth <b>{search.depth}</b> · nodes <b>{search.nodes.toLocaleString()}</b></li>
 
@@ -104,7 +104,7 @@ export function MoveList({ topMoves, history = [], evalMode = false, search = nu
 
               <span className={styles.uci}>{m.uci}</span>
 
-              <span className={styles.mu}>{m.effMu.toFixed(0)}</span>
+              <span className={styles.mu}>{formatSubstrateMoveDelta(m.effMu)}</span>
 
               {i === 0 && (
 

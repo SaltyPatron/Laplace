@@ -33,20 +33,6 @@ internal static class FoundryExport
         public static readonly PlaneCoo Empty = new([], [], []);
     }
 
-    internal static int EnvInt(string name, int dflt) =>
-        int.TryParse(Environment.GetEnvironmentVariable(name), out var v) && v > 0 ? v : dflt;
-
-    internal static double EnvDouble(string name, double dflt) =>
-        double.TryParse(Environment.GetEnvironmentVariable(name),
-            System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : dflt;
-
-    internal static double EnvDoubleOr(string name, double ifUnset) =>
-        Environment.GetEnvironmentVariable(name) is { Length: > 0 } raw
-        && double.TryParse(raw, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0
-            ? v : ifUnset;
-
 
 
 
@@ -785,7 +771,7 @@ internal static class FoundryExport
         }
 
 
-        int corpusMax = EnvInt("LAPLACE_FOUNDRY_CORPUS_MAX", 200_000);
+        int corpusMax = FoundryDefaults.CorpusMax;
         if (corpusMax > 0)
         {
             await using var setCmd = conn.CreateCommand();
@@ -836,7 +822,7 @@ internal static class FoundryExport
 
 
 
-        if (EnvInt("LAPLACE_FOUNDRY_PPMI", 1) != 0) ApplyPpmi(adj);
+        if (FoundryDefaults.Ppmi) ApplyPpmi(adj);
         return CooFromAdj(adj, degreeCap);
     }
 
@@ -934,7 +920,7 @@ internal static class FoundryExport
         int vocab, int dModel, PlaneCoo aff, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
     {
-        int k = Math.Min(dModel - 1, Math.Min(EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256), vocab));
+        int k = Math.Min(dModel - 1, Math.Min(FoundryDefaults.BasisRank, vocab));
         var A = new float[(long)vocab * vocab];
         for (long e = 0; e < aff.Nnz; e++)
         {
@@ -1050,7 +1036,7 @@ internal static class FoundryExport
 
 
 
-        if (vocab <= EnvInt("LAPLACE_FOUNDRY_DENSE_SVD_MAX", 6000))
+        if (vocab <= FoundryDefaults.DenseSvdMax)
         {
             var As = new float[(long)vocab * vocab];
             for (int i = 0; i < sn; i++) As[(long)sx[i] * vocab + sy[i]] = (float)sv[i];
@@ -1092,8 +1078,8 @@ internal static class FoundryExport
     internal static int FactorSparseRandomized(
         int[] sx, int[] sy, double[] sv, int sn, int vocab, int dim, double[] embed, double[] lmHead)
     {
-        int L = Math.Min(vocab, dim + EnvInt("LAPLACE_FOUNDRY_RSVD_OVERSAMPLE", 16));
-        int q = EnvInt("LAPLACE_FOUNDRY_RSVD_POWER", 1);
+        int L = Math.Min(vocab, dim + FoundryDefaults.RsvdOversample);
+        int q = FoundryDefaults.RsvdPower;
 
         var Y = new double[(long)L * vocab];
         var Om = new double[(long)L * vocab];
@@ -1200,12 +1186,12 @@ internal static class FoundryExport
 
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
-        out BasisStats stats)
+        out BasisStats stats, bool coordDirect = false, double? coordScale = null)
     {
-        bool coordOnly = EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0;
+        bool coordOnly = FoundryDefaults.CoordOnly;
         int k = coordOnly
             ? Math.Min(4, dModel - 1)
-            : Math.Min(Math.Min(dModel - 1, EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256)),
+            : Math.Min(Math.Min(dModel - 1, FoundryDefaults.BasisRank),
                        Math.Max(2, vocab - 2));
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
         if (coordOnly)
@@ -1263,20 +1249,14 @@ internal static class FoundryExport
         var fitIdx = new List<int>();
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
         var e = new double[(long)vocab * dModel];
-        bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
+        bool coordDirectMode = coordDirect || FoundryDefaults.CoordDirect;
         if (coordOnly)
         {
 
         }
-        else if (coordDirect && fitIdx.Count > 0)
+        else if (coordDirectMode && fitIdx.Count > 0)
         {
-
-
-
-
-
-
-            double cs = EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 1.0);
+            double cs = coordScale ?? FoundryDefaults.CoordScale;
             for (int i = 0; i < vocab; i++)
             {
                 var a = anchors[i];
@@ -1328,7 +1308,7 @@ internal static class FoundryExport
 
 
                     double scale = anchSq > 0 ? Math.Sqrt(specSq / anchSq) : 1.0;
-                    if (EnvInt("LAPLACE_FOUNDRY_PROCRUSTES", 1) != 0)
+                    if (FoundryDefaults.Procrustes)
                         for (int i = 0; i < vocab; i++)
                             for (int d = 0; d < 4; d++)
                                 y[(long)i * k + d] = a4[(long)i * 4 + d] * scale;
@@ -1346,7 +1326,7 @@ internal static class FoundryExport
 
 
 
-        double capFrac = EnvDouble("LAPLACE_FOUNDRY_CAP_FRAC", 0.05);
+        double capFrac = FoundryDefaults.CapFrac;
         int capDims = Math.Max(1, dModel - 1 - k);
         double capScale = Math.Sqrt(capFrac * ((double)k / vocab) / capDims);
         for (int d = k; d < dModel - 1; d++)

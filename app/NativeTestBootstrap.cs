@@ -1,38 +1,30 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-
-
-
+using Laplace.Engine.Core;
 
 internal static class NativeTestBootstrap
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr AddDllDirectory(string newDirectory);
+
     [ModuleInitializer]
     internal static void Init()
     {
         if (!OperatingSystem.IsWindows()) return;
 
-        // laplace_synthesis (and dynamics under MKL) resolve oneAPI runtime
-        // DLLs from PATH; test hosts launched without env.cmd don't have
-        // them. Prepend the oneAPI bins so NativeLibrary.Load can bind
-        // dependencies exactly like the script-driven processes do.
         var oneApi = new[]
         {
             @"C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin",
             @"C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin",
             @"C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin",
         };
-        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
         foreach (var dir in oneApi)
-            if (Directory.Exists(dir) && !path.Contains(dir, StringComparison.OrdinalIgnoreCase))
-                path = dir + ";" + path;
-        Environment.SetEnvironmentVariable("PATH", path);
+            if (Directory.Exists(dir))
+                AddDllDirectory(dir);
 
-        string? root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
+        string? root = LaplaceInstall.TryRepoRoot(out var repo) ? repo : null;
 
-        // Build outputs live outside the repo (Directory.Build.props), so an
-        // ancestor walk from the test binary can't find build-win — prefer
-        // the repo root stamped into every assembly at build time.
         if (string.IsNullOrEmpty(root))
         {
             root = typeof(NativeTestBootstrap).Assembly

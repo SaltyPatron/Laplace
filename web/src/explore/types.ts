@@ -1,19 +1,19 @@
 export interface SubstrateCount { metric: string; value: number; }
 export interface ConsensusHealth {
-  evidence_rows: number;
-  consensus_rows: number;
-  dedup_ratio?: number | null;
-  avg_witnesses?: number | null;
-  max_witnesses?: number | null;
+  evidenceRows: number;
+  consensusRows: number;
+  dedupRatio?: number | null;
+  avgWitnesses?: number | null;
+  maxWitnesses?: number | null;
 }
 export interface VisualizationEdge {
-  subject_id_hex: string;
+  subjectIdHex: string;
   subject: string;
-  type_id_hex: string;
+  typeIdHex: string;
   type: string;
-  object_id_hex: string;
+  objectIdHex: string;
   object: string;
-  effective_mu: number;
+  effectiveMu: number;
   witnesses: number;
 }
 export interface ExploreSourceRow {

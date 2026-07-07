@@ -242,6 +242,10 @@
     box-shadow: inset 0 0 0 2px rgba(255, 207, 58, 0.55);
   }
 
+  .inCheck {
+    background: radial-gradient(circle at center, hsla(28, 90%, 55%, 0.75), hsla(28, 80%, 45%, 0.25) 70%);
+  }
+
   .mated {
     background: radial-gradient(circle at center, hsla(0, 85%, 55%, 0.85), hsla(0, 80%, 45%, 0.35) 70%);
   }

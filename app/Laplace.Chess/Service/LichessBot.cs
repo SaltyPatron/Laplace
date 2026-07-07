@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -38,21 +39,8 @@ public sealed class LichessBot : IAsyncDisposable
     public static string? ResolveToken(string? explicitToken = null)
     {
         if (!string.IsNullOrWhiteSpace(explicitToken)) return explicitToken;
-        var env = Environment.GetEnvironmentVariable("LICHESS_API");
-        if (!string.IsNullOrWhiteSpace(env)) return env;
-        var envFile = Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "deploy", "secrets", "lichess.env");
-        if (!File.Exists(envFile)) return null;
-        foreach (var line in File.ReadLines(envFile))
-        {
-            if (line.TrimStart().StartsWith('#')) continue;
-            var eq = line.IndexOf('=');
-            if (eq < 0) continue;
-            var key = line[..eq].Trim();
-            if (key is "LICHESS_TOKEN" or "LICHESS_API")
-                return line[(eq + 1)..].Trim();
-        }
-        return null;
+        return LaplaceInstall.TryReadDeploySecret("lichess.env", "LICHESS_API")
+            ?? LaplaceInstall.TryReadDeploySecret("lichess.env", "LICHESS_TOKEN");
     }
 
     public async Task RunAsync(int maxConcurrent = 4, CancellationToken ct = default)

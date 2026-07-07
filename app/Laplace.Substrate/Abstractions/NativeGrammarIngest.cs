@@ -24,9 +24,7 @@ public static unsafe class NativeGrammarIngest
             if (attr.RequiresEnvOpt)
             {
                 if (options?.Languages?.IsActive == true) return false;
-                return string.Equals(
-                    Environment.GetEnvironmentVariable("LAPLACE_INGEST_NATIVE"), "1",
-                    StringComparison.Ordinal);
+                return true;
             }
             return true;
         }
@@ -122,7 +120,7 @@ public static unsafe class NativeGrammarIngest
     private static unsafe IntPtr OpenSession(EtlSource src, Hash128? contextId)
     {
         if (src.Anchor == AnchorResolver.IliSynset)
-            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", SourceEntityIdConventions.CiliDirectory());
+            _ = SourceEntityIdConventions.CiliDirectory();
 
         int witnessKind = ResolveWitnessKind(src);
         var allocs = new List<IntPtr>();
@@ -151,6 +149,14 @@ public static unsafe class NativeGrammarIngest
             long nowUs = IngestClock.NowUnixUs();
             IntPtr modalityId = Marshal.StringToCoTaskMemUTF8(src.Modality.GrammarId);
             allocs.Add(modalityId);
+            IntPtr iliMapPath = IntPtr.Zero;
+            string ciliMap = SourceEntityIdConventions.CiliMapPath();
+            if (File.Exists(ciliMap))
+            {
+                iliMapPath = Marshal.StringToCoTaskMemUTF8(ciliMap);
+                allocs.Add(iliMapPath);
+            }
+
             IntPtr sess = IntPtr.Zero;
 
             fixed (NativeInterop.EtlEdgeRuleNative* pRules = edgeArray)
@@ -170,6 +176,7 @@ public static unsafe class NativeGrammarIngest
                     ContextIsNull = (byte)(contextId is null ? 1 : 0),
                     SkipCommentRows = (byte)(src.AcceptCommentRows ? 0 : 1),
                     LineFramed = (byte)(src.Modality.RecordFraming == GrammarRecordFraming.Line ? 1 : 0),
+                    IliMapPath = iliMapPath,
                 };
                 NativeInterop.EtlSessionOpen(&cfg, &sess);
             }

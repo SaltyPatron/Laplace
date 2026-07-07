@@ -10,19 +10,7 @@ public sealed class VerbNetDecomposerTests
 {
     static VerbNetDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
 
-    private static string ResolvePerfcacheBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
-    }
+    private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 
     private const string ClassXml = """
 <VNCLASS ID="give-13.1">

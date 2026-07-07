@@ -228,19 +228,7 @@ public sealed class IngestTopology
 
 
 
-    public static int ResolveApplyPartitions()
-
-    {
-
-        var raw = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
-
-        if (int.TryParse(raw, out int n) && n >= 1)
-
-            return n;
-
-        return 1;
-
-    }
+    public static int ResolveApplyPartitions() => 1;
 
 
 

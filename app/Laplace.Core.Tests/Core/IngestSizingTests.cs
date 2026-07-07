@@ -30,16 +30,7 @@ public sealed class IngestSizingTests
     [Fact]
     public void Resolve_DefaultApplyPartitions_OneBulkApplyPerCommit()
     {
-        var prev = Environment.GetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS");
-        try
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", null);
-            Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("LAPLACE_APPLY_PARTITIONS", prev);
-        }
+        Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
     }
 
     [Fact]
