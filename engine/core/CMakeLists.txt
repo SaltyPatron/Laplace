@@ -196,12 +196,14 @@ install(TARGETS laplace_core
 )
 
 # Ship the linker PDB alongside the DLL so a deployed native crash symbolizes.
-# OPTIONAL: absent on non-MSVC toolchains / Debug-only configs without /DEBUG.
-install(FILES $<TARGET_PDB_FILE:laplace_core>
-    DESTINATION lib
-    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
-    OPTIONAL
-)
+# Windows/MSVC only — TARGET_PDB_FILE is invalid on Linux CI (breaks cmake --generate).
+if(WIN32)
+    install(FILES $<TARGET_PDB_FILE:laplace_core>
+        DESTINATION lib
+        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+        OPTIONAL
+    )
+endif()
 
 install(FILES ${LAPLACE_PERFCACHE_BIN}
     DESTINATION share/laplace
