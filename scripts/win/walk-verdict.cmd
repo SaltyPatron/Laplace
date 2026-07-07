@@ -4,7 +4,7 @@ call "%~dp0env.cmd"
 
 set "VERDICT_DB=%~1"
 if not defined VERDICT_DB set "VERDICT_DB=laplace_export"
-set "OUTDIR=%LAPLACE_ROOT%\build-win\verdicts"
+set "OUTDIR=%LAPLACE_ENGINE_BUILD%\verdicts"
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
 echo ==== B2 index rebuild on %VERDICT_DB% (minutes at 1e8+ rows) ====

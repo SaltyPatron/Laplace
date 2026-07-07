@@ -2,11 +2,13 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot      = (Resolve-Path "$PSScriptRoot\..\.."),
-  [string]$OutDir        = "D:\Data\inetsrv\laplace-api",
+  [string]$OutDir        = $(if ($env:LAPLACE_IIS_API) { $env:LAPLACE_IIS_API } else { "D:\Data\inetsrv\laplace-api" }),
   [string]$EnvFile       = "$PSScriptRoot\laplace-api.env",
   [string]$Configuration = "Release"
 )
 $ErrorActionPreference = "Stop"
+$dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { "D:\Data\Laplace" }
+$engineBuild = if ($env:LAPLACE_ENGINE_BUILD) { $env:LAPLACE_ENGINE_BUILD } else { Join-Path $dataRoot "build-win" }
 $proj = "$RepoRoot\app\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj"
 $uciProj = "$RepoRoot\app\Laplace.Chess.Uci\Laplace.Chess.Uci.csproj"
 if (-not (Test-Path $EnvFile)) {
@@ -40,12 +42,15 @@ if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
 New-Item -ItemType Directory $wwwroot | Out-Null
 Copy-Item "$RepoRoot\web\dist\*" $wwwroot -Recurse -Force
 $natives = @(
-  "$RepoRoot\build-win\core\laplace_core.dll",
-  "$RepoRoot\build-win\dynamics\laplace_dynamics.dll",
-  "$RepoRoot\build-win\synthesis\laplace_synthesis.dll",
+  "$engineBuild\core\laplace_core.dll",
+  "$engineBuild\dynamics\laplace_dynamics.dll",
+  "$engineBuild\synthesis\laplace_synthesis.dll",
   "C:\Program Files\PostgreSQL\18\bin\libxml2.dll"
 )
-foreach ($n in $natives) { if (Test-Path $n) { Copy-Item $n $stage -Force } else { Write-Warning "native dep missing: $n" } }
+foreach ($n in $natives) {
+  if (-not (Test-Path $n)) { throw "native dep missing: $n — run scripts\win\build-engine.cmd first" }
+  Copy-Item $n $stage -Force
+}
 
 Write-Host "==> [5/6] inject env config into web.config" -ForegroundColor Cyan
 $webConfig = Join-Path $stage "web.config"
@@ -89,6 +94,21 @@ $xml.Save($webConfig)
 
 Write-Host "==> [6/6] sync staging -> $OutDir" -ForegroundColor Cyan
 New-Item -ItemType Directory $OutDir -Force | Out-Null
+$appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
+$pool = "LaplacePool"
+if (Test-Path $appcmd) {
+  Write-Host "    stopping IIS app pool $pool" -ForegroundColor DarkGray
+  & $appcmd stop apppool "/apppool.name:$pool" 2>$null | Out-Null
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline) {
+    $running = & $appcmd list wp 2>$null | Select-String -Pattern 'LaplacePool' -Quiet
+    if (-not $running) { break }
+    Start-Sleep -Seconds 1
+  }
+  if (& $appcmd list wp 2>$null | Select-String -Pattern 'LaplacePool' -Quiet) {
+    throw "LaplacePool worker still running — cannot sync to $OutDir"
+  }
+}
 $offline = Join-Path $OutDir "app_offline.htm"
 Set-Content -Path $offline -Value "<h1>Laplace is deploying…</h1>" -Encoding utf8
 Start-Sleep -Seconds 1
@@ -97,6 +117,16 @@ $rc = $LASTEXITCODE
 Remove-Item $offline -Force -ErrorAction SilentlyContinue
 if ($rc -ge 8) { throw "robocopy failed ($rc)" }
 if (-not (Test-Path (Join-Path $OutDir "laplace-uci.exe"))) { throw "laplace-uci.exe missing from $OutDir after sync" }
+$mainDll = Join-Path $OutDir "Laplace.Endpoints.OpenAICompat.dll"
+$stageDll = Join-Path $stage "Laplace.Endpoints.OpenAICompat.dll"
+if ((Get-FileHash $stageDll).Hash -ne (Get-FileHash $mainDll).Hash) {
+  throw "live DLL hash != staged build — copy failed or file locked"
+}
+if (Test-Path $appcmd) {
+  Write-Host "    starting IIS app pool $pool" -ForegroundColor DarkGray
+  & $appcmd start apppool "/apppool.name:$pool" 2>$null | Out-Null
+  & $appcmd start site "/site.name:Laplace" 2>$null | Out-Null
+}
 $global:LASTEXITCODE = 0
 Write-Host "OK published to $OutDir (laplace-uci.exe at install root)" -ForegroundColor Green
 exit 0

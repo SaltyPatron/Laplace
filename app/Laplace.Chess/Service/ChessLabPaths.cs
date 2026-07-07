@@ -119,7 +119,7 @@ public static class ChessLabPaths
         path = "";
         var buildRoot = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
         if (string.IsNullOrWhiteSpace(buildRoot) && OperatingSystem.IsWindows())
-            buildRoot = @"D:\Data\Builds\Laplace";
+            buildRoot = @"D:\Data\Laplace";
 
         if (string.IsNullOrWhiteSpace(buildRoot))
             return false;

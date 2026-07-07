@@ -3,8 +3,8 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "FAIL=0"
-set "LOG=%LAPLACE_ROOT%\build-win-ext\test-all.log"
-if not exist "%LAPLACE_ROOT%\build-win-ext" mkdir "%LAPLACE_ROOT%\build-win-ext"
+set "LOG=%LAPLACE_EXT_BUILD%\test-all.log"
+if not exist "%LAPLACE_EXT_BUILD%" mkdir "%LAPLACE_EXT_BUILD%"
 > "%LOG%" echo test-all started %DATE% %TIME%
 
 echo === verify-toolchain ===
@@ -14,7 +14,7 @@ if errorlevel 1 set "FAIL=1"
 
 echo === engine gtest ===
 >> "%LOG%" echo === engine gtest ===
-ctest --test-dir build-win --output-on-failure -LE regress >> "%LOG%" 2>&1
+ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure -LE regress >> "%LOG%" 2>&1
 if errorlevel 1 set "FAIL=1"
 
 echo === pg_regress ===

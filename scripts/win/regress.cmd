@@ -5,14 +5,14 @@ cd /d "%LAPLACE_ROOT%"
 set "PGREGRESS=C:\Program Files\PostgreSQL\18\lib\pgxs\src\test\regress\pg_regress.exe"
 set "CONN=-h localhost -U postgres"
 set "PATH=%PATH%;C:\Program Files\Git\usr\bin"
-if not exist "%LAPLACE_ROOT%\build-win-ext\regress_geom" mkdir "%LAPLACE_ROOT%\build-win-ext\regress_geom"
-if not exist "%LAPLACE_ROOT%\build-win-ext\regress_substrate" mkdir "%LAPLACE_ROOT%\build-win-ext\regress_substrate"
+if not exist "%LAPLACE_EXT_BUILD%\regress_geom" mkdir "%LAPLACE_EXT_BUILD%\regress_geom"
+if not exist "%LAPLACE_EXT_BUILD%\regress_substrate" mkdir "%LAPLACE_EXT_BUILD%\regress_substrate"
 
 "%PGBIN%\dropdb.exe" %CONN% --force --if-exists laplace_regress_geom || exit /b 1
 "%PGBIN%\createdb.exe" %CONN% laplace_regress_geom || exit /b 1
 "%PGREGRESS%" --bindir="%PGBIN%" --host=localhost --user=postgres ^
   --inputdir=extension\laplace_geom\tests ^
-  --outputdir=build-win-ext\regress_geom ^
+  --outputdir=%LAPLACE_EXT_BUILD%\regress_geom ^
   --dbname=laplace_regress_geom --use-existing ^
   hash128 st_4d
 set GEOM_RC=%ERRORLEVEL%
@@ -21,7 +21,7 @@ set GEOM_RC=%ERRORLEVEL%
 "%PGBIN%\createdb.exe" %CONN% laplace_regress_substrate || exit /b 1
 "%PGREGRESS%" --bindir="%PGBIN%" --host=localhost --user=postgres ^
   --inputdir=extension\laplace_substrate\tests ^
-  --outputdir=build-win-ext\regress_substrate ^
+  --outputdir=%LAPLACE_EXT_BUILD%\regress_substrate ^
   --dbname=laplace_regress_substrate --use-existing ^
   bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period consensus_fold generation_corpus converse word_law identity_law schema_law structural_surface
 set SUB_RC=%ERRORLEVEL%

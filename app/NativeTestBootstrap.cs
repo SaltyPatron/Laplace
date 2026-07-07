@@ -23,30 +23,8 @@ internal static class NativeTestBootstrap
             if (Directory.Exists(dir))
                 AddDllDirectory(dir);
 
-        string? root = LaplaceInstall.TryRepoRoot(out var repo) ? repo : null;
-
-        if (string.IsNullOrEmpty(root))
-        {
-            root = typeof(NativeTestBootstrap).Assembly
-                .GetCustomAttributes<AssemblyMetadataAttribute>()
-                .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
-            if (root is not null && !Directory.Exists(Path.Combine(root, "build-win", "core")))
-                root = null;
-        }
-        if (string.IsNullOrEmpty(root))
-        {
-            var dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 8 && dir is not null; i++)
-            {
-                if (Directory.Exists(Path.Combine(dir, "build-win", "core")))
-                {
-                    root = dir;
-                    break;
-                }
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-        }
-        if (root is null) return;
+        if (!TryResolveEngineBuildRoot(out var engineBuild))
+            return;
 
         foreach (var (sub, name) in new (string, string)[]
                  {
@@ -55,10 +33,36 @@ internal static class NativeTestBootstrap
                      ("synthesis", "laplace_synthesis"),
                  })
         {
-            var path2 = Path.Combine(root, "build-win", sub, name + ".dll");
+            var path2 = Path.Combine(engineBuild, sub, name + ".dll");
             if (!File.Exists(path2)) continue;
             try { NativeLibrary.Load(path2); }
             catch (DllNotFoundException) { }
         }
+    }
+
+    private static bool TryResolveEngineBuildRoot(out string engineBuild)
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_ENGINE_BUILD");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            engineBuild = Path.GetFullPath(fromEnv.Trim());
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        fromEnv = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            engineBuild = Path.GetFullPath(Path.Combine(fromEnv.Trim(), "build-win"));
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        if (LaplaceInstall.TryRepoRoot(out var root))
+        {
+            engineBuild = Path.Combine(root, "build-win");
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        engineBuild = "";
+        return false;
     }
 }

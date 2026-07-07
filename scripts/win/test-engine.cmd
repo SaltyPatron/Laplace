@@ -49,11 +49,11 @@ goto arg_loop
 
 if defined _regex (
 
-  ctest --test-dir build-win --output-on-failure !_extra! -R "!_regex!"
+  ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure !_extra! -R "!_regex!"
 
 ) else (
 
-  ctest --test-dir build-win --output-on-failure !_extra!
+  ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure !_extra!
 
 )
 

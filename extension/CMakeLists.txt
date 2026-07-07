@@ -37,8 +37,11 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     message(STATUS "PG server includes: ${LAPLACE_PG_INCLUDEDIR_SERVER}")
     message(STATUS "PG pkglibdir:       ${LAPLACE_PG_PKGLIBDIR}")
 
-    set(LAPLACE_ENGINE_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/../build-win"
-        CACHE PATH "Engine build tree holding laplace_core/dynamics static libs")
+    set(LAPLACE_ENGINE_BUILD "${LAPLACE_ENGINE_BUILD}" CACHE PATH
+        "Engine build tree holding laplace_core/dynamics static libs")
+    if(LAPLACE_ENGINE_BUILD STREQUAL "")
+        set(LAPLACE_ENGINE_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/../build-win")
+    endif()
     foreach(_eng core dynamics)
         if(NOT EXISTS "${LAPLACE_ENGINE_BUILD}/${_eng}/laplace_${_eng}_static.lib")
             message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/${_eng}/laplace_${_eng}_static.lib — build the engine first (scripts\\win\\build-engine.cmd)")

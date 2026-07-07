@@ -23,19 +23,19 @@ del /q "%DEPLOY%\share\*.stale~*" 2>nul
 
 if not exist "%T0_SRC%" (
   echo ERROR: T0 perfcache missing at %T0_SRC%
-  echo        run: cmake --build build-win --target laplace_t0_perfcache
+  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_t0_perfcache
   exit /b 1
 )
 if not exist "%HW_SRC%" (
   echo ERROR: highway perfcache missing at %HW_SRC%
-  echo        run: cmake --build build-win --target laplace_highway_perfcache
+  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_highway_perfcache
   exit /b 1
 )
 
-cmake --build build-win-ext --target laplace_geom_sql laplace_substrate_sql || exit /b 1
+cmake --build "%LAPLACE_EXT_BUILD%" --target laplace_geom_sql laplace_substrate_sql || exit /b 1
 
-set "GEOM_DIR=%LAPLACE_ROOT%\build-win-ext\laplace_geom"
-set "SUB_DIR=%LAPLACE_ROOT%\build-win-ext\laplace_substrate"
+set "GEOM_DIR=%LAPLACE_EXT_BUILD%\laplace_geom"
+set "SUB_DIR=%LAPLACE_EXT_BUILD%\laplace_substrate"
 if not exist "%GEOM_DIR%\laplace_geom.control" (
   echo ERROR: missing %GEOM_DIR%\laplace_geom.control — run build-extensions.cmd first
   exit /b 1
@@ -52,10 +52,10 @@ copy /y "%SUB_DIR%\laplace_substrate.control" "%DEPLOY%\share\extension\" >nul |
 for %%F in ("%SUB_DIR%\laplace_substrate--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
 copy /y "%SUB_DIR%\laplace_substrate_upgrade.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
-call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
-call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
-call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
-call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
+call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
+call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1
+call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" || exit /b 1
+call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" || exit /b 1
 rem Both perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
@@ -86,10 +86,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET extension_control_path = 'D:/Data/Laplace/deploy/share;$system';" || exit /b 1
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET dynamic_library_path = '$libdir;D:/Data/Laplace/deploy/lib';" || exit /b 1
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = 'D:/Data/Laplace/deploy/share/laplace_t0_perfcache.bin';" || exit /b 1
-"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = 'D:/Data/Laplace/deploy/share/laplace_highway_perfcache.bin';" || exit /b 1
+"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET extension_control_path = '%LAPLACE_DEPLOY_PG%/share;$system';" || exit /b 1
+"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET dynamic_library_path = '$libdir;%LAPLACE_DEPLOY_PG%/lib';" || exit /b 1
+"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin';" || exit /b 1
+"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin';" || exit /b 1
 rem Preload the extension into the POSTMASTER so both perfcache blobs mmap ONCE at
 rem startup and every forked backend inherits them copy-on-write — hot from the
 rem first query, no per-connection cold lazy-load. The extension only prewarms

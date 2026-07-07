@@ -3,9 +3,9 @@ setlocal
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
-set "SUB_RESULTS=%LAPLACE_ROOT%\build-win-ext\regress_substrate\results"
+set "SUB_RESULTS=%LAPLACE_EXT_BUILD%\regress_substrate\results"
 set "SUB_EXPECTED=%LAPLACE_ROOT%\extension\laplace_substrate\tests\expected"
-set "GEO_RESULTS=%LAPLACE_ROOT%\build-win-ext\regress_geom\results"
+set "GEO_RESULTS=%LAPLACE_EXT_BUILD%\regress_geom\results"
 set "GEO_EXPECTED=%LAPLACE_ROOT%\extension\laplace_geom\tests\expected"
 
 if not exist "%SUB_RESULTS%" (

@@ -63,7 +63,7 @@ if "%DO_FULL%"=="1" (set "MAX_UNITS=0") else (set "LAPLACE_INGEST_MAX_UNITS=%MAX
 call :configure_source "%SOURCE%"
 if errorlevel 1 exit /b 1
 
-set "CLI_EXE=%LAPLACE_ROOT%\app\Laplace.Cli\bin\Release\net10.0\Laplace.Cli.exe"
+set "CLI_EXE=%LAPLACE_CLI_EXE%"
 for /f "delims=" %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%t"
 set "RUN_DIR=%LAPLACE_ROOT%\docs\bench\runs\%STAMP%_%SOURCE%"
 mkdir "%RUN_DIR%" 2>nul

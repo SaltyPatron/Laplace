@@ -3,7 +3,14 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$deployLib = 'D:\Data\Laplace\deploy\lib'
+$dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { 'D:\Data\Laplace' }
+$engineBuild = if ($env:LAPLACE_ENGINE_BUILD) { $env:LAPLACE_ENGINE_BUILD } else { Join-Path $dataRoot 'build-win' }
+$extBuild = if ($env:LAPLACE_EXT_BUILD) { $env:LAPLACE_EXT_BUILD } else { Join-Path $dataRoot 'build-win-ext' }
+$asanBuild = if ($env:LAPLACE_ENGINE_BUILD_ASAN) { $env:LAPLACE_ENGINE_BUILD_ASAN } else { Join-Path $dataRoot 'build-win-asan' }
+$deployRoot = if ($env:LAPLACE_DEPLOY) { $env:LAPLACE_DEPLOY } else { Join-Path $dataRoot 'deploy' }
+$deployLib = Join-Path $deployRoot 'lib'
+$deployShare = Join-Path $deployRoot 'share'
+$deployPg = ($deployRoot -replace '\\', '/')
 $psql = if (Get-Command psql) { 'psql' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
 $env:PGPASSWORD = if ($env:PGPASSWORD) { $env:PGPASSWORD } else { 'postgres' }
 $env:PGCONNECT_TIMEOUT = '3'
@@ -19,11 +26,15 @@ Write-Host "branch $branch, $dirty dirty file(s), last: $last"
 Pop-Location
 
 Section 'BUILD TREES (ninja dry-run; pending=0 means current)'
-foreach ($tree in 'build-win', 'build-win-ext', 'build-win-asan') {
-    $treePath = Join-Path $root $tree
+foreach ($pair in @(
+        @{ label = 'build-win'; path = $engineBuild; hint = '' },
+        @{ label = 'build-win-ext'; path = $extBuild; hint = 's/extensions' },
+        @{ label = 'build-win-asan'; path = $asanBuild; hint = '-asan' }
+    )) {
+    $tree = $pair.label
+    $treePath = $pair.path
     if (-not (Test-Path (Join-Path $treePath 'build.ninja'))) {
-        Write-Host ("{0,-16} NOT CONFIGURED (build-engine{1}.cmd configures it)" -f $tree,
-            $(if ($tree -eq 'build-win-ext') { 's/extensions' } elseif ($tree -eq 'build-win-asan') { '-asan' } else { '' }))
+        Write-Host ("{0,-16} NOT CONFIGURED (build-engine{1}.cmd configures it)" -f $tree, $pair.hint)
         continue
     }
     $lock = Join-Path $treePath '.lap-lock\owner.json'
@@ -43,19 +54,17 @@ foreach ($tree in 'build-win', 'build-win-ext', 'build-win-asan') {
     }
 }
 
-Section 'DEPLOY (D:\Data\Laplace\deploy vs build outputs)'
-$deployLib = 'D:\Data\Laplace\deploy\lib'
-$deployShare = 'D:\Data\Laplace\deploy\share'
+Section "DEPLOY ($deployRoot vs build outputs)"
 $pairs = @(
-    @{ src = 'build-win-ext\laplace_geom\laplace_geom.dll'; dst = Join-Path $deployLib 'laplace_geom.dll'; label = 'laplace_geom.dll' },
-    @{ src = 'build-win-ext\laplace_substrate\laplace_substrate.dll'; dst = Join-Path $deployLib 'laplace_substrate.dll'; label = 'laplace_substrate.dll' },
-    @{ src = 'build-win\core\laplace_core.dll'; dst = Join-Path $deployLib 'laplace_core.dll'; label = 'laplace_core.dll' },
-    @{ src = 'build-win\dynamics\laplace_dynamics.dll'; dst = Join-Path $deployLib 'laplace_dynamics.dll'; label = 'laplace_dynamics.dll' },
-    @{ src = 'build-win\core\perfcache\laplace_t0_perfcache.bin'; dst = Join-Path $deployShare 'laplace_t0_perfcache.bin'; label = 'laplace_t0_perfcache.bin' },
-    @{ src = 'build-win\core\perfcache\laplace_highway_perfcache.bin'; dst = Join-Path $deployShare 'laplace_highway_perfcache.bin'; label = 'laplace_highway_perfcache.bin' }
+    @{ src = Join-Path $extBuild 'laplace_geom\laplace_geom.dll'; dst = Join-Path $deployLib 'laplace_geom.dll'; label = 'laplace_geom.dll' },
+    @{ src = Join-Path $extBuild 'laplace_substrate\laplace_substrate.dll'; dst = Join-Path $deployLib 'laplace_substrate.dll'; label = 'laplace_substrate.dll' },
+    @{ src = Join-Path $engineBuild 'core\laplace_core.dll'; dst = Join-Path $deployLib 'laplace_core.dll'; label = 'laplace_core.dll' },
+    @{ src = Join-Path $engineBuild 'dynamics\laplace_dynamics.dll'; dst = Join-Path $deployLib 'laplace_dynamics.dll'; label = 'laplace_dynamics.dll' },
+    @{ src = Join-Path $engineBuild 'core\perfcache\laplace_t0_perfcache.bin'; dst = Join-Path $deployShare 'laplace_t0_perfcache.bin'; label = 'laplace_t0_perfcache.bin' },
+    @{ src = Join-Path $engineBuild 'core\perfcache\laplace_highway_perfcache.bin'; dst = Join-Path $deployShare 'laplace_highway_perfcache.bin'; label = 'laplace_highway_perfcache.bin' }
 )
 foreach ($pair in $pairs) {
-    $s = Join-Path $root $pair.src
+    $s = $pair.src
     $d = $pair.dst
     if (-not (Test-Path $s)) { Write-Host ("{0,-32} NOT BUILT" -f $pair.label); continue }
     if (-not (Test-Path $d)) { Write-Host ("{0,-32} NOT DEPLOYED (install-extensions.cmd)" -f $pair.label); continue }
@@ -76,8 +85,8 @@ Write-Host "service postgresql-x64-18: $($svc.Status)"
 if ($svc.Status -eq 'Running') {
     $gucT0 = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.perfcache_path;" 2>&1 | Where-Object { $_ })
     $gucHw = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;" 2>&1 | Where-Object { $_ })
-    $wantT0 = 'D:/Data/Laplace/deploy/share/laplace_t0_perfcache.bin'
-    $wantHw = 'D:/Data/Laplace/deploy/share/laplace_highway_perfcache.bin'
+    $wantT0 = "$deployPg/share/laplace_t0_perfcache.bin"
+    $wantHw = "$deployPg/share/laplace_highway_perfcache.bin"
     Write-Host "perfcache_path GUC: $(if ($gucT0 -eq $wantT0) { 'OK' } else { "STALE ($gucT0)" })"
     Write-Host "highway_perfcache_path GUC: $(if ($gucHw -eq $wantHw) { 'OK' } else { "STALE ($gucHw)" })"
     $ext = & $psql -h localhost -U postgres -d postgres -tAc "SELECT name || ' ' || default_version FROM pg_available_extensions WHERE name LIKE 'laplace%' ORDER BY 1;" 2>&1

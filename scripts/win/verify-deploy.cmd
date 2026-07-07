@@ -61,7 +61,7 @@ if exist "%HW_SRC%" if exist "%HW_DST%" (
 
 if "%OK%"=="0" (
   echo.
-  echo FIX: cmake --build build-win --target laplace_t0_perfcache laplace_highway_perfcache
+  echo FIX: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_t0_perfcache laplace_highway_perfcache
   echo      scripts\win\build-extensions.cmd ^&^& scripts\win\install-extensions.cmd
   exit /b 1
 )
@@ -82,11 +82,11 @@ for /f "delims=" %%G in ('psql -h localhost -U postgres -d postgres -tAc "SHOW l
 for /f "delims=" %%G in ('psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;"') do set "GUC_HW=%%G"
 echo   laplace_substrate.perfcache_path = %GUC_T0%
 echo   laplace_substrate.highway_perfcache_path = %GUC_HW%
-if /i not "%GUC_T0%"=="D:/Data/Laplace/deploy/share/laplace_t0_perfcache.bin" (
+if /i not "%GUC_T0%"=="%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin" (
   echo STALE GUC: T0 path does not match deploy tree — run install-extensions.cmd
   set "OK=0"
 )
-if /i not "%GUC_HW%"=="D:/Data/Laplace/deploy/share/laplace_highway_perfcache.bin" (
+if /i not "%GUC_HW%"=="%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin" (
   echo STALE GUC: highway path does not match deploy tree — run install-extensions.cmd
   set "OK=0"
 )

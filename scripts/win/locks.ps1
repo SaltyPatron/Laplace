@@ -6,7 +6,7 @@
 param([switch]$Kill)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$deployLib = 'D:\Data\Laplace\deploy\lib'
+$deployLib = if ($env:LAPLACE_DEPLOY) { Join-Path $env:LAPLACE_DEPLOY 'lib' } else { 'D:\Data\Laplace\deploy\lib' }
 $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()

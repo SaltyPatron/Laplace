@@ -374,8 +374,15 @@ venv/
 !engine/test/fixtures/*.bin
 
 .claude/
-build-win*/
-build-cutechess/
+
+# Native / .NET build trees (never commit — CMake/Ninja/msbuild output only)
+/build-win/
+/build-win-ext/
+/build-win-asan/
+/build-win2/
+/build-cutechess/
+/out/
+/out/
 
 .ingest-proof/
 
@@ -401,3 +408,25 @@ CMakeUserPresets.json
 # real (secret-bearing) deploy env files — only the .example is tracked
 deploy/windows/laplace-api.env
 deploy/linux/laplace-api.env
+
+# ── Generated runtime / build artifacts (never commit) ──
+# Perfcache blobs + UCD intermediate (cmake targets laplace_t0_perfcache / laplace_highway_perfcache)
+laplace_t0_perfcache.bin
+laplace_highway_perfcache.bin
+laplace_t0_perfcache_*.bin
+**/perfcache/
+**/ucd.nounihan.flat.xml
+**/ucd.nounihan.flat.zip
+
+# PG extension SQL preprocess output (cpp on *.sql.in → build tree only)
+*.sql.i
+extension/**/*.sql.i
+
+# Web API types (regenerate: scripts\win\build-web.cmd or npm run gen:api)
+web/src/api/types.gen.ts
+
+# Publish/deploy trees (local machine paths; not source)
+deploy/share/
+deploy/**/wwwroot/
+deploy/**/endpoint/
+deploy/**/migrations/

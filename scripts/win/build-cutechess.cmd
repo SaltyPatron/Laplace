@@ -10,7 +10,7 @@ set "QT_ARCH=win64_msvc2022_64"
 set "QT_ROOT=D:\Qt"
 set "QT_DIR=%QT_ROOT%\%QT_VER%\msvc2022_64"
 set "CC_SRC=%LAPLACE_ROOT%\external\cutechess"
-set "CC_BUILD=%LAPLACE_ROOT%\build-cutechess"
+set "CC_BUILD=%LAPLACE_CUTECHESS_BUILD%"
 set "VCVARS=D:\Microsoft Visual Studio\2026\VC\Auxiliary\Build\vcvars64.bat"
 
 if not exist "%CC_SRC%\CMakeLists.txt" (

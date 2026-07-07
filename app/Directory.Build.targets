@@ -1,7 +1,8 @@
 <Project>
   <PropertyGroup>
     <LaplaceRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</LaplaceRepoRoot>
-    <LaplaceBuildWin>$(LaplaceRepoRoot)\build-win</LaplaceBuildWin>
+    <LaplaceBuildWin Condition="'$(LAPLACE_BUILD_ROOT)' != ''">$(LAPLACE_BUILD_ROOT)\build-win</LaplaceBuildWin>
+    <LaplaceBuildWin Condition="'$(LaplaceBuildWin)' == ''">$(LaplaceRepoRoot)\build-win</LaplaceBuildWin>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">

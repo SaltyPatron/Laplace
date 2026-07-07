@@ -8,7 +8,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $env:LAPLACE_ROOT = $root
 $envScript = Join-Path $PSScriptRoot 'env.cmd'
 cmd /c "call `"$envScript`" >nul"
-$cli = Join-Path $root 'app\Laplace.Cli\bin\Release\net10.0\Laplace.Cli.exe'
+$cli = if ($env:LAPLACE_CLI_EXE) { $env:LAPLACE_CLI_EXE } else { Join-Path 'D:\Data\Laplace' 'app\bin\Laplace.Cli\Release\net10.0\Laplace.Cli.exe' }
 $log = Join-Path $root 'omw-bench-results.csv'
 
 if (-not (Test-Path $cli)) {

@@ -1,0 +1,34 @@
+{
+  "files.exclude": {
+    "**/build-win": true,
+    "**/build-win-ext": true,
+    "**/build-cutechess": true,
+    "**/out": true,
+    "**/node_modules": true,
+    "**/web/dist": true,
+    "**/external/postgresql": true,
+    "**/external/postgis": true,
+    "**/external/gdal": true,
+    "**/external/geos": true,
+    "**/external/proj": true,
+    "**/external/tree-sitter-grammars": true
+  },
+  "search.exclude": {
+    "**/build-win": true,
+    "**/build-win-ext": true,
+    "**/build-cutechess": true,
+    "**/out": true,
+    "**/node_modules": true,
+    "**/web/dist": true,
+    "**/external": true,
+    "**/engine/core/grammars/generated": true,
+    "**/app/Laplace.Endpoints.OpenAICompat/wwwroot": true
+  },
+  "files.watcherExclude": {
+    "**/build-win/**": true,
+    "**/build-win-ext/**": true,
+    "**/out/**": true,
+    "**/node_modules/**": true,
+    "**/external/**": true
+  }
+}

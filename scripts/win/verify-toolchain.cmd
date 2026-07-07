@@ -16,21 +16,21 @@ for %%V in (MKLROOT TBBROOT CMPLR_ROOT) do (
 
 echo verify-toolchain: MKL_NUM_THREADS=%MKL_NUM_THREADS% TBB_NUM_THREADS=%TBB_NUM_THREADS% MKL_DYNAMIC=%MKL_DYNAMIC%
 
-if not exist build-win\CMakeCache.txt (
-  echo verify-toolchain: ERROR build-win not configured — run build-engine.cmd --reconfigure
+if not exist "%LAPLACE_ENGINE_BUILD%\CMakeCache.txt" (
+  echo verify-toolchain: ERROR engine build not configured — run build-engine.cmd --reconfigure
   exit /b 1
 )
-findstr /C:"LAPLACE_REQUIRE_MKL:BOOL=ON" build-win\CMakeCache.txt >nul || (
+findstr /C:"LAPLACE_REQUIRE_MKL:BOOL=ON" "%LAPLACE_ENGINE_BUILD%\CMakeCache.txt" >nul || (
   echo verify-toolchain: ERROR LAPLACE_REQUIRE_MKL is not ON — run build-engine.cmd --reconfigure
   set "FAIL=1"
 )
-findstr /C:"LAPLACE_SYNTHESIS_REQUIRE_MKL:BOOL=ON" build-win\CMakeCache.txt >nul || (
+findstr /C:"LAPLACE_SYNTHESIS_REQUIRE_MKL:BOOL=ON" "%LAPLACE_ENGINE_BUILD%\CMakeCache.txt" >nul || (
   echo verify-toolchain: ERROR LAPLACE_SYNTHESIS_REQUIRE_MKL is not ON — run build-engine.cmd --reconfigure
   set "FAIL=1"
 )
 
-if not exist build-win\dynamics\laplace_dynamics.dll (
-  echo verify-toolchain: ERROR missing build-win\dynamics\laplace_dynamics.dll
+if not exist "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" (
+  echo verify-toolchain: ERROR missing %LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll
   set "FAIL=1"
 )
 if "%FAIL%"=="1" exit /b 1
@@ -44,7 +44,7 @@ if not defined DUMPBIN (
   ) do if exist %%P set "DUMPBIN=%%~P"
 )
 if defined DUMPBIN (
-  "%DUMPBIN%" /DEPENDENTS build-win\dynamics\laplace_dynamics.dll | findstr /i /c:"mkl_tbb" /c:"tbb12.dll" >nul || (
+  "%DUMPBIN%" /DEPENDENTS "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" | findstr /i /c:"mkl_tbb" /c:"tbb12.dll" >nul || (
     echo verify-toolchain: ERROR laplace_dynamics.dll missing MKL/TBB runtime deps
     set "FAIL=1"
   )
@@ -53,7 +53,7 @@ if defined DUMPBIN (
   echo verify-toolchain: WARN dumpbin not found — skipping DLL dependency check
 )
 
-ctest --test-dir build-win --output-on-failure -R "LaplaceDynamicsToolchain|SynthesisToolchain"
+ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure -R "LaplaceDynamicsToolchain|SynthesisToolchain"
 if errorlevel 1 set "FAIL=1"
 
 if "%FAIL%"=="0" (

@@ -1,11 +1,8 @@
 <Project>
   <!--
-    All build outputs live OUTSIDE the repo, always. LAPLACE_BUILD_ROOT
-    defaults on Windows so bare `dotnet build`/IDE builds land in the same
-    tree as env.cmd-driven script builds — a split default previously left
-    stale in-repo obj/ folders whose generated AssemblyInfo.cs got globbed
-    into redirected builds (CS0579 duplicate-attribute failures). Linux/CI
-    keeps in-repo outputs unless it sets LAPLACE_BUILD_ROOT itself.
+    All build outputs live OUTSIDE the repo under D:\Data\Laplace (see scripts/win/env.cmd).
+    LAPLACE_BUILD_ROOT defaults on Windows so bare `dotnet build`/IDE builds land in the
+    same tree as env.cmd-driven script builds.
   -->
   <!-- Shared compiler settings for every project under app/. -->
   <PropertyGroup>
@@ -15,7 +12,7 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <PropertyGroup>
-    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Builds\Laplace</LAPLACE_BUILD_ROOT>
+    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Laplace</LAPLACE_BUILD_ROOT>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
     <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>

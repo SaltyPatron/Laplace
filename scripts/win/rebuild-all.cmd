@@ -23,21 +23,17 @@ if "%SKIP_CLEAN%"=="0" (
   echo ===== PHASE 1 — CLEAN =====
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win || exit /b 1
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
-  if exist "%LAPLACE_ROOT%\build-win" (
-    echo removing build-win ...
-    rmdir /s /q "%LAPLACE_ROOT%\build-win"
+  if exist "%LAPLACE_ENGINE_BUILD%" (
+    echo removing %LAPLACE_ENGINE_BUILD% ...
+    rmdir /s /q "%LAPLACE_ENGINE_BUILD%"
   )
-  if exist "%LAPLACE_ROOT%\build-win-ext" (
-    echo removing build-win-ext ...
-    rmdir /s /q "%LAPLACE_ROOT%\build-win-ext"
+  if exist "%LAPLACE_EXT_BUILD%" (
+    echo removing %LAPLACE_EXT_BUILD% ...
+    rmdir /s /q "%LAPLACE_EXT_BUILD%"
   )
-  if exist "%LAPLACE_ROOT%\app\Laplace.Cli\bin" (
-    echo removing app Release bin ...
-    rmdir /s /q "%LAPLACE_ROOT%\app\Laplace.Cli\bin"
-  )
-  if exist "%LAPLACE_ROOT%\app\Laplace.Cli\obj" (
-    echo removing app Release obj ...
-    rmdir /s /q "%LAPLACE_ROOT%\app\Laplace.Cli\obj"
+  if exist "%LAPLACE_BUILD_ROOT%\app" (
+    echo removing external app build tree ...
+    rmdir /s /q "%LAPLACE_BUILD_ROOT%\app"
   )
 ) else (
   echo.
@@ -58,17 +54,17 @@ call "%~dp0build-extensions.cmd" %NATIVE_FLAGS% || exit /b 1
 
 echo.
 echo ===== PHASE 5 — PERF CACHE (before deploy — install-extensions copies these) =====
-cmake --build build-win --target laplace_t0_perfcache laplace_highway_perfcache || exit /b 1
+cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_t0_perfcache laplace_highway_perfcache || exit /b 1
 if not exist "%LAPLACE_PERFCACHE_BIN%" (
   echo ERROR: T0 perfcache blob missing at %LAPLACE_PERFCACHE_BIN%
   exit /b 1
 )
-if not exist "%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin" (
-  echo ERROR: highway perfcache blob missing at build-win\core\perfcache\laplace_highway_perfcache.bin
+if not exist "%LAPLACE_HIGHWAY_PERFCACHE_BIN%" (
+  echo ERROR: highway perfcache blob missing at %LAPLACE_HIGHWAY_PERFCACHE_BIN%
   exit /b 1
 )
 for %%F in ("%LAPLACE_PERFCACHE_BIN%") do echo T0 perfcache ready: %%~zF bytes — %%F
-for %%F in ("%LAPLACE_ROOT%\build-win\core\perfcache\laplace_highway_perfcache.bin") do echo highway perfcache ready: %%~zF bytes — %%F
+for %%F in ("%LAPLACE_HIGHWAY_PERFCACHE_BIN%") do echo highway perfcache ready: %%~zF bytes — %%F
 
 echo.
 echo ===== PHASE 6 — DEPLOY / INSTALL =====
@@ -84,6 +80,10 @@ if "%SKIP_APP%"=="0" (
   dotnet build Laplace.slnx -c Release -v minimal || exit /b 1
   cd /d "%LAPLACE_ROOT%"
 )
+
+echo.
+echo ===== PHASE 8 — PUBLISH + IIS DEPLOY =====
+call "%~dp0publish-deploy.cmd" --skip-managed-build || exit /b 1
 
 echo.
 echo ===== REBUILD-ALL COMPLETE =====

@@ -4,7 +4,7 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// Install-time discovery: repo layout, Postgres, perfcache, ingest data.
-/// No environment variables, no config files — walk the filesystem from the DLL.
+/// Postgres uses LAPLACE_DB when set (IIS/deploy); otherwise localhost defaults.
 /// </summary>
 public static class LaplaceInstall
 {
@@ -49,10 +49,38 @@ public static class LaplaceInstall
             ? database
             : ResolveLinuxDatabaseName(database);
 
-        var s = OperatingSystem.IsWindows()
-            ? $"Host=localhost;Username=postgres;Password=postgres;Database={dbName};Command Timeout=0"
-            : $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_DB");
+        var s = !string.IsNullOrWhiteSpace(fromEnv)
+            ? WithDatabase(fromEnv.Trim(), dbName)
+            : OperatingSystem.IsWindows()
+                ? $"Host=localhost;Username=postgres;Password=postgres;Database={dbName};Command Timeout=0"
+                : $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
 
+        return EnsurePostgresConnectionDefaults(s);
+    }
+
+    private static string WithDatabase(string connectionString, string database)
+    {
+        var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var replaced = false;
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var eq = parts[i].IndexOf('=');
+            if (eq <= 0) continue;
+            if (!string.Equals(parts[i][..eq].Trim(), "Database", StringComparison.OrdinalIgnoreCase)) continue;
+            parts[i] = $"Database={database}";
+            replaced = true;
+            break;
+        }
+
+        if (!replaced)
+            parts = [..parts, $"Database={database}"];
+
+        return string.Join(';', parts);
+    }
+
+    private static string EnsurePostgresConnectionDefaults(string s)
+    {
         if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
             s += ";Include Error Detail=true";
         if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
@@ -65,10 +93,20 @@ public static class LaplaceInstall
 
     public static string ResolveT0Perfcache()
     {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
+        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv.Trim()))
+            return Path.GetFullPath(fromEnv.Trim());
+
+        if (TryResolveEngineBuildRoot(out var engineBuild))
+        {
+            var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_t0_perfcache.bin");
+            if (File.Exists(fromBuild)) return fromBuild;
+            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_t0_perfcache.bin", SearchOption.AllDirectories))
+                return hit;
+        }
+
         if (TryRepoRoot(out var root))
         {
-            var fromBuild = Path.Combine(root, "build-win", "core", "perfcache", "laplace_t0_perfcache.bin");
-            if (File.Exists(fromBuild)) return fromBuild;
             foreach (var build in Directory.EnumerateDirectories(root, "build*"))
             {
                 var hit = Directory.EnumerateFiles(build, "laplace_t0_perfcache.bin", SearchOption.AllDirectories)
@@ -146,10 +184,16 @@ public static class LaplaceInstall
             if (File.Exists(sibling)) return sibling;
         }
 
+        if (TryResolveEngineBuildRoot(out var engineBuild))
+        {
+            var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_highway_perfcache.bin");
+            if (File.Exists(fromBuild)) return fromBuild;
+            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_highway_perfcache.bin", SearchOption.AllDirectories))
+                return hit;
+        }
+
         if (TryRepoRoot(out var root))
         {
-            var fromBuild = Path.Combine(root, "build-win", "core", "perfcache", "laplace_highway_perfcache.bin");
-            if (File.Exists(fromBuild)) return fromBuild;
             foreach (var build in Directory.EnumerateDirectories(root, "build*"))
             {
                 var hit = Directory.EnumerateFiles(build, "laplace_highway_perfcache.bin", SearchOption.AllDirectories)
@@ -198,6 +242,14 @@ public static class LaplaceInstall
 
     public static string ResolveGgufOutputDir()
     {
+        var outRoot = Environment.GetEnvironmentVariable("LAPLACE_OUT");
+        if (!string.IsNullOrWhiteSpace(outRoot))
+            return Path.GetFullPath(Path.Combine(outRoot.Trim(), "models"));
+
+        var buildRoot = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        if (!string.IsNullOrWhiteSpace(buildRoot))
+            return Path.GetFullPath(Path.Combine(buildRoot.Trim(), "out", "models"));
+
         if (TryRepoRoot(out var root))
             return Path.GetFullPath(Path.Combine(root, "out", "models"));
 
@@ -240,6 +292,32 @@ public static class LaplaceInstall
         => typeof(LaplaceInstall).Assembly
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
+
+    private static bool TryResolveEngineBuildRoot(out string engineBuild)
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_ENGINE_BUILD");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            engineBuild = Path.GetFullPath(fromEnv.Trim());
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        fromEnv = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            engineBuild = Path.GetFullPath(Path.Combine(fromEnv.Trim(), "build-win"));
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        if (TryRepoRoot(out var root))
+        {
+            engineBuild = Path.Combine(root, "build-win");
+            if (Directory.Exists(engineBuild)) return true;
+        }
+
+        engineBuild = "";
+        return false;
+    }
 
     private static IEnumerable<string> DeploySecretCandidates(string fileName)
     {

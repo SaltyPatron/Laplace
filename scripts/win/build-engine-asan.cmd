@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-set "PATH=%LAPLACE_ROOT%\build-win-asan\core;%LAPLACE_ROOT%\build-win-asan\dynamics;%LAPLACE_ROOT%\build-win-asan\synthesis;%PATH%"
+set "PATH=%LAPLACE_ENGINE_BUILD_ASAN%\core;%LAPLACE_ENGINE_BUILD_ASAN%\dynamics;%LAPLACE_ENGINE_BUILD_ASAN%\synthesis;%PATH%"
 for /d %%v in ("C:\Program Files (x86)\Intel\oneAPI\compiler\latest\lib\clang\*") do set "LAPLACE_ASAN_RT=%%v\lib\windows"
 set "PATH=%LAPLACE_ASAN_RT%;%PATH%"
 
@@ -21,16 +21,17 @@ goto parse
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-asan || exit /b 1
 
 if "%RECONF%"=="1" goto configure
-if not exist build-win-asan\build.ninja goto configure
+if not exist "%LAPLACE_ENGINE_BUILD_ASAN%\build.ninja" goto configure
 goto build
 
 :configure
-if exist build-win-asan\CMakeCache.txt if not exist build-win-asan\build.ninja (
-  echo clearing dead-configure debris from build-win-asan...
-  del /q build-win-asan\CMakeCache.txt
-  rmdir /s /q build-win-asan\CMakeFiles 2>nul
+if exist "%LAPLACE_ENGINE_BUILD_ASAN%\CMakeCache.txt" if not exist "%LAPLACE_ENGINE_BUILD_ASAN%\build.ninja" (
+  echo clearing dead-configure debris from %LAPLACE_ENGINE_BUILD_ASAN%...
+  del /q "%LAPLACE_ENGINE_BUILD_ASAN%\CMakeCache.txt"
+  rmdir /s /q "%LAPLACE_ENGINE_BUILD_ASAN%\CMakeFiles" 2>nul
 )
-cmake -B build-win-asan -S engine -G Ninja ^
+set "LAPLACE_UCD=%LAPLACE_UCD_ROOT%"
+cmake -B "%LAPLACE_ENGINE_BUILD_ASAN%" -S engine -G Ninja ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
   "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2026/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" ^
   -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
@@ -47,10 +48,10 @@ cmake -B build-win-asan -S engine -G Ninja ^
   -DBUILD_TESTING=ON ^
   -DLAPLACE_REQUIRE_MKL=ON ^
   -DLAPLACE_SYNTHESIS_REQUIRE_MKL=ON ^
-  "-DLAPLACE_UCD_PATH=D:/Data/Ingest/UCD/Public/UCD/latest" ^
-  "-DLAPLACE_UCDXML_ZIP=D:/Data/Ingest/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip" ^
-  "-DLAPLACE_DUCET_FILE=D:/Data/Ingest/UCD/Public/UCD/latest/uca/allkeys.txt" ^
-  "-DLAPLACE_UCD_CONFORMANCE_DIR=D:/Data/Ingest/UCD/Public/UCD/latest/ucd" ^
+  "-DLAPLACE_UCD_PATH=%LAPLACE_UCD%" ^
+  "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.nounihan.flat.zip" ^
+  "-DLAPLACE_DUCET_FILE=%LAPLACE_UCD%\uca\allkeys.txt" ^
+  "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd" ^
   "-DLIBXML2_INCLUDE_DIR=C:/Program Files/PostgreSQL/18/include" ^
   "-DLIBXML2_LIBRARY=C:/Program Files/PostgreSQL/18/lib/libxml2.lib"
 if errorlevel 1 goto fail
@@ -58,9 +59,9 @@ if errorlevel 1 goto fail
 :build
 if "%CONFONLY%"=="1" goto done
 if defined TARGETS (
-  cmake --build build-win-asan --target%TARGETS%
+  cmake --build "%LAPLACE_ENGINE_BUILD_ASAN%" --target%TARGETS%
 ) else (
-  cmake --build build-win-asan
+  cmake --build "%LAPLACE_ENGINE_BUILD_ASAN%"
 )
 if errorlevel 1 goto fail
 
