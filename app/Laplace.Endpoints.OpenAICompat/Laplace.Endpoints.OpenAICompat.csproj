@@ -36,7 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="laplace.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="laplace.env" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

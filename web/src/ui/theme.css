@@ -97,8 +97,7 @@
     font-family: var(--font-sans);
   }
 
-  #root,
-  .app {
+  #root {
     height: 100vh;
     display: flex;
     flex-direction: column;

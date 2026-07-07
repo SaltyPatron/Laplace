@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { LoadingText, Muted, Panel, Stack } from '@ui';
+import { LoadingText, Muted, Panel } from '@ui';
 import { exploreCatalog } from '../api';
 import { useExploreStore } from '../store';
 import type { ExploreStageRow } from '../types';
@@ -22,8 +22,7 @@ export function StageBrowse() {
   if (!stage) return <LoadingText>Loading stage…</LoadingText>;
 
   return (
-    <Stack gap={4}>
-      <Panel title={stage.stage}>
+    <Panel title={stage.stage}>
         {stage.law ? <Muted>{stage.law}</Muted> : null}
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {stage.sources.map((s) => (
@@ -35,6 +34,5 @@ export function StageBrowse() {
           ))}
         </ul>
       </Panel>
-    </Stack>
   );
 }

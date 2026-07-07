@@ -19,6 +19,7 @@ public sealed class GoldenFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                o.Bypass = false;
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = true;
             });

@@ -20,6 +20,7 @@ import {
   type UsageResponse,
 } from '../api/client';
 import { useAppStore } from '../store';
+import styles from './BillingView.module.css';
 
 export function BillingView() {
   const tenant = useAppStore((s) => s.tenant);
@@ -56,17 +57,17 @@ export function BillingView() {
   }
 
   return (
-    <div className="billing">
+    <div className={styles.root}>
       {error && <ErrorText>{error}</ErrorText>}
 
       <h2>Plans</h2>
-      <div className="plan-grid">
+      <div className={styles.planGrid}>
         {plans.map((p) => (
-          <div key={p.plan_id} className="plan-card">
+          <div key={p.plan_id} className={styles.planCard}>
             <h3>{p.name}</h3>
-            <p className="price">${(((p.monthly_price_cents ?? 0) as number) / 100).toFixed(0)}/mo</p>
+            <p className={styles.price}>${(((p.monthly_price_cents ?? 0) as number) / 100).toFixed(0)}/mo</p>
             <Muted>{p.description}</Muted>
-            <ul className="credits">
+            <ul className={styles.credits}>
               {Object.entries(p.monthly_credits ?? {}).map(([service, credits]) => (
                 <li key={service}>
                   <span>{service}</span>
@@ -92,8 +93,8 @@ export function BillingView() {
       )}
 
       <h2>Metered services</h2>
-      <TableScroll>
-        <Table className="catalog">
+      <TableScroll className={styles.catalogScroll}>
+        <Table className={styles.catalog}>
           <thead>
             <tr><Th>Service</Th><Th>Unit</Th><Th>Unit price</Th><Th>Base fee</Th></tr>
           </thead>
@@ -114,8 +115,8 @@ export function BillingView() {
       {usage && usage.entries && usage.entries.length > 0 ? (
         <>
           <p>Total: {(((usage.total_amount_cents ?? 0) as number) / 100).toFixed(2)} usd</p>
-          <TableScroll>
-            <Table className="catalog">
+          <TableScroll className={styles.catalogScroll}>
+            <Table className={styles.catalog}>
               <thead>
                 <tr><Th>Service</Th><Th>Units</Th><Th>Amount</Th><Th>Executed</Th></tr>
               </thead>

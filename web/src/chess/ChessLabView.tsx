@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from '@ui';
 import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './lab/sse';
+import styles from './ChessLabView.module.css';
 
 type FieldDef =
   | { key: string; label: string; type: 'number'; min: number; max: number; step?: number; unit?: string; help?: string }
@@ -157,14 +158,14 @@ export function ChessLabView() {
   };
 
   return (
-    <div className="chess-lab">
+    <div className={styles.lab}>
       <Panel>
-        <div className="lab-title">
+        <div className={styles.title}>
           <h3>Chess Lab</h3>
           <Muted>headless experiments over the substrate & external engines</Muted>
         </div>
         {catalog && (
-          <div className="lab-engines">
+          <div className={styles.engines}>
             {Object.entries(engines).map(([name, e]) => (
               <Tooltip key={name}>
                 <TooltipTrigger asChild>
@@ -180,7 +181,7 @@ export function ChessLabView() {
         )}
         {err && <Alert>{err}</Alert>}
 
-        <div className="lab-form">
+        <div className={styles.form}>
           <Field label="experiment">
             <Select value={kind} onChange={(e) => setKind(e.target.value)}>
               {jobSpecs.map((j) => <option key={j.kind} value={j.kind}>{j.label ?? j.kind}</option>)}
@@ -190,10 +191,10 @@ export function ChessLabView() {
             <LabField key={f.key} field={f} value={params[f.key] ?? ''}
                       onChange={(v) => setParams((p) => ({ ...p, [f.key]: v }))} />
           ))}
-          {fields.length === 0 && <Muted className="lab-noparams">no parameters — reads directly from the substrate.</Muted>}
+          {fields.length === 0 && <Muted className={styles.noParams}>no parameters — reads directly from the substrate.</Muted>}
         </div>
 
-        <div className="row lab-actions">
+        <div className={styles.actions}>
           {blockedReason ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -212,19 +213,19 @@ export function ChessLabView() {
             </Button>
           )}
           <Button variant="ghost" onClick={() => void stopJob()} disabled={!activeRunning}>Stop</Button>
-          {blockedReason && <span className="lab-blocked">{blockedReason}</span>}
+          {blockedReason && <span className={styles.blocked}>{blockedReason}</span>}
         </div>
       </Panel>
 
       {jobs.length > 0 && (
-        <Panel className="lab-jobs" title="Jobs">
-          <ul className="lab-job-list">
+        <Panel className={styles.jobs} title="Jobs">
+          <ul className={styles.jobList}>
             {jobs.map((j) => (
-              <li key={j.id} className={j.id === active?.id ? 'sel' : ''}>
-                <Button variant="ghost" className="lab-job-btn" onClick={() => openJob(j)}>
-                  <span className={`state state-${j.state.toLowerCase()}`}>{j.state}</span>
-                  <span className="jk">{j.kind}</span>
-                  <Muted>{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</Muted>
+              <li key={j.id} className={j.id === active?.id ? styles.jobItemSelected : undefined}>
+                <Button variant="ghost" className={styles.jobBtn} onClick={() => openJob(j)}>
+                  <span className={stateStyle(j.state)}>{j.state}</span>
+                  <span className={styles.jobKind}>{j.kind}</span>
+                  <Muted className={styles.jobSummary}>{j.summary.message ?? `${j.summary.done}/${j.summary.total}`}</Muted>
                 </Button>
               </li>
             ))}
@@ -233,10 +234,10 @@ export function ChessLabView() {
       )}
 
       {active && (
-        <Panel title={<>{active.kind} <Muted className={`state-${active.state.toLowerCase()}`}>{active.state}</Muted></>}>
+        <Panel title={<>{active.kind} <Muted className={stateStyle(active.state)}>{active.state}</Muted></>}>
           <Muted>{active.summary.message ?? `${active.summary.done}/${active.summary.total}`}</Muted>
           {active.artifacts?.['games.pgn'] && (
-            <div className="row">
+            <div className={styles.artifactRow}>
               <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>Download PGN</a>
               <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest to substrate</Button>
             </div>
@@ -244,8 +245,8 @@ export function ChessLabView() {
         </Panel>
       )}
 
-      <Panel className="lab-feed" title="Live feed">
-        <ul className="lab-events">
+      <Panel className={styles.feed} title="Live feed">
+        <ul className={styles.events}>
           {events.map((e, i) => <LabRow key={i} e={e} />)}
           {events.length === 0 && <li><Muted>no events yet — Start an experiment above.</Muted></li>}
         </ul>
@@ -306,13 +307,26 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
   );
 }
 
+const STATE_CLASS: Record<string, string> = {
+  Running: 'stateRunning',
+  Pending: 'statePending',
+  Completed: 'stateCompleted',
+  Failed: 'stateFailed',
+  Cancelled: 'stateCancelled',
+};
+
+function stateStyle(state: string): string | undefined {
+  const key = STATE_CLASS[state];
+  return key ? styles[key as keyof typeof styles] : styles.state;
+}
+
 function LabRow({ e }: { e: LabEvent }) {
   if (e.title && e.rows) {
     return (
-      <li className="lab-table-row">
-        <div className="lab-table-title">{e.title}</div>
-        <div className="lab-table-scroll">
-          <table className="lab-table">
+      <li className={styles.tableRow}>
+        <div className={styles.tableTitle}>{e.title}</div>
+        <div className={styles.tableScroll}>
+          <table className={styles.labTable}>
             {e.columns && (
               <thead><tr>{e.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
             )}
@@ -327,19 +341,20 @@ function LabRow({ e }: { e: LabEvent }) {
     );
   }
   if (e.name !== undefined && e.value !== undefined) {
-    return <li className="lab-metric"><span className="lab-metric-name">{e.name}</span><b>{e.value}{e.unit ?? ''}</b></li>;
+    return <li className={styles.metric}><span className={styles.metricName}>{e.name}</span><b>{e.value}{e.unit ?? ''}</b></li>;
   }
   if (e.done !== undefined && e.total !== undefined) {
-    return <li className="lab-progress">progress {e.done}/{e.total}{e.label ? ` · ${e.label}` : ''}</li>;
+    return <li className={styles.progress}>progress {e.done}/{e.total}{e.label ? ` · ${e.label}` : ''}</li>;
   }
   if (e.result !== undefined && (e.white !== undefined || e.black !== undefined)) {
-    return <li className="lab-game">#{e.index ?? '?'} {e.white ?? '?'} vs {e.black ?? '?'} — <b>{e.result}</b></li>;
+    return <li>#{e.index ?? '?'} {e.white ?? '?'} vs {e.black ?? '?'} — <b>{e.result}</b></li>;
   }
   if (e.finalState !== undefined) {
-    return <li className="lab-done">done: {e.finalState}{e.message ? ` (${e.message})` : ''}</li>;
+    return <li className={styles.done}>done: {e.finalState}{e.message ? ` (${e.message})` : ''}</li>;
   }
   if (e.level !== undefined && e.message !== undefined) {
-    return <li className={`lab-log lvl-${e.level}`}>[{e.level}] {e.message}</li>;
+    const lvl = e.level === 'error' ? styles.logError : (e.level === 'warning' || e.level === 'warn') ? styles.logWarn : styles.logInfo;
+    return <li className={lvl}>[{e.level}] {e.message}</li>;
   }
   return <li><Muted>{JSON.stringify(e)}</Muted></li>;
 }

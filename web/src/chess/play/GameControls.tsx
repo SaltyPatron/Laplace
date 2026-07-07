@@ -1,4 +1,6 @@
-import { Button, Checkbox, ErrorText, Field, Input, Muted, Panel } from '@ui';
+import { Button, Checkbox, cn, ErrorText, Field, Input, Muted, Panel } from '@ui';
+import shared from './playShared.module.css';
+import styles from './GameControls.module.css';
 
 const MOTIF_LABEL: Record<string, string> = {
   fork: 'fork', discovered_check: 'discovered check', hanging_piece_won: 'won material',
@@ -26,20 +28,34 @@ export interface GameControlsProps {
   onEvalMode: (v: boolean) => void;
 }
 
-/** Game status + actions, extracted from ChessView so the sidebar owns it as a
- *  first-class module rather than a block hard-wired above the board. */
 export function GameControls(p: GameControlsProps) {
-  const statusCls = `status${p.busy ? ' thinking' : ''}${p.over ? (p.status === 'draw' ? ' over draw' : ' over win') : ''}`;
   return (
-    <Panel className="game-controls">
-      <div className={statusCls} role="status">{p.statusText}</div>
-      {p.motifs.length > 0 && (
-        <div className="motifs">
-          {p.motifs.map((m) => <span key={m} className="motif-chip">{MOTIF_LABEL[m] ?? m}</span>)}
+    <Panel className={styles.panel}>
+      <div className={styles.statusBlock}>
+        <div
+          className={cn(
+            styles.status,
+            p.busy && styles.thinking,
+            p.over && styles.over,
+            p.over && (p.status === 'draw' ? styles.overDraw : styles.overWin),
+          )}
+          role="status"
+        >
+          {p.statusText}
         </div>
-      )}
-      {p.err && <ErrorText role="alert">{p.err}</ErrorText>}
-      <div className="ctl-row">
+        <div className={styles.feedbackSlot} aria-live="polite">
+          {p.err ? (
+            <ErrorText role="alert">{p.err}</ErrorText>
+          ) : (
+            <div className={styles.motifs} aria-hidden={p.motifs.length === 0}>
+              {p.motifs.map((m) => (
+                <span key={m} className={styles.motifChip}>{MOTIF_LABEL[m] ?? m}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className={shared.ctlRow}>
         <Button onClick={p.onNewGame}>New game</Button>
         <Button onClick={p.onBotMove} disabled={p.busy || p.over}>Bot move</Button>
         <Checkbox
@@ -55,7 +71,7 @@ export function GameControls(p: GameControlsProps) {
           label="flip"
         />
       </div>
-      <div className="ctl-row">
+      <div className={shared.ctlRow}>
         <Field label="depth" layout="row" htmlFor="search-depth">
           <Input
             id="search-depth"
@@ -83,7 +99,7 @@ export function GameControls(p: GameControlsProps) {
         />
       </div>
       <Muted>drag/click to move · right-drag = arrow · right-click = mark · left-click clears</Muted>
-      <code className="fen">{p.fen}</code>
+      <code className={styles.fen}>{p.fen}</code>
     </Panel>
   );
 }

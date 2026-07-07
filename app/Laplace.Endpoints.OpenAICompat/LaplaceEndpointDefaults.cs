@@ -9,6 +9,8 @@ internal static class LaplaceEndpointDefaults
     private const string DefaultWindowsDb =
         "Host=localhost;Username=postgres;Password=postgres;Database=laplace;Command Timeout=0";
 
+    private const string DefaultListenUrl = "http://127.0.0.1:5187";
+
     public static void Initialize()
     {
         LoadEnvFile(Path.Combine(AppContext.BaseDirectory, "laplace.env"));
@@ -18,7 +20,15 @@ internal static class LaplaceEndpointDefaults
 
         if (Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS") is null)
             Environment.SetEnvironmentVariable("LAPLACE_BILLING_BYPASS", "true");
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS"))
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_URLS")))
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", DefaultListenUrl);
     }
+
+    public static string ContentRoot => AppContext.BaseDirectory;
+
+    public static string WebRoot => Path.Combine(AppContext.BaseDirectory, "wwwroot");
 
     public static string ConnectionString
     {

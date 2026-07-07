@@ -1,0 +1,29 @@
+@layer components {
+  .canvas {
+    height: 420px;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: #05070c;
+  }
+
+  .empty,
+  .note {
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+    margin-top: 0.5rem;
+  }
+
+  .tooltip {
+    background: var(--color-bg-panel);
+    border: 1px solid var(--color-border-default);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .cap {
+    margin-bottom: 0.35rem;
+  }
+}

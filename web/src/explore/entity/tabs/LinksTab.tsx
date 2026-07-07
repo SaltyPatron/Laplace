@@ -1,4 +1,5 @@
 import { ConsensusBadge, Muted, Panel, Stack } from '@ui';
+import { exploreMembers, explorePeers } from '../../api';
 import { EntityLink } from '../../components/EntityLink';
 import { GatePrompt } from '../../components/GatePrompt';
 import styles from '../EntityDetail.module.css';
@@ -10,8 +11,8 @@ export function LinksTab({
   onLoadLinks,
 }: {
   linksUnlocked: boolean;
-  members: Awaited<ReturnType<typeof import('../../api').exploreMembers>>['members'] | null;
-  peers: Awaited<ReturnType<typeof import('../../api').explorePeers>>['peers'] | null;
+  members: Awaited<ReturnType<typeof exploreMembers>>['members'] | null;
+  peers: Awaited<ReturnType<typeof explorePeers>>['peers'] | null;
   onLoadLinks: () => void;
 }) {
   if (!linksUnlocked || !members || !peers) {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ErrorText } from '@ui';
+import { ErrorText, Panel } from '@ui';
 import { apiPost } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
@@ -27,18 +27,21 @@ export function AuditPanel() {
   }
 
   return (
-    <div>
-      <h3>Audit</h3>
+    <Panel title="Audit">
       {!unlocked ? (
-        <GatePrompt serviceId="audit.deep_report" label="Deep substrate audit report." onReady={() => { setUnlocked(true); void load(); }} />
+        <GatePrompt
+          serviceId="audit.deep_report"
+          label="Deep substrate audit report."
+          onReady={() => { setUnlocked(true); void load(); }}
+        />
       ) : (
-        <ul>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
           {report?.counts?.map((c) => (
             <li key={c.metric}>{c.metric}: {c.value.toLocaleString()}</li>
           ))}
         </ul>
       )}
       {err ? <ErrorText>{err}</ErrorText> : null}
-    </div>
+    </Panel>
   );
 }

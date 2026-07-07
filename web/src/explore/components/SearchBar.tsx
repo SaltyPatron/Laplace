@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LookupRow } from '@ui';
 import { exploreResolve } from '../api';
+import styles from './SearchBar.module.css';
 
 export function SearchBar({ placeholder = 'word, ILI, frame, or id hex…' }: { placeholder?: string }) {
   const [q, setQ] = useState('');
@@ -25,7 +26,7 @@ export function SearchBar({ placeholder = 'word, ILI, frame, or id hex…' }: { 
   }
 
   return (
-    <div className="explore-search">
+    <div className={styles.search}>
       <LookupRow
         value={q}
         onChange={setQ}

@@ -19,6 +19,7 @@ public sealed class SignedWebhookFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISubstrateClient, UnreachableSubstrateClient>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                o.Bypass = false;
                 o.WebhookSecret = WebhookSecret;
                 o.SkipSignatureVerification = true;
             });

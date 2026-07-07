@@ -13,6 +13,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo ==== Mirroring wwwroot to publish output ====
+robocopy "%LAPLACE_ROOT%\app\Laplace.Endpoints.OpenAICompat\wwwroot" "%PUBLISH_OUT%\wwwroot" /MIR /NJH /NJS /NDL /NFL
+if errorlevel 8 exit /b 1
+
 echo ==== Publishing Laplace.Migrations to %LAPLACE_ROOT%\out\migrations ====
 dotnet publish app\Laplace.Migrations\Laplace.Migrations.csproj ^
     -c Release -o "%LAPLACE_ROOT%\out\migrations"

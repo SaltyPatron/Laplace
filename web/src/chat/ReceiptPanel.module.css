@@ -1,0 +1,56 @@
+@layer components {
+  .panel {
+    position: relative;
+    border-left: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel);
+    flex-shrink: 0;
+    display: flex;
+    min-width: 300px;
+    max-width: 60vw;
+  }
+
+  .resizeHandle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 2;
+    transform: translateX(-3px);
+  }
+
+  .resizeHandle:hover,
+  :global(body[data-receipt-resizing]) .resizeHandle {
+    background: rgba(120, 160, 220, 0.35);
+  }
+
+  :global(body[data-receipt-resizing]) {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  .body {
+    flex: 1;
+    min-width: 0;
+    padding: 1rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .body h2 {
+    margin: 0 0 0.3rem;
+    font-size: 1rem;
+  }
+
+  .evidence h3 {
+    font-size: 0.95rem;
+    margin: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .panel {
+    display: none;
+  }
+}

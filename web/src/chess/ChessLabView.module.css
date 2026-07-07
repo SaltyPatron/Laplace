@@ -1,0 +1,211 @@
+@layer components {
+  .lab {
+    height: 100%;
+    overflow-y: auto;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .title h3 {
+    margin: 0;
+  }
+
+  .engines {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    margin: 0.5rem 0 0.7rem;
+    font-size: var(--text-sm);
+  }
+
+  .form {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.5rem 0.8rem;
+    margin: 0.2rem 0 0.7rem;
+  }
+
+  .noParams {
+    grid-column: 1 / -1;
+    margin: 0.2rem 0;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .blocked {
+    color: var(--color-draw);
+    font-size: var(--text-sm);
+  }
+
+  .jobList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .jobItemSelected button {
+    border-color: var(--color-accent);
+  }
+
+  .jobBtn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-align: left;
+    justify-content: flex-start;
+  }
+
+  .jobKind {
+    font-weight: 600;
+  }
+
+  .jobSummary {
+    margin-left: auto;
+  }
+
+  .state {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--color-border-default);
+  }
+
+  .stateRunning,
+  .statePending {
+    color: var(--color-accent);
+  }
+
+  .stateCompleted {
+    color: var(--color-confirm);
+  }
+
+  .stateFailed {
+    color: var(--color-error);
+  }
+
+  .stateCancelled {
+    color: var(--color-text-muted);
+  }
+
+  .feed {
+    flex: 1 1 auto;
+    min-height: 12rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .events {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: var(--text-sm);
+    font-family: ui-monospace, monospace;
+  }
+
+  .events > li {
+    padding: 0.15rem 0.3rem;
+    border-radius: 4px;
+  }
+
+  .logError {
+    color: var(--color-error);
+  }
+
+  .logWarn {
+    color: var(--color-draw);
+  }
+
+  .logInfo {
+    color: var(--color-text-muted);
+  }
+
+  .progress {
+    color: var(--color-accent);
+  }
+
+  .done {
+    color: var(--color-confirm);
+    font-weight: 600;
+  }
+
+  .metric {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+  }
+
+  .metricName {
+    color: var(--color-text-muted);
+  }
+
+  .artifactRow {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .tableRow {
+    background: var(--color-bg-panel-2);
+    border: 1px solid var(--color-border-default);
+    padding: 0.5rem 0.6rem !important;
+  }
+
+  .tableTitle {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+  }
+
+  .tableScroll {
+    overflow-x: auto;
+  }
+
+  .labTable {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: ui-monospace, monospace;
+    font-size: 0.78rem;
+  }
+
+  .labTable th,
+  .labTable td {
+    text-align: left;
+    padding: 0.25rem 0.6rem;
+    border-bottom: 1px solid var(--color-border-default);
+    white-space: nowrap;
+  }
+
+  .labTable th {
+    color: var(--color-text-muted);
+    font-weight: 500;
+  }
+
+  .labTable td {
+    font-variant-numeric: tabular-nums;
+  }
+}

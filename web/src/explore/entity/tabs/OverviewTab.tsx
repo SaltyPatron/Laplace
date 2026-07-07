@@ -1,4 +1,4 @@
-import { ConsensusBadge, Muted, Panel, Table, Td, Th } from '@ui';
+import { ConsensusBadge, Muted, Panel, Table, Td } from '@ui';
 import { EntityLink } from '../../components/EntityLink';
 import { RelationChip } from '../../components/RelationChip';
 import type { ExploreEntityResponse } from '../../types';

@@ -21,16 +21,25 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
                 relation_type_id('FOLLOWS'), relation_type_id('CO_OCCURS_WITH'),
                 relation_type_id('OCCURS_IN_CONTEXT'), relation_type_id('HAS_LEX_CATEGORY'),
                 relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
-                relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'))
+                relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'),
+                relation_type_id('HAS_EXAMPLE'), relation_type_id('EVOKES_FRAME'),
+                relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
+                relation_type_id('HAS_NAME_ALIAS'))
               AND NOT EXISTS (
                   SELECT 1 FROM entities et
                   WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
+              AND NOT (
+                  c.type_id = relation_type_id('IS_SYNONYM_OF')
+                  AND c.object_id IN (SELECT id FROM subj))
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
     )
     SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
         SELECT type_label(t.type_id) AS type,
-               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
+               COALESCE(
+                   NULLIF(_realize_synset_lemma(t.object_id, COALESCE(p_lang, word_language(p_word))), ''),
+                   NULLIF(render_text(t.object_id, 12), ''),
+                   left(encode(t.object_id, 'hex'), 16)) AS fact,
                eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
                eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t

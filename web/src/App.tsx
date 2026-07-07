@@ -7,6 +7,7 @@ import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
 import { ExploreView } from './explore/ExploreView';
 import { useAppStore } from './store';
+import styles from './App.module.css';
 
 type Tab = 'chat' | 'billing' | 'chess-play' | 'chess-lab';
 
@@ -16,7 +17,7 @@ function MainShell() {
   const nav = useNavigate();
 
   return (
-    <div className="app">
+    <div className={styles.shell}>
       <AppHeader
         title="Laplace"
         tagline="witnessed consensus, not weights"
@@ -33,7 +34,7 @@ function MainShell() {
         }
         tenant={<TenantField value={tenant} onChange={setTenant} />}
       />
-      <main>
+      <main className={styles.main}>
         {tab === 'chat' ? <ChatView />
           : tab === 'chess-play' ? <ChessView />
           : tab === 'chess-lab' ? <ChessLabView />
@@ -48,9 +49,9 @@ function ExploreShell() {
   const nav = useNavigate();
 
   return (
-    <div className="app">
+    <div className={styles.shell}>
       <AppHeader
-        title={<RouterLink to="/explore" className="brand-link">Laplace Explore</RouterLink>}
+        title={<RouterLink to="/explore" className={styles.exploreTitle}>Laplace Explore</RouterLink>}
         tagline="warehouse · inspect · export"
         nav={
           <NavTabs
@@ -62,7 +63,7 @@ function ExploreShell() {
         }
         tenant={<TenantField id="tenant-explore" value={tenant} onChange={setTenant} />}
       />
-      <main>
+      <main className={styles.main}>
         <ExploreView />
       </main>
     </div>

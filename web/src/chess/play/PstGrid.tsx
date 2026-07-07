@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiGet } from '../../api/client';
 import {
   Alert,
+  cn,
   IconButton,
   LoadingText,
   Muted,
@@ -11,6 +12,7 @@ import {
   TooltipTrigger,
 } from '@ui';
 import { PIECE_NAME, PIECES } from './pstConstants';
+import styles from './PstGrid.module.css';
 
 interface LearnedSquare { piece: string; file: number; rank: number; devPoints: number; witness: number; }
 
@@ -40,14 +42,14 @@ export function PstGrid() {
   const at = (file: number, rank: number) => forPiece.find((s) => s.file === file && s.rank === rank);
 
   return (
-    <Panel className="pst" title="Learned PST" actions={
-      <div className="pst-pieces">
+    <Panel title="Learned PST" actions={
+      <div className={styles.pieces}>
         {PIECES.map((p) => (
           <Tooltip key={p}>
             <TooltipTrigger asChild>
               <IconButton
                 aria-label={PIECE_NAME[p]}
-                className={p === piece ? 'active' : ''}
+                className={cn(p === piece && styles.pieceActive)}
                 onClick={() => setPiece(p)}
               >
                 {p}
@@ -62,7 +64,7 @@ export function PstGrid() {
       {loading && !squares && <LoadingText>loading…</LoadingText>}
       {squares && (
         <>
-          <div className="pst-grid" role="img" aria-label={`Learned piece-square deviations for ${PIECE_NAME[piece]}`}>
+          <div className={styles.grid} role="img" aria-label={`Learned piece-square deviations for ${PIECE_NAME[piece]}`}>
             {Array.from({ length: 8 }, (_, r) => 7 - r).flatMap((rank) =>
               Array.from({ length: 8 }, (_, file) => {
                 const s = at(file, rank);
@@ -76,7 +78,7 @@ export function PstGrid() {
                 return (
                   <Tooltip key={`${file}-${rank}`}>
                     <TooltipTrigger asChild>
-                      <div className="pst-cell" style={{ background: bg }} tabIndex={wit > 0 ? 0 : -1}>
+                      <div className={styles.cell} style={{ background: bg }} tabIndex={wit > 0 ? 0 : -1}>
                         {wit > 0 ? Math.round(dev) : ''}
                       </div>
                     </TooltipTrigger>
@@ -86,7 +88,7 @@ export function PstGrid() {
               }),
             )}
           </div>
-          <Muted className="pst-foot">
+          <Muted className={styles.foot}>
             deviation from PeSTO prior, learned by witnessed self-play · green = better square, red = worse ·{' '}
             {totalWitness.toFixed(0)} witnesses on {PIECE_NAME[piece]}
           </Muted>

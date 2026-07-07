@@ -1,0 +1,9 @@
+@layer components {
+  .search {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+}

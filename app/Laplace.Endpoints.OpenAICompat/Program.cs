@@ -12,7 +12,12 @@ using Serilog.Formatting.Compact;
 ChessLabPaths.LoadEnvFile();
 LaplaceEndpointDefaults.Initialize();
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = LaplaceEndpointDefaults.ContentRoot,
+    WebRootPath = LaplaceEndpointDefaults.WebRoot,
+});
 
 
 

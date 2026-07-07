@@ -1,0 +1,36 @@
+@layer components {
+  .stats {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.9rem;
+  }
+
+  .knobs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.6rem;
+    margin: 0.4rem 0;
+  }
+
+  .ctlRow {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    flex-basis: 100%;
+  }
+
+  .lgStar {
+    color: #ffcf3a;
+  }
+
+  .pv {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-text-primary);
+    word-break: break-all;
+  }
+}

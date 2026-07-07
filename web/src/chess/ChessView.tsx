@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Modal } from '@ui';
 import { apiGet, apiPost } from '../api/client';
 import { Board, parseBoard, whiteToMove, useBoardRef, type MoveScore } from './play/Board';
 import { MoveList } from './play/MoveList';
@@ -6,6 +7,7 @@ import { EnginePanel, type TrainKnobs, type TrainStatus } from './play/EnginePan
 import { PstGrid } from './play/PstGrid';
 import { GameControls } from './play/GameControls';
 import { Sidebar } from './play/Sidebar';
+import styles from './ChessView.module.css';
 
 interface ApplyResult { fen: string; terminal: boolean; status: string; legal: boolean; motifs?: string[]; }
 interface BestMove {
@@ -192,8 +194,8 @@ export function ChessView() {
       : `${sideToMove} to move`;
 
   return (
-    <div className="chess">
-      <div className="chess-main">
+    <div className={styles.layout}>
+      <div className={styles.main}>
         <Board
           fen={fen}
           legal={legal}
@@ -216,19 +218,26 @@ export function ChessView() {
           onDragMove={(x, y) => setDrag((d) => (d ? { ...d, x, y } : d))}
         />
         {promo && (
-          <div className="promo-modal" role="dialog">
-            <p>Promote pawn</p>
-            {(['q', 'r', 'b', 'n'] as const).map((p) => (
-              <button key={p} onClick={() => { void applyUci(promo.from + promo.to + p); setPromo(null); }}>{p.toUpperCase()}</button>
-            ))}
-            <button onClick={() => setPromo(null)}>Cancel</button>
-          </div>
+          <Modal
+            open
+            title="Promote pawn"
+            onClose={() => setPromo(null)}
+            actions={<Button variant="ghost" onClick={() => setPromo(null)}>Cancel</Button>}
+          >
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+              {(['q', 'r', 'b', 'n'] as const).map((p) => (
+                <Button key={p} onClick={() => { void applyUci(promo.from + promo.to + p); setPromo(null); }}>
+                  {p.toUpperCase()}
+                </Button>
+              ))}
+            </div>
+          </Modal>
         )}
       </div>
 
       {/* Modular sidebar: controls first, then the analysis modules. Reorder or add
           custom controls by editing this list — each item is a Panel-based UserControl. */}
-      <Sidebar>
+      <Sidebar className={styles.side}>
         <GameControls
           statusText={statusText} busy={busy} over={over} status={status}
           motifs={motifs} err={err} fen={fen}

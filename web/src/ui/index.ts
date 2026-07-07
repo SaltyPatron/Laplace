@@ -32,6 +32,7 @@ export { Label, type LabelProps } from './primitives/Label';
 
 // Tier 3 — Composites
 export { Field, type FieldProps } from './composites/Field';
+export { FormRow, type FormRowProps } from './composites/FormRow';
 export { LookupRow, type LookupRowProps } from './composites/LookupRow';
 export { Banner, type BannerProps } from './composites/Banner';
 export { Alert, type AlertProps } from './composites/Alert';

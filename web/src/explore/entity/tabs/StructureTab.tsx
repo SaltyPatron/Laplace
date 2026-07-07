@@ -1,4 +1,5 @@
 import { Button, Muted, Panel, Stack, Table, Td, Th } from '@ui';
+import { exploreContainers, exploreDecompose } from '../../api';
 import { EntityLink } from '../../components/EntityLink';
 import { GatePrompt } from '../../components/GatePrompt';
 import type { ExploreEntityPreviewResponse, ExploreEntityResponse } from '../../types';
@@ -16,10 +17,10 @@ export function StructureTab({
 }: {
   entity: ExploreEntityResponse;
   preview: ExploreEntityPreviewResponse;
-  decomposeNodes: Awaited<ReturnType<typeof import('../../api').exploreDecompose>>['nodes'] | null;
+  decomposeNodes: Awaited<ReturnType<typeof exploreDecompose>>['nodes'] | null;
   decomposeBusy: boolean;
   containersUnlocked: boolean;
-  containers: Awaited<ReturnType<typeof import('../../api').exploreContainers>>['containers'] | null;
+  containers: Awaited<ReturnType<typeof exploreContainers>>['containers'] | null;
   onDecompose: () => void;
   onLoadContainers: () => void;
 }) {
