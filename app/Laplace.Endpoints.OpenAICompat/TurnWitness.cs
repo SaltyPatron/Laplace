@@ -22,7 +22,10 @@ internal sealed class TurnWitness : BackgroundService
 
     public bool IsOnline { get; private set; }
 
-    public bool IsAvailable => IsOnline;
+    /// <summary>WebApplicationFactory golden tests: gate open before BackgroundService starts.</summary>
+    internal bool TestForceAvailable { get; set; }
+
+    public bool IsAvailable => TestForceAvailable || IsOnline;
 
     public TurnWitness(SubstrateClient substrate, ILogger<TurnWitness> log)
     {

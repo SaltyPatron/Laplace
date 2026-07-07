@@ -71,23 +71,6 @@ public sealed class ChessAnalyzeDecomposer : DecomposerOrchestrator
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return Task.FromResult<long?>(null);
-        return CountRecordedGamesAsync(ds, ct);
-    }
-
-    private static async Task<long?> CountRecordedGamesAsync(Npgsql.NpgsqlDataSource ds, CancellationToken ct)
-    {
-        await using var cmd = ds.CreateCommand(@"
-            SELECT count(DISTINCT e.id)
-            FROM laplace.entities e
-            JOIN laplace.attestations mt
-              ON mt.subject_id = e.id
-             AND mt.type_id = $2
-             AND mt.source_id = $3
-            WHERE e.type_id = $1");
-        cmd.Parameters.AddWithValue(ChessVocabulary.GameType.ToBytes());
-        cmd.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT").ToBytes());
-        cmd.Parameters.AddWithValue(ChessVocabulary.PgnSourceId.ToBytes());
-        var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return total is long n ? n : 0L;
+        return ChessWitnessHydrator.CountRecordedGamesAsync(ds, ct);
     }
 }

@@ -26,23 +26,29 @@ public sealed class ChessLabPathsTests
     [Fact]
     public void Stockfish_UsesExternalBuildRootWhenAvailable()
     {
-        if (!LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
-        {
-            return;
-        }
-
-        var sf = Path.Combine(buildRoot, "build-cutechess", "stockfish.exe");
-        Directory.CreateDirectory(Path.GetDirectoryName(sf)!);
+        var buildRoot = Path.Combine(Path.GetTempPath(), $"laplace-build-{Guid.NewGuid():N}");
+        var cutechessBuild = Path.Combine(buildRoot, "build-cutechess");
+        Directory.CreateDirectory(cutechessBuild);
+        var sf = Path.Combine(cutechessBuild, "stockfish.exe");
         File.WriteAllText(sf, "");
+        var prior = Environment.GetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD");
+        Environment.SetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD", cutechessBuild);
+        try
+        {
+            var probe = ChessLabPaths.ResolveExecutableForTest(
+                null,
+                _ => Path.Combine(cutechessBuild, "stockfish.exe"),
+                ["stockfish.exe"]);
 
-        var probe = ChessLabPaths.ResolveExecutableForTest(
-            null,
-            root => Path.Combine(root, "build-cutechess", "stockfish.exe"),
-            ["stockfish.exe"]);
-
-        Assert.Equal("build", probe.Source);
-        Assert.Equal(sf, probe.Path);
-        Assert.True(probe.Found);
+            Assert.Equal("build", probe.Source);
+            Assert.Equal(sf, probe.Path);
+            Assert.True(probe.Found);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD", prior);
+            Directory.Delete(buildRoot, recursive: true);
+        }
     }
 
     [Fact]

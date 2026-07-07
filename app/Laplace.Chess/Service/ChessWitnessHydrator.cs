@@ -27,6 +27,23 @@ internal static class ChessWitnessHydrator
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
         reader is NpgsqlSubstrateReader npg ? npg.DataSource : null;
 
+    internal static async Task<long?> CountRecordedGamesAsync(NpgsqlDataSource ds, CancellationToken ct)
+    {
+        await using var cmd = ds.CreateCommand(@"
+            SELECT count(DISTINCT e.id)
+            FROM laplace.entities e
+            JOIN laplace.attestations mt
+              ON mt.subject_id = e.id
+             AND mt.type_id = $2
+             AND mt.source_id = $3
+            WHERE e.type_id = $1");
+        cmd.Parameters.AddWithValue(ChessVocabulary.GameType.ToBytes());
+        cmd.Parameters.AddWithValue(RelHasMovetext.ToBytes());
+        cmd.Parameters.AddWithValue(ChessVocabulary.PgnSourceId.ToBytes());
+        var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return total is long n ? n : 0L;
+    }
+
     internal static async IAsyncEnumerable<Hash128> StreamUnanalyzedGameIdsAsync(
         NpgsqlDataSource ds,
         ISubstrateReader reader,
