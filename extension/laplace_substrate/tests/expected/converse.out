@@ -265,7 +265,7 @@ SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
 SELECT reply FROM recall('antonyms of dog');
  reply 
 -------
- 
+ h
 (1 row)
 
 SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));

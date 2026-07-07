@@ -14,16 +14,18 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
     private readonly ConsensusAccumulatingWriter _writer;
     private readonly ISubstrateReader _reader;
     private readonly double _witnessWeight;
+    private readonly string _learnContext;
     private readonly SubstrateStateValuer _valuer;
 
     public SubstrateTurnHost(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, ISubstrateReader reader,
-        double witnessWeight)
+        double witnessWeight, string learnContext = "chess/selfplay/game")
     {
         _ds = ds ?? throw new ArgumentNullException(nameof(ds));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _witnessWeight = witnessWeight;
+        _learnContext = learnContext;
         _valuer = new SubstrateStateValuer(ds);
     }
 
@@ -89,7 +91,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
     {
         if (edges.Count == 0) return;
 
-        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/selfplay/game");
+        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, _learnContext);
 
 
         // SelfPlayTrustClass = "ResponseContent" — the player-name claim must carry the same low

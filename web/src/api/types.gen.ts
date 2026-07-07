@@ -1911,6 +1911,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chess/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EvalRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chess/bestmove": {
         parameters: {
             query?: never;
@@ -2812,6 +2849,12 @@ export interface components {
         };
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
+        };
+        EvalRequest: {
+            fen: string;
+            /** Format: int32 */
+            depth: null | number | string;
+            substrate: null | boolean;
         };
         EvidenceResponse: {
             entity_id: string;

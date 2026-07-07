@@ -33,12 +33,12 @@ internal static class ChessCommands
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
         + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"
-        + "  substrate-test [--mode fold|edge|off] [--games N] [--depth D] [--cp-per-point X] [--cap C] [--openings]\n"
+        + "  substrate-test [--mode fold|edge|off] [--games N] [--depth D] [--cp-per-point X] [--cap C] [--openings] [--no-record]\n"
         + "      guided-vs-pure: the corpus's Elo lift over the classical floor.\n"
         + "      --mode fold = substructure-fold (generalizes, the honest transfer test; DEFAULT);\n"
         + "             edge = raw MOVE-edge eff_mu (popularity; the first null result); off = sanity (pure vs pure)\n"
         + "      --openings = seed games from the ingested ECO openings (where the corpus HAS data)\n"
-        + "  ladder [--games N] [--depth D] [--openings]   (overlay-ablation: each EvalTerm's individual Elo)\n"
+        + "  ladder [--games N] [--depth D] [--openings] [--no-record]   (overlay-ablation: each EvalTerm's individual Elo)\n"
         + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over ingested games)\n"
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
         + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
@@ -57,6 +57,7 @@ internal static class ChessCommands
         int cap = ArgInt(args, "--cap", 150);
         int concurrency = ArgInt(args, "--concurrency", 16);
         bool seedOpenings = HasFlag(args, "--openings");
+        bool record = !HasFlag(args, "--no-record");
 
         await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
         IRootBias? bias = mode switch
@@ -89,18 +90,24 @@ internal static class ChessCommands
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
         Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, "
-            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, db={Redact(ChessEngineService.ResolveConnString())}");
+            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, record={record}, db={Redact(ChessEngineService.ResolveConnString())}");
         string pgnOut = ArgStr(args, "--pgn-out", "");
         var sink = string.IsNullOrEmpty(pgnOut)
             ? null
             : new System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>();
+        await using var recorder = record
+            ? await ChessLabRecorder.OpenAsync("chess/cli/substrate-test")
+            : null;
         var r = MatchRunner.Play(guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
-                                 openingFens: book, pgnSink: sink);
+                                 openingFens: book, pgnSink: sink,
+                                 recordSink: recorder is null ? null : (edges, adj) => recorder.RecordGameBlocking(edges, adj));
         if (sink is not null)
         {
             ChessPgnWriter.WriteFile(pgnOut, sink, white: "Laplace-guided", black: "Laplace-pure", @event: "substrate-test");
             Console.WriteLine($"  wrote {sink.Count} games -> {pgnOut}   (loop closure: laplace ingest chess \"{pgnOut}\")");
         }
+        if (recorder is not null)
+            Console.WriteLine($"  recorded {recorder.GamesRecorded} games to substrate (chess/cli/substrate-test)");
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
         Console.WriteLine(r.EloDiff > 5
@@ -243,13 +250,14 @@ internal static class ChessCommands
         return 0;
     }
 
-    private static Task<int> LadderAsync(string[] args)
+    private static async Task<int> LadderAsync(string[] args)
     {
         int games = ArgInt(args, "--games", 100);
         int depth = ArgInt(args, "--depth", 4);
         int maxPlies = ArgInt(args, "--max-plies", 160);
         int concurrency = ArgInt(args, "--concurrency", 16);
         bool seedOpenings = HasFlag(args, "--openings");
+        bool record = !HasFlag(args, "--no-record");
         string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
         var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
 
@@ -259,18 +267,24 @@ internal static class ChessCommands
             EvalTerm.RookFiles, EvalTerm.PawnStructure, EvalTerm.Tempo,
         };
         Console.WriteLine($"overlay-ablation ladder: full eval vs eval-minus-term, depth {depth}, {games} games each, "
-            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}");
+            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, record={record}");
+        await using var recorder = record
+            ? await ChessLabRecorder.OpenAsync("chess/cli/ladder")
+            : null;
         Console.WriteLine($"  {"term",-14} {"W-D-L",-12} {"Elo",7}  {"+/-",5}");
         foreach (var t in terms)
         {
             var full = MatchRunner.SearcherFactory(depth, EvalTerm.All);
             var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~t);
-            var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7, concurrency: concurrency, openingFens: book);
+            var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7, concurrency: concurrency, openingFens: book,
+                recordSink: recorder is null ? null : (edges, adj) => recorder.RecordGameBlocking(edges, adj));
             string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
             Console.WriteLine($"  {t,-14} {$"{r.AWins}-{r.Draws}-{r.BWins}",-12} {elo,7}  {r.Margin95,5:F0}");
         }
+        if (recorder is not null)
+            Console.WriteLine($"  recorded {recorder.GamesRecorded} games to substrate (chess/cli/ladder)");
         Console.WriteLine("  (positive Elo = removing that overlay WEAKENS the engine, i.e. the overlay helps)");
-        return Task.FromResult(0);
+        return 0;
     }
 
     private static string Redact(string conn) =>
