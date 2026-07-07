@@ -145,6 +145,15 @@ public static class CpuTopology
 
 
 
+
+    // Parallel workers for maintenance operations (index builds, vacuum), matching
+    // tune-pg's max_parallel_maintenance_workers = (P-cores+1)/2. Declared ONCE here so no
+    // call site hardcodes a literal like "4" — the P-vs-E policy for maintenance parallelism
+    // lives with the topology authority, not scattered across the CRUD writer.
+    public static int ParallelMaintenanceWorkers => Math.Max(1, (PerformanceCoreCount + 1) / 2);
+
+
+
     public static bool TryPinCurrentThreadToPerformanceCores() => PinCurrentThreadToPerformanceCores();
 
 

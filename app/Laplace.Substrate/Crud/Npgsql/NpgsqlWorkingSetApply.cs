@@ -152,10 +152,13 @@ public sealed partial class NpgsqlSubstrateWriter
             await using (var guc = conn.CreateCommand())
             {
                 guc.Transaction = tx;
+                // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
+                // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
+                // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
+                // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
                 guc.CommandText =
                     "SET LOCAL session_replication_role = replica; "
                     + "SET LOCAL synchronous_commit = off; "
-                    + "SET LOCAL work_mem = '256MB'; "
                     + "SET LOCAL jit = off; "
                     + "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))";
                 await guc.ExecuteNonQueryAsync(ct);
