@@ -198,6 +198,31 @@ lp_ili_map_t* lp_ili_map_load(const char* path) {
     return m;
 }
 
+static lp_ili_map_t* lp_ili_map_load_from_dir(const char* dir) {
+    if (!dir || !dir[0]) return NULL;
+    size_t dlen = strlen(dir);
+    while (dlen > 0 && (dir[dlen - 1] == '/' || dir[dlen - 1] == '\\')) --dlen;
+    if (dlen == 0) return NULL;
+
+    const char* fname = LP_ILI_MAP_FILENAME;
+    size_t flen = strlen(fname);
+    char* path = (char*)malloc(dlen + 1 + flen + 1);
+    if (!path) return NULL;
+    memcpy(path, dir, dlen);
+    path[dlen] = '/';
+    memcpy(path + dlen + 1, fname, flen + 1);
+
+    lp_ili_map_t* map = lp_ili_map_load(path);
+    free(path);
+    return map;
+}
+
+lp_ili_map_t* lp_ili_map_load_for_etl(const char* explicit_tab_path) {
+    if (explicit_tab_path && explicit_tab_path[0]) return lp_ili_map_load(explicit_tab_path);
+    const char* dir = getenv("LAPLACE_CILI_DIR");
+    return lp_ili_map_load_from_dir(dir);
+}
+
 const char* lp_ili_map_resolve(const lp_ili_map_t* m, int64_t offset, char ss) {
     if (!m) return NULL;
     int64_t key = ili_key(offset, ss);

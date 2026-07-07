@@ -677,11 +677,7 @@ int laplace_etl_session_open(const laplace_etl_config_t* cfg, laplace_etl_sessio
         free(s);
         return -3;
     }
-    {
-        const char* ili_path = cfg->ili_map_path;
-        if (ili_path && ili_path[0])
-            s->ili_map = lp_ili_map_load(ili_path);
-    }
+    s->ili_map = lp_ili_map_load_for_etl(cfg->ili_map_path);
 
     memset(&s->total, 0, sizeof(s->total));
     *out = s;

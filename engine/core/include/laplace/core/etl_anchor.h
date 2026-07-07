@@ -15,7 +15,11 @@ int lp_parse_mapnet_synset(const char* s, size_t n, int64_t* out_offset, char* o
 
 typedef struct lp_ili_map lp_ili_map_t;
 
+#define LP_ILI_MAP_FILENAME "ili-map-pwn30.tab"
+
 lp_ili_map_t* lp_ili_map_load(const char* tab_path);
+
+lp_ili_map_t* lp_ili_map_load_for_etl(const char* explicit_tab_path);
 
 const char* lp_ili_map_resolve(const lp_ili_map_t* map, int64_t offset, char ss);
 
