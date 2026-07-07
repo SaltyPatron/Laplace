@@ -1,14 +1,31 @@
-
-
-
-
 param(
     [Parameter(Mandatory = $true)][ValidateSet('acquire', 'release')][string]$Action,
     [Parameter(Mandatory = $true)][string]$Tree
 )
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$treePath = Join-Path $root $Tree
+
+function Resolve-TreePath {
+    param([string]$Name)
+    $fromEnv = @{
+        'build-win'      = $env:LAPLACE_ENGINE_BUILD
+        'build-win-ext'  = $env:LAPLACE_EXT_BUILD
+        'build-win-asan' = $env:LAPLACE_ENGINE_BUILD_ASAN
+    }
+    if ($fromEnv.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace($fromEnv[$Name])) {
+        return $fromEnv[$Name]
+    }
+    $dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { 'D:\Data\Laplace' }
+    $defaults = @{
+        'build-win'      = Join-Path $dataRoot 'build-win'
+        'build-win-ext'  = Join-Path $dataRoot 'build-win-ext'
+        'build-win-asan' = Join-Path $dataRoot 'build-win-asan'
+    }
+    if ($defaults.ContainsKey($Name)) { return $defaults[$Name] }
+    $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    return Join-Path $root $Name
+}
+
+$treePath = Resolve-TreePath $Tree
 $lockDir = Join-Path $treePath '.lap-lock'
 $ownerFile = Join-Path $lockDir 'owner.json'
 
@@ -44,6 +61,7 @@ while ($true) {
         try { $cur = Get-Content $ownerFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
         $alive = $false
         if ($cur -and $cur.pid) {
+            if ($cur.pid -eq $ownerPid) { exit 0 }
             $p = Get-Process -Id $cur.pid -ErrorAction SilentlyContinue
             if ($p) {
                 $curStart = ''
@@ -52,12 +70,13 @@ while ($true) {
             }
         }
         if (-not $alive) {
-            Write-Host "tree-lock: clearing stale lock on $Tree (owner gone)"
+            Write-Host "tree-lock: clearing stale lock on $Tree at $treePath (owner gone)"
             Remove-Item -Recurse -Force $lockDir -ErrorAction SilentlyContinue
             continue
         }
         if ($elapsed -eq 0) {
             Write-Host "tree-lock: $Tree is locked by PID $($cur.pid) ($($cur.name)) since $($cur.acquired) -- waiting up to ${waitMax}s."
+            Write-Host "tree-lock: lock path: $treePath"
             Write-Host "tree-lock: do NOT start a parallel build tree. scripts\win\locks.cmd shows holders."
         }
         if ($elapsed -ge $waitMax) {

@@ -35,6 +35,15 @@ if "%SKIP_CLEAN%"=="0" (
     echo removing external app build tree ...
     rmdir /s /q "%LAPLACE_BUILD_ROOT%\app"
   )
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
+  if exist "%LAPLACE_ROOT%\build-win" (
+    echo removing stale in-repo build-win lock tree ...
+    rmdir /s /q "%LAPLACE_ROOT%\build-win"
+  )
+  if exist "%LAPLACE_ROOT%\build-win-ext" (
+    rmdir /s /q "%LAPLACE_ROOT%\build-win-ext"
+  )
 ) else (
   echo.
   echo ===== PHASE 1 — CLEAN [skipped: --skip-clean; native uses --clean-first] =====
