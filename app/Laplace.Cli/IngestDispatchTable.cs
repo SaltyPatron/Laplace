@@ -90,7 +90,7 @@ internal static class IngestDispatchTable
             ["recipe"] = cli => IngestCommands.IngestRecipeAsync(cli),
             ["chess"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "",
-                skipLayerCheck: true, cli),
+                skipLayerCheck: true, cli, skipSourceCompletion: true),
             ["chess-analyze"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessAnalyzeDecomposer(), cli.Path ?? "",
                 skipLayerCheck: true, cli, skipSourceCompletion: true),

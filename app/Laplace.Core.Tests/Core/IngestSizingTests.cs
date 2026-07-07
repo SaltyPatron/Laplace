@@ -62,6 +62,37 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
+    public void ResolveWorkingSetBudgetBytes_On48GiBMachine_IsAboutThreeGiB()
+    {
+        long budget = IngestSizing.ResolveWorkingSetBudgetBytes();
+        Assert.InRange(budget, 1L << 30, 8L << 30);
+    }
+
+    [Fact]
+    public void ResolveWorkingSetRecordCap_RelationTriple_MatchesCommitRows()
+    {
+        IngestTopology.EnsureReady();
+        int cap = IngestSizing.ResolveWorkingSetRecordCap(
+            IngestSourceProfile.RelationTriple, TestBudgetBytes);
+        var plan = IngestSizing.ResolveForSource(
+            IngestSourceProfile.RelationTriple, workingSetBudgetBytes: TestBudgetBytes);
+        Assert.Equal(plan.CommitRows, cap);
+    }
+
+    [Fact]
+    public void ResolveForSource_RelationTriple_UsesTopologyAndMemory()
+    {
+        IngestTopology.EnsureReady();
+        var plan = IngestSizing.ResolveForSource(IngestSourceProfile.RelationTriple);
+        Assert.InRange(plan.RecordBatchSize, 256, 4096);
+        Assert.Equal(plan.CommitRows, plan.WorkingSetRecordCap);
+        Assert.Equal(plan.WorkingSetProbeInterval,
+            IngestSizing.ResolveWorkingSetProbeInterval(plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
+        Assert.Equal(IngestTopology.Current.ComposeWorkers, plan.ComposeWorkers);
+        Assert.InRange(plan.WorkingSetBudgetBytes, 1L << 30, 8L << 30);
+    }
+
+    [Fact]
     public void Resolve_UnicodeProfile_LargeBatch()
     {
         var plan = IngestSizing.Resolve(

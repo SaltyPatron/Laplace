@@ -12,6 +12,20 @@ namespace Laplace.Decomposers.Abstractions;
 public static class IngestPipelineDefaults
 {
     /// <summary>
+    /// Per-source working-set knobs from Intel topology + RAM (Rule #12).
+    /// </summary>
+    public static (int Batch, int ProbeInterval, int RecordCap, int ProbeChunk) ResolveWorkingSet(
+        IngestSourceProfile profile,
+        DecomposerOptions? options = null,
+        int? defaultBatch = null)
+    {
+        int batch = BatchConfigDefaults.Resolve(
+            options, defaultBatch ?? IngestSizing.ResolveForSource(profile).RecordBatchSize);
+        var sized = IngestSizing.ResolveForSource(profile, batch);
+        return (batch, sized.WorkingSetProbeInterval, sized.WorkingSetRecordCap, sized.ProbeChunkSize);
+    }
+
+    /// <summary>
     /// Relation-triple lane: each record composes subject + object tier trees (see
     /// <see cref="RelationTripleHandler"/>). Batch and probe interval come from
     /// <see cref="IngestSourceProfile.RelationTriple"/>, not HighVolume.
@@ -20,15 +34,15 @@ public static class IngestPipelineDefaults
         Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options, ISubstrateReader? reader)
     {
         var profile = IngestSourceProfile.RelationTriple;
-        int defaultBatch = IngestSizing.ResolveRecordBatch(
-            IngestTopology.Current.PerformanceCoreCount, profile.EstBytesPerRecord);
-        int batch = BatchConfigDefaults.Resolve(options, defaultBatch);
+        var ws = ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = batch,
-            WorkingSetProbeInterval = IngestSizing.ResolveWorkingSetProbeInterval(batch, profile),
+            BatchSize = ws.Batch,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
             ContainmentReader = reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
@@ -41,57 +55,81 @@ public static class IngestPipelineDefaults
         int defaultBatchSize,
         DecomposerOptions options,
         ISubstrateReader? reader,
+        IngestSourceProfile? profile = null,
         int? attestationCapacity = null,
-        int commitEpoch = 0) =>
-        new()
+        int commitEpoch = 0)
+    {
+        profile ??= IngestSourceProfile.Default;
+        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = BatchConfigDefaults.Resolve(options, defaultBatchSize),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = ws.ProbeChunk,
             CommitEpoch = commitEpoch,
             ContainmentReader = reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
-            EntityCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 4,
-            PhysicalityCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 2,
-            AttestationCapacity = attestationCapacity
-                ?? BatchConfigDefaults.Resolve(options, defaultBatchSize) * 8,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
+            EntityCapacity = ws.Batch * 4,
+            PhysicalityCapacity = ws.Batch * 2,
+            AttestationCapacity = attestationCapacity ?? ws.Batch * 8,
         };
+    }
 
     public static IngestBatchConfig GrammarCompose(
         Hash128 sourceId, string batchLabelPrefix, int defaultBatchSize,
-        DecomposerOptions options, ISubstrateReader? reader) =>
-        new()
+        DecomposerOptions options, ISubstrateReader? reader,
+        IngestSourceProfile? profile = null)
+    {
+        profile ??= IngestSourceProfile.Default;
+        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Max(1, BatchConfigDefaults.Resolve(options, defaultBatchSize)),
-            ProbeChunkSize = Math.Clamp(BatchConfigDefaults.Resolve(options, defaultBatchSize), 64, 1024),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
             EnableDeferredContentOnBuilder = false,
-            EntityCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 8,
-            PhysicalityCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 8,
-            AttestationCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 16,
+            EntityCapacity = ws.Batch * 8,
+            PhysicalityCapacity = ws.Batch * 8,
+            AttestationCapacity = ws.Batch * 16,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
             MaxInputUnits = options.MaxInputUnits,
         };
+    }
 
     public static IngestBatchConfig CategoryCorrespondence(
         Hash128 sourceId, string batchLabelPrefix, int defaultBatchSize,
-        DecomposerOptions options, ISubstrateReader? reader) =>
-        new()
+        DecomposerOptions options, ISubstrateReader? reader,
+        IngestSourceProfile? profile = null)
+    {
+        profile ??= IngestSourceProfile.Default;
+        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Max(1, BatchConfigDefaults.Resolve(options, defaultBatchSize)),
-            ProbeChunkSize = Math.Clamp(BatchConfigDefaults.Resolve(options, defaultBatchSize), 64, 4096),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
             ContainmentReader = reader,
             EnableDeferredContentOnBuilder = false,
-            EntityCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 3,
-            AttestationCapacity = BatchConfigDefaults.Resolve(options, defaultBatchSize) * 3,
+            EntityCapacity = ws.Batch * 3,
+            AttestationCapacity = ws.Batch * 3,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
             MaxInputUnits = options.MaxInputUnits,
         };
+    }
 
     public static IngestBatchConfig ApplyMaxInputUnits(IngestBatchConfig config, DecomposerOptions options) =>
         options.MaxInputUnits > 0 ? config.WithMaxInputUnits(options.MaxInputUnits) : config;
@@ -116,6 +154,13 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     protected virtual int DefaultBatchSize => BatchConfigDefaults.Structural;
 
+    public virtual int EstimatedBytesPerRecord => IngestSizing.DefaultEstBytesPerRecord;
+
+    public virtual int EstimatedComposeUnitsPerRecord => 1;
+
+    protected IngestSourceProfile PipelineProfile =>
+        new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
+
     protected abstract IIngestRecordHandler<TRecord> CreateHandler();
 
     protected abstract IAsyncEnumerable<TRecord> ExtractRecordsAsync(
@@ -124,7 +169,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
     protected virtual IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader);
+            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
 
     public abstract Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default);
 
@@ -234,14 +279,14 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader);
+            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
 }
 
 public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord>
 {
-    public int EstimatedBytesPerRecord => IngestSourceProfile.RelationTriple.EstBytesPerRecord;
+    public override int EstimatedBytesPerRecord => IngestSourceProfile.RelationTriple.EstBytesPerRecord;
 
-    public int EstimatedComposeUnitsPerRecord =>
+    public override int EstimatedComposeUnitsPerRecord =>
         IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
 
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>

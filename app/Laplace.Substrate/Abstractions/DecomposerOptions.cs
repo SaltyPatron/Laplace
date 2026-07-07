@@ -8,7 +8,13 @@ public sealed record DecomposerOptions(
     LanguageFilter? Languages = null,
 
     bool EmitCrossLanguageLinks = true,
-    long MaxInputUnits = 0)
+    long MaxInputUnits = 0,
+
+    /// <summary>
+    /// Re-emit testimony for content already present (laplace ingest --force). When false,
+    /// per-root novelty filters skip present roots before compose.
+    /// </summary>
+    bool ReObservePresent = false)
 {
     public static DecomposerOptions Default { get; } =
         new(BatchSize: 1, DryRun: false, IncludeFilter: null, ExcludeFilter: null);

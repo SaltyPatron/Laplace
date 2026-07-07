@@ -79,15 +79,22 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
 public static class DocumentIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        string batchLabelPrefix, ISubstrateReader? reader, int batchSize = 32) =>
-        new()
+        string batchLabelPrefix, ISubstrateReader? reader, int batchSize = 32)
+    {
+        var profile = IngestSourceProfile.Document;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        return new()
         {
             SourceId = UserPromptContent.Source,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Clamp(batchSize, 1, 256),
-            ProbeChunkSize = Math.Clamp(batchSize, 16, 256),
+            BatchSize = Math.Clamp(ws.Batch, 1, 256),
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 16, 256),
             WitnessWeight = UserPromptContent.WitnessWeight,
             ContainmentReader = reader,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
         };
+    }
 }

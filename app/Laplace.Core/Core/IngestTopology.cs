@@ -192,7 +192,8 @@ public sealed class IngestTopology
 
         int pCores = CpuTopology.PerformanceCoreCount;
 
-        var sizing = IngestSizing.Resolve(pCores, fileWorkers, applyPartitions);
+        var sizing = IngestSizing.Resolve(
+            pCores, fileWorkers, applyPartitions, composeWorkers: composeWorkers);
 
         return new IngestTopology(
 

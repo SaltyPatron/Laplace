@@ -42,7 +42,7 @@ internal static class Program
     {
         if (args.Length == 0 || args[0] != "cpu-topology")
         {
-            NativeRuntimeEnv.ApplyFromTopologyIfUnset();
+            NativeRuntimeEnv.ApplyFromTopology();
             Laplace.Engine.Dynamics.MklAvailability.EnsureOrThrow();
             Laplace.Engine.Synthesis.MklAvailability.EnsureOrThrow();
         }

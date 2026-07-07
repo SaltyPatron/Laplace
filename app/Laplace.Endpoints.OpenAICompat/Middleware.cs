@@ -1,3 +1,4 @@
+using global::Npgsql;
 using Laplace.Api.Contracts;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -51,7 +52,26 @@ internal sealed class ExceptionEnvelopeMiddleware
         catch (SubstrateUnavailableException ex)
         {
             _logger.LogError(ex, "Substrate unavailable.");
-            await EndpointJson.ServiceUnavailable("db_unavailable", ex.Message).ExecuteAsync(context);
+            await EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message).ExecuteAsync(context);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or PostgresException or TimeoutException)
+        {
+            _logger.LogError(ex, "Substrate connection failed.");
+            await EndpointJson.ServiceUnavailable(
+                "substrate_unavailable",
+                $"Substrate unreachable: {ex.Message}").ExecuteAsync(context);
+        }
+        catch (InvalidOperationException ex) when (IsInfrastructureFailure(ex))
+        {
+            _logger.LogError(ex, "Substrate infrastructure not ready.");
+            await EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message).ExecuteAsync(context);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Invalid operation.");
+            await Results.Json(
+                new ErrorResponse(new ErrorBody("internal_error", "invalid_operation", ex.Message)),
+                statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
         }
         catch (Exception ex)
         {
@@ -60,5 +80,15 @@ internal sealed class ExceptionEnvelopeMiddleware
                 new ErrorResponse(new ErrorBody("internal_error", "unhandled_exception", "Unexpected endpoint failure.")),
                 statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
         }
+    }
+
+    private static bool IsInfrastructureFailure(InvalidOperationException ex)
+    {
+        var msg = ex.Message;
+        return msg.Contains("perfcache", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("Postgres", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("substrate", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("connect", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("not found", StringComparison.OrdinalIgnoreCase);
     }
 }

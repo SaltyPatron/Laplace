@@ -61,19 +61,26 @@ public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<Categor
 public static class CategoryCorrespondenceIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader) =>
-        new()
+        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader)
+    {
+        var profile = IngestSourceProfile.Default;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Max(1, batchSize),
-            ProbeChunkSize = Math.Clamp(batchSize, 64, 4096),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
             ContainmentReader = reader,
             EnableDeferredContentOnBuilder = false,
-            EntityCapacity = batchSize * 3,
-            AttestationCapacity = batchSize * 3,
+            EntityCapacity = ws.Batch * 3,
+            AttestationCapacity = ws.Batch * 3,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
         };
+    }
 
     public static IAsyncEnumerable<SubstrateChange> RunPipelineAsync(
         IAsyncEnumerable<CategoryCorrespondenceRecord> records,

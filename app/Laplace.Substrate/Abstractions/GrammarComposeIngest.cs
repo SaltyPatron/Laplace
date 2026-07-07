@@ -154,20 +154,27 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
 public static class GrammarComposeIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader) =>
-        new()
+        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader)
+    {
+        var profile = IngestSourceProfile.Default;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Max(1, batchSize),
-            ProbeChunkSize = Math.Clamp(batchSize, 64, 1024),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
             EnableDeferredContentOnBuilder = false,
-            EntityCapacity = batchSize * 8,
-            PhysicalityCapacity = batchSize * 8,
-            AttestationCapacity = batchSize * 16,
+            EntityCapacity = ws.Batch * 8,
+            PhysicalityCapacity = ws.Batch * 8,
+            AttestationCapacity = ws.Batch * 16,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
         };
+    }
 
     public static IAsyncEnumerable<SubstrateChange> RunPipelineAsync(
         IAsyncEnumerable<GrammarComposeRecord> records,

@@ -38,7 +38,9 @@ public sealed class TatoebaDecomposer : DecomposerOrchestrator, IIngestInventory
     {
         string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
         string links = Path.Combine(context.EcosystemPath, "links.csv");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
+        int batch = options.BatchSize > 1
+            ? options.BatchSize
+            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
         long cap = options.MaxInputUnits;
         long consumed = 0;
 

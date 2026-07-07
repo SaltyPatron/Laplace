@@ -14,6 +14,7 @@ public static class StructuredGrammarIngest
         double witnessWeight,
         string batchLabelPrefix,
         Action<long>? reportUnits,
+        IngestSourceProfile sizingProfile,
         Hash128? contextId = null,
         int commitEpoch = 0,
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
@@ -24,18 +25,23 @@ public static class StructuredGrammarIngest
     {
         var stream = new GrammarFileRecordStream(filePath, modalityId, acceptRow, recordFraming);
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
+        var sized = IngestSizing.ResolveForSource(
+            sizingProfile, batchSize > 0 ? batchSize : null);
         var config = new IngestBatchConfig
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = batchSize,
-            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
+            BatchSize = sized.RecordBatchSize,
+            ProbeChunkSize = sized.ProbeChunkSize,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
             ContainmentReader = containmentReader,
             ReportUnits = reportUnits,
             MaxInputUnits = maxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = sized.WorkingSetProbeInterval,
+            WorkingSetRecordCap = sized.WorkingSetRecordCap,
+            WorkingSetProfile = sizingProfile,
         };
 
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
@@ -58,23 +64,30 @@ public static class StructuredGrammarIngest
         int commitEpoch = 0,
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
-        int recordsPerChange = 32_768,
+        int? recordsPerChange = null,
+        IngestSourceProfile? sizingProfile = null,
         ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
     {
+        var profile = sizingProfile ?? IngestSourceProfile.Wiktionary;
+        var sized = IngestSizing.ResolveForSource(profile, recordsPerChange);
+        int workers = workerCount > 0 ? workerCount : sized.ComposeWorkers;
         var stream = new ParallelGrammarFileRecordStream(
-            filePath, modalityId, acceptRow, recordFraming, workerCount, ct);
+            filePath, modalityId, acceptRow, recordFraming, workers, ct);
         var handler = new GrammarIngestHandler(sourceId, modalityId, witness, contextId);
         var config = new IngestBatchConfig
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = recordsPerChange,
-            ProbeChunkSize = IngestTopology.Current.Sizing.ProbeChunkSize,
+            BatchSize = sized.RecordBatchSize,
+            ProbeChunkSize = sized.ProbeChunkSize,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
             ContainmentReader = containmentReader,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = sized.WorkingSetProbeInterval,
+            WorkingSetRecordCap = sized.WorkingSetRecordCap,
+            WorkingSetProfile = profile,
         };
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }
@@ -139,6 +152,7 @@ public static class StructuredGrammarIngest
             witnessWeight,
             batchLabelPrefix,
             reportUnits,
+            IngestSourceProfile.Wiktionary,
             contextId,
             commitEpoch,
             acceptRow,
@@ -203,7 +217,8 @@ public static class StructuredGrammarIngest
         CancellationToken ct = default)
         => IngestFileAsync(
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
-            batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
+            batchLabelPrefix, reportUnits, IngestSourceProfile.Wiktionary,
+            contextId, commitEpoch, acceptRow,
             maxInputUnits, containmentReader, recordFraming, ct);
 
     public static IAsyncEnumerable<SubstrateChange> IngestFileViaPipelineAsync(

@@ -620,23 +620,17 @@ export function ChessView() {
 
           onDragMove={(x, y) => setDrag((d) => (d ? { ...d, x, y } : d))}
 
-        />
-
-        <MoveNav
-
-          viewPly={viewPly}
-
-          livePly={livePly}
-
-          reviewing={reviewing}
-
-          onFirst={() => goToPly(0)}
-
-          onPrev={() => goToPly(viewPly - 1)}
-
-          onNext={() => goToPly(viewPly + 1)}
-
-          onLast={() => goToPly(livePly)}
+          footer={(
+            <MoveNav
+              viewPly={viewPly}
+              livePly={livePly}
+              reviewing={reviewing}
+              onFirst={() => goToPly(0)}
+              onPrev={() => goToPly(viewPly - 1)}
+              onNext={() => goToPly(viewPly + 1)}
+              onLast={() => goToPly(livePly)}
+            />
+          )}
 
         />
 

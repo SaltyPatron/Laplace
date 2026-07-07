@@ -391,17 +391,14 @@ internal static class IngestCommands
         int workers = IngestTopology.Current.CommitWorkers;
         long maxUnits = 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
-        var sizing = IngestSizing.Resolve(
-            IngestTopology.Current.PerformanceCoreCount,
-            IngestTopology.Current.FileWorkers,
-            IngestTopology.Current.ApplyPartitions,
-            recordBatchOverride: null,
-            commitRowsOverride: null,
-            profile: profile);
-        if (batch <= 0) batch = sizing.RecordBatchSize;
-        int commitRows = sizing.CommitRows;
+        var sized = IngestSizing.ResolveForSource(profile);
+        sized.Log(sourceName);
+        if (batch <= 0) batch = sized.RecordBatchSize;
+        int commitRows = sized.CommitRows;
         var decoOpts = DecomposerOptions.ForWitness(
             sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);
+        if (cli?.Force ?? false)
+            decoOpts = decoOpts with { ReObservePresent = true };
         if (maxUnits > 0)
             decoOpts = decoOpts with { MaxInputUnits = maxUnits };
         return IngestRunOptions.Default with

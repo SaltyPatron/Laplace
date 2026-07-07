@@ -16,6 +16,9 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
     public override int LayerOrder => 20;
     public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
 
+    public int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
+    public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
+
 
 
 
@@ -30,44 +33,37 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
     // Everything needed to compute a game's content-addressed GameId, cheaply enough to do for
     // an entire chunk before committing to the expensive per-ply work below.
     internal sealed record ParsedGame(
-        string GameText, PgnMovetext.PgnWalkResult Walk, List<string> Moves, GameOutcome Result, Hash128 GameId);
+        string GameText, PgnMovetext.PgnWalkResult Walk, List<string> Moves, GameOutcome Result, Hash128 GameId)
+        : ITrunkRootRecord
+    {
+        public Hash128 TrunkRootId => GameId;
+    }
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // options.BatchSize is LAPLACE_INGEST_BATCH, a global knob sized for cheap flat
-        // records (WordNet synsets, ConceptNet triples). A chess game is not a flat record —
-        // it explodes into dozens-to-hundreds of entity/physicality/attestation rows per game.
-        // Inheriting the global batch size directly (confirmed live at 65536 via env.cmd)
-        // collapsed an 88,760-game file into ~1-2 giant intents, which in turn made every
-        // IngestRunner commit-threshold check moot (nothing to flush until the one giant
-        // intent finally dequeues) and forced a single ~20-minute apply_batch call plus a
-        // single monolithic consensus fold at the very end. Capped independent of the global
-        // knob so IngestRunner's row/intent flush thresholds can actually fire mid-run.
-        int batch = Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 512, 1, 512);
+        var profile = IngestSourceProfile.ChessPgn;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options, BatchConfigDefaults.Chess);
 
-        // A concatenated PGN archive = one pipeline = one core on the sequential
-        // lane — and working-set mode's single spanning builder in DecomposerBatch
-        // means no change (and therefore no INGEST_PROGRESS line) yields until the
-        // memory budget fills, so a 900k-game corpus is minutes of silence on one
-        // core. Same cure as the wiktionary lane: the feeder frames raw game text
-        // only; workers own the expensive work (tree-sitter parse, per-ply board
-        // replay, compose) in parallel, each yielding every `batch` games so the
-        // runner's progress heartbeat actually beats. A unit cap or dry run keeps
-        // the sequential, exactly-bounded path.
         if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0 && !options.DryRun)
         {
-            int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8);
+            int workers = IngestTopology.Current.ComposeWorkers;
             var config = new IngestBatchConfig
             {
                 SourceId = ChessVocabulary.PgnSourceId,
                 BatchLabelPrefix = "chess/pgn",
-                BatchSize = batch,
+                BatchSize = ws.Batch,
+                ProbeChunkSize = ws.ProbeChunk,
                 ContainmentReader = context.Reader,
                 WorkingSet = WorkingSetMode.Enabled,
+                WorkingSetProbeInterval = ws.ProbeInterval,
+                WorkingSetRecordCap = ws.RecordCap,
+                WorkingSetProfile = profile,
             };
-            var stream = new ParallelChessGameRecordStream(context.EcosystemPath, workers, ct);
+            var stream = new ParallelChessGameRecordStream(
+                context.EcosystemPath, context.Reader, ws.ProbeInterval, workers,
+                options.ReObservePresent, ct);
             await foreach (var change in IngestBatchPipeline.RunAsync(
                                stream, new ChessGameIngestHandler(), config, ct))
                 yield return change;
@@ -75,14 +71,14 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         }
 
         await foreach (var change in RunComposePhaseAsync(
-            StreamNovelGamesAsync(context.EcosystemPath, context.Reader, batch, ct),
+            StreamNovelGamesAsync(context.EcosystemPath, context.Reader, ws.Batch, options.ReObservePresent, ct),
             (parsed, b) => RecordGame(parsed, b),
-            "pgn", SourceTrust.StructuredCorpus, batch, context, options, ct))
+            "pgn", SourceTrust.StructuredCorpus, ws.Batch, context, options, ct))
             yield return change;
     }
 
     private static async IAsyncEnumerable<ParsedGame> StreamNovelGamesAsync(
-        string ecosystemPath, ISubstrateReader? reader, int chunkSize,
+        string ecosystemPath, ISubstrateReader? reader, int chunkSize, bool reObservePresent,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var chunk = new List<ParsedGame>(chunkSize);
@@ -90,8 +86,20 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         {
             if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
             if (chunk.Count < chunkSize) continue;
-            await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
+            await foreach (var g in YieldChunkAsync(chunk, reader, reObservePresent, ct)) yield return g;
             chunk.Clear();
+        }
+        await foreach (var g in YieldChunkAsync(chunk, reader, reObservePresent, ct)) yield return g;
+    }
+
+    internal static async IAsyncEnumerable<ParsedGame> YieldChunkAsync(
+        List<ParsedGame> chunk, ISubstrateReader? reader, bool reObservePresent,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (reObservePresent || reader is null)
+        {
+            foreach (var g in chunk) yield return g;
+            yield break;
         }
         await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
     }

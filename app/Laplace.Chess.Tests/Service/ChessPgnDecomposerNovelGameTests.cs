@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -32,6 +33,14 @@ public sealed class ChessPgnDecomposerNovelGameTests
         "[Event \"A\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Date \"2024.01.01\"]\n\n1. e4 e5 1-0\n";
     private const string GameB =
         "[Event \"B\"]\n[White \"Carol\"]\n[Black \"Dave\"]\n[Date \"2024.01.02\"]\n\n1. d4 d5 0-1\n";
+
+    [Fact]
+    public void ParsedGame_ImplementsTrunkRootRecord()
+    {
+        var g = ChessPgnDecomposer.TryParseGame(GameA)!;
+        Assert.IsAssignableFrom<ITrunkRootRecord>(g);
+        Assert.Equal(g.GameId, ((ITrunkRootRecord)g).TrunkRootId);
+    }
 
     [Fact]
     public async Task FilterNovelAsync_SkipsGamesAlreadyPresent_BulkProbesOnce()

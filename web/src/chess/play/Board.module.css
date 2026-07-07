@@ -69,6 +69,13 @@
     font-size: 0.74rem;
   }
 
+  .footer {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    max-width: min(78vh, 760px);
+  }
+
   .legend b {
     color: var(--color-text-primary);
   }

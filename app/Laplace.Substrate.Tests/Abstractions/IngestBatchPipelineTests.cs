@@ -324,7 +324,7 @@ public sealed class IngestBatchPipelineTests
 
             await foreach (var _ in StructuredGrammarIngest.IngestFileAsync(
                 path, "tsv", TestSource, witness, batchSize: 64, witnessWeight: 1.0,
-                batchLabelPrefix: "grammar-probe", reportUnits: null,
+                batchLabelPrefix: "grammar-probe", reportUnits: null, IngestSourceProfile.Default,
                 containmentReader: reader))
             { }
 

@@ -99,6 +99,11 @@ internal static class IngestExistenceGate
             rootId = id.Value;
             return true;
         }
+        if (record is ITrunkRootRecord trunk)
+        {
+            rootId = trunk.TrunkRootId;
+            return rootId != default;
+        }
         return false;
     }
 

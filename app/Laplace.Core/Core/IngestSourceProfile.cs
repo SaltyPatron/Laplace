@@ -30,6 +30,15 @@ public sealed record IngestSourceProfile(
     /// <summary>Document ingest — large text blobs per file chunk.</summary>
     public static readonly IngestSourceProfile Document = new(64_000, 1);
 
+    /// <summary>
+    /// Chess PGN game — one input unit explodes into dozens–hundreds of substrate rows
+    /// (per-ply board replay, geometry, attestations). Sized like a fat record, not a flat triple.
+    /// </summary>
+    public static readonly IngestSourceProfile ChessPgn = new(4_000_000, 1);
+
+    /// <summary>WordNet synset/sense line — small text, many emitted rows per line.</summary>
+    public static readonly IngestSourceProfile WordNet = new(4_096, 4);
+
     public int WorkingSetBytesPerRecord =>
         Math.Max(1, EstBytesPerRecord) * Math.Max(1, EstComposeUnitsPerRecord);
 }

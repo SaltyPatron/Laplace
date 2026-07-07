@@ -56,7 +56,7 @@ public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInvent
             : null;
 
         var source = EtlManifest.Get("wiktionary");
-        int workers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
+        int workers = 0;
         await foreach (var change in StructuredGrammarIngest.IngestFileParallelAsync(
                            file,
                            source.Modality.GrammarId,

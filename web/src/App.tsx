@@ -7,6 +7,7 @@ import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
 import { ExploreView } from './explore/ExploreView';
 import { useAppStore } from './store';
+import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import styles from './App.module.css';
 
 type Tab = 'chat' | 'billing' | 'chess-play' | 'chess-lab';
@@ -34,6 +35,7 @@ function MainShell() {
         }
         tenant={<TenantField value={tenant} onChange={setTenant} />}
       />
+      <SubstrateStatusBanner />
       <main className={styles.main}>
         {tab === 'chat' ? <ChatView />
           : tab === 'chess-play' ? <ChessView />
@@ -63,6 +65,7 @@ function ExploreShell() {
         }
         tenant={<TenantField id="tenant-explore" value={tenant} onChange={setTenant} />}
       />
+      <SubstrateStatusBanner />
       <main className={styles.main}>
         <ExploreView />
       </main>

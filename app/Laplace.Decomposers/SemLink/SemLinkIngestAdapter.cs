@@ -101,22 +101,25 @@ public static class SemLinkIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
         Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader,
-        long maxInputUnits = 0) =>
-        new()
+        long maxInputUnits = 0)
+    {
+        var profile = IngestSourceProfile.Wiktionary;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Max(1, batchSize),
-            ProbeChunkSize = Math.Clamp(batchSize, 64, 1024),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
             MaxInputUnits = maxInputUnits,
-            // SemLink's witness stages category anchors (CategoryAnchor.Emit ->
-            // ContentWitnessBatch.TryAppendToBuilder) — without deferred content
-            // those bypass the containment reader and re-stage already-present
-            // content unconditionally. No-op when reader is null.
             EnableDeferredContentOnBuilder = true,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
         };
+    }
 
     public static async IAsyncEnumerable<SubstrateChange> IngestJsonDocumentAsync(
         string path,

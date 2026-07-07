@@ -10,6 +10,8 @@ namespace Laplace.Decomposers.WordNet;
 
 public sealed class WordNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
 {
+    public int EstimatedBytesPerRecord => IngestSourceProfile.WordNet.EstBytesPerRecord;
+    public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.WordNet.EstComposeUnitsPerRecord;
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -96,7 +98,9 @@ public sealed class WordNetDecomposer : DecomposerOrchestrator, IIngestInventory
         SourceEntityIdConventions.WarnIfCiliMapMissing(context.Logger, SourceName);
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
+        int batch = IngestSizing.ResolveForSource(
+            IngestSourceProfile.WordNet,
+            options.BatchSize > 1 ? options.BatchSize : null).RecordBatchSize;
         ISubstrateReader? reader = context.Reader;
         var frames = await LoadVerbFramesAsync(dictDir, ct);
 

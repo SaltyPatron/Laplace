@@ -31,6 +31,16 @@ public interface IMultiTreeIngestDeferredUnit : IIngestDeferredUnit
         SubstrateChangeBuilder builder, double witnessWeight, ReadOnlySpan<byte[]?> perTreeBitmaps);
 }
 
+/// <summary>
+/// Record whose content-addressed trunk root is known before expensive compose work
+/// (chess GameId, content hash, grammar row root, …). Enables the existence gate to
+/// bulk-probe and short-circuit present roots without a deferred unit.
+/// </summary>
+public interface ITrunkRootRecord
+{
+    Hash128 TrunkRootId { get; }
+}
+
 public interface IIngestRecordHandler<TRecord>
 {
     ValueTask<bool> TryTrunkShortcircuitAsync(
@@ -65,6 +75,17 @@ public sealed class IngestBatchConfig
 
     /// <summary>Records per O(tiers) existence interval in working-set mode.</summary>
     public int? WorkingSetProbeInterval { get; init; }
+
+    /// <summary>
+    /// Max records accumulated in one working set before descent/apply/yield.
+    /// Sized from <see cref="IngestSizing.ResolveWorkingSetRecordCap"/> for the source
+    /// profile — closes the set when deferred tier trees would exceed the RAM budget
+    /// even if <see cref="SubstrateChangeBuilder.StagedBytesEstimate"/> is still low.
+    /// </summary>
+    public int? WorkingSetRecordCap { get; init; }
+
+    /// <summary>Per-source byte model for the working-set memory estimate valve.</summary>
+    public IngestSourceProfile? WorkingSetProfile { get; init; }
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
@@ -108,6 +129,8 @@ public sealed class IngestBatchConfig
             AttestationCapacity = AttestationCapacity,
             WorkingSet = WorkingSet,
             WorkingSetProbeInterval = WorkingSetProbeInterval,
+            WorkingSetRecordCap = WorkingSetRecordCap,
+            WorkingSetProfile = WorkingSetProfile,
         };
 }
 
@@ -146,7 +169,9 @@ public static class IngestBatchPipeline
         // existence runs once per working set in FinalizeWorkingSetAsync (06 L93-94a).
         // Legacy batch mode uses ProbeChunkSize and probes every flush.
         int probeInterval = config.WorkingSet
-            ? (config.WorkingSetProbeInterval ?? WorkingSetMode.ProbeIntervalRecords)
+            ? (config.WorkingSetProbeInterval
+               ?? IngestSizing.ResolveWorkingSetProbeInterval(
+                   config.BatchSize, config.WorkingSetProfile ?? IngestSourceProfile.Default))
             : config.ProbeChunkSize;
         var pending = new List<TRecord>(Math.Min(probeInterval, 65_536));
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
@@ -200,7 +225,7 @@ public static class IngestBatchPipeline
             }
 
             if (config.WorkingSet && pending.Count > 0
-                && state.Builder.StagedBytesEstimate >= WorkingSetMode.BudgetBytes)
+                && ShouldCloseWorkingSet(state, config))
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                     yield return change;
@@ -286,6 +311,28 @@ public static class IngestBatchPipeline
 
         await foreach (var change in FlushBuffer())
             yield return change;
+    }
+
+    private static bool ShouldCloseWorkingSet(BatchState state, IngestBatchConfig config)
+    {
+        int recordCap = config.WorkingSetRecordCap
+            ?? IngestSizing.ResolveWorkingSetRecordCap(IngestSourceProfile.Default);
+        if (recordCap > 0 && state.InBatch >= recordCap)
+            return true;
+
+        long staged = state.Builder.StagedBytesEstimate;
+        if (staged >= WorkingSetMode.BudgetBytes)
+            return true;
+
+        if (state.InBatch > 0)
+        {
+            var profile = config.WorkingSetProfile ?? IngestSourceProfile.Default;
+            long est = IngestSizing.EstimateWorkingSetBytes(state.InBatch, staged, profile);
+            if (est >= WorkingSetMode.BudgetBytes)
+                return true;
+        }
+
+        return false;
     }
 
     private static async IAsyncEnumerable<SubstrateChange> FlushPending<TRecord>(

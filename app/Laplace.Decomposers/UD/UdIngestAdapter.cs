@@ -204,22 +204,30 @@ public static class UdIngestSupport
 
     public static IngestBatchConfig PipelineConfig(
         Hash128 sourceId, string batchLabelPrefix, int batchSentences, ISubstrateReader? reader,
-        long maxInputUnits = 0) =>
-        new()
+        long maxInputUnits = 0)
+    {
+        var profile = IngestSourceProfile.UdSentence;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSentences);
+        return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = batchSentences,
-            ProbeChunkSize = Math.Clamp(batchSentences, 64, 512),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 512),
             ContainmentReader = reader,
             MaxInputUnits = maxInputUnits,
             EnableDeferredContentOnBuilder = false,
-            EntityCapacity = batchSentences * 40,
-            PhysicalityCapacity = batchSentences * 40,
-            AttestationCapacity = batchSentences * 60,
+            EntityCapacity = ws.Batch * 40,
+            PhysicalityCapacity = ws.Batch * 40,
+            AttestationCapacity = ws.Batch * 60,
             WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
+            WorkingSetProfile = profile,
         };
+    }
 
     public static int ResolveBatchSentences(DecomposerOptions options) =>
-        Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 512, 64, 512);
+        IngestSizing.ResolveForSource(IngestSourceProfile.UdSentence, options.BatchSize > 1 ? options.BatchSize : null)
+            .RecordBatchSize;
 }

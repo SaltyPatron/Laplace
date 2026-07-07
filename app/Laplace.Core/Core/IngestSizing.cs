@@ -30,13 +30,117 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Working-set byte budget: phys/32 capped at 2 GiB (matches WorkingSetMode).
+    /// Per-source ingest plan derived from Intel topology (P/E pools), RAM budget,
+    /// and the source byte/compose model. Single entry point for pipeline config.
     /// </summary>
-    public static long ResolveWorkingSetBudgetBytes()
+    public sealed record SourcePlan(
+        long WorkingSetBudgetBytes,
+        long TotalMemoryBytes,
+        int RecordBatchSize,
+        int CommitRows,
+        int WorkingSetRecordCap,
+        int WorkingSetProbeInterval,
+        int ComposeWorkers,
+        int FileWorkers,
+        int CommitWorkers,
+        int ApplyPartitions,
+        int ProbeChunkSize,
+        int DecomposeChannelCapacity,
+        int MaxIntentsPerCommit,
+        long RowBudget)
     {
-        long phys = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
-        return Math.Clamp(phys / 32, 512L << 20, 2_048L << 20);
+        public void Log(string sourceLabel)
+        {
+            Console.Error.WriteLine(
+                "ingest_source_sizing: source={0} budget_bytes={1} total_ram_bytes={2} "
+                + "record_batch={3} commit_rows={4} ws_record_cap={5} ws_probe={6} "
+                + "compose_workers={7} file_workers={8} commit_workers={9} apply_partitions={10} "
+                + "probe_chunk={11} decompose_channel={12} max_intents={13} row_budget={14}",
+                sourceLabel,
+                WorkingSetBudgetBytes,
+                TotalMemoryBytes,
+                RecordBatchSize,
+                CommitRows,
+                WorkingSetRecordCap,
+                WorkingSetProbeInterval,
+                ComposeWorkers,
+                FileWorkers,
+                CommitWorkers,
+                ApplyPartitions,
+                ProbeChunkSize,
+                DecomposeChannelCapacity,
+                MaxIntentsPerCommit,
+                RowBudget);
+        }
     }
+
+    public static long TotalPhysicalMemoryBytes() =>
+        GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+
+    /// <summary>
+    /// Working-set byte budget: phys/16 clamped [1, 8] GiB (Rule #12 / Issue 42).
+    /// On a 48 GiB box this is ~3 GiB, not 8 GiB — eight is the ceiling on large servers.
+    /// </summary>
+    public static long ResolveWorkingSetBudgetBytes() =>
+        Math.Clamp(TotalPhysicalMemoryBytes() / 16, 1L << 30, 8L << 30);
+
+    /// <summary>
+    /// Resolve a full per-source plan from live Intel topology + RAM. Call after
+    /// <see cref="IngestTopology.EnsureReady"/> so worker pools are initialized.
+    /// </summary>
+    public static SourcePlan ResolveForSource(
+        IngestSourceProfile profile,
+        int? recordBatchOverride = null,
+        long? workingSetBudgetBytes = null)
+    {
+        var topo = IngestTopology.Current;
+        long budget = workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes();
+        long ram = TotalPhysicalMemoryBytes();
+
+        var plan = Resolve(
+            topo.PerformanceCoreCount,
+            topo.FileWorkers,
+            topo.ApplyPartitions,
+            recordBatchOverride: recordBatchOverride,
+            profile: profile,
+            workingSetBudgetBytes: budget,
+            composeWorkers: topo.ComposeWorkers);
+
+        int batch = plan.RecordBatchSize;
+        return new SourcePlan(
+            budget,
+            ram,
+            batch,
+            plan.CommitRows,
+            plan.CommitRows,
+            ResolveWorkingSetProbeInterval(batch, profile),
+            topo.ComposeWorkers,
+            topo.FileWorkers,
+            topo.CommitWorkers,
+            topo.ApplyPartitions,
+            plan.ProbeChunkSize,
+            plan.DecomposeChannelCapacity,
+            plan.MaxIntentsPerCommit,
+            plan.RowBudget);
+    }
+
+    /// <summary>
+    /// Max input records per working set before descent/apply — derived from the RAM budget
+    /// and per-source staged-byte model (includes compose-unit multiplier + resident slack).
+    /// </summary>
+    public static int ResolveWorkingSetRecordCap(
+        IngestSourceProfile profile, long? workingSetBudgetBytes = null) =>
+        ResolveForSource(profile, workingSetBudgetBytes: workingSetBudgetBytes).WorkingSetRecordCap;
+
+    /// <summary>
+    /// Working-set memory estimate: staged builder bytes plus deferred compose trees
+    /// (tier trees / grammar ASTs held in WorkingSetDeferredBatch that
+    /// SubstrateChangeBuilder.StagedBytesEstimate does not count).
+    /// </summary>
+    public static long EstimateWorkingSetBytes(
+        long recordsInSet, long stagedBuilderBytes, IngestSourceProfile profile) =>
+        stagedBuilderBytes
+        + (long)(recordsInSet * profile.WorkingSetBytesPerRecord * WorkingSetResidentSlack);
 
     public static Plan Resolve(
         int performanceCoreCount,
@@ -45,12 +149,18 @@ public static class IngestSizing
         int? recordBatchOverride = null,
         int? commitRowsOverride = null,
         IngestSourceProfile? profile = null,
-        long? workingSetBudgetBytes = null)
+        long? workingSetBudgetBytes = null,
+        int composeWorkers = 1)
     {
         profile ??= IngestSourceProfile.Default;
 
         int batch = recordBatchOverride
-            ?? ResolveRecordBatch(performanceCoreCount, profile.EstBytesPerRecord);
+            ?? ResolveRecordBatch(
+                performanceCoreCount,
+                profile.EstBytesPerRecord,
+                profile.EstComposeUnitsPerRecord,
+                composeWorkers,
+                workingSetBudgetBytes);
         int probe = ResolveProbeChunk(batch, fileWorkers);
 
         int commit = commitRowsOverride
@@ -69,18 +179,42 @@ public static class IngestSizing
         return new Plan(batch, probe, commit, decomposeChan, fileChan, maxIntents, rowBudget);
     }
 
+    /// <summary>
+    /// Record batch from RAM budget, per-record bytes, P-core count, and compose parallelism.
+    /// Cheap records (unicode) scale up; fat records (wiktionary, relation triples) scale down.
+    /// </summary>
     public static int ResolveRecordBatch(
-        int performanceCoreCount, int estBytesPerRecord = DefaultEstBytesPerRecord)
+        int performanceCoreCount,
+        int estBytesPerRecord = DefaultEstBytesPerRecord,
+        int estComposeUnits = 1,
+        int composeWorkers = 1,
+        long? workingSetBudgetBytes = null)
     {
-        int fromMem = TargetBytesPerBatch / Math.Max(1, estBytesPerRecord);
+        long budget = workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes();
+        int workingBytes = Math.Max(1, estBytesPerRecord) * Math.Max(1, estComposeUnits);
 
-        if (performanceCoreCount <= 4)
-            return Math.Clamp(fromMem / 2, 512, 2048);
+        int fromTarget = TargetBytesPerBatch / Math.Max(1, estBytesPerRecord);
+        int fromMemory = (int)Math.Clamp(
+            budget / (8L * workingBytes * Math.Max(1, composeWorkers)),
+            256,
+            32_768);
 
-        if (performanceCoreCount >= 16)
-            return Math.Clamp(fromMem * 2, 2048, 8192);
+        int coreCeiling = performanceCoreCount switch
+        {
+            <= 4 => 2048,
+            <= 8 => 4096,
+            <= 16 => 8192,
+            _ => 8192,
+        };
+        int coreFloor = performanceCoreCount <= 4 ? 512 : 1024;
 
-        return Math.Clamp(fromMem, 1024, 4096);
+        int raw = Math.Min(Math.Min(fromTarget, fromMemory), coreCeiling);
+        // Only truly fat input units (chess games, documents) skip coreFloor.
+        int batch = estBytesPerRecord > 256_000
+            ? Math.Clamp(raw, 256, coreCeiling)
+            : Math.Clamp(raw, coreFloor, coreCeiling);
+
+        return batch;
     }
 
     /// <summary>
@@ -136,8 +270,11 @@ public static class IngestSizing
     public static void LogPlan(Plan plan)
     {
         Console.Error.WriteLine(
-            "ingest_sizing: record_batch={0} probe_chunk={1} commit_rows={2} "
-            + "decompose_channel={3} file_channel={4} max_intents_per_commit={5} row_budget={6}",
+            "ingest_sizing: total_ram_bytes={0} working_set_budget_bytes={1} record_batch={2} "
+            + "probe_chunk={3} commit_rows={4} decompose_channel={5} file_channel={6} "
+            + "max_intents_per_commit={7} row_budget={8}",
+            TotalPhysicalMemoryBytes(),
+            ResolveWorkingSetBudgetBytes(),
             plan.RecordBatchSize,
             plan.ProbeChunkSize,
             plan.CommitRows,

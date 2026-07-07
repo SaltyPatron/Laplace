@@ -69,7 +69,7 @@ internal static class IngestDescentFlush
 
         var units = new IIngestDeferredUnit[records.Count];
         int composeWorkers = Math.Min(
-            Math.Max(1, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8)),
+            Math.Max(1, IngestTopology.Current.ComposeWorkers),
             records.Count);
         if (composeWorkers <= 1)
         {

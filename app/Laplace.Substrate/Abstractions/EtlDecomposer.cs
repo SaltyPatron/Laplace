@@ -68,7 +68,9 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
         var files = EnumerateFiles(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
+        int batch = options.BatchSize > 1
+            ? options.BatchSize
+            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
         long cap = options.MaxInputUnits;
         long consumed = 0;
         int fileBn = 0;

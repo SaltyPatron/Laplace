@@ -8,18 +8,31 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// P-core parallel game framing + parse feeding the same IngestBatchPipeline spine as
-/// DecomposerBatch (Rule #8). Replaces the legacy PCoreParallelCompose hand-builder lane.
+/// DecomposerBatch (Rule #8). Chunked novelty filter before yield skips compose for games
+/// already in the substrate (unless <paramref name="reObservePresent"/>).
 /// </summary>
 internal sealed class ParallelChessGameRecordStream : IRecordStream<ChessPgnDecomposer.ParsedGame>
 {
     private readonly string _ecosystemPath;
+    private readonly ISubstrateReader? _reader;
+    private readonly int _probeChunk;
     private readonly int _workerCount;
+    private readonly bool _reObservePresent;
     private readonly CancellationToken _ct;
 
-    public ParallelChessGameRecordStream(string ecosystemPath, int workerCount, CancellationToken ct)
+    public ParallelChessGameRecordStream(
+        string ecosystemPath,
+        ISubstrateReader? reader,
+        int probeChunk,
+        int workerCount,
+        bool reObservePresent,
+        CancellationToken ct)
     {
         _ecosystemPath = ecosystemPath;
+        _reader = reader;
+        _probeChunk = Math.Max(1, probeChunk);
         _workerCount = Math.Max(1, workerCount);
+        _reObservePresent = reObservePresent;
         _ct = ct;
     }
 
@@ -82,8 +95,17 @@ internal sealed class ParallelChessGameRecordStream : IRecordStream<ChessPgnDeco
             parsed.Writer.TryComplete();
         }, runCt);
 
+        var chunk = new List<ChessPgnDecomposer.ParsedGame>(_probeChunk);
         await foreach (var record in parsed.Reader.ReadAllAsync(runCt))
-            yield return record;
+        {
+            chunk.Add(record);
+            if (chunk.Count < _probeChunk) continue;
+            await foreach (var g in ChessPgnDecomposer.YieldChunkAsync(chunk, _reader, _reObservePresent, runCt))
+                yield return g;
+            chunk.Clear();
+        }
+        await foreach (var g in ChessPgnDecomposer.YieldChunkAsync(chunk, _reader, _reObservePresent, runCt))
+            yield return g;
 
         await feeder.ConfigureAwait(false);
         await closer.ConfigureAwait(false);
@@ -104,7 +126,8 @@ internal sealed class ChessGameIngestHandler : IIngestRecordHandler<ChessPgnDeco
 
     public void WalkWitness(
         ChessPgnDecomposer.ParsedGame record, Hash128 root,
-        SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
+        SubstrateChangeBuilder builder, IIngestDeferredUnit unit) =>
+        ChessPgnDecomposer.RecordGame(record, builder);
 
     private sealed class Unit(ChessPgnDecomposer.ParsedGame record) : IIngestDeferredUnit
     {

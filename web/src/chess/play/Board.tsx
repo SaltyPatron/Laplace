@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
 import { formatSubstrateMoveDelta } from '../evalDisplay';
 import shared from './playShared.module.css';
@@ -63,6 +63,7 @@ export interface BoardProps {
   matedKing?: string | null;
   checkedKing?: string | null;
   readOnly?: boolean;
+  footer?: ReactNode;
   onPointerDown: (e: PointerEvent, sq: string) => void;
   onPointerUp: (e: PointerEvent, sq: string) => void;
   onDragMove: (x: number, y: number) => void;
@@ -71,7 +72,7 @@ export interface BoardProps {
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
   whiteEval, evalFrac, evalDetail, boardRef, flip = false, lastMove, matedKing, checkedKing,
-  readOnly = false,
+  readOnly = false, footer,
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
   const board = parseBoard(fen);
@@ -208,6 +209,7 @@ export function Board({
           <span>eval bar = engine score in pawns (white&rsquo;s view)</span>
           <span>right-drag = arrow · right-click = mark</span>
         </div>
+        {footer ? <div className={styles.footer}>{footer}</div> : null}
       </div>
       {drag && (
         <span

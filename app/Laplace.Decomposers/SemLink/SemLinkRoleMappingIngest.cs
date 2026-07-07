@@ -37,18 +37,14 @@ internal static class SemLinkRoleMappingIngest
         ISubstrateReader? containmentReader = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (batchSize <= 0) batchSize = 4096;
+        if (batchSize <= 0)
+            batchSize = IngestSizing.ResolveForSource(IngestSourceProfile.RelationTriple).RecordBatchSize;
         var stream = new AsyncEnumerableRecordStream<RelationTripleRecord>(EnumerateRecordsAsync(path, ct));
         var handler = new RelationTripleHandler(SemLinkDecomposer.Source, TC.AcademicCurated);
-        var config = new IngestBatchConfig
-        {
-            SourceId = SemLinkDecomposer.Source,
-            BatchLabelPrefix = "semlink/vn-fn-role-mapping",
-            BatchSize = batchSize,
-            ProbeChunkSize = Math.Clamp(batchSize, 64, 4096),
-            ContainmentReader = containmentReader,
-            WorkingSet = WorkingSetMode.Enabled,
-        };
+        var config = IngestPipelineDefaults.RelationTriple(
+            SemLinkDecomposer.Source, "semlink/vn-fn-role-mapping",
+            DecomposerOptions.Default with { BatchSize = batchSize },
+            containmentReader);
         await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
             yield return change;
     }
