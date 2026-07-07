@@ -2,6 +2,7 @@
   <PropertyGroup>
     <LaplaceRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</LaplaceRepoRoot>
     <LaplaceBuildWin Condition="'$(LAPLACE_BUILD_ROOT)' != ''">$(LAPLACE_BUILD_ROOT)\build-win</LaplaceBuildWin>
+    <LaplaceBuildWin Condition="'$(LaplaceBuildWin)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Laplace\build-win</LaplaceBuildWin>
     <LaplaceBuildWin Condition="'$(LaplaceBuildWin)' == ''">$(LaplaceRepoRoot)\build-win</LaplaceBuildWin>
   </PropertyGroup>
 

@@ -12,6 +12,23 @@ public static class LaplaceInstall
 
     public static string InstallRoot => AppContext.BaseDirectory;
 
+    /// <summary>Windows default matches scripts/win/env.cmd when LAPLACE_BUILD_ROOT is unset.</summary>
+    public static string DefaultBuildRoot =>
+        OperatingSystem.IsWindows() ? @"D:\Data\Laplace" : "/vault/Data";
+
+    public static bool TryDefaultBuildRoot(out string buildRoot)
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            buildRoot = Path.GetFullPath(fromEnv.Trim());
+            return true;
+        }
+
+        buildRoot = DefaultBuildRoot;
+        return true;
+    }
+
     public static string WebRoot => Path.Combine(InstallRoot, "wwwroot");
 
     public static string EndpointBaseUrl => $"http://127.0.0.1:{EndpointPort}";
@@ -105,16 +122,6 @@ public static class LaplaceInstall
                 return hit;
         }
 
-        if (TryRepoRoot(out var root))
-        {
-            foreach (var build in Directory.EnumerateDirectories(root, "build*"))
-            {
-                var hit = Directory.EnumerateFiles(build, "laplace_t0_perfcache.bin", SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        }
-
         const string share = "/opt/laplace/share/laplace";
         if (Directory.Exists(share))
         {
@@ -122,18 +129,8 @@ public static class LaplaceInstall
             if (hit is not null) return hit;
         }
 
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                    SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        }
-
         throw new InvalidOperationException(
-            "T0 perfcache not found — build the engine (build-win/core/perfcache/laplace_t0_perfcache.bin).");
+            "T0 perfcache not found — build the engine (D:\\Data\\Laplace\\build-win\\core\\perfcache\\laplace_t0_perfcache.bin).");
     }
 
     public static string ResolveIngestRoot()
@@ -192,26 +189,6 @@ public static class LaplaceInstall
                 return hit;
         }
 
-        if (TryRepoRoot(out var root))
-        {
-            foreach (var build in Directory.EnumerateDirectories(root, "build*"))
-            {
-                var hit = Directory.EnumerateFiles(build, "laplace_highway_perfcache.bin", SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        }
-
-        for (var walk = new DirectoryInfo(AppContext.BaseDirectory); walk is not null; walk = walk.Parent)
-        {
-            foreach (var build in walk.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_highway_perfcache.bin",
-                    SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        }
-
         throw new InvalidOperationException(
             "Highway perfcache not found — build the engine (laplace_highway_perfcache.bin beside T0 blob).");
     }
@@ -250,8 +227,8 @@ public static class LaplaceInstall
         if (!string.IsNullOrWhiteSpace(buildRoot))
             return Path.GetFullPath(Path.Combine(buildRoot.Trim(), "out", "models"));
 
-        if (TryRepoRoot(out var root))
-            return Path.GetFullPath(Path.Combine(root, "out", "models"));
+        if (TryDefaultBuildRoot(out buildRoot))
+            return Path.GetFullPath(Path.Combine(buildRoot, "out", "models"));
 
         var fallback = Path.Combine(AppContext.BaseDirectory, "models");
         Directory.CreateDirectory(fallback);
@@ -309,9 +286,9 @@ public static class LaplaceInstall
             if (Directory.Exists(engineBuild)) return true;
         }
 
-        if (TryRepoRoot(out var root))
+        if (TryDefaultBuildRoot(out var buildRoot))
         {
-            engineBuild = Path.Combine(root, "build-win");
+            engineBuild = Path.GetFullPath(Path.Combine(buildRoot, "build-win"));
             if (Directory.Exists(engineBuild)) return true;
         }
 

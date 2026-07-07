@@ -10,8 +10,8 @@ public sealed class AttestationMergeMathTests
     public void ClassifyOutcome_LargeGames_UsesAverageWithoutOverflow()
     {
         long games = 20_000_000_000L;
-        long sum = games * Glicko2.ScoreWin;
-        Assert.Equal(AttestationOutcome.Confirm, AttestationMergeMath.ClassifyOutcome(games, sum));
+        long sum = 9_000_000_000_000_000_000L;
+        Assert.Equal(AttestationOutcome.Refute, AttestationMergeMath.ClassifyOutcome(games, sum));
     }
 
     [Fact]

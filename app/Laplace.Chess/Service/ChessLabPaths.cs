@@ -29,12 +29,12 @@ public static class ChessLabPaths
 
     public static Probe Cutechess => ResolveExecutable(
         "LAPLACE_CUTECHESS",
-        repoRoot => Path.Combine(repoRoot, "build-cutechess", "cutechess-cli.exe"),
+        _ => TryDefaultCutechessCandidate(),
         CutechessPathNames);
 
     public static Probe Stockfish => ResolveExecutable(
         "LAPLACE_STOCKFISH",
-        repoRoot => Path.Combine(repoRoot, "build-cutechess", "stockfish.exe"),
+        _ => TryDefaultCutechessCandidate("stockfish.exe"),
         StockfishPathNames);
 
     public static Probe LaplaceUci => ResolveLaplaceUci();
@@ -114,14 +114,20 @@ public static class ChessLabPaths
         return new Probe(installed, false, "missing");
     }
 
+    private static string? TryDefaultCutechessCandidate(string name = "cutechess-cli.exe")
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD");
+        if (string.IsNullOrWhiteSpace(fromEnv) && OperatingSystem.IsWindows())
+            fromEnv = Path.Combine(LaplaceInstall.DefaultBuildRoot, "build-cutechess");
+        if (string.IsNullOrWhiteSpace(fromEnv))
+            return null;
+        return Path.Combine(fromEnv.Trim(), name);
+    }
+
     private static bool TryResolveUciBuildOutput(out string path)
     {
         path = "";
-        var buildRoot = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
-        if (string.IsNullOrWhiteSpace(buildRoot) && OperatingSystem.IsWindows())
-            buildRoot = @"D:\Data\Laplace";
-
-        if (string.IsNullOrWhiteSpace(buildRoot))
+        if (!LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
             return false;
 
         foreach (var cfg in new[] { "Release", "Debug" })
@@ -151,11 +157,12 @@ public static class ChessLabPaths
                 return new Probe(p, true, "config");
         }
 
-        if (LaplaceInstall.TryRepoRoot(out var root) && repoCandidate is not null)
+        LaplaceInstall.TryDefaultBuildRoot(out var buildRoot);
+        if (repoCandidate is not null)
         {
-            var repoPath = repoCandidate(root);
+            var repoPath = repoCandidate(buildRoot);
             if (!string.IsNullOrEmpty(repoPath) && File.Exists(repoPath))
-                return new Probe(repoPath, true, "repo");
+                return new Probe(repoPath, true, "build");
         }
 
         if (!string.IsNullOrEmpty(assemblyNeighbor) && File.Exists(assemblyNeighbor))
@@ -165,7 +172,7 @@ public static class ChessLabPaths
             return new Probe(pathHit, true, "path");
 
         var missing = !string.IsNullOrWhiteSpace(configPath) ? configPath.Trim()
-            : repoCandidate is not null && LaplaceInstall.TryRepoRoot(out root) ? repoCandidate(root)
+            : repoCandidate is not null ? repoCandidate(buildRoot)
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
     }

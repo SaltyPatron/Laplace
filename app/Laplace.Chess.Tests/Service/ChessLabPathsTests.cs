@@ -24,23 +24,23 @@ public sealed class ChessLabPathsTests
     }
 
     [Fact]
-    public void Stockfish_UsesRepoRelativeWhenAvailable()
+    public void Stockfish_UsesExternalBuildRootWhenAvailable()
     {
-        if (!LaplaceInstall.TryRepoRoot(out var root))
+        if (!LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
         {
             return;
         }
 
-        var sf = Path.Combine(root, "build-cutechess", "stockfish.exe");
+        var sf = Path.Combine(buildRoot, "build-cutechess", "stockfish.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(sf)!);
         File.WriteAllText(sf, "");
 
         var probe = ChessLabPaths.ResolveExecutableForTest(
             null,
-            r => Path.Combine(r, "build-cutechess", "stockfish.exe"),
+            root => Path.Combine(root, "build-cutechess", "stockfish.exe"),
             ["stockfish.exe"]);
 
-        Assert.Equal("repo", probe.Source);
+        Assert.Equal("build", probe.Source);
         Assert.Equal(sf, probe.Path);
         Assert.True(probe.Found);
     }

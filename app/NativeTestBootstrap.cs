@@ -56,9 +56,9 @@ internal static class NativeTestBootstrap
             if (Directory.Exists(engineBuild)) return true;
         }
 
-        if (LaplaceInstall.TryRepoRoot(out var root))
+        if (LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
         {
-            engineBuild = Path.Combine(root, "build-win");
+            engineBuild = Path.GetFullPath(Path.Combine(buildRoot, "build-win"));
             if (Directory.Exists(engineBuild)) return true;
         }
 

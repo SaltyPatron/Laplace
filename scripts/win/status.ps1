@@ -1,13 +1,13 @@
 
 
 
-$ErrorActionPreference = 'SilentlyContinue'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { 'D:\Data\Laplace' }
-$engineBuild = if ($env:LAPLACE_ENGINE_BUILD) { $env:LAPLACE_ENGINE_BUILD } else { Join-Path $dataRoot 'build-win' }
-$extBuild = if ($env:LAPLACE_EXT_BUILD) { $env:LAPLACE_EXT_BUILD } else { Join-Path $dataRoot 'build-win-ext' }
-$asanBuild = if ($env:LAPLACE_ENGINE_BUILD_ASAN) { $env:LAPLACE_ENGINE_BUILD_ASAN } else { Join-Path $dataRoot 'build-win-asan' }
-$deployRoot = if ($env:LAPLACE_DEPLOY) { $env:LAPLACE_DEPLOY } else { Join-Path $dataRoot 'deploy' }
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'laplace-paths.ps1')
+$Root = Get-LaplaceRepoRoot
+$deployRoot = if ($env:LAPLACE_DEPLOY) { $env:LAPLACE_DEPLOY } else { Join-Path (Get-LaplaceDataRoot) 'deploy' }
+$engineBuild = Resolve-LaplaceTreePath 'build-win'
+$extBuild = Resolve-LaplaceTreePath 'build-win-ext'
+$asanBuild = Resolve-LaplaceTreePath 'build-win-asan'
 $deployLib = Join-Path $deployRoot 'lib'
 $deployShare = Join-Path $deployRoot 'share'
 $deployPg = ($deployRoot -replace '\\', '/')
@@ -18,7 +18,7 @@ $env:PGCONNECT_TIMEOUT = '3'
 function Section($t) { Write-Host "`n=== $t ===" }
 
 Section 'GIT'
-Push-Location $root
+Push-Location $Root
 $branch = git rev-parse --abbrev-ref HEAD
 $dirty = (git status --porcelain --ignore-submodules | Measure-Object).Count
 $last = git log -1 --format='%h %ad %s' --date=format:'%m-%d %H:%M'

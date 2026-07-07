@@ -1,16 +1,12 @@
-
-
-
-
-
 param([switch]$Kill)
 $ErrorActionPreference = 'SilentlyContinue'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$deployLib = if ($env:LAPLACE_DEPLOY) { Join-Path $env:LAPLACE_DEPLOY 'lib' } else { 'D:\Data\Laplace\deploy\lib' }
+. (Join-Path $PSScriptRoot 'laplace-paths.ps1')
+
+$root = Get-LaplaceRepoRoot
+$deployLib = if ($env:LAPLACE_DEPLOY) { Join-Path $env:LAPLACE_DEPLOY 'lib' } else { Join-Path (Get-LaplaceDataRoot) 'deploy\lib' }
 $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()
-
 
 foreach ($p in Get-Process) {
     $path = $null
@@ -26,8 +22,26 @@ foreach ($p in Get-Process) {
     }
 }
 
+foreach ($pair in Get-LaplaceBuildTreePaths) {
+    $treePath = $pair.path
+    if (-not $treePath) { continue }
+    foreach ($p in Get-Process) {
+        $path = $null
+        try { $path = $p.MainModule.FileName } catch { continue }
+        if (-not $path) { continue }
+        if ($path.StartsWith($treePath, 'OrdinalIgnoreCase')) {
+            if ($holders.Pid -contains $p.Id) { continue }
+            $isBuildTool = $buildTools -contains $p.ProcessName.ToLower()
+            $holders += [pscustomobject]@{
+                Pid = $p.Id; Process = $p.ProcessName; Holds = $path
+                SafeToKill = -not $isBuildTool
+                Note = if ($isBuildTool) { "build in progress ($($pair.label))" } else { "runs from $($pair.label)" }
+            }
+        }
+    }
+}
 
-foreach ($p in Get-Process -Name dotnet, testhost) {
+foreach ($p in Get-Process -Name dotnet, testhost -ErrorAction SilentlyContinue) {
     if ($holders.Pid -contains $p.Id) { continue }
     $hit = $null
     try {
@@ -41,7 +55,6 @@ foreach ($p in Get-Process -Name dotnet, testhost) {
         }
     }
 }
-
 
 if (Test-Path $deployLib) {
     foreach ($f in Get-ChildItem (Join-Path $deployLib '*.dll')) {
@@ -58,12 +71,21 @@ if (Test-Path $deployLib) {
     }
 }
 
-if (-not $holders) {
+$treeLocks = Get-LaplaceTreeLocks
+if ($treeLocks) {
+    Write-Host 'tree locks:'
+    $treeLocks | Format-Table Tree, Path, Pid, Name, Acquired, Alive -AutoSize | Out-String -Width 240 | Write-Host
+}
+
+if (-not $holders -and -not $treeLocks) {
     Write-Host 'locks: nothing is holding Laplace artifacts.'
     exit 0
 }
 
-$holders | Sort-Object SafeToKill -Descending | Format-Table -AutoSize | Out-String -Width 240 | Write-Host
+if ($holders) {
+    Write-Host 'process / file locks:'
+    $holders | Sort-Object SafeToKill -Descending | Format-Table -AutoSize | Out-String -Width 240 | Write-Host
+}
 
 if ($Kill) {
     $targets = $holders | Where-Object { $_.SafeToKill -and $_.Pid -ne '-' }

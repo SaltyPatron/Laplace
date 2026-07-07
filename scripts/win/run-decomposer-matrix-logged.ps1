@@ -9,9 +9,11 @@ $LogDir = Join-Path $Root ".ingest-proof"
 $Log = Join-Path $LogDir "decomposer-matrix-run.log"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+. (Join-Path $PSScriptRoot 'laplace-paths.ps1')
+Import-LaplaceEnv
+
 $env:LAPLACE_SKIP_MODELS = "1"
-$env:INGEST = "D:\Data\Ingest"
-$env:LAPLACE_DATA_ROOT = "D:\Data\Ingest"
+if (-not $env:INGEST) { $env:INGEST = "D:\Data\Ingest" }
 
 function Write-Log([string]$Line) {
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

@@ -3,29 +3,9 @@ param(
     [Parameter(Mandatory = $true)][string]$Tree
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'laplace-paths.ps1')
 
-function Resolve-TreePath {
-    param([string]$Name)
-    $fromEnv = @{
-        'build-win'      = $env:LAPLACE_ENGINE_BUILD
-        'build-win-ext'  = $env:LAPLACE_EXT_BUILD
-        'build-win-asan' = $env:LAPLACE_ENGINE_BUILD_ASAN
-    }
-    if ($fromEnv.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace($fromEnv[$Name])) {
-        return $fromEnv[$Name]
-    }
-    $dataRoot = if ($env:LAPLACE_DATA_ROOT) { $env:LAPLACE_DATA_ROOT } else { 'D:\Data\Laplace' }
-    $defaults = @{
-        'build-win'      = Join-Path $dataRoot 'build-win'
-        'build-win-ext'  = Join-Path $dataRoot 'build-win-ext'
-        'build-win-asan' = Join-Path $dataRoot 'build-win-asan'
-    }
-    if ($defaults.ContainsKey($Name)) { return $defaults[$Name] }
-    $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    return Join-Path $root $Name
-}
-
-$treePath = Resolve-TreePath $Tree
+$treePath = Resolve-LaplaceTreePath $Tree
 $lockDir = Join-Path $treePath '.lap-lock'
 $ownerFile = Join-Path $lockDir 'owner.json'
 

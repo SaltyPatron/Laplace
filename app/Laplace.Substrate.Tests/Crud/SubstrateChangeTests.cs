@@ -192,12 +192,12 @@ public class SubstrateChangeTests
         var row = new AttestationRow(
             H(4), H(1), H(50), H(2), src, null,
             AttestationOutcome.Confirm, 0L, 1L, Glicko2.ScoreWin, 30_000_000_000L);
-        b.AddAttestation(row with { ObservationCount = 20_000_000_000L, SumScoreFp1e9 = 20_000_000_000_000_000_000L });
+        b.AddAttestation(row with { ObservationCount = 20_000_000_000L, SumScoreFp1e9 = 9_000_000_000_000_000_000L });
         b.AddAttestation(row with { ObservationCount = 1L });
 
         var a = Assert.Single(b.Build().Attestations);
-        Assert.Equal(20_000_000_000_001L, a.ObservationCount);
-        Assert.Equal(AttestationOutcome.Confirm, a.Outcome);
+        Assert.Equal(20_000_000_001L, a.ObservationCount);
+        Assert.Equal(AttestationOutcome.Refute, a.Outcome);
     }
 
     [Fact]
