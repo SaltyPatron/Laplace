@@ -1,0 +1,33 @@
+@layer components {
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: min(78vh, 760px);
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+  }
+
+  .label {
+    min-width: 7rem;
+    text-align: center;
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+  }
+
+  .label b {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reviewing {
+    color: var(--color-accent);
+  }
+}

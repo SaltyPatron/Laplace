@@ -202,6 +202,16 @@ public static class LaplaceInstall
         return fallback;
     }
 
+    /// <summary>Process environment first, then <c>deploy/secrets/{secretFile}</c>.</summary>
+    public static string? TryReadConfig(string key, string? secretFile = null)
+    {
+        var fromEnv = Environment.GetEnvironmentVariable(key);
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+            return fromEnv.Trim();
+
+        return secretFile is null ? null : TryReadDeploySecret(secretFile, key);
+    }
+
     /// <summary>Read a key from <c>deploy/secrets/{fileName}</c> when present.</summary>
     public static string? TryReadDeploySecret(string fileName, string key)
     {

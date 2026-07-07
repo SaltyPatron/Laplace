@@ -98,7 +98,7 @@ export function GameControls(p: GameControlsProps) {
           label="eval mode"
         />
       </div>
-      <Muted>drag/click to move · right-drag = arrow · right-click = mark · left-click clears</Muted>
+      <Muted>drag/click to move · ← → review · right-drag = arrow · right-click = mark</Muted>
       <code className={styles.fen}>{p.fen}</code>
     </Panel>
   );

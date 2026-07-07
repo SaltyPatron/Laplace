@@ -43,8 +43,12 @@ public sealed class Search
     private readonly Stopwatch _sw = new();
     private CancellationToken _ct;
 
-    private bool TimeUp() => (_nodes & 2047) == 0 && _rootBestMove != default
-        && (_sw.ElapsedMilliseconds >= _deadlineMs || _ct.IsCancellationRequested);
+    private bool TimeUp()
+    {
+        if (_ct.IsCancellationRequested) return true;
+        return (_nodes & 2047) == 0 && _rootBestMove != default
+            && _sw.ElapsedMilliseconds >= _deadlineMs;
+    }
 
     private readonly EvalTerm _terms;
     private readonly IRootBias? _rootBias;
@@ -118,6 +122,7 @@ public sealed class Search
 
     private int Negamax(Board b, int depth, int alpha, int beta, int ply)
     {
+        if (_ct.IsCancellationRequested) { _aborted = true; return 0; }
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
@@ -176,6 +181,7 @@ public sealed class Search
 
     private int Quiesce(Board b, int alpha, int beta, int ply)
     {
+        if (_ct.IsCancellationRequested) { _aborted = true; return 0; }
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 

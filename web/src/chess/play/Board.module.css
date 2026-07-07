@@ -246,6 +246,10 @@
     background: radial-gradient(circle at center, hsla(28, 90%, 55%, 0.75), hsla(28, 80%, 45%, 0.25) 70%);
   }
 
+  .readOnly {
+    cursor: default;
+  }
+
   .mated {
     background: radial-gradient(circle at center, hsla(0, 85%, 55%, 0.85), hsla(0, 80%, 45%, 0.35) 70%);
   }

@@ -62,6 +62,7 @@ export interface BoardProps {
   lastMove?: { from: string; to: string } | null;
   matedKing?: string | null;
   checkedKing?: string | null;
+  readOnly?: boolean;
   onPointerDown: (e: PointerEvent, sq: string) => void;
   onPointerUp: (e: PointerEvent, sq: string) => void;
   onDragMove: (x: number, y: number) => void;
@@ -70,6 +71,7 @@ export interface BoardProps {
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
   whiteEval, evalFrac, evalDetail, boardRef, flip = false, lastMove, matedKing, checkedKing,
+  readOnly = false,
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
   const board = parseBoard(fen);
@@ -89,7 +91,7 @@ export function Board({
   const targetMu = new Map(selMoves.map((m) => [m.uci.slice(2, 4), m.effMu]));
 
   const suggMark = new Map<string, { hue: number; role: 'from' | 'to' }>();
-  if (!sel && !drag) {
+  if (!readOnly && !sel && !drag) {
     const sugg = [...legal].sort((a, b) => b.effMu - a.effMu).filter((m) => m.rated).slice(0, 5);
     sugg.forEach((m, i) => {
       const hue = Math.round((i / Math.max(1, sugg.length)) * 320);
@@ -162,6 +164,7 @@ export function Board({
                       sm && (sm.role === 'to' ? styles.suggTo : styles.sugg),
                       showPick && sq === botBestTo && styles.pick,
                       drag?.from === sq && styles.dragging,
+                      readOnly && styles.readOnly,
                     )}
                     style={style}
                     onPointerDown={(e) => onPointerDown(e, sq)}

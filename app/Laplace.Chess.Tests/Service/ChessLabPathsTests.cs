@@ -8,7 +8,7 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessLabPathsTests
 {
     [Fact]
-    public void Cutechess_UsesExplicitPathWhenProvided()
+    public void Cutechess_UsesConfigPathWhenProvided()
     {
         var fake = Path.Combine(Path.GetTempPath(), $"cutechess-{Guid.NewGuid():N}.exe");
         File.WriteAllText(fake, "");
@@ -46,21 +46,32 @@ public sealed class ChessLabPathsTests
     }
 
     [Fact]
-    public void LaplaceUci_DiscoversOnPath()
+    public void LaplaceUci_UsesInstallRootContract()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"laplace-path-{Guid.NewGuid():N}");
+        var dir = Path.Combine(Path.GetTempPath(), $"laplace-install-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         var uci = Path.Combine(dir, "laplace-uci.exe");
         File.WriteAllText(uci, "");
 
-        var probe = ChessLabPaths.ResolveExecutableForTest(
-            uci,
-            _ => null,
-            ["laplace-uci.exe", "laplace-uci"]);
+        var probe = ChessLabPaths.ResolveLaplaceUciForTest(uci);
 
-        Assert.Equal("config", probe.Source);
+        Assert.Equal("install", probe.Source);
         Assert.Equal(uci, probe.Path);
         Assert.True(probe.Found);
+    }
+
+    [Fact]
+    public void LaplaceUci_IgnoresStaleConfig_InstallRootIsCanonical()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"laplace-install-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var uci = Path.Combine(dir, "laplace-uci.exe");
+        File.WriteAllText(uci, "");
+
+        // ResolveLaplaceUci has no config key — stale LAPLACE_UCI env cannot override install root.
+        var probe = ChessLabPaths.ResolveLaplaceUciForTest(uci);
+        Assert.True(probe.Found);
+        Assert.Equal(uci, probe.Path);
     }
 
     [Fact]
@@ -87,22 +98,11 @@ public sealed class ChessLabPathsTests
     }
 
     [Fact]
-    public void LaplaceUci_FallsBackWhenConfigPathMissing()
+    public void DeployedLaplaceUciPath_IsInstallRootNeighbor()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"laplace-neighbor-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        var uci = Path.Combine(dir, "laplace-uci.exe");
-        File.WriteAllText(uci, "");
-
-        var probe = ChessLabPaths.ResolveExecutableForTest(
-            Path.Combine(Path.GetTempPath(), $"missing-uci-{Guid.NewGuid():N}.exe"),
-            _ => null,
-            ["laplace-uci.exe", "laplace-uci"],
-            uci);
-
-        Assert.Equal("path", probe.Source);
-        Assert.Equal(uci, probe.Path);
-        Assert.True(probe.Found);
+        Assert.Equal(
+            Path.Combine(LaplaceInstall.InstallRoot, "laplace-uci.exe"),
+            ChessLabPaths.DeployedLaplaceUciPath);
     }
 
     [Fact]

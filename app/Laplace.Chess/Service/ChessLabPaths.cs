@@ -13,13 +13,16 @@ public static class ChessLabPaths
 
     public readonly record struct Probe(string? Path, bool Found, string Source);
 
+    /// <summary>Deployed API hosts ship <c>laplace-uci.exe</c> beside the entry assembly.</summary>
+    public static string DeployedLaplaceUciPath => Path.Combine(LaplaceInstall.InstallRoot, "laplace-uci.exe");
+
     public static string LabDir
     {
         get
         {
-            var fromSecret = LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, "LAPLACE_CHESS_LAB_DIR");
-            return !string.IsNullOrWhiteSpace(fromSecret)
-                ? fromSecret.Trim()
+            var fromConfig = LaplaceInstall.TryReadConfig("LAPLACE_CHESS_LAB_DIR", ChessLabEnvFile);
+            return !string.IsNullOrWhiteSpace(fromConfig)
+                ? fromConfig.Trim()
                 : Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
         }
     }
@@ -34,23 +37,7 @@ public static class ChessLabPaths
         repoRoot => Path.Combine(repoRoot, "build-cutechess", "stockfish.exe"),
         StockfishPathNames);
 
-    public static Probe LaplaceUci => ResolveExecutable(
-        "LAPLACE_UCI",
-        repoRoot =>
-        {
-            foreach (var rel in new[]
-            {
-                Path.Combine("app", "Laplace.Chess.Uci", "bin", "Release", "net10.0", "laplace-uci.exe"),
-                Path.Combine("app", "Laplace.Cli", "bin", "Release", "net10.0", "laplace-uci.exe"),
-            })
-            {
-                var p = Path.Combine(repoRoot, rel);
-                if (File.Exists(p)) return p;
-            }
-            return null;
-        },
-        LaplaceUciPathNames,
-        Path.Combine(AppContext.BaseDirectory, "laplace-uci.exe"));
+    public static Probe LaplaceUci => ResolveLaplaceUci();
 
     public static Probe QtBin => ResolveQtBin();
 
@@ -69,11 +56,26 @@ public static class ChessLabPaths
     }
 
     internal static Probe ResolveExecutableForTest(
-        string? envValue,
+        string? configValue,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
         string? assemblyNeighbor = null)
-        => ResolveExecutableCore(envValue, repoCandidate, pathNames, assemblyNeighbor);
+        => ResolveExecutableCore(configValue, repoCandidate, pathNames, assemblyNeighbor);
+
+    internal static Probe ResolveLaplaceUciForTest(string? installExe, Func<string, string?>? buildOutput = null)
+    {
+        if (!string.IsNullOrEmpty(installExe) && File.Exists(installExe))
+            return new Probe(installExe, true, "install");
+
+        if (LaplaceInstall.TryRepoRoot(out var root) && buildOutput is not null)
+        {
+            var built = buildOutput(root);
+            if (!string.IsNullOrEmpty(built) && File.Exists(built))
+                return new Probe(built, true, "build");
+        }
+
+        return new Probe(installExe, false, "missing");
+    }
 
     internal static Probe ResolveQtBinForTest(string? configValue)
     {
@@ -92,20 +94,59 @@ public static class ChessLabPaths
         string[] pathNames,
         string? assemblyNeighbor = null)
         => ResolveExecutableCore(
-            LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, configKey),
+            LaplaceInstall.TryReadConfig(configKey, ChessLabEnvFile),
             repoCandidate,
             pathNames,
             assemblyNeighbor);
 
+    private static Probe ResolveLaplaceUci()
+    {
+        var installed = DeployedLaplaceUciPath;
+        if (File.Exists(installed))
+            return new Probe(installed, true, "install");
+
+        if (TryResolveUciBuildOutput(out var built))
+            return new Probe(built, true, "build");
+
+        if (TryFindOnPath(LaplaceUciPathNames, out var pathHit))
+            return new Probe(pathHit, true, "path");
+
+        return new Probe(installed, false, "missing");
+    }
+
+    private static bool TryResolveUciBuildOutput(out string path)
+    {
+        path = "";
+        var buildRoot = Environment.GetEnvironmentVariable("LAPLACE_BUILD_ROOT");
+        if (string.IsNullOrWhiteSpace(buildRoot) && OperatingSystem.IsWindows())
+            buildRoot = @"D:\Data\Builds\Laplace";
+
+        if (string.IsNullOrWhiteSpace(buildRoot))
+            return false;
+
+        foreach (var cfg in new[] { "Release", "Debug" })
+        {
+            var candidate = Path.Combine(
+                buildRoot.Trim(), "app", "bin", "Laplace.Chess.Uci", cfg, "net10.0", "laplace-uci.exe");
+            if (File.Exists(candidate))
+            {
+                path = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static Probe ResolveExecutableCore(
-        string? explicitPath,
+        string? configPath,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
         string? assemblyNeighbor)
     {
-        if (!string.IsNullOrWhiteSpace(explicitPath))
+        if (!string.IsNullOrWhiteSpace(configPath))
         {
-            var p = explicitPath.Trim();
+            var p = configPath.Trim();
             if (File.Exists(p))
                 return new Probe(p, true, "config");
         }
@@ -113,8 +154,8 @@ public static class ChessLabPaths
         if (LaplaceInstall.TryRepoRoot(out var root) && repoCandidate is not null)
         {
             var repoPath = repoCandidate(root);
-            if (!string.IsNullOrEmpty(repoPath))
-                return new Probe(repoPath, File.Exists(repoPath), "repo");
+            if (!string.IsNullOrEmpty(repoPath) && File.Exists(repoPath))
+                return new Probe(repoPath, true, "repo");
         }
 
         if (!string.IsNullOrEmpty(assemblyNeighbor) && File.Exists(assemblyNeighbor))
@@ -123,18 +164,18 @@ public static class ChessLabPaths
         if (TryFindOnPath(pathNames, out var pathHit))
             return new Probe(pathHit, true, "path");
 
-        var missing = repoCandidate is not null && LaplaceInstall.TryRepoRoot(out root)
-            ? repoCandidate(root)
+        var missing = !string.IsNullOrWhiteSpace(configPath) ? configPath.Trim()
+            : repoCandidate is not null && LaplaceInstall.TryRepoRoot(out root) ? repoCandidate(root)
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
     }
 
     private static Probe ResolveQtBin()
     {
-        var fromSecret = LaplaceInstall.TryReadDeploySecret(ChessLabEnvFile, "LAPLACE_QT_BIN");
-        if (!string.IsNullOrWhiteSpace(fromSecret))
+        var fromConfig = LaplaceInstall.TryReadConfig("LAPLACE_QT_BIN", ChessLabEnvFile);
+        if (!string.IsNullOrWhiteSpace(fromConfig))
         {
-            var p = fromSecret.Trim();
+            var p = fromConfig.Trim();
             if (Directory.Exists(p))
                 return new Probe(p, true, "config");
         }

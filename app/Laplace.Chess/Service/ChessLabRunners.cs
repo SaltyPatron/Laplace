@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using global::Npgsql;
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Microsoft.Extensions.Logging;
 
@@ -17,7 +18,7 @@ public static class ChessLabRunners
         int games = int.Parse(Config(cfg, "games", "20"));
         int depth = int.Parse(Config(cfg, "depth", "4"));
         int maxPlies = int.Parse(Config(cfg, "maxPlies", "160"));
-        int concurrency = int.Parse(Config(cfg, "concurrency", "4"));
+        int concurrency = ResolveConcurrency(cfg);
         bool openings = Config(cfg, "openings", "false") == "true";
 
         lab.Publish(slot, new ChessLabLogEvent("info", $"substrate-test [{mode}] {games} games depth {depth}"));
@@ -30,8 +31,8 @@ public static class ChessLabRunners
             "off" => null,
             _ => null,
         };
-        var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias);
-        var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All);
+        var guided = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias, ct: ct);
+        var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
 
         var progress = new Progress<(int Done, int AWins, int Draws, int BWins)>(p =>
@@ -42,7 +43,7 @@ public static class ChessLabRunners
 
         var r = await Task.Run(() => MatchRunner.Play(
             guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
-            openingFens: book, progress: progress), ct);
+            openingFens: book, progress: progress, ct: ct), ct);
 
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
@@ -57,19 +58,59 @@ public static class ChessLabRunners
         {
             int games = int.Parse(Config(slot.Job.Config, "games", "20"));
             int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
-            lab.Publish(slot, new ChessLabLogEvent("info", $"ladder depth {depth} × {games}"));
-            var terms = new[] { EvalTerm.Material, EvalTerm.Pst, EvalTerm.BishopPair, EvalTerm.RookFiles, EvalTerm.PawnStructure, EvalTerm.Tempo };
-            var rows = new List<IReadOnlyList<string>>();
-            foreach (var t in terms)
+            int maxPlies = int.Parse(Config(slot.Job.Config, "maxPlies", "160"));
+            int budget = ResolveConcurrency(slot.Job.Config);
+            var terms = new[]
             {
-                ct.ThrowIfCancellationRequested();
-                var full = MatchRunner.SearcherFactory(depth, EvalTerm.All);
-                var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~t);
-                var r = MatchRunner.Play(full, minus, games, seed: 7, concurrency: 4);
+                EvalTerm.Material, EvalTerm.Pst, EvalTerm.BishopPair,
+                EvalTerm.RookFiles, EvalTerm.PawnStructure, EvalTerm.Tempo,
+            };
+            int perTerm = Math.Max(1, budget / terms.Length);
+            int totalGames = games * terms.Length;
+
+            lab.Publish(slot, new ChessLabLogEvent("info",
+                $"ladder depth {depth} × {games} games × {terms.Length} terms "
+                + $"(parallel terms, {perTerm} games/term-slot, {budget} core budget)"));
+            lab.UpdateSummary(slot, new ChessLabJobSummary(0, totalGames, "starting"));
+
+            var rows = new IReadOnlyList<string>?[terms.Length];
+            var termDone = new int[terms.Length];
+            var progressLock = new object();
+
+            Parallel.For(0, terms.Length, new ParallelOptions
+            {
+                MaxDegreeOfParallelism = terms.Length,
+                CancellationToken = ct,
+            }, ti =>
+            {
+                var term = terms[ti];
+                lab.Publish(slot, new ChessLabLogEvent("info", $"term {ti + 1}/{terms.Length}: {term}"));
+
+                var full = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct);
+                var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~term, ct: ct);
+                var progress = new Progress<(int Done, int AWins, int Draws, int BWins)>(p =>
+                {
+                    int overall;
+                    lock (progressLock)
+                    {
+                        termDone[ti] = p.Done;
+                        overall = 0;
+                        foreach (var d in termDone) overall += d;
+                        lab.UpdateSummary(slot, new ChessLabJobSummary(
+                            overall, totalGames, $"{term}: {p.AWins}-{p.Draws}-{p.BWins}"));
+                    }
+                    lab.Publish(slot, new ChessLabProgressEvent(overall, totalGames, term.ToString()));
+                });
+
+                var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm, progress: progress, ct: ct);
                 string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
-                rows.Add([t.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo]);
-            }
-            lab.Publish(slot, new ChessLabTableEvent("overlay ladder", ["term", "W-D-L", "Elo"], rows));
+                rows[ti] = [term.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo];
+                lab.Publish(slot, new ChessLabLogEvent("info", $"{term}: {r.AWins}-{r.Draws}-{r.BWins} Elo {elo}"));
+            });
+
+            lab.Publish(slot, new ChessLabTableEvent("overlay ladder", ["term", "W-D-L", "Elo"],
+                rows.Select(r => r!).ToList()));
+            lab.UpdateSummary(slot, new ChessLabJobSummary(totalGames, totalGames, "complete"));
             Finish(lab, slot, ChessLabJobState.Completed);
         }, ct);
 
@@ -181,6 +222,15 @@ public static class ChessLabRunners
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string def)
         => cfg.TryGetValue(key, out var v) ? v : def;
+
+    /// <summary>0 or absent = all performance cores; explicit value caps parallel game workers.</summary>
+    private static int ResolveConcurrency(IReadOnlyDictionary<string, string> cfg, string key = "concurrency")
+    {
+        if (cfg.TryGetValue(key, out var raw) && int.TryParse(raw, out var parsed))
+            return parsed <= 0 ? CpuTopology.PerformanceLogicalProcessorCount : parsed;
+
+        return CpuTopology.PerformanceLogicalProcessorCount;
+    }
 
     private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : (name.Length > 16 ? name[..16] : name);
 

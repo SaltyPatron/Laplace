@@ -71,6 +71,7 @@ public sealed class ChessLabService
 
         if (cts is null) return false;
         cts.Cancel();
+        Publish(slot, new ChessLabLogEvent("info", "stop requested — cancelling workers"));
         return true;
     }
 

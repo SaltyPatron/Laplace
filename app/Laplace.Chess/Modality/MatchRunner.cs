@@ -57,11 +57,12 @@ public static class MatchRunner
 
     private static int PlayOne(
         ChessModality m, MoveChooser white, MoveChooser black, int maxPlies, Random rng, int openingPlies,
-        ChessState? start = null, List<ChessMove>? record = null)
+        ChessState? start = null, List<ChessMove>? record = null, CancellationToken ct = default)
     {
         var s = start ?? m.Initial();
         for (int ply = 0; ; ply++)
         {
+            if (ct.IsCancellationRequested) return 2;
             if (m.Terminal(s) is { } t) return t.IsDraw ? 2 : (t.Winner ?? 2);
             if (ply >= maxPlies) return 2;
             MoveChooser chooser = ply < openingPlies ? RandomChooser
@@ -87,11 +88,11 @@ public static class MatchRunner
 
     public static Func<MoveChooser> SearcherFactory(
         int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null, int ttBits = 16,
-        int[][]? mgPst = null, int[][]? egPst = null)
+        int[][]? mgPst = null, int[][]? egPst = null, CancellationToken ct = default)
         => () =>
         {
             var search = new Search(terms, bias, ttBits, mgPst, egPst);
-            return (s, rng) => search.Think(s.Board, new Search.Limits(MaxDepth: depth)).BestMove
+            return (s, rng) => search.Think(s.Board, new Search.Limits(MaxDepth: depth), ct).BestMove
                                ?? RandomChooser(s, rng);
         };
 
@@ -100,12 +101,19 @@ public static class MatchRunner
         int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,
         IReadOnlyList<string>? openingFens = null,
         System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null,
-        IProgress<(int Done, int AWins, int Draws, int BWins)>? progress = null)
+        IProgress<(int Done, int AWins, int Draws, int BWins)>? progress = null,
+        CancellationToken ct = default)
     {
         bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0, done = 0;
-        Parallel.For(0, games, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, concurrency) }, g =>
+        int reportEvery = Math.Max(1, games / 500);
+        Parallel.For(0, games, new ParallelOptions
         {
+            MaxDegreeOfParallelism = ResolveParallelism(concurrency),
+            CancellationToken = ct,
+        }, g =>
+        {
+            ct.ThrowIfCancellationRequested();
             var m = new ChessModality();
             var rng = new Random(seed + g);
             var a = makeA();
@@ -114,14 +122,18 @@ public static class MatchRunner
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var record = pgnSink is not null ? new List<ChessMove>() : null;
             int outcome = PlayOne(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
-                                  book ? 0 : openingPlies, start, record);
+                                  book ? 0 : openingPlies, start, record, ct);
             if (record is not null) pgnSink!.Add((record, outcome, start.Board.ToFen()));
             if (outcome == 2) Interlocked.Increment(ref draws);
             else if ((outcome == 0) == aWhite) Interlocked.Increment(ref aWins);
             else Interlocked.Increment(ref bWins);
             int d = Interlocked.Increment(ref done);
-            progress?.Report((d, Volatile.Read(ref aWins), Volatile.Read(ref draws), Volatile.Read(ref bWins)));
+            if (progress is not null && (d % reportEvery == 0 || d == games))
+                progress.Report((d, Volatile.Read(ref aWins), Volatile.Read(ref draws), Volatile.Read(ref bWins)));
         });
         return new MatchResult(games, aWins, draws, bWins);
     }
+
+    private static int ResolveParallelism(int concurrency)
+        => concurrency <= 0 ? -1 : Math.Max(1, concurrency);
 }

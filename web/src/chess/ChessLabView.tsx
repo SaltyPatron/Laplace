@@ -20,7 +20,7 @@ import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJ
 import styles from './ChessLabView.module.css';
 
 type FieldDef =
-  | { key: string; label: string; type: 'number'; min: number; max: number; step?: number; unit?: string; help?: string }
+  | { key: string; label: string; type: 'number'; min: number; max?: number; step?: number; unit?: string; help?: string }
   | { key: string; label: string; type: 'text' | 'password'; help?: string }
   | { key: string; label: string; type: 'select'; options: string[]; help?: string }
   | { key: string; label: string; type: 'bool'; help?: string };
@@ -28,15 +28,17 @@ type FieldDef =
 const JOB_FIELDS: Record<string, FieldDef[]> = {
   'substrate-test': [
     { key: 'mode', label: 'bias mode', type: 'select', options: ['fold', 'edge', 'off'], help: 'substrate root-bias source (off = pure search baseline)' },
-    { key: 'games', label: 'games', type: 'number', min: 1, max: 500 },
+    { key: 'games', label: 'games', type: 'number', min: 1, help: 'no upper limit' },
     { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
     { key: 'maxPlies', label: 'max plies', type: 'number', min: 10, max: 400, help: 'adjudicate a draw past this length' },
-    { key: 'concurrency', label: 'concurrency', type: 'number', min: 1, max: 16 },
+    { key: 'concurrency', label: 'concurrency', type: 'number', min: 0, help: 'parallel games (0 = all performance cores)' },
     { key: 'openings', label: 'opening book', type: 'bool', help: 'seed games from the opening set' },
   ],
   ladder: [
-    { key: 'games', label: 'games / term', type: 'number', min: 1, max: 200 },
+    { key: 'games', label: 'games / term', type: 'number', min: 1, help: 'no upper limit' },
     { key: 'depth', label: 'depth', type: 'number', min: 1, max: 12 },
+    { key: 'maxPlies', label: 'max plies', type: 'number', min: 10, max: 400, help: 'adjudicate a draw past this length' },
+    { key: 'concurrency', label: 'core budget', type: 'number', min: 0, help: 'total parallel workers across all terms (0 = all performance cores)' },
   ],
   tactics: [{ key: 'depth', label: 'depth', type: 'number', min: 1, max: 16 }],
   review: [
@@ -131,6 +133,12 @@ export function ChessLabView() {
       try {
         for await (const evt of streamLabEvents(job.id, ac.signal)) {
           setEvents((prev) => [...prev.slice(-200), evt]);
+          if (evt.done !== undefined && evt.total !== undefined) {
+            setJobs((prev) => prev.map((j) =>
+              j.id === job.id
+                ? { ...j, summary: { ...j.summary, done: evt.done!, total: evt.total!, message: evt.label ?? j.summary.message } }
+                : j));
+          }
         }
       } catch { /* aborted or stream closed */ }
       void refresh();
@@ -279,18 +287,32 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
   }
 
   if (field.type === 'number') {
+    if (field.max !== undefined) {
+      return (
+        <Field
+          label={field.label}
+          help={field.help}
+          valueDisplay={`${value || '—'}${field.unit ?? ''}`}
+        >
+          <SliderField
+            min={field.min}
+            max={field.max}
+            step={field.step ?? 1}
+            value={value}
+            onChange={onChange}
+          />
+        </Field>
+      );
+    }
+
     return (
-      <Field
-        label={field.label}
-        help={field.help}
-        valueDisplay={`${value || '—'}${field.unit ?? ''}`}
-      >
-        <SliderField
+      <Field label={field.label} help={field.help}>
+        <Input
+          type="number"
           min={field.min}
-          max={field.max}
           step={field.step ?? 1}
           value={value}
-          onChange={onChange}
+          onChange={(e) => onChange(e.target.value)}
         />
       </Field>
     );
