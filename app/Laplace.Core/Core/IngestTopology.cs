@@ -188,9 +188,16 @@ public sealed class IngestTopology
 
         int commitWorkers = CpuTopology.ResolveIngestCommitWorkers(headroom: 1);
 
-        int applyPartitions = ResolveApplyPartitions();
-
+        // Read the P-core count EXACTLY ONCE and derive apply partitions from that same
+        // value. Previously applyPartitions came from ResolveApplyPartitions() (its own
+        // read of CpuTopology.PerformanceCoreCount) while pCores read it again separately;
+        // a first-touch topology-init race made the two reads disagree — apply_partitions=1
+        // while p_physical=8 — which silently pinned the ENTIRE apply COPY path to a single
+        // thread (parallelCopy in NpgsqlWorkingSetApply requires ApplyParallelism > 1). One
+        // read → the two can never diverge again.
         int pCores = CpuTopology.PerformanceCoreCount;
+
+        int applyPartitions = Math.Max(1, pCores);
 
         var sizing = IngestSizing.Resolve(
             pCores, fileWorkers, applyPartitions, composeWorkers: composeWorkers);

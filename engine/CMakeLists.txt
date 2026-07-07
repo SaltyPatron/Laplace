@@ -19,6 +19,23 @@ else()
     set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma)
 endif()
 
+# Emit CodeView debug info + a linker PDB for optimized Release native builds so a
+# native crash (access violation / heap fail-fast) symbolizes to function+line instead
+# of a bare module+offset. /Z7 embeds CodeView in each .obj (Ninja-parallel-safe, no
+# mspdbsrv serialization); /DEBUG makes the linker emit the .pdb; /OPT:REF,ICF keep the
+# release binary size. Optimization level is UNCHANGED — this only adds symbols. Guarded
+# to Release/RelWithDebInfo because Debug already carries its own /Zi (mutually exclusive
+# with /Z7).
+if(WIN32)
+    add_compile_options($<$<CONFIG:Release,RelWithDebInfo>:/Z7>)
+    # icx forwards linker flags ONLY via /Qoption,link,<flag>; a bare /DEBUG hits the
+    # compiler driver and is silently dropped (never reaches link → no PDB). /OPT:REF,ICF
+    # must also be forwarded because /DEBUG otherwise disables them and bloats the binary.
+    add_link_options($<$<CONFIG:Release,RelWithDebInfo>:/Qoption,link,/DEBUG>)
+    add_link_options($<$<CONFIG:Release,RelWithDebInfo>:/Qoption,link,/OPT:REF>)
+    add_link_options($<$<CONFIG:Release,RelWithDebInfo>:/Qoption,link,/OPT:ICF>)
+endif()
+
 set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)")
 set_property(CACHE LAPLACE_TARGET_ISA PROPERTY STRINGS AVX2 AVX512)
 if(WIN32)

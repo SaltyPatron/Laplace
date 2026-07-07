@@ -166,8 +166,12 @@ internal static class Program
         var migrationsDir = LocateMigrationsDir();
         Console.WriteLine($"Migrations directory: {migrationsDir}");
 
+        // DbUp parses Search Path= from the connection string as the executor schema.
+        // Multi-schema paths (laplace,public) become invalid SQL in VerifySchema:
+        //   CREATE SCHEMA IF NOT EXISTS laplace,public  → syntax error at ","
+        // Journal lives in public; pass it explicitly and keep Search Path for scripts.
         return DeployChanges.To
-            .PostgresqlDatabase(connectionString)
+            .PostgresqlDatabase(connectionString, "public")
             .WithScriptsFromFileSystem(migrationsDir)
             .JournalToPostgresqlTable("public", "schemaversions")
             .WithVariablesDisabled()
@@ -198,6 +202,10 @@ internal static class Program
             if (args[i] == "--connection-string") return args[i + 1];
             if (args[i] == "--database") return LaplaceInstall.PostgresConnectionString(args[i + 1]);
         }
+
+        var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
+            return ParsePostgresUrl(databaseUrl);
 
         return LaplaceInstall.PostgresConnectionString();
     }

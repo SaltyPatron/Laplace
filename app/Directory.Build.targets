@@ -12,18 +12,31 @@
 
 
 
+  <!-- Copy each native DLL AND its PDB so a crash in app/bin symbolizes. The .pdb
+       carries no Condition of its own: it rides beside the DLL, OPTIONAL via Exists so
+       a Debug/no-PDB build doesn't break the copy. SkipUnchangedFiles keeps the PDB in
+       lockstep with its DLL — a stale PDB is worse than none, so both refresh together. -->
   <Target Name="LaplaceCopyNativeLibs" AfterTargets="Build"
           Condition="Exists('$(LaplaceBuildWin)\core\laplace_core.dll')">
     <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.pdb"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(LaplaceBuildWin)\core\laplace_core.pdb')" />
     <Copy SourceFiles="C:\Program Files\PostgreSQL\18\bin\libxml2.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
           Condition="Exists('C:\Program Files\PostgreSQL\18\bin\libxml2.dll')" />
     <Copy SourceFiles="$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
           Condition="Exists('$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll')" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\dynamics\laplace_dynamics.pdb"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(LaplaceBuildWin)\dynamics\laplace_dynamics.pdb')" />
     <Copy SourceFiles="$(LaplaceBuildWin)\synthesis\laplace_synthesis.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
           Condition="Exists('$(LaplaceBuildWin)\synthesis\laplace_synthesis.dll')" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\synthesis\laplace_synthesis.pdb"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(LaplaceBuildWin)\synthesis\laplace_synthesis.pdb')" />
   </Target>
 </Project>

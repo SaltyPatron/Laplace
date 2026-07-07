@@ -45,9 +45,13 @@ public static class LaplaceInstall
 
     public static string PostgresConnectionString(string database = "laplace")
     {
+        var dbName = OperatingSystem.IsWindows()
+            ? database
+            : ResolveLinuxDatabaseName(database);
+
         var s = OperatingSystem.IsWindows()
-            ? $"Host=localhost;Username=postgres;Password=postgres;Database={database};Command Timeout=0"
-            : $"Host=/var/run/postgresql;Username=laplace_admin;Database={database}-dev";
+            ? $"Host=localhost;Username=postgres;Password=postgres;Database={dbName};Command Timeout=0"
+            : $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
 
         if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
             s += ";Include Error Detail=true";
@@ -261,5 +265,21 @@ public static class LaplaceInstall
         var stamped = TryStampedRepoRoot();
         if (!string.IsNullOrEmpty(stamped))
             yield return Path.Combine(stamped, "deploy", "secrets", fileName);
+    }
+
+    /// <summary>
+    /// Linux two-DB law: PGDATABASE when set (CI/ingest targets laplace), else local
+    /// sandbox laplace-dev; any other explicit name is used as-is.
+    /// </summary>
+    private static string ResolveLinuxDatabaseName(string database)
+    {
+        if (database != "laplace")
+            return database;
+
+        var fromEnv = Environment.GetEnvironmentVariable("PGDATABASE");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+            return fromEnv;
+
+        return "laplace-dev";
     }
 }

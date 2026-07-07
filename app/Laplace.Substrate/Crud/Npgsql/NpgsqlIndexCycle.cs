@@ -42,8 +42,8 @@ internal sealed class NpgsqlIndexCycle
 
     public static async Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
     {
-        await using var conn = await ds.OpenConnectionAsync(ct);
         var pending = new List<(string Name, string Def)>();
+        await using (var conn = await ds.OpenConnectionAsync(ct))
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT index_name, index_def FROM laplace.index_cycle_journal";
@@ -51,18 +51,44 @@ internal sealed class NpgsqlIndexCycle
             while (await rd.ReadAsync(ct))
                 pending.Add((rd.GetString(0), rd.GetString(1)));
         }
-        foreach (var (name, def) in pending)
+        if (pending.Count == 0) return;
+
+        // Recovery rebuilds every index a crashed run left dropped, on the FULL table,
+        // BEFORE any ingest can start. Doing it serially on one connection made post-crash
+        // startup take as long as the crash itself. Parallelize exactly like the normal
+        // rebuild path (RebuildAsync below): one connection per worker, same maintenance
+        // GUCs, up to ApplyParallelism concurrent builds.
+        int workers = Math.Min(pending.Count, NpgsqlSubstrateWriter.ApplyParallelism);
+        int next = -1;
+        await Laplace.Engine.Core.CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
         {
-            log.LogWarning("INDEX_CYCLE recovery: re-creating {Index} from journal", name);
-            await using var mk = conn.CreateCommand();
-            mk.CommandTimeout = 0;
-            mk.CommandText = def.Replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
-            await mk.ExecuteNonQueryAsync(ct);
-            await using var del = conn.CreateCommand();
-            del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
-            del.Parameters.AddWithValue(name);
-            await del.ExecuteNonQueryAsync(ct);
-        }
+            for (int i = Interlocked.Increment(ref next); i < pending.Count;
+                 i = Interlocked.Increment(ref next))
+            {
+                var (name, def) = pending[i];
+                log.LogWarning("INDEX_CYCLE recovery: re-creating {Index} from journal", name);
+                await using var conn = await ds.OpenConnectionAsync(token);
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.CommandText =
+                        "SET maintenance_work_mem = '2GB'; "
+                        + "SET max_parallel_maintenance_workers = 4";
+                    await guc.ExecuteNonQueryAsync(token);
+                }
+                await using (var mk = conn.CreateCommand())
+                {
+                    mk.CommandTimeout = 0;
+                    mk.CommandText = def.Replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
+                    await mk.ExecuteNonQueryAsync(token);
+                }
+                await using (var del = conn.CreateCommand())
+                {
+                    del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
+                    del.Parameters.AddWithValue(name);
+                    await del.ExecuteNonQueryAsync(token);
+                }
+            }
+        }, ct);
     }
 
     /// <summary>

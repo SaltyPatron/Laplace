@@ -195,6 +195,14 @@ install(TARGETS laplace_core
         PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
+# Ship the linker PDB alongside the DLL so a deployed native crash symbolizes.
+# OPTIONAL: absent on non-MSVC toolchains / Debug-only configs without /DEBUG.
+install(FILES $<TARGET_PDB_FILE:laplace_core>
+    DESTINATION lib
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+    OPTIONAL
+)
+
 install(FILES ${LAPLACE_PERFCACHE_BIN}
     DESTINATION share/laplace
     RENAME "laplace_t0_perfcache_${LAPLACE_UNICODE_VERSION}.bin"

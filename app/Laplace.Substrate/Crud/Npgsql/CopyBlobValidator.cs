@@ -14,11 +14,14 @@ internal static class CopyBlobValidator
 {
 
 
-    // Armed via env because the corruption is intermittent: LAPLACE_COPY_BLOB_VALIDATE=1
-    // makes every CollectBlobs pass walk the native COPY blobs and fail AT the corrupting
-    // phase instead of 6MB downstream in CopyTupleParser.
+    // Default ON. Walking the native COPY blobs each CollectBlobs pass turns silent heap
+    // corruption into a loud error AT the corrupting phase instead of a fail-fast 6MB
+    // downstream in CopyTupleParser. The cost is negligible against a multi-hour seed, and
+    // a correctness check that catches memory corruption must never be opt-in — the safe
+    // path is the default. Explicit opt-out (LAPLACE_COPY_BLOB_VALIDATE=0) exists only for
+    // clean-run micro-benchmarking, never for production seeds.
     public static readonly bool Enabled =
-        Environment.GetEnvironmentVariable("LAPLACE_COPY_BLOB_VALIDATE") == "1";
+        Environment.GetEnvironmentVariable("LAPLACE_COPY_BLOB_VALIDATE") != "0";
 
 
 
