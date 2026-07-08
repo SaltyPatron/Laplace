@@ -578,7 +578,12 @@ ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
 KillSignal=SIGINT
 TimeoutSec=120
-Restart=on-failure
+# Restart=always (not on-failure): the runner user OWNS this postmaster and
+# bounces it rootlessly by SIGINT (clean exit, code 0) — pipeline.sh
+# restart_postgres relies on systemd resurrecting it after a CLEAN shutdown.
+# systemctl stop still stops it for good (stop suppresses Restart=).
+Restart=always
+RestartSec=2
 UMask=0027
 
 [Install]

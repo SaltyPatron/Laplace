@@ -52,42 +52,55 @@ usage() {
 }
 
 restart_postgres() {
-  # $1 = reason. Restart the systemd unit that OWNS the running postmaster —
-  # discovered, never guessed. The old `systemctl is-active postgresql` guard
-  # silently skipped the restart on any runner whose unit isn't literally named
-  # "postgresql", leaving ALTER SYSTEM settings pending_restart forever (the
-  # perfcache preload among them, which 503'd every smoke run). This helper
-  # either restarts the real unit and PROVES nothing is left pending, or fails
-  # the phase loudly right here — a pending restart is never again downgraded
+  # $1 = reason. ROOTLESS self-bounce: on this host the postmaster runs AS the
+  # runner user (laplace-postgresql.service, User=laplace-runner), so the
+  # runner controls its own postgres — it signals the postmaster it owns with
+  # SIGINT (fast shutdown) and systemd's Restart=always resurrects it with the
+  # new config. No sudo anywhere on the hot path. A sudo -n (never-prompt)
+  # systemctl restart exists only as a fallback for hosts where postgres runs
+  # under a different user. Either way this PROVES nothing is left pending or
+  # fails the phase loudly right here — a pending restart is never downgraded
   # to a warning four jobs upstream of the failure it causes.
-  local reason="$1" unit=""
-  if command -v systemctl >/dev/null 2>&1; then
-    unit=$(systemctl list-units --type=service --state=running --plain --no-legend \
-             'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
+  local reason="$1" datadir pidfile oldpid=""
+  datadir=$(psql -d postgres -U laplace_admin -tAc "SHOW data_directory")
+  pidfile="$datadir/postmaster.pid"
+  oldpid=$(head -1 "$pidfile" 2>/dev/null || true)
+
+  if [[ -n "$oldpid" ]] && kill -0 "$oldpid" 2>/dev/null; then
+    echo "restart_postgres ($reason): fast-shutdown SIGINT to owned postmaster pid $oldpid (systemd resurrects it)"
+    kill -INT "$oldpid"
+  else
+    local unit=""
+    if command -v systemctl >/dev/null 2>&1; then
+      unit=$(systemctl list-units --type=service --state=running --plain --no-legend \
+               'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
+    fi
+    if [[ -z "$unit" ]] || ! sudo -n systemctl restart "$unit" 2>/dev/null; then
+      echo "::error::restart_postgres ($reason): postmaster pid ${oldpid:-unknown} is not signalable by $(id -un) and no rootless path exists — bounce PostgreSQL manually, then rerun this phase" >&2
+      return 1
+    fi
+    echo "restart_postgres ($reason): restarted $unit via passwordless systemctl fallback"
   fi
-  if [[ -z "$unit" ]]; then
-    echo "::error::restart_postgres ($reason): no running postgres systemd unit found — restart the cluster manually, then rerun this phase" >&2
-    return 1
-  fi
-  echo "restart_postgres ($reason): restarting $unit"
-  sudo systemctl restart "$unit"
-  local tries=0
-  until psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
+
+  local tries=0 newpid=""
+  until newpid=$(head -1 "$pidfile" 2>/dev/null) && [[ -n "$newpid" && "$newpid" != "$oldpid" ]] \
+        && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
     tries=$((tries + 1))
-    if (( tries > 60 )); then
-      echo "::error::restart_postgres ($reason): PostgreSQL not accepting connections ${tries}s after restarting $unit" >&2
+    if (( tries > 120 )); then
+      echo "::error::restart_postgres ($reason): PostgreSQL did not come back within ${tries}s (old pid ${oldpid:-unknown}) — if the unit lacks Restart=always, apply the drop-in from bootstrap-laplace-runner.sh and start it manually" >&2
       return 1
     fi
     sleep 1
   done
+
   local still
   still=$(psql -d postgres -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
   if [[ "$still" != "0" ]]; then
-    echo "::error::restart_postgres ($reason): $still setting(s) STILL pending after restarting $unit:" >&2
+    echo "::error::restart_postgres ($reason): $still setting(s) STILL pending after restart:" >&2
     psql -d postgres -U laplace_admin -c "SELECT name, setting FROM pg_settings WHERE pending_restart" >&2
     return 1
   fi
-  echo "restart_postgres ($reason): clean — no settings pending"
+  echo "restart_postgres ($reason): clean — postmaster ${oldpid:-?} -> $newpid, no settings pending"
 }
 
 phase_clean() {
