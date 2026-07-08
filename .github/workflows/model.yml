@@ -24,8 +24,6 @@ env:
   MODEL_DIR_INPUT: ${{ inputs.model_dir }}
   GGUF_OUT: /tmp/laplace-model-substrate-ci.gguf
   CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build --"
-  LAPLACE_INGEST_WORKERS: "4"
-  LAPLACE_FOLD_WORKERS: "4"
 
 jobs:
   ingest:

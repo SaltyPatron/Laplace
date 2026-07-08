@@ -50,18 +50,17 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
         const string sql = """
             SELECT reply, eff_mu, witnesses
-            FROM laplace.recall(@p, CASE WHEN @prior = '' THEN NULL
-                                         ELSE laplace.resolve_topic(@prior, NULL) END);
+            FROM laplace.recall_session(@p, @session);
             """;
         try
         {
             var prompt = userTurns[^1];
-            var prior = userTurns.Count >= 2 ? userTurns[^2] : "";
 
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             await using var cmd = new NpgsqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("p", prompt);
-            cmd.Parameters.AddWithValue("prior", prior);
+            var sessionParam = cmd.Parameters.Add("session", NpgsqlDbType.Bytea);
+            sessionParam.Value = session is null ? DBNull.Value : session;
 
             var rows = new List<ConverseRow>(8);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -77,7 +76,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         catch (PostgresException pg)
         {
             throw new SubstrateQueryException(
-                $"recall query failed [{pg.SqlState}] {pg.MessageText}"
+                $"recall_session query failed [{pg.SqlState}] {pg.MessageText}"
                 + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)

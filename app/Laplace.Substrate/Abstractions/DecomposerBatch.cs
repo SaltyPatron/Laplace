@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Imperative-compose pipeline entry for non-orchestrator code (e.g. ModelTokenEdgeETL).
-/// Orchestrator lanes use <see cref="DecomposerOrchestrator.RunComposePhaseAsync{T}"/>.
+/// Multi-phase sources use nested <see cref="ComposeDecomposerPhase{T}"/> types instead.
 /// </summary>
 public static class IngestComposePipeline
 {

@@ -26,7 +26,7 @@ public sealed class JsonLeafContentConvergenceTests
             composer.TrySpanEntity((uint)ci, (uint)(ci + surface.Length), out var leafId),
             "the JSON string-content leaf must resolve to a composed entity");
 
-        var contentId = ContentWitnessBatch.RootId(surface);
+        var contentId = ContentTierSpine.ResolveRoot(surface);
         Assert.NotNull(contentId);
         Assert.Equal(contentId!.Value, leafId);
     }
@@ -44,7 +44,7 @@ public sealed class JsonLeafContentConvergenceTests
             utf8, ast, default, composer, JsonGrammarHelper.FindRootObjectNode(ast));
 
         Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "w", out var leafId));
-        var contentId = ContentWitnessBatch.RootId(surface);
+        var contentId = ContentTierSpine.ResolveRoot(surface);
         Assert.NotNull(contentId);
         Assert.Equal(contentId!.Value, leafId);
     }
@@ -62,6 +62,6 @@ public sealed class JsonLeafContentConvergenceTests
             utf8, ast, default, composer, JsonGrammarHelper.FindRootObjectNode(ast));
 
         Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "word", out var wordId));
-        Assert.Equal(ContentWitnessBatch.RootId(surface), wordId);
+        Assert.Equal(ContentTierSpine.ResolveRoot(surface), wordId);
     }
 }

@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
@@ -11,44 +10,6 @@ internal static class FnLuSynsetBridgeIngest
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
 
     internal const string MultiWordNetVersion = SourceEntityIdConventions.MultiWordNetWnVersion;
-
-    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
-        string path,
-        Hash128 source,
-        string labelPrefix,
-        int batchSize,
-        string synsetVersion = "pwn30",
-        long maxInputUnits = 0,
-        ISubstrateReader? reader = null,
-        DecomposerOptions? options = null,
-        CancellationToken ct = default)
-    {
-        options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
-        if (maxInputUnits > 0)
-            options = options with { MaxInputUnits = maxInputUnits };
-        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
-            EnumerateTabRecordsAsync(path, synsetVersion, maxInputUnits, ct),
-            source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
-    }
-
-    internal static IAsyncEnumerable<SubstrateChange> StreamWfnNativeAsync(
-        string path,
-        Hash128 source,
-        string labelPrefix,
-        int batchSize,
-        string synsetVersion = "pwn30",
-        long maxInputUnits = 0,
-        ISubstrateReader? reader = null,
-        DecomposerOptions? options = null,
-        CancellationToken ct = default)
-    {
-        options ??= DecomposerOptions.ForWitness("FnLuSynsetBridge");
-        if (maxInputUnits > 0)
-            options = options with { MaxInputUnits = maxInputUnits };
-        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
-            EnumerateWfnNativeRecordsAsync(path, synsetVersion, maxInputUnits, ct),
-            source, TC.AcademicCurated, labelPrefix, batchSize, reader, options, ct);
-    }
 
     internal static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateTabRecordsAsync(
         string path,

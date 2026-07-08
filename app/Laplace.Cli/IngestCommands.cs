@@ -395,13 +395,18 @@ internal static class IngestCommands
                 + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
-        int batch = 0;
         int workers = IngestTopology.Current.CommitWorkers;
-        long maxUnits = 0;
+        // LAPLACE_INGEST_MAX_UNITS caps INPUT VOLUME (smoke/bench scoping — an
+        // operator decision, like --langs). It is not a machine-sizing knob:
+        // batch/commit sizing stays owned by IngestSizing/MemoryTopology and
+        // deliberately has no env override.
+        long maxUnits =
+            long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_MAX_UNITS"),
+                out var mu) && mu > 0 ? mu : 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
         var sized = IngestSizing.ResolveForSource(profile);
         sized.Log(sourceName);
-        if (batch <= 0) batch = sized.RecordBatchSize;
+        int batch = sized.RecordBatchSize;
         int commitRows = sized.CommitRows;
         var decoOpts = DecomposerOptions.ForWitness(
             sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);

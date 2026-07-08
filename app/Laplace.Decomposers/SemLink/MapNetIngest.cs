@@ -2,72 +2,47 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
 internal static class MapNetIngest
 {
-    private const string FrameMappingFile = "mapping_frame_synsets.txt";
-    private const string LuMappingFile = "mapping_lus_synsets.txt";
+    internal const string FrameMappingFile = "mapping_frame_synsets.txt";
+    internal const string LuMappingFile = "mapping_lus_synsets.txt";
 
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
 
-    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
-        string path,
-        int batchSize,
-        ISubstrateReader? reader,
-        DecomposerOptions options,
-        long maxInputUnits = 0,
-        CancellationToken ct = default)
-    {
-        if (Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase))
-        {
-            return FnLuSynsetBridgeIngest.StreamAsync(
-                path, MapNetDecomposer.Source, "mapnet/lu", batchSize,
-                FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct);
-        }
+    internal readonly record struct MapNetFileSpec(string Path, string Label, bool IsLuFile);
 
-        var opts = maxInputUnits > 0 ? options with { MaxInputUnits = maxInputUnits } : options;
-        return CategoryCorrespondenceIngestSupport.RunPipelineAsync(
-            EnumerateFrameRecordsAsync(path, maxInputUnits, ct),
-            MapNetDecomposer.Source, TC.AcademicCurated, "mapnet/frame", batchSize, reader, opts, ct);
+    internal static MapNetFileSpec DescribeFile(string path)
+    {
+        bool isLu = Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase);
+        string label = isLu ? "mapnet/lu" : "mapnet/frame";
+        return new MapNetFileSpec(path, label, isLu);
     }
 
-    private static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateFrameRecordsAsync(
+    internal static async IAsyncEnumerable<CategoryCorrespondenceRecord> EnumerateFrameRecordsAsync(
         string path,
         long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
-        long rowsTotal = 0;
-
-        while (true)
+        await foreach (var rec in TabBridgeHelpers.ReadTwoColumnBridgeAsync(
+                           path,
+                           static col0 => System.Text.Encoding.UTF8.GetString(col0),
+                           FrameTypeId,
+                           static col1 =>
+                           {
+                               string raw = System.Text.Encoding.UTF8.GetString(col1);
+                               var parsed = SourceEntityIdConventions.ParseMapNetSynsetKey(raw);
+                               return parsed is null ? default(Hash128)
+                                   : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
+                                       FnLuSynsetBridgeIngest.MultiWordNetVersion) ?? default;
+                           },
+                           maxInputUnits: maxInputUnits,
+                           ct: ct))
         {
-            ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
-            if (line.Length == 0) continue;
-
-            var fields = line.Split('\t');
-            if (fields.Length < 2) continue;
-
-            string frame = fields[0].Trim();
-            string synRaw = fields[1].Trim();
-            if (frame.Length == 0 || synRaw.Length == 0) continue;
-
-            Hash128? synId = SynsetAnchor(synRaw);
-            if (synId is null) continue;
-
-            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
-            rowsTotal++;
-
-            yield return new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value);
-
-            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            if (rec.ObjectId != default)
+                yield return rec;
         }
     }
 
@@ -165,12 +140,25 @@ internal static class MapNetIngest
             yield return line;
         }
     }
+}
 
-    private static Hash128? SynsetAnchor(string raw)
+internal sealed class MapNetMultiFileStream : IMultiFileRecordStream<CategoryCorrespondenceRecord>
+{
+    private readonly IReadOnlyList<MapNetIngest.MapNetFileSpec> _files;
+
+    public MapNetMultiFileStream(IReadOnlyList<MapNetIngest.MapNetFileSpec> files) => _files = files;
+
+    public async IAsyncEnumerable<(string FileLabel, CategoryCorrespondenceRecord Record)> RecordsAsync(
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var parsed = SourceEntityIdConventions.ParseMapNetSynsetKey(raw);
-        return parsed is null ? null
-            : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
-                                     FnLuSynsetBridgeIngest.MultiWordNetVersion);
+        foreach (var spec in _files)
+        {
+            var records = spec.IsLuFile
+                ? FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
+                    spec.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct)
+                : MapNetIngest.EnumerateFrameRecordsAsync(spec.Path, 0, ct);
+            await foreach (var rec in records)
+                yield return (spec.Label, rec);
+        }
     }
 }

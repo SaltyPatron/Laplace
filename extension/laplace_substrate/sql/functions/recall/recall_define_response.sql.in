@@ -3,5 +3,5 @@ CREATE OR REPLACE FUNCTION recall_define_response(p_prompt text, p_topic bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT d.definition, d.eff_mu, d.witnesses
-    FROM define(p_topic, recall_context_exclude(p_prompt, p_topic)) d
+    FROM define_fast(p_topic, recall_context_exclude(p_prompt, p_topic)) d
 $$;

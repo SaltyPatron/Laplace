@@ -13,8 +13,38 @@ public sealed class LanguageFilter
 
     public bool IsActive => _canon.Count > 0;
 
+    /// <summary>
+    /// Env-driven language scope: <c>LAPLACE_INGEST_LANGS_{KEY}</c> (per-source)
+    /// wins over <c>LAPLACE_INGEST_LANGS</c> (global). Unset means NO filter —
+    /// every language ingests (witness-manifest law). This is the mechanism the
+    /// manifest documents; it was once severed to a hard-coded null, which left
+    /// every scoped CI ingest silently running the whole multilingual corpus.
+    /// </summary>
+    public static LanguageFilter? ForSource(string sourceKey)
+    {
+        string? spec = PerSourceEnv(sourceKey) ?? GlobalEnv();
+        if (string.IsNullOrWhiteSpace(spec)) return null;
+        return FromSpec(spec);
+    }
 
-    public static LanguageFilter? ForSource(string sourceKey) => null;
+    private static string? GlobalEnv() =>
+        Environment.GetEnvironmentVariable("LAPLACE_INGEST_LANGS");
+
+    private static string? PerSourceEnv(string sourceName)
+    {
+        string key = SourceEnvKey(sourceName);
+        return Environment.GetEnvironmentVariable($"LAPLACE_{key}_LANGS")
+            ?? Environment.GetEnvironmentVariable($"LAPLACE_INGEST_LANGS_{key}");
+    }
+
+    private static string SourceEnvKey(string sourceName)
+    {
+        const string suffix = "Decomposer";
+        string s = sourceName.Trim();
+        if (s.EndsWith(suffix, StringComparison.Ordinal))
+            s = s[..^suffix.Length];
+        return s.ToUpperInvariant().Replace('-', '_');
+    }
 
     public static LanguageFilter FromSpec(string commaSeparated)
     {

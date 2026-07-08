@@ -31,25 +31,7 @@ internal static class SemLinkRoleMappingIngest
         yield return ecosystemPath;
     }
 
-    internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
-        string path,
-        int batchSize,
-        ISubstrateReader? containmentReader = null,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        if (batchSize <= 0)
-            batchSize = IngestSizing.ResolveForSource(IngestSourceProfile.RelationTriple).RecordBatchSize;
-        var stream = new AsyncEnumerableRecordStream<RelationTripleRecord>(EnumerateRecordsAsync(path, ct));
-        var handler = new RelationTripleHandler(SemLinkDecomposer.Source, TC.AcademicCurated);
-        var config = IngestPipelineDefaults.RelationTriple(
-            SemLinkDecomposer.Source, "semlink/vn-fn-role-mapping",
-            DecomposerOptions.Default with { BatchSize = batchSize },
-            containmentReader);
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
-            yield return change;
-    }
-
-    private static async IAsyncEnumerable<RelationTripleRecord> EnumerateRecordsAsync(
+    internal static async IAsyncEnumerable<RelationTripleRecord> EnumerateRecordsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
         var doc = new XmlDocument();
@@ -115,5 +97,44 @@ internal static class SemLinkRoleMappingIngest
             }
         }, ct);
         return total > 0 ? total : null;
+    }
+}
+
+internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RelationTripleRecord>
+{
+    private readonly string _path;
+
+    public SemLinkRoleMappingPhase(string path) => _path = path;
+
+    protected override string PhaseLabel => "semlink/vn-fn-role-mapping";
+
+    public override Hash128 SourceId => SemLinkDecomposer.Source;
+    public override string SourceName => "SemLinkDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => SemLinkDecomposer.TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
+
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SemLinkRoleMappingIngest.EstimateUnitCountAsync(_path, ct);
+
+    protected override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
+        new RelationTripleHandler(SourceId, SourceTrust);
+
+    protected override IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+        SemLinkRoleMappingIngest.EnumerateRecordsAsync(_path, ct);
+
+    protected override IngestBatchConfig BuildPipelineConfig(
+        IDecomposerContext context, DecomposerOptions options)
+    {
+        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
+        var config = IngestPipelineDefaults.RelationTriple(
+            SourceId, BatchLabelPrefix,
+            options with { BatchSize = batchSize },
+            context.Reader);
+        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

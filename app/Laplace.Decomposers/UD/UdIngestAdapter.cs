@@ -65,7 +65,7 @@ public sealed class UdListRecordStream(IReadOnlyList<UdIngestRecord> records) : 
     }
 }
 
-public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>
+public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>, IIngestBatchScopedHandler
 {
     private readonly Hash128 _sourceId;
     private readonly ConcurrentDictionary<string, byte> _canonicalNames;
@@ -98,7 +98,7 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>
 
     internal void SetEmitContext(UdSentenceEmitContext ctx) => _emitCtx = ctx;
 
-    internal void ResetBatchState()
+    public void ResetBatchState()
     {
         _seenEntBatch.Clear();
         _seenAttBatch = new ConcurrentIdSet();

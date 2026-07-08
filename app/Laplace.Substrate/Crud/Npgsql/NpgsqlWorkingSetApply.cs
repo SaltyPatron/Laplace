@@ -146,23 +146,18 @@ public sealed partial class NpgsqlSubstrateWriter
         long aFold = 0, eSkip = 0, pSkip = 0;
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
+        // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
+        // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
+        // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
+        // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
+        await using var tx = await AdvisoryTxLock.BeginWithLockAsync(
+            conn, "laplace_apply_batch",
+            "SET LOCAL session_replication_role = replica; "
+            + "SET LOCAL synchronous_commit = off; "
+            + "SET LOCAL jit = off; ",
+            _log, ct);
         try
         {
-            await using (var guc = conn.CreateCommand())
-            {
-                guc.Transaction = tx;
-                // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
-                // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
-                // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
-                // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
-                guc.CommandText =
-                    "SET LOCAL session_replication_role = replica; "
-                    + "SET LOCAL synchronous_commit = off; "
-                    + "SET LOCAL jit = off; "
-                    + "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0))";
-                await guc.ExecuteNonQueryAsync(ct);
-            }
             rt++;
 
             if (workingSetToken is Hash128 token)

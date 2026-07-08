@@ -106,6 +106,39 @@ public static class IngestPipelineDefaults
         };
     }
 
+    /// <summary>
+    /// Witnessed structured-grammar lane (OMW, Wiktionary, Tatoeba, Etl rows).
+    /// Mirrors <see cref="StructuredGrammarIngest.IngestFileAsync"/> config shape.
+    /// </summary>
+    public static IngestBatchConfig StructuredGrammar(
+        Hash128 sourceId,
+        string batchLabelPrefix,
+        int defaultBatchSize,
+        DecomposerOptions options,
+        ISubstrateReader? reader,
+        double witnessWeight = 1.0,
+        int commitEpoch = 0,
+        IngestSourceProfile? profile = null)
+    {
+        profile ??= IngestSourceProfile.Wiktionary;
+        var sized = IngestSizing.ResolveForSource(profile, defaultBatchSize > 0 ? defaultBatchSize : null);
+        return new()
+        {
+            SourceId = sourceId,
+            BatchLabelPrefix = batchLabelPrefix,
+            BatchSize = sized.RecordBatchSize,
+            ProbeChunkSize = sized.ProbeChunkSize,
+            WitnessWeight = witnessWeight,
+            CommitEpoch = commitEpoch,
+            ContainmentReader = reader,
+            MaxInputUnits = options.MaxInputUnits,
+            WorkingSet = WorkingSetMode.Enabled,
+            WorkingSetProbeInterval = sized.WorkingSetProbeInterval,
+            WorkingSetRecordCap = sized.WorkingSetRecordCap,
+            WorkingSetProfile = profile,
+        };
+    }
+
     public static IngestBatchConfig CategoryCorrespondence(
         Hash128 sourceId, string batchLabelPrefix, int defaultBatchSize,
         DecomposerOptions options, ISubstrateReader? reader,
@@ -212,7 +245,8 @@ public abstract class Decomposer<TRecord> : IDecomposer
 /// </summary>
 public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
 {
-    protected abstract IMultiFileRecordStream<TRecord> CreateMultiFileStream(string ecosystemPath);
+    protected abstract IMultiFileRecordStream<TRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options);
 
     protected abstract IIngestRecordHandler<TRecord> CreateHandlerForFile(string fileLabel);
 
@@ -228,7 +262,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
         if (options.DryRun) yield break;
 
         await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
-                           CreateMultiFileStream(context.EcosystemPath),
+                           CreateMultiFileStream(context.EcosystemPath, options),
                            CreateHandlerForFile,
                            label => ConfigForFile(label, context.Reader, options),
                            maxTotalUnits: options.MaxInputUnits,
@@ -310,6 +344,53 @@ public abstract class GrammarComposeDecomposer : Decomposer<GrammarComposeRecord
     protected override int DefaultBatchSize => BatchConfigDefaults.Code;
 }
 
+/// <summary>
+/// Witnessed structured-grammar lane: row parse → <see cref="GrammarIngestHandler"/>.
+/// Subclasses supply record streams (file, parallel file, multi-file).
+/// </summary>
+public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
+{
+    protected abstract string ModalityId { get; }
+    protected abstract IGrammarWitness CreateWitness(DecomposerOptions options);
+    protected virtual double WitnessWeight => 1.0;
+    protected virtual int CommitEpoch => 0;
+    protected virtual Hash128? ContextId => null;
+    protected virtual IngestSourceProfile IngestProfile => IngestSourceProfile.Wiktionary;
+
+    private DecomposerOptions? _activeOptions;
+
+    protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler()
+    {
+        var options = _activeOptions ?? DecomposerOptions.Default;
+        return new GrammarIngestHandler(SourceId, ModalityId, CreateWitness(options), ContextId);
+    }
+
+    protected override IngestBatchConfig BuildPipelineConfig(
+        IDecomposerContext context, DecomposerOptions options) =>
+        IngestPipelineDefaults.StructuredGrammar(
+            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader,
+            WitnessWeight, CommitEpoch, IngestProfile);
+
+    protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
+        IDecomposerContext context,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ContainmentReader = context.Reader;
+        _activeOptions = options;
+        if (options.DryRun) yield break;
+
+        var stream = new AsyncEnumerableRecordStream<GrammarIngestRecord>(
+            ExtractRecordsAsync(context.EcosystemPath, options, ct));
+        var handler = CreateHandler();
+        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+            BuildPipelineConfig(context, options), options);
+
+        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
+            yield return change;
+    }
+}
+
 public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorrespondenceRecord>
 {
     protected sealed override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandler() =>
@@ -324,12 +405,13 @@ public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorr
 }
 
 /// <summary>
-/// Sources whose ingest spans multiple pipeline lanes or files with custom
-/// orchestration (UD parallel treebanks, SemLink sub-ingests, Model phases).
-/// Still sealed on <see cref="DecomposeAsync"/> — subclasses implement
-/// <see cref="RunIngestAsync"/> only.
+/// Multi-phase sources (WordNet data/sense/exc/sent, SemLink sub-ingests,
+/// Model tokenizer/recipe/…). Each phase is a standalone
+/// <see cref="DecomposerPhase{T}"/> or <see cref="ComposeDecomposerPhase{T}"/>
+/// routed through <see cref="RunPhaseAsync"/>. Sealed on
+/// <see cref="DecomposeAsync"/> — subclasses implement <see cref="RunIngestAsync"/> only.
 /// </summary>
-public abstract class DecomposerOrchestrator : IDecomposer
+public abstract class DecomposerMultiPhase : IDecomposer
 {
     public abstract Hash128 SourceId { get; }
     public abstract string SourceName { get; }
@@ -364,195 +446,5 @@ public abstract class DecomposerOrchestrator : IDecomposer
     {
         await foreach (var change in phase.DecomposeAsync(context, options, ct))
             yield return change;
-    }
-
-    protected async IAsyncEnumerable<SubstrateChange> RunComposePhaseAsync<T>(
-        IAsyncEnumerable<T> records,
-        Action<T, SubstrateChangeBuilder> compose,
-        string phaseLabel,
-        double sourceTrust,
-        int batchSize,
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct,
-        int commitEpoch = 0,
-        int? attestationCapacity = null)
-    {
-        var phase = new OrchestratorComposePhase<T>(
-            this, phaseLabel, records, compose, sourceTrust, batchSize, commitEpoch, attestationCapacity);
-        await foreach (var change in phase.DecomposeAsync(context, options, ct))
-            yield return change;
-    }
-
-    protected async IAsyncEnumerable<SubstrateChange> RunGrammarComposePhaseAsync(
-        IAsyncEnumerable<GrammarComposeRecord> records,
-        double sourceTrust,
-        string phaseLabel,
-        int batchSize,
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var phase = new OrchestratorGrammarComposePhase(this, phaseLabel, records, sourceTrust, batchSize);
-        await foreach (var change in phase.DecomposeAsync(context, options, ct))
-            yield return change;
-    }
-
-    protected async IAsyncEnumerable<SubstrateChange> RunCategoryCorrespondencePhaseAsync(
-        IAsyncEnumerable<CategoryCorrespondenceRecord> records,
-        double sourceTrust,
-        string phaseLabel,
-        int batchSize,
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var phase = new OrchestratorCategoryCorrespondencePhase(this, phaseLabel, records, sourceTrust, batchSize);
-        await foreach (var change in phase.DecomposeAsync(context, options, ct))
-            yield return change;
-    }
-
-    private sealed class OrchestratorComposePhase<T> : ComposeDecomposerPhase<T>
-    {
-        private readonly DecomposerOrchestrator _owner;
-        private readonly IAsyncEnumerable<T> _records;
-        private readonly Action<T, SubstrateChangeBuilder> _compose;
-        private readonly double _sourceTrust;
-        private readonly int _batchSize;
-        private readonly int _commitEpoch;
-        private readonly int? _attestationCapacity;
-
-        public OrchestratorComposePhase(
-            DecomposerOrchestrator owner,
-            string phaseLabel,
-            IAsyncEnumerable<T> records,
-            Action<T, SubstrateChangeBuilder> compose,
-            double sourceTrust,
-            int batchSize,
-            int commitEpoch,
-            int? attestationCapacity)
-        {
-            _owner = owner;
-            _phaseLabel = phaseLabel;
-            _records = records;
-            _compose = compose;
-            _sourceTrust = sourceTrust;
-            _batchSize = batchSize;
-            _commitEpoch = commitEpoch;
-            _attestationCapacity = attestationCapacity;
-        }
-
-        private readonly string _phaseLabel;
-
-        protected override string PhaseLabel => _phaseLabel;
-
-        public override Hash128 SourceId => _owner.SourceId;
-        public override string SourceName => _owner.SourceName;
-        public override int LayerOrder => _owner.LayerOrder;
-        public override Hash128 TrustClassId => _owner.TrustClassId;
-        protected override double SourceTrust => _sourceTrust;
-        protected override int DefaultBatchSize => _batchSize;
-
-        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(null);
-
-        protected override void Compose(T record, SubstrateChangeBuilder builder) => _compose(record, builder);
-
-        protected override IAsyncEnumerable<T> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options, CancellationToken ct) => _records;
-
-        protected override IngestBatchConfig BuildPipelineConfig(
-            IDecomposerContext context, DecomposerOptions options)
-        {
-            var config = IngestPipelineDefaults.Compose(
-                SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader,
-                attestationCapacity: _attestationCapacity, commitEpoch: _commitEpoch);
-            return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
-        }
-    }
-
-    private sealed class OrchestratorGrammarComposePhase : GrammarComposeDecomposer
-    {
-        private readonly DecomposerOrchestrator _owner;
-        private readonly IAsyncEnumerable<GrammarComposeRecord> _records;
-        private readonly double _sourceTrust;
-        private readonly int _batchSize;
-        private readonly string _batchLabelPrefix;
-
-        public OrchestratorGrammarComposePhase(
-            DecomposerOrchestrator owner,
-            string phaseLabel,
-            IAsyncEnumerable<GrammarComposeRecord> records,
-            double sourceTrust,
-            int batchSize)
-        {
-            _owner = owner;
-            _batchLabelPrefix = $"{owner.SourceName}/{phaseLabel}";
-            _records = records;
-            _sourceTrust = sourceTrust;
-            _batchSize = batchSize;
-        }
-
-        protected override string BatchLabelPrefix => _batchLabelPrefix;
-
-        public override Hash128 SourceId => _owner.SourceId;
-        public override string SourceName => _owner.SourceName;
-        public override int LayerOrder => _owner.LayerOrder;
-        public override Hash128 TrustClassId => _owner.TrustClassId;
-        protected override double SourceTrust => _sourceTrust;
-        protected override int DefaultBatchSize => _batchSize;
-
-        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(null);
-
-        protected override IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options, CancellationToken ct) => _records;
-    }
-
-    private sealed class OrchestratorCategoryCorrespondencePhase : CategoryCorrespondenceDecomposer
-    {
-        private readonly DecomposerOrchestrator _owner;
-        private readonly IAsyncEnumerable<CategoryCorrespondenceRecord> _records;
-        private readonly double _sourceTrust;
-        private readonly int _batchSize;
-        private readonly string _batchLabelPrefix;
-
-        public OrchestratorCategoryCorrespondencePhase(
-            DecomposerOrchestrator owner,
-            string phaseLabel,
-            IAsyncEnumerable<CategoryCorrespondenceRecord> records,
-            double sourceTrust,
-            int batchSize)
-        {
-            _owner = owner;
-            _batchLabelPrefix = $"{owner.SourceName}/{phaseLabel}";
-            _records = records;
-            _sourceTrust = sourceTrust;
-            _batchSize = batchSize;
-        }
-
-        protected override string BatchLabelPrefix => _batchLabelPrefix;
-
-        public override Hash128 SourceId => _owner.SourceId;
-        public override string SourceName => _owner.SourceName;
-        public override int LayerOrder => _owner.LayerOrder;
-        public override Hash128 TrustClassId => _owner.TrustClassId;
-        protected override double SourceTrust => _sourceTrust;
-        protected override int DefaultBatchSize => _batchSize;
-
-        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(null);
-
-        protected override IAsyncEnumerable<CategoryCorrespondenceRecord> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options, CancellationToken ct) => _records;
     }
 }

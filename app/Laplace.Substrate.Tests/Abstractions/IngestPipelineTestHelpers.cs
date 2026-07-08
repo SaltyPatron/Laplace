@@ -45,9 +45,9 @@ internal static class IngestPipelineTestHelpers
         /// (ISubstrateReader.ContentDescentBitmapAsync). The pipeline was
         /// migrated to TierTreeDescent's tier-by-tier probing (which lands
         /// in <see cref="FlatProbeCalls"/> via TierBatchExistenceProbeAsync's
-        /// default delegation), so tests assert this stays ZERO — the one
-        /// remaining production caller is NativeGrammarIngest, which is not
-        /// exercised through this pipeline.
+        /// default delegation), so tests assert this stays ZERO — no
+        /// production caller remains (the native ETL lane that was the last
+        /// one is deleted).
         /// </summary>
         public int LegacyContentDescentCalls;
         public int MaxFlatCandidates;

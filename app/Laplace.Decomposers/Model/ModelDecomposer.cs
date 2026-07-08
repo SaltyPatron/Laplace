@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Model;
 
 
 
-public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
@@ -160,10 +160,10 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
 
 
 
-        await foreach (var batch in EmitLegacyRecipeBatches(configPath, Source, log, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(new LegacyRecipePhase(this, configPath, log), context, options, ct))
             yield return batch;
 
-        await foreach (var batch in EmitSynthesizedRecipeBatches(manifest, Source, log, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
             yield return batch;
 
         if (manifest.Coverage == Coverage.Unsupported)
@@ -181,10 +181,7 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
 
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
-        await foreach (var batch in RunComposePhaseAsync(
-            SingleIdAsync(tokEntityId, ct),
-            (id, b) => b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId, firstObservedBy: Source),
-            "tokenizer/entity", SourceTrust.AiModelProbe, 1, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(new TokenizerEntityPhase(this, tokEntityId), context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -197,10 +194,7 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
         int batchSz = Math.Max(options.BatchSize, 8192);
         phaseSw.Restart();
         int vocabBatches = 0;
-        await foreach (var batch in RunComposePhaseAsync(
-            LlamaTokenizerParser.EnumerateVocabRecordsAsync(tokens, ct),
-            (rec, b) => LlamaTokenizerParser.StageVocabToken(b, rec, Source),
-            "tokenizer/vocab", SourceTrust.AiModelProbe, batchSz, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(new VocabPhase(this, tokens, batchSz), context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -212,10 +206,7 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
         phaseSw.Restart();
         var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
         int mergeBatches = 0;
-        await foreach (var batch in RunComposePhaseAsync(
-            LlamaTokenizerParser.EnumerateMergeRecordsAsync(merges, ct),
-            (rec, b) => LlamaTokenizerParser.StageMergeRecord(b, rec, Source, TextTypeId),
-            "tokenizer/merges", SourceTrust.AiModelProbe, batchSz, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(new MergesPhase(this, merges, batchSz), context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -225,10 +216,8 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
         int mapsBatches = 0;
-        await foreach (var batch in RunComposePhaseAsync(
-            LlamaTokenizerParser.EnumerateMapsToRecordsAsync(tokens, tokEntityId, ct),
-            (rec, b) => LlamaTokenizerParser.StageMapsToRecord(b, rec, Source),
-            "tokenizer/maps-to", SourceTrust.AiModelProbe, batchSz, context, options, ct))
+        await foreach (var batch in RunPhaseAsync(
+                           new MapsToPhase(this, tokens, tokEntityId, batchSz), context, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -322,71 +311,217 @@ public sealed class ModelDecomposer : DecomposerOrchestrator, IIngestInventoryPr
         return distinctVocab + perLayerPlanes + similarTo;
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> EmitLegacyRecipeBatches(
-        string configPath, Hash128 source, ILogger log, IDecomposerContext context, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    private abstract class ModelComposePhase<T> : ComposeDecomposerPhase<T>
     {
-        LlamaRecipeExtractor.RecipeInfo recipe;
-        try { recipe = LlamaRecipeExtractor.Parse(configPath); }
-        catch (Exception ex)
+        protected readonly ModelDecomposer Owner;
+        private readonly int _batch;
+
+        protected ModelComposePhase(ModelDecomposer owner, int batch)
         {
-            log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
-            yield break;
+            Owner = owner;
+            _batch = batch;
         }
-        await foreach (var batch in IngestComposePipeline.RunAsync(
-                           SingleLegacyRecipeAsync(recipe, ct),
-                           (rec, b) => LlamaRecipeExtractor.StageLegacyRecipe(
-                               b, rec, source, ModelRecipeTypeId,
-                               HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
-                               HasIntermSizeTypeId, HasVocabSizeTypeId, IsATypeId, LlamaArchitectureId),
-                           source, "recipe/config.json", 1, context.Reader, options, ct))
-            yield return batch;
+
+        public override Hash128 SourceId => Owner.SourceId;
+        public override string SourceName => Owner.SourceName;
+        public override int LayerOrder => Owner.LayerOrder;
+        public override Hash128 TrustClassId => Owner.TrustClassId;
+        protected override double SourceTrust => Abstractions.SourceTrust.AiModelProbe;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
+
+        protected override IngestBatchConfig BuildPipelineConfig(
+            IDecomposerContext context, DecomposerOptions options) =>
+            IngestPipelineDefaults.ApplyMaxInputUnits(
+                IngestPipelineDefaults.Compose(
+                    SourceId, BatchLabelPrefix, _batch, options, context.Reader, PipelineProfile),
+                options);
     }
 
-    private static async IAsyncEnumerable<SubstrateChange> EmitSynthesizedRecipeBatches(
-        ModelManifest manifest, Hash128 source, ILogger log, IDecomposerContext context, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    private sealed class LegacyRecipePhase : ModelComposePhase<LlamaRecipeExtractor.RecipeInfo>
     {
-        RecipeExtractor.RecipeInfo synth;
-        try
+        private readonly string _configPath;
+        private readonly ILogger _log;
+        private LlamaRecipeExtractor.RecipeInfo? _recipe;
+        private bool _parsed;
+
+        public LegacyRecipePhase(ModelDecomposer owner, string configPath, ILogger log) : base(owner, 1)
         {
-            synth = RecipeSynthesizer.Synthesize(manifest);
-            log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited", synth.NumLayers);
+            _configPath = configPath;
+            _log = log;
         }
-        catch (Exception ex)
+
+        protected override string PhaseLabel => "recipe/config.json";
+
+        protected override void Compose(LlamaRecipeExtractor.RecipeInfo rec, SubstrateChangeBuilder b) =>
+            LlamaRecipeExtractor.StageLegacyRecipe(
+                b, rec, SourceId, ModelRecipeTypeId,
+                HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
+                HasIntermSizeTypeId, HasVocabSizeTypeId, IsATypeId, LlamaArchitectureId);
+
+        protected override async IAsyncEnumerable<LlamaRecipeExtractor.RecipeInfo> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
         {
-            log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
-            yield break;
+            if (!_parsed)
+            {
+                _parsed = true;
+                try { _recipe = LlamaRecipeExtractor.Parse(_configPath); }
+                catch (Exception ex)
+                {
+                    _log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
+                    yield break;
+                }
+            }
+            if (_recipe is not null)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return _recipe;
+            }
+            await Task.CompletedTask;
         }
-        await foreach (var batch in IngestComposePipeline.RunAsync(
-                           SingleSynthRecipeAsync(synth, ct),
-                           (rec, b) => RecipeExtractor.StageRecipe(
-                               b, rec, source, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId),
-                           source, "recipe/laplace.recipe", 1, context.Reader, options, ct))
-            yield return batch;
     }
 
-    private static async IAsyncEnumerable<LlamaRecipeExtractor.RecipeInfo> SingleLegacyRecipeAsync(
-        LlamaRecipeExtractor.RecipeInfo recipe, [EnumeratorCancellation] CancellationToken ct = default)
+    private sealed class SynthRecipePhase : ModelComposePhase<RecipeExtractor.RecipeInfo>
     {
-        ct.ThrowIfCancellationRequested();
-        yield return recipe;
-        await Task.CompletedTask;
+        private readonly ModelManifest _manifest;
+        private readonly ILogger _log;
+        private RecipeExtractor.RecipeInfo? _recipe;
+        private bool _synthesized;
+
+        public SynthRecipePhase(ModelDecomposer owner, ModelManifest manifest, ILogger log) : base(owner, 1)
+        {
+            _manifest = manifest;
+            _log = log;
+        }
+
+        protected override string PhaseLabel => "recipe/laplace.recipe";
+
+        protected override void Compose(RecipeExtractor.RecipeInfo rec, SubstrateChangeBuilder b) =>
+            RecipeExtractor.StageRecipe(b, rec, SourceId, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId);
+
+        protected override async IAsyncEnumerable<RecipeExtractor.RecipeInfo> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            if (!_synthesized)
+            {
+                _synthesized = true;
+                try
+                {
+                    _recipe = RecipeSynthesizer.Synthesize(_manifest);
+                    _log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited",
+                        _recipe.NumLayers);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
+                    yield break;
+                }
+            }
+            if (_recipe is not null)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return _recipe;
+            }
+            await Task.CompletedTask;
+        }
     }
 
-    private static async IAsyncEnumerable<RecipeExtractor.RecipeInfo> SingleSynthRecipeAsync(
-        RecipeExtractor.RecipeInfo recipe, [EnumeratorCancellation] CancellationToken ct = default)
+    private sealed class TokenizerEntityPhase : ModelComposePhase<Hash128>
     {
-        ct.ThrowIfCancellationRequested();
-        yield return recipe;
-        await Task.CompletedTask;
+        private readonly Hash128 _tokEntityId;
+
+        public TokenizerEntityPhase(ModelDecomposer owner, Hash128 tokEntityId) : base(owner, 1)
+            => _tokEntityId = tokEntityId;
+
+        protected override string PhaseLabel => "tokenizer/entity";
+
+        protected override void Compose(Hash128 id, SubstrateChangeBuilder b) =>
+            b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId, firstObservedBy: SourceId);
+
+        protected override async IAsyncEnumerable<Hash128> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return _tokEntityId;
+            await Task.CompletedTask;
+        }
     }
 
-    private static async IAsyncEnumerable<Hash128> SingleIdAsync(
-        Hash128 id, [EnumeratorCancellation] CancellationToken ct = default)
+    private sealed class VocabPhase : ModelComposePhase<LlamaTokenizerParser.TokenRecord>
     {
-        ct.ThrowIfCancellationRequested();
-        yield return id;
-        await Task.CompletedTask;
+        private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
+
+        public VocabPhase(ModelDecomposer owner, IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, int batch)
+            : base(owner, batch) => _tokens = tokens;
+
+        protected override string PhaseLabel => "tokenizer/vocab";
+
+        protected override void Compose(LlamaTokenizerParser.TokenRecord rec, SubstrateChangeBuilder b) =>
+            LlamaTokenizerParser.StageVocabToken(b, rec, SourceId);
+
+        protected override async IAsyncEnumerable<LlamaTokenizerParser.TokenRecord> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in LlamaTokenizerParser.EnumerateVocabRecordsAsync(_tokens, ct))
+                yield return rec;
+        }
+    }
+
+    private sealed class MergesPhase : ModelComposePhase<LlamaTokenizerParser.MergeRecord>
+    {
+        private readonly List<(byte[] Left, byte[] Right)> _merges;
+
+        public MergesPhase(ModelDecomposer owner, List<(byte[] Left, byte[] Right)> merges, int batch)
+            : base(owner, batch) => _merges = merges;
+
+        protected override string PhaseLabel => "tokenizer/merges";
+
+        protected override void Compose(LlamaTokenizerParser.MergeRecord rec, SubstrateChangeBuilder b) =>
+            LlamaTokenizerParser.StageMergeRecord(b, rec, SourceId, TextTypeId);
+
+        protected override async IAsyncEnumerable<LlamaTokenizerParser.MergeRecord> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in LlamaTokenizerParser.EnumerateMergeRecordsAsync(_merges, ct))
+                yield return rec;
+        }
+    }
+
+    private sealed class MapsToPhase : ModelComposePhase<LlamaTokenizerParser.TokenMapsToRecord>
+    {
+        private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
+        private readonly Hash128 _tokEntityId;
+
+        public MapsToPhase(
+            ModelDecomposer owner,
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+            Hash128 tokEntityId,
+            int batch) : base(owner, batch)
+        {
+            _tokens = tokens;
+            _tokEntityId = tokEntityId;
+        }
+
+        protected override string PhaseLabel => "tokenizer/maps-to";
+
+        protected override void Compose(LlamaTokenizerParser.TokenMapsToRecord rec, SubstrateChangeBuilder b) =>
+            LlamaTokenizerParser.StageMapsToRecord(b, rec, SourceId);
+
+        protected override async IAsyncEnumerable<LlamaTokenizerParser.TokenMapsToRecord> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in LlamaTokenizerParser.EnumerateMapsToRecordsAsync(_tokens, _tokEntityId, ct))
+                yield return rec;
+        }
     }
 }

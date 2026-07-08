@@ -4,13 +4,14 @@ using System.Collections.Immutable;
 using global::Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
 {
-    public const string PeriodBoundaryUnitPrefix = "period-boundary/";
+    public const string PeriodBoundaryUnitPrefix = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
 
     private readonly ISubstrateWriter _inner;
     private readonly NpgsqlDataSource _ds;
@@ -577,6 +578,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                     }
                     await Task.WhenAny(_foldChain, Task.Delay(TimeSpan.FromSeconds(5), ct));
                     ct.ThrowIfCancellationRequested();
+                    // Task.WhenAny never throws. A faulted fold chain stops
+                    // _epochsFolded from ever advancing, which used to turn this
+                    // loop into a silent forever-spin — the ingest "hung" while
+                    // the real exception sat unobserved. Surface it instead.
+                    if (_foldChain.IsFaulted)
+                        await _foldChain;
                 }
             }
 
@@ -826,9 +833,21 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
     public async ValueTask DisposeAsync()
     {
         _disposing = true;
-        var spin = new SpinWait();
-        while (Interlocked.CompareExchange(ref _inflightApplies, 0, 0) > 0)
-            spin.SpinOnce();
+        // A raw SpinWait here was undiagnosable: an apply blocked inside PG
+        // (e.g. on an advisory lock) made dispose spin forever with zero
+        // output. Wait cooperatively and say what is being waited on.
+        var waitSw = System.Diagnostics.Stopwatch.StartNew();
+        while (Volatile.Read(ref _inflightApplies) > 0)
+        {
+            await Task.Delay(25);
+            if (waitSw.Elapsed >= TimeSpan.FromSeconds(30))
+            {
+                _log.LogWarning(
+                    "dispose: still waiting on {N} in-flight apply call(s) — if this repeats, a backend is blocked in PG (see advisory-lock holder warnings above)",
+                    Volatile.Read(ref _inflightApplies));
+                waitSw.Restart();
+            }
+        }
 
         try
         {

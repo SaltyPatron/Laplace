@@ -51,6 +51,45 @@ usage() {
   exit 2
 }
 
+restart_postgres() {
+  # $1 = reason. Restart the systemd unit that OWNS the running postmaster —
+  # discovered, never guessed. The old `systemctl is-active postgresql` guard
+  # silently skipped the restart on any runner whose unit isn't literally named
+  # "postgresql", leaving ALTER SYSTEM settings pending_restart forever (the
+  # perfcache preload among them, which 503'd every smoke run). This helper
+  # either restarts the real unit and PROVES nothing is left pending, or fails
+  # the phase loudly right here — a pending restart is never again downgraded
+  # to a warning four jobs upstream of the failure it causes.
+  local reason="$1" unit=""
+  if command -v systemctl >/dev/null 2>&1; then
+    unit=$(systemctl list-units --type=service --state=running --plain --no-legend \
+             'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
+  fi
+  if [[ -z "$unit" ]]; then
+    echo "::error::restart_postgres ($reason): no running postgres systemd unit found — restart the cluster manually, then rerun this phase" >&2
+    return 1
+  fi
+  echo "restart_postgres ($reason): restarting $unit"
+  sudo systemctl restart "$unit"
+  local tries=0
+  until psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    if (( tries > 60 )); then
+      echo "::error::restart_postgres ($reason): PostgreSQL not accepting connections ${tries}s after restarting $unit" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  local still
+  still=$(psql -d postgres -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
+  if [[ "$still" != "0" ]]; then
+    echo "::error::restart_postgres ($reason): $still setting(s) STILL pending after restarting $unit:" >&2
+    psql -d postgres -U laplace_admin -c "SELECT name, setting FROM pg_settings WHERE pending_restart" >&2
+    return 1
+  fi
+  echo "restart_postgres ($reason): clean — no settings pending"
+}
+
 phase_clean() {
   echo "===== PHASE — CLEAN ====="
   rm -rf "$ROOT/build"
@@ -180,12 +219,7 @@ phase_tune_pg() {
   local pending
   pending=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
   if [[ "$pending" != "0" ]]; then
-    if command -v systemctl >/dev/null && systemctl is-active --quiet postgresql; then
-      echo "tune-pg: $pending setting(s) pending restart — restarting postgresql"
-      sudo systemctl restart postgresql
-    else
-      echo "::warning::tune-pg: $pending setting(s) pending restart — restart PostgreSQL to apply"
-    fi
+    restart_postgres "tune-pg: $pending setting(s) pending"
   fi
   echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs maintenance_work_mem=$mwm work_mem=$wm wal_buffers=$wb cores=$cores pcores=$pcores pdeg=$pdeg max_worker_processes=$mwp autovacuum_max_workers=$avw jit=off"
 }
@@ -241,12 +275,7 @@ phase_perfcache_guc() {
     local newval="laplace_substrate"
     [[ -n "$preload" ]] && newval="$preload,laplace_substrate"
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1       -c "ALTER SYSTEM SET shared_preload_libraries = '$newval'"
-    if command -v systemctl >/dev/null && systemctl is-active --quiet postgresql; then
-      echo "shared_preload_libraries -> $newval (restarting postgresql to activate prewarm)"
-      sudo systemctl restart postgresql
-    else
-      echo "::warning::shared_preload_libraries set to '$newval' — restart PostgreSQL to activate the perfcache prewarm"
-    fi
+    restart_postgres "shared_preload_libraries -> $newval (perfcache prewarm)"
   fi
 
 }

@@ -2,10 +2,11 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TabularDecomposer : DecomposerOrchestrator
+public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowRecord>
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TabularDecomposer/v1");
@@ -21,20 +22,23 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
 
     private readonly string _targetColumn;
     private readonly string _positiveValue;
-    private readonly int _numBins;
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _stagedColumns = new(StringComparer.Ordinal);
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
         _targetColumn = targetColumn;
         _positiveValue = positiveValue;
-        _numBins = numBins;
+        _ = numBins;
     }
 
     public override Hash128 SourceId => Source;
     public override string SourceName => "TabularDecomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "tabular";
+    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
@@ -49,17 +53,23 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
             relationNodeNames: ["PREDICTS", "IS_VALUE_IN", "IS_INSTANCE_OF"],
             ct: ct);
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
+            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 2);
         seed.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
         _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
+        if (ContentEmitter.Emit(seed, _targetColumn, Source) is { } targetNameId)
+            seed.AddAttestation(NativeAttestation.Categorical(
+                OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, TC.StructuredCorpus));
+        if (ContentEmitter.Emit(seed, _positiveValue, Source) is { } posValId)
+            seed.AddAttestation(NativeAttestation.Categorical(
+                OutcomeId, "IS_INSTANCE_OF", posValId, Source, TC.StructuredCorpus));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override async IAsyncEnumerable<RowRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = EnumerateCsv(context.EcosystemPath).ToList();
+        var files = EnumerateCsv(ecosystemPath).ToList();
         if (files.Count == 0) yield break;
 
         string[]? header = await ReadHeaderAsync(files, ct);
@@ -70,88 +80,54 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
             .ToList();
         if (featureCols.Count == 0) yield break;
 
-        // Pass 1 (streaming sample): infer numeric/binning schema without retaining rows.
-        var samples = featureCols.ToDictionary(c => c, _ => new List<string>(64), StringComparer.Ordinal);
-        await StreamRowsAsync(files, header, async (rec, token) =>
-        {
-            foreach (var c in featureCols)
-            {
-                if (!rec.TryGetValue(c, out var v)) continue;
-                var list = samples[c];
-                if (list.Count < 3000) list.Add(v);
-            }
-            await Task.CompletedTask;
-        }, ct);
+        int targetIdx = Array.IndexOf(header, _targetColumn);
+        if (targetIdx < 0) yield break;
 
-        var isNumeric = new Dictionary<string, bool>(StringComparer.Ordinal);
-        var edges = new Dictionary<string, double[]>(StringComparer.Ordinal);
-        foreach (var c in featureCols)
-        {
-            var vals = samples[c];
-            bool numeric = vals.Count > 0 && vals.All(v => double.TryParse(v, out _));
-            int card = vals.Distinct(StringComparer.Ordinal).Take(_numBins * 2 + 1).Count();
-            if (numeric && card > _numBins * 2)
-            {
-                isNumeric[c] = true;
-                edges[c] = Quantiles(vals.Where(v => double.TryParse(v, out _)).Select(double.Parse), _numBins);
-            }
-            else isNumeric[c] = false;
-        }
-
-        var lowCard = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var c in featureCols)
-        {
-            if (isNumeric[c]) { lowCard.Add(c); continue; }
-            if (samples[c].Distinct(StringComparer.Ordinal).Take(16).Count() <= 15)
-                lowCard.Add(c);
-        }
-
-        // Pass 2 (streaming aggregate): fold row stats into count maps — calculated layer, not row retention.
-        var counts = new Dictionary<(string Col, string Tok), (long N, long M)>();
-        var counts2 = new Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)>();
-        var rowtoks = new List<(string Col, string Tok)>(featureCols.Count);
-        await StreamRowsAsync(files, header, async (rec, token) =>
-        {
-            bool positive = rec.TryGetValue(_targetColumn, out var tv) && tv.Trim() == _positiveValue;
-            rowtoks.Clear();
-            foreach (var c in featureCols)
-            {
-                if (!rec.TryGetValue(c, out var v)) continue;
-                string t = Tokenize(c, v, isNumeric, edges);
-                var key = (c, t);
-                counts.TryGetValue(key, out var nm);
-                counts[key] = (nm.N + 1, nm.M + (positive ? 1 : 0));
-                if (lowCard.Contains(c)) rowtoks.Add((c, t));
-            }
-            rowtoks.Sort((x, y) => string.CompareOrdinal(x.Col, y.Col));
-            for (int i = 0; i < rowtoks.Count; i++)
-                for (int j = i + 1; j < rowtoks.Count; j++)
-                {
-                    var k2 = (rowtoks[i].Col, rowtoks[i].Tok, rowtoks[j].Col, rowtoks[j].Tok);
-                    counts2.TryGetValue(k2, out var nm2);
-                    counts2[k2] = (nm2.N + 1, nm2.M + (positive ? 1 : 0));
-                }
-            await Task.CompletedTask;
-        }, ct);
-
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
-        var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
-        var emitCtx = new TabularEmitContext(this, isNumeric, witnessWeight, predicts);
-
-        if (!options.DryRun)
-        {
-            await foreach (var change in RunComposePhaseAsync(
-                EnumerateSchemaRecords(featureCols, ct), StageSchemaRecord,
-                "schema", SourceTrust.StructuredCorpus, 1, context, options, ct))
-                yield return change;
-        }
-
-        await foreach (var change in RunComposePhaseAsync(
-            EnumerateRecords(counts, counts2, ct), emitCtx.Emit,
-            "aggregates", SourceTrust.StructuredCorpus, batch, context, options, ct))
-            yield return change;
+        await foreach (var row in StreamRowsAsync(files, header, featureCols, targetIdx, ct))
+            yield return row;
     }
+
+    protected override void Compose(RowRecord rec, SubstrateChangeBuilder b)
+    {
+        double witnessWeight = RelationTypeRank.Associative * TC.StructuredCorpus;
+        var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
+        long score = rec.Positive ? checked(2 * Glicko2.FpScale) : 0;
+
+        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
+
+        foreach (var (col, raw) in rec.Cells)
+        {
+            string tok = raw.Trim();
+            if (tok.Length == 0) continue;
+
+            EnsureColumn(b, col);
+
+            var valueId = ValueId(col, tok);
+            b.AddEntity(new EntityRow(valueId, EntityTier.Word, ValueTypeId, Source));
+            _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
+            b.AddAttestation(NativeAttestation.Aggregated(
+                valueId, predicts, OutcomeId, Source, contextId: ColumnId(col),
+                games: 1, sumScoreFp1e9: score, witnessWeight: witnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(
+                valueId, "IS_VALUE_IN", ColumnId(col), Source, TC.StructuredCorpus));
+            if (ContentEmitter.Emit(b, tok, Source) is { } bareId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    valueId, "IS_INSTANCE_OF", bareId, Source, TC.StructuredCorpus));
+        }
+    }
+
+    private void EnsureColumn(SubstrateChangeBuilder b, string col)
+    {
+        if (!_stagedColumns.Add(col)) return;
+        b.AddEntity(new EntityRow(ColumnId(col), EntityTier.Word, ColumnTypeId, Source));
+        _canonicalNames.Add($"tabular/column/{col}/v1");
+        if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                ColumnId(col), "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
+    }
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
 
     private static async Task<string[]?> ReadHeaderAsync(IReadOnlyList<string> files, CancellationToken ct)
     {
@@ -170,11 +146,12 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
         return null;
     }
 
-    private static async Task StreamRowsAsync(
+    private async IAsyncEnumerable<RowRecord> StreamRowsAsync(
         IReadOnlyList<string> files,
         string[] header,
-        Func<Dictionary<string, string>, CancellationToken, Task> rowHandler,
-        CancellationToken ct)
+        IReadOnlyList<string> featureCols,
+        int targetIdx,
+        [EnumeratorCancellation] CancellationToken ct)
     {
         foreach (var f in files)
         {
@@ -185,97 +162,19 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
             {
                 if (!skippedHeader) { skippedHeader = true; continue; }
                 if (fields.Length != header.Length) continue;
-                var rec = new Dictionary<string, string>(header.Length, StringComparer.Ordinal);
-                for (int i = 0; i < header.Length; i++) rec[header[i]] = fields[i];
-                await rowHandler(rec, ct);
+
+                var rec = new Dictionary<string, string>(featureCols.Count, StringComparer.Ordinal);
+                for (int i = 0; i < header.Length; i++)
+                {
+                    string col = header[i];
+                    if (col.Equals(_targetColumn, StringComparison.Ordinal) || IdLike.Contains(col)) continue;
+                    rec[col] = fields[i];
+                }
+
+                bool positive = fields[targetIdx].Trim() == _positiveValue;
+                yield return new RowRecord(rec, positive);
             }
         }
-    }
-
-    private readonly record struct TabularSchemaRecord(string Column);
-
-    private void StageSchemaRecord(TabularSchemaRecord rec, SubstrateChangeBuilder b)
-    {
-        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-        if (rec.Column.Length == 0)
-        {
-            if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
-            if (ContentEmitter.Emit(b, _positiveValue, Source) is { } posValId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    OutcomeId, "IS_INSTANCE_OF", posValId, Source, SourceTrust.StructuredCorpus));
-            return;
-        }
-        b.AddEntity(new EntityRow(ColumnId(rec.Column), EntityTier.Word, ColumnTypeId, Source));
-        _canonicalNames.Add($"tabular/column/{rec.Column}/v1");
-        if (ContentEmitter.Emit(b, rec.Column, Source) is { } colNameId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                ColumnId(rec.Column), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
-    }
-
-    private static async IAsyncEnumerable<TabularSchemaRecord> EnumerateSchemaRecords(
-        IReadOnlyList<string> featureCols, [EnumeratorCancellation] CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        yield return new TabularSchemaRecord("");
-        foreach (var c in featureCols)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return new TabularSchemaRecord(c);
-        }
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<TabularRecord> EnumerateRecords(
-        Dictionary<(string Col, string Tok), (long N, long M)> counts,
-        Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)> counts2,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        foreach (var ((col, tok), nm) in counts)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return TabularRecord.Value(col, tok, nm.N, nm.M);
-        }
-        foreach (var ((pa, ta, pb, tb), nm) in counts2)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return TabularRecord.Pair(pa, ta, pb, tb, nm.N, nm.M);
-        }
-        await Task.CompletedTask;
-    }
-
-    internal void TrackCanonical(string name) => _canonicalNames.Add(name);
-
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
-
-    private string Tokenize(string col, string v,
-                            Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)
-    {
-        if (isNumeric.TryGetValue(col, out var num) && num && double.TryParse(v, out var d) && edges.TryGetValue(col, out var e))
-        {
-            int bin = 0;
-            while (bin < e.Length && d > e[bin]) bin++;
-            return "b" + bin;
-        }
-        return v;
-    }
-
-    private static double[] Quantiles(IEnumerable<double> xs, int bins)
-    {
-        var arr = xs.ToArray();
-        Array.Sort(arr);
-        if (arr.Length == 0) return Array.Empty<double>();
-        var qs = new List<double>(bins + 1);
-        for (int i = 0; i <= bins; i++)
-        {
-            double idx = (double)i / bins * (arr.Length - 1);
-            int lo = (int)Math.Floor(idx), hi = (int)Math.Ceiling(idx);
-            double q = arr[lo] + (idx - lo) * (arr[hi] - arr[lo]);
-            if (qs.Count == 0 || q > qs[^1]) qs.Add(q);
-        }
-        return qs.ToArray();
     }
 
     private static IEnumerable<string> EnumerateCsv(string root)
@@ -291,64 +190,5 @@ public sealed class TabularDecomposer : DecomposerOrchestrator
             yield return f;
     }
 
-    private readonly record struct TabularRecord(
-        TabularRecordKind Kind,
-        string Col,
-        string Tok,
-        string ColB,
-        string TokB,
-        long N,
-        long M)
-    {
-        public static TabularRecord Value(string col, string tok, long n, long m) =>
-            new(TabularRecordKind.Value, col, tok, "", "", n, m);
-        public static TabularRecord Pair(string pa, string ta, string pb, string tb, long n, long m) =>
-            new(TabularRecordKind.Pair, pa, ta, pb, tb, n, m);
-    }
-
-    private enum TabularRecordKind { Value, Pair }
-
-    private sealed class TabularEmitContext(
-        TabularDecomposer owner,
-        Dictionary<string, bool> isNumeric,
-        double witnessWeight,
-        Hash128 predictsType)
-    {
-        public void Emit(TabularRecord rec, SubstrateChangeBuilder b)
-        {
-            if (rec.Kind == TabularRecordKind.Value)
-                EmitValue(rec, b);
-            else
-                EmitPair(rec, b);
-        }
-
-        private void EmitValue(TabularRecord rec, SubstrateChangeBuilder b)
-        {
-            var cq = ValueId(rec.Col, rec.Tok);
-            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
-            owner.TrackCanonical($"tabular/value/{rec.Col}={rec.Tok}/v1");
-            b.AddAttestation(NativeAttestation.Aggregated(
-                cq, predictsType, owner.OutcomeId, Source, contextId: ColumnId(rec.Col),
-                games: rec.N, sumScoreFp1e9: checked(rec.M * Glicko2.FpScale), witnessWeight: witnessWeight));
-            b.AddAttestation(NativeAttestation.Categorical(
-                cq, "IS_VALUE_IN", ColumnId(rec.Col), Source, SourceTrust.StructuredCorpus));
-            if (!isNumeric[rec.Col])
-            {
-                var bare = ContentEmitter.Emit(b, rec.Tok, Source);
-                if (bare is { } bid)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        cq, "IS_INSTANCE_OF", bid, Source, SourceTrust.StructuredCorpus));
-            }
-        }
-
-        private void EmitPair(TabularRecord rec, SubstrateChangeBuilder b)
-        {
-            var cq = Hash128.OfCanonical($"tabular/pair/{rec.Col}={rec.Tok}&{rec.ColB}={rec.TokB}/v1");
-            b.AddEntity(new EntityRow(cq, EntityTier.Word, ValueTypeId, Source));
-            owner.TrackCanonical($"tabular/pair/{rec.Col}={rec.Tok}&{rec.ColB}={rec.TokB}/v1");
-            b.AddAttestation(NativeAttestation.Aggregated(
-                cq, predictsType, owner.OutcomeId, Source, contextId: null,
-                games: rec.N, sumScoreFp1e9: checked(rec.M * Glicko2.FpScale), witnessWeight: witnessWeight));
-        }
-    }
+    public readonly record struct RowRecord(IReadOnlyDictionary<string, string> Cells, bool Positive);
 }

@@ -613,9 +613,9 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
         rc = SPI_execute_with_args(
             "SELECT g.object_id, g.rating, g.rd, g.witness_count, "
             "       s.rating, s.rd, ss.rating, ss.rd "
-            "FROM laplace.consensus s "
-            "JOIN laplace.consensus ss ON ss.subject_id = s.object_id AND ss.type_id = $3 "
-            "JOIN laplace.consensus g  ON g.subject_id  = ss.object_id AND g.type_id = $4 "
+            "FROM laplace.v_consensus_unrefuted s "
+            "JOIN laplace.v_consensus_unrefuted ss ON ss.subject_id = s.object_id AND ss.type_id = $3 "
+            "JOIN laplace.v_consensus_unrefuted g  ON g.subject_id  = ss.object_id AND g.type_id = $4 "
             "WHERE s.subject_id = ANY($1) AND s.type_id = $2",
             4, types, args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
@@ -648,7 +648,7 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
 
         rc = SPI_execute_with_args(
             "SELECT g.object_id, g.rating, g.rd, g.witness_count "
-            "FROM laplace.consensus g "
+            "FROM laplace.v_consensus_unrefuted g "
             "WHERE g.subject_id = ANY($1) AND g.type_id = $2",
             2, types, args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
@@ -686,8 +686,8 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
 
         rc = SPI_execute_with_args(
             "SELECT c.object_id, sum(laplace.eff_mu(c.rating, c.rd)) "
-            "FROM laplace.consensus c "
-            "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) AND NOT laplace.refuted(c.rating, c.rd) "
+            "FROM laplace.v_consensus_unrefuted c "
+            "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) "
             "GROUP BY c.object_id",
             2, types, args, NULL, true, 0);
         if (rc == SPI_OK_SELECT)

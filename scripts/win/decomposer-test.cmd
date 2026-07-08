@@ -68,14 +68,6 @@ if defined PREREQ_SOURCES (
 )
 
 echo ==== target ingest: !SOURCE! ====
-if /i "!SOURCE!"=="omw" (
-  set "LAPLACE_INGEST_WORKERS=4"
-  set "LAPLACE_INGEST_COMPOSE_WORKERS=1"
-)
-if /i "!SOURCE!"=="wiktionary" (
-  set "LAPLACE_INGEST_WORKERS=1"
-  set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-)
 if /i "!SOURCE!"=="document" (
   if not exist "!INGEST!\test-data\text" (
     echo ERROR: document test requires !INGEST!\test-data\text

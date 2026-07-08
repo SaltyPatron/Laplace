@@ -6,83 +6,47 @@ using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessPgnDecomposer : DecomposerOrchestrator
+public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
 {
     public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
     public override string SourceName => "ChessPgn";
     public override int LayerOrder => 20;
     public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "chess/pgn";
+    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
-    public int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
-    public IngestSourceProfile SizingProfile => IngestSourceProfile.ChessPgn;
-    public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
-
-
-
-
-
+    public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
 
-    // Everything needed to compute a game's content-addressed GameId, cheaply enough to do for
-    // an entire chunk before committing to the expensive per-ply work below.
-    internal sealed record ParsedGame(
-        string GameText, PgnMovetext.PgnWalkResult Walk, List<string> Moves, GameOutcome Result, Hash128 GameId)
-        : ITrunkRootRecord
+    protected override async IAsyncEnumerable<ChessGameRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        public Hash128 TrunkRootId => GameId;
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        await foreach (var game in StreamNovelGamesAsync(
+                           ecosystemPath, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
+            yield return game;
     }
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var profile = IngestSourceProfile.ChessPgn;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options, BatchConfigDefaults.Chess);
+    protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b) => RecordGame(record, b);
 
-        if (WorkingSetMode.Enabled && options.MaxInputUnits <= 0 && !options.DryRun)
-        {
-            int workers = IngestTopology.Current.ComposeWorkers;
-            var config = new IngestBatchConfig
-            {
-                SourceId = ChessVocabulary.PgnSourceId,
-                BatchLabelPrefix = "chess/pgn",
-                BatchSize = ws.Batch,
-                ProbeChunkSize = ws.ProbeChunk,
-                ContainmentReader = context.Reader,
-                WorkingSet = WorkingSetMode.Enabled,
-                WorkingSetProbeInterval = ws.ProbeInterval,
-                WorkingSetRecordCap = ws.RecordCap,
-                WorkingSetProfile = profile,
-            };
-            var stream = new ParallelChessGameRecordStream(
-                context.EcosystemPath, context.Reader, ws.ProbeInterval, workers,
-                options.ReObservePresent, ct);
-            await foreach (var change in IngestBatchPipeline.RunAsync(
-                               stream, new ChessGameIngestHandler(), config, ct))
-                yield return change;
-            yield break;
-        }
-
-        await foreach (var change in RunComposePhaseAsync(
-            StreamNovelGamesAsync(context.EcosystemPath, context.Reader, ws.Batch, options.ReObservePresent, ct),
-            (parsed, b) => RecordGame(parsed, b),
-            "pgn", SourceTrust.StructuredCorpus, ws.Batch, context, options, ct))
-            yield return change;
-    }
-
-    private static async IAsyncEnumerable<ParsedGame> StreamNovelGamesAsync(
+    private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(
         string ecosystemPath, ISubstrateReader? reader, int chunkSize, bool reObservePresent,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunk = new List<ParsedGame>(chunkSize);
+        var chunk = new List<ChessGameRecord>(chunkSize);
         await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, ct))
         {
             if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
@@ -93,8 +57,8 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         await foreach (var g in YieldChunkAsync(chunk, reader, reObservePresent, ct)) yield return g;
     }
 
-    internal static async IAsyncEnumerable<ParsedGame> YieldChunkAsync(
-        List<ParsedGame> chunk, ISubstrateReader? reader, bool reObservePresent,
+    internal static async IAsyncEnumerable<ChessGameRecord> YieldChunkAsync(
+        List<ChessGameRecord> chunk, ISubstrateReader? reader, bool reObservePresent,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (reObservePresent || reader is null)
@@ -105,8 +69,8 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
     }
 
-    internal static async IAsyncEnumerable<ParsedGame> FilterNovelAsync(
-        List<ParsedGame> chunk, ISubstrateReader? reader, [EnumeratorCancellation] CancellationToken ct)
+    internal static async IAsyncEnumerable<ChessGameRecord> FilterNovelAsync(
+        List<ChessGameRecord> chunk, ISubstrateReader? reader, [EnumeratorCancellation] CancellationToken ct)
     {
         if (chunk.Count == 0) yield break;
         if (reader is null) { foreach (var g in chunk) yield return g; yield break; }
@@ -151,7 +115,7 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         }
     }
 
-    internal static ParsedGame? TryParseGame(string gameText)
+    internal static ChessGameRecord? TryParseGame(string gameText)
     {
         var gameBytes = Encoding.UTF8.GetBytes(gameText);
         PgnMovetext.PgnWalkResult walk;
@@ -164,16 +128,17 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
         var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
-        return new ParsedGame(gameText, walk, moves, result, gameId);
+        return new ChessGameRecord(gameText, moves, result, gameId) { Walk = walk };
     }
 
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
     // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
     // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
     // (ChessAnalyze), run later off this witnessed layer. See .scratchpad/08_Record_vs_Calculate.
-    internal static void RecordGame(ParsedGame parsed, SubstrateChangeBuilder b)
+    internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b)
     {
-        var (gameText, walk, moves, result, gameId) = parsed;
+        var (gameText, moves, result, gameId) = parsed;
+        var walk = parsed.Walk;
         var src = ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
@@ -188,8 +153,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         RecordPlyAnnotations(b, gameId, gameText, walk, moves.Count, src);
     }
 
-    // [SetUp "1"]/[FEN] start recorded verbatim as witnessed content so the analyzer can replay
-    // non-standard starts without the source PGN. Absent => analyzer defaults to the standard array.
     private static void RecordStartPosition(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
     {
         if (PgnGames.TagStr(gameText, "SetUp") != "1") return;
@@ -199,8 +162,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
             b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_SETUP", fid, src, null, PgnWitnessWeight));
     }
 
-    // Source-asserted ECO/opening headers = witnessed. The analyzer later computes its OWN
-    // classification as a separate, higher-trust calculated witness; consensus reconciles them.
     private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
     {
         string eco = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
@@ -209,8 +170,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         if (opening.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
     }
 
-    // The mainline SAN sequence as one witnessed content node — the analyzer replays it to derive
-    // positions. (GameId already incorporates the moves, so this is the game's defining content.)
     private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<string> moves, Hash128 src)
     {
         if (moves.Count == 0) return;
@@ -218,10 +177,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
             b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
     }
 
-    // Per-ply witnessed annotations (SAN, clock, eval token, move quality, comment) hung on a
-    // deterministic ply anchor PlyId(game,ply) the analyzer reconstructs to attach them to the
-    // position it computes at that ply. A ply node is materialized only when it carries an
-    // annotation — plain moves live in the movetext. Comment text is now recorded (was dropped).
     private static void RecordPlyAnnotations(
         SubstrateChangeBuilder b, Hash128 gameId, string gameText,
         PgnMovetext.PgnWalkResult walk, int moveCount, Hash128 src)
@@ -257,14 +212,8 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
             b.AddAttestation(NativeAttestation.Categorical(ply, rel, vid, src, ctx, PgnWitnessWeight));
     }
 
-    // One awaited ReadLineAsync per line caps the feeder around ~400 games/s —
-    // slower than even a single compose worker, so the parallel lane starved at
-    // exactly the framing rate (measured live: feed 403 games/s == composed
-    // rate, 7 workers each ~60% idle). Chunked block reads with manual line
-    // splitting keep the same game-text semantics (terminators stripped, lines
-    // joined with '\n') at file-IO speed.
     private static async IAsyncEnumerable<string> StreamGamesAsync(
-    string path, [EnumeratorCancellation] CancellationToken ct)
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
         using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sb = new StringBuilder(2048);
@@ -283,8 +232,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
                 if (carry.Length > 0)
                 {
                     carry.Append(tail);
-                    // A CRLF split exactly at the block boundary leaves the '\r'
-                    // in carry (the in-block check above can't see across reads).
                     if (carry[^1] == '\r') carry.Length--;
                     ProcessLine(carry.ToString().AsSpan(), sb, ref inGame, out var completed);
                     carry.Clear();
@@ -319,13 +266,11 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         }
     }
 
-
-
     private const double PgnWitnessWeight = 0.7;
 
     private static void EmitGame(
-    SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
-    Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
+        SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
+        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
     {
         var src = ChessVocabulary.PgnSourceId;
         b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
@@ -383,9 +328,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         ChessVocabulary.EmitPlayer(b, canonicalId, name, ChessVocabulary.PgnSourceId);
         var legacyId = ChessVocabulary.LegacyPlayerId(name);
         if (legacyId != canonicalId)
-            // CORRESPONDS_TO is the manifest's existing symmetric cross-naming-alignment relation
-            // (rank=equivalence) — reused here instead of a chess-only "SAME_AS" so this gets a
-            // real highway_mask bit instead of hashing to a relation type the manifest never saw.
             b.AddAttestation(NativeAttestation.Categorical(
                 canonicalId, "CORRESPONDS_TO", legacyId, ChessVocabulary.PgnSourceId, null, PgnWitnessWeight));
         return canonicalId;
@@ -412,11 +354,6 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
 
-
-
-
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
-
     private static IEnumerable<string> EnumerateFiles(string path)
     {
         if (string.IsNullOrEmpty(path)) yield break;
@@ -426,4 +363,18 @@ public sealed class ChessPgnDecomposer : DecomposerOrchestrator
                                    .OrderBy(p => p, StringComparer.Ordinal))
             yield return f;
     }
+}
+
+/// <summary>
+/// Parsed PGN game with content-addressed <see cref="GameId"/> for existence-gate short-circuit.
+/// </summary>
+public sealed record ChessGameRecord(
+    string GameText,
+    List<string> Moves,
+    GameOutcome Result,
+    Hash128 GameId)
+    : ITrunkRootRecord
+{
+    internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
+    public Hash128 TrunkRootId => GameId;
 }

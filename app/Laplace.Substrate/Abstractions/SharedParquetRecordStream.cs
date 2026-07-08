@@ -2,13 +2,13 @@ using System.Runtime.CompilerServices;
 using Parquet;
 using Parquet.Schema;
 
-namespace Laplace.Decomposers.Extractors;
+namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Shared parquet row streaming for Stack/TinyCodes code corpora. Pure extract —
 /// no builder logic, no SQL.
 /// </summary>
-public static class ParquetCodeRecordStream
+public static class SharedParquetRecordStream
 {
     public static DataField? FindField(DataField[] fields, string name)
     {

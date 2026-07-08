@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
@@ -105,7 +106,7 @@ public static class SemLinkIngestSupport
     {
         var profile = IngestSourceProfile.Wiktionary;
         var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
-        return new()
+        var config = new IngestBatchConfig
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
@@ -119,22 +120,53 @@ public static class SemLinkIngestSupport
             WorkingSetRecordCap = ws.RecordCap,
             WorkingSetProfile = profile,
         };
+        return maxInputUnits > 0 ? config.WithMaxInputUnits(maxInputUnits) : config;
+    }
+}
+
+internal sealed class SemLinkJsonDocumentPhase : DecomposerPhase<GrammarIngestRecord>
+{
+    private readonly string _path;
+    private readonly SemLinkDocumentKind _kind;
+    private readonly string _label;
+
+    public SemLinkJsonDocumentPhase(string path, SemLinkDocumentKind kind, string label)
+    {
+        _path = path;
+        _kind = kind;
+        _label = label;
     }
 
-    public static async IAsyncEnumerable<SubstrateChange> IngestJsonDocumentAsync(
-        string path,
-        SemLinkDocumentKind kind,
-        string batchLabelPrefix,
-        int batchSize,
-        ISubstrateReader? containmentReader,
-        long maxInputUnits = 0,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override string PhaseLabel => _label;
+
+    public override Hash128 SourceId => SemLinkDecomposer.Source;
+    public override string SourceName => "SemLinkDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => SemLinkDecomposer.TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
+
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SemLinkJsonPairStream.CountPairsAsync(_path, ct).ContinueWith(t => (long?)t.Result, ct);
+
+    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandler()
     {
-        var witness = new SemLinkGrammarWitness(kind);
-        var stream = new SemLinkJsonPairStream(path);
-        var handler = new GrammarIngestHandler(SemLinkDecomposer.Source, witness.ModalityId, witness);
-        var config = PipelineConfig(SemLinkDecomposer.Source, batchLabelPrefix, batchSize, containmentReader, maxInputUnits);
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
-            yield return change;
+        var witness = new SemLinkGrammarWitness(_kind);
+        return new GrammarIngestHandler(SemLinkDecomposer.Source, witness.ModalityId, witness);
+    }
+
+    protected override IAsyncEnumerable<GrammarIngestRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+        new SemLinkJsonPairStream(_path).RecordsAsync(ct);
+
+    protected override IngestBatchConfig BuildPipelineConfig(
+        IDecomposerContext context, DecomposerOptions options)
+    {
+        int batchSize = options.BatchSize > 0 ? options.BatchSize : 1;
+        var config = SemLinkIngestSupport.PipelineConfig(
+            SourceId, BatchLabelPrefix, batchSize, context.Reader, options.MaxInputUnits);
+        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

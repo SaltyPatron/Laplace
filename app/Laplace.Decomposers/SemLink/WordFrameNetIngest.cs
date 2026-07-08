@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
@@ -24,27 +23,16 @@ internal static class WordFrameNetIngest
         "XWFN",
     ];
 
-    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
-        string path,
-        int batchSize,
-        ISubstrateReader? reader,
-        DecomposerOptions options,
-        long maxInputUnits = 0,
-        CancellationToken ct = default)
+    internal readonly record struct WordFrameNetFileSpec(string Path, string Label, bool NativeFormat);
+
+    internal static WordFrameNetFileSpec DescribeFile(string path)
     {
         string baseName = Path.GetFileName(path);
         string label = baseName.Equals("lu_synset.map", StringComparison.OrdinalIgnoreCase)
                            || baseName.Equals("lu_synset", StringComparison.OrdinalIgnoreCase)
             ? "wordframenet/lu"
             : $"wordframenet/{baseName}";
-
-        return LooksLikeNativeWfn(path)
-            ? FnLuSynsetBridgeIngest.StreamWfnNativeAsync(
-                  path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct)
-            : FnLuSynsetBridgeIngest.StreamAsync(
-                  path, WordFrameNetDecomposer.Source, label, batchSize,
-                  FnLuSynsetBridgeIngest.MultiWordNetVersion, maxInputUnits, reader, options, ct);
+        return new WordFrameNetFileSpec(path, label, LooksLikeNativeWfn(path));
     }
 
     internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct) =>
@@ -139,5 +127,27 @@ internal static class WordFrameNetIngest
 
         string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
         if (seen.Add(platformDefault)) yield return platformDefault;
+    }
+}
+
+internal sealed class WordFrameNetMultiFileStream : IMultiFileRecordStream<CategoryCorrespondenceRecord>
+{
+    private readonly IReadOnlyList<WordFrameNetIngest.WordFrameNetFileSpec> _files;
+
+    public WordFrameNetMultiFileStream(IReadOnlyList<WordFrameNetIngest.WordFrameNetFileSpec> files) => _files = files;
+
+    public async IAsyncEnumerable<(string FileLabel, CategoryCorrespondenceRecord Record)> RecordsAsync(
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var spec in _files)
+        {
+            var records = spec.NativeFormat
+                ? FnLuSynsetBridgeIngest.EnumerateWfnNativeRecordsAsync(
+                    spec.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct)
+                : FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
+                    spec.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct);
+            await foreach (var rec in records)
+                yield return (spec.Label, rec);
+        }
     }
 }

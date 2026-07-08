@@ -29,6 +29,7 @@
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
     <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
     <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers\Laplace.Decomposers.csproj" />
   </ItemGroup>
 
   <ItemGroup>

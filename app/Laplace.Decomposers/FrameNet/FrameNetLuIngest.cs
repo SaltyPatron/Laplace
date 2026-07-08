@@ -3,7 +3,6 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -46,11 +45,11 @@ internal static class FrameNetLuIngest
         if (string.IsNullOrEmpty(frameName) || string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos))
             return null;
 
-        string lemma = FrameNetLemmaHelpers.LemmaOf(luName);
+        string lemma = FrameNetLemmaHelper.LemmaOf(luName);
         if (lemma.Length == 0) return null;
         string luKey = SourceEntityIdConventions.FrameNetLuKey(frameName, luName);
 
-        string definition = FrameNetLemmaHelpers.CollapseWs((string?)root.Element(ns + "definition") ?? "");
+        string definition = FrameNetLemmaHelper.CollapseWs((string?)root.Element(ns + "definition") ?? "");
 
         var patterns = new List<string>();
         foreach (var vu in root.Descendants(ns + "valenceUnit"))
@@ -80,7 +79,7 @@ internal static class FrameNetLuIngest
         var sentences = new List<LuSentence>();
         foreach (var sent in root.Descendants(ns + "sentence"))
         {
-            string text = FrameNetLemmaHelpers.CollapseWs((string?)sent.Element(ns + "text") ?? "");
+            string text = FrameNetLemmaHelper.CollapseWs((string?)sent.Element(ns + "text") ?? "");
             if (text.Length == 0) continue;
 
             string? target = null;

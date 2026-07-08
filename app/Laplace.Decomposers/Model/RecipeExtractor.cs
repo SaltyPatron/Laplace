@@ -29,6 +29,9 @@ public sealed class RecipeExtractor
 
 
 
+    /// <summary>Canonical BLAKE3 input — sorted JSON keys, matches ingest + export identity.</summary>
+    public static byte[] CanonicalBytes(JsonElement root) => CanonicalizeJson(root);
+
     public static RecipeInfo ParseText(string recipeJson, string origin = "(in-memory)")
     {
         using var doc = JsonDocument.Parse(recipeJson);

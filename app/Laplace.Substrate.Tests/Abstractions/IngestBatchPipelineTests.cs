@@ -248,6 +248,9 @@ public sealed class IngestBatchPipelineTests
         Assert.Contains(changes, c => c.Metadata.SourceContentUnitName.StartsWith("multi/file-a/"));
         Assert.Contains(changes, c => c.Metadata.SourceContentUnitName.StartsWith("multi/file-b/"));
         Assert.Contains(changes, c => c.Metadata.SourceContentUnitName.StartsWith("multi/file-c/"));
+        Assert.Equal(3, changes.Count(c =>
+            c.Metadata.SourceContentUnitName.StartsWith(
+                IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
     }
 
     [Fact]

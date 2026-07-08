@@ -1,6 +1,10 @@
 13 — STABILIZATION AUDIT + PLAN (current-state truth table and the path to "progress
 comes naturally")
 ================================================================================
+*** HISTORICAL — agent draft 2026-07-05. Verify every claim against code before
+    trusting. Active remediation: .cursor/plans/full_stack_remediation_bdaba5c3.plan.md;
+    decomposer evidence: .scratchpad/17. This doc is NOT the active plan. ***
+
 Date: 2026-07-05. Reconciles 01-12, MEMORY, CLAUDE.md, and a fresh code survey
 (decomposer→pipeline lane map, write-lane state, CLI dispatch, repo hygiene) into one
 document. Grounding rule inherited from 05/06: every claim below was verified against

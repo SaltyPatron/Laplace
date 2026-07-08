@@ -4,13 +4,13 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class FrameNetDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
@@ -91,51 +91,102 @@ public sealed class FrameNetDecomposer : DecomposerOrchestrator, IIngestInventor
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        string frameDir = Path.Combine(context.EcosystemPath, "frame");
-        string luDir = Path.Combine(context.EcosystemPath, "lu");
-        string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         var uncapped = options with { MaxInputUnits = 0 };
 
-        await foreach (var change in RunComposePhaseAsync(
-            ParseAllFramesAsync(frameDir, ct),
-            static (frame, b) => { EmitFrameEntities(b, frame); EmitFrameAttestations(b, frame); },
-            "frame", SourceTrust.AcademicCurated, batch, context, options, ct))
+        await foreach (var change in RunPhaseAsync(new FramePhase(batch), context, options, ct))
             yield return change;
 
-        await foreach (var change in RunComposePhaseAsync(
-            FrameNetLuIngest.ParseAllLusAsync(luDir, ct),
-            (lu, b) => FrameNetLuIngest.EmitLu(b, lu, Source),
-            "lu", SourceTrust.AcademicCurated, batch, context, uncapped, ct))
+        await foreach (var change in RunPhaseAsync(new LuPhase(batch), context, uncapped, ct))
             yield return change;
 
-        await foreach (var change in RunComposePhaseAsync(
-            ParseAllFulltextAsync(fulltextDir, ct),
-            static (ann, b) => ComposeFulltextAnno(ann, b),
-            "fulltext", SourceTrust.AcademicCurated, batch, context, uncapped, ct))
+        await foreach (var change in RunPhaseAsync(new FulltextPhase(batch), context, uncapped, ct))
             yield return change;
     }
 
-    private static async IAsyncEnumerable<Frame> ParseAllFramesAsync(
-        string frameDir, [EnumeratorCancellation] CancellationToken ct)
+    private abstract class FnComposePhase<T> : ComposeDecomposerPhase<T>
     {
-        if (!Directory.Exists(frameDir)) yield break;
-        foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
+        private readonly int _batch;
+
+        protected FnComposePhase(int batch) => _batch = batch;
+
+        public override Hash128 SourceId => Source;
+        public override string SourceName => "FrameNetDecomposer";
+        public override int LayerOrder => 3;
+        public override Hash128 TrustClassId => TrustClass;
+        protected override double SourceTrust => TC.AcademicCurated;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
+
+        protected override IngestBatchConfig BuildPipelineConfig(
+            IDecomposerContext context, DecomposerOptions options) =>
+            IngestPipelineDefaults.ApplyMaxInputUnits(
+                IngestPipelineDefaults.Compose(
+                    SourceId, BatchLabelPrefix, _batch, options, context.Reader, PipelineProfile),
+                options);
+    }
+
+    private sealed class FramePhase : FnComposePhase<Frame>
+    {
+        public FramePhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "frame";
+        protected override void Compose(Frame frame, SubstrateChangeBuilder b)
         {
-            ct.ThrowIfCancellationRequested();
-            if (ParseFrame(path) is { } frame) yield return frame;
+            EmitFrameEntities(b, frame);
+            EmitFrameAttestations(b, frame);
+        }
+        protected override async IAsyncEnumerable<Frame> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string frameDir = Path.Combine(ecosystemPath, "frame");
+            if (!Directory.Exists(frameDir)) yield break;
+            foreach (var path in SharedXmlFramesetReader.EnumerateXmlFiles(frameDir))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (ParseFrame(path) is { } frame) yield return frame;
+            }
+            await Task.CompletedTask;
         }
     }
 
-    private static async IAsyncEnumerable<FulltextAnno> ParseAllFulltextAsync(
-        string fulltextDir, [EnumeratorCancellation] CancellationToken ct)
+    private sealed class LuPhase : FnComposePhase<FrameNetLuIngest.LuDocument>
     {
-        if (!Directory.Exists(fulltextDir)) yield break;
-        foreach (var path in Directory.EnumerateFiles(fulltextDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
+        public LuPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "lu";
+        protected override void Compose(FrameNetLuIngest.LuDocument lu, SubstrateChangeBuilder b) =>
+            FrameNetLuIngest.EmitLu(b, lu, Source);
+        protected override async IAsyncEnumerable<FrameNetLuIngest.LuDocument> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
         {
-            ct.ThrowIfCancellationRequested();
-            await foreach (var ann in ParseFulltextAsync(path, ct))
-                yield return ann;
+            await foreach (var lu in FrameNetLuIngest.ParseAllLusAsync(
+                               Path.Combine(ecosystemPath, "lu"), ct))
+                yield return lu;
+        }
+    }
+
+    private sealed class FulltextPhase : FnComposePhase<FulltextAnno>
+    {
+        public FulltextPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "fulltext";
+        protected override void Compose(FulltextAnno ann, SubstrateChangeBuilder b) => ComposeFulltextAnno(ann, b);
+        protected override async IAsyncEnumerable<FulltextAnno> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string fulltextDir = Path.Combine(ecosystemPath, "fulltext");
+            if (!Directory.Exists(fulltextDir)) yield break;
+            foreach (var path in SharedXmlFramesetReader.EnumerateXmlFiles(fulltextDir))
+            {
+                ct.ThrowIfCancellationRequested();
+                await foreach (var ann in ParseFulltextAsync(path, ct))
+                    yield return ann;
+            }
         }
     }
 
@@ -150,28 +201,42 @@ public sealed class FrameNetDecomposer : DecomposerOrchestrator, IIngestInventor
                 Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
     }
 
+    // The old inventory estimated units as NEWLINES of the XML files
+    // (~13.9M for v1.7), while the pipeline numerator counts parsed records
+    // (~44K) — progress showed 0.3% at completion and read as a truncated or
+    // hung run. Files are the only statically honest unit here: frame and LU
+    // phases yield exactly one record per file; fulltext yields one record per
+    // annotation, so the fraction still overshoots 100% on the fulltext tail —
+    // a known skew, small next to the 300x newline lie, gone once per-file
+    // consumption accounting lands on the flat pipeline lane.
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        string frameDir = Path.Combine(context.EcosystemPath, "frame");
-        string luDir = Path.Combine(context.EcosystemPath, "lu");
+        var paths = InputFiles(context.EcosystemPath);
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        var specs = paths
+            .Select(p => new IngestFileSpec(Path.GetFileName(p), p, 1))
+            .ToList();
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("files", paths.Count, specs));
+    }
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(InputFiles(context.EcosystemPath).Count);
+
+    private static List<string> InputFiles(string ecosystemPath)
+    {
         var paths = new List<string>();
+        string frameDir = Path.Combine(ecosystemPath, "frame");
+        string luDir = Path.Combine(ecosystemPath, "lu");
+        string fulltextDir = Path.Combine(ecosystemPath, "fulltext");
         if (Directory.Exists(frameDir))
             paths.AddRange(Directory.EnumerateFiles(frameDir, "*.xml"));
         if (Directory.Exists(luDir))
             paths.AddRange(Directory.EnumerateFiles(luDir, "lu*.xml"));
-        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        return Task.FromResult(IngestInventory.FromFiles("frames", paths, options.MaxInputUnits, ct));
-    }
-
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        long frames = 0, lus = 0;
-        string frameDir = Path.Combine(context.EcosystemPath, "frame");
-        string luDir = Path.Combine(context.EcosystemPath, "lu");
-        if (Directory.Exists(frameDir)) frames = Directory.EnumerateFiles(frameDir, "*.xml").LongCount();
-        if (Directory.Exists(luDir)) lus = Directory.EnumerateFiles(luDir, "lu*.xml").LongCount();
-        return Task.FromResult<long?>(frames + lus);
+        if (Directory.Exists(fulltextDir))
+            paths.AddRange(Directory.EnumerateFiles(fulltextDir, "*.xml"));
+        return paths;
     }
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
@@ -334,7 +399,7 @@ public sealed class FrameNetDecomposer : DecomposerOrchestrator, IIngestInventor
             string? pos = (string?)lu.Attribute("POS");
             if (string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos)) continue;
             if (!int.TryParse((string?)lu.Attribute("ID"), out int id)) continue;
-            string lemma = FrameNetLemmaHelpers.LemmaOf(luName);
+            string lemma = FrameNetLemmaHelper.LemmaOf(luName);
             if (lemma.Length == 0) continue;
             lus.Add(new LexUnit(id, lemma, pos));
         }

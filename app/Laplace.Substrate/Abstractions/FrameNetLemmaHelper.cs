@@ -1,9 +1,9 @@
-namespace Laplace.Decomposers.Extractors;
+namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// FrameNet LU name → surface lemma. Shared by FrameNetDecomposer and FrameNetLuIngest.
 /// </summary>
-public static class FrameNetLemmaHelpers
+public static class FrameNetLemmaHelper
 {
     public static string LemmaOf(string luName)
     {

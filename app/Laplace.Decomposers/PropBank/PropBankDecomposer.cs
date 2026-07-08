@@ -4,7 +4,6 @@ using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using Laplace.Decomposers.Extractors;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
@@ -59,8 +58,8 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
         string framesDir = DecomposerFileDiscovery.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("propbank-frames-main", "frames"), "frames");
-        await foreach (var root in XmlFramesetStream.ReadRootsAsync(
-                           XmlFramesetStream.EnumerateFramesetFiles(framesDir, ecosystemPath),
+        await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(
+                           SharedXmlFramesetReader.EnumerateFramesetFiles(framesDir, ecosystemPath),
                            "frameset", ct))
             yield return root;
     }
@@ -115,7 +114,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 
     private static void EmitRoles(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
-        foreach (var role in XmlFramesetStream.DescendantElements(roleset, "role"))
+        foreach (var role in SharedXmlFramesetReader.DescendantElements(roleset, "role"))
         {
             string descr = role.GetAttribute("descr").Trim();
             string num = role.GetAttribute("n").Trim();
@@ -148,7 +147,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
                         roleId.Value, "HAS_FEATURE", funcId.Value, Source, TC.AcademicCurated));
             }
 
-            foreach (var link in XmlFramesetStream.DescendantElements(role, "rolelink"))
+            foreach (var link in SharedXmlFramesetReader.DescendantElements(role, "rolelink"))
             {
                 string resource = link.GetAttribute("resource");
                 string cls = link.GetAttribute("class").Trim();
@@ -191,8 +190,8 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 
     private static void EmitExamples(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
-        foreach (var example in XmlFramesetStream.DescendantElements(roleset, "example"))
-            foreach (var text in XmlFramesetStream.DescendantElements(example, "text"))
+        foreach (var example in SharedXmlFramesetReader.DescendantElements(roleset, "example"))
+            foreach (var text in SharedXmlFramesetReader.DescendantElements(example, "text"))
             {
                 string ex = text.InnerText.Trim();
                 if (ex.Length == 0) continue;

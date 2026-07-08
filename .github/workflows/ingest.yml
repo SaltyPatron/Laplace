@@ -47,16 +47,8 @@ on:
         description: "optional path argument (document root, etc.)"
         type: string
         default: ""
-      workers:
-        description: "LAPLACE_INGEST_WORKERS override (blank = per-source default)"
-        type: string
-        default: ""
-      commit_rows:
-        description: "LAPLACE_INGEST_COMMIT_ROWS override (blank = per-source default)"
-        type: string
-        default: ""
       langs:
-        description: "LAPLACE_INGEST_LANGS override (blank = per-source default)"
+        description: "LAPLACE_INGEST_LANGS scope (blank = ALL languages — the default and the law; set only to deliberately narrow a run)"
         type: string
         default: ""
       skip_gates:
@@ -71,12 +63,11 @@ concurrency:
 permissions:
   contents: read
 
+# Worker counts, commit rows, and apply partitions are NOT knobs here: they are
+# machine-sized by IngestSizing/CpuTopology/MemoryTopology inside the CLI. The
+# env vars that once pretended to control them are gone — nothing read them.
 env:
   LAPLACE_DATA_ROOT: /vault/Data
-  LAPLACE_INGEST_WORKERS: "2"
-  LAPLACE_DECOMPOSE_WORKERS: "2"
-  LAPLACE_FOLD_WORKERS: "4"
-  LAPLACE_APPLY_PARTITIONS: "6"
 
 jobs:
   ingest:
@@ -88,35 +79,18 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Resolve per-source tuning
-        id: tune
-        run: |
-          # Defaults distilled from the archived per-source wrappers
-          # (.github/archive/ci-2026-07/workflows/) — override via inputs.
-          workers="" commit_rows="" langs=""
-          case "${{ inputs.source }}" in
-            conceptnet) workers="1"; commit_rows="50000" ;;
-            ud)         langs="en"; commit_rows="25000" ;;
-            wiktionary) langs="en"; commit_rows="50000" ;;
-          esac
-          [ -n "${{ inputs.workers }}" ]     && workers="${{ inputs.workers }}"
-          [ -n "${{ inputs.commit_rows }}" ] && commit_rows="${{ inputs.commit_rows }}"
-          [ -n "${{ inputs.langs }}" ]       && langs="${{ inputs.langs }}"
-          {
-            echo "workers=$workers"
-            echo "commit_rows=$commit_rows"
-            echo "langs=$langs"
-          } >> "$GITHUB_OUTPUT"
-          echo "tuning: workers='$workers' commit_rows='$commit_rows' langs='$langs'"
-
       - name: Ingest
         env:
           LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
           PGDATABASE: ${{ inputs.database }}
         run: |
-          [ -n "${{ steps.tune.outputs.workers }}" ]     && export LAPLACE_INGEST_WORKERS="${{ steps.tune.outputs.workers }}"
-          [ -n "${{ steps.tune.outputs.commit_rows }}" ] && export LAPLACE_INGEST_COMMIT_ROWS="${{ steps.tune.outputs.commit_rows }}"
-          [ -n "${{ steps.tune.outputs.langs }}" ]       && export LAPLACE_INGEST_LANGS="${{ steps.tune.outputs.langs }}"
+          # Language scoping is the ONE per-source tuning that exists; it is
+          # read by LanguageFilter.ForSource in the CLI. Unset = ALL languages
+          # — witness-manifest law. Never defaulted; narrowing a run is an
+          # explicit operator decision via the langs input.
+          langs="${{ inputs.langs }}"
+          [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
+          echo "LAPLACE_INGEST_LANGS='${LAPLACE_INGEST_LANGS:-}' (empty = all languages)"
           if [ -n "${{ inputs.path }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
           else

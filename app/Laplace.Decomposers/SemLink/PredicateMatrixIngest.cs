@@ -36,34 +36,7 @@ internal static class PredicateMatrixIngest
     private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
 
-    internal static IAsyncEnumerable<SubstrateChange> StreamAsync(
-        string path,
-        int batchSize,
-        LanguageFilter? langs,
-        ISubstrateReader? reader,
-        DecomposerOptions options,
-        long maxInputUnits = 0,
-        CancellationToken ct = default)
-    {
-        if (options.DryRun) return EmptyAsync();
-        if (batchSize <= 0) batchSize = 4096;
-        var opts = maxInputUnits > 0 ? options with { MaxInputUnits = maxInputUnits } : options;
-        var stream = new AsyncEnumerableRecordStream<PredicateMatrixEdge>(
-            EnumerateEdgesAsync(path, langs, maxInputUnits, ct));
-        var handler = new PredicateMatrixEdgeHandler(Source, TC.AcademicCurated);
-        var config = CategoryCorrespondenceIngestSupport.PipelineConfig(
-            Source, "semlink/predicate-matrix", batchSize, reader);
-        if (opts.MaxInputUnits > 0) config = config.WithMaxInputUnits(opts.MaxInputUnits);
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
-    }
-
-    private static async IAsyncEnumerable<SubstrateChange> EmptyAsync()
-    {
-        await Task.CompletedTask;
-        yield break;
-    }
-
-    private static async IAsyncEnumerable<PredicateMatrixEdge> EnumerateEdgesAsync(
+    internal static async IAsyncEnumerable<PredicateMatrixEdge> EnumerateEdgesAsync(
         string path,
         LanguageFilter? langs,
         long maxInputUnits,
@@ -309,6 +282,9 @@ internal static class PredicateMatrixIngest
         public static PredicateMatrixEdge FromTriple(RelationTripleRecord t) => new(null, t);
     }
 
+    internal static IIngestRecordHandler<PredicateMatrixEdge> CreateEdgeHandler(double trust) =>
+        new PredicateMatrixEdgeHandler(Source, trust);
+
     private sealed class PredicateMatrixEdgeHandler : IIngestRecordHandler<PredicateMatrixEdge>
     {
         private readonly CategoryCorrespondenceHandler _category;
@@ -333,5 +309,47 @@ internal static class PredicateMatrixIngest
         public void WalkWitness(
             PredicateMatrixEdge record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
         { }
+    }
+}
+
+internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixIngest.PredicateMatrixEdge>
+{
+    private readonly string _path;
+    private readonly LanguageFilter? _langs;
+
+    public PredicateMatrixPhase(string path, LanguageFilter? langs)
+    {
+        _path = path;
+        _langs = langs;
+    }
+
+    protected override string PhaseLabel => "semlink/predicate-matrix";
+
+    public override Hash128 SourceId => PredicateMatrixIngest.Source;
+    public override string SourceName => "PredicateMatrixDecomposer";
+    public override int LayerOrder => 3;
+    public override Hash128 TrustClassId => PredicateMatrixIngest.TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
+
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        PredicateMatrixIngest.EstimateLineCountAsync(_path, ct);
+
+    protected override IIngestRecordHandler<PredicateMatrixIngest.PredicateMatrixEdge> CreateHandler() =>
+        PredicateMatrixIngest.CreateEdgeHandler(SourceTrust);
+
+    protected override IAsyncEnumerable<PredicateMatrixIngest.PredicateMatrixEdge> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+        PredicateMatrixIngest.EnumerateEdgesAsync(_path, _langs, options.MaxInputUnits, ct);
+
+    protected override IngestBatchConfig BuildPipelineConfig(
+        IDecomposerContext context, DecomposerOptions options)
+    {
+        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
+        var config = IngestPipelineDefaults.CategoryCorrespondence(
+            SourceId, BatchLabelPrefix, batchSize, options, context.Reader);
+        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

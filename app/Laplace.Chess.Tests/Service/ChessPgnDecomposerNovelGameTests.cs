@@ -35,7 +35,7 @@ public sealed class ChessPgnDecomposerNovelGameTests
         "[Event \"B\"]\n[White \"Carol\"]\n[Black \"Dave\"]\n[Date \"2024.01.02\"]\n\n1. d4 d5 0-1\n";
 
     [Fact]
-    public void ParsedGame_ImplementsTrunkRootRecord()
+    public void ChessGameRecord_ImplementsTrunkRootRecord()
     {
         var g = ChessPgnDecomposer.TryParseGame(GameA)!;
         Assert.IsAssignableFrom<ITrunkRootRecord>(g);
@@ -50,8 +50,8 @@ public sealed class ChessPgnDecomposerNovelGameTests
         var reader = new FakeReader();
         reader.Present.Add(a.GameId);
 
-        var novel = new List<ChessPgnDecomposer.ParsedGame>();
-        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessPgnDecomposer.ParsedGame> { a, b }, reader, CancellationToken.None))
+        var novel = new List<ChessGameRecord>();
+        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessGameRecord> { a, b }, reader, CancellationToken.None))
             novel.Add(g);
 
         Assert.Single(novel);
@@ -66,8 +66,8 @@ public sealed class ChessPgnDecomposerNovelGameTests
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
 
-        var novel = new List<ChessPgnDecomposer.ParsedGame>();
-        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessPgnDecomposer.ParsedGame> { a, b }, reader, CancellationToken.None))
+        var novel = new List<ChessGameRecord>();
+        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessGameRecord> { a, b }, reader, CancellationToken.None))
             novel.Add(g);
 
         Assert.Equal(2, novel.Count);
@@ -89,8 +89,8 @@ public sealed class ChessPgnDecomposerNovelGameTests
     public async Task FilterNovelAsync_NullReader_ReturnsAllGamesUnfiltered()
     {
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
-        var novel = new List<ChessPgnDecomposer.ParsedGame>();
-        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessPgnDecomposer.ParsedGame> { a }, null, CancellationToken.None))
+        var novel = new List<ChessGameRecord>();
+        await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessGameRecord> { a }, null, CancellationToken.None))
             novel.Add(g);
         Assert.Single(novel);
     }

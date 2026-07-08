@@ -32,6 +32,9 @@ internal static class AppComposition
             sp.GetRequiredService<ChessLiveGameHost>(),
             sp.GetService<ILoggerFactory>()?.CreateLogger("lichess")));
 
+        services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
+        services.AddSingleton<IFoundryExportService, CliFoundryExportService>();
+
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();

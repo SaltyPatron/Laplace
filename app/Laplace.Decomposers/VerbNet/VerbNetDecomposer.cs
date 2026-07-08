@@ -3,7 +3,6 @@ using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using Laplace.Decomposers.Extractors;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
@@ -50,8 +49,8 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
         string classDir = DecomposerFileDiscovery.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("verbnet-master", "verbnet3.4"), "verbnet3.4");
-        await foreach (var root in XmlFramesetStream.ReadRootsAsync(
-                           XmlFramesetStream.EnumerateXmlFiles(classDir), "VNCLASS", ct))
+        await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(
+                           SharedXmlFramesetReader.EnumerateXmlFiles(classDir), "VNCLASS", ct))
             yield return root;
     }
 
@@ -90,7 +89,7 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
                     classEntity, "IS_A", parentAnchor.Value, Source, TC.AcademicCurated));
         }
 
-        foreach (var member in XmlFramesetStream.ChildElements(el, "MEMBERS", "MEMBER"))
+        foreach (var member in SharedXmlFramesetReader.ChildElements(el, "MEMBERS", "MEMBER"))
         {
             string name = member.GetAttribute("name").Replace('_', ' ').Trim();
             if (name.Length == 0) continue;
@@ -121,7 +120,7 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
             }
         }
 
-        foreach (var role in XmlFramesetStream.ChildElements(el, "THEMROLES", "THEMROLE"))
+        foreach (var role in SharedXmlFramesetReader.ChildElements(el, "THEMROLES", "THEMROLE"))
         {
             string type = role.GetAttribute("type").Trim();
             if (type.Length == 0) continue;
@@ -131,7 +130,7 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
                 classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
         }
 
-        foreach (var frame in XmlFramesetStream.ChildElements(el, "FRAMES", "FRAME"))
+        foreach (var frame in SharedXmlFramesetReader.ChildElements(el, "FRAMES", "FRAME"))
         {
             string primary = "";
             foreach (XmlNode d in frame.GetElementsByTagName("DESCRIPTION"))
@@ -190,8 +189,8 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
             }
         }
 
-        foreach (var subWrap in XmlFramesetStream.DirectChildren(el, "SUBCLASSES"))
-            foreach (var sub in XmlFramesetStream.DirectChildren(subWrap, "VNSUBCLASS"))
+        foreach (var subWrap in SharedXmlFramesetReader.DirectChildren(el, "SUBCLASSES"))
+            foreach (var sub in SharedXmlFramesetReader.DirectChildren(subWrap, "VNSUBCLASS"))
                 EmitClass(b, sub, parentClassId: classId);
     }
 }

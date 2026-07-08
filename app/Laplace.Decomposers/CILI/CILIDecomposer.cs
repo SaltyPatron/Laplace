@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.CILI;
 
-public sealed class CILIDecomposer : DecomposerOrchestrator
+public sealed class CILIDecomposer : DecomposerMultiPhase
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/CILIDecomposer/v1");
@@ -23,9 +23,7 @@ public sealed class CILIDecomposer : DecomposerOrchestrator
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
 
-    private readonly HashSet<string> _names = new(StringComparer.Ordinal);
-    private readonly object _namesLock = new();
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _names;
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => [];
 
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
@@ -39,56 +37,127 @@ public sealed class CILIDecomposer : DecomposerOrchestrator
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string root = context.EcosystemPath;
-        if (options.DryRun) yield break;
-
-        int batchSize = options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
 
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
-            await foreach (var change in RunComposePhaseAsync(
-                ParseIliTtlAsync(ttl, ct), (rec, b) => EmitConceptRow(b, rec),
-                "concepts", TC.AcademicCurated, batchSize, context, options, ct))
+            await foreach (var change in RunPhaseAsync(new ConceptsPhase(), context, options, ct))
                 yield return change;
         }
 
-        var tabs = Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories)
-                            .OrderBy(p => p, StringComparer.Ordinal);
-        foreach (var tab in tabs)
+        foreach (var tab in Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories)
+                                      .OrderBy(p => p, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            string version = VersionLabel(tab);
-            await foreach (var change in RunComposePhaseAsync(
-                ParseIliMapAsync(tab, version, ct), (rec, b) => EmitMapRow(b, rec),
-                $"map/{version}", TC.AcademicCurated, batchSize, context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                               new MapTabPhase(tab, VersionLabel(tab)), context, options, ct))
                 yield return change;
         }
 
-        var ttlMaps = Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories)
-                               .OrderBy(p => p, StringComparer.Ordinal);
-        foreach (var ttlMap in ttlMaps)
+        foreach (var ttlMap in Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories)
+                                        .OrderBy(p => p, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            string version = VersionLabel(ttlMap);
-            await foreach (var change in RunComposePhaseAsync(
-                ParseIliMapTtlAsync(ttlMap, version, ct), (rec, b) => EmitMapRow(b, rec),
-                $"map/{version}", TC.AcademicCurated, batchSize, context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                               new MapTtlPhase(ttlMap, VersionLabel(ttlMap)), context, options, ct))
                 yield return change;
         }
     }
 
-    private static void EmitConceptRow(SubstrateChangeBuilder b, (byte[] Ili, byte[]? Def) rec)
+    private static int ResolveBatch(DecomposerOptions options) =>
+        options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
+
+    private abstract class CiliComposePhase<T> : ComposeDecomposerPhase<T>
     {
-        var (ili, def) = rec;
-        if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
-        if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
+        public override Hash128 SourceId => Source;
+        public override string SourceName => "CILIDecomposer";
+        public override int LayerOrder => 2;
+        public override Hash128 TrustClassId => TrustClass;
+        protected override double SourceTrust => TC.AcademicCurated;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
+
+        protected override IngestBatchConfig BuildPipelineConfig(
+            IDecomposerContext context, DecomposerOptions options) =>
+            IngestPipelineDefaults.ApplyMaxInputUnits(
+                IngestPipelineDefaults.Compose(
+                    SourceId, BatchLabelPrefix, ResolveBatch(options), options, context.Reader, PipelineProfile),
+                options);
+    }
+
+    private sealed class ConceptsPhase : CiliComposePhase<(byte[] Ili, byte[]? Def)>
+    {
+        protected override string PhaseLabel => "concepts";
+        protected override void Compose((byte[] Ili, byte[]? Def) rec, SubstrateChangeBuilder b)
         {
+            var (ili, def) = rec;
+            if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
             b.AddAttestation(NativeAttestation.Categorical(
-                id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
-            b.AddAttestation(NativeAttestation.Categorical(
-                id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
+                id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
+            if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
+            {
+                b.AddAttestation(NativeAttestation.Categorical(
+                    id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
+            }
+        }
+        protected override async IAsyncEnumerable<(byte[] Ili, byte[]? Def)> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in ParseIliTtlAsync(Path.Combine(ecosystemPath, "ili.ttl"), ct))
+                yield return rec;
+        }
+    }
+
+    private sealed class MapTabPhase : CiliComposePhase<(byte[] Ili, byte[] OffsetPos, string Version)>
+    {
+        private readonly string _path;
+        private readonly string _version;
+
+        public MapTabPhase(string path, string version)
+        {
+            _path = path;
+            _version = version;
+        }
+
+        protected override string PhaseLabel => $"map/{_version}";
+        protected override void Compose((byte[] Ili, byte[] OffsetPos, string Version) rec, SubstrateChangeBuilder b) =>
+            EmitMapRow(b, rec);
+        protected override async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in ParseIliMapAsync(_path, _version, ct))
+                yield return rec;
+        }
+    }
+
+    private sealed class MapTtlPhase : CiliComposePhase<(byte[] Ili, byte[] OffsetPos, string Version)>
+    {
+        private readonly string _path;
+        private readonly string _version;
+
+        public MapTtlPhase(string path, string version)
+        {
+            _path = path;
+            _version = version;
+        }
+
+        protected override string PhaseLabel => $"map/{_version}";
+        protected override void Compose((byte[] Ili, byte[] OffsetPos, string Version) rec, SubstrateChangeBuilder b) =>
+            EmitMapRow(b, rec);
+        protected override async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var rec in ParseIliMapTtlAsync(_path, _version, ct))
+                yield return rec;
         }
     }
 
@@ -241,6 +310,21 @@ public sealed class CILIDecomposer : DecomposerOrchestrator
         return name.StartsWith(prefix, StringComparison.Ordinal) ? name[prefix.Length..] : name;
     }
 
+    // The unit numerator counts pipeline RECORDS (ttl/tab lines that parse),
+    // so the denominator must be a line count of the same files RunIngestAsync
+    // reads. The previous hardcoded 120,000 (the CILI concept count) made every
+    // run report ~1050% progress — the map phases alone are >1.1M lines.
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(120_000L);
+    {
+        string root = context.EcosystemPath;
+        long total = 0;
+        string ttl = Path.Combine(root, "ili.ttl");
+        if (File.Exists(ttl))
+            total += EtlInventory.EstimateNewlineCount(ttl, ct);
+        foreach (var tab in Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories))
+            total += EtlInventory.EstimateNewlineCount(tab, ct);
+        foreach (var ttlMap in Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories))
+            total += EtlInventory.EstimateNewlineCount(ttlMap, ct);
+        return Task.FromResult<long?>(total > 0 ? total : null);
+    }
 }

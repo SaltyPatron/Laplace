@@ -102,6 +102,16 @@ public sealed record RecipeQuoteRequest(
     [property: JsonPropertyName("commercial")] bool Commercial = false,
     [property: JsonPropertyName("private_export")] bool PrivateExport = false);
 
+public sealed record RecipeCompileRequest(
+    [property: JsonPropertyName("recipe")] string? Recipe);
+
+public sealed record SynthesisExportRequest(
+    [property: JsonPropertyName("recipe")] string? Recipe,
+    [property: JsonPropertyName("recipe_id_prefix")] string? RecipeIdPrefix = null,
+    [property: JsonPropertyName("tokenizer_dir")] string? TokenizerDir = null,
+    [property: JsonPropertyName("format")] string? Format = null,
+    [property: JsonPropertyName("filename")] string? Filename = null);
+
 public sealed record AuditReportRequest(
     [property: JsonPropertyName("scope")] string? Scope = null,
     [property: JsonPropertyName("include_evidence")] bool IncludeEvidence = true,

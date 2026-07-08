@@ -12,7 +12,6 @@
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/content_witness_batch.h"
-#include "laplace/core/etl_ingest.h"
 #include "laplace/core/hash128.h"
 
 namespace {
@@ -50,54 +49,6 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
 
 
 
-
-TEST(GrammarCompose, OmwRowsAsanRepro) {
-    const char* dir = std::getenv("LAPLACE_OMW_REPRO_DIR");
-    if (!dir || !*dir) GTEST_SKIP() << "set LAPLACE_OMW_REPRO_DIR to run";
-
-    
-    
-    
-    
-    laplace_etl_config_t cfg;
-    std::memset(&cfg, 0, sizeof(cfg));
-    cfg.modality_id = "tsv";
-    hash128_blake3(reinterpret_cast<const uint8_t*>("omw/source"), 10, &cfg.source_id);
-    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &cfg.type_meta_id);
-    cfg.witness_weight    = 1.0;
-    cfg.trust_weight      = 1.0;
-    cfg.now_unix_us       = 0;
-    cfg.witness_kind      = 0;   
-    cfg.edge_rules        = nullptr;
-    cfg.edge_rule_count   = 0;
-    cfg.context_is_null   = 1;
-    cfg.skip_comment_rows = 0;
-
-    laplace_etl_session_t* sess = nullptr;
-    ASSERT_EQ(laplace_etl_session_open(&cfg, &sess), 0);
-    ASSERT_NE(sess, nullptr);
-    intent_stage_t* stage = intent_stage_new(1u << 16);
-    ASSERT_NE(stage, nullptr);
-
-    std::vector<std::filesystem::path> files;
-    for (auto& e : std::filesystem::recursive_directory_iterator(dir))
-        if (e.is_regular_file() && e.path().extension() == ".tab") files.push_back(e.path());
-    std::sort(files.begin(), files.end());
-
-    laplace_etl_stats_t stats;
-    std::memset(&stats, 0, sizeof(stats));
-    for (auto& fp : files) {
-        while (laplace_etl_session_feed_file(
-                   sess, fp.string().c_str(), 1u << 20, 0, stage,
-                   nullptr, nullptr, nullptr, nullptr, &stats) == 1) {  }
-    }
-    std::fprintf(stderr, "[repro] read=%llu parsed=%llu emitted=%llu ents=%zu phys=%zu (files=%zu)\n",
-                 (unsigned long long)stats.rows_read, (unsigned long long)stats.rows_parsed,
-                 (unsigned long long)stats.rows_emitted,
-                 intent_stage_entity_count(stage), intent_stage_physicality_count(stage), files.size());
-    laplace_etl_session_close(sess);
-    intent_stage_free(stage);
-}
 
 TEST(GrammarCompose, EntityDedupDoesNotInflateCount) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");

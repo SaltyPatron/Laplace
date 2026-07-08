@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class WiktionaryDecomposer : GrammarIngestDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
@@ -18,14 +18,11 @@ public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInvent
     public override string SourceName => "WiktionaryDecomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
-    // kaikki wiktextract records are fat JSON trees (senses, translations, etymology,
-    // pronunciation) — tens of KB each. Sizing at the 512-byte default would stage ~20×
-    // the memory per batch; the real shape keeps batches small and memory bounded.
-    public int EstimatedBytesPerRecord => IngestSourceProfile.Wiktionary.EstBytesPerRecord;
+    protected override double SourceTrust => TC.AcademicCuratedUserInput;
+    protected override string ModalityId => "json";
+    protected override double WitnessWeight => 0.7;
 
-
-
-
+    public override int EstimatedBytesPerRecord => IngestSourceProfile.Wiktionary.EstBytesPerRecord;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
@@ -41,36 +38,37 @@ public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInvent
                 "FORM_OF", "HAS_FEATURE", "MANNER_OF"],
             readbackNames: VocabularyNames, ct: ct);
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IGrammarWitness CreateWitness(DecomposerOptions options) =>
+        new WiktionaryGrammarWitness(options);
+
+    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        string? file = ResolveInput(context.EcosystemPath, options.Languages);
+        string? file = ResolveInput(ecosystemPath, options.Languages);
         if (file is null) yield break;
 
-        var witness = new WiktionaryGrammarWitness(options);
+        var source = EtlManifest.Get("wiktionary");
         bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, options.Languages);
         Func<ReadOnlySpan<byte>, bool>? acceptRow = preFilter && options.Languages is { IsActive: true } langs
             ? line => WiktionaryJsonFilter.MatchesLanguageFilter(line, langs)
             : null;
 
-        var source = EtlManifest.Get("wiktionary");
-        int workers = 0;
-        await foreach (var change in StructuredGrammarIngest.IngestFileParallelAsync(
-                           file,
-                           source.Modality.GrammarId,
-                           source.SourceId,
-                           witness: witness,
-                           witnessWeight: 0.7,
-                           batchLabelPrefix: "wiktionary",
-                           workerCount: workers,
-                           acceptRow: acceptRow,
-                           recordFraming: source.Modality.RecordFraming,
-                           containmentReader: context.Reader,
-                           ct: ct))
+        var sized = IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary, null);
+        int workers = sized.ComposeWorkers;
+
+        if (workers > 1)
         {
-            if (!options.DryRun) yield return change;
+            var parallel = new ParallelGrammarFileRecordStream(
+                file, source.Modality.GrammarId, acceptRow, source.Modality.RecordFraming, workers, ct);
+            await foreach (var record in parallel.RecordsAsync(ct))
+                yield return record;
+        }
+        else
+        {
+            var stream = GrammarFileRecordStream.ForSource(file, source, acceptRow);
+            await foreach (var record in stream.RecordsAsync(ct))
+                yield return record;
         }
     }
 
@@ -79,7 +77,6 @@ public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInvent
     {
         string? file = ResolveInput(context.EcosystemPath, options.Languages);
         if (file is null) return Task.FromResult<IngestInventory?>(null);
-
 
         if (options.MaxInputUnits > 0)
             return Task.FromResult(IngestInventory.SingleFile(
@@ -97,9 +94,6 @@ public sealed class WiktionaryDecomposer : DecomposerOrchestrator, IIngestInvent
 
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {
-
-
-
         if (langs?.IsActive == true)
         {
             string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");

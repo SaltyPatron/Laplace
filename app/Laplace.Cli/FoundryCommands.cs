@@ -956,24 +956,32 @@ internal static class FoundryCommands
         Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
 
-        if (desc.HiddenSizeAuto)
-            return Fail("hidden_size 'auto' (spectral rank) not yet wired for Mold-A-Model — set an integer for the spine");
+        if (RejectRetiredFoundryEnvVars() is { } retired)
+            return Fail(retired);
+
         if (desc.Structure != "dense")
             return Fail($"Mold-A-Model spine supports 'dense' (got '{desc.Structure}'); MoE is Milestone B");
 
-        int dModel = desc.HiddenSizeOr(0);
         int nLayers = desc.NumLayers;
-        int intermR = desc.IntermediateSize;
         int nHeads = desc.Layers[0].Heads.Count;
         int nKv = desc.Layers[0].KvHeads;
         foreach (var L in desc.Layers)
             if (L.Heads.Count != nHeads || L.KvHeads != nKv)
                 return Fail("Mold-A-Model spine requires uniform heads/kv per layer (variable-per-layer is Milestone B)");
-        if (dModel <= 0 || dModel % nHeads != 0)
-            return Fail($"hidden_size {dModel} must be a positive multiple of heads/layer {nHeads}");
         if (nKv != nHeads)
             return Fail($"Mold-A-Model spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
-        int headDim = dModel / nHeads;
+
+        int moldDim = desc.HiddenSizeAuto
+            ? Math.Max(nHeads * 64, FoundryDefaults.BasisRank)
+            : desc.HiddenSizeOr(0);
+        if (!desc.HiddenSizeAuto && moldDim <= 0)
+            return Fail("hidden_size must be a positive integer or 'auto'");
+        if (!desc.HiddenSizeAuto && moldDim % nHeads != 0)
+            return Fail($"hidden_size {moldDim} must be a positive multiple of heads/layer {nHeads}");
+        int intermR = desc.IntermediateSize > 0
+            ? desc.IntermediateSize
+            : RoundTo64(moldDim * 8 / 3);
+        int headDim = moldDim / nHeads;
 
 
 
@@ -991,7 +999,7 @@ internal static class FoundryCommands
                 + $"seeds={desc.Vocab.Seeds.Count}, hops={desc.Vocab.Hops})");
             string? moldCfg = await MaterializeNativeMoldAsync(
                 desc.Vocab.Size > 0 ? desc.Vocab.Size : 2000,
-                dModel, nLayers, nHeads, nKv, intermR,
+                moldDim, nLayers, nHeads, nKv, intermR,
                 crawlSeeds: desc.Vocab.Seeds.Count > 0 ? string.Join(",", desc.Vocab.Seeds) : null,
                 crawlHops: desc.Vocab.Hops, crawlFanout: desc.Vocab.Fanout,
                 grapheme: desc.Vocab.Source == "grapheme");
@@ -1012,30 +1020,8 @@ internal static class FoundryCommands
         }
 
 
-        byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
-        string bridgePath = Path.Combine(Path.GetTempPath(),
-            $"laplace-bab-{Convert.ToHexString(desc.RecipeId.ToBytes())[..12]}-config.json");
-        await File.WriteAllBytesAsync(bridgePath, configJson);
-        var recipe = LlamaRecipeExtractor.Parse(bridgePath);
-
-        IntPtr recipeHandle, tmplHandle;
-        var specs = new TensorSpec[300];
-        int tensorCount;
-        unsafe
-        {
-            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
-            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
-            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
-            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            fixed (TensorSpec* sp = specs)
-                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
-        }
-        if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
-        Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
-
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         int degreeCap = FoundryDefaults.LeDegree;
-
 
         var opKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var L in desc.Layers) { foreach (var h in L.Heads) opKeys.Add(h.Key); opKeys.Add(L.Ffn.Key); }
@@ -1089,9 +1075,66 @@ internal static class FoundryCommands
         }
         var unionGraph = FoundryExport.Union(planeByOp.Values.ToArray());
         if (unionGraph.Nnz == 0) return Fail("no consensus over this vocab for any recipe operator — ingest content first");
-        double[] E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out var basisStats);
+
+        int dModel = moldDim;
+        if (desc.HiddenSizeAuto)
+        {
+            int probeDim = Math.Min(FoundryDefaults.BasisRank + 1, vocab);
+            probeDim = Math.Max(nHeads, ((probeDim + nHeads - 1) / nHeads) * nHeads);
+            var probeAnchors = new double[vocab][];
+            FoundryExport.BuildBasis(vocab, probeDim, unionGraph, probeAnchors, desc.RecipeId, out var probeStats);
+            int spectral = Math.Max(nHeads, probeStats.SpectralRank);
+            dModel = Math.Max(nHeads, ((spectral + nHeads - 1) / nHeads) * nHeads);
+            intermR = desc.IntermediateSize > 0 ? desc.IntermediateSize : RoundTo64(dModel * 8 / 3);
+            headDim = dModel / nHeads;
+            Console.WriteLine($"  hidden_size auto → spectral rank {probeStats.SpectralRank} → dModel={dModel}, ffn={intermR}");
+        }
+
+        bool coordEmbed = desc.Embed.Key == "coord";
+        double[] E;
+        FoundryExport.BasisStats basisStats;
+        if (coordEmbed)
+        {
+            await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
+            double cs = FoundryDefaults.CoordScale;
+            E = new double[(long)vocab * dModel];
+            int placed = 0;
+            for (int t = 0; t < vocab; t++)
+            {
+                if (anchors[t] is not { } a) continue;
+                for (int d = 0; d < 4 && d < dModel; d++) E[(long)t * dModel + d] = a[d] * cs;
+                placed++;
+            }
+            basisStats = new FoundryExport.BasisStats(4, vocab - placed, 0.0);
+            Console.WriteLine($"  embed coord: {placed:N0} tokens = verbatim S³ coordinate ×{cs} (no Lanczos)");
+        }
+        else
+        {
+            E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out basisStats);
+        }
         MirrorDualFormEmbeds(tokens, E, vocab, dModel);
         Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
+
+        byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
+        string bridgePath = Path.Combine(Path.GetTempPath(),
+            $"laplace-bab-{Convert.ToHexString(desc.RecipeId.ToBytes())[..12]}-config.json");
+        await File.WriteAllBytesAsync(bridgePath, configJson);
+        var recipe = LlamaRecipeExtractor.Parse(bridgePath);
+
+        IntPtr recipeHandle, tmplHandle;
+        var specs = new TensorSpec[300];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
+            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
+            fixed (TensorSpec* sp = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
+        Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
 
 
 
@@ -1366,7 +1409,21 @@ internal static class FoundryCommands
 
 
 
-    private static string? RejectRetiredFoundryEnvVars() => null;
+    private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);
+
+    private static string? RejectRetiredFoundryEnvVars()
+    {
+        var retired = new List<string>();
+        foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
+        {
+            if (e.Key is string k && k.StartsWith("LAPLACE_FOUNDRY_", StringComparison.OrdinalIgnoreCase))
+                retired.Add(k);
+        }
+        if (retired.Count == 0) return null;
+        retired.Sort(StringComparer.OrdinalIgnoreCase);
+        return "retired LAPLACE_FOUNDRY_* env vars are ignored — knobs live in FoundryDefaults: "
+               + string.Join(", ", retired);
+    }
 
 
 

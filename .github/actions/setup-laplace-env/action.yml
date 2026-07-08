@@ -22,3 +22,9 @@ runs:
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_DB=${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}" >> "$GITHUB_ENV"
+        # MSBuild worker nodes and the Roslyn compiler server outlive their
+        # jobs on a persistent runner (killed as orphans at cleanup, seen
+        # every seed run). Cross-job reuse buys nothing here — disable both
+        # so builds stop leaking processes.
+        echo "MSBUILDDISABLENODEREUSE=1" >> "$GITHUB_ENV"
+        echo "UseSharedCompilation=false" >> "$GITHUB_ENV"

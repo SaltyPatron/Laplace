@@ -98,7 +98,7 @@ same fact; trust binds to source/method, and their divergence is itself signal.
 | 10 SQL consolidation | Zero-loss numbered-file removal + lockout gates | done; the gate pattern to reuse |
 | 11 Chess provenance/consensus | Three-layer model; chess geometry ladder spec | living spec |
 | 12 Mold-A-Model map | Substrate primitive → transformer slot bijection | living spec |
-| 13 Stabilization audit + plan | Current-state truth table + phased refactor plan (THE active plan) | living — start here for "what next" |
+| 13 Stabilization audit + plan | Agent draft 2026-07-05 — verify against code before trusting | historical; NOT the active plan |
 | 14 Foundry root cause | Why heads/layers mash + why no conversation: 5 mechanisms (M1-M5), supply-vs-consumption table, prescriptions P1-P10, live reseed baseline, literature panel | living — the foundry build's working doc |
 | 15 Gödel engine / OODA loop | The RUNNING inference engine: the walk IS the forward pass; evaluation IS ingestion; the engine's own outputs are witnesses folding into the same consensus the next walk reads — a closed self-improving loop. This is the AI, not a query layer. | living spec — the read/serve side |
 | 16 Tier-correct attestation + hub unification | "Record each fact once, at the tier/identity/provenance the source asserts it"; decomposer tier/identity/provenance defect audit + fix sequence | living spec |
@@ -111,17 +111,35 @@ self-improvement loop (docs 09/12/15, `extension/.../recall.c`+`generate_walk.c`
 OPEN FRONTIER is one research question (doc 09): does consensus × geometry × trajectory
 ROUTE as well as trained attention at depth. Everything else — seven ingestion lanes
 (Issue 45), read-side fragmentation (Issue 46), foundry gaps (Issues 04/05/06), sequenced
-in doc 13 — is plumbing UNDER the invention, not the invention. Do not mistake the cleanup
-backlog for the thing.
+in `.cursor/plans/full_stack_remediation_bdaba5c3.plan.md` (evidence: `.scratchpad/16` + `17`)
+— is plumbing UNDER the invention, not the invention. Do not mistake the cleanup backlog for
+the thing.
 
 ## Build / deploy / seed — READ BEFORE RUNNING ANYTHING
 
 Two toolchains; not interchangeable: `Justfile` + root CMake = Linux/CI. The real Windows
-workflow is `scripts/win/*.cmd`: `rebuild-all.cmd` (clean+codegen+build+perfcache),
-`db-reset.cmd`, `seed-foundation.cmd` (10 core layers), `seed-step.cmd <source>`
-(see `--list`; runs an independent post-step `:verify_step` — never trust the CLI's own
-summary line), `seed-everything.cmd` (hours-scale). `scripts/win/env.cmd` is the
-toolchain source of truth (cmake/ninja/icx paths, Server-GC vars; `dotnet` stays bare).
+workflow is `scripts/win/*.cmd`. **LAW: if a script covers the task, use the script — never
+hand-roll `call env.cmd && …` chains.** The scripts carry correctness the chains miss
+(test-app strips the billing dev-bypass; %VAR% in a composed cmd line expands before
+env.cmd runs and silently breaks; tree locks; log routing). Operational map:
+
+| Task | Entry point |
+|------|-------------|
+| Full clean rebuild | `rebuild-all.cmd` (clean+codegen+build+perfcache) |
+| Engine only / extensions | `build-engine.cmd [--reconfigure]` / `build-extensions.cmd` then `install-extensions.cmd` |
+| ASAN engine (native corruption hunts) | `build-engine-asan.cmd` |
+| All tests (the gate) | `test-all.cmd` — toolchain + gtest + pg_regress + dotnet + verify-fk; log at `%LAPLACE_EXT_BUILD%\test-all.log` |
+| dotnet tests only | `test-app.cmd [project-substring]` |
+| native ctest / pg_regress | `test-engine.cmd` / `regress.cmd` |
+| Seed | `db-reset.cmd`, `seed-foundation.cmd` (10 layers), `seed-step.cmd <source>` (`--list`; trust `:verify_step`, never the CLI summary), `seed-everything.cmd` (hours) |
+| CLI invocation | `cli.cmd` (not `dotnet run` — mutex matches command line) |
+| Stuck processes / who holds files | `locks.cmd` (`locks.ps1 -Kill`) |
+| Stack status / deploy checks | `status.cmd`, `verify-deploy.cmd`, `verify-toolchain.cmd` |
+| PG recovery / tuning | `fix-postgres.cmd`, `recover-pgdata.cmd`, `tune-pg.cmd`, `tune-laplace.cmd` |
+
+Script logs land in `D:\Data\Output\<script>.log` — check there before rerunning anything.
+`scripts/win/env.cmd` is the toolchain source of truth (cmake/ninja/icx paths, Server-GC
+vars; `dotnet` stays bare).
 
 **CRITICAL: never invoke `scripts/win/*.cmd` through the PowerShell tool.** This
 machine's pwsh has a confirmed .cmd-launch regression
