@@ -3,17 +3,8 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-
-
-
-
-
-
-
-internal static class CopyBlobValidator
+internal static unsafe class CopyBlobValidator
 {
-
-
     // Default ON. Walking the native COPY blobs each CollectBlobs pass turns silent heap
     // corruption into a loud error AT the corrupting phase instead of a fail-fast 6MB
     // downstream in CopyTupleParser. The cost is negligible against a multi-hour seed, and
@@ -22,13 +13,6 @@ internal static class CopyBlobValidator
     // clean-run micro-benchmarking, never for production seeds.
     public static readonly bool Enabled =
         Environment.GetEnvironmentVariable("LAPLACE_COPY_BLOB_VALIDATE") != "0";
-
-
-
-
-
-
-
 
     public static void Checkpoint(IntentStage stage, string phase)
     {
@@ -49,25 +33,19 @@ internal static class CopyBlobValidator
         }
     }
 
-
-
-
-
-
+    // Walk the native COPY-tuple buffer IN PLACE with long offsets. The buffer is the
+    // IntentStage's UNMANAGED tuple arena, so there is no GC pin required and no 2 GiB
+    // ceiling: a large working-set apply (a monolithic UD/ConceptNet/chess flush is tens of
+    // millions of rows / multiple GiB in one buffer) is validated directly. The previous
+    // implementation copied the whole buffer into a managed byte[] via
+    // GC.AllocateUninitializedArray(checked((int)len)) — which (a) threw OverflowException
+    // the instant a single stage buffer crossed int.MaxValue, aborting the entire lane with
+    // committed=0, and (b) doubled resident memory by cloning every multi-GiB buffer on
+    // every apply. Neither is acceptable for a correctness check.
     public static void Validate(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
     {
         if (ptr == IntPtr.Zero || len <= 0) return;
-        var blob = GC.AllocateUninitializedArray<byte>(checked((int)len));
-        unsafe
-        {
-            new ReadOnlySpan<byte>((void*)ptr, checked((int)len)).CopyTo(blob);
-        }
-
-
-
-
-
-
+        byte* blob = (byte*)ptr;
 
         long off = 0;
         int row = 0;
@@ -75,23 +53,23 @@ internal static class CopyBlobValidator
         {
             long rowStart = off;
             if (off + 2 > len)
-                FailCopyBlob(blob, rowStart, row, tableName, expectedFields, -1,
+                FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, -1,
                     "truncated field-count (need 2 bytes)");
             int fields = (blob[off] << 8) | blob[off + 1];
             off += 2;
             if (fields != expectedFields)
-                FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
+                FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
                     $"unexpected field count (got {fields})");
             for (int f = 0; f < fields; f++)
             {
                 if (off + 4 > len)
-                    FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
+                    FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
                         $"truncated length prefix at field {f}");
                 int flen = (blob[off] << 24) | (blob[off + 1] << 16) | (blob[off + 2] << 8) | blob[off + 3];
                 off += 4;
                 if (flen == -1) continue;
                 if (flen < 0 || off + flen > len)
-                    FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
+                    FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
                         $"field {f} length {flen} overruns blob (off={off}, len={len})");
                 off += flen;
             }
@@ -103,10 +81,10 @@ internal static class CopyBlobValidator
     }
 
     private static void FailCopyBlob(
-        byte[] blob, long rowStart, int row, string tableName, int expected, int got, string why)
+        byte* blob, long len, long rowStart, int row, string tableName, int expected, int got, string why)
     {
         long winStart = Math.Max(0, rowStart - 160);
-        long winEnd = Math.Min(blob.LongLength, rowStart + 160);
+        long winEnd = Math.Min(len, rowStart + 160);
         var sb = new StringBuilder();
         for (long i = winStart; i < winEnd; i++)
         {
@@ -129,7 +107,7 @@ internal static class CopyBlobValidator
         if (tableName == "entities")
         {
             strideReport.Append('\n');
-            strideReport.Append(DescribeEntityStride(blob, rowStart));
+            strideReport.Append(DescribeEntityStride(blob, len, rowStart));
         }
 
         throw new InvalidOperationException(
@@ -139,12 +117,11 @@ internal static class CopyBlobValidator
 
 
 
-    private static string DescribeEntityStride(byte[] blob, long failOffset)
+    private static string DescribeEntityStride(byte* blob, long len, long failOffset)
     {
         var sb = new StringBuilder();
         long off = 0;
         int row = 0;
-        long len = blob.LongLength;
         long lastGoodStart = 0;
         while (off + 2 <= len)
         {
@@ -171,10 +148,10 @@ internal static class CopyBlobValidator
 
 
 
-            int lId = ReadLen(blob, rowStart + 2);
-            int lTier = ReadLen(blob, rowStart + 2 + 4 + 16);
-            int lType = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2);
-            int lFob = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2 + 4 + 16);
+            int lId = ReadLen(blob, len, rowStart + 2);
+            int lTier = ReadLen(blob, len, rowStart + 2 + 4 + 16);
+            int lType = ReadLen(blob, len, rowStart + 2 + 4 + 16 + 4 + 2);
+            int lFob = ReadLen(blob, len, rowStart + 2 + 4 + 16 + 4 + 2 + 4 + 16);
             bool ok = lId == 16 && lTier == 2 && lType == 16 && (lFob == 16 || lFob == -1);
             if (!ok)
             {
@@ -202,9 +179,9 @@ internal static class CopyBlobValidator
         return sb.ToString();
     }
 
-    private static int ReadLen(byte[] blob, long at)
+    private static int ReadLen(byte* blob, long len, long at)
     {
-        if (at < 0 || at + 4 > blob.LongLength) return -100;
+        if (at < 0 || at + 4 > len) return -100;
         return (blob[at] << 24) | (blob[at + 1] << 16) | (blob[at + 2] << 8) | (blob[at + 3]);
     }
 }

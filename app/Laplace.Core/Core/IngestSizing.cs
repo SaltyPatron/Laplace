@@ -74,15 +74,16 @@ public static class IngestSizing
         }
     }
 
-    public static long TotalPhysicalMemoryBytes() =>
-        GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+    public static long TotalPhysicalMemoryBytes() => MemoryTopology.TotalPhysicalBytes;
 
     /// <summary>
-    /// Working-set byte budget: phys/16 clamped [1, 8] GiB (Rule #12 / Issue 42).
-    /// On a 48 GiB box this is ~3 GiB, not 8 GiB — eight is the ceiling on large servers.
+    /// Working-set apply byte budget — delegated to <see cref="MemoryTopology"/>, the single
+    /// RAM authority. Derived from real physical memory and clamped to the hard COPY-buffer
+    /// safety ceiling so a single-table apply buffer can never approach the 2 GiB int wall.
+    /// The former inline phys/16 (~3 GiB on this box) was itself the source of the >2 GiB
+    /// COPY overflow that aborted UD/ConceptNet/chess with committed=0.
     /// </summary>
-    public static long ResolveWorkingSetBudgetBytes() =>
-        Math.Clamp(TotalPhysicalMemoryBytes() / 16, 1L << 30, 8L << 30);
+    public static long ResolveWorkingSetBudgetBytes() => MemoryTopology.WorkingSetBudgetBytes;
 
     /// <summary>
     /// Resolve a full per-source plan from live Intel topology + RAM. Call after

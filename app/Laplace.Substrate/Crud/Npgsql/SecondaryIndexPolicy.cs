@@ -102,9 +102,9 @@ public sealed class SecondaryIndexPolicy
 
                 t.CommandText =
 
-                    "SET LOCAL maintenance_work_mem = '2GB'; "
+                    $"SET LOCAL maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
 
-                    + "SET LOCAL max_parallel_maintenance_workers = 4";
+                    + $"SET LOCAL max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
 
                 await t.ExecuteNonQueryAsync(ct);
 

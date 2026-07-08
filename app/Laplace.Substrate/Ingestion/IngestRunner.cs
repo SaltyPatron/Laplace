@@ -182,9 +182,23 @@ public sealed class IngestRunner
                                                     counters, failures, log, ct);
                         continue;
                     }
+                    long sib = BytesOf(intent);
+                    // Flush BEFORE adding an intent that would push the accumulated COPY
+                    // bytes past the budget, so a single apply never exceeds it. Adding then
+                    // checking (below) let the crossing intent land first, so one apply could
+                    // reach ~2× budget and build a single-table buffer near the 2 GiB wall.
+                    if (workingSet && sbatch.Count > 0
+                        && wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
+                    {
+                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                                                counters, failures, log, workingSet, ct);
+                        sbatch.Clear();
+                        sbatchRows = 0;
+                        wsBytes = 0;
+                    }
                     sbatch.Add(intent);
                     sbatchRows += RowsOf(intent);
-                    wsBytes += BytesOf(intent);
+                    wsBytes += sib;
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                     {
                         await ProcessBatchAsync(sbatch, decomposer, options, rng,
@@ -258,9 +272,22 @@ public sealed class IngestRunner
                                                          counters, failures, log, ct);
                             continue;
                         }
+                        long ib = BytesOf(intent);
+                        // Flush BEFORE adding an intent that would push accumulated COPY bytes
+                        // past the budget, so a single working-set apply never exceeds it and
+                        // no single-table buffer approaches the 2 GiB int wall.
+                        if (workingSet && batch.Count > 0
+                            && wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
+                        {
+                            await ProcessBatchAsync(batch, decomposer, options, rng,
+                                                    counters, failures, log, workingSet, ct);
+                            batch.Clear();
+                            batchRows = 0;
+                            wsBytes = 0;
+                        }
                         batch.Add(intent);
                         batchRows += RowsOf(intent);
-                        wsBytes += BytesOf(intent);
+                        wsBytes += ib;
                         if (ShouldFlushWithCap(batch.Count, batchRows))
                         {
                             await ProcessBatchAsync(batch, decomposer, options, rng,

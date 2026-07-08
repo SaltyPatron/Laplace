@@ -71,8 +71,8 @@ internal sealed class NpgsqlIndexCycle
                 await using (var guc = conn.CreateCommand())
                 {
                     guc.CommandText =
-                        "SET maintenance_work_mem = '2GB'; "
-                        + "SET max_parallel_maintenance_workers = 4";
+                        $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+                        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 await using (var mk = conn.CreateCommand())
@@ -178,8 +178,8 @@ internal sealed class NpgsqlIndexCycle
                 await using (var guc = conn.CreateCommand())
                 {
                     guc.CommandText =
-                        "SET maintenance_work_mem = '2GB'; "
-                        + "SET max_parallel_maintenance_workers = 4";
+                        $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+                        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 await using (var mk = conn.CreateCommand())

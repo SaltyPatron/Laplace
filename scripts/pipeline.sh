@@ -162,7 +162,16 @@ phase_tune_pg() {
   # autovacuum_max_workers default (3) is thin for 4 bulk-ingest tables under aggressive
   # per-table analyze thresholds (phase_tune_laplace); scale with total cores, clamp to [3,6].
   avw=$(( cores / 4 )); (( avw < 3 )) && avw=3; (( avw > 6 )) && avw=6
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1     -c "ALTER SYSTEM SET shared_buffers = '$sb'"     -c "ALTER SYSTEM SET effective_cache_size = '$ecs'"     -c "ALTER SYSTEM SET maintenance_work_mem = '2GB'"     -c "ALTER SYSTEM SET work_mem = '256MB'"     -c "ALTER SYSTEM SET max_wal_size = '32GB'"     -c "ALTER SYSTEM SET min_wal_size = '4GB'"     -c "ALTER SYSTEM SET wal_compression = on"     -c "ALTER SYSTEM SET wal_buffers = '128MB'"     -c "ALTER SYSTEM SET wal_level = minimal"     -c "ALTER SYSTEM SET max_wal_senders = 0"     -c "ALTER SYSTEM SET checkpoint_timeout = '30min'"     -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9"     -c "ALTER SYSTEM SET max_worker_processes = $mwp"     -c "ALTER SYSTEM SET autovacuum_max_workers = $avw"     -c "ALTER SYSTEM SET jit = off"     -c "ALTER SYSTEM SET max_parallel_workers = $pcores"     -c "ALTER SYSTEM SET max_parallel_workers_per_gather = $pdeg"     -c "ALTER SYSTEM SET max_parallel_maintenance_workers = $pdeg"     -c "ALTER SYSTEM SET effective_io_concurrency = 256"     -c "ALTER SYSTEM SET maintenance_io_concurrency = 256"     -c "ALTER SYSTEM SET random_page_cost = 1.1"     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0"     -c "ALTER SYSTEM SET huge_pages = try"     -c "ALTER SYSTEM SET io_workers = $pdeg"     -c "SELECT pg_reload_conf()"
+  # maintenance_work_mem / work_mem / wal_buffers derived from RAM — the SAME formulas as
+  # MemoryTopology.cs (the canonical .NET authority: RAM/32, RAM/256, RAM/512 with the same
+  # clamps). Kept in bash here because this phase also needs runtime PG introspection
+  # (io_method capability probe below) that the static `cpu-topology --pg-tuning` emitter
+  # cannot do. NO hardcoded GB literals.
+  local mwm wm wb
+  mwm=$(( mem_kb / 32 / 1024 )); (( mwm < 256 )) && mwm=256; (( mwm > 4096 )) && mwm=4096; mwm=${mwm}MB
+  wm=$(( mem_kb / 256 / 1024 )); (( wm < 32 )) && wm=32; (( wm > 512 )) && wm=512; wm=${wm}MB
+  wb=$(( mem_kb / 512 / 1024 )); (( wb < 16 )) && wb=16; (( wb > 1024 )) && wb=1024; wb=${wb}MB
+  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1     -c "ALTER SYSTEM SET shared_buffers = '$sb'"     -c "ALTER SYSTEM SET effective_cache_size = '$ecs'"     -c "ALTER SYSTEM SET maintenance_work_mem = '$mwm'"     -c "ALTER SYSTEM SET work_mem = '$wm'"     -c "ALTER SYSTEM SET max_wal_size = '32GB'"     -c "ALTER SYSTEM SET min_wal_size = '4GB'"     -c "ALTER SYSTEM SET wal_compression = on"     -c "ALTER SYSTEM SET wal_buffers = '$wb'"     -c "ALTER SYSTEM SET wal_level = minimal"     -c "ALTER SYSTEM SET max_wal_senders = 0"     -c "ALTER SYSTEM SET checkpoint_timeout = '30min'"     -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9"     -c "ALTER SYSTEM SET max_worker_processes = $mwp"     -c "ALTER SYSTEM SET autovacuum_max_workers = $avw"     -c "ALTER SYSTEM SET jit = off"     -c "ALTER SYSTEM SET max_parallel_workers = $pcores"     -c "ALTER SYSTEM SET max_parallel_workers_per_gather = $pdeg"     -c "ALTER SYSTEM SET max_parallel_maintenance_workers = $pdeg"     -c "ALTER SYSTEM SET effective_io_concurrency = 256"     -c "ALTER SYSTEM SET maintenance_io_concurrency = 256"     -c "ALTER SYSTEM SET random_page_cost = 1.1"     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0"     -c "ALTER SYSTEM SET huge_pages = try"     -c "ALTER SYSTEM SET io_workers = $pdeg"     -c "SELECT pg_reload_conf()"
   # io_uring only exists when PG was built with liburing; fall back to worker.
   local io
   io=$(psql -d "$PGDATABASE" -U laplace_admin -tAc     "SELECT CASE WHEN 'io_uring' = ANY(enumvals) THEN 'io_uring' ELSE 'worker' END FROM pg_settings WHERE name = 'io_method'")
@@ -178,7 +187,7 @@ phase_tune_pg() {
       echo "::warning::tune-pg: $pending setting(s) pending restart — restart PostgreSQL to apply"
     fi
   fi
-  echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs cores=$cores pcores=$pcores pdeg=$pdeg max_worker_processes=$mwp autovacuum_max_workers=$avw jit=off"
+  echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs maintenance_work_mem=$mwm work_mem=$wm wal_buffers=$wb cores=$cores pcores=$pcores pdeg=$pdeg max_worker_processes=$mwp autovacuum_max_workers=$avw jit=off"
 }
 
 phase_tune_laplace() {

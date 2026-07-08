@@ -92,7 +92,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
 
 
-        _stagingThreshold = stagingThresholdRelations ?? 4_000_000;
+        _stagingThreshold = stagingThresholdRelations ?? MemoryTopology.ConsensusFoldMaxRelations;
         _partitions = foldWorkers
             ?? CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 24);
 
