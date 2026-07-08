@@ -344,7 +344,10 @@ jobs:
           echo "::error::laplace-api not ready 60s after restart — readiness detail:"
           curl -sS http://127.0.0.1:5187/health/ready || true
           echo
-          sudo journalctl -u laplace-api -n 40 --no-pager
+          # journalctl needs no root when the runner is in systemd-journal;
+          # sudo -n (never prompts) systemctl status is the granted fallback.
+          journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
+            || sudo -n systemctl status laplace-api || true
           exit 1
 
   smoke:
@@ -389,6 +392,7 @@ jobs:
           sleep 3
           curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
             echo "::warning::laplace-api unhealthy after restore"
-            sudo journalctl -u laplace-api -n 40 --no-pager
+            journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
+              || sudo -n systemctl status laplace-api || true
             exit 1
           }

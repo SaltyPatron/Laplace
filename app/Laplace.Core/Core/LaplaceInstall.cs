@@ -62,18 +62,49 @@ public static class LaplaceInstall
 
     public static string PostgresConnectionString(string database = "laplace")
     {
-        var dbName = OperatingSystem.IsWindows()
-            ? database
-            : ResolveLinuxDatabaseName(database);
-
         var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_DB");
-        var s = !string.IsNullOrWhiteSpace(fromEnv)
-            ? WithDatabase(fromEnv.Trim(), dbName)
-            : OperatingSystem.IsWindows()
+        string s;
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            // Precedence: an explicit caller argument (tests, Migrations --database)
+            // overrides the env; otherwise an explicit Database= inside LAPLACE_DB is
+            // AUTHORITATIVE. The old code re-resolved the default through the two-DB
+            // law even when LAPLACE_DB named a database, silently stomping the
+            // deployed service's Database=laplace with the laplace-dev sandbox —
+            // the config knob said one thing and the code did another.
+            if (database != "laplace")
+                s = WithDatabase(fromEnv.Trim(),
+                    OperatingSystem.IsWindows() ? database : ResolveLinuxDatabaseName(database));
+            else if (HasDatabase(fromEnv))
+                s = fromEnv.Trim();
+            else
+                s = WithDatabase(fromEnv.Trim(),
+                    OperatingSystem.IsWindows() ? database : ResolveLinuxDatabaseName(database));
+        }
+        else
+        {
+            var dbName = OperatingSystem.IsWindows()
+                ? database
+                : ResolveLinuxDatabaseName(database);
+            s = OperatingSystem.IsWindows()
                 ? $"Host=localhost;Username=postgres;Password=postgres;Database={dbName};Command Timeout=0"
                 : $"Host=/var/run/postgresql;Username=laplace_admin;Database={dbName}";
+        }
 
         return EnsurePostgresConnectionDefaults(s);
+    }
+
+    private static bool HasDatabase(string connectionString)
+    {
+        foreach (var part in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            if (string.Equals(part[..eq].Trim(), "Database", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(part[(eq + 1)..]))
+                return true;
+        }
+        return false;
     }
 
     private static string WithDatabase(string connectionString, string database)
