@@ -30,21 +30,15 @@ echo "==> nginx vhost: /etc/nginx/sites-available/laplace (port 8080)"
 install -m 0644 "$HERE/nginx-laplace.conf" /etc/nginx/sites-available/laplace
 ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 
-echo "==> sudoers grant for $RUN_USER (restart api/postgres + reload nginx only)"
-# The PostgreSQL unit name varies by install (postgresql, postgresql@18-main,
-# laplace-postgresql) — grant the one that actually owns the running postmaster,
-# discovered the same way scripts/pipeline.sh restart_postgres discovers it.
-# Without this grant, tune-pg/perfcache-guc ALTER SYSTEM settings stay
-# pending_restart forever and the readiness/smoke gates 503.
-PG_UNIT=$(systemctl list-units --type=service --state=running --plain --no-legend \
-            'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
-PG_UNIT="${PG_UNIT:-postgresql.service}"
-echo "   postgres unit: $PG_UNIT"
+echo "==> sudoers grant for $RUN_USER (restart service + reload nginx only)"
+# PostgreSQL is deliberately NOT here: the postmaster runs AS the runner user
+# (laplace-postgresql.service, User=laplace-runner), so the runner bounces its
+# own postgres rootlessly — SIGINT to the owned postmaster + the unit's
+# Restart=always (see bootstrap-laplace-runner.sh). No new sudo surface.
 cat > /etc/sudoers.d/laplace-runner-deploy <<EOF
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart laplace-api, \\
   /usr/bin/systemctl start laplace-api, /usr/bin/systemctl stop laplace-api, \\
   /usr/bin/systemctl status laplace-api, /usr/bin/systemctl is-active laplace-api, \\
-  /usr/bin/systemctl restart $PG_UNIT, \\
   /usr/sbin/nginx -t, /usr/sbin/nginx -s reload
 EOF
 chmod 0440 /etc/sudoers.d/laplace-runner-deploy
