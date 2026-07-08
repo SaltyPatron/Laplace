@@ -1,14 +1,13 @@
 using System.Runtime.CompilerServices;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 
-namespace Laplace.Decomposers.Extractors;
+namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Tab-separated correspondence bridges (MapNet frame→LU, WordFrameNet, OMW .tab rows).
 /// Pure extract — yields <see cref="CategoryCorrespondenceRecord"/> rows, no SQL.
 /// </summary>
-public static class TabCorrespondenceStream
+public static class TabBridgeHelpers
 {
     public static async IAsyncEnumerable<CategoryCorrespondenceRecord> ReadMapNetFrameRowsAsync(
         string path, long maxInputUnits, [EnumeratorCancellation] CancellationToken ct)

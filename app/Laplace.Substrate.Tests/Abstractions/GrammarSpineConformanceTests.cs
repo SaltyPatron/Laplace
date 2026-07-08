@@ -38,17 +38,17 @@ public class GrammarSpineConformanceTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
         {
-            ("Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness"]),
-            ("SemLink", ["IngestBatchPipeline", "GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            ("Tatoeba", ["StructuredGrammarIngest", "TatoebaGrammarWitness", "IGrammarWitness", "ContentTierSpine"]),
+            ("Wiktionary", ["GrammarIngestDecomposer", "WiktionaryGrammarWitness", "IGrammarWitness"]),
+            ("SemLink", ["GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
+            ("Tatoeba", ["DecomposerMultiFile<GrammarIngestRecord>", "GrammarIngestHandler",
+                "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
             // ConceptNet + Atomic2020 are triple sources on the shared
-            // RelationTripleDecomposerBase → IngestBatchPipeline path (extraction only),
-            // NOT the grammar spine — the base carries the ingestion, so the source
-            // files reference RelationTripleRecord, not a grammar witness.
+            // RelationTripleDecomposerBase path (extraction only), NOT the grammar spine.
             ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("OMW", ["StructuredGrammarIngest", "OMWGrammarWitness", "IGrammarWitness", "OMWRowParser"]),
+            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord>", "GrammarIngestHandler",
+                "OMWGrammarWitness", "OMWRowParser"]),
             ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("UD", ["IngestBatchPipeline", "UdIngestHandler", "UdConlluParser"]),
+            ("UD", ["DecomposerMultiFile<UdIngestRecord>", "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)

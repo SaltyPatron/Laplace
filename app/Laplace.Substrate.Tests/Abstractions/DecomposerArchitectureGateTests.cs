@@ -36,6 +36,40 @@ public sealed class DecomposerArchitectureGateTests
         "Unicode/UnicodeDecomposer.cs",
     };
 
+    /// <summary>
+    /// DecomposerOrchestrator was removed in Wave 3 — multi-phase sources use
+    /// <see cref="DecomposerMultiPhase"/> with nested ComposeDecomposerPhase types.
+    /// </summary>
+    private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Laplace.Decomposers/CILI/CILIDecomposer.cs",
+        "Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs",
+        "Laplace.Decomposers/ISO/ISODecomposer.cs",
+        "Laplace.Decomposers/Model/ModelDecomposer.cs",
+        "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
+        "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
+    };
+
+    /// <summary>Direct IngestBatchPipeline in *Decomposer.cs until orchestrator migrates.</summary>
+    private static readonly HashSet<string> PipelineInDecomposerAllowlist = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Direct IngestBatchPipeline in *Ingest*.cs adapter modules pending spine migration.</summary>
+    private static readonly HashSet<string> PipelineInIngestAdapterAllowlist = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Hand-rolled parallel file workers pending spine migration.</summary>
+    private static readonly HashSet<string> ParallelIngestAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Laplace.Chess/Service/ChessLabService.cs",
+    };
+
+    private static readonly Regex ResolveFileWorkersCall = new(
+        @"\bIngestParallelism\.ResolveFileWorkers\s*\(",
+        RegexOptions.Compiled);
+
+    private static readonly Regex BoundedChannelCreate = new(
+        @"\bChannel\.CreateBounded\s*<",
+        RegexOptions.Compiled);
+
     private static IEnumerable<string> DecomposerProjectRoots(string repoRoot)
     {
         yield return Path.Combine(repoRoot, "app", "Laplace.Decomposers");
@@ -122,7 +156,7 @@ public sealed class DecomposerArchitectureGateTests
 
                 var text = File.ReadAllText(file);
                 bool inheritsBase =
-                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerOrchestrator|Decomposer<)")
+                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|GrammarIngestDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerMultiPhase|Decomposer<)")
                     || text.Contains(": Decomposer<", StringComparison.Ordinal);
                 if (!inheritsBase)
                     violations.Add($"{projectRel}/{rel}");
@@ -149,8 +183,8 @@ public sealed class DecomposerArchitectureGateTests
                 if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
                 var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
                 if (UnicodeAllowlist.Contains(rel)) continue;
+                if (PipelineInDecomposerAllowlist.Contains($"{projectRel}/{rel}")) continue;
                 var text = File.ReadAllText(file);
-                if (text.Contains(": DecomposerOrchestrator", StringComparison.Ordinal)) continue;
                 if (DirectPipelineCall.IsMatch(text))
                     violations.Add($"{projectRel}/{rel}");
             }
@@ -158,6 +192,112 @@ public sealed class DecomposerArchitectureGateTests
         Assert.True(violations.Count == 0,
             "Decomposer projects must not call IngestBatchPipeline directly (use Decomposer<T> base):\n"
             + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void DecomposerProjects_NoDirectPipelineCallsFromIngestAdapters()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Ingest*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                var relPath = $"{projectRel}/{rel}";
+                if (PipelineInIngestAdapterAllowlist.Contains(relPath)) continue;
+                var text = File.ReadAllText(file);
+                if (DirectPipelineCall.IsMatch(text))
+                    violations.Add(relPath);
+            }
+        }
+        Assert.True(violations.Count == 0,
+            "Ingest adapter modules must not call IngestBatchPipeline directly (route through Decomposer<T>):\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void DecomposerProjects_NoHandRolledParallelIngest()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                var relPath = $"{projectRel}/{rel}";
+                if (ParallelIngestAllowlist.Contains(relPath)) continue;
+                var text = File.ReadAllText(file);
+                if (ResolveFileWorkersCall.IsMatch(text) || BoundedChannelCreate.IsMatch(text))
+                    violations.Add(relPath);
+            }
+        }
+        Assert.True(violations.Count == 0,
+            "Decomposer projects must not hand-roll parallel ingest (ResolveFileWorkers/Channel.CreateBounded):\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void DecomposerProjects_ContainNoDecomposerOrchestrator()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var found = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var text = File.ReadAllText(file);
+                if (text.Contains("DecomposerOrchestrator", StringComparison.Ordinal))
+                    found.Add($"{projectRel}/{Path.GetRelativePath(dir, file).Replace('\\', '/')}");
+            }
+        }
+        Assert.True(found.Count == 0,
+            "DecomposerOrchestrator was removed in Wave 3; use DecomposerMultiPhase or Decomposer<T>:\n"
+            + string.Join("\n", found));
+    }
+
+    [Fact]
+    public void DecomposerMultiPhase_AllowlistMatchesTree()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var found = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var text = File.ReadAllText(file);
+                if (!text.Contains(": DecomposerMultiPhase", StringComparison.Ordinal)) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                found.Add($"{projectRel}/{rel}");
+            }
+        }
+
+        var unknown = found.Where(p => !MultiPhaseAllowlist.Contains(p)).ToList();
+        var stale = MultiPhaseAllowlist.Where(k => !found.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        Assert.True(unknown.Count == 0,
+            "New DecomposerMultiPhase sources must be added to MultiPhaseAllowlist:\n"
+            + string.Join("\n", unknown));
+        Assert.True(stale.Count == 0,
+            "Remove migrated sources from MultiPhaseAllowlist:\n"
+            + string.Join("\n", stale));
     }
 
     [Fact]
@@ -190,6 +330,17 @@ public sealed class DecomposerArchitectureGateTests
         Assert.True(violations.Count == 0,
             "DecomposeAsync must route through Decomposer<T>, not hand builders:\n"
             + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void SubstrateAbstractions_ExportsSharedExtractors()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var abstractions = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions");
+        Assert.True(File.Exists(Path.Combine(abstractions, "SharedParquetRecordStream.cs")));
+        Assert.True(File.Exists(Path.Combine(abstractions, "SharedXmlFramesetReader.cs")));
+        Assert.True(File.Exists(Path.Combine(abstractions, "FrameNetLemmaHelper.cs")));
+        Assert.True(File.Exists(Path.Combine(abstractions, "TabBridgeHelpers.cs")));
     }
 
     [Fact]

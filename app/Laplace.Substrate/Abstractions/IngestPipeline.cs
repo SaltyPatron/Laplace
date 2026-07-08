@@ -57,6 +57,12 @@ public interface IIngestRecordHandler<TRecord>
     long UnitsPerRecord(TRecord record) => 1;
 }
 
+/// <summary>Handler with per-batch dedup state that must reset after each yielded change.</summary>
+public interface IIngestBatchScopedHandler
+{
+    void ResetBatchState();
+}
+
 public sealed class IngestBatchConfig
 {
     public required Hash128 SourceId { get; init; }
@@ -136,6 +142,19 @@ public sealed class IngestBatchConfig
 
 public static class IngestBatchPipeline
 {
+    public const string PeriodBoundaryUnitPrefix = "period-boundary/";
+
+    /// <summary>Consensus fold trigger + ingest file-progress marker (see IngestRunner.TrackIntent).</summary>
+    public static SubstrateChange BuildPeriodBoundary(Hash128 sourceId, string fileLabel)
+    {
+        string stem = fileLabel.Contains('/', StringComparison.Ordinal)
+            ? fileLabel[(fileLabel.LastIndexOf('/') + 1)..]
+            : fileLabel;
+        return new SubstrateChangeBuilder(
+            sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+    }
+
     internal sealed class AllAbsentSubstrateReader : ISubstrateReader
     {
         internal static readonly AllAbsentSubstrateReader Instance = new();
@@ -207,11 +226,15 @@ public static class IngestBatchPipeline
             if (config.MaxInputUnits > 0 && unitsConsumed >= config.MaxInputUnits)
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+                {
                     yield return change;
+                    ResetBatchScope(handler);
+                }
                 if (state.InBatch > 0)
                 {
                     await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
                     yield return await state.BuildRemainingAsync(ct);
+                    ResetBatchScope(handler);
                 }
                 yield break;
             }
@@ -221,19 +244,26 @@ public static class IngestBatchPipeline
             if (pending.Count >= probeInterval)
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+                {
                     yield return change;
+                    ResetBatchScope(handler);
+                }
             }
 
             if (config.WorkingSet && pending.Count > 0
                 && ShouldCloseWorkingSet(state, config))
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+                {
                     yield return change;
+                    ResetBatchScope(handler);
+                }
 
                 if (state.InBatch > 0)
                 {
                     await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
                     yield return await state.YieldBatchAsync(ct);
+                    ResetBatchScope(handler);
                     state.ResetBuilder(config.NewBuilder(state.BatchNumber));
                 }
             }
@@ -244,6 +274,7 @@ public static class IngestBatchPipeline
             if (!config.WorkingSet && state.InBatch >= config.BatchSize)
             {
                 yield return await state.YieldBatchAsync(ct);
+                ResetBatchScope(handler);
                 state.ResetBuilder(config.NewBuilder(state.BatchNumber));
             }
         }
@@ -251,13 +282,17 @@ public static class IngestBatchPipeline
         if (pending.Count > 0)
         {
             await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+            {
                 yield return change;
+                ResetBatchScope(handler);
+            }
         }
 
         if (state.InBatch > 0)
         {
             await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
             yield return await state.BuildRemainingAsync(ct);
+            ResetBatchScope(handler);
         }
     }
 
@@ -268,49 +303,62 @@ public static class IngestBatchPipeline
     long maxTotalUnits = 0,
     [EnumeratorCancellation] CancellationToken ct = default)
     {
-        string? currentLabel = null;
-        IIngestRecordHandler<TRecord>? handler = null;
-        IngestBatchConfig? config = null;
-        var buffer = new List<TRecord>();
         long unitsConsumed = 0;
+        await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
+        if (!await e.MoveNextAsync())
+            yield break;
 
-        async IAsyncEnumerable<SubstrateChange> FlushBuffer()
+        while (true)
         {
-            if (buffer.Count == 0 || handler is null || config is null)
-                yield break;
+            string label = e.Current.FileLabel;
+            var handler = handlerFactory(label);
+            var config = configFactory(label);
+            bool streamEnded = false;
+
+            async IAsyncEnumerable<TRecord> RecordsForFile(
+                [EnumeratorCancellation] CancellationToken token)
+            {
+                yield return e.Current.Record;
+                while (true)
+                {
+                    if (!await e.MoveNextAsync())
+                    {
+                        streamEnded = true;
+                        yield break;
+                    }
+                    if (e.Current.FileLabel != label)
+                        yield break;
+                    yield return e.Current.Record;
+                }
+            }
+
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
             var runConfig = fileCap > 0 ? config.WithMaxInputUnits(fileCap) : config;
-            await foreach (var change in RunAsync(new ListRecordStream<TRecord>(buffer), handler, runConfig, ct))
+            bool hitCap = false;
+
+            await foreach (var change in RunAsync(
+                new AsyncEnumerableRecordStream<TRecord>(RecordsForFile(ct)), handler, runConfig, ct))
             {
                 unitsConsumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
                 if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
-                    yield break;
+                {
+                    hitCap = true;
+                    break;
+                }
             }
-            buffer.Clear();
-        }
 
-        await foreach (var (label, record) in stream.RecordsAsync(ct))
-        {
-            if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+            yield return BuildPeriodBoundary(config.SourceId, label);
+
+            if (hitCap || streamEnded)
                 yield break;
-
-            if (label != currentLabel)
-            {
-                await foreach (var change in FlushBuffer())
-                    yield return change;
-                if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
-                    yield break;
-
-                currentLabel = label;
-                handler = handlerFactory(label);
-                config = configFactory(label);
-            }
-            buffer.Add(record);
         }
+    }
 
-        await foreach (var change in FlushBuffer())
-            yield return change;
+    private static void ResetBatchScope<TRecord>(IIngestRecordHandler<TRecord> handler)
+    {
+        if (handler is IIngestBatchScopedHandler scoped)
+            scoped.ResetBatchState();
     }
 
     private static bool ShouldCloseWorkingSet(BatchState state, IngestBatchConfig config)

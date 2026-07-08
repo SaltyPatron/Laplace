@@ -8,7 +8,11 @@ name: Laplace — build, deploy, test
 #   policy ─┐
 #           ├─> build -> unit-test -> deploy -> db-ops -> integration-test
 #   deps ───┘                                                    │
-#                              restore-api <── smoke <── seed <── publish
+#                              restore-api <── smoke <── publish <── seed
+#
+# Seed precedes publish: seeding writes to PG through the CLI (no API
+# dependency), and publish gates on /health/ready — which requires a seeded
+# substrate. This order keeps that gate valid on the fresh_db path too.
 
 on:
   push:
@@ -39,12 +43,6 @@ env:
   LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
-  LAPLACE_INGEST_WORKERS: "2"
-  LAPLACE_DECOMPOSE_WORKERS: "2"
-  LAPLACE_FOLD_WORKERS: "4"
-  LAPLACE_APPLY_PARTITIONS: "6"
-  LAPLACE_UD_LANGS: en
-  LAPLACE_WIKTIONARY_LANGS: en
 
 jobs:
 
@@ -123,8 +121,9 @@ jobs:
           exit "$violations"
 
   deps:
+    # Runs on pull_request too: the PR gate must exercise the same build the
+    # merge will run, or merges land blind and main becomes the test bench.
     name: Runner capabilities + system deps (no-op when current)
-    if: github.event_name != 'pull_request'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     steps:
@@ -186,7 +185,6 @@ jobs:
 
   build:
     name: Build — engine, extensions, app, perfcache
-    if: github.event_name != 'pull_request'
     needs: [policy, deps]
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
@@ -210,7 +208,6 @@ jobs:
 
   unit-test:
     name: Unit tests — native engine (ctest, excludes pg_regress)
-    if: github.event_name != 'pull_request'
     needs: build
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
@@ -296,33 +293,10 @@ jobs:
           dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
             --filter 'Tier!=perf'
 
-  publish:
-    name: Publish — API + SPA, restart service
-    if: github.event_name != 'pull_request'
-    needs: integration-test
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Publish API + SPA
-        run: bash scripts/pipeline.sh publish
-
-      - name: Restart API + health gate
-        run: |
-          sudo systemctl restart laplace-api
-          sleep 3
-          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
-            sudo journalctl -u laplace-api -n 40 --no-pager
-            exit 1
-          }
-
   seed:
     name: Seed — foundation ladder (idempotent, no-op when present)
     if: github.event_name != 'pull_request'
-    needs: publish
+    needs: integration-test
     runs-on: [self-hosted, laplace]
     timeout-minutes: 240
     steps:
@@ -338,10 +312,45 @@ jobs:
           fi
           bash scripts/pipeline.sh "${args[@]}" foundation
 
+  publish:
+    name: Publish — API + SPA, restart service
+    if: github.event_name != 'pull_request'
+    needs: seed
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Publish API + SPA
+        run: bash scripts/pipeline.sh publish
+
+      - name: Restart API + readiness gate
+        # Gate on /health/ready, not /health: /health is liveness only (a
+        # hard-coded "ok" that proves the process started). Readiness proves
+        # the service can reach the substrate AND the T0 perfcache is loaded
+        # in PG — exactly the states whose absence previously sailed through
+        # this gate and surfaced four jobs later as a smoke 503.
+        run: |
+          sudo systemctl restart laplace-api
+          for i in $(seq 1 30); do
+            sleep 2
+            if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
+              echo "laplace-api ready"
+              exit 0
+            fi
+          done
+          echo "::error::laplace-api not ready 60s after restart — readiness detail:"
+          curl -sS http://127.0.0.1:5187/health/ready || true
+          echo
+          sudo journalctl -u laplace-api -n 40 --no-pager
+          exit 1
+
   smoke:
     name: Smoke — live endpoint + substrate counts
     if: github.event_name != 'pull_request'
-    needs: seed
+    needs: publish
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     steps:

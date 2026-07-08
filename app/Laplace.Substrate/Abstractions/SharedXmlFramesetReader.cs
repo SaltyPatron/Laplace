@@ -1,13 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Xml;
 
-namespace Laplace.Decomposers.Extractors;
+namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Shared XML file enumeration for PropBank framesets and VerbNet VNCLASS roots.
 /// Pure extract — load document, yield matching root element per file.
 /// </summary>
-public static class XmlFramesetStream
+public static class SharedXmlFramesetReader
 {
     public static async IAsyncEnumerable<XmlElement> ReadRootsAsync(
         IEnumerable<string> files,

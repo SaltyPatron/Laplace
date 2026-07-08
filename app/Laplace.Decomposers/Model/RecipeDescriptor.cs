@@ -104,6 +104,10 @@ public sealed record RecipeDescriptor(
                                                                  : new OperatorSpec("unary", null, null);
             layers.Add(new LayerSpec(kv, heads, ffn));
         }
+        if (root.TryGetProperty("num_layers", out var nl) && nl.ValueKind == JsonValueKind.Number
+            && nl.GetInt32() != layers.Count)
+            throw new InvalidOperationException(
+                $"num_layers ({nl.GetInt32()}) != layers.length ({layers.Count})");
 
         var vocab = ParseVocab(root);
         var attributes = new List<string>();
@@ -120,7 +124,7 @@ public sealed record RecipeDescriptor(
         if (compile.Length == 0)
             compile = lmHead.Key == "trajectory" ? "continuation" : "full";
 
-        byte[] canonical = Encoding.UTF8.GetBytes(recipeJson);
+        byte[] canonical = RecipeExtractor.CanonicalBytes(root);
 
         return new RecipeDescriptor(
             Hash128.Blake3(canonical), name, structure, hidden, intermediate, layers.Count,

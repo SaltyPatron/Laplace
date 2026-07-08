@@ -1,11 +1,11 @@
-using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class MapNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenceRecord>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/MapNetDecomposer/v1");
@@ -16,39 +16,35 @@ public sealed class MapNetDecomposer : DecomposerOrchestrator, IIngestInventoryP
     public override string SourceName => "MapNetDecomposer";
     public override int LayerOrder => 3;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
 
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
+        return SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["FrameNet_Frame", "FrameNet_LU"],
             relationNodeNames: ["CORRESPONDS_TO"],
             ct: ct);
-
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
-
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : 4096;
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
-        foreach (string path in MapNetIngest.ResolvePaths(context.EcosystemPath))
-        {
-            if (cap > 0 && consumed >= cap) yield break;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-            await foreach (var change in MapNetIngest.StreamAsync(
-                               path, batchSize, context.Reader, options, fileCap, ct))
-            {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                }
-                if (cap > 0 && consumed >= cap) yield break;
-            }
-        }
     }
+
+    protected override IMultiFileRecordStream<CategoryCorrespondenceRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        var files = MapNetIngest.ResolvePaths(ecosystemPath)
+            .Select(MapNetIngest.DescribeFile)
+            .ToList();
+        return new MapNetMultiFileStream(files);
+    }
+
+    protected override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandlerForFile(string fileLabel) =>
+        new CategoryCorrespondenceHandler(Source, SourceTrust);
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.CategoryCorrespondence(
+                Source, fileLabel, DefaultBatchSize, options, reader),
+            options);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -68,5 +64,4 @@ public sealed class MapNetDecomposer : DecomposerOrchestrator, IIngestInventoryP
         }
         return total > 0 ? total : null;
     }
-
 }

@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -66,7 +65,7 @@ public sealed class StackDecomposer : GrammarComposeDecomposer
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = ParquetCodeRecordStream.EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
+        var files = SharedParquetRecordStream.EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
         if (files.Count == 0)
         {
             if (Directory.Exists(ecosystemPath))
@@ -78,7 +77,7 @@ public sealed class StackDecomposer : GrammarComposeDecomposer
 
         foreach (var file in files)
         {
-            await foreach (var row in ParquetCodeRecordStream.ReadStackRowsAsync(file, ct))
+            await foreach (var row in SharedParquetRecordStream.ReadStackRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
                 string? modality = ResolveModality(row.Language);

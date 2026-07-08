@@ -41,6 +41,16 @@
     "feedback": {
       "status": "live",
       "backend": "laplace.attestations (confirm/refute) + consensus fold"
+    },
+    "recipe_compile": {
+      "status": "live",
+      "backend": "laplace.recipe validation + RecipeDescriptor",
+      "billing": "recipe.compile"
+    },
+    "synthesis_export": {
+      "status": "live",
+      "backend": "foundry CLI export (writes GGUF; never loaded on chat path)",
+      "billing": "synthesis"
     }
   }
 }

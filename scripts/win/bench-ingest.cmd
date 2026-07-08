@@ -55,9 +55,7 @@ if /i "%BENCH_DB%"=="laplace" (
   exit /b 2
 )
 
-if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
-if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
-if not defined LAPLACE_APPLY_PARTITIONS set "LAPLACE_APPLY_PARTITIONS=1"
+if not defined LAPLACE_COPY_BLOB_VALIDATE set "LAPLACE_COPY_BLOB_VALIDATE=0"
 if "%DO_FULL%"=="1" (set "MAX_UNITS=0") else (set "LAPLACE_INGEST_MAX_UNITS=%MAX_UNITS%")
 
 call :configure_source "%SOURCE%"
@@ -122,27 +120,18 @@ set "INGEST_STEP=%~1"
 set "INGEST_LANGS="
 set "INGEST_CLI_SOURCE="
 if /i "%INGEST_STEP%"=="conceptnet" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=16384"
-  if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
-  if not defined LAPLACE_COMMIT_LANES set "LAPLACE_COMMIT_LANES=8"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\ConceptNet"
 )
 if /i "%INGEST_STEP%"=="wiktionary" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\Wiktionary"
 )
 if /i "%INGEST_STEP%"=="wiktionary-en" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=8192"
   set "INGEST_LANGS=--langs en"
   set "INGEST_CLI_SOURCE=wiktionary"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\Wiktionary"
 )
 if not defined INGEST_CLI_SOURCE set "INGEST_CLI_SOURCE=%INGEST_STEP%"
 if /i "%INGEST_STEP%"=="ud" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
   if not defined BENCH_PATH set "BENCH_PATH=%INGEST%\UD-Treebanks"
 )
 exit /b 0

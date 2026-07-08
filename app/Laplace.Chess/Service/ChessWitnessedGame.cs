@@ -8,7 +8,7 @@ namespace Laplace.Chess.Service;
 /// Witnessed-layer inputs for <see cref="ChessAnalyze.DeriveGame"/> — hydrated from the
 /// substrate (content roundtrip on HAS_MOVETEXT / ply attestations), not re-parsed PGN.
 /// </summary>
-internal sealed record ChessWitnessedGame(
+public sealed record ChessWitnessedGame(
     Hash128 GameId,
     IReadOnlyList<string> Moves,
     GameOutcome Result,

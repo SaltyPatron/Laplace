@@ -1009,6 +1009,114 @@
         }
       }
     },
+    "/v1/recipe/compile": {
+      "post": {
+        "tags": [
+          "foundry"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeCompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeCompileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/synthesis/export": {
+      "post": {
+        "tags": [
+          "foundry"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesisExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesisExportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing/catalog": {
       "get": {
         "tags": [
@@ -2523,6 +2631,26 @@
             "$ref": "#/components/schemas/CapabilityStatus"
           },
           "feedback": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CapabilityStatus"
+              }
+            ]
+          },
+          "recipe_compile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CapabilityStatus"
+              }
+            ]
+          },
+          "synthesis_export": {
             "oneOf": [
               {
                 "type": "null"
@@ -6264,6 +6392,84 @@
           }
         }
       },
+      "RecipeCompileRequest": {
+        "required": [
+          "recipe"
+        ],
+        "type": "object",
+        "properties": {
+          "recipe": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RecipeCompileResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "recipe_id_hex",
+          "name",
+          "structure",
+          "hidden_size",
+          "num_layers",
+          "compile_mode",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "recipe_id_hex": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "structure": {
+            "type": "string"
+          },
+          "hidden_size": {
+            "type": "string"
+          },
+          "num_layers": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "compile_mode": {
+            "type": "string"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
       "RecipeQuoteRequest": {
         "required": [
           "tenant",
@@ -6519,6 +6725,96 @@
             "items": {
               "$ref": "#/components/schemas/VisualizationEdge"
             }
+          }
+        }
+      },
+      "SynthesisExportRequest": {
+        "required": [
+          "recipe"
+        ],
+        "type": "object",
+        "properties": {
+          "recipe": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recipe_id_prefix": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tokenizer_dir": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "format": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "filename": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SynthesisExportResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "format",
+          "output_path",
+          "bytes",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "format": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "bytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
           }
         }
       },
@@ -7206,6 +7502,9 @@
     },
     {
       "name": "explore"
+    },
+    {
+      "name": "foundry"
     },
     {
       "name": "billing"

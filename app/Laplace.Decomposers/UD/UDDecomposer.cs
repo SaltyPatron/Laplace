@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
-using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
@@ -18,8 +17,9 @@ public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvi
     public override string SourceName => "UDDecomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.AcademicCurated;
 
-    public int EstimatedBytesPerRecord => IngestSourceProfile.UdSentence.EstBytesPerRecord;
+    public override int EstimatedBytesPerRecord => IngestSourceProfile.UdSentence.EstBytesPerRecord;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
@@ -31,114 +31,26 @@ public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvi
                 "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
             readbackNames: _canonicalNames, ct: ct);
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IMultiFileRecordStream<UdIngestRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options)
     {
-        string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
-        if (!Directory.Exists(treebanksDir)) yield break;
-        if (options.DryRun) yield break;
-
-        int batchSentences = UdIngestSupport.ResolveBatchSentences(options);
-        long cap = options.MaxInputUnits;
-        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
+        string treebanksDir = Path.Combine(ecosystemPath, "ud-treebanks-v2.17");
         var files = ListTreebankFiles(treebanksDir, options);
-        if (files.Count == 0) yield break;
-
-        ISubstrateReader? reader = context.Reader;
-
-        if (workers <= 1 || files.Count == 1)
+        var labeled = files.Select(p =>
         {
-            await foreach (var change in IngestFilesSerialAsync(files, reader, batchSentences, cap, ct))
-                yield return change;
-            yield break;
-        }
-
-        var fileQueue = new ConcurrentQueue<string>(files);
-        var channel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(workers * 4)
-            {
-                SingleWriter = false,
-                SingleReader = true,
-                FullMode = BoundedChannelFullMode.Wait,
-            });
-
-        var producers = new Task[workers];
-        for (int wi = 0; wi < workers; wi++)
-        {
-            int worker = wi;
-            producers[wi] = Task.Run(async () =>
-            {
-                while (fileQueue.TryDequeue(out var conllu))
-                {
-                    ct.ThrowIfCancellationRequested();
-                    string stem = Path.GetFileNameWithoutExtension(conllu);
-                    await foreach (var change in IngestOneFileAsync(
-                        conllu, reader, batchSentences, $"ud/w{worker}/{stem}", maxInputUnits: 0, ct))
-                        await channel.Writer.WriteAsync(change, ct);
-                    await channel.Writer.WriteAsync(PeriodBoundary(stem), ct);
-                }
-            }, ct);
-        }
-
-        _ = Task.WhenAll(producers).ContinueWith(
-            t => channel.Writer.TryComplete(t.Exception),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-
-        await foreach (var change in channel.Reader.ReadAllAsync(ct))
-            yield return change;
-        await Task.WhenAll(producers);
+            string stem = Path.GetFileNameWithoutExtension(p);
+            return (Path: p, Label: $"ud/{stem}");
+        }).ToList();
+        return new UdConlluMultiFileStream(labeled);
     }
 
-    private async IAsyncEnumerable<SubstrateChange> IngestFilesSerialAsync(
-        List<string> files,
-        ISubstrateReader? reader,
-        int batchSentences,
-        long maxInputUnits,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        long consumed = 0;
-        foreach (string conllu in files)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
-            long fileCap = maxInputUnits > 0 ? maxInputUnits - consumed : 0;
-            string stem = Path.GetFileNameWithoutExtension(conllu);
-            await foreach (var change in IngestOneFileAsync(
-                conllu, reader, batchSentences, $"ud/{stem}", fileCap, ct))
-            {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
-            }
-            yield return PeriodBoundary(stem);
-            if (maxInputUnits > 0 && consumed >= maxInputUnits) yield break;
-        }
-    }
+    protected override IIngestRecordHandler<UdIngestRecord> CreateHandlerForFile(string fileLabel) =>
+        new UdIngestHandler(Source, _canonicalNames);
 
-    private async IAsyncEnumerable<SubstrateChange> IngestOneFileAsync(
-        string conllu,
-        ISubstrateReader? reader,
-        int batchSentences,
-        string batchLabelPrefix,
-        long maxInputUnits,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        string langCode = UdIngestSupport.ExtractLangCode(Path.GetFileName(conllu));
-        Hash128 langId = LanguageReference.Resolve(langCode);
-        var stream = new UdConlluFileStream(conllu, langId, langCode);
-        var handler = new UdIngestHandler(Source, _canonicalNames);
-        var config = UdIngestSupport.PipelineConfig(
-            Source, batchLabelPrefix, batchSentences, reader, maxInputUnits);
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
-        {
-            handler.ResetBatchState();
-            yield return change;
-        }
-    }
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        UdIngestSupport.PipelineConfig(
+            Source, fileLabel, UdIngestSupport.ResolveBatchSentences(options), reader);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -164,10 +76,6 @@ public sealed class UDDecomposer : DecomposerOrchestrator, IIngestInventoryProvi
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits;
     }
-
-    private static SubstrateChange PeriodBoundary(string stem) =>
-        new SubstrateChangeBuilder(Source, $"period-boundary/{stem}", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
 
     private static LanguageFilter? EffectiveLanguages(DecomposerOptions options) =>
         options.Languages is { IsActive: true } ? options.Languages

@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION recall_what_is_response(p_prompt text, p_topic bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-    FROM define(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
+    FROM define_fast(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
     UNION ALL
     SELECT repeat('  ', h.depth) || E'\u2192 is ' || COALESCE(h.hypernym, '?')
            || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint

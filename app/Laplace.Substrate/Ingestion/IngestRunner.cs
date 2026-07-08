@@ -640,7 +640,7 @@ public sealed class IngestRunner
     private static void TrackIntent(RunCounters c, SubstrateChange intent)
     {
         string unit = intent.Metadata.SourceContentUnitName;
-        const string periodBoundary = "period-boundary/";
+        const string periodBoundary = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
         if (unit.StartsWith(periodBoundary, StringComparison.Ordinal))
         {
             Interlocked.Increment(ref c._filesDone);

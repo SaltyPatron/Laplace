@@ -14,7 +14,8 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
-    protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(string ecosystemPath) =>
+    protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options) =>
         new DocumentMultiFileStream(ecosystemPath);
 
     protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(string fileLabel) =>

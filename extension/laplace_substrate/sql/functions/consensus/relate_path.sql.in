@@ -24,15 +24,15 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
         SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
                ARRAY[1] AS dirs, eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
                c.type_id AS plane_type
-        FROM xset x JOIN consensus c ON c.subject_id = x.id
+        FROM xset x JOIN v_consensus_unrefuted c ON c.subject_id = x.id
           AND c.object_id IN (SELECT id FROM yset)
-          AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
+          AND c.type_id IN (SELECT k FROM lat)
         UNION ALL
         SELECT ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
                eff_mu_display(c.rating, c.rd), 1, c.type_id
-        FROM xset x JOIN consensus c ON c.object_id = x.id
+        FROM xset x JOIN v_consensus_unrefuted c ON c.object_id = x.id
           AND c.subject_id IN (SELECT id FROM yset)
-          AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
+          AND c.type_id IN (SELECT k FROM lat)
     ),
     ux(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
@@ -40,9 +40,9 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
         SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
                LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)),
                      eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM ux u JOIN consensus c ON c.subject_id = u.node
+        FROM ux u JOIN v_consensus_unrefuted c ON c.subject_id = u.node
           AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
-          AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
+          AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth
     ),
     uy(node, path, types, mu, d) AS (
@@ -51,9 +51,9 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
         SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
                LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)),
                      eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM uy u JOIN consensus c ON c.subject_id = u.node
+        FROM uy u JOIN v_consensus_unrefuted c ON c.subject_id = u.node
           AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
-          AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
+          AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth
     ),
     lca_pick AS (

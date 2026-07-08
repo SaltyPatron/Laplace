@@ -3,10 +3,11 @@ using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : DecomposerOrchestrator
+public sealed class RepoDecomposer : GrammarComposeDecomposer
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/RepoDecomposer/v1");
@@ -26,8 +27,11 @@ public sealed class RepoDecomposer : DecomposerOrchestrator
     public override string SourceName => "RepoDecomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+    protected override string BatchLabelPrefix => "repo";
 
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
+    private Hash128 _repoId;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
@@ -39,77 +43,32 @@ public sealed class RepoDecomposer : DecomposerOrchestrator
                 "HAS_EXAMPLE", "HAS_DEFINITION"],
             ct: ct);
         _canonicalNames.UnionWith(boot.CanonicalNames);
-    }
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
         var root = context.EcosystemPath;
-        if (!Directory.Exists(root)) yield break;
+        if (!Directory.Exists(root)) return;
 
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.Add(repoCanonical);
-        var repoId = Hash128.OfCanonical(repoCanonical);
-        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
+        _repoId = Hash128.OfCanonical(repoCanonical);
 
-        if (!options.DryRun)
-        {
-            await foreach (var change in RunComposePhaseAsync(
-                SingleRepoRootAsync(repoCanonical, repoId, ct), StageRepoRoot,
-                "root", SourceTrust.StructuredCorpus, 1, context, options, ct))
-                yield return change;
-        }
-
-        var files = EnumerateRepoFiles(root).ToList();
-        if (files.Count == 0) yield break;
-
-        await foreach (var change in RunGrammarComposePhaseAsync(
-            EnumerateRecordsAsync(files, root, repoId, ct),
-            SourceTrust.StructuredCorpus, "repo", batch, context, options, ct))
-            yield return change;
+        var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,
+            entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: 0);
+        StageRepoRoot(seed, repoCanonical, _repoId);
+        await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(Directory.Exists(context.EcosystemPath)
-            ? EnumerateRepoFiles(context.EcosystemPath).Count()
-            : null);
-
-    private readonly record struct RepoRootRecord(string Canonical, Hash128 Id);
-
-    private static void StageRepoRoot(RepoRootRecord rec, SubstrateChangeBuilder b)
-    {
-        b.AddEntity(new EntityRow(rec.Id, EntityTier.Document, RepoTypeId, Source));
-        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(rec.Canonical),
-                out _, out _, out double cx, out double cy, out double cz, out double cm))
-        {
-            Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
-            Hash128 physId = PhysicalityId.Compute(rec.Id, PhysicalityType.Content);
-            b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: rec.Id, SourceId: Source,
-                Type: PhysicalityType.Content,
-                CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
-                HilbertIndex: Hilbert128.Encode(coord),
-                TrajectoryXyzm: null, NConstituents: 0,
-                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
-        }
-    }
-
-    private static async IAsyncEnumerable<RepoRootRecord> SingleRepoRootAsync(
-        string repoCanonical, Hash128 repoId, [EnumeratorCancellation] CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        yield return new RepoRootRecord(repoCanonical, repoId);
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<GrammarComposeRecord> EnumerateRecordsAsync(
-        IReadOnlyList<(string File, string Modality)> files,
-        string root,
-        Hash128 repoId,
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        if (_repoId == default)
+        {
+            if (!Directory.Exists(ecosystemPath)) yield break;
+            string repoCanonical = $"repo:{Path.GetFullPath(ecosystemPath)}/v1";
+            _repoId = Hash128.OfCanonical(repoCanonical);
+        }
+
+        var files = EnumerateRepoFiles(ecosystemPath).ToList();
         foreach (var (file, modality) in files)
         {
             ct.ThrowIfCancellationRequested();
@@ -123,7 +82,7 @@ public sealed class RepoDecomposer : DecomposerOrchestrator
             }
             if (bytes.Length == 0) continue;
 
-            string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');
+            string relPath = Path.GetRelativePath(ecosystemPath, file).Replace('\\', '/');
             var filename = Path.GetFileNameWithoutExtension(file);
             var segments = new List<string>();
             if (!string.IsNullOrEmpty(filename))
@@ -140,7 +99,30 @@ public sealed class RepoDecomposer : DecomposerOrchestrator
                 ExampleSegments: segments.Count > 0 ? segments : null,
                 ConceptAnchorKey: relPath,
                 ConceptCategoryTypeId: FileTypeId,
-                ParentContainerId: repoId);
+                ParentContainerId: _repoId);
+        }
+    }
+
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(Directory.Exists(context.EcosystemPath)
+            ? EnumerateRepoFiles(context.EcosystemPath).Count()
+            : null);
+
+    private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
+    {
+        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
+        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
+                out _, out _, out double cx, out double cy, out double cz, out double cm))
+        {
+            Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
+            Hash128 physId = PhysicalityId.Compute(repoId, PhysicalityType.Content);
+            b.AddPhysicality(new PhysicalityRow(
+                Id: physId, EntityId: repoId, SourceId: Source,
+                Type: PhysicalityType.Content,
+                CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
+                HilbertIndex: Hilbert128.Encode(coord),
+                TrajectoryXyzm: null, NConstituents: 0,
+                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
         }
     }
 

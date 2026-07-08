@@ -19,4 +19,5 @@ IS the battle (doc 13 §2.4). When editing them:
   the law; do so only with explicit user direction.
 - When a fix lands, also fix the stale "violations"/"known gaps" paragraphs it
   invalidates (06 Rule #8 violations and CLAUDE.md "Known gaps" have drifted before).
-- Doc 13 is THE active plan; new work items go there, sequenced against the arc.
+- Doc 13 is historical stabilization notes — verify against code; active remediation
+  lives in `.scratchpad/16`, `.scratchpad/17`, and `.cursor/plans/`.

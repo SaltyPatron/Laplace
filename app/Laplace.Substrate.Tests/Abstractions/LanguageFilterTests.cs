@@ -51,4 +51,54 @@ public sealed class LanguageFilterTests
             () => LanguageFilter.FromSpec("English, Mandarin"));
         Assert.Contains("Mandarin", ex.Message);
     }
+
+    // ForSource is the mechanism witness-manifest.json documents as law:
+    // LAPLACE_INGEST_LANGS scopes every decomposer; unset = ALL languages.
+    // It was once gutted to `=> null`, which turned every scoped CI ingest
+    // into a silent whole-corpus run. These tests make that regression loud.
+
+    [Fact]
+    public void ForSource_NoEnv_ReturnsNull_MeaningAllLanguages()
+    {
+        using var _ = new EnvScope(("LAPLACE_INGEST_LANGS", null), ("LAPLACE_UD_LANGS", null));
+        Assert.Null(LanguageFilter.ForSource("UDDecomposer"));
+    }
+
+    [Fact]
+    public void ForSource_ReadsGlobalEnv()
+    {
+        using var _ = new EnvScope(("LAPLACE_INGEST_LANGS", "en"), ("LAPLACE_UD_LANGS", null));
+        var f = LanguageFilter.ForSource("UDDecomposer");
+        Assert.NotNull(f);
+        Assert.True(f!.MatchesRaw("en"));
+        Assert.False(f.MatchesRaw("de"));
+    }
+
+    [Fact]
+    public void ForSource_PerSourceEnv_WinsOverGlobal()
+    {
+        using var _ = new EnvScope(("LAPLACE_INGEST_LANGS", "en"), ("LAPLACE_UD_LANGS", "de"));
+        var f = LanguageFilter.ForSource("UDDecomposer");
+        Assert.NotNull(f);
+        Assert.True(f!.MatchesRaw("de"));
+        Assert.False(f.MatchesRaw("en"));
+    }
+
+    private sealed class EnvScope : IDisposable
+    {
+        private readonly (string Key, string? Prior)[] _saved;
+
+        public EnvScope(params (string Key, string? Value)[] vars)
+        {
+            _saved = [.. vars.Select(v => (v.Key, Environment.GetEnvironmentVariable(v.Key)))];
+            foreach (var (key, value) in vars)
+                Environment.SetEnvironmentVariable(key, value);
+        }
+
+        public void Dispose()
+        {
+            foreach (var (key, prior) in _saved)
+                Environment.SetEnvironmentVariable(key, prior);
+        }
+    }
 }

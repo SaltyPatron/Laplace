@@ -33,7 +33,19 @@ public sealed partial class ConsensusAccumulatingWriter
     {
         await prev.ConfigureAwait(false);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        long folded = await FoldSnapshotClientAsync(edges, CancellationToken.None).ConfigureAwait(false);
+        long folded;
+        try
+        {
+            folded = await FoldSnapshotClientAsync(edges, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Timestamp the failure at the moment it happens. The chain waiters
+            // rethrow this later, but "later" can be minutes away — without this
+            // line the log shows nothing between "queued" and the eventual crash.
+            _log.LogError(ex, "consensus fold e{Epoch} FAILED ({Edges:N0} edges)", epoch, edges.Count);
+            throw;
+        }
         sw.Stop();
         Interlocked.Add(ref _foldedRelations, folded);
         int done = Interlocked.Increment(ref _epochsFolded);
@@ -72,20 +84,18 @@ public sealed partial class ConsensusAccumulatingWriter
             await anCmd.ExecuteNonQueryAsync(ct);
         }
 
+        _log.LogInformation(
+            "consensus fold: {Edges:N0} edges — acquiring fold lock, reading priors, folding (silence here is work, not a hang; lock waits log the holder every 30s)",
+            n);
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
+        await using var tx = await AdvisoryTxLock.BeginWithLockAsync(
+            conn, "laplace_consensus_fold",
+            "SET LOCAL session_replication_role = replica; "
+            + "SET LOCAL synchronous_commit = off; "
+            + "SET LOCAL jit = off; ",
+            _log, ct);
         try
         {
-            await using (var guc = conn.CreateCommand())
-            {
-                guc.Transaction = tx;
-                guc.CommandText =
-                    "SET LOCAL session_replication_role = replica; "
-                    + "SET LOCAL synchronous_commit = off; "
-                    + "SET LOCAL jit = off; "
-                    + "SELECT pg_advisory_xact_lock(hashtextextended('laplace_consensus_fold', 0))";
-                await guc.ExecuteNonQueryAsync(ct);
-            }
 
             long neutralMu, initialRd, initialVol, tau;
             await using (var consts = conn.CreateCommand())

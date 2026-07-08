@@ -3,9 +3,7 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
-set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_COPY_VALIDATE=1"
-if not defined LAPLACE_FOLD_WORKERS set "LAPLACE_FOLD_WORKERS=8"
 
 call "%~dp0build-engine-libs.cmd" || exit /b 1
 cd app

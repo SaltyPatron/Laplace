@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class SemLinkDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
@@ -47,18 +47,12 @@ public sealed class SemLinkDecomposer : DecomposerOrchestrator, IIngestInventory
         foreach (var (path, kind, label) in JsonDocumentSpecs(instancesDir))
         {
             if (cap > 0 && consumed >= cap) yield break;
-            int jsonBatch = options.BatchSize > 0 ? options.BatchSize : 1;
-            ISubstrateReader? reader = context.Reader;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-
-            await foreach (var change in SemLinkIngestSupport.IngestJsonDocumentAsync(
-                               path, kind, label, jsonBatch, reader, fileCap, ct))
+            var phaseOpts = RemainingOptions(options, cap, consumed);
+            var phase = new SemLinkJsonDocumentPhase(path, kind, label);
+            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
             {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                }
+                consumed += change.Metadata.InputUnitsConsumed;
+                yield return change;
                 if (cap > 0 && consumed >= cap) yield break;
             }
         }
@@ -68,17 +62,13 @@ public sealed class SemLinkDecomposer : DecomposerOrchestrator, IIngestInventory
         foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
         {
             if (cap > 0 && consumed >= cap) yield break;
-            int pmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-            await foreach (var change in PredicateMatrixIngest.StreamAsync(
-                               pmPath, pmBatch, options.Languages, context.Reader, options, fileCap, ct))
+            var phaseOpts = RemainingOptions(options, cap, consumed);
+            var phase = new PredicateMatrixPhase(pmPath, options.Languages);
+            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
             {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                    if (cap > 0 && consumed >= cap) yield break;
-                }
+                consumed += change.Metadata.InputUnitsConsumed;
+                yield return change;
+                if (cap > 0 && consumed >= cap) yield break;
             }
             break;
         }
@@ -88,18 +78,19 @@ public sealed class SemLinkDecomposer : DecomposerOrchestrator, IIngestInventory
         string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
         if (roleMappingPath is not null)
         {
-            int rmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
-            await foreach (var change in SemLinkRoleMappingIngest.StreamAsync(roleMappingPath, rmBatch, context.Reader, ct))
+            var phaseOpts = RemainingOptions(options, cap, consumed);
+            var phase = new SemLinkRoleMappingPhase(roleMappingPath);
+            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
             {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                    if (cap > 0 && consumed >= cap) yield break;
-                }
+                consumed += change.Metadata.InputUnitsConsumed;
+                yield return change;
+                if (cap > 0 && consumed >= cap) yield break;
             }
         }
     }
+
+    private static DecomposerOptions RemainingOptions(DecomposerOptions options, long cap, long consumed) =>
+        cap > 0 ? options with { MaxInputUnits = cap - consumed } : options;
 
     public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

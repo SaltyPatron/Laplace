@@ -26,7 +26,7 @@ public static class ChessAnalyze
 
     // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
     // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
-    internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessPgnDecomposer.ParsedGame parsed)
+    internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
         => DeriveFromWitnessed(b, WitnessedFromParsed(parsed));
 
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
@@ -52,9 +52,10 @@ public static class ChessAnalyze
                     ChessVocabulary.AnalysisMarkerType, SourceId);
     }
 
-    internal static ChessWitnessedGame WitnessedFromParsed(ChessPgnDecomposer.ParsedGame parsed)
+    internal static ChessWitnessedGame WitnessedFromParsed(ChessGameRecord parsed)
     {
-        var (gameText, walk, moves, result, gameId) = parsed;
+        var (gameText, moves, result, gameId) = parsed;
+        var walk = parsed.Walk;
         string whiteName = PgnGames.TagStr(gameText, "White");
         string blackName = PgnGames.TagStr(gameText, "Black");
         Hash128? wp = ValidName(whiteName) ? ChessVocabulary.PlayerId(whiteName) : null;

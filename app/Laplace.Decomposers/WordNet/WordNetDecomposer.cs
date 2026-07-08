@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class WordNetDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public int EstimatedBytesPerRecord => IngestSourceProfile.WordNet.EstBytesPerRecord;
     public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.WordNet.EstComposeUnitsPerRecord;
@@ -101,37 +101,120 @@ public sealed class WordNetDecomposer : DecomposerOrchestrator, IIngestInventory
         int batch = IngestSizing.ResolveForSource(
             IngestSourceProfile.WordNet,
             options.BatchSize > 1 ? options.BatchSize : null).RecordBatchSize;
-        ISubstrateReader? reader = context.Reader;
         var frames = await LoadVerbFramesAsync(dictDir, ct);
 
-
-        await foreach (var c in RunComposePhaseAsync(
-            ParseAllSynsetsAsync(dictDir, ct),
-            (syn, b) => { EmitSynsetEntities(b, syn, frames); EmitSynsetAttestations(b, syn, frames); },
-            "data", SourceTrust.StandardsDerived, batch, context, options, ct))
+        await foreach (var c in RunPhaseAsync(new DataPhase(frames, batch), context, options, ct))
             yield return c;
 
         if (options.MaxInputUnits > 0) yield break;
 
         var uncapped = options with { MaxInputUnits = 0 };
 
-        await foreach (var c in RunComposePhaseAsync(
-            ParseSensesAsync(Path.Combine(dictDir, "index.sense"), ct),
-            static (s, b) => ComposeSense(s, b),
-            "sense", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
+        await foreach (var c in RunPhaseAsync(new SensePhase(batch), context, uncapped, ct))
             yield return c;
 
-        await foreach (var c in RunComposePhaseAsync(
-            ParseExceptionsAsync(dictDir, ct),
-            static (exc, b) => ComposeExcLine(exc, b),
-            "exc", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
+        await foreach (var c in RunPhaseAsync(new ExcPhase(batch), context, uncapped, ct))
             yield return c;
 
-        await foreach (var c in RunComposePhaseAsync(
-            ParseVerbSentencesAsync(dictDir, ct),
-            static (entry, b) => ComposeVerbSentEntry(entry, b),
-            "sents", SourceTrust.StandardsDerived, batch, context, uncapped, ct))
+        await foreach (var c in RunPhaseAsync(new SentsPhase(batch), context, uncapped, ct))
             yield return c;
+    }
+
+    private abstract class WnComposePhase<T> : ComposeDecomposerPhase<T>
+    {
+        private readonly int _batch;
+
+        protected WnComposePhase(int batch) => _batch = batch;
+
+        public override Hash128 SourceId => Source;
+        public override string SourceName => "WordNetDecomposer";
+        public override int LayerOrder => 2;
+        public override Hash128 TrustClassId => TrustClass;
+        protected override double SourceTrust => TC.StandardsDerived;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
+
+        protected override IngestBatchConfig BuildPipelineConfig(
+            IDecomposerContext context, DecomposerOptions options) =>
+            IngestPipelineDefaults.ApplyMaxInputUnits(
+                IngestPipelineDefaults.Compose(
+                    SourceId, BatchLabelPrefix, _batch, options, context.Reader,
+                    IngestSourceProfile.WordNet),
+                options);
+    }
+
+    private sealed class DataPhase : WnComposePhase<WnSynset>
+    {
+        private readonly string?[] _frames;
+
+        public DataPhase(string?[] frames, int batch) : base(batch) => _frames = frames;
+
+        protected override string PhaseLabel => "data";
+
+        protected override void Compose(WnSynset syn, SubstrateChangeBuilder b)
+        {
+            EmitSynsetEntities(b, syn, _frames);
+            EmitSynsetAttestations(b, syn, _frames);
+        }
+
+        protected override async IAsyncEnumerable<WnSynset> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
+            await foreach (var syn in ParseAllSynsetsAsync(dictDir, ct))
+                yield return syn;
+        }
+    }
+
+    private sealed class SensePhase : WnComposePhase<WnSense>
+    {
+        public SensePhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "sense";
+        protected override void Compose(WnSense s, SubstrateChangeBuilder b) => ComposeSense(s, b);
+        protected override async IAsyncEnumerable<WnSense> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string path = Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "index.sense");
+            await foreach (var s in ParseSensesAsync(path, ct))
+                yield return s;
+        }
+    }
+
+    private sealed class ExcPhase : WnComposePhase<WnExcLine>
+    {
+        public ExcPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "exc";
+        protected override void Compose(WnExcLine exc, SubstrateChangeBuilder b) => ComposeExcLine(exc, b);
+        protected override async IAsyncEnumerable<WnExcLine> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
+            await foreach (var exc in ParseExceptionsAsync(dictDir, ct))
+                yield return exc;
+        }
+    }
+
+    private sealed class SentsPhase : WnComposePhase<WnVerbSentEntry>
+    {
+        public SentsPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "sents";
+        protected override void Compose(WnVerbSentEntry entry, SubstrateChangeBuilder b) =>
+            ComposeVerbSentEntry(entry, b);
+        protected override async IAsyncEnumerable<WnVerbSentEntry> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
+            await foreach (var entry in ParseVerbSentencesAsync(dictDir, ct))
+                yield return entry;
+        }
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

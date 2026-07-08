@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -58,7 +57,7 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = ParquetCodeRecordStream.EnumerateParquet(ecosystemPath, SearchOption.TopDirectoryOnly).ToList();
+        var files = SharedParquetRecordStream.EnumerateParquet(ecosystemPath, SearchOption.TopDirectoryOnly).ToList();
         if (files.Count == 0)
         {
             if (Directory.Exists(ecosystemPath))
@@ -70,7 +69,7 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer
 
         foreach (var file in files)
         {
-            await foreach (var (conceptKey, lang, prompt, response) in ParquetCodeRecordStream.ReadTinyCodesRowsAsync(file, ct))
+            await foreach (var (conceptKey, lang, prompt, response) in SharedParquetRecordStream.ReadTinyCodesRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(response)) continue;

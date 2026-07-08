@@ -1,18 +1,17 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : DecomposerOrchestrator, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
-
 
     internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
@@ -24,6 +23,11 @@ public sealed class TatoebaDecomposer : DecomposerOrchestrator, IIngestInventory
     public override string SourceName => "TatoebaDecomposer";
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+
+    // Shared across sentence + link epochs: maps Tatoeba numeric id → content root.
+    internal readonly ConcurrentDictionary<long, Hash128> IdToRoot = new();
+    private HashSet<long>? _allowedSentenceIds;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
@@ -31,80 +35,57 @@ public sealed class TatoebaDecomposer : DecomposerOrchestrator, IIngestInventory
             relationNodeNames: ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"],
             readbackNames: LanguageNames, ct: ct);
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options)
     {
-        string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
-        string links = Path.Combine(context.EcosystemPath, "links.csv");
-        int batch = options.BatchSize > 1
-            ? options.BatchSize
-            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
+        IdToRoot.Clear();
+        _allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
-
-
-
-
-
-
-
-
-        var allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
-
-        // Shared across the sentence + link epochs: maps Tatoeba's numeric sentence id to
-        // the content-addressed UAX root of its text, so links.csv (numeric ids only) can
-        // anchor IS_TRANSLATION_OF on the real content roots. Populated fully during the
-        // sentence epoch (yielded before the link epoch begins). See .scratchpad/16 §2a.
-        var idToRoot = new ConcurrentDictionary<long, Hash128>();
+        string sentences = Path.Combine(ecosystemPath, "sentences.csv");
+        string links = Path.Combine(ecosystemPath, "links.csv");
+        var files = new List<(string Path, string Label, Func<ReadOnlySpan<byte>, bool>? AcceptRow)>();
 
         if (File.Exists(sentences))
         {
-            if (cap > 0 && consumed >= cap) yield break;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Sentence, allowedSentenceIds, idToRoot);
             Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
                 ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
                 : null;
-
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                sentences, EtlManifest.Get("tatoeba"), witness, batch, 1.0, "tatoeba/sent",
-                reportUnits: null, contextId: null, commitEpoch: 0,
-                acceptRow: acceptSent, maxInputUnits: fileCap,
-                containmentReader: context.Reader, ct: ct))
-            {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                }
-            }
+            files.Add((sentences, "tatoeba/sent", acceptSent));
         }
 
         if (File.Exists(links))
         {
-            if (cap > 0 && consumed >= cap) yield break;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Link, allowedSentenceIds, idToRoot);
-            Func<ReadOnlySpan<byte>, bool>? acceptLink = allowedSentenceIds is not null
-                ? line => TatoebaRowFilter.MatchesLinkFilter(line, allowedSentenceIds)
+            Func<ReadOnlySpan<byte>, bool>? acceptLink = _allowedSentenceIds is not null
+                ? line => TatoebaRowFilter.MatchesLinkFilter(line, _allowedSentenceIds)
                 : null;
-
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                links, EtlManifest.Get("tatoeba"), witness, batch, 1.0, "tatoeba/link",
-                reportUnits: null, contextId: null, commitEpoch: 1,
-                acceptRow: acceptLink, maxInputUnits: fileCap,
-                containmentReader: context.Reader, ct: ct))
-            {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                }
-            }
+            files.Add((links, "tatoeba/link", acceptLink));
         }
+
+        return new TatoebaMultiFileStream(files);
+    }
+
+    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(string fileLabel)
+    {
+        var kind = fileLabel.EndsWith("/link", StringComparison.Ordinal)
+            ? TatoebaRowKind.Link
+            : TatoebaRowKind.Sentence;
+        return new GrammarIngestHandler(
+            Source, "tsv",
+            new TatoebaGrammarWitness(kind, _allowedSentenceIds, IdToRoot),
+            contextId: null);
+    }
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
+    {
+        int batch = options.BatchSize > 1
+            ? options.BatchSize
+            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
+        int commitEpoch = fileLabel.EndsWith("/link", StringComparison.Ordinal) ? 1 : 0;
+        return IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.StructuredGrammar(
+                Source, fileLabel, batch, options, reader, witnessWeight: 1.0, commitEpoch: commitEpoch),
+            options);
     }
 
     public async Task<IngestInventory?> DescribeInputAsync(

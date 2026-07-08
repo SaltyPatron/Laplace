@@ -49,7 +49,6 @@ if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
 rem Ingest batch/commit/worker counts are derived at runtime from Intel topology
 rem (CpuTopology) + RAM (IngestSizing.ResolveForSource). Do not set LAPLACE_INGEST_* here.
 
-if not defined LAPLACE_APPLY_PARTITIONS set "LAPLACE_APPLY_PARTITIONS=1"
 if not defined LAPLACE_TBB_MAX_THREADS_PER_CORE set "LAPLACE_TBB_MAX_THREADS_PER_CORE=1"
 rem MKL/TBB/native thread counts are reconciled from Intel P-core topology at CLI startup
 rem (NativeRuntimeEnv.ApplyFromTopology). Values here are fallbacks for non-CLI tools only.
