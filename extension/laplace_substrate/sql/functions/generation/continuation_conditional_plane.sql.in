@@ -1,0 +1,66 @@
+-- Finish-line Phase 3 (the conditional theorem, doc 14 §6b): the smoothed
+-- row-normalized LOG-CONDITIONAL of continuation evidence. A trained LM's
+-- logits are log P(y|prefix); the pour must factor THIS table, not affinity —
+-- P(y|x) = P(x,y)/P(x), and the division is what lets content words win their
+-- slots (glue has high joint AND high marginal; content is concentrated).
+--
+-- Counts fuse the two continuation witnesses at word grain:
+--   corpus order  : word_order (tier>2 trajectory adjacency, punctuation
+--                   included once vocab admits it)
+--   discourse     : sentence_order_word_bridge (sentence-boundary pairs)
+--   consensus mass: PRECEDES witness_count (unrefuted), so evidence folded
+--                   from every source contributes
+-- Emitted w = log((c(x,y) + k) / (c(x) + k*V)) — add-k smoothing over the
+-- vocab, so each row is a proper (log) conditional distribution up to the
+-- unseen-mass remainder. NEGATIVE values are expected and meaningful.
+CREATE OR REPLACE FUNCTION continuation_conditional_plane(
+        p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
+        p_degree_cap int DEFAULT 512)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    vsize AS (SELECT count(*)::float8 AS n FROM v),
+    corpus_pairs AS (
+        SELECT subject_id AS x, object_id AS y, w AS c
+        FROM word_order(p_vocab, p_trajs, 1)
+    ),
+    bridge_pairs AS (
+        SELECT subject_id AS x, object_id AS y, w AS c
+        FROM sentence_order_word_bridge(p_vocab, p_trajs)
+    ),
+    consensus_pairs AS (
+        SELECT c.subject_id AS x, c.object_id AS y, c.witness_count::float8 AS c
+        FROM v
+        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
+            AND c.type_id = relation_type_id('PRECEDES')
+        JOIN v vo ON vo.id = c.object_id
+    ),
+    fused AS (
+        SELECT x, y, sum(c) AS c
+        FROM (
+            SELECT * FROM corpus_pairs
+            UNION ALL SELECT * FROM bridge_pairs
+            UNION ALL SELECT * FROM consensus_pairs
+        ) u
+        GROUP BY x, y
+    ),
+    marginals AS (
+        SELECT x, sum(c) AS cx FROM fused GROUP BY x
+    ),
+    conditional AS (
+        SELECT f.x, f.y,
+               ln((f.c + p_smooth_k) / (m.cx + p_smooth_k * vs.n)) AS w,
+               row_number() OVER (PARTITION BY f.x ORDER BY f.c DESC, f.y) AS rn
+        FROM fused f
+        JOIN marginals m ON m.x = f.x
+        CROSS JOIN vsize vs
+    )
+    SELECT c.x, c.y, c.w FROM conditional c WHERE c.rn <= p_degree_cap
+    UNION ALL
+    -- per-row UNSEEN default as a NULL-object row: log(k / (cx + k*V)).
+    -- The densifier MUST use this for absent pairs — zero (= log 1) would rank
+    -- every unseen continuation above every seen one.
+    SELECT m.x, NULL::bytea, ln(p_smooth_k / (m.cx + p_smooth_k * vs.n))
+    FROM marginals m CROSS JOIN vsize vs
+$$;

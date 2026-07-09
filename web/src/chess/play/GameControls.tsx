@@ -84,6 +84,7 @@ export function GameControls(p: GameControlsProps) {
               if (!Number.isNaN(n)) p.onDepth(Math.min(12, Math.max(1, n)));
             }}
             disabled={p.busy}
+            label="Search depth"
           />
         </Field>
         <Checkbox

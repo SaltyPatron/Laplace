@@ -138,8 +138,10 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
         FROM rendered n
         WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
-          AND n.s ~ '[[:alpha:]]'          
-          AND n.s !~ '^i[0-9]+$'           
+          -- 2026-07-09 (finish-line Phase 2): the old `~ '[[:alpha:]]'` gate made
+          -- punctuation and numerals unrepresentable — no poured model could emit
+          -- a sentence boundary. Non-whitespace is content; only ILI ids stay out.
+          AND n.s !~ '^i[0-9]+$'
         ORDER BY n.s, n.pri DESC, n.weight DESC
     )
     SELECT c.entity_id, c.s, c.weight FROM clean c ORDER BY c.pri DESC, c.weight DESC LIMIT p_max

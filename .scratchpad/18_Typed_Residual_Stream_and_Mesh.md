@@ -265,6 +265,38 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
        scaling now exempts continuation operators (FoundryCommands o_proj fill).
        "Counted, not chosen" resolution: the ranks stay hand-authored as the
        knowledge prior; what gets COUNTED is which prior each intent invokes.
+  C-6  POS/SENSE/DEPREL QUERY-GRAIN AUDIT (2026-07-09, live-verified; prompted by
+       the eff_mu-head observation that the consensus's global top is annotation
+       scaffolding — IS_A 'NN'→'NOUN' at eff_mu 3214 / 1.24M witnesses):
+       CLEAN — HAS_POS objects are ONE inventory: 18 UD-upos classes end to end
+         (NOUN 4.57M subjects/22.1M witnesses … INTJ; one IDIO outlier, 27 words).
+         No Penn tags as HAS_POS objects; corpus-witnessed and usage-dominant
+         ('close': VERB 567 > ADJ 284 > ADV 61 > NOUN 53). pos_transition_plane
+         v1's single-inventory + dominant-POS assumptions HOLD as poured.
+       CLEAN — the multilingual hub is live and grain-consistent: top_synset('dog')
+         → IS_TYPED_AS WordNet_Synset (typing de-conflated, correct);
+         HAS_SYNSET_KEY '01595188-n' = POS AT HUB GRAIN (one fact, every language
+         inherits); synset_members per-sense across languages (Hund=dog-animal,
+         verfolgen=dog-chase, Sperrklinke=dog-catch); word-grain HAS_POS('Hund')
+         = NOUN×48 consistent with the hub. "dog is a noun in German" is answered
+         by evidence already ingested.
+       DEFECT (recording, watch) — the XPOS→UPOS tag map is recorded as IS_A
+         between class entities ('NN' IS_A 'NOUN'). Cross-schema correspondence
+         is CORRESPONDS_TO's job; as IS_A it (a) tops every eff_mu-ranked
+         undisciplined read, (b) reaches hypernym walks through PUNNED tokens:
+         the pour vocab contains 'IN' and 'CD' — uppercase corpus words content-
+         addressed to the SAME entities as the Penn tags. Benign for current
+         recipes (no IS_A operator poured); any IS_A/crawl consumer must
+         type-discipline first. Doc 16 hub-unification class.
+       GAP (query depth, next pour) — IS_SYNONYM_OF is MIXED GRAIN under one
+         family: synset→word co-membership spokes (multilingual) AND word→word
+         direct edges. The vocab-joined plane correctly keeps word→word only
+         (21,083 edges) but that is the WEAKER evidence — WordNet co-membership
+         synonymy is 2-hop through the synset hub and invisible to every 1-hop
+         plane. The S-stratum pour needs the derived projection: word→synset→word
+         (same lang) server-side. Same shape for hub-POS and EVOKES_FRAME:
+         the mesh's convergence points are queryable TODAY (senses/top_synset/
+         synset_members all answer) and NO poured plane consumes them yet.
 
 ================================================================================
 SECTION 7 — OPEN DESIGN QUESTIONS (next docs, not this build)

@@ -8,7 +8,66 @@ internal sealed partial class SubstrateClient
 {
     private static readonly WitnessCatalog WitnessCatalog = WitnessCatalog.Load();
 
+    // The catalog is tenant-independent substrate accounting; recomputing it per page
+    // load re-aggregated 100M+ row tables on every UI landing. One flight fills it,
+    // everyone reads it for the TTL.
+    private static readonly TimeSpan CatalogTtl = TimeSpan.FromMinutes(5);
+    private readonly SemaphoreSlim _catalogGate = new(1, 1);
+    private ExploreCatalogResponse? _catalogCache;
+    private DateTimeOffset _catalogCachedAt;
+
     public async Task<ExploreCatalogResponse> ExploreCatalogAsync(CancellationToken ct)
+    {
+        var cached = _catalogCache;
+        if (cached is not null && DateTimeOffset.UtcNow - _catalogCachedAt < CatalogTtl)
+            return cached;
+
+        if (cached is not null)
+        {
+            // Stale: serve it immediately and refresh once in the background. A cold
+            // load pays the doomed exact-aggregate budget attempts (~15s); no user
+            // request should wait on that when yesterday's counts are on hand.
+            if (_catalogGate.Wait(0))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        _catalogCache = await LoadCatalogAsync(CancellationToken.None);
+                        _catalogCachedAt = DateTimeOffset.UtcNow;
+                    }
+                    catch
+                    {
+                        // keep serving stale; the next expiry retries
+                    }
+                    finally
+                    {
+                        _catalogGate.Release();
+                    }
+                });
+            }
+
+            return cached;
+        }
+
+        await _catalogGate.WaitAsync(ct);
+        try
+        {
+            if (_catalogCache is { } refilled && DateTimeOffset.UtcNow - _catalogCachedAt < CatalogTtl)
+                return refilled;
+
+            var response = await LoadCatalogAsync(ct);
+            _catalogCache = response;
+            _catalogCachedAt = DateTimeOffset.UtcNow;
+            return response;
+        }
+        finally
+        {
+            _catalogGate.Release();
+        }
+    }
+
+    private async Task<ExploreCatalogResponse> LoadCatalogAsync(CancellationToken ct)
     {
         try
         {
@@ -22,9 +81,12 @@ internal sealed partial class SubstrateClient
                     counts.Add(new SubstrateCount(reader.GetString(0).TrimEnd(' ', '~'), reader.GetInt64(1)));
             }
 
+            // Approx variant only: the exact consensus_stats() is a minutes-long full
+            // aggregate and this is the UI landing call. The audit report is the place
+            // that attempts exactness (AuditReportAsync).
             ConsensusHealth? consensus = null;
             await using (var cmd = new NpgsqlCommand(
-                "SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM laplace.consensus_stats();", conn))
+                "SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM laplace.consensus_stats_approx();", conn))
             await using (var reader = await cmd.ExecuteReaderAsync(ct))
             {
                 if (await reader.ReadAsync(ct))
@@ -38,20 +100,20 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            long? multiSource = null;
-            await using (var cmd = new NpgsqlCommand("SELECT laplace.multi_source_entity_count();", conn))
-            {
-                var value = await cmd.ExecuteScalarAsync(ct);
-                multiSource = value is null or DBNull ? null : Convert.ToInt64(value);
-            }
-
+            var multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 5, ct);
             var topRelations = await ReadTopRelationsAsync(conn, 20, ct);
 
+            // source_counts() is a full GROUP BY over attestations plus a
+            // count(DISTINCT) join — unbounded at 135M rows. Attempt within a small
+            // budget; on timeout the stage grid still renders from the static witness
+            // catalog with zero live counts (degraded, not dead).
             var sources = new List<ExploreSourceRow>();
             var liveByKey = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
-            await using (var cmd = new NpgsqlCommand("SELECT source, evidence, content FROM laplace.source_counts();", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            try
             {
+                await using var cmd = new NpgsqlCommand("SELECT source, evidence, content FROM laplace.source_counts();", conn);
+                cmd.CommandTimeout = 10;
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
                     var key = reader.GetString(0);
@@ -65,6 +127,11 @@ internal sealed partial class SubstrateClient
                     sources.Add(row);
                     liveByKey[key] = row;
                 }
+            }
+            catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
+            {
+                sources.Clear();
+                liveByKey.Clear();
             }
 
             var stages = WitnessCatalog.BuildStages(liveByKey);

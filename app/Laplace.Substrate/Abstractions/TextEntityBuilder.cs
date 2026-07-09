@@ -16,6 +16,7 @@ public sealed class TextEntityBuilder
     public static readonly Hash128 DocumentTypeId = EntityTypeRegistry.Document;
 
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
+    public static readonly Hash128 ContainsTypeId = RelationTypeRegistry.RelationTypeId("CONTAINS");
 
     private const byte WordTier = 2;
     private const byte SentenceTier = 3;
@@ -258,13 +259,27 @@ public sealed class TextEntityBuilder
     {
         ArgumentNullException.ThrowIfNull(tree);
         var precedes = new Dictionary<(Hash128 A, Hash128 B), long>();
+        // 2026-07-09: every sentence and every word gets INDIVIDUAL occurrence
+        // evidence, not just pair participation — (sentence CONTAINS word) and
+        // (root CONTAINS sentence), aggregated. Codepoints have had property
+        // attestations from day one; words/sentences were consensus-invisible
+        // as OCCURRENCES (their mass lived only in physicalities, unfolded).
+        var contains = new Dictionary<(Hash128 A, Hash128 B), long>();
         var contentMemo = new Dictionary<Hash128, bool>();
         var content = new List<Hash128>();
+        var rootId = tree.GetNode(tree.NaturalUnitIndex()).Id;
         int n = tree.NodeCount;
         for (uint idx = 0; idx < (uint)n; idx++)
         {
             var node = tree.GetNode(idx);
             if (node.Tier != SentenceTier || node.ChildCount < 2) continue;
+
+            if (node.Id != rootId)
+            {
+                var sKey = (rootId, node.Id);
+                contains.TryGetValue(sKey, out long sc);
+                contains[sKey] = sc + 1;
+            }
 
             content.Clear();
             for (uint ci = 0; ci < node.ChildCount; ci++)
@@ -274,6 +289,12 @@ public sealed class TextEntityBuilder
                 if (child.Tier != WordTier) continue;
                 if (IsContentWord(tree, childIdx, contentMemo)) content.Add(child.Id);
             }
+            foreach (var wid in content)
+            {
+                var wKey = (node.Id, wid);
+                contains.TryGetValue(wKey, out long wc);
+                contains[wKey] = wc + 1;
+            }
             for (int i = 1; i < content.Count; i++)
             {
                 var key = (content[i - 1], content[i]);
@@ -282,13 +303,13 @@ public sealed class TextEntityBuilder
             }
         }
 
-        if (precedes.Count == 0) return ImmutableArray<AttestationRow>.Empty;
+        if (precedes.Count == 0 && contains.Count == 0) return ImmutableArray<AttestationRow>.Empty;
 
 
 
 
-        var contextId = tree.GetNode(tree.NaturalUnitIndex()).Id;
-        var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
+        var contextId = rootId;
+        var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count + contains.Count);
         foreach (var (pair, count) in precedes)
         {
             long sumScore = checked(count * Glicko2.FpScale);
@@ -296,26 +317,40 @@ public sealed class TextEntityBuilder
                 pair.A, PrecedesTypeId, pair.B, sourceId, contextId: contextId,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
+        foreach (var (pair, count) in contains)
+        {
+            long sumScore = checked(count * Glicko2.FpScale);
+            rows.Add(NativeAttestation.Aggregated(
+                pair.A, ContainsTypeId, pair.B, sourceId, contextId: contextId,
+                games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
+        }
         return rows.ToImmutable();
     }
 
+    // 2026-07-09: was HasAlphanumericLeaf — which silently dropped PUNCTUATION
+    // from every PRECEDES chain ("dog, cat" attested dog→cat; sentence-final
+    // periods and question marks were never attested by ANY text source), so no
+    // poured model could learn sentence rhythm and the walker's consensus floor
+    // had no boundary evidence. UAX29 records punctuation faithfully (it is in
+    // every trajectory); this derivation was the discard point. Only WHITESPACE
+    // is a separator — punctuation, numerals, and symbols are content.
     private static bool IsContentWord(TierTree tree, uint idx, Dictionary<Hash128, bool> memo)
     {
         var node = tree.GetNode(idx);
         if (memo.TryGetValue(node.Id, out bool cached)) return cached;
-        bool result = HasAlphanumericLeaf(tree, idx);
+        bool result = HasNonWhitespaceLeaf(tree, idx);
         memo[node.Id] = result;
         return result;
     }
 
-    private static bool HasAlphanumericLeaf(TierTree tree, uint idx)
+    private static bool HasNonWhitespaceLeaf(TierTree tree, uint idx)
     {
         var node = tree.GetNode(idx);
         if (node.Tier == 0)
             return Rune.IsValid((int)node.Atom)
-                && Rune.IsLetterOrDigit(new Rune((int)node.Atom));
+                && !Rune.IsWhiteSpace(new Rune((int)node.Atom));
         for (uint ci = 0; ci < node.ChildCount; ci++)
-            if (HasAlphanumericLeaf(tree, node.FirstChildIdx + ci)) return true;
+            if (HasNonWhitespaceLeaf(tree, node.FirstChildIdx + ci)) return true;
         return false;
     }
 }

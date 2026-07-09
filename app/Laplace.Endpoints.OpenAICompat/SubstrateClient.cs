@@ -178,27 +178,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
             ConsensusHealth? consensus = null;
             if (includeConsensus)
-            {
-                await using var cmd = new NpgsqlCommand("SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM laplace.consensus_stats();", conn);
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (await reader.ReadAsync(ct))
-                {
-                    consensus = new ConsensusHealth(
-                        EvidenceRows: reader.GetInt64(0),
-                        ConsensusRows: reader.GetInt64(1),
-                        DedupRatio: reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-                        AvgWitnesses: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
-                        MaxWitnesses: reader.IsDBNull(4) ? null : reader.GetInt64(4));
-                }
-            }
+                consensus = await ReadConsensusHealthAsync(conn, exactBudgetSeconds: 20, ct);
 
             long? multiSource = null;
             if (includeConvergence)
-            {
-                await using var cmd = new NpgsqlCommand("SELECT laplace.multi_source_entity_count();", conn);
-                var value = await cmd.ExecuteScalarAsync(ct);
-                multiSource = value is null or DBNull ? null : Convert.ToInt64(value);
-            }
+                multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 20, ct);
 
             var topRelations = await ReadTopRelationsAsync(conn, Math.Clamp(topRelationLimit, 1, 200), ct);
             return new SubstrateAuditReport(counts, consensus, multiSource, topRelations);
@@ -404,8 +388,92 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
+    /// <summary>
+    /// Exact consensus_stats() is a full count(*) over attestations plus a full aggregate
+    /// over consensus — measured minutes at 135M/124M rows live. Attempt it within a
+    /// bounded budget, then fall back to laplace.consensus_stats_approx() (planner
+    /// estimates; avg/max witnesses come back NULL — that nullness IS the approximation
+    /// signal in the contract).
+    /// </summary>
+    private static async Task<ConsensusHealth?> ReadConsensusHealthAsync(
+        NpgsqlConnection conn, int exactBudgetSeconds, CancellationToken ct)
+    {
+        foreach (var (fn, budget) in new[]
+        {
+            ("laplace.consensus_stats()", exactBudgetSeconds),
+            ("laplace.consensus_stats_approx()", DefaultCommandTimeoutSeconds)
+        })
+        {
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    $"SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM {fn};", conn);
+                cmd.CommandTimeout = budget;
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
+                {
+                    return new ConsensusHealth(
+                        EvidenceRows: reader.GetInt64(0),
+                        ConsensusRows: reader.GetInt64(1),
+                        DedupRatio: reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+                        AvgWitnesses: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+                        MaxWitnesses: reader.IsDBNull(4) ? null : reader.GetInt64(4));
+                }
+            }
+            catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
+            {
+                // exact variant blew its budget — fall through to the approx variant
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// multi_source_entity_count() groups ALL attestations by subject — unbounded at
+    /// 135M rows. Attempt within a budget; null means "not computed", which the
+    /// response contracts already tolerate. Durable fix is a calculated-layer stat
+    /// maintained post-ingest (doc 02, Issue 52).
+    /// </summary>
+    private static async Task<long?> TryReadMultiSourceCountAsync(
+        NpgsqlConnection conn, int budgetSeconds, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new NpgsqlCommand("SELECT laplace.multi_source_entity_count();", conn);
+            cmd.CommandTimeout = budgetSeconds;
+            var value = await cmd.ExecuteScalarAsync(ct);
+            return value is null or DBNull ? null : Convert.ToInt64(value);
+        }
+        catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Npgsql surfaces a tripped CommandTimeout as NpgsqlException wrapping a
+    /// TimeoutException, or as PostgresException 57014 (query_canceled) when the server
+    /// processed the cancel first. Connection-level failures are neither and must keep
+    /// propagating as substrate_unavailable.</summary>
+    private static bool IsStatementTimeout(Exception ex) => ex switch
+    {
+        PostgresException pg => pg.SqlState == PostgresErrorCodes.QueryCanceled,
+        NpgsqlException npg => npg.InnerException is TimeoutException,
+        TimeoutException => true,
+        _ => false
+    };
+
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)
     {
+        // laplace.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
+        // consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
+        // killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
+        // Same ranking law, bounded work: consensus_eff_mu_btree serves the global top-M
+        // by raw eff_mu instantly; edge_rank (salience band x eff_mu, the single readout
+        // law) then reorders only that candidate pool. Bands span 1.0..0.05, so anything
+        // that can reach the top of edge_rank is inside a generous raw-eff_mu head.
+        // Measured 0.5s live. Supersedes laplace.top_relations for API reads until a
+        // calculated-layer variant lands extension-side (doc 02, Issue 52).
         const string sql = """
             SELECT
                 encode(t.subject_id, 'hex') AS subject_id_hex,
@@ -415,8 +483,16 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 encode(t.object_id, 'hex') AS object_id_hex,
                 laplace.label_or_hex(t.object_id) AS object_label,
                 t.eff_mu,
-                t.witnesses
-            FROM laplace.top_relations(@limit, NULL) t;
+                t.witness_count AS witnesses
+            FROM (
+                SELECT c.subject_id, c.type_id, c.object_id, c.eff_mu, c.eff_mu_raw, c.witness_count
+                FROM laplace.v_consensus_resolved c
+                WHERE c.object_id IS NOT NULL
+                ORDER BY c.eff_mu_raw DESC
+                LIMIT GREATEST(5000, @limit * 25)
+            ) t
+            ORDER BY laplace.edge_rank(t.type_id, t.eff_mu_raw::numeric) DESC, t.witness_count DESC
+            LIMIT @limit;
             """;
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -681,7 +757,20 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         await _dataSource.DisposeAsync();
     }
 
-    private static string BuildConnectionString() => LaplaceInstall.PostgresConnectionString();
+    private static string BuildConnectionString()
+    {
+        // LAPLACE_DB carries `Command Timeout=0` (unbounded) for the ingest CLI, where
+        // hours-long COPY/fold statements are legitimate. A request/response API must
+        // never inherit that: a slow substrate query then hangs the HTTP client forever
+        // instead of surfacing the ExceptionEnvelopeMiddleware's 503 envelope. Bound it
+        // here; individual commands may set a tighter per-command budget.
+        var builder = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
+        if (builder.CommandTimeout <= 0 || builder.CommandTimeout > DefaultCommandTimeoutSeconds)
+            builder.CommandTimeout = DefaultCommandTimeoutSeconds;
+        return builder.ConnectionString;
+    }
+
+    internal const int DefaultCommandTimeoutSeconds = 30;
 }
 
 internal sealed class SubstrateUnavailableException : Exception

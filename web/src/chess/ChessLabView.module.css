@@ -63,6 +63,9 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md, 8px);
     background: var(--color-bg-panel-2);
+    /* <button> does not inherit color; without this the title rendered UA-default
+       black on the dark panel (contrast 1.32 — invisible; caught by axe). */
+    color: var(--color-text-primary);
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
   }

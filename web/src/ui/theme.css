@@ -6,6 +6,10 @@
     --primitive-neutral-700: #1a2235;
     --primitive-neutral-600: #243049;
     --primitive-blue-500: #4f8cff;
+    /* Fill variant: white small text on blue-500 is 3.2:1 (fails WCAG 4.5:1, caught by
+       axe). blue-600 gives 5.2:1; use it wherever the accent is a text-bearing fill.
+       blue-500 stays for borders, glows and accents on dark surfaces. */
+    --primitive-blue-600: #2563eb;
     --primitive-red-500: #ff6b6b;
     --primitive-green-500: #3ecf8e;
     --primitive-yellow-500: #e8b339;
@@ -27,6 +31,7 @@
     --color-text-primary: var(--primitive-text-100);
     --color-text-muted: var(--primitive-text-400);
     --color-accent: var(--primitive-blue-500);
+    --color-accent-fill: var(--primitive-blue-600);
     --color-error: var(--primitive-red-500);
     --color-confirm: var(--primitive-green-500);
     --color-refute: var(--primitive-red-500);
@@ -58,7 +63,7 @@
     --z-modal: 1100;
 
     /* Tier C — Component */
-    --button-primary-bg: var(--color-accent);
+    --button-primary-bg: var(--color-accent-fill);
     --button-primary-fg: #fff;
     --tooltip-bg: var(--color-bg-panel);
     --tooltip-fg: var(--color-text-primary);

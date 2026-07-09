@@ -281,6 +281,11 @@ internal static class FoundryCommands
             foreach (var (surface, weight) in sel)
             {
                 float sc = (float)(Math.Log(weight + 1.0) + 1.0);
+                // Finish-line Phase 2: punctuation/symbol pieces attach WITHOUT a
+                // leading space — emit bare only (a "▁," token would demand ' ,').
+                bool punctLike = surface.Length > 0
+                    && !surface.Any(ch => char.IsLetterOrDigit(ch));
+                if (punctLike) { pieces.Add((surface, sc, 1)); continue; }
                 pieces.Add(("▁" + surface, sc, 1));
                 if (!(surface.Length == 1 && surface[0] < 128)) { pieces.Add((surface, sc, 1)); aliases++; }
             }
@@ -982,6 +987,15 @@ internal static class FoundryCommands
         RecipeDescriptor desc, string modelDir, string outputPath, string? scopeSource = null)
     {
         Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
+        // Real wall-clock stage timing (2026-07-09: the old "complete in Xs" timed
+        // only the tensor write — a fake number for a multi-minute pour).
+        var swTotal = Stopwatch.StartNew();
+        var swStage = Stopwatch.StartNew();
+        void Stage(string label)
+        {
+            Console.WriteLine($"  [t] {label}: {swStage.Elapsed.TotalSeconds:F1}s (wall {swTotal.Elapsed.TotalSeconds:F1}s)");
+            swStage.Restart();
+        }
         CodepointPerfcache.Load(ResolveBlob());
 
         if (RejectRetiredFoundryEnvVars() is { } retired)
@@ -1034,6 +1048,7 @@ internal static class FoundryCommands
             if (moldCfg is null) return Fail("substrate vocab generation failed");
             tokenizerPath = Path.Combine(Path.GetDirectoryName(moldCfg)!, "tokenizer.json");
         }
+        Stage("vocab crawl + mold materialize");
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         int vocab = 0;
         foreach (var t in tokens) if (t.TokenId + 1 > vocab) vocab = t.TokenId + 1;
@@ -1142,8 +1157,10 @@ internal static class FoundryCommands
                 plane = FoundryExport.Normalize(await FoundryExport.ReadSentenceOrderAsync(ds, tokenSlots, cap: degreeCap));
             else if (opKey == "context")
                 plane = FoundryExport.PlaneCoo.Empty; // special-cased at head fill: trajectory plane or identity QK
+            else if (opKey is "conditional" or "conditional_pos")
+                plane = FoundryExport.PlaneCoo.Empty; // floor mode: handled at embed/lm_head construction
             else
-                return Fail($"recipe operator '{opKey}' has no plane reader — supported: relation:<TYPE>, metric:<name>, trajectory, unary, sentence_order, context. A silently-empty plane here poured dead tensors before 2026-07-08.");
+                return Fail($"recipe operator '{opKey}' has no plane reader — supported: relation:<TYPE>, metric:<name>, trajectory, unary, sentence_order, context, conditional, conditional_pos. A silently-empty plane here poured dead tensors before 2026-07-08.");
             planeByOp[opKey] = plane;
             Console.WriteLine($"  operator {opKey}: {plane.Nnz:N0} edges");
         }
@@ -1153,6 +1170,7 @@ internal static class FoundryCommands
         }
         double HeadSalience(string key) => opSalience.TryGetValue(key, out var s) ? s : 1.0;
         Console.WriteLine($"  operator planes read in {swRead.Elapsed.TotalSeconds:F1}s");
+        Stage("operator plane reads");
 
 
         var anchors = new double[vocab][];
@@ -1181,9 +1199,102 @@ internal static class FoundryCommands
         }
 
         bool coordEmbed = desc.Embed.Key == "coord";
+        bool conditionalFloor = desc.Embed.Key is "conditional" or "conditional_pos";
+        bool posFloor = desc.Embed.Key == "conditional_pos";
+        double[]? lmHeadCond = null; // V·√Σ from the conditional SVD, used when lm_head op == "conditional"
         double[] E;
         FoundryExport.BasisStats basisStats;
-        if (coordEmbed)
+        if (conditionalFloor)
+        {
+            // Finish-line Phase 3: embed/lm_head = the two factors of the smoothed
+            // LOG-CONDITIONAL table M[x,y] = log P̂(y|x). h(x)·lm(y) ≈ M[x,y] with
+            // Eckart–Young-optimal rank-d error — the poured floor IS the table.
+            // NO normalization, NO recentering, NO PE: calibration is the payload.
+            if (desc.HiddenSizeAuto)
+                return Fail("embed op 'conditional' requires an explicit hidden_size (the floor's rank IS the budget)");
+            var (condPlane, rowDefault) = await FoundryExport.ReadConditionalPlaneAsync(
+                ds, tokenSlots, vocab, trajs: FoundryDefaults.CorpusMax, cap: 512);
+            Console.WriteLine($"  conditional plane: {condPlane.Nnz:N0} log-conditional entries");
+            int kF = dModel - 1;
+            double globalDefault = Math.Log(1.0 / Math.Max(2, vocab));
+            var M = new float[(long)vocab * vocab];
+            for (int x = 0; x < vocab; x++)
+            {
+                float def = (float)(double.IsNaN(rowDefault[x]) ? globalDefault : rowDefault[x]);
+                long off = (long)x * vocab;
+                for (int y = 0; y < vocab; y++) M[off + y] = def;
+            }
+            var seen = new System.Collections.BitArray(vocab * vocab);
+            for (long e = 0; e < condPlane.Nnz; e++)
+            {
+                long idx = (long)condPlane.Rows[e] * vocab + condPlane.Cols[e];
+                M[idx] = (float)condPlane.Vals[e];
+                seen[(int)idx] = true;
+            }
+
+            if (posFloor)
+            {
+                // Phase 4 v2 (v1 add-everywhere DEGRADED the head: hits@50 0.448→0.38 —
+                // the class table is a next-word prior and re-ranking SEEN calibrated
+                // bigrams with it is C-5's intent error). Backoff form: only the UNSEEN
+                // mass gets class-differentiated, centered per source class so the
+                // default's mean doesn't move — seen calibration is untouched.
+                var (tokenClass, T, nClasses) = await FoundryExport.ReadPosCorrectionAsync(ds, tokenSlots, vocab);
+                int known = tokenClass.Count(c => c >= 0);
+                double g = FoundryDefaults.PosFloorGain;
+                var classCount = new int[nClasses];
+                foreach (int c in tokenClass) if (c >= 0) classCount[c]++;
+                var rowMean = new double[nClasses];
+                for (int cx = 0; cx < nClasses; cx++)
+                {
+                    double s = 0; long n = 0;
+                    for (int cy = 0; cy < nClasses; cy++) { s += T[cx, cy] * classCount[cy]; n += classCount[cy]; }
+                    rowMean[cx] = n > 0 ? s / n : 0.0;
+                }
+                for (int x = 0; x < vocab; x++)
+                {
+                    int cx = tokenClass[x];
+                    if (cx < 0) continue;
+                    long off = (long)x * vocab;
+                    for (int y = 0; y < vocab; y++)
+                    {
+                        int cy = tokenClass[y];
+                        if (cy >= 0 && !seen[(int)(off + y)])
+                            M[off + y] += (float)(g * (T[cx, cy] - rowMean[cx]));
+                    }
+                }
+                Console.WriteLine($"  pos floor correction (unseen-mass backoff): {nClasses} classes over {known:N0}/{vocab:N0} tokens, gain {g}");
+            }
+
+            var U = new float[(long)vocab * vocab];
+            var S = new float[vocab];
+            var Vt = new float[(long)vocab * vocab];
+            nuint outRank = 0;
+            int rcSvd;
+            unsafe
+            {
+                fixed (float* pa = M) fixed (float* pu = U) fixed (float* ps = S) fixed (float* pvt = Vt)
+                    rcSvd = SynthInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0, &outRank, pu, ps, pvt, (nuint)vocab);
+            }
+            if (rcSvd != 0) return Fail($"conditional-floor SVD failed rc={rcSvd} (vocab={vocab})");
+            int kEff = Math.Min(kF, (int)outRank);
+            E = new double[(long)vocab * dModel];
+            lmHeadCond = new double[(long)vocab * dModel];
+            for (int r = 0; r < kEff; r++)
+            {
+                double sq = Math.Sqrt(Math.Max(0f, S[r]));
+                for (int t = 0; t < vocab; t++)
+                {
+                    E[(long)t * dModel + r] = sq * U[(long)t * vocab + r];
+                    lmHeadCond[(long)t * dModel + r] = sq * Vt[(long)r * vocab + t];
+                }
+            }
+            for (int t = 0; t < vocab; t++) E[(long)t * dModel + dModel - 1] = 1.0;
+            basisStats = new FoundryExport.BasisStats(kEff, 0, 0.0);
+            Console.WriteLine($"  conditional floor: rank {kEff}/{vocab} factorization of log P̂(y|x) "
+                + $"(top σ {S[0]:F2}, σ[{kEff - 1}] {S[Math.Max(0, kEff - 1)]:F4})");
+        }
+        else if (coordEmbed)
         {
             await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
             double cs = FoundryDefaults.CoordScale;
@@ -1213,6 +1324,9 @@ internal static class FoundryCommands
         // Fix = P4a applied at the source: mean-center the CONTENT dims (remove
         // the DC; bias dim untouched — gate calibration depends on it), THEN
         // rescale rows to RMS 1. Differential signal becomes the payload.
+        // SKIPPED for the conditional floor: its rows ARE calibrated log-prob
+        // factors — any recentering or rescaling destroys the table.
+        if (!conditionalFloor)
         {
             int dC0 = dModel - 1;
             var meanRow = new double[dC0];
@@ -1247,6 +1361,7 @@ internal static class FoundryCommands
         }
         MirrorDualFormEmbeds(tokens, E, vocab, dModel);
         Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
+        Stage("basis (eigensolve + discipline)");
 
         byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
         string bridgePath = Path.Combine(Path.GetTempPath(),
@@ -1279,8 +1394,10 @@ internal static class FoundryCommands
         int kFfn = Math.Min(intermR, dModel);
         var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
         double split = Math.Pow(Math.Max(1, nLayers), -0.25);
+        // Floor pours: corrections perturb the calibrated floor, never overwrite it.
+        double floorGain = conditionalFloor ? FoundryDefaults.FloorCorrectionGain : 1.0;
         double attnScale = FoundryDefaults.AttnGain * split;
-        double layerScale = FoundryDefaults.ResidGain * split;
+        double layerScale = FoundryDefaults.ResidGain * split * floorGain;
         bool contCompile = desc.ContinuationCompile;
         double ctxQk = FoundryDefaults.CtxQk * split;
         double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
@@ -1416,9 +1533,20 @@ internal static class FoundryCommands
                 for (int i = 0; i < dModel; i++) R[to + i] *= inv;
             }
         }
-
+        Stage($"layer loop (project+factor+diffuse × {nLayers} layers)");
 
         var lmHead = new double[(long)vocab * dModel];
+        if (desc.LmHead.Key is "conditional" or "conditional_pos")
+        {
+            // Finish-line Phase 3: the calibrated V·√Σ factor from the conditional
+            // SVD IS the lm_head — no idf, no suppression, no normalization; the
+            // rows are log-probability factors and must remain so.
+            if (lmHeadCond is null)
+                return Fail("lm_head op 'conditional' requires embed op 'conditional' (the two factors come from one SVD)");
+            Array.Copy(lmHeadCond, lmHead, lmHeadCond.Length);
+            Console.WriteLine("  lm_head: conditional-floor factor (calibrated; no post-processing)");
+        }
+        else
         {
             var pl = desc.LmHead.Key == "trajectory" ? trajPlane
                    : planeByOp.TryGetValue(desc.LmHead.Key, out var lp) ? lp : FoundryExport.PlaneCoo.Empty;
@@ -1446,13 +1574,10 @@ internal static class FoundryCommands
                 long yo = (long)y * dModel, xo = (long)x * dModel;
 
 
-                // 2026-07-09: accumulate against E, not R_final — runtime h for a
-                // short prompt is E-dominated (causal attention over few tokens,
-                // damped gains), while pour-time R is the all-vocab diffusion
-                // state the runtime never visits. Readout rows must live where
-                // the query will actually be. (Measured: content words ranked
-                // 972–6081/6421 against R_final rows.)
-                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * E[xo + c];
+                // 2026-07-09 bisect: E-accumulation REVERTED to R (E variant moved
+                // content ranks only 6081→2989 and is implicated in the 15/16→5/16
+                // behavioral regression; PASS-era config uses R_final).
+                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * R[xo + c];
                 inDeg[y] += Math.Abs(w);
             }
             for (int v = 0; v < vocab; v++)
@@ -1465,16 +1590,23 @@ internal static class FoundryCommands
 
 
 
+            // Finish-line Phase 2: suppress byte rows and bare ALIASES (which have a
+            // space-led twin), but KEEP bare-only pieces — punctuation attaches
+            // without a leading space and must be emittable or sentences can't end.
+            var hasSpaceLed = new HashSet<Hash128>();
+            foreach (var t in tokens)
+                if (t.Role.HasFlag(TokenRole.LeadingSpace)) hasSpaceLed.Add(t.EntityId);
             int suppressed = 0;
             foreach (var t in tokens)
             {
                 if (t.TokenId < 0 || t.TokenId >= vocab) continue;
-                if (!(t.IsByteLevel || !t.Role.HasFlag(TokenRole.LeadingSpace))) continue;
+                bool bareAlias = !t.Role.HasFlag(TokenRole.LeadingSpace) && hasSpaceLed.Contains(t.EntityId);
+                if (!(t.IsByteLevel || bareAlias)) continue;
                 long o = (long)t.TokenId * dModel;
                 for (int c = 0; c < dModel; c++) lmHead[o + c] = 0.0;
                 suppressed++;
             }
-            Console.WriteLine($"  lm_head: suppressed {suppressed:N0} byte + bare-alias rows (space-led word targets only)");
+            Console.WriteLine($"  lm_head: suppressed {suppressed:N0} byte + bare-alias rows (bare-only pieces kept)");
 
 
 
@@ -1541,29 +1673,10 @@ internal static class FoundryCommands
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
-        // 2026-07-09 poured PairNorm: per-dim SNR weights in the (previously
-        // all-ones) norm tensors. Dims where the vocab MEAN dominates the
-        // VARIANCE carry the shared/DC mass that makes h prompt-independent
-        // (measured: cos 0.99 at depth 4); w_d = sd/sqrt(sd²+mu²) suppresses
-        // them at every layer input and before the readout — no training, no
-        // architecture change. The FFN norm keeps the bias dim at 1.0 (the
-        // banded gate's floor rides h_bias); attention/output norms suppress it.
-        var snrW = new float[dModel];
-        {
-            for (int c = 0; c < dModel; c++)
-            {
-                double mu = 0, m2 = 0;
-                for (int t = 0; t < vocab; t++) { double v = E[(long)t * dModel + c]; mu += v; m2 += v * v; }
-                mu /= vocab;
-                double var = Math.Max(0, m2 / vocab - mu * mu);
-                snrW[c] = (float)(Math.Sqrt(var) / Math.Sqrt(var + mu * mu + 1e-12));
-            }
-        }
-        void FillNorm(float[] vals, bool keepBias)
-        {
-            for (int c = 0; c < vals.Length && c < dModel; c++) vals[c] = snrW[c];
-            if (keepBias && dModel - 1 < vals.Length) vals[dModel - 1] = 1.0f;
-        }
+        // 2026-07-09 bisect: poured-PairNorm norm weights REVERTED to all-ones —
+        // shipped ungated and implicated in the 15/16→5/16 behavioral regression
+        // (with E-accumulation). The per-dim SNR idea stays documented in doc 14
+        // §6b; it may return only through a gated pour.
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -1593,10 +1706,9 @@ internal static class FoundryCommands
                         vals[(long)r * tc + c] = (float)srcE[(long)r * dModel + c];
             }
             else if (name == "model.norm.weight"
-                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal))
-                FillNorm(vals, keepBias: false);   // poured PairNorm: suppress DC dims
-            else if (name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
-                FillNorm(vals, keepBias: true);    // gate floor rides h_bias — keep it
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                Array.Fill(vals, 1.0f);
             else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
             {
                 int layerDot = name.IndexOf('.', "model.layers.".Length);
@@ -1681,8 +1793,9 @@ internal static class FoundryCommands
         SynthInterop.RecipeFree(recipeHandle);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
         long fsz = new FileInfo(outputPath).Length;
+        Stage("lm_head + tensor fill + gguf write");
         Console.WriteLine($"Mold-A-Model complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
-            + $"({fsz / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s — {opKeys.Count} distinct operators, per-head (no tiling)");
+            + $"({fsz / 1048576.0:F0} MB) in {swTotal.Elapsed.TotalSeconds:F1}s total (tensor write {sw.Elapsed.TotalSeconds:F1}s) — {opKeys.Count} distinct operators, per-head (no tiling)");
         return 0;
     }
 

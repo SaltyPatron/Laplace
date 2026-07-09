@@ -1,0 +1,66 @@
+-- Finish-line Phase 4 v1 (the syntax organ): class-transition log-conditionals,
+-- P(class(y) | class(x)), from evidence the substrate ALREADY holds — each
+-- word's dominant HAS_POS (max eff_mu across ConceptNet/OMW/Wiktionary/WordNet
+-- witnesses) joined onto the fused continuation counts. Composed into the
+-- lm_head as a log-linear correction, this is what shifts the conditional's
+-- support by grammatical slot (determiner→noun, clause→boundary) — the thing
+-- retrieval alone cannot do. v2 upgrades the class inventory to UD deprel.
+--
+-- Returns WORD-pair corrections: (x, y, log P̂(class(y)|class(x))) for vocab
+-- pairs whose classes are known — directly summable with the conditional plane.
+CREATE OR REPLACE FUNCTION pos_transition_plane(
+        p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
+        p_degree_cap int DEFAULT 512)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    -- dominant POS per vocab word: strongest unrefuted HAS_POS object
+    word_pos AS (
+        SELECT DISTINCT ON (c.subject_id)
+               c.subject_id AS wid, c.object_id AS pos
+        FROM v
+        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
+            AND c.type_id = relation_type_id('HAS_POS')
+            AND c.object_id IS NOT NULL
+        ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
+    ),
+    nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
+    -- fused word-adjacency counts (same evidence as the conditional plane)
+    pairs AS (
+        SELECT subject_id AS x, object_id AS y, w AS c
+        FROM word_order(p_vocab, p_trajs, 1)
+        UNION ALL
+        SELECT c.subject_id, c.object_id, c.witness_count::float8
+        FROM v
+        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
+            AND c.type_id = relation_type_id('PRECEDES')
+        JOIN v vo ON vo.id = c.object_id
+    ),
+    class_pairs AS (
+        SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c
+        FROM pairs p
+        JOIN word_pos wx ON wx.wid = p.x
+        JOIN word_pos wy ON wy.wid = p.y
+        GROUP BY wx.pos, wy.pos
+    ),
+    class_marginals AS (
+        SELECT px, sum(c) AS cx FROM class_pairs GROUP BY px
+    ),
+    class_conditional AS (
+        SELECT cp.px, cp.py,
+               ln((cp.c + p_smooth_k) / (cm.cx + p_smooth_k * nc.n)) AS w
+        FROM class_pairs cp
+        JOIN class_marginals cm ON cm.px = cp.px
+        CROSS JOIN nclasses nc
+    ),
+    -- project class corrections back onto word pairs (only where classes known)
+    word_corrections AS (
+        SELECT wx.wid AS x, wy.wid AS y, cc.w,
+               row_number() OVER (PARTITION BY wx.wid ORDER BY cc.w DESC, wy.wid) AS rn
+        FROM word_pos wx
+        JOIN class_conditional cc ON cc.px = wx.pos
+        JOIN word_pos wy ON wy.pos = cc.py
+    )
+    SELECT wc.x, wc.y, wc.w FROM word_corrections wc WHERE wc.rn <= p_degree_cap
+$$;
