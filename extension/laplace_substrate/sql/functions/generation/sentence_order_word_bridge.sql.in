@@ -1,0 +1,61 @@
+-- Plan Phase 4 (doc 18 §3 L-real / doc 14 C3): the DIALOGUE/discourse plane at
+-- word granularity — for each consecutive sentence pair in a tier-4 document
+-- trajectory, bridge last-in-vocab-word(s_i) -> first-in-vocab-word(s_{i+1}).
+-- Composes with the tier-2 continuation plane in the lm_head so the poured
+-- model can cross a sentence boundary instead of speaking document-internal
+-- word adjacency only.
+CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs int DEFAULT 100000)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS did, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier = 4
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT p_docs
+    ),
+    g AS (
+        SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+    ),
+    pairs AS (
+        SELECT sid AS cur, lead(sid) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g
+    ),
+    live AS (
+        SELECT DISTINCT sid FROM (
+            SELECT cur AS sid FROM pairs WHERE nxt IS NOT NULL
+            UNION ALL
+            SELECT nxt FROM pairs WHERE nxt IS NOT NULL
+        ) u
+    ),
+    sent_traj AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
+        FROM physicalities p
+        JOIN live s ON s.sid = p.entity_id
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id
+    ),
+    words AS (
+        -- in-vocab join doubles as the content filter (whitespace/punctuation
+        -- constituents are not vocab entities)
+        SELECT st.sid, tc.ordinal AS ord, tc.entity_id AS wid
+        FROM sent_traj st CROSS JOIN LATERAL laplace_trajectory_constituents(st.trajectory) tc
+        JOIN v ON v.id = tc.entity_id
+    ),
+    lastw  AS (SELECT DISTINCT ON (sid) sid, wid FROM words ORDER BY sid, ord DESC),
+    firstw AS (SELECT DISTINCT ON (sid) sid, wid FROM words ORDER BY sid, ord ASC),
+    bridged AS (
+        SELECT lw.wid AS cur, fw.wid AS nxt
+        FROM pairs pr
+        JOIN lastw lw  ON lw.sid = pr.cur
+        JOIN firstw fw ON fw.sid = pr.nxt
+        WHERE pr.nxt IS NOT NULL
+    ),
+    cnt AS (
+        SELECT cur, nxt, count(*)::float8 AS c
+        FROM bridged WHERE cur <> nxt GROUP BY cur, nxt
+    )
+    SELECT cur, nxt, c FROM cnt
+$$;

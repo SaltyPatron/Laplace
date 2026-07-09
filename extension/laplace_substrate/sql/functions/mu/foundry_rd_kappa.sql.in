@@ -1,0 +1,7 @@
+-- P5 (doc 14 / plan Phase 1): rd-uncertainty discount rate for foundry plane
+-- weights. Applied as exp(-kappa * rd_in_rating_units); rd arrives fp1e9 so
+-- callers pass rd::float8 / 1e9. 1.0 = one rating-unit of rd costs e^-1.
+CREATE OR REPLACE FUNCTION @extschema@.foundry_rd_kappa()
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT 1.0::double precision
+$$;

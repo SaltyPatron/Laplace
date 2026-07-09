@@ -1,0 +1,29 @@
+-- Plan Phase 4 (doc 18 §3): tier-3 sentence adjacency DERIVED from tier-4
+-- document trajectories. Witnessed order lives in the trajectory (doc 14 C3
+-- correction: no sentence-tier PRECEDES exists in consensus); this is the
+-- calculated view over it — word_order one tier up. Document constituents are
+-- sentences by construction (same convention as corpus_sentence_constituents_since).
+CREATE OR REPLACE FUNCTION sentence_order(p_docs int DEFAULT 100000, p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS did, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier = 4
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT p_docs
+    ),
+    g AS (
+        SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+    ),
+    bg AS (
+        SELECT sid AS cur, lead(sid, p_gap) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g
+    ),
+    cnt AS (
+        SELECT cur, nxt, count(*)::float8 AS c
+        FROM bg WHERE nxt IS NOT NULL AND cur <> nxt GROUP BY cur, nxt
+    )
+    SELECT cur, nxt, c FROM cnt
+$$;

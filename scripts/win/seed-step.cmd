@@ -156,13 +156,13 @@ if not defined STEP_SOURCE (
   exit /b 3
 )
 set "STEP_EVIDENCE="
-for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
 if not defined STEP_EVIDENCE goto verify_fail
 if "%STEP_EVIDENCE%"=="0" goto verify_fail
 echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====
 exit /b 0
 :verify_fail
-echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME%)
+echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME% @ %LAPLACE_PGHOST%)
 exit /b 3
 
 :run_model_tinyllama

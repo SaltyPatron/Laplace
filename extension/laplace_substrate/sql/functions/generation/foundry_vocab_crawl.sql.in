@@ -93,11 +93,17 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     
     
     scaffold AS (
+        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed eff_mu, rd-discounted,
+        -- witness-saturated; refuted edges excluded), not raw degree count —
+        -- frequent-but-slack pairings stop outranking rare-but-taut terms.
         SELECT f.id AS entity_id, f.d::bigint AS weight,
                row_number() OVER (ORDER BY f.d DESC) AS rn
         FROM (
-            SELECT c.subject_id AS id, count(*) AS d
-            FROM consensus c
+            SELECT c.subject_id AS id,
+                   (sum((eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::float8 / 1e9
+                        * exp(- foundry_rd_kappa() * c.rd::float8 / 1e9)
+                        * foundry_witness_sat(c.witness_count)) * 1000)::bigint AS d
+            FROM v_consensus_unrefuted c
             JOIN entities e ON e.id = c.subject_id AND e.tier = 2
             WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
             GROUP BY c.subject_id

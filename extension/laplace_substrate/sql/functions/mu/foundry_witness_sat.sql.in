@@ -1,0 +1,8 @@
+-- P5 (doc 14 / plan Phase 1): evidence-mass saturation for foundry plane
+-- weights. Michaelis-Menten with half-max at 4 witnesses: a single-witness
+-- edge carries 0.2 of its rating weight, a well-witnessed edge approaches 1.
+-- "Tension = certainty" (doc 09): witnessing tightens the strand.
+CREATE OR REPLACE FUNCTION @extschema@.foundry_witness_sat(p_wc bigint)
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_wc::double precision / (p_wc::double precision + 4.0)
+$$;

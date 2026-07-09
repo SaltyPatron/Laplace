@@ -59,12 +59,14 @@ internal static class FoundryCommands
 
 
             bool grapheme = false;
+            string? scopeSource = null; // Plan Phase 8: comma-separated source short-names
             var positional = new List<string>();
             for (int i = 1; i < args.Length; i++)
             {
                 switch (args[i])
                 {
                     case "--grapheme-floor": grapheme = true; break;
+                    case "--scope-source" when i + 1 < args.Length: scopeSource = args[++i]; break;
                     case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
                     case "--tokenizer" when i + 1 < args.Length: tokenizerDir = args[++i]; break;
                     case "--native-vocab" when i + 1 < args.Length: nativeVocab = int.Parse(args[++i]); break;
@@ -85,7 +87,8 @@ internal static class FoundryCommands
             if (string.IsNullOrEmpty(outputPath))
                 return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
-                          + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>");
+                          + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>\n"
+                          + "  [--scope-source <name,name,...>]  Build-A-Bear: pour ONLY the named sources' re-folded consensus (laplace.recipe pours)");
 
             if (nativeVocab > 0)
             {
@@ -103,7 +106,7 @@ internal static class FoundryCommands
                 if (molded is null) return 2;
                 recipePath = molded;
             }
-            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme);
+            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme, scopeSource);
         }
 
         return Fail(
@@ -244,18 +247,17 @@ internal static class FoundryCommands
             return null;
         }
 
+        // P6a (plan Phase 3): consensus BPE merges are SHIPPED, not diagnostic.
+        // The merge chains rebuild in-vocab words exactly and route OOV text onto
+        // learned pieces instead of the byte floor (the '#'-garbage class).
+        var bpeMerges = new List<string>();
+        var bpeLearned = new List<(string piece, long freq)>();
         if (!grapheme)
         {
             var sw0 = System.Diagnostics.Stopwatch.StartNew();
-            var (bpeM, bpeV) = TrainByteBpe(sel, vocabN, 3 + 256);
+            (bpeMerges, bpeLearned) = TrainByteBpe(sel, vocabN, 3 + 256);
             sw0.Stop();
-            Console.WriteLine($"  [BPE-TEST] {sel.Count:N0} words -> {bpeM.Count:N0} merges, {bpeV.Count:N0} learned pieces in {sw0.ElapsedMilliseconds}ms");
-            Console.Write("  [BPE-TEST] first 30 merges: ");
-            foreach (var m in bpeM.Take(30)) Console.Write($"({m}) ");
-            Console.WriteLine();
-            Console.Write("  [BPE-TEST] sample learned pieces: ");
-            foreach (var (p, f) in bpeV.OrderByDescending(x => x.freq).Take(20)) Console.Write($"{p}={f} ");
-            Console.WriteLine();
+            Console.WriteLine($"  bpe: {sel.Count:N0} words -> {bpeMerges.Count:N0} merges, {bpeLearned.Count:N0} learned pieces in {sw0.ElapsedMilliseconds}ms");
         }
 
 
@@ -283,6 +285,21 @@ internal static class FoundryCommands
                 if (!(surface.Length == 1 && surface[0] < 128)) { pieces.Add((surface, sc, 1)); aliases++; }
             }
             Console.WriteLine($"  dual-form: +{aliases:N0} bare-word aliases (sentence-initial match; input-only)");
+
+            // P6a: learned BPE pieces enter the vocab so OOV merge chains resolve to
+            // real tokens instead of falling to the byte floor. Stored in ▁/plain
+            // form; the GGUF writer re-encodes to the byte alphabet uniformly.
+            var present = new HashSet<string>(pieces.Select(p => p.piece), StringComparer.Ordinal);
+            int learnedAdded = 0;
+            foreach (var (piece, freq) in bpeLearned)
+            {
+                string dec = ByteDecode(piece);
+                string form = dec.StartsWith(' ') ? "▁" + dec[1..] : dec;
+                if (form.Length == 0 || !present.Add(form)) continue;
+                pieces.Add((form, (float)Math.Log(freq + 1.0), 1));
+                learnedAdded++;
+            }
+            Console.WriteLine($"  bpe: +{learnedAdded:N0} learned pieces added to vocab");
         }
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
@@ -308,11 +325,20 @@ internal static class FoundryCommands
             }
             w.WriteEndArray();
             w.WriteStartObject("model");
-            w.WriteString("type", "WordLevel");
+            w.WriteString("type", grapheme ? "WordLevel" : "BPE");
             w.WriteString("unk_token", "<unk>");
+            if (!grapheme) w.WriteBoolean("ignore_merges", true);
             w.WriteStartObject("vocab");
             for (int i = 0; i < pieces.Count; i++) w.WriteNumber(pieces[i].piece, i);
             w.WriteEndObject();
+            if (!grapheme)
+            {
+                // merges stay in the byte-encoded (Ġ) alphabet — identical to the GGUF
+                // token encoding; LlamaTokenizerParser.Canonicalize handles both forms.
+                w.WriteStartArray("merges");
+                foreach (var m in bpeMerges) w.WriteStringValue(m);
+                w.WriteEndArray();
+            }
             w.WriteEndObject();
             w.WriteEndObject();
         }
@@ -422,7 +448,7 @@ internal static class FoundryCommands
         return (merges, learned);
     }
 
-    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false)
+    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false, string? scopeSource = null)
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
@@ -436,8 +462,10 @@ internal static class FoundryCommands
         {
             var moldDesc = RecipeDescriptor.Parse(recipeText);
             string moldDir = Path.GetDirectoryName(recipePath) ?? ".";
-            return await SynthesizeMoldAModelAsync(moldDesc, moldDir, outputPath);
+            return await SynthesizeMoldAModelAsync(moldDesc, moldDir, outputPath, scopeSource);
         }
+        if (scopeSource is not null)
+            return Fail("--scope-source is supported for laplace.recipe (Mold-A-Model) pours only");
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -951,7 +979,7 @@ internal static class FoundryCommands
 
 
     private static async Task<int> SynthesizeMoldAModelAsync(
-        RecipeDescriptor desc, string modelDir, string outputPath)
+        RecipeDescriptor desc, string modelDir, string outputPath, string? scopeSource = null)
     {
         Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -1020,7 +1048,49 @@ internal static class FoundryCommands
         }
 
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        // Plan Phase 8 (Build-A-Bear): a scoped pour re-folds ONLY the named sources'
+        // attestations (laplace.scoped_consensus) into pg_temp.consensus on every
+        // physical connection — the temp table shadows laplace.consensus inside all
+        // plane functions (pg_temp resolves first), so the entire pour reads the
+        // scoped world with zero plane changes.
+        string? scopedInitSql = null;
+        if (!string.IsNullOrWhiteSpace(scopeSource))
+        {
+            var names = scopeSource.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var idHexes = new List<string>();
+            await using (var probeDs = new NpgsqlDataSourceBuilder(ConnString).Build())
+            await using (var probeConn = await probeDs.OpenConnectionAsync())
+            {
+                foreach (var name in names)
+                {
+                    await using var sc = probeConn.CreateCommand();
+                    sc.CommandText = "SELECT laplace.source_id($1)";
+                    sc.Parameters.AddWithValue(name);
+                    var sid = await sc.ExecuteScalarAsync();
+                    if (sid is byte[] sb) idHexes.Add(Convert.ToHexString(sb));
+                    else return Fail($"--scope-source: unknown source '{name}' (short names — see source registry)");
+                }
+            }
+            string arr = string.Join(",", idHexes.Select(h => $"decode('{h}','hex')"));
+            scopedInitSql =
+                "CREATE TEMP TABLE IF NOT EXISTS consensus AS " +
+                $"SELECT * FROM laplace.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
+                "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
+            Console.WriteLine($"  scope: {names.Length} source(s) — pour reads a re-folded scoped consensus ({scopeSource})");
+        }
+        var dsb = new NpgsqlDataSourceBuilder(ConnString);
+        if (scopedInitSql is not null)
+        {
+            // Pool reset (DISCARD ALL) drops temp tables while the physical
+            // connection survives — the initializer would not re-fire and later
+            // readers would silently see the UNSCOPED world (observed live:
+            // type planes scoped, adjacency unscoped in one pour).
+            dsb.ConnectionStringBuilder.NoResetOnClose = true;
+            dsb.UsePhysicalConnectionInitializer(
+                conn => { using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; c.ExecuteNonQuery(); },
+                async conn => { await using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; await c.ExecuteNonQueryAsync(); });
+        }
+        await using var ds = dsb.Build();
         int degreeCap = FoundryDefaults.LeDegree;
 
         var opKeys = new HashSet<string>(StringComparer.Ordinal);
@@ -1036,9 +1106,17 @@ internal static class FoundryCommands
         var swRead = Stopwatch.StartNew();
         var typePlanes = await FoundryExport.ReadTypePlanesAsync(ds, tokenSlots, degreeCap, neededTypes);
         var planeByType = new Dictionary<Hash128, FoundryExport.PlaneCoo>();
-        foreach (var tp in typePlanes) planeByType[tp.TypeId] = FoundryExport.Normalize(tp.Plane);
+        var rankByType = new Dictionary<Hash128, double>();
+        foreach (var tp in typePlanes)
+        {
+            planeByType[tp.TypeId] = FoundryExport.Normalize(tp.Plane);
+            rankByType[tp.TypeId] = tp.Rank;
+        }
 
         var planeByOp = new Dictionary<string, FoundryExport.PlaneCoo>(StringComparer.Ordinal);
+        // P3: the 13 salience bands as head-importance priors — relation heads' o_proj
+        // is scaled by the manifest rank (normalized to the strongest rank in use).
+        var opSalience = new Dictionary<string, double>(StringComparer.Ordinal);
         var trajPlane = FoundryExport.PlaneCoo.Empty;
         foreach (var opKey in opKeys)
         {
@@ -1047,6 +1125,7 @@ internal static class FoundryCommands
             {
                 var tid = RelationTypeRegistry.RelationTypeId(opKey["relation:".Length..]);
                 plane = planeByType.TryGetValue(tid, out var p) ? p : FoundryExport.PlaneCoo.Empty;
+                if (rankByType.TryGetValue(tid, out var rank) && rank > 0) opSalience[opKey] = rank;
             }
             else if (opKey.StartsWith("metric:", StringComparison.Ordinal))
                 plane = FoundryExport.Normalize(await FoundryExport.ReadMetricEdgesAsync(
@@ -1059,11 +1138,20 @@ internal static class FoundryCommands
             }
             else if (opKey == "unary")
                 plane = FoundryExport.Normalize(await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
+            else if (opKey == "sentence_order")
+                plane = FoundryExport.Normalize(await FoundryExport.ReadSentenceOrderAsync(ds, tokenSlots, cap: degreeCap));
+            else if (opKey == "context")
+                plane = FoundryExport.PlaneCoo.Empty; // special-cased at head fill: trajectory plane or identity QK
             else
-                plane = FoundryExport.PlaneCoo.Empty;
+                return Fail($"recipe operator '{opKey}' has no plane reader — supported: relation:<TYPE>, metric:<name>, trajectory, unary, sentence_order, context. A silently-empty plane here poured dead tensors before 2026-07-08.");
             planeByOp[opKey] = plane;
             Console.WriteLine($"  operator {opKey}: {plane.Nnz:N0} edges");
         }
+        {
+            double maxRank = opSalience.Count > 0 ? opSalience.Values.Max() : 1.0;
+            foreach (var k in opSalience.Keys.ToList()) opSalience[k] /= maxRank;
+        }
+        double HeadSalience(string key) => opSalience.TryGetValue(key, out var s) ? s : 1.0;
         Console.WriteLine($"  operator planes read in {swRead.Elapsed.TotalSeconds:F1}s");
 
 
@@ -1073,7 +1161,9 @@ internal static class FoundryCommands
             if (t.TokenId < 0 || t.TokenId >= vocab || !t.HasContentCoord) continue;
             anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
         }
-        var unionGraph = FoundryExport.Union(planeByOp.Values.ToArray());
+        // P5 split: basis affinity must be nonnegative (Laplacian eigenmap); operator
+        // planes stay signed in planeByOp so refutation reaches attention as negative weight.
+        var unionGraph = FoundryExport.Union(planeByOp.Values.Select(FoundryExport.PositivePart).ToArray());
         if (unionGraph.Nnz == 0) return Fail("no consensus over this vocab for any recipe operator — ingest content first");
 
         int dModel = moldDim;
@@ -1110,7 +1200,50 @@ internal static class FoundryCommands
         }
         else
         {
-            E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out basisStats);
+            var hilbertKeys = await FoundryExport.FillHilbertKeysAsync(ds, tokenSlots, vocab);
+            E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out basisStats,
+                hilbertKeys: hilbertKeys);
+        }
+        // 2026-07-08/09 embedding discipline (two measured defects, one block):
+        //   scale mismatch — unit-norm rows (~1.5) sat 10× below block outputs
+        //     (RMSNorm scale ~sqrt(d)); token identity drowned 25:1;
+        //   shared mass — cos(dog,water)=0.86 AT THE EMBED (bias dim alone ≈44%
+        //     of each row after rescale; spectral smoothness adds the rest), so
+        //     every dot product starts mostly shared and layers smooth to 0.99.
+        // Fix = P4a applied at the source: mean-center the CONTENT dims (remove
+        // the DC; bias dim untouched — gate calibration depends on it), THEN
+        // rescale rows to RMS 1. Differential signal becomes the payload.
+        {
+            int dC0 = dModel - 1;
+            var meanRow = new double[dC0];
+            int live = 0;
+            for (int t = 0; t < vocab; t++)
+            {
+                long off = (long)t * dModel;
+                double n2 = 0;
+                for (int c = 0; c < dC0; c++) n2 += E[off + c] * E[off + c];
+                if (n2 <= 1e-24) continue;
+                for (int c = 0; c < dC0; c++) meanRow[c] += E[off + c];
+                live++;
+            }
+            if (live > 1) for (int c = 0; c < dC0; c++) meanRow[c] /= live;
+            for (int t = 0; t < vocab; t++)
+            {
+                long off = (long)t * dModel;
+                double n2 = 0;
+                for (int c = 0; c < dC0; c++) n2 += E[off + c] * E[off + c];
+                if (n2 <= 1e-24) continue;
+                for (int c = 0; c < dC0; c++) E[off + c] -= meanRow[c];
+            }
+            for (int t = 0; t < vocab; t++)
+            {
+                long off = (long)t * dModel;
+                double n2 = 0;
+                for (int c = 0; c < dModel; c++) { double v = E[off + c]; n2 += v * v; }
+                if (n2 <= 1e-24) continue;
+                double scale = Math.Sqrt(dModel / n2);
+                for (int c = 0; c < dModel; c++) E[off + c] *= scale;
+            }
         }
         MirrorDualFormEmbeds(tokens, E, vocab, dModel);
         Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
@@ -1153,6 +1286,17 @@ internal static class FoundryCommands
         double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
         double OpResidScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : layerScale;
 
+        // Plan Phase 6 (doc 14 P2): highway band membership drives the FFN gate.
+        // Centroids are computed per layer from that layer's INPUT representation.
+        if (!HighwayPerfcache.IsLoaded)
+        {
+            try { HighwayPerfcache.LoadDefault(); }
+            catch (Exception ex) { Console.WriteLine($"  (highway perfcache unavailable — banded gate falls back to constant: {ex.Message})"); }
+        }
+        var highwayMasks = await FoundryExport.FillHighwayMasksAsync(ds, tokenSlots, vocab);
+        const int highwayBands = 13; // salience bands (relation_types.toml [ranks])
+        var gateCentroids = new List<double[]?[]>(nLayers);
+
         var R = (double[])E.Clone();
         var fAttnL = new List<Dictionary<string, FoundryExport.Factors>>(nLayers);
         var fOvL = new List<Dictionary<string, FoundryExport.Factors>>(nLayers);
@@ -1160,6 +1304,35 @@ internal static class FoundryCommands
         const double normEps = 1e-6;
         for (int li = 0; li < nLayers; li++)
         {
+            // Phase 6: band centroids from this layer's input representation R.
+            var cents = new double[]?[highwayBands];
+            if (HighwayPerfcache.IsLoaded)
+            {
+                for (int b = 0; b < highwayBands; b++)
+                {
+                    var bm = HighwayPerfcache.BandMask((byte)b);
+                    if (bm.IsZero) continue;
+                    var acc = new double[dModel];
+                    int members = 0;
+                    for (int t = 0; t < vocab; t++)
+                    {
+                        if ((highwayMasks[t] & bm).IsZero) continue;
+                        long to = (long)t * dModel;
+                        for (int i = 0; i < dModel - 1; i++) acc[i] += R[to + i];
+                        members++;
+                    }
+                    if (members == 0) continue;
+                    double n2 = 0;
+                    for (int i = 0; i < dModel - 1; i++) n2 += acc[i] * acc[i];
+                    if (n2 <= 1e-24) continue;
+                    double inv = 1.0 / Math.Sqrt(n2);
+                    for (int i = 0; i < dModel - 1; i++) acc[i] *= inv;
+                    acc[dModel - 1] = 0.0;
+                    cents[b] = acc;
+                }
+            }
+            gateCentroids.Add(cents);
+
             var lyr = desc.Layers[li];
             var fa = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
             var fo = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
@@ -1208,8 +1381,31 @@ internal static class FoundryCommands
                 fo["context"] = FoundryExport.Factor(ctxResid, dModel, headDim, relTol, transpose: true);
             }
 
+            // P3 (doc 14 M2 write-collision): orthogonalize the layer's head OUTPUT
+            // bases against each other so each head owns a disjoint residual slice.
+            FoundryExport.BlockOrthonormalizeLeft(
+                lyr.Heads.Where(h => h.Key != "context").Select(h => h.Key).Distinct().ToList(), fo, dModel);
+
             fAttnL.Add(fa); fOvL.Add(fo); fFfnL.Add(ff);
 
+            // P4a (doc 14 M3 oversmoothing): recenter each dimension of the update
+            // across the vocab before the norm — removes the DC/hub component the
+            // summed diffusion power-iterates toward (mean-subtraction = the
+            // Fiedler recentring; RMSNorm below controls norm, not diversity).
+            {
+                var colMean = new double[dModel];
+                for (int t = 0; t < vocab; t++)
+                {
+                    long to = (long)t * dModel;
+                    for (int i = 0; i < dModel; i++) colMean[i] += update[to + i];
+                }
+                for (int i = 0; i < dModel; i++) colMean[i] /= vocab;
+                System.Threading.Tasks.Parallel.For(0, vocab, t =>
+                {
+                    long to = (long)t * dModel;
+                    for (int i = 0; i < dModel; i++) update[to + i] -= colMean[i];
+                });
+            }
 
             for (int t = 0; t < vocab; t++)
             {
@@ -1226,6 +1422,20 @@ internal static class FoundryCommands
         {
             var pl = desc.LmHead.Key == "trajectory" ? trajPlane
                    : planeByOp.TryGetValue(desc.LmHead.Key, out var lp) ? lp : FoundryExport.PlaneCoo.Empty;
+            // Plan Phase 4 (doc 14 C3): compose the tier-2 continuation plane with
+            // the tier-3 sentence-boundary bridge so the lm_head can cross sentence
+            // boundaries (discourse) instead of speaking word adjacency only.
+            if (desc.LmHead.Key == "trajectory")
+            {
+                var bridge = planeByOp.TryGetValue("sentence_order", out var sb) && sb.Nnz > 0
+                    ? sb
+                    : FoundryExport.Normalize(await FoundryExport.ReadSentenceOrderAsync(ds, tokenSlots, cap: degreeCap));
+                if (bridge.Nnz > 0)
+                {
+                    pl = FoundryExport.Union(pl, bridge);
+                    Console.WriteLine($"  lm_head: trajectory plane + sentence_order bridge ({bridge.Nnz:N0} boundary edges)");
+                }
+            }
             int dC = dModel - 1;
             var inDeg = new double[vocab];
             for (long e2 = 0; e2 < pl.Nnz; e2++)
@@ -1236,7 +1446,13 @@ internal static class FoundryCommands
                 long yo = (long)y * dModel, xo = (long)x * dModel;
 
 
-                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * R[xo + c];
+                // 2026-07-09: accumulate against E, not R_final — runtime h for a
+                // short prompt is E-dominated (causal attention over few tokens,
+                // damped gains), while pour-time R is the all-vocab diffusion
+                // state the runtime never visits. Readout rows must live where
+                // the query will actually be. (Measured: content words ranked
+                // 972–6081/6421 against R_final rows.)
+                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * E[xo + c];
                 inDeg[y] += Math.Abs(w);
             }
             for (int v = 0; v < vocab; v++)
@@ -1264,14 +1480,58 @@ internal static class FoundryCommands
 
 
 
+            // 2026-07-08 readout calibration (two failures, one lesson):
+            //   unit-norm rows  → 1-edge and 500-edge rows become identical unit
+            //                     vectors; single-hub-source tokens tie exactly
+            //                     (flat +11.328 plateau observed);
+            //   mass-saturated  → rewards promiscuity; "for" collapses everything
+            //                     (hub share 1.0 observed);
+            //   idf-mean, raw   → norm variance again dominates cos ("moment" hub;
+            //                     full-logit-vector corr 1.0 = norm-profile artifact).
+            // Law: DIRECTION carries the ranking (unit rows); evidence mass may only
+            // break ties (small multiplicative bonus), never set magnitude.
+            // 2026-07-09 addendum (mold-d "Agent/Theme" hub finding): the DC/hub
+            // component re-emerges at every altitude it isn't explicitly removed
+            // from — P4a recentering applies to the READOUT too. Subtract the mean
+            // row before unit-norm so cos ranks by DIFFERENTIAL direction; hub rows
+            // (≈ the DC itself) collapse to near-zero and stop winning every prompt.
+            // 2026-07-09: coherence-norm (pre-center norm scaling) REVERTED — it
+            // regressed the behavioral gate 15/16 → 5/16 ("greater" loops; gated
+            // live). PASS-era readout restored: center, then unit-norm + mass
+            // tie-break. The crosstalk residue is a row-GEOMETRY limit (doc 14
+            // §6b) — readout scaling variants cannot fix it; stop trying.
+            {
+                var meanRow = new double[dC];
+                int live = 0;
+                for (int v = 0; v < vocab; v++)
+                {
+                    long off = (long)v * dModel;
+                    double n2 = 0;
+                    for (int c = 0; c < dC; c++) n2 += lmHead[off + c] * lmHead[off + c];
+                    if (n2 <= 1e-24) continue;
+                    for (int c = 0; c < dC; c++) meanRow[c] += lmHead[off + c];
+                    live++;
+                }
+                if (live > 1)
+                    for (int c = 0; c < dC; c++) meanRow[c] /= live;
+                for (int v = 0; v < vocab; v++)
+                {
+                    long off = (long)v * dModel;
+                    double n2 = 0;
+                    for (int c = 0; c < dC; c++) n2 += lmHead[off + c] * lmHead[off + c];
+                    if (n2 <= 1e-24) continue;
+                    for (int c = 0; c < dC; c++) lmHead[off + c] -= meanRow[c];
+                }
+            }
             for (int v = 0; v < vocab; v++)
             {
                 long off = (long)v * dModel;
                 double n2 = 0;
                 for (int c = 0; c < dC; c++) { double t = lmHead[off + c]; n2 += t * t; }
                 if (n2 <= 1e-24) continue;
-                double inv = 1.0 / Math.Sqrt(n2);
-                for (int c = 0; c < dC; c++) lmHead[off + c] *= inv;
+                double mass = inDeg[v];
+                double scale = (1.0 + 0.1 * mass / (mass + 4.0)) / Math.Sqrt(n2);
+                for (int c = 0; c < dC; c++) lmHead[off + c] *= scale;
             }
         }
 
@@ -1280,6 +1540,30 @@ internal static class FoundryCommands
         double gateZ = FoundryDefaults.GateZ;
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
+
+        // 2026-07-09 poured PairNorm: per-dim SNR weights in the (previously
+        // all-ones) norm tensors. Dims where the vocab MEAN dominates the
+        // VARIANCE carry the shared/DC mass that makes h prompt-independent
+        // (measured: cos 0.99 at depth 4); w_d = sd/sqrt(sd²+mu²) suppresses
+        // them at every layer input and before the readout — no training, no
+        // architecture change. The FFN norm keeps the bias dim at 1.0 (the
+        // banded gate's floor rides h_bias); attention/output norms suppress it.
+        var snrW = new float[dModel];
+        {
+            for (int c = 0; c < dModel; c++)
+            {
+                double mu = 0, m2 = 0;
+                for (int t = 0; t < vocab; t++) { double v = E[(long)t * dModel + c]; mu += v; m2 += v * v; }
+                mu /= vocab;
+                double var = Math.Max(0, m2 / vocab - mu * mu);
+                snrW[c] = (float)(Math.Sqrt(var) / Math.Sqrt(var + mu * mu + 1e-12));
+            }
+        }
+        void FillNorm(float[] vals, bool keepBias)
+        {
+            for (int c = 0; c < vals.Length && c < dModel; c++) vals[c] = snrW[c];
+            if (keepBias && dModel - 1 < vals.Length) vals[dModel - 1] = 1.0f;
+        }
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -1309,9 +1593,10 @@ internal static class FoundryCommands
                         vals[(long)r * tc + c] = (float)srcE[(long)r * dModel + c];
             }
             else if (name == "model.norm.weight"
-                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
-                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
-                Array.Fill(vals, 1.0f);
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal))
+                FillNorm(vals, keepBias: false);   // poured PairNorm: suppress DC dims
+            else if (name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                FillNorm(vals, keepBias: true);    // gate floor rides h_bias — keep it
             else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
             {
                 int layerDot = name.IndexOf('.', "model.layers.".Length);
@@ -1328,7 +1613,8 @@ internal static class FoundryCommands
                                 FoundryExport.FillHead(vals, tr, tc, h, headDim, ctxQ, ctxQk);
                             else if (key == "context")
                                 FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
-                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
+                            // rotary-pair-0 skip: content operators stay out of the always-rotating plane
+                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s, skipRotaryPair0: FoundryDefaults.DisableRope); }
                         }
                         break;
                     case "self_attn.k_proj.weight":
@@ -1339,7 +1625,8 @@ internal static class FoundryCommands
                                 FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, ctxK, ctxQk);
                             else if (key == "context")
                                 FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
-                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
+                            // same skip mapping as q_proj — Q/K components must stay paired
+                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s, skipRotaryPair0: FoundryDefaults.DisableRope); }
                         }
                         break;
                     case "self_attn.v_proj.weight":
@@ -1361,10 +1648,17 @@ internal static class FoundryCommands
                                 FoundryExport.FillColsHead(vals, tr, tc, h, headDim, ctxO, layerScale);
                             else if (key == "context")
                                 FoundryExport.FillColsHeadIdentity(vals, tr, tc, h, headDim);
-                            else { double s = OpResidScale(key); if (s > 0) FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
+                            // P3: salience rank scales each head's write-back — but ONLY for
+                            // knowledge-intent heads. Phase-R ablation (2026-07-08): manifest
+                            // ranks hit 0.000 on next-word intent vs 0.889 without — the rank
+                            // table is a knowledge prior and must not suppress continuation ops.
+                            else { double s = OpResidScale(key) * (FoundryExport.IsContinuationOperator(key) ? 1.0 : HeadSalience(key)); if (s > 0) FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
                         }
                         break;
-                    case "mlp.gate_proj.weight": if (OpResidScale(layer.Ffn.Key) > 0) FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                    // Phase 6 (kills M1): content-dependent gate — band-block rows keyed
+                    // on salience-band centroids; upGain stays as CALIBRATION (aligned
+                    // token ≈ 1.0×, misaligned ≈ silu(floor)/silu(gateZ) ≈ 0.05×).
+                    case "mlp.gate_proj.weight": if (OpResidScale(layer.Ffn.Key) > 0) FoundryExport.FillGateBanded(vals, tr, tc, gateCentroids[layerIdx], gateZ, 0.5); break;
                     case "mlp.up_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillRowsRight(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s * upGain); } break;
                     case "mlp.down_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillCols(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s); } break;
                     default: SynthInterop.GgufWriterFree(gguf); return Fail($"Mold-A-Model: undefined tensor '{name}'");
@@ -1535,6 +1829,52 @@ internal static class FoundryCommands
     }
     private static int ParseByteToken(string p) => Convert.ToInt32(p.Substring(3, 2), 16);
 
+    /// Raw model.merges strings from a tokenizer.json ("A B" pairs, byte-encoded
+    /// alphabet, order = merge rank). Empty list when absent.
+    private static List<string> ReadTokenizerMerges(string tokenizerJsonPath)
+    {
+        var merges = new List<string>();
+        if (!File.Exists(tokenizerJsonPath)) return merges;
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(tokenizerJsonPath));
+        if (!doc.RootElement.TryGetProperty("model", out var model)
+            || !model.TryGetProperty("merges", out var arr)
+            || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+            return merges;
+        foreach (var el in arr.EnumerateArray())
+        {
+            if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var s = el.GetString();
+                if (!string.IsNullOrEmpty(s)) merges.Add(s);
+            }
+            else if (el.ValueKind == System.Text.Json.JsonValueKind.Array && el.GetArrayLength() == 2)
+            {
+                var l = el[0].GetString(); var r = el[1].GetString();
+                if (!string.IsNullOrEmpty(l) && !string.IsNullOrEmpty(r)) merges.Add(l + " " + r);
+            }
+        }
+        return merges;
+    }
+
+    private static readonly Dictionary<char, byte> UnicodeToByte = BuildUnicodeToByte();
+    private static Dictionary<char, byte> BuildUnicodeToByte()
+    {
+        var inv = new Dictionary<char, byte>(256);
+        for (int b = 0; b < 256; b++) inv[ByteToUnicode[b]] = (byte)b;
+        return inv;
+    }
+    private static string ByteDecode(string s)
+    {
+        var bytes = new byte[s.Length];
+        int n = 0;
+        foreach (var c in s)
+        {
+            if (!UnicodeToByte.TryGetValue(c, out var b)) return s;
+            bytes[n++] = b;
+        }
+        return Encoding.UTF8.GetString(bytes, 0, n);
+    }
+
     private static void WriteGgufMetadata(
         IntPtr gguf,
         LlamaRecipeExtractor.RecipeInfo recipe,
@@ -1552,7 +1892,11 @@ internal static class FoundryCommands
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count_kv", (uint)recipe.NumKvHeads);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.vocab_size", (uint)recipe.VocabSize);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", (float)recipe.RmsNormEps);
-        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base", (float)recipe.RopeTheta);
+        // Phase 0 rope-probe verdict (2026-07-08): RoPE corrupts poured content-QK.
+        // Huge freq_base flattens rotary pairs j>=1; pair 0 rotates regardless
+        // (~2/headDim residual exposure, re-probed per pour).
+        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",
+            FoundryDefaults.DisableRope ? 1e9f : (float)recipe.RopeTheta);
 
 
         uint bosId = 1, eosId = 2;
@@ -1639,23 +1983,30 @@ internal static class FoundryCommands
         }
         if (byteBpe)
         {
-
-
-
-            var mseen = new HashSet<string>(); var mlist = new List<string>();
-            for (int i = 0; i < n; i++)
+            // P6a: prefer the TRAINED consensus merges from tokenizer.json (real BPE
+            // chains that rebuild multi-char pieces). The char-bigram reconstruction
+            // below cannot chain past two characters and is kept only as a fallback
+            // for molds whose tokenizer.json carries no merges.
+            var mlist = ReadTokenizerMerges(Path.Combine(modelDir, "tokenizer.json"));
+            if (mlist.Count > 0)
+                Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} trained merges from tokenizer.json");
+            else
             {
-                if (types[i] != 1) continue;
-                string pc = pieces[i];
-                for (int k = 0; k + 1 < pc.Length; k++)
+                var mseen = new HashSet<string>();
+                for (int i = 0; i < n; i++)
                 {
-                    string m = pc[k] + " " + pc[k + 1];
-                    if (mseen.Add(m)) mlist.Add(m);
+                    if (types[i] != 1) continue;
+                    string pc = pieces[i];
+                    for (int k = 0; k + 1 < pc.Length; k++)
+                    {
+                        string m = pc[k] + " " + pc[k + 1];
+                        if (mseen.Add(m)) mlist.Add(m);
+                    }
                 }
+                Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} reconstructed bigram merges (no trained merges found)");
             }
             byte[] mp = PackStrings(mlist.ToArray());
             unsafe { fixed (byte* p = mp) SynthInterop.GgufWriterAddMetadataStrArrayPacked(gguf, "tokenizer.ggml.merges", p, (nuint)mp.Length, (nuint)mlist.Count); }
-            Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} merges (ignore_merges: words tokenize direct)");
         }
 
         string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");
