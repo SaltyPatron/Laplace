@@ -88,7 +88,13 @@ M3. THE LAYER UPDATE IS POWER ITERATION TOWARD THE HUB EIGENVECTOR.
     every-layer). RMSNorm controls norm, not DIVERSITY; nothing in the loop
     preserves pairwise separation. → Prescription P4.
 
-M4. THE BASIS ITSELF IS HUB-DOMINATED FROM STEP ONE.
+M4. [CORRECTION 2026-07-08 — STALE, verified against code (doc 18 §6 C-1): the live
+    default basis IS the normalized-Laplacian eigenmap (eigenmaps.cpp:56, Spectra low
+    eigenvectors, trivial vector dropped); BuildBasisAffinity raw-SVD is dead code
+    (affRaw hardcoded null), and hidden='auto' spectral-rank sizing IS implemented
+    (FoundryCommands.cs:1080-1091). P1 is effectively done. Text below preserved as
+    originally written.]
+    THE BASIS ITSELF IS HUB-DOMINATED FROM STEP ONE.
     BuildBasisAffinity does raw SVD of the summed affinity A. The top singular
     directions of an UN-normalized affinity track degree — hubs ("person",
     "them") own the leading coordinates of every token's embedding before any
@@ -141,11 +147,15 @@ C2. NO REAL SEQUENCE MACHINERY: the only positional signal is the identity
     position → sequence PE). Without them, prefix mixing cannot represent order
     — no discourse state, no anaphora, no "what did you just say".
 C3. THE LM_HEAD SPEAKS DOCUMENT-ADJACENCY, NOT DIALOGUE. One word-tier PRECEDES
-    plane. The substrate HOLDS conversational structure the pour never reads:
-    OpenSubtitles consecutive-turn structure and Tatoeba sentence pairs at
-    tier-3 — a sentence-level turn/response plane is sitting in consensus,
-    unpoured. A conversational lm_head = completion operator over TIER-3
-    PRECEDES/response edges composed with the tier-2 continuation plane.
+    plane. [CORRECTION 2026-07-08 (doc 18 §6 C-2): the claim that a turn/response
+    plane "is sitting in consensus, unpoured" is WRONG. OpenSubtitles emits ONLY
+    cross-language IS_TRANSLATION_OF line pairs (OpenSubtitlesDecomposer.cs:55-57);
+    Tatoeba only translations; no sentence→sentence PRECEDES exists anywhere in
+    consensus. Sentence ORDER survives in tier-4 document trajectories, so the
+    dialogue plane is a CALCULATED plane over witnessed trajectories
+    (sentence_order — remediation plan Phase 4), not an unpoured consensus asset.]
+    A conversational lm_head = completion operator over a TIER-3 sentence-order
+    bridge composed with the tier-2 continuation plane.
 C4. NO CONDITIONING: the serving path converses because recall_*_response does
     intent routing + templated realization server-side. The GGUF gets no
     analogue of intent, persona, or scope. The mold-native mechanism exists on
@@ -279,6 +289,135 @@ this is the current cost of "regenerate, never backfill".
   - MERGE_CONFLICT ~440e/~240p at EVERY run start: the bootstrap working set
     re-stages canonical vocab rows that are always present (~280ms/run probe).
     Cosmetic but noisy — a bootstrap-presence shortcircuit would silence it.
+
+================================================================================
+SECTION 6b — 2026-07-08 REMEDIATION EXECUTION LOG (plan wild-orbiting-shamir)
+================================================================================
+Landed in code this session (extension 4165d6ab732d4d41 installed + ALTER'd; CLI
+rebuilt; all pours = Path A via laplace.recipe, d256/L2/H4, vocab 1500+BPE):
+  P5   Glicko-complete plane weights: signed neutral-centered eff_mu ×
+       exp(−rd) × witness_sat(wc/(wc+4)) in consensus_type_plane/adjacency/
+       entity_relation_plane/layer_plane(_masked); abs(w) degree-cap ordering;
+       basis union clamped nonneg client-side (FoundryExport.PositivePart).
+       New constants functions/mu/foundry_rd_kappa + foundry_witness_sat.
+  P4a  column-wise mean-subtraction on the pour-loop update (pre-RMSNorm).
+  P3   block Gram-Schmidt across head O-bases per layer; native QR rc=-4 on
+       collinear factors → managed MGS fallback zeroes overlap (measured:
+       15/192 directions collinear = M2 observed); o_proj scaled by salience.
+  P6a  trained byte-BPE merges SHIPPED (tokenizer.json type=BPE ignore_merges +
+       GGUF tokenizer.ggml.merges from trained chains, not bigram reconstruction;
+       +554 learned pieces enter vocab). 3b: foundry_vocab_crawl scaffold lane
+       ranks by consensus tension, not degree count.
+  P4b' sentence_order + sentence_order_word_bridge SQL planes (tier-4 trajectory
+       derived; 597 pairs / 60 in-vocab bridge edges on this doc corpus); lm_head
+       composes trajectory + bridge; opKey sentence_order recipe-addressable.
+  P7   hilbert content-PE: 8 reserved trailing dims (reserve BEFORE spectrum or
+       full-rank K leaves 0 dims — hit live), scale 0.25, big-endian bytes.
+  P2   FillGateBanded: 13 salience-band blocks, per-layer band centroids from
+       that layer's input R, silu floor 0.5 logit; membership DERIVED from
+       consensus participation via perfcache MaskForRelationType because
+       entities.highway_mask is 0-populated on this DB generation (live finding).
+  RoPE VERDICT: CORRUPTS (191% drift). freq_base=1e9 alone insufficient — rotary
+       pair 0 rotates at frequency 1 regardless of theta; fix = freq_base 1e9 +
+       rotary-pair-0 component skip in Q/K fills (Q,K same mapping). Verified:
+       relation heads 0.0000 drift at all gaps; context head rotates BY DESIGN
+       (recency kernel); rope-probe.py gates on median head drift.
+  Unknown opKeys now FAIL the pour loudly (silent empty planes poured dead
+       tensors before).
+FORWARD-PASS DEBUG CHAIN (each verified by oracle, in order):
+  F1 flat +11.328 logit plateau: unit-norm lm_head rows make single-hub-source
+     tokens IDENTICAL unit vectors.
+  F2 mass-saturated rows: "for" hub collapse share 1.0 (promiscuity rewarded).
+  F3 raw idf-mean rows: "moment" hub — row-norm variance dominates cos; NOTE
+     full-logit-vector correlation 1.0 is a NORM-PROFILE ARTIFACT, not a
+     prompt-independence proof; compare top-k rankings instead.
+  F4 prompt-independence root causes: (a) embed rows unit-norm (~1.5) vs block
+     outputs at RMSNorm scale (~16) — token drowned 25:1 → embed rescaled to
+     row RMS 1; (b) factored operators effectively RANK-1 (V row norms 0.841 vs
+     0.029 = 29:1; ffn_up 47:1) — sqrt(s/s0) crushes sub-dominant structure →
+     FactorSpectrumAlpha 0.25 (each side (s/s0)^0.125). M3 lives in the OPERATOR
+     spectrum, not only the pour loop.
+  READOUT LAW (four experiments): direction carries ranking (unit rows);
+     evidence mass only breaks ties (×(1+0.1·sat(mass))), never sets magnitude.
+RESULT: behavioral 0/16 (baseline Path B, "neither" mono-collapse) → 14/16
+  content hit-rate 0.875 with per-prompt distinct rankings; remaining FAIL =
+  greedy-decode function-word attractor ("for" share 0.56, hub detector
+  correctly refuses). Function words ARE corpus-attested continuations; the
+  residue is decode policy + composition depth, i.e. P10 territory.
+DEPTH-4 CONTROLLED COMPARISON (same recipe, one variable — the day's second
+  decisive result):
+  mold-b (L4/H8/d512, compile=full):          "Obj" mono-collapse, 0/16.
+  mold-c (L4/H8/d512, compile=continuation):  16/16 content hits, pass rate 1.0,
+    per-prompt ordering variation; hub detector still flags "the" share 0.69
+    (hits ride glue words — determiners ARE attested PRECEDES continuations, so
+    the next quality bar is content-WORD hits = P10's depth-k metric).
+  VERDICT: depth composes (continuation routing survives 4 layers with the
+  2026-07-08 discipline fixes); SEMANTIC heads writing into the shared residual
+  are the mash vector. Doc 18's typed-stratum allocation is the prerequisite
+  for full-compile pours — now an experimental result, not a design argument.
+  Harness decode = greedy + repeat-penalty 1.4 (deterministic, loop-suppressed;
+  hub detector still armed).
+PHASE R RESOLVED (verdict + numbers in doc 18 §6 C-5): rank ablation = perfect
+  double dissociation (next-word: manifest 0.000 vs eff_mu 0.889; knowledge:
+  manifest 0.556 vs eff_mu 0.056). Ranks = knowledge-intent prior; defect =
+  universal application. Fix = intent-conditional band weighting (15 C-b);
+  export-side salience scaling now exempts continuation operators.
+PHASE 8 VERIFIED (differential gate PASSED): --scope-source WordNetDecomposer →
+  unary 397 edges (vs 112,501 unscoped; WordNet's rare direct word→word
+  assertions), relation word⊗word planes 0 (WordNet routes semantics through
+  synset hubs — mesh point A observed in production), trajectory global by
+  design. TRAP FOUND+FIXED: Npgsql pool reset (DISCARD ALL) drops the pg_temp
+  shadow while the physical connection survives → initializer doesn't re-fire →
+  later readers silently read the UNSCOPED world (observed: type planes scoped,
+  adjacency unscoped in ONE pour). Fix: NoResetOnClose on the scoped source.
+  Note: FillHighwayMasksAsync schema-qualifies laplace.consensus → gate
+  membership stays GLOBAL under scope (band membership as global property —
+  acceptable, documented). Source names: source_id('WordNetDecomposer') form.
+PHASE 3 GATE GREEN: 129/129 Decomposers tests incl. BpeTokenizerRoundTripTests.
+PHASE 7 SERVING: llama-server.exe serves mold-c.gguf, /health ok, /completion
+  answers ("the dog" → grammatical glue chain) — the webui endpoint is live;
+  content-WORD depth-k metric remains the open measurement.
+PHASE 8 CODE (detail):
+  functions/fold/scoped_consensus.sql.in (v1: neutral-phi uniform fold over
+  attestations WHERE source_id=ANY, games=observation_count, score=outcome/2;
+  registered both manifests) + CLI --scope-source <names> — resolves source ids,
+  then a physical-connection initializer materializes pg_temp.consensus, which
+  SHADOWS laplace.consensus inside every plane function (pg_temp resolves
+  first): the entire pour reads the scoped world with ZERO plane changes.
+  Scope covers evidence-derived planes; trajectory/corpus planes stay global
+  (content order is not evidence). Differential gate still to run.
+PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
+  BpeTokenizerRoundTripTests.cs (EntityId invariance WordLevel↔BPE + merge
+  round-trip) — not yet executed.
+2026-07-09 — FIRST FORMAL BEHAVIORAL PASS + THE RESIDUE, MEASURED:
+  mold-d (L4/H8/d512, continuation compile, unary lm_head) PASSES the gate:
+  15/16 content 0.938, NO hub/empty collapse, per-prompt rankings — after:
+  embed mean-centering (cos(dog,water) 0.86→0.74; bias dim = the floor),
+  block gains 0.5 (additions perturb, don't bury), poured PairNorm (per-dim
+  SNR weights in the previously all-ones norm tensors; ffn_norm keeps bias
+  for the gate floor), content-word metric added to the harness
+  (content_word_pass_rate; GLUE_WORDS stoplist).
+  THE RESIDUE (doc 09's routing-at-depth, now mechanically characterized):
+  content words rank ~3000/6421 in the readout and are INVARIANT under five
+  readout calibrations (unit-norm / mass-sat / idf-mean / DC-removed /
+  coherence-normed) — because a rank-d single-vector lm_head is a factored
+  V×V completion operator whose CROSSTALK = embedding row non-orthogonality
+  (row cos ~0.74): logit(y) = Σ_x M[x,y]·cos(E[x],h) smears every source into
+  every logit. Row(animal) ≈ vocab mean (its in-sources are generic nouns) →
+  DC removal zeroes it; normalization games cannot change row GEOMETRY.
+  Tied-embedding readout test: retrieval-INTO-h through the transposed V/O
+  factors partially works (dog→cat rank 182 tied vs 2866 untied) but is
+  noise-dominated. Exact lookup needs d ≥ V; at d < V the substrate-native
+  outs are (a) doc-18 stratum allocation — retrieval lands in a reserved
+  slice read by a slice-limited lm_head; (b) voronoi MoE — readout competes
+  within a cell, not across the whole vocab; (c) capacity — the Build-A-Bear
+  "millions of FFN rows" conversation is the exactness dial, confirmed from
+  the readout side. This is the doc-18 build's second experimental mandate
+  (first: mold-b full-compile collapse).
+STILL OPEN from the plan: test-all cross-gate; Phase 7 depth-k metric now
+  exists (content_word_pass_rate) — its target is the doc-18 build; Issue 51. Baselines in D:\Models\laplace-gen
+  (phase0-baseline.gguf Path B / phase16-mold-a.gguf / mold-b.gguf / mold-c.gguf
+  + report JSONs).
 
 ================================================================================
 SECTION 7 — LITERATURE PANEL (verified links, searched 2026-07-05)

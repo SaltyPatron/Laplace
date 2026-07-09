@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION consensus_type_plane(
          -- (rk's DISTINCT type_id scan and ranked's join), so the fence avoids
          -- re-executing the v->consensus->v join. Do not strip.
          edges AS MATERIALIZED (
-             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count, c.type_id
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id
@@ -21,15 +21,22 @@ CREATE OR REPLACE FUNCTION consensus_type_plane(
              CROSS JOIN LATERAL relation_rank_resolved(d.type_id) AS r(rank)
              WHERE r.rank IS NOT NULL
          ),
+         -- P5 Glicko-complete weight (doc 14 M5): neutral-centered (signed) eff_mu,
+         -- rd-uncertainty discount, witness-mass saturation. Refuted edges go
+         -- NEGATIVE (operator planes are sign-safe; the basis union clamps
+         -- client-side via FoundryExport.PositivePart).
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, e.type_id, rk.rank AS rk
+                    (eff_mu(e.rating, e.rd) - glicko2_neutral_mu())::float8 / 1e9
+                      * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
+                      * foundry_witness_sat(e.witness_count) AS w,
+                    e.type_id, rk.rank AS rk
              FROM edges e JOIN rk ON rk.type_id = e.type_id
          ),
          capped AS (
              SELECT r.subject_id, r.object_id, r.w, r.type_id, r.rk,
                     row_number() OVER (PARTITION BY r.subject_id, r.type_id
-                                       ORDER BY r.w DESC, r.object_id) AS rn
+                                       ORDER BY abs(r.w) DESC, r.object_id) AS rn
              FROM ranked r
          )
     SELECT c.subject_id, c.object_id, c.w, c.type_id, c.rk

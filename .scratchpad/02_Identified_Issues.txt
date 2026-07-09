@@ -100,6 +100,17 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
 50  OPEN       recall intent router extracts topics naively: 'facts about give' takes
                'facts' as the topic (frame-chains "facts→of→Partitive"). Issue 46's
                resolve(text,context) entry point is the structural fix.
+51  OPEN       word_shape_peers_fast Fréchet gate runs on MANTISSA-PACKED vertices,
+               not geometry (found 2026-07-08 audit): recall.c fetches
+               physicalities.trajectory raw (:817/:860) and feeds it to
+               laplace_frechet_4d (:980) — vertices are bit-packed child IDENTITIES
+               (exponent pinned 0x3FF), so the DP measures hash bits, not S³ shape;
+               behaves as a rough aligned-sequence-identity test. The SQL lane
+               (word_shape_distance → word_curve) correctly rebuilds constituent
+               COORDS via ST_MakeLine — two different metrics under one name family.
+               Fix: native lane should build the coord curve (word_curve semantics)
+               or batch-unpack constituents to coords before the Fréchet SPI call.
+               Read-side only; does not block the foundry pour.
 NU1903 FIXED   transitive Microsoft.OpenApi pinned 2.7.5, CPM transitive pinning on
 
 RULE #8 PIPELINE STATUS (supersedes several entries above): ALL FIVE PHASES of the

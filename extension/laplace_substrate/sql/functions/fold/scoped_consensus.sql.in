@@ -1,0 +1,42 @@
+-- Plan Phase 8 (Build-A-Bear): re-fold attestations from ONLY the named sources
+-- into a scoped consensus edge set — the "I know kung fu" package fold. The
+-- caller materializes this as pg_temp.consensus, which shadows laplace.consensus
+-- inside every plane function for that connection (pg_temp resolves first), so
+-- the entire pour reads the scoped world with no plane changes.
+--
+-- v1 approximation, stated: every witness plays a NEUTRAL opponent at
+-- glicko2_initial_rd (the ingest fold's per-source trust phi is a client-side
+-- quantity); games = observation_count; score = outcome/2 per game. A scoped
+-- pour is a different artifact by definition — bit-parity with the ingest fold
+-- is not a goal here.
+CREATE OR REPLACE FUNCTION scoped_consensus(p_source_ids bytea[])
+    RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint,
+                  last_observed_at timestamptz)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    WITH grouped AS (
+        SELECT a.subject_id, a.type_id, a.object_id,
+               sum(GREATEST(a.observation_count, 1))::bigint AS games,
+               sum(GREATEST(a.observation_count, 1)
+                   * CASE a.outcome WHEN 2 THEN 1000000000::bigint
+                                    WHEN 1 THEN  500000000::bigint
+                                    ELSE 0::bigint END)::bigint AS sum_score,
+               max(a.last_observed_at) AS last_ts
+        FROM attestations a
+        WHERE a.source_id = ANY(p_source_ids)
+        GROUP BY a.subject_id, a.type_id, a.object_id
+    )
+    SELECT consensus_id(f.subject_id, f.type_id, f.object_id),
+           f.subject_id, f.type_id, f.object_id,
+           (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+           f.games, f.last_ts
+    FROM (
+        SELECT g.*,
+               laplace_glicko2_accumulate_games(
+                   glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+                   glicko2_neutral_mu(), glicko2_initial_rd(),
+                   g.games, g.sum_score, glicko2_tau()) AS acc
+        FROM grouped g
+    ) f
+$$;

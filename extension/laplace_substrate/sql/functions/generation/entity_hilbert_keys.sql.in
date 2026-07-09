@@ -1,0 +1,14 @@
+-- Plan Phase 5 (doc 14 P7): per-entity 128-bit hilbert key for the foundry's
+-- static content positional encoding. hilbert_index is big-endian packed
+-- (lexicographic byte order = hilbert curve order), so the leading bytes are
+-- the coarsest content-locality signal.
+CREATE OR REPLACE FUNCTION entity_hilbert_keys(p_vocab bytea[])
+    RETURNS TABLE(entity_id bytea, hilbert_index bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT DISTINCT ON (p.entity_id) p.entity_id, p.hilbert_index
+    FROM physicalities p
+    JOIN unnest(p_vocab) AS u(id) ON u.id = p.entity_id
+    WHERE p.type = 1 AND p.hilbert_index IS NOT NULL
+    ORDER BY p.entity_id, p.id
+$$;

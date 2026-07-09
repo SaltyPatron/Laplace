@@ -30,6 +30,18 @@ DEFAULT_PROBES = [
     "tree", "man", "woman", "time", "good", "world", "day", "people",
 ]
 
+# Phase 7 depth-k content-WORD metric (2026-07-08): determiners/prepositions ARE
+# attested PRECEDES objects, so glue hits inflate content_pass_rate. Hits are
+# additionally scored with this stoplist excluded; content_word_pass_rate is the
+# number that adjudicates knowledge transfer (doc 14 P10).
+GLUE_WORDS = frozenset("""
+the a an of to in on at by for with and or but nor so yet as if that this these
+those his her its their our your my is are was were be been being am do does did
+have has had will would shall should can could may might must not no he she it
+they we you i who whom whose which what when where why how there here then than
+seem seems from into onto over under up down out off about after before between
+""".split())
+
 WORD_RE = re.compile(r"[a-z]+")
 
 
@@ -76,8 +88,12 @@ def expected_set(db, word, limit):
 
 
 def run_completion(llama, model, prompt, n_tokens):
+    # Greedy + repeat-penalty: deterministic AND loop-suppressed — the decode any
+    # real consumer would use. Pure greedy (no penalty) loops even trained models
+    # at this length; the hub-collapse detector still fires on cross-probe hubs.
     r = subprocess.run(
-        [llama, "-m", model, "-p", prompt, "-n", str(n_tokens), "--temp", "0"],
+        [llama, "-m", model, "-p", prompt, "-n", str(n_tokens), "--temp", "0",
+         "--repeat-penalty", "1.4"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=180)
     if r.returncode != 0:
@@ -129,18 +145,22 @@ def main():
             break
         toks = [t for t in WORD_RE.findall(gen.lower()) if t != word]
         hit = sorted(set(toks) & exp)
+        content_hit = sorted(t for t in hit if t not in GLUE_WORDS)
         if toks:
             first_tokens.append(toks[0])
         results.append({
             "word": word,
             "generated": gen,
             "hits": hit,
+            "content_hits": content_hit,
             "passed": len(hit) >= 1,
+            "content_passed": len(content_hit) >= 1,
             "distinct_tokens": len(set(toks)),
         })
 
     scored = [r for r in results if "passed" in r]
     passed = [r for r in scored if r["passed"]]
+    content_passed = [r for r in scored if r.get("content_passed")]
 
     # Failure-shape detectors, each named for the fraud it catches.
     verdicts = {}
@@ -148,6 +168,7 @@ def main():
         verdicts["load_or_generate_failed"] = load_failure
     if scored:
         verdicts["content_pass_rate"] = round(len(passed) / len(scored), 3)
+        verdicts["content_word_pass_rate"] = round(len(content_passed) / len(scored), 3)
         empty = [r for r in scored if r["distinct_tokens"] == 0]
         if len(empty) > len(scored) / 2:
             verdicts["empty_output_collapse"] = len(empty)

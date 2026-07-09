@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
                AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
          ),
          edges AS (
-             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count, c.type_id,
                     bt.rank
              FROM v
              JOIN consensus c ON c.subject_id = v.id
@@ -19,14 +19,19 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
              JOIN band_types bt ON bt.id = c.type_id
              WHERE bt.rank IS NOT NULL
          ),
+         -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
+         -- witness-saturated (see consensus_type_plane).
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, e.rank AS rk
+                    (eff_mu(e.rating, e.rd) - glicko2_neutral_mu())::float8 / 1e9
+                      * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
+                      * foundry_witness_sat(e.witness_count) AS w,
+                    e.rank AS rk
              FROM edges e
          ),
          capped AS (
              SELECT r.subject_id, r.object_id, r.w, r.rk,
-                    row_number() OVER (PARTITION BY r.subject_id ORDER BY r.rk * r.w DESC, r.object_id) AS rn
+                    row_number() OVER (PARTITION BY r.subject_id ORDER BY r.rk * abs(r.w) DESC, r.object_id) AS rn
              FROM ranked r
          )
     SELECT c.subject_id, c.object_id, c.w, c.rk FROM capped c WHERE c.rn <= p_degree_cap

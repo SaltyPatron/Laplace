@@ -63,7 +63,10 @@ functions/mu/glicko2_neutral_mu.sql.in
 functions/mu/glicko2_initial_rd.sql.in
 functions/mu/glicko2_initial_volatility.sql.in
 functions/mu/glicko2_tau.sql.in
+functions/mu/foundry_rd_kappa.sql.in
+functions/mu/foundry_witness_sat.sql.in
 functions/fold/drop_period_staging.sql.in
+functions/fold/scoped_consensus.sql.in
 functions/fold/create_period_staging.sql.in
 functions/fold/period_staging_table.sql.in
 functions/fold/create_period_staging_with_epoch.sql.in
@@ -235,6 +238,10 @@ functions/generation/foundry_vocab.sql.in
 functions/generation/grapheme_floor_vocab.sql.in
 functions/generation/grapheme_order.sql.in
 functions/generation/word_order.sql.in
+functions/generation/sentence_order.sql.in
+functions/generation/sentence_order_word_bridge.sql.in
+functions/generation/entity_hilbert_keys.sql.in
+functions/generation/entity_highway_masks.sql.in
 functions/generation/corpus_word_vocab.sql.in
 functions/generation/metric_edges.sql.in
 functions/generation/foundry_crawl.sql.in

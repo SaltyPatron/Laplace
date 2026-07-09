@@ -38,7 +38,13 @@ if not defined PGPASSWORD set "PGPASSWORD=postgres"
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
-if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%;Command Timeout=0"
+rem LAPLACE_PGHOST/LAPLACE_PGUSER feed BOTH the CLI connection string below AND
+rem every scripted psql verify/health check, so the writer and the verifier can
+rem never target different databases. Remote seeding (e.g. Windows -> hart-server):
+rem set LAPLACE_PGHOST=hart-server before calling any seed script.
+if not defined LAPLACE_PGHOST set "LAPLACE_PGHOST=localhost"
+if not defined LAPLACE_PGUSER set "LAPLACE_PGUSER=postgres"
+if not defined LAPLACE_DB set "LAPLACE_DB=Host=%LAPLACE_PGHOST%;Username=%LAPLACE_PGUSER%;Password=%PGPASSWORD%;Database=%LAPLACE_DBNAME%;Command Timeout=0"
 if not defined LAPLACE_BILLING_BYPASS set "LAPLACE_BILLING_BYPASS=true"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"

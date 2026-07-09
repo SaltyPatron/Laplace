@@ -102,7 +102,8 @@ same fact; trust binds to source/method, and their divergence is itself signal.
 | 14 Foundry root cause | Why heads/layers mash + why no conversation: 5 mechanisms (M1-M5), supply-vs-consumption table, prescriptions P1-P10, live reseed baseline, literature panel | living — the foundry build's working doc |
 | 15 Gödel engine / OODA loop | The RUNNING inference engine: the walk IS the forward pass; evaluation IS ingestion; the engine's own outputs are witnesses folding into the same consensus the next walk reads — a closed self-improving loop. This is the AI, not a query layer. | living spec — the read/serve side |
 | 16 Tier-correct attestation + hub unification | "Record each fact once, at the tier/identity/provenance the source asserts it"; decomposer tier/identity/provenance defect audit + fix sequence | living spec |
-| 17 Decomposer full-stack audit | Code-verified inventory of every decomposer vs the Rule #8 spine; trust order (code > binding docs > ops > doc 13); spine-brand fork map | living; input to an unwritten doc 18 |
+| 17 Decomposer full-stack audit | Code-verified inventory of every decomposer vs the Rule #8 spine; trust order (code > binding docs > ops > doc 13); spine-brand fork map | living |
+| 18 Typed residual stream + mesh | The mesh inventory (6 convergence points: ILI hub, VerbNet/FrameNet/PropBank/sense/surface) + typed-stratum pour spec (subspaces S/W/C/F/G, resolution-ladder layers, EVOKES_FRAME selectors); §6 = 2026-07-08 audit corrections (14 M4 stale, 14 C3 wrong, 182 bits) | living spec — the post-remediation foundry build |
 
 Current state in one line: the invention is whole and largely built — a content-addressed
 attestation substrate (ingest), a consensus-Laplacian model foundry (Mold-A-Model export,
@@ -172,7 +173,7 @@ schema's self-introspection catalog — check it before assuming a helper doesn'
   `NpgsqlWorkingSetApply`, bracketed by `IngestRunner`) does batching/dedup/fold/COPY —
   Rule #8 is the sequence spec; doc 13 Phase 1 unifies the seven adapter lanes onto it.
 - **highway_mask**: 256-bit relation-TYPE bitmask on entities+attestations, generated
-  from `engine/manifest/relation_types.toml` (153 assigned bits, 13 salience bands
+  from `engine/manifest/relation_types.toml` (182 assigned bits, 13 salience bands
   mandate=1.0 … probationary=0.05 — the same number weights read-time confidence and
   export planes). Fixed + live-verified (05 Rule #5); pre-2026-07-01 DB generations are
   regenerated, never backfilled.

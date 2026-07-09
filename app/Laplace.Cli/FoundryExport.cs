@@ -624,6 +624,39 @@ internal static class FoundryExport
 
 
 
+    /// Plan Phase 5 (doc 14 P7): per-token 128-bit hilbert key (big-endian; leading
+    /// bytes = coarsest content locality) for the static content-PE dims.
+    internal static async Task<byte[]?[]> FillHilbertKeysAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        var keys = new byte[]?[vocabSize];
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = "SELECT entity_id, hilbert_index FROM laplace.entity_hilbert_keys($1)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        try
+        {
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
+                var hb = (byte[])rdr[1];
+                foreach (int s in slots) if (s >= 0 && s < vocabSize) keys[s] = hb;
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (entity_hilbert_keys unavailable: {ex.SqlState} — content-PE skipped)");
+        }
+        return keys;
+    }
+
     internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -753,6 +786,49 @@ internal static class FoundryExport
 
 
 
+
+    /// Plan Phase 4: sentence-boundary word bridge — last word of sentence i to
+    /// first word of sentence i+1, from tier-4 document trajectories. The
+    /// discourse component of the lm_head (doc 14 C3 correction).
+    internal static async Task<PlaneCoo> ReadSentenceOrderAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
+        int docs = 100000, int cap = 64)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.sentence_order_word_bridge($1, $2)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(docs);
+        try
+        {
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w <= 0) continue;
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (sentence_order_word_bridge unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
+        return CooFromAdj(adj, cap);
+    }
 
     internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
         NpgsqlDataSource ds, int maxGap,
@@ -889,6 +965,25 @@ internal static class FoundryExport
         var vals = new double[p.Nnz];
         for (int i = 0; i < vals.Length; i++) vals[i] = p.Vals[i] / max;
         return p with { Vals = vals };
+    }
+
+    /// P5 signed/nonneg split: operator planes carry SIGNED weights (refutation =
+    /// negative attention; ProjectOperator is sign-safe), but the basis union feeds
+    /// the normalized-Laplacian eigenmap, which needs a nonnegative affinity.
+    /// Clamp negatives to zero (drop, not abs — a refuted edge is not affinity).
+    internal static PlaneCoo PositivePart(PlaneCoo p)
+    {
+        int kept = 0;
+        for (int i = 0; i < p.Nnz; i++) if (p.Vals[i] > 0) kept++;
+        if (kept == p.Nnz) return p;
+        var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
+        int at = 0;
+        for (int i = 0; i < p.Nnz; i++)
+        {
+            if (p.Vals[i] <= 0) continue;
+            rows[at] = p.Rows[i]; cols[at] = p.Cols[i]; vals[at] = p.Vals[i]; at++;
+        }
+        return new PlaneCoo(rows, cols, vals);
     }
 
     internal static PlaneCoo Union(params PlaneCoo[] planes)
@@ -1186,12 +1281,17 @@ internal static class FoundryExport
 
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
-        out BasisStats stats, bool coordDirect = false, double? coordScale = null)
+        out BasisStats stats, bool coordDirect = false, double? coordScale = null,
+        byte[]?[]? hilbertKeys = null)
     {
         bool coordOnly = FoundryDefaults.CoordOnly;
+        // Phase 5: when a hilbert content-PE is requested, RESERVE its trailing dims
+        // up front — otherwise a full-rank spectrum (k = dModel-1) leaves peDims = 0
+        // and the PE silently vanishes (observed on the first Path-A pour).
+        int peReserve = (hilbertKeys is not null && dModel > 24) ? 8 : 0;
         int k = coordOnly
             ? Math.Min(4, dModel - 1)
-            : Math.Min(Math.Min(dModel - 1, FoundryDefaults.BasisRank),
+            : Math.Min(Math.Min(dModel - 1 - peReserve, FoundryDefaults.BasisRank),
                        Math.Max(2, vocab - 2));
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
         if (coordOnly)
@@ -1348,6 +1448,34 @@ internal static class FoundryExport
             e[off + dModel - 1] = BiasValue;
         }
 
+        // Plan Phase 5 (doc 14 P7): hilbert content-PE in the trailing capacity dims,
+        // written AFTER row-normalization so every token carries the same fixed-scale
+        // positional fraction (content dims are unit-norm; PE rides at HilbertPeScale).
+        if (hilbertKeys is not null)
+        {
+            int peCapDims = dModel - 1 - k;
+            int peDims = Math.Min(8, peCapDims);
+            if (peDims > 0)
+            {
+                double peScale = FoundryDefaults.HilbertPeScale;
+                int peBase = dModel - 1 - peDims;
+                int placedPe = 0;
+                for (int i = 0; i < vocab; i++)
+                {
+                    var hb = hilbertKeys.Length > i ? hilbertKeys[i] : null;
+                    if (hb is null || hb.Length == 0) continue;
+                    long off = (long)i * dModel;
+                    for (int d = 0; d < peDims; d++)
+                    {
+                        byte b = d < hb.Length ? hb[d] : (byte)0;
+                        e[off + peBase + d] = (2.0 * b / 255.0 - 1.0) * peScale;
+                    }
+                    placedPe++;
+                }
+                Console.WriteLine($"  hilbert content-PE: {placedPe:N0} tokens in {peDims} trailing dims (scale {peScale})");
+            }
+        }
+
         stats = new BasisStats(k, zeroSpectral, resid);
         return e;
     }
@@ -1389,6 +1517,83 @@ internal static class FoundryExport
 
 
 
+    /// P3 (doc 14 M2): block Gram-Schmidt across per-head OV output bases so each
+    /// head writes an orthogonal residual slice. Rows are orthonormalized jointly
+    /// (earlier heads keep their span; later heads get the complement — native
+    /// Householder QR, deterministic), then each row's ORIGINAL norm is re-applied
+    /// so singular-value energy per head survives; only the overlap is removed.
+    /// Fail-open: on native rc != 0 (rank deficiency) the factors are left as-is.
+    internal static void BlockOrthonormalizeLeft(
+        IReadOnlyList<string> headKeys, Dictionary<string, Factors> fo, int dModel)
+    {
+        var live = new List<(string Key, Factors F)>();
+        int total = 0;
+        foreach (var k in headKeys)
+            if (fo.TryGetValue(k, out var f) && f.Rank > 0 && f.Dim == dModel)
+            { live.Add((k, f)); total += f.Rank; }
+        if (live.Count < 2 || total > dModel) return;
+
+        var buf = new double[(long)total * dModel];
+        var norms = new double[total];
+        int v = 0;
+        foreach (var (_, f) in live)
+            for (int r = 0; r < f.Rank; r++, v++)
+            {
+                double n2 = 0;
+                for (int j = 0; j < dModel; j++)
+                {
+                    double x = f.Left[(long)r * dModel + j];
+                    buf[(long)v * dModel + j] = x;
+                    n2 += x * x;
+                }
+                norms[v] = Math.Sqrt(n2);
+            }
+
+        int rc;
+        unsafe { fixed (double* p = buf) rc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)total, (nuint)dModel); }
+        if (rc != 0)
+        {
+            // Rank deficiency here IS doc-14 M2 observed: the heads' output bases are
+            // collinear. Managed modified Gram-Schmidt: orthogonalize sequentially,
+            // ZERO directions that vanish (a later head's collinear component carries
+            // no new information — removing it is the allocation working, not a loss).
+            int zeroed = 0;
+            for (int a = 0; a < total; a++)
+            {
+                long ao = (long)a * dModel;
+                for (int b2 = 0; b2 < a; b2++)
+                {
+                    long bo = (long)b2 * dModel;
+                    double dot = 0;
+                    for (int j = 0; j < dModel; j++) dot += buf[ao + j] * buf[bo + j];
+                    if (dot == 0) continue;
+                    for (int j = 0; j < dModel; j++) buf[ao + j] -= dot * buf[bo + j];
+                }
+                double n2r = 0;
+                for (int j = 0; j < dModel; j++) n2r += buf[ao + j] * buf[ao + j];
+                if (n2r < 1e-12)
+                {
+                    for (int j = 0; j < dModel; j++) buf[ao + j] = 0;
+                    zeroed++;
+                    continue;
+                }
+                double invr = 1.0 / Math.Sqrt(n2r);
+                for (int j = 0; j < dModel; j++) buf[ao + j] *= invr;
+            }
+            Console.WriteLine($"  head-allocation: native QR rc={rc} → managed MGS, {zeroed}/{total} collinear directions zeroed (M2 overlap removed)");
+        }
+
+        v = 0;
+        foreach (var (key, f) in live)
+        {
+            var left = new float[(long)f.Rank * dModel];
+            for (int r = 0; r < f.Rank; r++, v++)
+                for (int j = 0; j < dModel; j++)
+                    left[(long)r * dModel + j] = (float)(norms[v] * buf[(long)v * dModel + j]);
+            fo[key] = f with { Left = left };
+        }
+    }
+
     internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
@@ -1412,9 +1617,12 @@ internal static class FoundryExport
         double s0 = k > 0 && s[0] > 0f ? s[0] : 1.0;
         var left = new float[(long)k * d];
         var right = new float[(long)k * d];
+        // spectrum flattening (M3 at operator level): each side carries
+        // (s_r/s0)^(alpha/2) so the reconstructed direction r scales (s_r/s0)^alpha.
+        float halfAlpha = (float)(FoundryDefaults.FactorSpectrumAlpha / 2.0);
         for (int r = 0; r < k; r++)
         {
-            float sq = MathF.Sqrt((float)(Math.Max(0f, s[r]) / s0));
+            float sq = MathF.Pow((float)(Math.Max(0f, s[r]) / s0), halfAlpha);
             for (int j = 0; j < d; j++)
             {
                 left[(long)r * d + j] = sq * u[(long)j * d + r];
@@ -1469,27 +1677,40 @@ internal static class FoundryExport
 
 
 
-    internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    /// Phase 0 RoPE mitigation, second half: rotary pair 0 (head components 0 and
+    /// hd/2) rotates at frequency 1 REGARDLESS of freq_base, and the factor's
+    /// strongest row otherwise lands exactly there. When skipping, factor row r
+    /// maps to component r+1 (or r+2 past the pair partner) so poured content
+    /// operators never occupy the always-rotating plane. Q and K must use the
+    /// SAME mapping (components pair in the dot product); V is not rotated.
+    private static int RotarySafeComponent(int r, int headDim, bool skip)
+        => !skip ? r : (r + 1 < headDim / 2 ? r + 1 : r + 2);
+
+    internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale, bool skipRotaryPair0 = false)
     {
         int baseRow = headIdx * headDim;
         if (baseRow >= rows) return;
-        int k = Math.Min(f.Rank, headDim);
-        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        int k = Math.Min(f.Rank, skipRotaryPair0 ? headDim - 2 : headDim);
+        for (int r = 0; r < k; r++)
         {
-            long dst = (long)(baseRow + r) * cols;
+            int c = RotarySafeComponent(r, headDim, skipRotaryPair0);
+            if (baseRow + c >= rows) break;
+            long dst = (long)(baseRow + c) * cols;
             for (int j = 0; j < cols && j < f.Dim; j++)
                 vals[dst + j] = (float)(scale * f.Left[(long)r * f.Dim + j]);
         }
     }
 
-    internal static void FillHeadRight(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    internal static void FillHeadRight(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale, bool skipRotaryPair0 = false)
     {
         int baseRow = headIdx * headDim;
         if (baseRow >= rows) return;
-        int k = Math.Min(f.Rank, headDim);
-        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        int k = Math.Min(f.Rank, skipRotaryPair0 ? headDim - 2 : headDim);
+        for (int r = 0; r < k; r++)
         {
-            long dst = (long)(baseRow + r) * cols;
+            int c = RotarySafeComponent(r, headDim, skipRotaryPair0);
+            if (baseRow + c >= rows) break;
+            long dst = (long)(baseRow + c) * cols;
             for (int j = 0; j < cols && j < f.Dim; j++)
                 vals[dst + j] = (float)(scale * f.Right[(long)r * f.Dim + j]);
         }
@@ -1513,7 +1734,7 @@ internal static class FoundryExport
 
 
     internal static bool IsContinuationOperator(string opKey) =>
-        opKey is "context" or "trajectory" or "relation:PRECEDES";
+        opKey is "context" or "trajectory" or "sentence_order" or "relation:PRECEDES";
 
     internal static void FillHeadZero(float[] vals, int rows, int cols, int headIdx, int headDim)
     {
@@ -1550,6 +1771,99 @@ internal static class FoundryExport
             long dst = (long)(baseRow + r) * cols;
             for (int j = 0; j < cols; j++) vals[dst + j] = 0f;
             if (baseRow + r < cols) vals[dst + (baseRow + r)] = scale;
+        }
+    }
+
+    /// Plan Phase 6 (doc 14 P2/M1): per-token highway masks for the content gate.
+    internal static async Task<Mask256[]> FillHighwayMasksAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        var masks = new Mask256[vocabSize];
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = "SELECT entity_id, highway_mask FROM laplace.entity_highway_masks($1)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        try
+        {
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
+                var m = Mask256.FromByteArray((byte[])rdr[1]);
+                foreach (int s in slots) if (s >= 0 && s < vocabSize) masks[s] = m;
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (entity_highway_masks unavailable: {ex.SqlState} — banded gate falls back to constant)");
+        }
+
+        // Fallback for DB generations whose entities.highway_mask is unpopulated
+        // (live finding 2026-07-08: 0 of 20.2M entities carry masks): DERIVE
+        // membership from consensus participation — the OR of the relation-type
+        // masks this entity has edges under, via the in-memory highway perfcache
+        // (layout-safe: no SQL bit arithmetic).
+        bool anyStored = false;
+        foreach (var m in masks) if (!m.IsZero) { anyStored = true; break; }
+        if (!anyStored && HighwayPerfcache.IsLoaded)
+        {
+            await using var cmd2 = conn.CreateCommand();
+            cmd2.CommandTimeout = 300;
+            cmd2.CommandText =
+                "SELECT u.id, c.type_id FROM unnest($1::bytea[]) AS u(id) " +
+                "JOIN laplace.consensus c ON c.subject_id = u.id GROUP BY u.id, c.type_id " +
+                "UNION " +
+                "SELECT u.id, c.type_id FROM unnest($1::bytea[]) AS u(id) " +
+                "JOIN laplace.consensus c ON c.object_id = u.id GROUP BY u.id, c.type_id";
+            cmd2.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            int derived = 0;
+            await using var rdr2 = await cmd2.ExecuteReaderAsync();
+            while (await rdr2.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr2[0]), out var slots)) continue;
+                var tm = HighwayPerfcache.MaskForRelationType(FromBytes((byte[])rdr2[1]));
+                if (tm.IsZero) continue;
+                foreach (int s in slots)
+                    if (s >= 0 && s < vocabSize) { masks[s] |= tm; derived++; }
+            }
+            Console.WriteLine($"  highway masks: derived from consensus participation ({derived:N0} entity-type memberships; stored masks empty)");
+        }
+        return masks;
+    }
+
+    /// Plan Phase 6 (doc 14 P2, kills M1): gate rows keyed on per-band embedding
+    /// centroids — FFN block b fires for tokens aligned with salience band b's
+    /// membership centroid. silu(gain·cos + floor): aligned ≈ silu(gain) (the old
+    /// constant), misaligned ≈ silu(floor) (a small leak, no dead tokens). Bands
+    /// with no centroid keep the old constant-open column — strictly no worse.
+    internal static void FillGateBanded(
+        float[] vals, int rows, int cols, double[]?[] bandCentroids, double gateZ, double floorZ)
+    {
+        // gateZ/floorZ are LOGIT units. For unit-content rows with bias=1, RMSNorm
+        // gives h ≈ x·sqrt(d/2), so weights scale by 1/sqrt(d/2) — the same
+        // calibration the constant gateCol used. Aligned token: silu(≈gateZ·cos);
+        // any token: at least silu(≈floorZ) via the bias column (no dead tokens).
+        double s = 1.0 / Math.Sqrt(cols / 2.0);
+        int bands = bandCentroids.Length;
+        for (int r = 0; r < rows; r++)
+        {
+            int b = (int)((long)r * bands / rows);
+            var c = bandCentroids[b];
+            if (c is null)
+            {
+                vals[(long)r * cols + (cols - 1)] = (float)(gateZ * s); // constant-open fallback
+                continue;
+            }
+            for (int j = 0; j < cols - 1 && j < c.Length; j++)
+                vals[(long)r * cols + j] = (float)(gateZ * s * c[j]);
+            vals[(long)r * cols + (cols - 1)] = (float)(floorZ * s);
         }
     }
 
