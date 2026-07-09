@@ -36,4 +36,12 @@
     <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Program.cs pins WebRootPath to <bin>/wwwroot (LaplaceInstall.WebRoot). Publish
+         copies wwwroot there, but plain build does not, so `serve.cmd` (dotnet run)
+         served 404 for the entire SPA. Mirror the build-web.cmd-staged wwwroot into
+         the build output so dev serve and publish see the same tree. -->
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

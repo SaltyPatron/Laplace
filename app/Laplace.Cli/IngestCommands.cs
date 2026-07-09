@@ -635,12 +635,30 @@ internal static class IngestCommands
 
         if (decomposer is null)
         {
-            Console.WriteLine("  witnesses:");
-            await using var src = Cmd();
-            src.CommandText = "SELECT source, evidence, content FROM laplace.source_counts()";
-            await using var rdr = await src.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                Console.WriteLine($"    {rdr.GetString(0),-28}: {rdr.GetInt64(1),12:N0} att  {rdr.GetInt64(2),12:N0} content");
+            // laplace.source_counts() joins a count(DISTINCT physicalities) per source —
+            // unbounded at 135M attestations; `stats` hung for minutes (Issue 52). The
+            // evidence half alone walks attestations_source_btree in ~30s live. Content
+            // per source stays exact via `stats <source>` (content_count is per-source
+            // bounded).
+            Console.WriteLine("  witnesses (evidence per source; content: run `stats <source>`):");
+            try
+            {
+                await using var src = Cmd();
+                src.CommandText = """
+                    SELECT laplace.render(a.source_id) AS source, count(*) AS evidence
+                    FROM laplace.attestations a
+                    GROUP BY a.source_id
+                    ORDER BY evidence DESC
+                    """;
+                src.CommandTimeout = 120;
+                await using var rdr = await src.ExecuteReaderAsync();
+                while (await rdr.ReadAsync())
+                    Console.WriteLine($"    {rdr.GetString(0),-44}: {rdr.GetInt64(1),12:N0} att");
+            }
+            catch (Exception ex) when (ex is NpgsqlException { InnerException: TimeoutException } or TimeoutException)
+            {
+                Console.WriteLine("    (source grouping exceeded 120s — per-source: `stats <source>`, exact via laplace.evidence_count)");
+            }
             return;
         }
 

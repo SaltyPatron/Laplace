@@ -389,7 +389,11 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
     const on = value === 'true';
     return (
       <Field label={field.label} help={field.help} layout="row" className={styles.fieldWide}>
-        <Toggle checked={on} onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')} />
+        <Toggle
+          checked={on}
+          onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')}
+          aria-label={field.label}
+        />
       </Field>
     );
   }
@@ -424,14 +428,14 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
     if (field.max !== undefined) {
       return (
         <Field label={field.label} help={field.help} valueDisplay={`${value || '—'}${field.unit ?? ''}`}>
-          <SliderField min={field.min} max={field.max} step={field.step ?? 1} value={value} onChange={onChange} />
+          <SliderField min={field.min} max={field.max} step={field.step ?? 1} value={value} onChange={onChange} label={field.label} />
         </Field>
       );
     }
     return (
       <Field label={field.label} help={field.help}>
         <Input type="number" min={field.min} step={field.step ?? 1} value={value} placeholder={field.placeholder}
-               onChange={(e) => onChange(e.target.value)} />
+               aria-label={field.label} onChange={(e) => onChange(e.target.value)} />
       </Field>
     );
   }
@@ -439,7 +443,7 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
   return (
     <Field label={field.label} help={field.help} className={styles.fieldWide}>
       <Input type={field.type === 'password' ? 'password' : 'text'} value={value} placeholder={field.placeholder}
-             onChange={(e) => onChange(e.target.value)} />
+             aria-label={field.label} onChange={(e) => onChange(e.target.value)} />
     </Field>
   );
 }

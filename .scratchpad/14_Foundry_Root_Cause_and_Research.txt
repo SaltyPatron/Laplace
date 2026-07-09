@@ -414,8 +414,168 @@ PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
   "millions of FFN rows" conversation is the exactness dial, confirmed from
   the readout side. This is the doc-18 build's second experimental mandate
   (first: mold-b full-compile collapse).
-STILL OPEN from the plan: test-all cross-gate; Phase 7 depth-k metric now
-  exists (content_word_pass_rate) — its target is the doc-18 build; Issue 51. Baselines in D:\Models\laplace-gen
+2026-07-09 THE CONDITIONAL THEOREM (third experimental mandate; supersedes all
+  readout calibration work): a trained LM computes h·E'(y) ≈ log P(y|prefix) —
+  a rank-d factorization OF THE CONDITIONAL. The pour factors AFFINITY (joint-
+  shaped): row(y) = mean source embedding — never divided by the context
+  marginal. P(y|x) = P(x,y)/P(x); the DIVISION is what lets content words win
+  their slots (glue has high joint AND high marginal → flat conditional;
+  content has concentrated joint → spiking conditional). Stop-word dominance,
+  hub collapses, and calibration-invariant ranks are all corollaries of the
+  missing division. Leg 3 already computes true conditionals (walk_continuations
+  order-k backoff count ratios) — the pour lost them in translation.
+  PRESCRIPTION (proof-shaped): (1) bigram floor = SVD of the log-conditional
+  matrix M[x,y]=log P̂(y|x); embed=A, lm_head=B; error = Eckart-Young-optimal
+  truncation (rank V = FAITHFUL's exact lookup; rank d = its correct
+  compression). (2) Layers = log-linear (MaxEnt) corrections on the calibrated
+  floor. (3) Syntax automaton head: POS-transition operator (HAS_POS attested;
+  UD seed = the grammar organ) shifts conditional support by grammatical slot.
+  (4) Gate on rank/log-likelihood of attested continuations, not greedy
+  strings (argmax of TRUE English bigram conditionals IS glue — a correct
+  floor "fails" greedy evals by design).
+BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
+  +21M chess attestations (the 01:21-01:52 load = a chess ingest from another
+  session; explains chess tokens entering crawl vocab). Regression fully
+  attributed to ungated E-accumulation + PairNorm norms; both reverted.
+  REAL POUR TIMINGS (fake "0.0s" stopwatch fixed; [t] stage lines added):
+  632s total = crawl 494s (78%!) + planes 52s + eigensolve 40s + layer loop
+  46s + write 0.2s. Crawl fix that already exists: vocab source="tokenizer"
+  reuses a mold dir — kills the 494s AND pins vocab for A/B integrity
+  (experiments need a fixed frame; the substrate is SUPPOSED to grow).
+2026-07-09 EVIDENCE CENSUS + TIER MAP (post-UD; the substrate's true shape):
+  UD landed: 50,004,402 attestations, layer_complete=True. Full-type MCV census:
+  HAS_POS 11.7M = the DB's LARGEST relation; DEP_*/EDEP_*/FEAT_* dense (nsubj
+  1.19M, obj 984k, amod 972k, det 687k; feat_number 1.9M, gender/case/tense...);
+  PRECEDES only 3.1M — the dependency layer is the richer word-order evidence
+  (typed, directed) and the conditional floor should fuse it. Tier×tier map:
+  25 populated cells — w→w 87.1M, w→s 16.5M, s→w 8.6M, g→w 8.2M, d→w 7.2M,
+  s→s 3.2M (IS_TRANSLATION_OF — sentence-tier equivalence at scale; corrects
+  the earlier "no sentence→sentence evidence" line, which was PRECEDES-only),
+  cp→w 2.7M, cp→cp 211k. Word⊗word planes read ONE cell; 50M+ cross-tier rows
+  are unpoured = doc 18's strata material, quantified. Live exhibit ("king"
+  warehouse view): multi-tier mesh + cross-sense leakage via polysemous bridges
+  (mesh point G), with Glicko already ranking leaks to the 1-wit tail — sense
+  mediation (W→C stratum) is the partition fix.
+2026-07-09 THE CONDITIONAL FLOOR POURED AND SPEAKS (floor-a.gguf, V=7134 incl.
+  punctuation, rank-511 factorization of 248,223 log-conditional entries):
+  LAYER-0 top-k is calibrated bigram English WITH SLOT STRUCTURE —
+    king→ of/and/was/who;  dog→ ␣/./and/or ('.' rank 2: sentences can END);
+    the→ close/short/particular/father (CONTENT WORDS after the determiner —
+    the division crushing glue in the glue-saturated slot, as the theorem
+    predicts). Floor-only likelihood: mean rank 1674/7134, hits@50 0.448,
+    mrr 0.054 — and the miss tail is LEGITIMATE (expected sets mix bigram
+    continuations with knowledge objects; a bigram floor SHOULD rank 'cart'
+    low after 'dog' — lifting knowledge objects is the LAYERS' job).
+  THE NEXT NAMED PROBLEM (measured): the correction layers DESTROY the floor —
+  Spearman(layer-0, full-forward) = 0.08–0.24. MaxEnt discipline violated:
+  corrections must PERTURB the calibrated floor, not overwhelm it. Full-forward
+  gate read mean 877/hits@50 0.389 (better mean via accidental mixing, worse
+  top-k). Build item: attenuate correction-head scales until layers monotonically
+  IMPROVE the likelihood metric over layers=0 — every gain step gated. Also:
+  formal Spearman-vs-SQL-table check still to run; likelihood gate gains a
+  --layers 0 floor mode. Evidence-fix builds: 974/0 tests green; extension
+  e49b4f0750aca3cc; conditional + pos_transition planes live and smoke-tested;
+  floor pour total 959s (crawl 441s on post-UD DB).
+2026-07-09 ATTENUATION EXECUTED + GAIN SWEEP VERDICT (floor-b/floor-c):
+  FoundryDefaults.FloorCorrectionGain multiplies layer output scales when
+  embed op == "conditional" (FoundryCommands layerScale). floor-b poured at
+  0.15 on the pinned tokenizer vocab (crawl 0.0s; plane reads now the hog at
+  550s — the DEP heads over post-UD consensus). CANARY RESTORED: the→
+  close/short/particular SURVIVES the full forward (same top-6 set, reordered);
+  Spearman L0↔full 0.39–0.68 across probes (was 0.08–0.24 at gain 1.0).
+  THE SWEEP (in-memory rescale of attn_output+ffn_down = pour-equivalent,
+  verified bit-identical at the poured point; 7 gains, 16-probe likelihood):
+    gain 0.00: mean 1674.6  mrr .0535  hits@50 .448  sp(the) 1.00
+    gain 0.10: mean 1429.5  mrr .0520  hits@50 .448  sp(the) 0.54
+    gain 0.15: mean 1345.8  mrr .0495  hits@50 .448  sp(the) 0.47
+    gain 0.50: mean 1071.4  mrr .0476  hits@50 .448  sp(the) 0.34
+  STRUCTURAL FINDING: correction planes are TAIL-ONLY. hits@50 flat at every
+  gain (nothing ever crosses the top-50 boundary), MRR never exceeds the
+  floor's, mean rank improves monotonically with gain. Strict monotone
+  improvement on all three metrics is UNACHIEVABLE by scaling — not a tuning
+  problem. Revised gate: mean rank improves, hits@50 holds exactly, MRR within
+  3% of floor. Pareto knee = 0.10 (beats 0.15 on BOTH mrr and canary Spearman);
+  FloorCorrectionGain set 0.10, floor-c.gguf is the shipping pour.
+  FLOOR-C SHIPPED + GATED (verify-model-behavioral --mode likelihood
+  --floor-gate, now a script flag; report floor-c-floorgate.json): PASS —
+  mean rank 1674.6→1507.3, mrr 0.0535→0.0526 (98.3% of floor), hits@50 held
+  0.448. Canary: the→close/short/particular fully intact (close stays rank 1),
+  dog top-6 IDENTICAL floor vs full; Spearman 0.61/0.86. Caveat: the direct
+  pour deviates slightly from the sweep's in-memory rescale (sweep predicted
+  1429.5/.0520/sp .54) — inter-layer diffusion sees the scaled writes at pour
+  time; sweep is exact only at the poured gain. The real pour came out BETTER
+  on mrr and Spearman than predicted.
+  MATH-PROOF CHECK RUN (was still-open): per-row Spearman between floor-c
+  layer-0 logits and continuation_conditional_plane's own w (pour-equivalent
+  vocab reconstructed via word_id over the tokenizer surfaces; single plane
+  eval filtered to the 16 probes): mean +0.778 over 13 probes (queen/cat/gold
+  had <5 matched pairs), range 0.68 (tree, n=36) → 0.92 (water, n=120) —
+  correlation strengthens with row evidence, exactly the rank-511 truncation
+  profile. The floor demonstrably transcribes the SQL table it was poured from.
+  (Pooled cross-row 0.53 — expected: pooling mixes per-row marginals.)
+  NEXT RESEARCH ITEM (successor to "attenuate until monotone"): make the
+  correction planes head-informative — today they only lift deep-tail attested
+  continuations; candidate cause is the readout law (direction ranks, mass
+  tie-breaks) not yet applied to the correction subspaces.
+2026-07-09 PLANE-READ ARCHITECTURE PASS (SQL/C# orchestrate, heavy lifting
+  pushed to the indexed/native layer): pour plane reads 540.8s → 56.0s (9.7×),
+  total pour 607.9s → 137.4s. Two root causes, both measured before fixing:
+  (1) relation_plane consensus family had NO vocab filter — 12 relation heads
+      streamed 27.5M rows/pour to C# which kept 1.3% (RELATED_TO alone 8.49M
+      rows → 18,959). Fix: p_vocab bytea[] param; type id resolved into a
+      plpgsql local FIRST (variable = bound param = index condition, Rule #4 /
+      L12), bare-column joins probe consensus_type_subject_btree. Old 3-arg
+      signature dropped; traj family unchanged.
+  (2) consensus_adjacency (already vocab-joined) ran 255-368s for 100,868
+      rows: the planner inlined the CTEs and pushed `relation_rank_resolved
+      (type_id) IS NOT NULL` INTO the 124M-row consensus scan — the ~27µs/call
+      C function ran once per TABLE row, not per joined row. Language
+      conversion (sql→plpgsql) did NOT fix it — the fence did:
+      `edges AS MATERIALIZED` pins rank to the 369k joined rows. 30.1s after.
+      NOTE relation_rank_resolved at ~27µs/call is ~100× a hash lookup —
+      suspect per-call GUC/mmap check (Bug A class); native SPI adjacency walk
+      (index scan + in-loop perfcache rank, C) is the endgame prescription.
+  VERIFIED: re-pour edge counts identical on 15/16 operators; sentence_order
+  121→124 (live DB gained documents between pours — the loop depositing, not
+  a defect) so GGUF hashes differ legitimately; floor-c-verify passes the
+  floor-gate (mean 1684.5→1603.9, mrr 97.7% of floor, hits@50 held).
+  Deploy lesson: EXT_VERSION is a CONFIGURE-time content hash — a modified
+  .sql.in restages under the STALE version silently; build-extensions.cmd
+  --reconfigure is mandatory for SQL changes, then upgrade-file copy + ALTER
+  EXTENSION UPDATE (today: e49b→8e91→ba3f→37f2938d3000dc12).
+2026-07-09 POS/SENSE/DEPREL QUERY AUDIT: verdict + evidence in doc 18 §6 C-6.
+  Headline: HAS_POS is one clean UD-upos inventory (pos_transition_plane v1
+  assumptions hold); the multilingual synset hub answers "dog is a noun in
+  German" today (HAS_SYNSET_KEY = POS at hub grain); XPOS→UPOS map recorded as
+  IS_A between class entities tops undisciplined eff_mu reads and puns with
+  vocab tokens 'IN'/'CD' (watch); IS_SYNONYM_OF mixed-grain — co-membership
+  synonymy is 2-hop through the hub, invisible to 1-hop planes (S-stratum item).
+2026-07-09 FLOOR-D SHIPPED — THE POS-CORRECTED FLOOR (Phase 4 executed at the
+  lm_head; the finish-line artifact):
+  MECHANISM: embed/lm_head op "conditional_pos" — before the SVD, the dense
+  log-conditional table's UNSEEN mass gets + PosFloorGain·(T[cx][cy] − rowmean)
+  where T = pos_class_transitions (17 UD-upos classes over the fused
+  continuation evidence) and class = vocab_dominant_pos (direct HAS_POS,
+  case-fold fallback for the 82 'ALL'→'all' surfaces; 6,325/7,134 tokens
+  classed, 250 surfaces legitimately unwitnessed, 259 ids structural).
+  v1 FAILURE (kept as the lesson): adding T everywhere re-ranked the SEEN
+  calibrated bigrams with a next-word prior — hits@50 0.448→0.38, C-5's
+  intent error inside one table. v2 = backoff form: seen entries untouched,
+  only the flat default differentiates, centered per source class.
+  RESULT (16-probe likelihood): floor L0 mean 1684.5→1256.7 (25% better),
+  hits@50 held 0.448; FULL FORWARD NOW IMPROVES EVERY METRIC OVER ITS OWN
+  FLOOR — mean 1256.7→1219.3, mrr 0.0507→0.0547, hits held — the monotone
+  gate attenuation could never reach (correction planes were tail-only) is
+  reached by making the FLOOR ITSELF carry the grammar. vs floor-c full:
+  mean 1603.9→1219.3, mrr 0.0508→0.0547 (+7.7%), hits equal.
+  Canary: the→close/mother/piece (noun-shaped determiner slot), Spearman
+  L0↔full 0.988. Artifacts: floor-d.gguf + floor-d-floorgate.json.
+  Extension chain today: e49b→8e91→ba3f→37f2→536a→7dce2120315ab75b
+  (relation_plane pushdown; consensus_adjacency fence; pos_class_transitions
+  + vocab_dominant_pos; every step ALTER'd + smoke-tested live).
+STILL OPEN from the plan: Phase 7 depth-k metric now exists
+  (content_word_pass_rate) — its target is layer attenuation on the floor +
+  doc-18 build; Issue 51. Baselines in D:\Models\laplace-gen
   (phase0-baseline.gguf Path B / phase16-mold-a.gguf / mold-b.gguf / mold-c.gguf
   + report JSONs).
 

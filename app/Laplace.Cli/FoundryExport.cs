@@ -55,16 +55,28 @@ internal static class FoundryExport
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var adj = new Dictionary<int, List<(int Col, double W)>>();
+        // Vocab pushdown (2026-07-09): unfiltered consensus-family reads streamed
+        // 27.5M rows per pour so this loop could keep ~1%; the vocab probes the
+        // (type_id, subject_id) index server-side instead. Client filter retained
+        // as the correctness net (traj family still returns unfiltered).
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
         await using var conn = await ds.OpenConnectionAsync();
         try
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, w FROM laplace.relation_plane($1, $2, $3)";
+                "SELECT subject_id, object_id, w FROM laplace.relation_plane($1, $2, $3, $4)";
             cmd.Parameters.AddWithValue(spec.Family);
             cmd.Parameters.AddWithValue(spec.Name);
             cmd.Parameters.AddWithValue((object?)spec.Arg ?? DBNull.Value);
+            cmd.Parameters.Add(new NpgsqlParameter
+            {
+                Value = spec.Family == "consensus" ? vocab : (object)DBNull.Value,
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea
+            });
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
             {
@@ -786,6 +798,107 @@ internal static class FoundryExport
 
 
 
+
+    /// Finish-line Phase 3 (the conditional theorem): the smoothed log-conditional
+    /// continuation table. Returns the sparse top-cap entries per row plus each
+    /// row's UNSEEN default (NULL-object rows from the SQL) — absent pairs must
+    /// densify to the default, NOT zero (zero = log 1 would rank every unseen
+    /// continuation above every seen one).
+    internal static async Task<(PlaneCoo Plane, double[] RowDefault)> ReadConditionalPlaneAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize,
+        int trajs = 200000, double smoothK = 0.5, int cap = 512)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        var rowDefault = new double[vocabSize];
+        Array.Fill(rowDefault, double.NaN);
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+        cmd.CommandText =
+            "SELECT subject_id, object_id, w FROM laplace.continuation_conditional_plane($1, $2, $3, $4)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(trajs);
+        cmd.Parameters.AddWithValue(smoothK);
+        cmd.Parameters.AddWithValue(cap);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            double w = rdr.GetDouble(2);
+            if (rdr.IsDBNull(1))
+            {
+                foreach (int s in subj) if (s >= 0 && s < vocabSize) rowDefault[s] = w;
+                continue;
+            }
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(16);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return (CooFromAdj(adj, cap), rowDefault);
+    }
+
+    /// Finish-line Phase 4 v1b: dominant POS class per vocab token + the class
+    /// transition log-conditional table, for the lm_head compose
+    /// M[x,y] += gain * T[class(x),class(y)] (grammatical shaping of the
+    /// unseen mass — the flat row default becomes class-differentiated).
+    internal static async Task<(int[] TokenClass, double[,] T, int NClasses)> ReadPosCorrectionAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var tokenClass = new int[vocabSize];
+        Array.Fill(tokenClass, -1);
+        var classIndex = new Dictionary<Hash128, int>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandTimeout = 600;
+            cmd.CommandText = "SELECT word_id, pos_id FROM laplace.vocab_dominant_pos($1)";
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
+                var pos = FromBytes((byte[])rdr[1]);
+                if (!classIndex.TryGetValue(pos, out int ci)) classIndex[pos] = ci = classIndex.Count;
+                foreach (int s in slots)
+                    if (s >= 0 && s < vocabSize) tokenClass[s] = ci;
+            }
+        }
+        var entries = new List<(Hash128 Px, Hash128 Py, double W)>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandTimeout = 600;
+            cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.pos_class_transitions($1)";
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+                entries.Add((FromBytes((byte[])rdr[0]), FromBytes((byte[])rdr[1]), rdr.GetDouble(2)));
+        }
+        int nc = classIndex.Count;
+        // unattested class pairs get the table's own floor, not 0 (0 = certainty-scale
+        // log-prob and would rank an unseen class pair above every seen one)
+        double floor = entries.Count > 0 ? entries.Min(e => e.W) : 0.0;
+        var t = new double[nc, nc];
+        for (int i = 0; i < nc; i++)
+            for (int j = 0; j < nc; j++) t[i, j] = floor;
+        foreach (var (px, py, w) in entries)
+            if (classIndex.TryGetValue(px, out int ci) && classIndex.TryGetValue(py, out int cj))
+                t[ci, cj] = w;
+        return (tokenClass, t, nc);
+    }
 
     /// Plan Phase 4: sentence-boundary word bridge — last word of sentence i to
     /// first word of sentence i+1, from tier-4 document trajectories. The

@@ -21,6 +21,7 @@ Exit codes: 0 pass, 1 content-gate failure, 2 harness/setup error.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -117,6 +118,90 @@ def run_completion(llama, model, prompt, n_tokens):
     return "\n".join(gen_lines).strip(), None
 
 
+def likelihood_mode(args, probes):
+    """Finish-line Phase 3 gate: score the model's next-token DISTRIBUTION, not a
+    greedy string (argmax of true English bigram conditionals IS glue — a correct
+    floor 'fails' greedy evals by design). Reports mean reciprocal rank + mean
+    rank of substrate-attested continuations via the numpy oracle, plus the
+    math-proof check: Spearman correlation between the model's logits and the
+    substrate's own log-conditional over the attested pairs."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("oracle", os.path.join(here, "model-forward-oracle.py"))
+    oracle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(oracle)
+    import numpy as np
+
+    kv, T = oracle._read_gguf(args.model)
+    vocab = oracle.gguf_vocab(args.tokenizer)
+
+    expected = {}
+    for word in probes:
+        wid = vocab.get(word) or vocab.get("▁" + word)
+        if wid is None:
+            continue
+        tids = []
+        for tok in expected_set(args.db, word, args.expected_per_probe):
+            tid = vocab.get("▁" + tok) or vocab.get(tok)
+            if tid is not None:
+                tids.append(int(tid))
+        expected[word] = (wid, tids)
+
+    def depth_metrics(layers):
+        ranks, per_probe = [], []
+        for word, (wid, tids) in expected.items():
+            logits = oracle.gguf_forward(kv, T, [wid], layers=layers).astype("float64")
+            order = np.argsort(logits)[::-1]
+            rank_of = {int(i): r for r, i in enumerate(order, 1)}
+            probe_ranks = [rank_of[t] for t in tids]
+            ranks.extend(probe_ranks)
+            if probe_ranks:
+                per_probe.append({"word": word, "n_expected_in_vocab": len(probe_ranks),
+                                  "best_rank": min(probe_ranks),
+                                  "mean_rank": round(sum(probe_ranks) / len(probe_ranks), 1)})
+        verdicts = {}
+        if ranks:
+            verdicts["mean_rank"] = round(sum(ranks) / len(ranks), 1)
+            verdicts["mrr"] = round(sum(1.0 / r for r in ranks) / len(ranks), 4)
+            verdicts["hits_at_50"] = round(sum(1 for r in ranks if r <= 50) / len(ranks), 3)
+            verdicts["vocab_size"] = len(vocab)
+        return verdicts, per_probe
+
+    if args.floor_gate:
+        # Attenuation gate (doc 14 §6b 2026-07-09): the correction planes are
+        # tail-only, so strict monotone improvement is unachievable — the full
+        # forward must improve mean rank while holding hits@50 exactly and
+        # keeping MRR within 3% of the calibrated floor (layers=0).
+        floor, _ = depth_metrics(0)
+        full, per_probe = depth_metrics(None)
+        ok = (bool(floor) and bool(full)
+              and full["mean_rank"] <= floor["mean_rank"]
+              and full["hits_at_50"] >= floor["hits_at_50"]
+              and full["mrr"] >= 0.97 * floor["mrr"])
+        verdicts = {"floor": floor, "full": full}
+    else:
+        verdicts, per_probe = depth_metrics(args.layers)
+        ok = bool(verdicts) and verdicts.get("mean_rank", 1e9) <= max(50, len(vocab) * 0.02)
+    report = {"model": args.model, "mode": "likelihood", "verdicts": verdicts,
+              "ok": ok, "probes": per_probe}
+    text = json.dumps(report, indent=2, ensure_ascii=False)
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as f:
+            f.write(text)
+    print(text)
+    if args.floor_gate:
+        f0, ff = verdicts.get("floor", {}), verdicts.get("full", {})
+        print(f"\nFLOOR-GATE {'PASS' if ok else 'FAIL'}: mean rank "
+              f"{f0.get('mean_rank')}→{ff.get('mean_rank')}, "
+              f"mrr {f0.get('mrr')}→{ff.get('mrr')}, "
+              f"hits@50 {f0.get('hits_at_50')}→{ff.get('hits_at_50')}")
+    else:
+        print(f"\nLIKELIHOOD {'PASS' if ok else 'FAIL'}: mean rank "
+              f"{verdicts.get('mean_rank')} of {verdicts.get('vocab_size')} "
+              f"(mrr {verdicts.get('mrr')}, hits@50 {verdicts.get('hits_at_50')})")
+    sys.exit(0 if ok else 1)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -127,7 +212,21 @@ def main():
     ap.add_argument("--expected-per-probe", type=int, default=40)
     ap.add_argument("--min-pass", type=float, default=0.5)
     ap.add_argument("--report", default=None)
+    ap.add_argument("--mode", choices=["generate", "likelihood"], default="generate")
+    ap.add_argument("--tokenizer", default=None,
+                    help="tokenizer dir (required for --mode likelihood)")
+    ap.add_argument("--layers", type=int, default=None,
+                    help="likelihood mode: truncate the forward to N layers (0 = floor only)")
+    ap.add_argument("--floor-gate", action="store_true",
+                    help="likelihood mode: gate full forward against the layers=0 floor "
+                         "(mean rank improves, hits@50 holds, mrr within 3%%)")
     args = ap.parse_args()
+
+    if args.mode == "likelihood":
+        if not args.tokenizer:
+            sys.exit("--mode likelihood requires --tokenizer <dir>")
+        likelihood_mode(args, [p.strip().lower() for p in args.probes.split(",") if p.strip()])
+        return
 
     probes = [p.strip().lower() for p in args.probes.split(",") if p.strip()]
     results = []

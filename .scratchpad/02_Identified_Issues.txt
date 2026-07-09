@@ -111,6 +111,15 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
                Fix: native lane should build the coord curve (word_curve semantics)
                or batch-unpack constituents to coords before the Fréchet SPI call.
                Read-side only; does not block the foundry pour.
+52  OPEN       request-time full-table aggregates killed 5 API endpoints at 135M
+               attestations / 124M consensus: consensus_stats (exact count(*)),
+               source_counts (GROUP BY all attestations + count(DISTINCT) join),
+               multi_source_entity_count (GROUP BY all subjects), top_relations
+               (edge_rank per row over ALL consensus — measured >9min for LIMIT 20),
+               evidence_receipt (labels/ranks ALL ~3k claims before LIMIT; >25s cold).
+               App layer remediated 2026-07-09 (bounded budgets + approx/degrade +
+               bounded-candidate top_relations, detail below); durable fix is
+               extension-side. Issue 02/48 family, doc 08 record-vs-calculate.
 NU1903 FIXED   transitive Microsoft.OpenApi pinned 2.7.5, CPM transitive pinning on
 
 RULE #8 PIPELINE STATUS (supersedes several entries above): ALL FIVE PHASES of the
@@ -184,6 +193,60 @@ ISSUE 46 — read-side fragmentation (07 §4): SubstrateClient and QueryCommands
 parallel read surfaces; six string→id paths; label() vs render() unresolved; missing
 canonical entry points (resolve/entity_form/decompose/reconstruct_content). Partially
 improved by d061beb/7313fdc/ee3bfef; remainder = plan 13 Phase 2.
+
+ISSUE 49 (update 2026-07-09) — walk_text cold path now >240s at 135M attestations
+(statement_timeout fired inside corpus_sentence_constituents_since). recall chat
+(recall_session) unaffected — /v1/chat/completions answers in seconds. /v1/completions
+rides walk_text and now returns an honest 503 at the API's 30s command budget instead
+of hanging the client. The prescribed fix stands: perfcache-class mmap'd GenCorpus blob
+(walk-engine findings), engine-side.
+
+ISSUE 52 — request-time full-table aggregates (found 2026-07-09 API sweep; the whole
+defect class is "unbounded work before LIMIT, inline at request time, on a connection
+inheriting Command Timeout=0"). Dead endpoints: /v1/explore/catalog, /v1/audit/report,
+/v1/visualizations/substrate (all >9min via top_relations + exact stats),
+/v1/evidence/{target} (>25s cold via evidence_receipt label-then-limit),
+/v1/completions (Issue 49). App-layer remediation SHIPPED (Laplace.Endpoints.
+OpenAICompat): (a) SubstrateClient data source bounds CommandTimeout to 30s — LAPLACE_DB's
+Command Timeout=0 is ingest law, not API law; middleware reports budget trips as
+time-budget 503s, not "unreachable"; (b) catalog/audit read consensus_stats_approx
+(already in schema) with exact-attempt fallback only in the audit path; (c)
+source_counts/multi_source_entity_count attempted under small per-command budgets,
+degrade to empty/null (contracts tolerate it; stage grid renders from the static
+witness catalog); (d) ReadTopRelationsAsync = bounded-candidate form: top-M raw eff_mu
+via consensus_eff_mu_btree (index-served), THEN the same edge_rank readout law over the
+pool — 9min → 0.5s measured; (e) 5-min TTL single-flight cache on the catalog response.
+EXTENSION-SIDE PRESCRIPTIONS (the durable fix, do when the manifest isn't contended):
+  1. source_counts_approx() from pg_stats MCV × reltuples (same sanctioned pattern as
+     substrate_counts' planner estimates) or a calculated-layer stats table maintained
+     post-ingest (doc 08: these are CALCULATED facts, versioned + evictable).
+  2. top_relations: adopt the bounded-candidate form natively (or a small calculated
+     top-edges table refreshed post-fold); the API's inline SQL in ReadTopRelationsAsync
+     is a documented Rule #6 duplication to retire.
+  3. evidence_receipt: rank claims on (edge_rank, consensus probe) FIRST, label only
+     the top-N (with a small over-fetch for the ellipsis-label filter). Labeling 3,129
+     claims at ~6ms each to return 3 rows is the whole cost.
+  4. multi_source_entity_count: calculated-layer counter, or estimate.
+ALSO FOUND in the same sweep, ingest-side, not app: UDDecomposer emits self-referential
+HAS_DEFINITION rows (dog —has definition→ dog, 9 observations) — tier/identity smell
+for the doc 16/17 decomposer audit trail.
+SECOND WAVE (same day, CLI + web UI): CLI `stats` hung on the same source_counts()
+join — now evidence-only GROUP BY (attestations_source_btree, ~30s live, 120s budget)
+with content deferred to `stats <source>`. LAPLACE_BILLING_BYPASS was a PLACEBO:
+e2e-web.cmd set it, test-app.cmd stripped it, AppComposition hardcoded Bypass=true and
+read the env nowhere — now honored (default true; deploys/gated runs set false).
+Web UI defects fixed: Chess Lab experiment-card titles were UA-default black on the
+dark panel (contrast 1.32 — invisible; <button> does not inherit color) → card sets
+--color-text-primary; white-on-accent fills were 3.21:1 → new --color-accent-fill
+(blue-600, 5.2:1) for Button primary + SegmentedControl selected; unlabeled controls
+(Toggle switches, SliderField range/number pairs, Lichess inputs) got accessible
+names. Three July-6 e2e tests were DRIFT (asserted UX unreachable under the suite's
+own bypass env / a Send-disabled-on-empty-input design older than the test) —
+rewritten to the real flows; gate test now skips unless LAPLACE_BILLING_BYPASS=false.
+Playwright suite: 4 failed/11 passed → 14 passed/1 conditional-skip. Evidence-lookup
+test carries a 35s budget tied to this issue's evidence_receipt prescription — tighten
+when the SQL fix lands. Data-side note: a 21M-attestation source renders as raw hex
+(ae0ca709…) — content-hash source id with no registered name entity.
 
 CHESS-SCALE OBSERVATIONS (open levers, not defects — from the 909k-game Lumbras runs):
   - Pipeline is APPLY-bound at scale (~60s compose per ~300-400s apply per ~30k-game

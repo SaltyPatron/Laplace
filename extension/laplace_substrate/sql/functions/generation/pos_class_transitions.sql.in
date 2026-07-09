@@ -1,0 +1,90 @@
+-- Finish-line Phase 4 v1b (the syntax organ, lm_head composition path): the
+-- pos_transition_plane word-pair projection caps at 512 arbitrary-tiebreak
+-- rows per word — wrong grain for a floor correction. The lm_head wants the
+-- ~18x18 CLASS table + each vocab word's dominant class; the dense compose
+-- M[x,y] += gain * T[class(x),class(y)] happens client-side over the full
+-- V x V table (SQL returns the small fact tables; C# orchestrates).
+CREATE OR REPLACE FUNCTION vocab_dominant_pos(p_vocab bytea[])
+    RETURNS TABLE(word_id bytea, pos_id bytea)
+    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    v_type bytea;
+BEGIN
+    v_type := relation_type_id('HAS_POS');
+    RETURN QUERY
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    direct AS (
+        SELECT DISTINCT ON (c.subject_id) c.subject_id AS wid, c.object_id AS pos
+        FROM v
+        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
+            AND c.type_id = v_type
+        WHERE c.object_id IS NOT NULL
+        ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
+    ),
+    -- case-variant asymmetry: 'ALL' has no HAS_POS witness but 'all' does —
+    -- fold unwitnessed surfaces and take the lowercase entity's class
+    missing AS (
+        SELECT vv.id, word_id(lower(render(vv.id))) AS fid
+        FROM v vv
+        WHERE NOT EXISTS (SELECT 1 FROM direct d WHERE d.wid = vv.id)
+    ),
+    folded AS (
+        SELECT DISTINCT ON (m.id) m.id AS wid, c.object_id AS pos
+        FROM missing m
+        JOIN v_consensus_unrefuted c ON c.subject_id = m.fid
+            AND c.type_id = v_type
+        WHERE c.object_id IS NOT NULL AND m.fid IS NOT NULL AND m.fid <> m.id
+        ORDER BY m.id, eff_mu(c.rating, c.rd) DESC
+    )
+    SELECT d.wid, d.pos FROM direct d
+    UNION ALL
+    SELECT f.wid, f.pos FROM folded f;
+END;
+$$;
+
+-- Class-transition log-conditionals P^(class(y) | class(x)) from the same
+-- fused continuation evidence as the conditional plane (word_order corpus
+-- adjacency + PRECEDES consensus), aggregated to the dominant-POS classes.
+CREATE OR REPLACE FUNCTION pos_class_transitions(
+        p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    v_prec bytea;
+BEGIN
+    v_prec := relation_type_id('PRECEDES');
+    RETURN QUERY
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    word_pos AS MATERIALIZED (
+        SELECT wp.word_id AS wid, wp.pos_id AS pos FROM vocab_dominant_pos(p_vocab) wp
+    ),
+    nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
+    pairs AS (
+        SELECT wo.subject_id AS x, wo.object_id AS y, wo.w AS c
+        FROM word_order(p_vocab, p_trajs, 1) wo
+        UNION ALL
+        SELECT c.subject_id, c.object_id, c.witness_count::float8
+        FROM v
+        JOIN consensus c ON c.type_id = v_prec AND c.subject_id = v.id
+        JOIN v vo ON vo.id = c.object_id
+        WHERE c.object_id IS NOT NULL
+    ),
+    class_pairs AS (
+        SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c
+        FROM pairs p
+        JOIN word_pos wx ON wx.wid = p.x
+        JOIN word_pos wy ON wy.wid = p.y
+        GROUP BY wx.pos, wy.pos
+    ),
+    class_marginals AS (
+        SELECT cp.px, sum(cp.c) AS cx FROM class_pairs cp GROUP BY cp.px
+    )
+    SELECT cp.px, cp.py,
+           ln((cp.c + p_smooth_k) / (cm.cx + p_smooth_k * nc.n))
+    FROM class_pairs cp
+    JOIN class_marginals cm ON cm.px = cp.px
+    CROSS JOIN nclasses nc;
+END;
+$$;
