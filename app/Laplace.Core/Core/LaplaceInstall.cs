@@ -339,6 +339,14 @@ public static class LaplaceInstall
 
     private static IEnumerable<string> DeploySecretCandidatePaths(string fileName)
     {
+        // Install-prefix secrets drop (Linux): setup-host seeds
+        // /opt/laplace/secrets/{fileName} from ~/.config/shell/secrets.env.
+        var prefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
+        if (string.IsNullOrWhiteSpace(prefix))
+            prefix = OperatingSystem.IsWindows() ? null : "/opt/laplace";
+        if (!string.IsNullOrWhiteSpace(prefix))
+            yield return Path.Combine(prefix.Trim(), "secrets", fileName);
+
         yield return Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "deploy", "secrets", fileName));
 

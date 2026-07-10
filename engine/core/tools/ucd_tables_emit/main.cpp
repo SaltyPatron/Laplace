@@ -12,10 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <libxml/parser.h>
-#include <libxml/SAX2.h>
-
 #include "laplace/core/hash128.h"
+#include "laplace/core/ucd_xml.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/super_fibonacci.h"
 #include "laplace/core/perfcache_format.h"
@@ -103,15 +101,15 @@ struct UcdData {
     }
 };
 
-static const xmlChar* attr(const xmlChar** a, const char* n) {
+static const char* attr(const char** a, const char* n) {
     if (!a) return nullptr;
-    for (int i = 0; a[i]; i += 2) if (std::strcmp((const char*)a[i], n) == 0) return a[i+1];
+    for (int i = 0; a[i]; i += 2) if (std::strcmp(a[i], n) == 0) return a[i+1];
     return nullptr;
 }
 
 struct SaxCtx { UcdData* d; bool in_rep = false; };
 
-extern "C" void on_start(void* u, const xmlChar* name, const xmlChar** a) {
+extern "C" void on_start(void* u, const char* name, const char** a) {
     auto* ctx = (SaxCtx*)u;
     if (std::strcmp((const char*)name, "repertoire") == 0) { ctx->in_rep = true; return; }
     if (!ctx->in_rep) return;
@@ -157,97 +155,17 @@ extern "C" void on_start(void* u, const xmlChar* name, const xmlChar** a) {
         if (!seq.empty()) d->decomp[first] = seq;
     }
 }
-extern "C" void on_end(void* u, const xmlChar* name) {
+extern "C" void on_end(void* u, const char* name) {
     auto* ctx = (SaxCtx*)u;
     if (std::strcmp((const char*)name,"repertoire")==0) ctx->in_rep = false;
 }
 
-struct DucetKeys {
-    std::vector<uint64_t> key;
-    std::vector<uint8_t>  explicit_;
-    DucetKeys() { key.assign(CP_COUNT, 0); explicit_.assign(CP_COUNT, 0); }
-};
-
-struct ImplicitRange { uint32_t first, last; uint32_t base; };
-
-static void parse_ducet(const fs::path& path, DucetKeys& dk) {
-    std::ifstream f(path);
-    if (!f) { std::fprintf(stderr, "cannot open DUCET %s\n", path.string().c_str()); std::exit(3); }
-    std::vector<ImplicitRange> implicit;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.empty()) continue;
-        if (line[0] == '@') {
-            if (line.rfind("@implicitweights", 0) == 0) {
-                const char* p = line.c_str() + 16;
-                char* e;
-                uint32_t lo = (uint32_t)std::strtoul(p, &e, 16); p = e;
-                while (*p == '.' ) ++p;
-                uint32_t hi = (uint32_t)std::strtoul(p, &e, 16); p = e;
-                while (*p && *p != ';') ++p; if (*p==';') ++p;
-                uint32_t base = (uint32_t)std::strtoul(p, &e, 16);
-                implicit.push_back({lo, hi, base});
-            }
-            continue;
-        }
-        if (line[0] == '#') continue;
-        size_t h = line.find('#'); if (h != std::string::npos) line = line.substr(0, h);
-        size_t semi = line.find(';'); if (semi == std::string::npos) continue;
-        std::string lhs = line.substr(0, semi);
-        const char* p = lhs.c_str(); char* e;
-        uint32_t cps[4]; int ncp = 0;
-        while (*p && ncp < 4) {
-            while (*p==' '||*p=='\t') ++p;
-            if (!*p) break;
-            uint32_t v = (uint32_t)std::strtoul(p, &e, 16);
-            if (e == p) break;
-            cps[ncp++] = v; p = e;
-        }
-        if (ncp != 1) continue;
-        uint32_t cp = cps[0];
-        if (cp >= CP_COUNT) continue;
-        std::string rhs = line.substr(semi + 1);
-        size_t b = rhs.find('[');
-        if (b == std::string::npos) continue;
-        const char* q = rhs.c_str() + b + 1;
-        if (*q=='.'||*q=='*') ++q;
-        uint32_t pw = (uint32_t)std::strtoul(q, &e, 16); q = e; if (*q=='.') ++q;
-        uint32_t sw = (uint32_t)std::strtoul(q, &e, 16); q = e; if (*q=='.') ++q;
-        uint32_t tw = (uint32_t)std::strtoul(q, &e, 16);
-        dk.key[cp] = ((uint64_t)pw << 48) | ((uint64_t)sw << 32) | ((uint64_t)tw << 16);
-        dk.explicit_[cp] = 1;
-    }
-    auto base_for = [&](uint32_t cp) -> uint32_t {
-        for (const auto& r : implicit) if (cp >= r.first && cp <= r.last) return r.base;
-        if ((cp>=0x4E00&&cp<=0x9FFF)||(cp>=0xF900&&cp<=0xFAFF)) return 0xFB40;
-        if ((cp>=0x3400&&cp<=0x4DBF)||(cp>=0x20000&&cp<=0x3FFFF)) return 0xFB80;
-        return 0xFBC0;
-    };
-    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
-        if (dk.explicit_[cp]) continue;
-        uint32_t base = base_for(cp);
-        uint32_t AAAA = base + (cp >> 15);
-        uint32_t BBBB = (cp & 0x7FFF) | 0x8000;
-        dk.key[cp] = ((uint64_t)AAAA << 48) | ((uint64_t)BBBB << 16);
-    }
-}
-
 static void put_u32(std::vector<uint8_t>& b, uint32_t v) { for(int i=0;i<4;++i) b.push_back((uint8_t)(v>>(i*8))); }
 static void put_u64(std::vector<uint8_t>& b, uint64_t v) { for(int i=0;i<8;++i) b.push_back((uint8_t)(v>>(i*8))); }
-static void put_f64(std::vector<uint8_t>& b, double d) { uint64_t v; std::memcpy(&v,&d,8); put_u64(b,v); }
 static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
     const uint8_t* p = (const uint8_t*)&h; for (int i=0;i<16;++i) b.push_back(p[i]);
 }
-static void put_hb128(std::vector<uint8_t>& b, const hilbert128_t& h) {
-    for (int i=0;i<16;++i) b.push_back(h.bytes[i]);
-}
 
-static size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
-    if (cp < 0x80) { o[0]=(uint8_t)cp; return 1; }
-    if (cp < 0x800) { o[0]=0xC0|(cp>>6); o[1]=0x80|(cp&0x3F); return 2; }
-    if (cp < 0x10000) { o[0]=0xE0|(cp>>12); o[1]=0x80|((cp>>6)&0x3F); o[2]=0x80|(cp&0x3F); return 3; }
-    o[0]=0xF0|(cp>>18); o[1]=0x80|((cp>>12)&0x3F); o[2]=0x80|((cp>>6)&0x3F); o[3]=0x80|(cp&0x3F); return 4;
-}
 
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
@@ -266,13 +184,16 @@ int main(int argc, char** argv) {
 
     UcdData d;
     SaxCtx ctx{&d, false};
-    xmlSAXHandler sax{}; sax.initialized = XML_SAX2_MAGIC;
-    sax.startElement = on_start; sax.endElement = on_end;
-    LIBXML_TEST_VERSION
-    if (xmlSAXUserParseFile(&sax, &ctx, cli.ucdxml.string().c_str()) != 0) {
+    std::vector<uint8_t> doc;
+    {
+        std::ifstream xf(cli.ucdxml, std::ios::binary);
+        if (!xf) { std::fprintf(stderr, "cannot open %s\n", cli.ucdxml.string().c_str()); return 4; }
+        doc.assign(std::istreambuf_iterator<char>(xf), std::istreambuf_iterator<char>());
+    }
+    if (laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx) != 0) {
         std::fprintf(stderr, "UCDXML parse failed\n"); return 4;
     }
-    xmlCleanupParser();
+    std::vector<uint8_t>().swap(doc);
 
     std::function<void(uint32_t, std::vector<uint32_t>&)> full;
     full = [&](uint32_t cp, std::vector<uint32_t>& out){
@@ -319,8 +240,8 @@ int main(int argc, char** argv) {
     blob.reserve(off_compose_r + compose_recs.size() + 16);
     put_u32(blob, LAPLACE_PERFCACHE_MAGIC);
     put_u32(blob, LAPLACE_PERFCACHE_VERSION);
-    { char v[8]={0}; std::strncpy(v, cli.ucd_version.c_str(), 8); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
-    { char v[8]={0}; std::strncpy(v, cli.uca_version.c_str(), 8); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
+    { char v[8]={0}; std::memcpy(v, cli.ucd_version.c_str(), std::min<size_t>(cli.ucd_version.size(), 8)); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
+    { char v[8]={0}; std::memcpy(v, cli.uca_version.c_str(), std::min<size_t>(cli.uca_version.size(), 8)); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
     put_u64(blob, CP_COUNT);
     put_u64(blob, 80);
     put_u64(blob, off_records);
@@ -339,6 +260,24 @@ int main(int argc, char** argv) {
     hash128_t crc; hash128_blake3(blob.data(), blob.size(), &crc);
     put_h128(blob, crc);
 
+    /* Write-if-changed: the runtime mmaps this blob and Windows refuses to
+     * truncate a user-mapped file, so a regeneration that produced identical
+     * bytes (the normal, deterministic case) must not fail the build under a
+     * live ingest. A CHANGED blob still writes — and correctly fails while
+     * anything has the old one mapped. */
+    {
+        std::ifstream prev(cli.output, std::ios::binary);
+        if (prev) {
+            std::vector<uint8_t> old((std::istreambuf_iterator<char>(prev)),
+                                     std::istreambuf_iterator<char>());
+            if (old.size() == blob.size()
+                && std::memcmp(old.data(), blob.data(), blob.size()) == 0) {
+                std::fprintf(stderr, "perfcache: unchanged (%.1f MiB) — write skipped\n",
+                             blob.size()/1048576.0);
+                return 0;
+            }
+        }
+    }
     std::ofstream out(cli.output, std::ios::binary);
     if (!out) { std::fprintf(stderr, "cannot write %s\n", cli.output.string().c_str()); return 5; }
     out.write((const char*)blob.data(), (std::streamsize)blob.size());

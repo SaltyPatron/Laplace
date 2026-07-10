@@ -26,42 +26,73 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class ModelTokenEdgeETL
 {
-    public readonly record struct EdgeAttestationRecord(
-        Hash128 Subject, Hash128 Object, Hash128 TypeId, long ScoreFp, double Weight);
+    // A pipeline record is a CHUNK of pre-staged rows, not one pair: the whole
+    // chunk crosses the managed→native boundary in ONE AggregatedBatch call
+    // (attestation ids, orientation, outcome — all native, batch-grain). The
+    // per-pair P/Invoke was the emission path's serial wall. Chunk size is the
+    // machine's own per-commit row budget (IngestSizing, Rule #12) — no
+    // constant, nothing dropped; chunks stream until the plane is exhausted.
+    public readonly record struct EdgeRowChunk(AttestationRow[] Rows, int Count);
 
-    public static void StageEdgeAttestation(
-        SubstrateChangeBuilder b, EdgeAttestationRecord rec, Hash128 sourceId) =>
-        b.AddAttestation(NativeAttestation.Aggregated(
-            rec.Subject, rec.TypeId, rec.Object, sourceId, null, 1, rec.ScoreFp, rec.Weight));
+    private static EdgeRowChunk BuildChunk(
+        AttestationAggregatedCellNative[] cells, int count,
+        Hash128 typeId, Hash128 source, double weight, AttestationStagedNative[] staged)
+    {
+        NativeAttestation.AggregatedBatch(cells, count, typeId, source, null, weight, staged);
+        var rows = new AttestationRow[count];
+        for (int i = 0; i < count; i++) rows[i] = NativeAttestation.Row(in staged[i]);
+        return new EdgeRowChunk(rows, count);
+    }
+
+    private static void StageEdgeChunk(SubstrateChangeBuilder b, EdgeRowChunk chunk)
+    {
+        for (int i = 0; i < chunk.Count; i++) b.AddAttestation(chunk.Rows[i]);
+    }
+
+    public readonly record struct OccurrenceRecord(Hash128 Token, Hash128 Coordinate, long ScoreFp);
+
+    // Witnessed occurrence: this token APPEARS_IN this circuit coordinate, at the
+    // salience the checkpoint itself assigns, scored through the native score law.
+    // Every token the circuit touches is recorded — the source's assertion is never
+    // truncated; the fold and read-side RD/eff_mu are the noise model. The
+    // coordinate is shared content across models; the model is only the source, so
+    // consensus (token, APPEARS_IN, coord) rates cross-model convergence.
+
+    public static string ResolvePlanesMode()
+    {
+        var m = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES");
+        return string.IsNullOrWhiteSpace(m) ? "structure" : m.Trim().ToLowerInvariant();
+    }
 
     private const int RowTile = 256;
-    private const int AttsPerChange = 200_000;
     private const int EigTargetDim = 64;
     private const int TopPairsPerCircuit = 64;
 
+    // Rows per change/chunk: the machine's commit-row budget from the one sizing
+    // authority (IngestSizing.ResolveForSource — RAM + topology derived), not a
+    // hand-set constant (Rule #12).
+    private readonly int _rowsPerChange = IngestSizing.ResolveForSource(IngestSourceProfile.Default).CommitRows;
 
-
-
+    // The native tiles' emission contract is strictly |score| > Theta; zero keeps
+    // every pair the checkpoint asserts. No per-row budgets, no floors: identical
+    // (subject, type, object, source) ids merge across circuits in the working set
+    // (observation_count/sum_score), so plane volume aggregates instead of
+    // ballooning, and weak couplings are draws the fold rates.
     private const double Theta = 0.0;
 
-    // Per-subject-row edge budget per plane. Without this, a zero floor emits every
-    // positive-scoring pair — O(V²) per plane, per head — which is computationally
-    // unbounded on a real vocabulary (V=32k ⇒ ~5×10⁸ candidate pairs per plane).
-    // Per-row top-|score| selection bounds every plane at V×k while keeping exactly
-    // the strongest partners, and makes EstimateMatchupUnits' partner assumption true
-    // instead of 3-6 orders optimistic. ATTENDS divides the budget across heads so a
-    // layer's total attention budget matches the other planes'.
-    internal const int EdgeTopK = 64;
 
 
 
 
 
-
-    private const string PlanesMode = "all";
-    private static bool RunSimilarity => PlanesMode is "all" or "similarity" or "shallow";
-    private static bool RunContinues => PlanesMode is "all" or "continues" or "shallow";
-    private static bool RunLayers => PlanesMode == "all";
+    // "structure" (default) deposits bounded APPEARS_IN occurrences aggregated from
+    // the native pair tiles; the token-pair planes themselves are the versioned
+    // analyzer's business ("all"/"similarity"/"continues"/"shallow").
+    private readonly string _mode = ResolvePlanesMode();
+    private bool StructureMode => _mode == "structure";
+    private bool RunSimilarity => _mode is "all" or "similarity" or "shallow";
+    private bool RunContinues => _mode is "all" or "continues" or "shallow";
+    private bool RunLayers => _mode is "all" or "structure";
 
 
 
@@ -139,6 +170,7 @@ public sealed class ModelTokenEdgeETL
             Array.Copy(embed, (long)rowOfToken[i] * d, Af, (long)i * d, d);
 
 
+
         if (RunSimilarity)
             await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, reader, options, ct))
                 yield return change;
@@ -159,21 +191,54 @@ public sealed class ModelTokenEdgeETL
 
 
         var Ad = new double[(long)n * d];
-        for (long i = 0; i < (long)n * d; i++) Ad[i] = Af[i];
+        unsafe { fixed (float* pf = Af) fixed (double* pd = Ad)
+            DynInterop.F32ToF64(pf, (nuint)((long)n * d), pd); }
 
+        // Layers are independent: produce them with bounded fan-out (memory is
+        // the bound — each in-flight layer holds GB-scale projection buffers)
+        // into one bounded channel; the single consumer preserves the async-
+        // enumerator contract for the runner. Machine-derived width, no
+        // constant: the working-set budget divided by one layer's buffer
+        // footprint (n×attn doubles ≈ the dominant allocation), clamped to
+        // the compose-worker count.
         int layers = _manifest.LayerCount;
-        for (int L = 0; L < layers; L++)
+        long perLayerBytes = 3L * n * d * sizeof(double);
+        int fanOut = (int)Math.Clamp(
+            MemoryTopology.WorkingSetBudgetBytes / Math.Max(1, perLayerBytes),
+            1, IngestTopology.Current.ComposeWorkers);
+        var chan = System.Threading.Channels.Channel.CreateBounded<SubstrateChange>(
+            new System.Threading.Channels.BoundedChannelOptions(fanOut * 2)
+            { SingleReader = true, SingleWriter = false });
+        var gate = new SemaphoreSlim(fanOut, fanOut);
+        var producers = new List<Task>(layers);
+        for (int i = 0; i < layers; i++)
         {
-            ct.ThrowIfCancellationRequested();
-            await foreach (var change in EmitAttentionLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                yield return change;
-            await foreach (var change in EmitOvLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                yield return change;
-            await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                yield return change;
+            int L = i;
+            producers.Add(Task.Run(async () =>
+            {
+                await gate.WaitAsync(ct);
+                try
+                {
+                    await foreach (var change in EmitAttentionLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
+                        await chan.Writer.WriteAsync(change, ct);
+                    await foreach (var change in EmitOvLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
+                        await chan.Writer.WriteAsync(change, ct);
+                    await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
+                        await chan.Writer.WriteAsync(change, ct);
+                }
+                finally { gate.Release(); }
+            }, ct));
         }
-    }
+        var completion = Task.WhenAll(producers).ContinueWith(t =>
+        {
+            chan.Writer.Complete(t.Exception?.GetBaseException());
+            return t;
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).Unwrap();
 
+        await foreach (var change in chan.Reader.ReadAllAsync(ct))
+            yield return change;
+        await completion;
+    }
 
     private async IAsyncEnumerable<SubstrateChange> EmitSimilarityPlane(
         float[] Af, List<Hash128> ents, int n, int d, int commitEpoch,
@@ -199,10 +264,16 @@ public sealed class ModelTokenEdgeETL
         if (rc != 0) { _log.LogWarning("phase=edges: tensor_svd_truncate rc={Rc}; skipping similarity", rc); yield break; }
         if (rank < 2) { _log.LogWarning("phase=edges: SVD rank {R}<2; skipping similarity", rank); yield break; }
 
-        var Y = new double[(long)n * rank];
+        var Yf = new float[(long)n * rank];
         for (int i = 0; i < n; i++)
-            for (int t = 0; t < rank; t++)
-                Y[(long)i * rank + t] = (double)U[(long)i * kmax + t] * S[t];
+            Array.Copy(U, (long)i * kmax, Yf, (long)i * rank, rank);
+        var Y = new double[(long)n * rank];
+        unsafe
+        {
+            fixed (float* pf = Yf) fixed (double* pd = Y)
+                DynInterop.F32ToF64(pf, (nuint)((long)n * rank), pd);
+        }
+        ScaleColsD(Y, n, rank, S);
         NormRows(Y, n, rank);
         _log.LogInformation("phase=edges: SVD reduced {N:N0} tokens d={D}->rank {R} (tol 1%), {Sec:F1}s; "
             + "folding SIMILAR_TO (every pair, no floor)", n, d, rank, sw.Elapsed.TotalSeconds);
@@ -212,7 +283,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in EmitBilinearPairs(
             Y, Y, n, rank, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "similarity", RelationName: "SIMILAR_TO"),
-            sampleForDecoder: false, topK: EdgeTopK, reader, options, ct))
+            reader, options, ct))
             yield return change;
     }
 
@@ -246,12 +317,17 @@ public sealed class ModelTokenEdgeETL
 
 
 
+        var Uf = new float[(long)n * d];
+        for (int i = 0; i < n; i++)
+            Array.Copy(Ufull, (long)rowOfToken[i] * d, Uf, (long)i * d, d);
         var Ed = new double[(long)n * d];
         var Ud = new double[(long)n * d];
-        for (int i = 0; i < n; i++)
+        unsafe
         {
-            long erow = (long)i * d, urow = (long)rowOfToken[i] * d;
-            for (int t = 0; t < d; t++) { Ed[erow + t] = Af[erow + t]; Ud[erow + t] = Ufull[urow + t]; }
+            fixed (float* pa = Af) fixed (double* pe = Ed)
+                DynInterop.F32ToF64(pa, (nuint)((long)n * d), pe);
+            fixed (float* pu = Uf) fixed (double* po = Ud)
+                DynInterop.F32ToF64(pu, (nuint)((long)n * d), po);
         }
         CenterColumns(Ed, n, d);
         CenterColumns(Ud, n, d);
@@ -264,7 +340,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in EmitBilinearPairs(
             Ed, Ud, n, d, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(Layer: -1, Head: -1, Plane: "continues", RelationName: "CONTINUES_TO"),
-            sampleForDecoder: true, topK: EdgeTopK, reader, options, ct))
+            reader, options, ct))
             yield return change;
     }
 
@@ -323,9 +399,8 @@ public sealed class ModelTokenEdgeETL
         double weight = WeightFor("ATTENDS");
         var Qh = new double[(long)n * hd];
         var Kh = new double[(long)n * hd];
-        // The layer's ATTENDS budget is shared across heads so one layer's attention
-        // plane emits ~V*EdgeTopK edges total, matching the OV/MLP planes.
-        int perHeadK = Math.Max(1, EdgeTopK / Math.Max(1, H));
+        var salQ = StructureMode ? new double[n] : null;
+        var salK = StructureMode ? new double[n] : null;
         for (int h = 0; h < H; h++)
         {
             ct.ThrowIfCancellationRequested();
@@ -333,10 +408,27 @@ public sealed class ModelTokenEdgeETL
             SliceHead(Kexp, Kh, n, attn, h, hd);
             if (gQ is not null) ScaleColsD(Qh, n, hd, gQ);
             if (gK is not null) ScaleColsD(Kh, n, hd, gK);
+            if (StructureMode)
+            {
+                // Salience = the token's magnitude in the head's QK subspace:
+                // sqrt(||q_h(t)||² + ||k_h(t)||²) — same law as the OV/MLP planes,
+                // read straight off the native projections. The n×n pair tile is
+                // the analyzer's business, not the recorder's (VTune: the per-row
+                // managed sort it forced was 83% of the ingest's CPU).
+                RowNorms(Qh, n, hd, salQ!);
+                RowNorms(Kh, n, hd, salK!);
+                unsafe { fixed (double* pa = salQ) fixed (double* pb = salK)
+                    DynInterop.HypotRowsD(pa, pb, (nuint)n, pa); }
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, h, "attention", "ATTENDS"), salQ!, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+                continue;
+            }
             await foreach (var change in EmitBilinearPairs(
                 Qh, Kh, n, hd, typeId, weight, ents, ents, commitEpoch,
-                new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true,
-                topK: perHeadK, reader, options, ct))
+                new CircuitDescriptor(L, h, "attention", "ATTENDS"),
+                reader, options, ct))
                 yield return change;
         }
     }
@@ -374,7 +466,6 @@ public sealed class ModelTokenEdgeETL
 
         var Vraw = new double[(long)n * kvDim];
         var Vexp = new double[(long)n * attn];
-        var OVout = new double[(long)n * d];
         int rcv, rce, rco;
         unsafe
         {
@@ -382,23 +473,63 @@ public sealed class ModelTokenEdgeETL
                 rcv = DynInterop.ProjectEmbedding(pa, (nuint)n, (nuint)d, pw, (nuint)kvDim, pv);
             fixed (double* pv = Vraw) fixed (double* pe = Vexp)
                 rce = DynInterop.ExpandKvHeadsD(pv, (nuint)n, (nuint)H, (nuint)Hkv, (nuint)hd, pe);
-
-            fixed (double* pv = Vexp) fixed (float* pw = Wo) fixed (double* po = OVout)
-                rco = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)attn, pw, (nuint)d, po);
         }
-        if (rcv != 0 || rce != 0 || rco != 0)
-        { _log.LogWarning("phase=edges L{L}: OV projection rc=({A},{B},{C}); skipping", L, rcv, rce, rco); yield break; }
+        if (rcv != 0 || rce != 0)
+        { _log.LogWarning("phase=edges L{L}: OV projection rc=({A},{B}); skipping", L, rcv, rce); yield break; }
 
-        NormRows(OVout, n, d);
+        if (StructureMode)
+        {
+            // Per-head OV occurrences: each head is its own circuit coordinate, and
+            // its salience for token t is the write magnitude ||Wo_h·v_h(t)|| — a
+            // direct read of what the head moves, from the native GEMM output. No
+            // n×n pair tile at rank d (that is the analyzer's petaflop, not the
+            // recorder's). Scores go through the native score law (arena = RMS).
+            var Vh = new double[(long)n * hd];
+            var WoH = new float[(long)d * hd];
+            var OVh = new double[(long)n * d];
+            var sal = new double[n];
+            for (int h = 0; h < H; h++)
+            {
+                ct.ThrowIfCancellationRequested();
+                SliceHead(Vexp, Vh, n, attn, h, hd);
+                for (int row = 0; row < d; row++)
+                    Array.Copy(Wo, (long)row * attn + (long)h * hd, WoH, (long)row * hd, hd);
+                int rcoH;
+                unsafe
+                {
+                    fixed (double* pv = Vh) fixed (float* pw = WoH) fixed (double* po = OVh)
+                        rcoH = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)hd, pw, (nuint)d, po);
+                }
+                if (rcoH != 0)
+                { _log.LogWarning("phase=edges L{L}.H{H2}: OV head projection rc={Rc}; skipping", L, h, rcoH); continue; }
+                RowNorms(OVh, n, d, sal);
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, h, "ov", "OV_RELATES"), sal, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+            }
+            yield break;
+        }
+
         var En = (double[])Ad.Clone();
         NormRows(En, n, d);
-
         var typeId = RelationTypeRegistry.Resolve("OV_RELATES").Id;
         double weight = WeightFor("OV_RELATES");
+
+        var OVfull = new double[(long)n * d];
+        unsafe
+        {
+            fixed (double* pv = Vexp) fixed (float* pw = Wo) fixed (double* po = OVfull)
+                rco = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)attn, pw, (nuint)d, po);
+        }
+        if (rco != 0)
+        { _log.LogWarning("phase=edges L{L}: OV projection rc={Rc}; skipping", L, rco); yield break; }
+
+        NormRows(OVfull, n, d);
         await foreach (var change in EmitBilinearPairs(
-            OVout, En, n, d, typeId, weight, ents, ents, commitEpoch,
-            new CircuitDescriptor(L, -1, "ov", "OV_RELATES"), sampleForDecoder: true,
-            topK: EdgeTopK, reader, options, ct))
+            OVfull, En, n, d, typeId, weight, ents, ents, commitEpoch,
+            new CircuitDescriptor(L, -1, "ov", "OV_RELATES"),
+            reader, options, ct))
             yield return change;
     }
 
@@ -410,12 +541,91 @@ public sealed class ModelTokenEdgeETL
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
+
+        // MoE layer: the router tensor IS the model's literal token→expert routing
+        // map. One GEMM per layer; each expert is its own coordinate
+        // [expert-plane, layer, expert] taking its top tokens by routing logit.
+        // Expert FFN internals are the analyzer's business.
+        if (StructureMode && cfg.NumExperts > 0)
+        {
+            var routerRole = _manifest.Single(L, TensorRoleKind.MoeRouter);
+            if (routerRole is null)
+            { _log.LogWarning("phase=edges L{L}: MoE layer without router tensor; skipping", L); yield break; }
+            int E = cfg.NumExperts;
+            float[] router;
+            try { router = WeightTensorETL.LoadTensorF32(refMap, routerRole.Name, (long)E * d); }
+            catch (Exception ex)
+            { _log.LogWarning("phase=edges L{L}: router load failed: {Msg}", L, ex.Message); yield break; }
+
+            if (NormFold)
+            {
+                var gPostR = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+                if (gPostR is not null) ScaleCols(router, E, d, gPostR);
+            }
+
+            var proj = new double[(long)n * E];
+            int rcR;
+            unsafe
+            {
+                fixed (double* pa = Ad) fixed (float* pw = router) fixed (double* po = proj)
+                    rcR = DynInterop.ProjectEmbeddingD(pa, (nuint)n, (nuint)d, pw, (nuint)E, po);
+            }
+            if (rcR != 0)
+            { _log.LogWarning("phase=edges L{L}: router projection rc={Rc}; skipping", L, rcR); yield break; }
+
+            var salE = new double[n];
+            for (int e = 0; e < E; e++)
+            {
+                ct.ThrowIfCancellationRequested();
+                for (int i = 0; i < n; i++) salE[i] = proj[(long)i * E + e];
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, e, "expert", "APPEARS_IN"), salE, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+            }
+            yield break;
+        }
+
         var upRole = _manifest.Single(L, TensorRoleKind.MlpUp);
         var downRole = _manifest.Single(L, TensorRoleKind.MlpDown);
         var gateRole = _manifest.Single(L, TensorRoleKind.MlpGate);
         if (upRole is null || downRole is null) yield break;
         int I = cfg.IntermediateSize;
         if (I <= 0) yield break;
+
+        var descriptor = new CircuitDescriptor(L, -1, "mlp", "COMPLETES_TO");
+
+        if (StructureMode)
+        {
+            // MLP occurrences from the token's gated-activation magnitude
+            // ||silu(gate·x)⊙(up·x)|| — native GEMM tiles + the native score law.
+            // The n×n COMPLETES_TO pair tile is the analyzer's business.
+            float[] upF; float[]? gateF = null;
+            try
+            {
+                upF = WeightTensorETL.LoadTensorF32(refMap, upRole.Name, (long)I * d);
+                if (gateRole is not null)
+                    gateF = WeightTensorETL.LoadTensorF32(refMap, gateRole.Name, (long)I * d);
+            }
+            catch (Exception ex)
+            { _log.LogWarning("phase=edges L{L}: MLP load failed: {Msg}", L, ex.Message); yield break; }
+
+            if (NormFold)
+            {
+                var gPostF = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+                if (gPostF is not null)
+                {
+                    ScaleCols(upF, I, d, gPostF);
+                    if (gateF is not null) ScaleCols(gateF, I, d, gPostF);
+                }
+            }
+
+            var sal = ComputeMlpActivationNorms(Ad, n, d, upF, gateF, I, L);
+            if (sal is null) yield break;
+            await foreach (var change in EmitNormOccurrences(descriptor, sal, ents, n, commitEpoch, reader, options, ct))
+                yield return change;
+            yield break;
+        }
 
         double[]? gate = null, up, down;
         try
@@ -440,19 +650,16 @@ public sealed class ModelTokenEdgeETL
 
         var typeId = RelationTypeRegistry.Resolve("COMPLETES_TO").Id;
         double weight = WeightFor("COMPLETES_TO");
-        var descriptor = new CircuitDescriptor(L, -1, "mlp", "COMPLETES_TO");
 
-        long cap = (long)RowTile * n;
-        var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
         var collector = _classifier is null ? null : new TopPairCollector(TopPairsPerCircuit);
 
         long edges = 0;
         await foreach (var batch in IngestComposePipeline.RunAsync(
-                           EnumerateFfnEdgeRecords(Ad, n, d, gate, up, down, I, ents, typeId, weight,
-                               oR, oC, oV, oS, cap, collector, ct),
-                           (rec, b) => StageEdgeAttestation(b, rec, _source),
-                           _source, $"model/edges/mlp/L{L}", AttsPerChange, reader, options, ct,
-                           commitEpoch, AttsPerChange))
+                           EnumerateFfnEdgeChunks(Ad, n, d, gate, up, down, I, _rowsPerChange, ents, typeId, _source,
+                               weight, collector, ct),
+                           (chunk, b) => StageEdgeChunk(b, chunk),
+                           _source, $"model/edges/mlp/L{L}", 1,
+                           reader, options, ct, commitEpoch, _rowsPerChange))
         {
             edges += batch.Attestations.Length;
             yield return batch;
@@ -468,24 +675,186 @@ public sealed class ModelTokenEdgeETL
     private async IAsyncEnumerable<SubstrateChange> EmitBilinearPairs(
         double[] left, double[] right, int n, int r, Hash128 typeId, double weight,
         List<Hash128> rowEnts, List<Hash128> colEnts, int commitEpoch,
-        CircuitDescriptor descriptor, bool sampleForDecoder, int topK,
+        CircuitDescriptor descriptor,
         ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         bool canonicalize = RelationTypeRegistry.Resolve(descriptor.RelationName).Symmetry
                             == RelationTypeRegistry.Symmetry.Symmetric;
-        var collector = (_classifier is null || !sampleForDecoder) ? null : new TopPairCollector(TopPairsPerCircuit);
+        var collector = _classifier is null ? null : new TopPairCollector(TopPairsPerCircuit);
         string label = EdgeBatchLabel(descriptor);
 
         await foreach (var batch in IngestComposePipeline.RunAsync(
-                           EnumerateBilinearEdgeRecords(left, right, n, r, typeId, weight, rowEnts, colEnts,
-                               canonicalize, topK, collector, ct),
-                           (rec, b) => StageEdgeAttestation(b, rec, _source),
-                           _source, label, AttsPerChange, reader, options, ct, commitEpoch, AttsPerChange))
+                           EnumerateBilinearEdgeChunks(left, right, n, r, _rowsPerChange, typeId, _source, weight,
+                               rowEnts, colEnts, canonicalize, Theta, collector, ct),
+                           (chunk, b) => StageEdgeChunk(b, chunk),
+                           _source, label, 1,
+                           reader, options, ct, commitEpoch, _rowsPerChange))
             yield return batch;
 
         await foreach (var change in EmitClassifyChange(descriptor, collector, commitEpoch, reader, options, ct))
             yield return change;
+    }
+
+    private static double VectorNorm(double[] v, int n)
+    {
+        var nrm = new double[1];
+        unsafe
+        {
+            fixed (double* ps = v) fixed (double* po = nrm)
+                if (DynInterop.RowNormsOutD(ps, 1, (nuint)n, po) != 0)
+                    throw new InvalidOperationException("row_norms_out_d failed");
+        }
+        return nrm[0];
+    }
+
+    private static void RowNorms(double[] m, int n, int dim, double[] outNorms)
+    {
+        unsafe
+        {
+            fixed (double* pm = m) fixed (double* po = outNorms)
+                if (DynInterop.RowNormsOutD(pm, (nuint)n, (nuint)dim, po) != 0)
+                    throw new InvalidOperationException("row_norms_out_d failed");
+        }
+    }
+
+    // Salience norms → occurrence rows through the NATIVE score law
+    // (NativeAttestation.ScoreFp → score.c); arena = the RMS of the circuit's
+    // salience distribution — the MERGES_WITH arena convention. Every token is
+    // recorded; the score carries the circuit's own weighting and the fold rates it.
+    private async IAsyncEnumerable<SubstrateChange> EmitNormOccurrences(
+        CircuitDescriptor descriptor, double[] sal, List<Hash128> ents, int n, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        double arena = VectorNorm(sal, n) / Math.Sqrt(Math.Max(1, n));
+        if (arena <= 0) yield break;
+
+        var scores = new Dictionary<Hash128, long>(n);
+        for (int i = 0; i < n; i++)
+            scores[ents[i]] = NativeAttestation.ScoreFp(sal[i], arena);
+
+        await foreach (var change in EmitOccurrenceChange(descriptor, scores, commitEpoch, reader, options, ct))
+            yield return change;
+    }
+
+    private double[]? ComputeMlpActivationNorms(
+        double[] Ad, int n, int d, float[] upF, float[]? gateF, int I, int L)
+    {
+        var sal = new double[n];
+        int rc;
+        unsafe
+        {
+            fixed (double* px = Ad) fixed (float* pu = upF) fixed (float* pg = gateF)
+            fixed (double* po = sal)
+                rc = DynInterop.FfnActivationNorms(px, (nuint)n, (nuint)d, pu,
+                    gateF is null ? null : pg, (nuint)I, po);
+        }
+        if (rc != 0)
+        {
+            _log.LogWarning("phase=edges L{L}: ffn_activation_norms rc={Rc}; skipping", L, rc);
+            return null;
+        }
+        return sal;
+    }
+
+
+    private async IAsyncEnumerable<SubstrateChange> EmitOccurrenceChange(
+        CircuitDescriptor descriptor, Dictionary<Hash128, long> salience, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (salience.Count == 0) yield break;
+        var coord = ModelCoordinates.CoordinateId(descriptor);
+        var top = salience.ToList();
+        double weight = WeightFor("APPEARS_IN");
+        bool metaStaged = false;
+
+        // THE CIRCUIT IS THE GAME (chess trajectory parity): one testimony-packed
+        // linestring on the coordinate entity carrying the circuit's ENTIRE
+        // assertion — every token, its score — exactly as a game's trajectory
+        // carries its whole move sequence. Calculated payload (Projection class,
+        // doc 08: versioned, evictable); anatomy queries read 1 row per circuit.
+        var trajTokens = new Hash128[top.Count];
+        var trajScores = new long[top.Count];
+        for (int i = 0; i < top.Count; i++)
+        {
+            trajTokens[i] = top[i].Key;
+            trajScores[i] = top[i].Value;
+        }
+        byte[] packed = TestimonyWalk.Pack(trajTokens, trajScores);
+        double[] trajXyzm = System.Runtime.InteropServices.MemoryMarshal
+            .Cast<byte, double>(packed).ToArray();
+        var circuitPhys = new PhysicalityRow(
+            Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
+            EntityId: coord, SourceId: _source,
+            Type: PhysicalityType.Projection,
+            CoordX: trajXyzm[0], CoordY: trajXyzm[1], CoordZ: trajXyzm[2], CoordM: trajXyzm[3],
+            HilbertIndex: default,
+            TrajectoryXyzm: trajXyzm, NConstituents: top.Count,
+            AlignmentResidual: null, SourceDim: null,
+            ObservedAtUnixUs: IngestClock.NowUnixUs());
+
+        // Same batch door as the pair planes: fill machine-sized cell chunks,
+        // ONE AggregatedBatch P/Invoke per chunk — never one per token.
+        var cells = new AttestationAggregatedCellNative[Math.Min(_rowsPerChange, top.Count)];
+        var staged = new AttestationStagedNative[cells.Length];
+        var chunks = new List<EdgeRowChunk>((top.Count + cells.Length - 1) / cells.Length);
+        int filled = 0;
+        foreach (var kv in top)
+        {
+            cells[filled] = new AttestationAggregatedCellNative
+            {
+                Subject = kv.Key, Object = coord, ObjectIsNull = 0,
+                Games = 1, SumScoreFp1e9 = kv.Value,
+            };
+            if (++filled == cells.Length)
+            {
+                chunks.Add(BuildChunk(cells, filled, ModelCoordinates.AppearsInTypeId, _source, weight, staged));
+                filled = 0;
+            }
+        }
+        if (filled > 0)
+            chunks.Add(BuildChunk(cells, filled, ModelCoordinates.AppearsInTypeId, _source, weight, staged));
+
+        await foreach (var batch in IngestComposePipeline.RunAsync(
+                           EnumerateChunksAsync(chunks, ct),
+                           (chunk, b) =>
+                           {
+                               if (!metaStaged)
+                               {
+                                   ModelCoordinates.StageCoordinate(b, descriptor, _source);
+                                   b.AddPhysicality(circuitPhys);
+                                   metaStaged = true;
+                               }
+                               StageEdgeChunk(b, chunk);
+                           },
+                           _source, EdgeBatchLabel(descriptor) + "/occ", 1,
+                           reader, options, ct, commitEpoch, _rowsPerChange))
+            yield return batch;
+    }
+
+    private static async IAsyncEnumerable<EdgeRowChunk> EnumerateChunksAsync(
+        List<EdgeRowChunk> chunks, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var c in chunks)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return c;
+        }
+        await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<OccurrenceRecord> EnumerateOccurrenceRecords(
+        List<KeyValuePair<Hash128, long>> top, Hash128 coord,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var kv in top)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new OccurrenceRecord(kv.Key, coord, kv.Value);
+        }
+        await Task.CompletedTask;
     }
 
     private static string EdgeBatchLabel(CircuitDescriptor descriptor)
@@ -496,57 +865,137 @@ public sealed class ModelTokenEdgeETL
         return label;
     }
 
-    private static async IAsyncEnumerable<EdgeAttestationRecord> EnumerateBilinearEdgeRecords(
-        double[] left, double[] right, int n, int r,
-        Hash128 typeId, double weight,
+    // Double-buffered: tile t+1's native GEMM/scan runs on a worker while tile
+    // t's pairs are cell-filled and batch-staged — compute and staging overlap
+    // instead of strictly alternating.
+    private static async IAsyncEnumerable<EdgeRowChunk> EnumerateBilinearEdgeChunks(
+        double[] left, double[] right, int n, int r, int rowsPerChange,
+        Hash128 typeId, Hash128 source, double weight,
         List<Hash128> rowEnts, List<Hash128> colEnts,
-        bool canonicalize, int topK,
+        bool canonicalize, double theta,
         TopPairCollector? collector,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long cap = (long)RowTile * n;
-        var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
-        for (int rb = 0; rb < n; rb += RowTile)
+        var bufA = (R: new int[cap], C: new int[cap], V: new double[cap], S: new long[cap]);
+        var bufB = (R: new int[cap], C: new int[cap], V: new double[cap], S: new long[cap]);
+        var cells = new AttestationAggregatedCellNative[rowsPerChange];
+        var staged = new AttestationStagedNative[rowsPerChange];
+
+        var cur = bufA;
+        var spare = bufB;
         {
-            ct.ThrowIfCancellationRequested();
-            int re = Math.Min(rb + RowTile, n);
-            int cnt = RunBilinearTile(left, rb, re, right, n, r, oR, oC, oV, oS, cap);
-            if (cnt < 0) yield break;
-            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, topK);
-            for (int e = 0; e < cnt; e++)
+            var b0 = cur;
+            int re0 = Math.Min(RowTile, n);
+            var pending = Task.Run(() => RunBilinearTile(left, 0, re0, right, n, r,
+                b0.R, b0.C, b0.V, b0.S, cap, theta), ct);
+
+            for (int rb = 0; rb < n; rb += RowTile)
             {
-                if (oC[e] == oR[e]) continue;
-                if (canonicalize && oC[e] < oR[e]) continue;
-                var subject = rowEnts[oR[e]];
-                var obj = colEnts[oC[e]];
-                collector?.Offer(subject, obj, oS[e]);
-                yield return new EdgeAttestationRecord(subject, obj, typeId, oS[e], weight);
+                ct.ThrowIfCancellationRequested();
+                int cnt = await pending.ConfigureAwait(false);
+                if (cnt < 0) yield break;
+                var tile = cur;
+
+                int rbNext = rb + RowTile;
+                if (rbNext < n)
+                {
+                    cur = spare;
+                    spare = tile;
+                    var bn = cur;
+                    int reNext = Math.Min(rbNext + RowTile, n);
+                    pending = Task.Run(() => RunBilinearTile(left, rbNext, reNext, right, n, r,
+                        bn.R, bn.C, bn.V, bn.S, cap, theta), ct);
+                }
+
+                int filled = 0;
+                for (int e = 0; e < cnt; e++)
+                {
+                    if (tile.C[e] == tile.R[e]) continue;
+                    if (canonicalize && tile.C[e] < tile.R[e]) continue;
+                    var subject = rowEnts[tile.R[e]];
+                    var obj = colEnts[tile.C[e]];
+                    collector?.Offer(subject, obj, tile.S[e]);
+                    cells[filled] = new AttestationAggregatedCellNative
+                    {
+                        Subject = subject,
+                        Object = obj,
+                        ObjectIsNull = 0,
+                        Games = 1,
+                        SumScoreFp1e9 = tile.S[e],
+                    };
+                    if (++filled == rowsPerChange)
+                    {
+                        yield return BuildChunk(cells, filled, typeId, source, weight, staged);
+                        filled = 0;
+                    }
+                }
+                if (filled > 0)
+                    yield return BuildChunk(cells, filled, typeId, source, weight, staged);
             }
         }
     }
 
-    private static async IAsyncEnumerable<EdgeAttestationRecord> EnumerateFfnEdgeRecords(
-        double[] Ad, int n, int d, double[]? gate, double[] up, double[] down, int I,
-        List<Hash128> ents, Hash128 typeId, double weight,
-        int[] oR, int[] oC, double[] oV, long[] oS, long cap,
+    private static async IAsyncEnumerable<EdgeRowChunk> EnumerateFfnEdgeChunks(
+        double[] Ad, int n, int d, double[]? gate, double[] up, double[] down, int I, int rowsPerChange,
+        List<Hash128> ents, Hash128 typeId, Hash128 source, double weight,
         TopPairCollector? collector,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        long cap = (long)RowTile * n;
+        var bufA = (R: new int[cap], C: new int[cap], V: new double[cap], S: new long[cap]);
+        var bufB = (R: new int[cap], C: new int[cap], V: new double[cap], S: new long[cap]);
+        var cells = new AttestationAggregatedCellNative[rowsPerChange];
+        var staged = new AttestationStagedNative[rowsPerChange];
+
+        var cur = bufA;
+        var spare = bufB;
+        var b0 = cur;
+        int re0 = Math.Min(RowTile, n);
+        var pending = Task.Run(() => RunFfnTile(Ad, n, d, gate, up, down, I, 0, re0,
+            b0.R, b0.C, b0.V, b0.S, cap), ct);
+
         for (int rb = 0; rb < n; rb += RowTile)
         {
             ct.ThrowIfCancellationRequested();
-            int re = Math.Min(rb + RowTile, n);
-            int cnt = RunFfnTile(Ad, n, d, gate, up, down, I, rb, re, oR, oC, oV, oS, cap);
+            int cnt = await pending.ConfigureAwait(false);
             if (cnt < 0) yield break;
-            cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, EdgeTopK);
+            var tile = cur;
+
+            int rbNext = rb + RowTile;
+            if (rbNext < n)
+            {
+                cur = spare;
+                spare = tile;
+                var bn = cur;
+                int reNext = Math.Min(rbNext + RowTile, n);
+                pending = Task.Run(() => RunFfnTile(Ad, n, d, gate, up, down, I, rbNext, reNext,
+                    bn.R, bn.C, bn.V, bn.S, cap), ct);
+            }
+
+            int filled = 0;
             for (int e = 0; e < cnt; e++)
             {
-                if (oC[e] == oR[e]) continue;
-                var subject = ents[oR[e]];
-                var obj = ents[oC[e]];
-                collector?.Offer(subject, obj, oS[e]);
-                yield return new EdgeAttestationRecord(subject, obj, typeId, oS[e], weight);
+                if (tile.C[e] == tile.R[e]) continue;
+                var subject = ents[tile.R[e]];
+                var obj = ents[tile.C[e]];
+                collector?.Offer(subject, obj, tile.S[e]);
+                cells[filled] = new AttestationAggregatedCellNative
+                {
+                    Subject = subject,
+                    Object = obj,
+                    ObjectIsNull = 0,
+                    Games = 1,
+                    SumScoreFp1e9 = tile.S[e],
+                };
+                if (++filled == rowsPerChange)
+                {
+                    yield return BuildChunk(cells, filled, typeId, source, weight, staged);
+                    filled = 0;
+                }
             }
+            if (filled > 0)
+                yield return BuildChunk(cells, filled, typeId, source, weight, staged);
         }
     }
 
@@ -604,18 +1053,17 @@ public sealed class ModelTokenEdgeETL
 
     private static void CenterColumns(double[] m, long n, int d)
     {
-        var mean = new double[d];
-        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) mean[j] += m[i * d + j];
-        for (int j = 0; j < d; j++) mean[j] /= n;
-        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) m[i * d + j] -= mean[j];
+        unsafe { fixed (double* pm = m)
+            if (DynInterop.CenterColumnsD(pm, (nuint)n, (nuint)d) != 0)
+                throw new InvalidOperationException("center_columns_d failed"); }
     }
     private static float[] CenteredCopyF(float[] a, long n, int d)
     {
-        var mean = new double[d];
-        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) mean[j] += a[i * d + j];
-        for (int j = 0; j < d; j++) mean[j] /= n;
         var c = new float[n * d];
-        for (long i = 0; i < n; i++) for (int j = 0; j < d; j++) c[i * d + j] = (float)(a[i * d + j] - mean[j]);
+        Array.Copy(a, c, n * d);
+        unsafe { fixed (float* pc = c)
+            if (DynInterop.CenterColumnsF(pc, (nuint)n, (nuint)d) != 0)
+                throw new InvalidOperationException("center_columns_f failed"); }
         return c;
     }
 
@@ -633,16 +1081,15 @@ public sealed class ModelTokenEdgeETL
                     pR, pC, pV, pS, (nuint)cap, &count, &overflow);
                 if (rc == 0 && overflow != 0)
                     throw new InvalidOperationException(
-                        $"ffn_token_pairs_tile overflow at cap {cap}: the native tile drops edges in scan "
-                        + "order (not by score), so results would be silently biased -- raise "
-                        + "LAPLACE_MODEL_EDGE_FLOOR to prune before the cap.");
+                        $"ffn_token_pairs_tile overflow at cap {cap}: cap is RowTile*n, the tile's "
+                        + "maximum possible emission, so overflow means a caller-side sizing bug.");
                 return rc != 0 ? -1 : (int)count;
             }
         }
     }
 
     private static int RunBilinearTile(double[] left, int rb, int re, double[] right, int n, int dim,
-        int[] oR, int[] oC, double[] oV, long[] oS, long cap)
+        int[] oR, int[] oC, double[] oV, long[] oS, long cap, double theta = Theta)
     {
         unsafe
         {
@@ -651,63 +1098,21 @@ public sealed class ModelTokenEdgeETL
             fixed (int* pR = oR) fixed (int* pC = oC) fixed (double* pV = oV) fixed (long* pS = oS)
             {
                 int rc = DynInterop.BilinearEdgesTile(pl, (nuint)rb, (nuint)re, pr, (nuint)n,
-                    (nuint)dim, Theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
+                    (nuint)dim, theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
                 if (rc == 0 && overflow != 0)
                     throw new InvalidOperationException(
-                        $"bilinear_edges_tile overflow at cap {cap}: the native tile drops edges in scan "
-                        + "order (not by score), so results would be silently biased -- raise "
-                        + "LAPLACE_MODEL_EDGE_FLOOR to prune before the cap.");
+                        $"bilinear_edges_tile overflow at cap {cap}: cap is RowTile*n, the tile's "
+                        + "maximum possible emission, so overflow means a caller-side sizing bug.");
                 return rc != 0 ? -1 : (int)count;
             }
         }
     }
 
-    // Keep only the top-k |value| edges per subject row within one tile's results,
-    // compacting the parallel arrays in place. Tiles partition rows, so per-tile
-    // selection is exact per-row selection. Returns the new count.
-    private static int SelectTopKPerRow(int cnt, int rb, int re, int[] oR, int[] oC, double[] oV, long[] oS, int k)
-    {
-        if (cnt <= 0 || k <= 0) return Math.Max(cnt, 0);
-        int rows = re - rb;
-        var perRow = new int[rows];
-        for (int e = 0; e < cnt; e++) perRow[oR[e] - rb]++;
-        bool over = false;
-        for (int i = 0; i < rows; i++) if (perRow[i] > k) { over = true; break; }
-        if (!over) return cnt;
-
-        var offsets = new int[rows + 1];
-        for (int i = 0; i < rows; i++) offsets[i + 1] = offsets[i] + perRow[i];
-        var idx = new int[cnt];
-        var cursor = (int[])offsets.Clone();
-        for (int e = 0; e < cnt; e++) idx[cursor[oR[e] - rb]++] = e;
-
-        var keep = new List<int>(Math.Min(cnt, rows * k));
-        for (int i = 0; i < rows; i++)
-        {
-            int start = offsets[i], len = perRow[i];
-            if (len <= k)
-            {
-                for (int j = 0; j < len; j++) keep.Add(idx[start + j]);
-                continue;
-            }
-            var rowIdx = new int[len];
-            Array.Copy(idx, start, rowIdx, 0, len);
-            Array.Sort(rowIdx, (a, b) => Math.Abs(oV[b]).CompareTo(Math.Abs(oV[a])));
-            for (int j = 0; j < k; j++) keep.Add(rowIdx[j]);
-        }
-        keep.Sort();
-        int w = 0;
-        foreach (int e in keep)
-        {
-            oR[w] = oR[e]; oC[w] = oC[e]; oV[w] = oV[e]; oS[w] = oS[e]; w++;
-        }
-        return w;
-    }
-
     private static void SliceHead(double[] full, double[] head, int n, int fullDim, int h, int hd)
     {
-        for (int i = 0; i < n; i++)
-            Array.Copy(full, (long)i * fullDim + (long)h * hd, head, (long)i * hd, hd);
+        unsafe { fixed (double* pf = full) fixed (double* ph = head)
+            if (DynInterop.SliceHeadD(pf, ph, (nuint)n, (nuint)fullDim, (nuint)h, (nuint)hd) != 0)
+                throw new InvalidOperationException("slice_head_d failed"); }
     }
 
     private static double[] LoadDouble(
@@ -715,7 +1120,8 @@ public sealed class ModelTokenEdgeETL
     {
         float[] f = WeightTensorETL.LoadTensorF32(refMap, name, elems);
         var dbl = new double[elems];
-        for (long i = 0; i < elems; i++) dbl[i] = f[i];
+        unsafe { fixed (float* pf = f) fixed (double* pd = dbl)
+            DynInterop.F32ToF64(pf, (nuint)elems, pd); }
         return dbl;
     }
 
@@ -747,13 +1153,15 @@ public sealed class ModelTokenEdgeETL
 
     private static void ScaleCols(float[] M, long rows, int dim, float[] g)
     {
-        for (long i = 0; i < rows; i++)
-            for (int j = 0; j < dim; j++) M[i * dim + j] *= g[j];
+        unsafe { fixed (float* pm = M) fixed (float* pg = g)
+            if (DynInterop.ScaleColsF(pm, (nuint)rows, (nuint)dim, pg) != 0)
+                throw new InvalidOperationException("scale_cols_f failed"); }
     }
     private static void ScaleColsD(double[] M, long rows, int dim, float[] g)
     {
-        for (long i = 0; i < rows; i++)
-            for (int j = 0; j < dim; j++) M[i * dim + j] *= g[j];
+        unsafe { fixed (double* pm = M) fixed (float* pg = g)
+            if (DynInterop.ScaleColsD(pm, (nuint)rows, (nuint)dim, pg) != 0)
+                throw new InvalidOperationException("scale_cols_d failed"); }
     }
 
 

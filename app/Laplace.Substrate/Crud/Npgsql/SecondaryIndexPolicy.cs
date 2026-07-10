@@ -102,7 +102,9 @@ public sealed class SecondaryIndexPolicy
 
                 t.CommandText =
 
-                    $"SET LOCAL maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+                    "SET LOCAL search_path = laplace, public; "
+
+                    + $"SET LOCAL maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
 
                     + $"SET LOCAL max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
 

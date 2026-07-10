@@ -18,6 +18,7 @@ internal static class AppComposition
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
+        services.AddHostedService<CatalogPrewarmService>();
 
         const double chessWeight = 0.5d;
         services.AddSingleton(_ =>
@@ -55,7 +56,13 @@ internal static class AppComposition
             options.Currency = "usd";
             options.SuccessUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/success";
             options.CancelUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/cancel";
-            options.Bypass = true;
+            // LAPLACE_BILLING_BYPASS was set by e2e-web.cmd and stripped by test-app.cmd
+            // while the code hardcoded `true` and read the env nowhere — the scripts were
+            // toggling a placebo. Honor it: default stays true (local dev auto-unlocks the
+            // quote gates); deploys and gated test runs set it to false explicitly.
+            options.Bypass = !string.Equals(
+                Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS"),
+                "false", StringComparison.OrdinalIgnoreCase);
         });
 
         return services;

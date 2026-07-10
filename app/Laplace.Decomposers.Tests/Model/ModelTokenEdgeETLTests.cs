@@ -10,7 +10,27 @@ namespace Laplace.Decomposers.Model.Tests;
 
 public class ModelTokenEdgeETLTests
 {
+    // ModelCoordinates.ScalarId resolves through the text content law (perfcache-backed
+    // decomposition), same as every other content id in the substrate.
+    static ModelTokenEdgeETLTests() => CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+
     private static readonly Hash128 Source = Hash128.OfCanonical("substrate/test/model-edges/source");
+
+    // Pair-plane pins construct the ETL under an explicit mode; the default mode is
+    // "structure" (APPEARS_IN occurrences). Tests in this class run sequentially, so
+    // process-env scoping is safe.
+    private static IDisposable PlanesMode(string mode) => new PlanesModeScope(mode);
+
+    private sealed class PlanesModeScope : IDisposable
+    {
+        private readonly string? _old;
+        public PlanesModeScope(string mode)
+        {
+            _old = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES");
+            Environment.SetEnvironmentVariable("LAPLACE_MODEL_PLANES", mode);
+        }
+        public void Dispose() => Environment.SetEnvironmentVariable("LAPLACE_MODEL_PLANES", _old);
+    }
 
     [Fact]
     public async Task EmitAsync_StagesTokenEdges_AndStoresNoCoordsOrDims()
@@ -64,6 +84,7 @@ public class ModelTokenEdgeETLTests
             }
 
             var manifest = ToyManifest(dir, vocab: n, hidden: d);
+            using var _ = PlanesMode("all");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var changes = new List<SubstrateChange>();
             await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default, ct: default)) changes.Add(c);
@@ -216,6 +237,7 @@ public class ModelTokenEdgeETLTests
                 ModelName = "fold-model",
             };
 
+            using var _ = PlanesMode("all");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
             var map = new Dictionary<(int, int), long>();
@@ -229,6 +251,151 @@ public class ModelTokenEdgeETLTests
                 }
             }
             return map;
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StructureMode_DepositsAppearsInOccurrences_OnSharedCoordinates()
+    {
+        // Default mode. A 1-layer/1-head QK model must deposit:
+        //   (token, APPEARS_IN, coordinate) occurrences scored by the native tiles,
+        //   the coordinate entity composed from plane anchor + layer scalar + head
+        //   scalar (Merkle — no model name near any id), CONTAINS/PRECEDES structure
+        //   scoped by context = coordinate, and NO token-pair rows.
+        var embed = new float[] { 1, 1, 2, 0, 0, 2, 3, 3 };
+        const int n = 4, d = 2;
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-occ-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            WriteSafetensors(Path.Combine(dir, "model.safetensors"), new[]
+            {
+                Tensor("model.embed_tokens.weight", new[] { n, d }, embed),
+                Tensor("model.layers.0.self_attn.q_proj.weight", new[] { d, d }, new float[] { 1, 0, 0, 1 }),
+                Tensor("model.layers.0.self_attn.k_proj.weight", new[] { d, d }, new float[] { 1, 0, 0, 1 }),
+            });
+
+            var ent = new Hash128[n];
+            var tokens = new LlamaTokenizerParser.TokenRecord[n];
+            for (int i = 0; i < n; i++)
+            {
+                ent[i] = Hash128.OfCanonical($"substrate/test/occ/tok/{i}");
+                tokens[i] = new LlamaTokenizerParser.TokenRecord
+                {
+                    TokenId = i,
+                    RawToken = $"t{i}",
+                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i],
+                    Tier = 2,
+                    IsByteLevel = false,
+                    Role = TokenRole.None,
+                    ContentX = double.NaN,
+                    ContentY = double.NaN,
+                    ContentZ = double.NaN,
+                    ContentM = double.NaN,
+                    HasContentCoord = false,
+                };
+            }
+
+            var cfg = new ModelConfig
+            {
+                ModelType = "llama",
+                Architecture = "LlamaForCausalLM",
+                VocabSize = n,
+                HiddenSize = d,
+                NumLayers = 1,
+                NumHeads = 1,
+                NumKvHeads = 1,
+                HeadDim = d,
+                IntermediateSize = d,
+                NumExperts = 0,
+                TieWordEmbeddings = false,
+                QkNorm = false,
+                RopeTheta = 10000,
+                NormEps = 1e-5,
+                MlaQLoraRank = 0,
+                MlaKvLoraRank = 0,
+                QkRopeHeadDim = 0,
+                QkNopeHeadDim = 0,
+                VHeadDim = 0,
+                RecipeEntityId = Hash128.OfCanonical("substrate/test/occ/recipe"),
+                CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+            };
+            var roles = new[]
+            {
+                new TensorRole("model.embed_tokens.weight", new[] { n, d }, "F32", TensorRoleKind.Embedding, -1, -1),
+                new TensorRole("model.layers.0.self_attn.q_proj.weight", new[] { d, d }, "F32", TensorRoleKind.AttnQ, 0, -1),
+                new TensorRole("model.layers.0.self_attn.k_proj.weight", new[] { d, d }, "F32", TensorRoleKind.AttnK, 0, -1),
+            };
+            var manifest = new ModelManifest
+            {
+                Config = cfg,
+                Roles = roles,
+                Modality = Modality.Text,
+                Coverage = Coverage.Full,
+                ModelName = "occ-model",
+            };
+
+            using var _ = PlanesMode("structure");
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
+            var changes = new List<SubstrateChange>();
+            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default)) changes.Add(c);
+
+            var atts = changes.SelectMany(c => c.Attestations).ToList();
+            var entities = changes.SelectMany(c => c.Entities).ToList();
+
+            var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
+            var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
+            var contains = RelationTypeRegistry.RelationTypeId("CONTAINS");
+            var precedes = RelationTypeRegistry.RelationTypeId("PRECEDES");
+
+            var descriptor = new CircuitDescriptor(0, 0, "attention", "ATTENDS");
+            var coord = ModelCoordinates.CoordinateId(descriptor);
+
+            // The coordinate id is Merkle over [plane anchor, layer scalar, head scalar].
+            Assert.Equal(
+                Hash128.Merkle(EntityTier.Word,
+                [
+                    ModelCoordinates.PlaneAnchor("attention"),
+                    ModelCoordinates.ScalarId(0),
+                    ModelCoordinates.ScalarId(0),
+                ]),
+                coord);
+
+            var occ = atts.Where(a => a.TypeId == appearsIn).ToList();
+            Assert.NotEmpty(occ);
+            var tokenSet = new HashSet<Hash128>(ent);
+            Assert.All(occ, a =>
+            {
+                Assert.Contains(a.SubjectId, tokenSet);
+                Assert.Equal(coord, a.ObjectId);
+                Assert.True((a.SumScoreFp1e9 ?? a.ScoreFp1e9) > 0, "occurrence must carry the native tile score");
+            });
+
+            // No token-pair rows in structure mode.
+            Assert.DoesNotContain(atts, a => a.TypeId == attends);
+
+            // Coordinate entity + constituents, typed correctly.
+            Assert.Contains(entities, e => e.Id == coord && e.TypeId == ModelCoordinates.CoordinateTypeId);
+            Assert.Contains(entities, e => e.Id == ModelCoordinates.PlaneAnchor("attention")
+                                           && e.TypeId == ModelCoordinates.PlaneTypeId);
+            Assert.Contains(entities, e => e.Id == ModelCoordinates.ScalarId(0)
+                                           && e.TypeId == ModelCoordinates.ScalarTypeId);
+
+            // Structure law: CONTAINS membership + PRECEDES order, context = coordinate.
+            // L0.H0's layer scalar and head scalar are the SAME content entity
+            // (Blake3("0")), so their CONTAINS rows are one content-addressed row —
+            // membership is a set, order lives in PRECEDES.
+            var constituents = ModelCoordinates.Constituents(descriptor);
+            var containsRows = atts.Where(a => a.TypeId == contains && a.SubjectId == coord).ToList();
+            Assert.Equal(constituents.Distinct().Count(), containsRows.Count);
+            Assert.All(containsRows, a => Assert.Equal(coord, a.ContextId));
+            var precedesRows = atts.Where(a => a.TypeId == precedes && a.ContextId == coord).ToList();
+            Assert.Equal(2, precedesRows.Count);
         }
         finally
         {
@@ -324,6 +491,7 @@ public class ModelTokenEdgeETLTests
                 ModelName = "cont-model",
             };
 
+            using var _ = PlanesMode("all");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var continuesTo = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
             int count = 0;

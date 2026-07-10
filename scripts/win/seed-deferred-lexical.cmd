@@ -7,7 +7,9 @@ set "LAPLACE_COPY_VALIDATE=1"
 
 call "%~dp0build-engine-libs.cmd" || exit /b 1
 cd app
-dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
+if not exist "%LAPLACE_CLI_EXE%" (
+  dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
+)
 
 call "%~dp0seed-step.cmd" conceptnet || exit /b 1
 call "%~dp0seed-step.cmd" atomic2020 || exit /b 1

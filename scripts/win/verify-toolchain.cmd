@@ -3,6 +3,14 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "FAIL=0"
+set "SKIP_CTEST=0"
+
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--skip-ctest" ( set "SKIP_CTEST=1" & shift /1 & goto parse_args )
+echo verify-toolchain: unknown flag %~1
+exit /b 2
+:args_done
 
 echo === verify-toolchain ===
 for %%V in (MKLROOT TBBROOT CMPLR_ROOT) do (
@@ -53,8 +61,18 @@ if defined DUMPBIN (
   echo verify-toolchain: WARN dumpbin not found — skipping DLL dependency check
 )
 
-ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure -R "LaplaceDynamicsToolchain|SynthesisToolchain"
-if errorlevel 1 set "FAIL=1"
+if "%SKIP_CTEST%"=="1" (
+  echo verify-toolchain: ctest skipped (--skip-ctest)
+) else (
+  set "_ctest_j="
+  if defined LAPLACE_TEST_SERIAL (
+    set "_ctest_j=-j1"
+  ) else if defined CTEST_PARALLEL_LEVEL (
+    set "_ctest_j=-j %CTEST_PARALLEL_LEVEL%"
+  )
+  ctest --test-dir "%LAPLACE_ENGINE_BUILD%" --output-on-failure !_ctest_j! -R "LaplaceDynamicsToolchain|SynthesisToolchain"
+  if errorlevel 1 set "FAIL=1"
+)
 
 if "%FAIL%"=="0" (
   echo verify-toolchain: OK

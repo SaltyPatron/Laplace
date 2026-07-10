@@ -12,7 +12,7 @@ namespace {
 constexpr size_t kCanonicalCoordDim = 4;
 
 /* Deterministic dense coord from a 16-byte entity hash — not an identity axis.
- * Maps hash bytes to a unit 4-vector (S³ projection) for pour-time feature lookup. */
+ * Maps hash bytes to a unit 4-vector (S³ projection) for synthesis-time feature lookup. */
 void hash_to_unit4(const void* entity_hash, double* out4)
 {
     const auto* h = static_cast<const unsigned char*>(entity_hash);

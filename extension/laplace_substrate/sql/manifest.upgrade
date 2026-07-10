@@ -63,7 +63,10 @@ functions/mu/glicko2_neutral_mu.sql.in
 functions/mu/glicko2_initial_rd.sql.in
 functions/mu/glicko2_initial_volatility.sql.in
 functions/mu/glicko2_tau.sql.in
+functions/mu/foundry_rd_kappa.sql.in
+functions/mu/foundry_witness_sat.sql.in
 functions/fold/drop_period_staging.sql.in
+functions/fold/scoped_consensus.sql.in
 functions/fold/create_period_staging.sql.in
 functions/fold/period_staging_table.sql.in
 functions/fold/create_period_staging_with_epoch.sql.in
@@ -160,6 +163,7 @@ inference/language_coverage.sql.in
 functions/converse/hypernyms.sql.in
 functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
+functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path.sql.in
@@ -235,6 +239,13 @@ functions/generation/foundry_vocab.sql.in
 functions/generation/grapheme_floor_vocab.sql.in
 functions/generation/grapheme_order.sql.in
 functions/generation/word_order.sql.in
+functions/generation/sentence_order.sql.in
+functions/generation/sentence_order_word_bridge.sql.in
+functions/generation/entity_hilbert_keys.sql.in
+functions/generation/entity_highway_masks.sql.in
+functions/generation/continuation_conditional_plane.sql.in
+functions/generation/pos_transition_plane.sql.in
+functions/generation/pos_class_transitions.sql.in
 functions/generation/corpus_word_vocab.sql.in
 functions/generation/metric_edges.sql.in
 functions/generation/foundry_crawl.sql.in
@@ -329,6 +340,7 @@ functions/analysis/laplace_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
+functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
 functions/inference/laplace_l2_sq.sql.in
 functions/inference/laplace_attention_centroid.sql.in

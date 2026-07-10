@@ -125,6 +125,27 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// ONE native call for a whole batch of pre-staged attestation rows —
+    /// the bulk door; never loop AddAttestation when rows are already staged.
+    /// </summary>
+    public void AddAttestationsStaged(AttestationStagedNative[] rows, int count, byte[] masksFlat)
+    {
+        if (count == 0) return;
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, rows.Length);
+        ArgumentOutOfRangeException.ThrowIfLessThan(masksFlat.Length, count * 32);
+        unsafe
+        {
+            fixed (AttestationStagedNative* pr = rows)
+            fixed (byte* pm = masksFlat)
+            {
+                int rc = NativeInterop.AttestationStagedBatchAdd(handle, pr, (nuint)count, pm);
+                if (rc != 0)
+                    throw new InvalidOperationException($"attestation staged batch add failed: {rc}");
+            }
+        }
+    }
+
     public void AddAttestation(
         Hash128 id,
         Hash128 subjectId,

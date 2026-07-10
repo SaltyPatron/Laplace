@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Foundry cast acceptance: does the poured GGUF carry the substrate's testimony?
+"""Foundry cast acceptance: does the synthesized GGUF carry the substrate's testimony?
 
 "Finite, non-flat logits" is vacuous — broken wiring also emits finite varied
 numbers. This probe measures testimony transfer, matched to the WITNESS CLASS:

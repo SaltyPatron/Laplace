@@ -616,7 +616,7 @@ static int emit_grapheme_floor_phys(laplace_compose_result_t* r,
 
 static int emit_ast_node_physicalities(
     laplace_compose_result_t* r, const uint8_t* utf8, size_t len, laplace_ast_t* ast,
-    const char* modality_id, const laplace_grapheme_floor_t* floor, tier_tree_t* tree,
+    const laplace_grapheme_floor_t* floor, tier_tree_t* tree,
     const compose_state_t* st, size_t g_first, int json_mod) {
     size_t n = st->n;
     for (size_t idx = n; idx-- > 0;) {
@@ -709,7 +709,7 @@ int laplace_grammar_compose_materialize_phys(laplace_compose_result_t* r,
     if (!r || !utf8 || !ast || !modality_id) return -1;
     if (r->phys_count > 0) return 0;
 
-    compose_state_t st = {0};
+    compose_state_t st{};
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
     memset(&floor, 0, sizeof(floor));
@@ -733,7 +733,7 @@ int laplace_grammar_compose_materialize_phys(laplace_compose_result_t* r,
                            NULL, NULL, NULL, &st);
     if (rc != 0) goto done_st;
 
-    rc = emit_ast_node_physicalities(r, utf8, len, ast, modality_id, &floor, tree, &st,
+    rc = emit_ast_node_physicalities(r, utf8, len, ast, &floor, tree, &st,
                                      g_first, json_mod);
 
 done_st:
@@ -759,7 +759,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     laplace_compose_result_t* r = (laplace_compose_result_t*)calloc(1, sizeof(*r));
     if (!r) return -3;
 
-    compose_state_t st = {0};
+    compose_state_t st{};
     size_t n = 0;
     hash128_t* emitted_entity = NULL;
     hash128_t* emitted_type   = NULL;
@@ -1044,7 +1044,7 @@ int laplace_grammar_compose_node_id(const uint8_t* utf8, size_t len, laplace_ast
     if (codepoint_table_is_loaded())
         hash_composer_run(tree, codepoint_resolver, NULL);
 
-    compose_state_t st = {0};
+    compose_state_t st{};
     rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, NULL,
                            NULL, NULL, NULL, &st);
     if (rc == 0 && st.comp_valid[ast_node_index]) {

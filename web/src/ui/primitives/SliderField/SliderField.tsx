@@ -10,10 +10,12 @@ export interface SliderFieldProps {
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
+  /** Accessible name for both paired inputs; the surrounding Field label is visual only. */
+  label?: string;
 }
 
 export const SliderField = forwardRef<HTMLDivElement, SliderFieldProps>(function SliderField(
-  { min, max, step = 1, value, onChange, className, disabled },
+  { min, max, step = 1, value, onChange, className, disabled, label },
   ref,
 ) {
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
@@ -42,6 +44,7 @@ export const SliderField = forwardRef<HTMLDivElement, SliderFieldProps>(function
         value={value === '' ? min : value}
         disabled={disabled}
         onChange={onRange}
+        aria-label={label}
       />
       <input
         type="number"
@@ -53,6 +56,7 @@ export const SliderField = forwardRef<HTMLDivElement, SliderFieldProps>(function
         disabled={disabled}
         onChange={onNumber}
         onBlur={onBlur}
+        aria-label={label ? `${label} value` : undefined}
       />
     </div>
   );

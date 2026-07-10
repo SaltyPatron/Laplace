@@ -56,10 +56,18 @@ internal sealed class ExceptionEnvelopeMiddleware
         }
         catch (Exception ex) when (ex is NpgsqlException or PostgresException or TimeoutException)
         {
-            _logger.LogError(ex, "Substrate connection failed.");
+            // A tripped command timeout surfaces as NpgsqlException wrapping
+            // TimeoutException (or 57014 after a server-side cancel). Report it as a
+            // time budget, not unreachability — the substrate is up, the query is slow.
+            var timedOut = ex is TimeoutException
+                || (ex as PostgresException)?.SqlState == PostgresErrorCodes.QueryCanceled
+                || ex.InnerException is TimeoutException;
+            _logger.LogError(ex, timedOut ? "Substrate query exceeded time budget." : "Substrate connection failed.");
             await EndpointJson.ServiceUnavailable(
                 "substrate_unavailable",
-                $"Substrate unreachable: {ex.Message}").ExecuteAsync(context);
+                timedOut
+                    ? $"Substrate query exceeded the API time budget ({SubstrateClient.DefaultCommandTimeoutSeconds}s)."
+                    : $"Substrate unreachable: {ex.Message}").ExecuteAsync(context);
         }
         catch (InvalidOperationException ex) when (IsInfrastructureFailure(ex))
         {

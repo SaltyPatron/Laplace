@@ -1,6 +1,6 @@
 -- Plane selection: every unrefuted consensus edge whose relation type belongs
 -- to the given salience band, strongest (eff_mu) first. This is the primitive
--- the foundry/pour and band-scoped readers should use instead of hand-rolled
+-- the foundry/synthesis and band-scoped readers should use instead of hand-rolled
 -- rank-threshold scans.
 --
 -- Native (highway_mask.c): the band's relation-type id set is computed

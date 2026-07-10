@@ -1,4 +1,14 @@
 #!/bin/bash
+# =============================================================================
+# THE human host entry point for Laplace on Linux.
+#
+#   sudo bash scripts/setup-host.sh
+#
+# That is the only command you run to stand up a machine. After it succeeds,
+# push to main — CI (pipeline.sh) owns the runtime forever.
+#
+# Do not call bootstrap-laplace-runner.sh / bootstrap-chess-lab.sh yourself.
+# =============================================================================
 
 set -euo pipefail
 
@@ -18,36 +28,12 @@ say()    { echo; echo "=========================================================
 
 usage() {
     cat <<EOF
-Usage: $0 <mode>
+Usage: sudo bash $0
 
-Modes:
-  setup     (default) Full Layer 0 + 0.5 + 1 set-up. Idempotent.
-            Layer 0 (sudo): bootstrap-laplace-runner.sh bootstrap — system
-                            account, runner, PG roles, peer auth, sudoers,
-                            ld.so.conf.d/laplace.conf, postgresql.conf
-                            extension paths.
-            Layer 0.5     : cmake --build build/deps — builds vendor deps
-                            (proj/geos/gdal/pg/postgis/tree-sitter) into
-                            /opt/laplace (no sudo, idempotent).
-            Layer 1       : cmake --install build (extensions to /opt/laplace),
-                            then dotnet run Laplace.Migrations -- up
-                            (DbUp EnsureDatabase + CREATE EXTENSION + grants).
+  setup   (default) Full host bring-up. Idempotent.
+  status / reset / stripe   Debug / teardown / Stripe only.
 
-  status    Print Layer 0 + Layer 1 state. No mutations.
-
-  reset     Tear down Layer 1 (db-nuke) then Layer 0 (bootstrap-laplace-runner.sh
-            reset). Requires typing 'RESET' to confirm.
-
-  layer0    Layer-0 only (system + runner + PG roles + auth + paths).
-  deps      Layer-0.5 only (build vendor deps into /opt/laplace).
-  layer1    Layer-1 only (cmake --install + DbUp).
-    stripe    Stripe sandbox setup:
-                        - run scripts/bootstrap-stripe-dev.sh for local user env
-                        - run sudo bootstrap-laplace-runner.sh stripe for runner .env
-
-After 'setup' completes the host is ready. Trigger CI:
-  gh workflow run laplace.yml
-  (or push to main)
+After setup: push to main (or: gh workflow run laplace.yml).
 EOF
 }
 
@@ -97,13 +83,7 @@ layer1_status() {
     say "Layer 1 — DbUp status"
     layer1_clean_foreign_build_artifacts
     runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- status" \
-        || yellow "(database not yet present; run setup or layer1)"
-}
-
-layer1_nuke() {
-    say "Layer 1 — DbUp nuke (DROP DATABASE laplace + recreate empty)"
-    layer1_clean_foreign_build_artifacts
-    runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- nuke"
+        || yellow "(database not yet present; run setup)"
 }
 
 layer1_build_install_extensions() {
@@ -114,11 +94,14 @@ layer1_build_install_extensions() {
         -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" | tail -3)
     (cd "$REPO_DIR" && cmake --build build | tail -3)
     (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" | tail -3)
-    green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+    green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
 layer0_5_build_deps() {
-    say "Layer 0.5 — Build vendor deps (proj/geos/gdal/pg/postgis/tree-sitter) into /opt/laplace"
+    say "Layer 0.5 — sync external + build vendor deps into /opt/laplace"
+    if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
+        bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
+    fi
     local deps_build_dir="/opt/laplace/build/deps"
     sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
     sudo -u "$RUNNER_USER" -H \
@@ -131,34 +114,30 @@ layer0_5_build_deps() {
 }
 
 do_setup() {
+    if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+        red "setup needs root — run: sudo bash scripts/setup-host.sh"
+        exit 1
+    fi
     ensure_dotnet_present
-    say "Layer 0 — System account, runner, PG roles, peer auth, sudoers, DB, postgis"
-    sudo "$BOOTSTRAP" bootstrap
+
+    # Order matters on a virgin host: prefix → deps (pgsql-18) → full Layer 0 → Layer 1.
+    say "Layer 0a — account, apt (incl. nginx/stockfish/Qt), /opt/laplace"
+    sudo "$BOOTSTRAP" prefix
+
     layer0_5_build_deps
+
+    say "Layer 0b — runner, PG cluster, API unit, chess-lab, secrets seed"
+    sudo "$BOOTSTRAP" bootstrap
+
     layer1_build_install_extensions
     layer1_up
 
-    say "DONE — host is set up."
+    say "DONE — host ready. CI owns deploys."
     cat <<EOF
 
-Layer 0 ✓ (bootstrap-laplace-runner.sh)
-Layer 1 ✓ (DbUp: EnsureDatabase('laplace') + CREATE EXTENSION postgis + laplace + grants)
+  Human once:  sudo bash scripts/setup-host.sh
+  CI forever:  push to main → laplace.yml → pipeline.sh publish
 
-What's running:
-  - laplace-runner system account
-  - GitHub Actions runner: actions.runner.SaltyPatron-Laplace.hart-server.service
-  - PostgreSQL database 'laplace' owned by laplace_admin
-  - Extensions present in laplace DB: postgis, laplace
-
-Next:
-  gh workflow run laplace.yml
-  (or push to main to trigger CI)
-
-Reset paths (each independently resettable):
-  $0 reset                                   
-  sudo $BOOTSTRAP reset                      
-  cd $REPO_DIR && just db-nuke               
-  cd $REPO_DIR && just db-reset              
 EOF
 }
 
@@ -169,7 +148,7 @@ do_status() {
         ensure_dotnet_present
         layer1_status
     else
-        yellow "(laplace-runner not present yet — Layer 0 hasn't run)"
+        yellow "(laplace-runner not present yet)"
     fi
 }
 
@@ -178,15 +157,6 @@ do_reset() {
 ========================================================================
 RESET — Tear down EVERYTHING this host provides for Laplace
 ========================================================================
-
-This will:
-  Layer 1: DROP DATABASE laplace (loses all substrate data)
-  Layer 0: Deregister + remove the GitHub Actions runner,
-           drop PG roles laplace_admin / laplace_app / laplace_readonly,
-           strip pg_hba/pg_ident entries, remove sudoers entry,
-           delete /var/lib/laplace-runner, remove the laplace-runner
-           system account.
-
 EOF
     read -rp "Type 'RESET' to confirm: " confirm
     if [ "$confirm" != "RESET" ]; then
@@ -200,57 +170,32 @@ EOF
             PATH="$PATH" \
             DOTNET_NOLOGO=1 \
             bash -c "cd '$REPO_DIR/app' && dotnet run --project '$MIGRATIONS_PROJ' -c Release -- nuke --yes" \
-            || yellow "Layer 1 nuke skipped (database absent or unreachable)"
+            || yellow "Layer 1 nuke skipped"
     fi
 
-    say "Layer 0 — bootstrap-laplace-runner.sh reset"
     echo "RESET" | sudo "$BOOTSTRAP" reset
-
     green "===== HOST RESET COMPLETE ====="
 }
 
 do_stripe() {
     say "Stripe sandbox bootstrap (local user + runner)"
-
     if [ ! -x "$STRIPE_BOOTSTRAP" ]; then
-        red "Missing executable script: $STRIPE_BOOTSTRAP"
+        red "Missing: $STRIPE_BOOTSTRAP"
         exit 1
     fi
-
     "$STRIPE_BOOTSTRAP" --persist-zsh
     sudo "$BOOTSTRAP" stripe
     green "✓ Stripe sandbox setup complete"
 }
 
 case "$MODE" in
-    setup)
-        do_setup
-        ;;
-    status)
-        do_status
-        ;;
-    reset)
-        do_reset
-        ;;
-    layer0)
-        sudo "$BOOTSTRAP" bootstrap
-        ;;
-    deps|layer0.5)
-        layer0_5_build_deps
-        ;;
-    layer1)
-        ensure_dotnet_present
-        layer1_build_install_extensions
-        layer1_up
-        ;;
-    stripe)
-        do_stripe
-        ;;
-    -h|--help|help)
-        usage
-        ;;
+    setup)          do_setup ;;
+    status)         do_status ;;
+    reset)          do_reset ;;
+    stripe)         do_stripe ;;
+    -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE"
+        red "Unknown mode: $MODE — use setup/status/reset/stripe"
         usage
         exit 64
         ;;

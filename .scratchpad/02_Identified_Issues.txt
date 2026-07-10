@@ -100,6 +100,26 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
 50  OPEN       recall intent router extracts topics naively: 'facts about give' takes
                'facts' as the topic (frame-chains "facts→of→Partitive"). Issue 46's
                resolve(text,context) entry point is the structural fix.
+51  OPEN       word_shape_peers_fast Fréchet gate runs on MANTISSA-PACKED vertices,
+               not geometry (found 2026-07-08 audit): recall.c fetches
+               physicalities.trajectory raw (:817/:860) and feeds it to
+               laplace_frechet_4d (:980) — vertices are bit-packed child IDENTITIES
+               (exponent pinned 0x3FF), so the DP measures hash bits, not S³ shape;
+               behaves as a rough aligned-sequence-identity test. The SQL lane
+               (word_shape_distance → word_curve) correctly rebuilds constituent
+               COORDS via ST_MakeLine — two different metrics under one name family.
+               Fix: native lane should build the coord curve (word_curve semantics)
+               or batch-unpack constituents to coords before the Fréchet SPI call.
+               Read-side only; does not block the foundry synthesis.
+52  OPEN       request-time full-table aggregates killed 5 API endpoints at 135M
+               attestations / 124M consensus: consensus_stats (exact count(*)),
+               source_counts (GROUP BY all attestations + count(DISTINCT) join),
+               multi_source_entity_count (GROUP BY all subjects), top_relations
+               (edge_rank per row over ALL consensus — measured >9min for LIMIT 20),
+               evidence_receipt (labels/ranks ALL ~3k claims before LIMIT; >25s cold).
+               App layer remediated 2026-07-09 (bounded budgets + approx/degrade +
+               bounded-candidate top_relations, detail below); durable fix is
+               extension-side. Issue 02/48 family, doc 08 record-vs-calculate.
 NU1903 FIXED   transitive Microsoft.OpenApi pinned 2.7.5, CPM transitive pinning on
 
 RULE #8 PIPELINE STATUS (supersedes several entries above): ALL FIVE PHASES of the
@@ -174,6 +194,60 @@ parallel read surfaces; six string→id paths; label() vs render() unresolved; m
 canonical entry points (resolve/entity_form/decompose/reconstruct_content). Partially
 improved by d061beb/7313fdc/ee3bfef; remainder = plan 13 Phase 2.
 
+ISSUE 49 (update 2026-07-09) — walk_text cold path now >240s at 135M attestations
+(statement_timeout fired inside corpus_sentence_constituents_since). recall chat
+(recall_session) unaffected — /v1/chat/completions answers in seconds. /v1/completions
+rides walk_text and now returns an honest 503 at the API's 30s command budget instead
+of hanging the client. The prescribed fix stands: perfcache-class mmap'd GenCorpus blob
+(walk-engine findings), engine-side.
+
+ISSUE 52 — request-time full-table aggregates (found 2026-07-09 API sweep; the whole
+defect class is "unbounded work before LIMIT, inline at request time, on a connection
+inheriting Command Timeout=0"). Dead endpoints: /v1/explore/catalog, /v1/audit/report,
+/v1/visualizations/substrate (all >9min via top_relations + exact stats),
+/v1/evidence/{target} (>25s cold via evidence_receipt label-then-limit),
+/v1/completions (Issue 49). App-layer remediation SHIPPED (Laplace.Endpoints.
+OpenAICompat): (a) SubstrateClient data source bounds CommandTimeout to 30s — LAPLACE_DB's
+Command Timeout=0 is ingest law, not API law; middleware reports budget trips as
+time-budget 503s, not "unreachable"; (b) catalog/audit read consensus_stats_approx
+(already in schema) with exact-attempt fallback only in the audit path; (c)
+source_counts/multi_source_entity_count attempted under small per-command budgets,
+degrade to empty/null (contracts tolerate it; stage grid renders from the static
+witness catalog); (d) ReadTopRelationsAsync = bounded-candidate form: top-M raw eff_mu
+via consensus_eff_mu_btree (index-served), THEN the same edge_rank readout law over the
+pool — 9min → 0.5s measured; (e) 5-min TTL single-flight cache on the catalog response.
+EXTENSION-SIDE PRESCRIPTIONS (the durable fix, do when the manifest isn't contended):
+  1. source_counts_approx() from pg_stats MCV × reltuples (same sanctioned pattern as
+     substrate_counts' planner estimates) or a calculated-layer stats table maintained
+     post-ingest (doc 08: these are CALCULATED facts, versioned + evictable).
+  2. top_relations: adopt the bounded-candidate form natively (or a small calculated
+     top-edges table refreshed post-fold); the API's inline SQL in ReadTopRelationsAsync
+     is a documented Rule #6 duplication to retire.
+  3. evidence_receipt: rank claims on (edge_rank, consensus probe) FIRST, label only
+     the top-N (with a small over-fetch for the ellipsis-label filter). Labeling 3,129
+     claims at ~6ms each to return 3 rows is the whole cost.
+  4. multi_source_entity_count: calculated-layer counter, or estimate.
+ALSO FOUND in the same sweep, ingest-side, not app: UDDecomposer emits self-referential
+HAS_DEFINITION rows (dog —has definition→ dog, 9 observations) — tier/identity smell
+for the doc 16/17 decomposer audit trail.
+SECOND WAVE (same day, CLI + web UI): CLI `stats` hung on the same source_counts()
+join — now evidence-only GROUP BY (attestations_source_btree, ~30s live, 120s budget)
+with content deferred to `stats <source>`. LAPLACE_BILLING_BYPASS was a PLACEBO:
+e2e-web.cmd set it, test-app.cmd stripped it, AppComposition hardcoded Bypass=true and
+read the env nowhere — now honored (default true; deploys/gated runs set false).
+Web UI defects fixed: Chess Lab experiment-card titles were UA-default black on the
+dark panel (contrast 1.32 — invisible; <button> does not inherit color) → card sets
+--color-text-primary; white-on-accent fills were 3.21:1 → new --color-accent-fill
+(blue-600, 5.2:1) for Button primary + SegmentedControl selected; unlabeled controls
+(Toggle switches, SliderField range/number pairs, Lichess inputs) got accessible
+names. Three July-6 e2e tests were DRIFT (asserted UX unreachable under the suite's
+own bypass env / a Send-disabled-on-empty-input design older than the test) —
+rewritten to the real flows; gate test now skips unless LAPLACE_BILLING_BYPASS=false.
+Playwright suite: 4 failed/11 passed → 14 passed/1 conditional-skip. Evidence-lookup
+test carries a 35s budget tied to this issue's evidence_receipt prescription — tighten
+when the SQL fix lands. Data-side note: a 21M-attestation source renders as raw hex
+(ae0ca709…) — content-hash source id with no registered name entity.
+
 CHESS-SCALE OBSERVATIONS (open levers, not defects — from the 909k-game Lumbras runs):
   - Pipeline is APPLY-bound at scale (~60s compose per ~300-400s apply per ~30k-game
     set); apply runs synchronously in the consume loop. Lever: pipeline apply of set N
@@ -231,3 +305,128 @@ L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
     ORDER BY, CTEs — Rule #2) appear as opaque Function Scans the planner
     cannot see through; chains of them compound. Candidate Rule #13 for 06.
 ================================================================================
+
+ISSUE 53 (2026-07-09) — Model ingestion lane rebuilt as RECORDER (witnessed structure),
+first model deposited. TinyLlama-1.1B ingested in 216s: 91,520 APPEARS_IN occurrences
+(1,430 circuits × 64), 52,345 MERGES_WITH, 26,622 TOKEN_MAPS_TO, 4,224 CONTAINS +
+2,838 PRECEDES coordinate-structure rows, 175,748 consensus relations folded.
+Design (author-decided this session, the chess/scholar's-mate pattern):
+  - Circuit COORDINATE = shared content across models (plane anchor + layer/head
+    Scalars, Merkle) — the model NEVER enters an id; it is the SOURCE. Consensus
+    (token, APPEARS_IN, coord) rates cross-model structural convergence.
+  - Occurrence salience = token magnitude in the circuit's subspace (QK: combined
+    q/k projection norm; OV: per-head write magnitude ||Wo_h·v_h||; MLP: gated
+    activation norm), scored via native laplace_score_fp (arena = RMS).
+  - Token-pair planes (ATTENDS/OV_RELATES/COMPLETES_TO/SIMILAR_TO/CONTINUES_TO pairs)
+    are CALCULATED, not witnessed — deferred to a versioned analyzer pass
+    (LAPLACE_MODEL_PLANES=all keeps the old path for it). Doc 08 split.
+  - APPEARS_IN + the six HAS_* recipe relations added to relation_types.toml
+    (189 highway bits) — recipe scalars no longer mint zero-mask raw hashes.
+VTune (attached per user direction) caught the recorder's first draft spending 83%
+of CPU in a managed per-row sort under SelectTopKPerRow feeding theta=0 tile output;
+fix = norms path, 18h trajectory → 216s. Lesson: profile the lane BEFORE running it.
+OPEN residuals:
+  a) HIGHWAY BIT LAYOUT SHIFTED: codegen assigns bits alphabetically, so adding
+     APPEARS_IN (+HAS_*) renumbered ~180 existing bits. The live DB generation's
+     stored highway_masks predate the 189-bit layout — Rule #5 says regenerate,
+     never backfill. Next full reseed heals it; until then mask-band filtering
+     against pre-2026-07-09 rows decodes against the wrong layout.
+  b) FIXED IN CODE (2026-07-10; live proof rides the 53a redeposit): sources now
+     name THEMSELVES — BootstrapIntentBuilder emits (source, HAS_NAME_ALIAS,
+     name content root) in the ctor, the same law AddType already used for type
+     nodes, so content-hash model sources stop rendering as raw hex (render()/
+     label()/source_counts already consult the alias; canonical-string sources
+     unaffected — canonical_names wins first). seed-step :verify_model_step
+     derives the model name (scripts/win/derive-model-source.ps1, parity with
+     ModelDecomposer.DeriveModelName, tested on all three path shapes) and
+     resolves name -> source id(s) via the alias consensus, summing
+     evidence_count. Verify query proven executable on the live schema; returns
+     0 against the CURRENT generation because the four deposited models predate
+     the alias — heals with the 189-bit redeposit 53a already owes.
+     PrintIngestValidationAsync's old-lane "witness/tensor-role" queries remain
+     to fix. Tests: alias law pinned (BootstrapIntentBuilderAliasTests);
+     Substrate 407 green, Decomposers 130 green. Also fixed in the same pass:
+     BpeTokenizerRoundTripTests lacked the per-class perfcache load and was
+     order-dependent (flaked when scheduled first) — assembly idiom applied.
+  c) EstimateMatchupUnits undercounts structure mode (composed 216k vs 118k —
+     CONTAINS/PRECEDES + per-head OV coords not in the formula).
+  d) FIXED (2026-07-10): the phantom LAPLACE_MODEL_EDGE_FLOOR strings died with
+     the truncation stack — EdgeTopK/perHeadK/SelectTopKPerRow, the
+     OccurrencesPerCircuit=64 cap, and the dead OperatorNoiseFloor/GramUpper
+     C# math are all deleted from ModelTokenEdgeETL; emission is the tiles'
+     full |score| > 0 contract, aggregated across circuits by identical
+     attestation ids (plane grain). EstimateMatchupUnits updated to the
+     untruncated formulas (its 53c undercount of CONTAINS/PRECEDES structure
+     rows remains open). Decomposers suite green post-change.
+  e) FIXED (2026-07-10): decoder ring ungated — every plane's circuits classify
+     when a classifier is present (sampleForDecoder parameter deleted);
+     ENCODES verdicts deposit for similarity/continues/attention/ov/mlp alike.
+  i) LANE COMPLETED ON THE CORRECTED DESIGN (2026-07-10, all tests green):
+     (1) THE CIRCUIT IS THE GAME — every circuit deposits ONE testimony-packed
+     Projection physicality on its coordinate entity (full vocabulary,
+     (token, scoreFp) vertices via TestimonyWalk.Pack; PhysicalityId =
+     (coord, Projection)) — chess game-trajectory parity; anatomy = 1 row per
+     circuit per model. (2) ALL MATH NATIVE — engine/dynamics/model_math.cpp:
+     center_columns_d/f, scale_cols_f/d, slice_head_d, row_norms_out_d,
+     f32_to_f64, hypot_rows_d, ffn_activation_norms (MKL GEMM + silu inside,
+     TBB row-parallel); every managed math loop in ModelTokenEdgeETL replaced
+     (centering, scaling, slicing, norms, widenings, salience combine, MLP
+     activation, SVD Y-scale, arena norm). Remaining loops are orchestration/
+     Array.Copy movement only. (3) Batched emission: one AggregatedBatch
+     P/Invoke per machine-sized chunk (IngestSizing.CommitRows), double-buffered
+     tile/stage overlap, per-record path deleted. (4) PrintIngestValidationAsync
+     layer-10 block rewritten lane-true: content-hash source id (never
+     source_id(name)), TOKEN_MAPS_TO/MERGES_WITH/APPEARS_IN/structure counts +
+     circuit-trajectory count; retired tensor-role relations dropped (53b
+     residual closed). 53c subsumed: estimate = circuits×vocab (uncapped)
+     dominates meta rows. Zero build warnings solution-wide (--no-incremental
+     verified). Similarity scrape from the pre-marker build was KILLED mid-fold
+     by owner order — DB is to be dropped and reseeded before any model ingest
+     runs again; no marker owed on a dropped generation.
+  j) BULK/PARALLEL PASS 2 (2026-07-10 afternoon): occurrence lane chunked
+     (one AggregatedBatch call per machine-sized chunk — the 38M per-row
+     P/Invokes died); writer spine bulk door — native
+     laplace_attestation_staged_batch_add carries per-row 32-byte masks
+     bit-identically (mask semantics verified against intent_stage.c:405 and
+     the builder's stamp at SubstrateChangeBuilder:174 — the first maskless
+     bulk design was DEAD CODE and was replaced); kernels on MKL proper
+     (cblas_ddot norms, vdHypot, vdExp silu, parallel column-mean reduction,
+     parallel widens); layer-level bounded fan-out (channel merge, width =
+     WorkingSetBudgetBytes / per-layer buffer footprint, clamped to
+     ComposeWorkers — machine-derived, no constant). DESIGN FACT, not
+     deferral: EdgeRowChunk's staged→AttestationRow materialization stays —
+     the builder's dedup + mask-stamp contract requires row form; the
+     interop wall it once fed is gone (one native call per change).
+     First clean-generation TinyLlama recorder deposit VERIFIED live:
+     appears_in=38,069,460 = 1,430×26,622 exact, circuit_trajectories=1,430,
+     verify-by-alias passed, 478s on the pre-bulk binary.
+  h) ANALYZER WATERMARK ADDED (2026-07-10, chess FilterUnanalyzedAsync parity):
+     ModelDecomposer.AnalysisMarkerId(source, planesMode) — probe before the
+     pass, marker entity deposited as the pass's final change; a completed
+     (model, mode, version) never re-folds. skipSourceCompletion for analyzer
+     modes wired at the safetensors call site (doc 08's chess-analyze law: the
+     recorder's completion marker neither blocks nor is re-written by analysis
+     passes). CAVEATS: grain is per-(model, mode) — a pass that crashes midway
+     re-folds its completed portion on re-run (chess avoids this with per-game
+     grain; per-circuit markers are the refinement if it bites). The 2026-07-10
+     TinyLlama 'similarity' run launched from the pre-marker build: it deposits
+     NO marker, so do not re-run similarity on TinyLlama this generation
+     without first depositing the marker or evicting the plane. Decomposers
+     130/130 green with the change.
+  f) Norm salience is dominated by rare-token representation degeneration (top
+     occupancy: 'listade', 'släktet', 'printStackTrace' — Gao et al. anisotropy).
+     Recorder records what the checkpoint asserts; a mean-centered/whitened variant
+     is an analyzer question, not a recorder change.
+  g) SCALAR IDENTITY FRAGMENTATION (found 2026-07-09 evening, FIXED in code): the
+     recipe-scalar convention (LlamaRecipeExtractor/RecipeExtractor.AddScalar) minted
+     scalar entities as Blake3(raw utf8 bytes), which coincides with the text content
+     law only for single-codepoint values — word_id('14') resolved to a DIFFERENT id
+     than the deposited scalar "14" (zero CONTAINS hits; hex labels in decode views).
+     ModelCoordinates.ScalarId inherited it. Fix: ScalarId = the text-root content law
+     (TryDecomposeRoot, perfcache-backed), both recipe extractors converted to it —
+     one implementation per fact. The deposited TinyLlama/phi-2 generation carries the
+     old multi-digit ids; heals with the redeposit the highway-layout reseed (53a)
+     already owes. Query law reaffirmed the same evening: ids are NEVER constructed
+     outside the system (python blake3 was used for demo addressing and rejected) —
+     SQL addressing uses canonical_id()/word_id()/relation_type_id()/consensus_id(),
+     all of which resolve through the extension's native hash.

@@ -1,0 +1,38 @@
+-- The jitter catalog: convicted training artifacts, as one indexed query.
+-- A model-witnessed coupling is ARTIFACT-shaped when it is asserted (the
+-- evidence row CONFIRMS: outcome=2) but corroborated by nobody: exactly one
+-- witness on the consensus cell and wide RD (the fold never earned
+-- confidence). Real structure replicates across independently trained
+-- checkpoints (hash collision at the shared cell) and against lexical
+-- witnesses; per-run noise cannot. p_rd_floor is the "still uncertain"
+-- bound (fp1e9 Glicko-1 scale). Set-returning; the LIMIT belongs to the
+-- caller (top-k is only ever a query LIMIT).
+CREATE OR REPLACE FUNCTION model_jitter_catalog(
+        p_relation text DEFAULT NULL,
+        p_rd_floor bigint DEFAULT 150000000000)
+    RETURNS TABLE(
+        subject_id bytea, type_id bytea, object_id bytea,
+        source_id bytea, outcome smallint, observations bigint,
+        rating bigint, rd bigint, eff_mu bigint, witness_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH model_rels(tid) AS (
+        SELECT relation_type_id(r)
+        FROM unnest(CASE WHEN p_relation IS NULL
+                         THEN ARRAY['ATTENDS','OV_RELATES','COMPLETES_TO',
+                                    'CONTINUES_TO','SIMILAR_TO']
+                         ELSE ARRAY[p_relation] END) AS r
+    )
+    SELECT a.subject_id, a.type_id, a.object_id,
+           a.source_id, a.outcome, a.observation_count,
+           c.rating, c.rd, eff_mu(c.rating, c.rd), c.witness_count
+    FROM consensus c
+    JOIN model_rels r ON r.tid = c.type_id
+    JOIN attestations a
+      ON a.subject_id = c.subject_id
+     AND a.type_id    = c.type_id
+     AND a.object_id  = c.object_id
+    WHERE c.witness_count = 1
+      AND c.rd >= p_rd_floor
+      AND a.outcome = 2
+$$;

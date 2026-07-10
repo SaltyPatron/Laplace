@@ -22,11 +22,19 @@ on:
   workflow_dispatch:
     inputs:
       full_clean:
-        description: "wipe build/ before building"
+        description: "wipe build/ before building (same as --force-rebuild)"
+        type: boolean
+        default: false
+      force_codegen:
+        description: "ignore attestation-law stamp; always regenerate"
         type: boolean
         default: false
       fresh_db:
         description: "nuke + re-migrate + force-reseed foundation (destructive schema changes only)"
+        type: boolean
+        default: false
+      serial_tests:
+        description: "force serial ctest/regress (LAPLACE_TEST_SERIAL=1)"
         type: boolean
         default: false
 
@@ -65,6 +73,9 @@ jobs:
             .github/workflows/model.yml \
             .github/actions/setup-laplace-env/action.yml \
             scripts/pipeline.sh \
+            scripts/test-parallel.sh \
+            scripts/setup-host.sh \
+            scripts/bootstrap-laplace-runner.sh \
             scripts/ingest-source.sh \
             scripts/ensure-foundation.sh; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
@@ -204,7 +215,15 @@ jobs:
           bash scripts/pipeline.sh clean
 
       - name: Build
-        run: bash scripts/pipeline.sh build
+        run: |
+          args=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.full_clean }}" = "true" ]; then
+            args+=(--force-rebuild)
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_codegen }}" = "true" ]; then
+            args+=(--force-codegen)
+          fi
+          bash scripts/pipeline.sh "${args[@]}" build
 
   unit-test:
     name: Unit tests — native engine (ctest, excludes pg_regress)
@@ -216,7 +235,15 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
       - name: ctest
-        run: ctest --test-dir build --output-on-failure -LE regress
+        env:
+          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
+        run: |
+          chmod +x scripts/test-parallel.sh
+          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
+            bash scripts/test-parallel.sh --serial --engine
+          else
+            bash scripts/test-parallel.sh --engine
+          fi
 
   deploy:
     name: Deploy — stage install to /opt/laplace
@@ -246,16 +273,16 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Migrate + sync extension + perfcache GUC + API env
+      - name: Migrate + sync extension + tune + perfcache GUC + API env
         run: |
           args=()
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
             args+=(--fresh-db)
           fi
-          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg perfcache-guc api-env
+          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
 
   integration-test:
-    name: Integration tests — pg_regress + dotnet (solution-wide)
+    name: Integration tests — pg_regress || dotnet (parallel)
     if: github.event_name != 'pull_request'
     needs: db-ops
     runs-on: [self-hosted, laplace]
@@ -268,8 +295,40 @@ jobs:
       - name: Clear stale regress output (diffs below must be from THIS run)
         run: rm -rf build/extension/*/tests/regress_output
 
-      - name: pg_regress
-        run: ctest --test-dir build --output-on-failure -L regress
+      - name: pg_regress || dotnet test (parallel)
+        env:
+          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
+        run: |
+          chmod +x scripts/test-parallel.sh
+          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
+            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
+          export LAPLACE_PERFCACHE_BIN="$bin"
+          echo "LAPLACE_PERFCACHE_BIN=$bin"
+          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
+            bash scripts/test-parallel.sh --serial --regress
+            ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+                --filter 'Tier!=perf' )
+          else
+            # regress ∥ dotnet (engine gtests already ran in unit-test)
+            reg_log=$(mktemp); app_log=$(mktemp)
+            set +e
+            bash scripts/test-parallel.sh --regress >"$reg_log" 2>&1 &
+            reg_pid=$!
+            ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+                --filter 'Tier!=perf' ) >"$app_log" 2>&1 &
+            app_pid=$!
+            wait $reg_pid; reg_rc=$?
+            wait $app_pid; app_rc=$?
+            set -e
+            echo "---- regress ----"; cat "$reg_log"
+            echo "---- dotnet ----"; cat "$app_log"
+            rm -f "$reg_log" "$app_log"
+            if [ "$reg_rc" -ne 0 ] || [ "$app_rc" -ne 0 ]; then
+              echo "::error::integration failed (regress_rc=$reg_rc app_rc=$app_rc)"
+              exit 1
+            fi
+          fi
 
       - name: Show regress diffs on failure
         if: failure()
@@ -280,18 +339,6 @@ jobs:
             cat "$f"
             echo "::endgroup::"
           done
-
-      - name: dotnet test (whole solution — no per-project lists)
-        run: |
-          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
-            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
-          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
-          export LAPLACE_PERFCACHE_BIN="$bin"
-          echo "LAPLACE_PERFCACHE_BIN=$bin"
-          # Tier=perf throughput gates need a clean DB; skip on the live substrate.
-          cd app
-          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-            --filter 'Tier!=perf'
 
   seed:
     name: Seed — foundation ladder (idempotent, no-op when present)
@@ -323,7 +370,7 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Publish API + SPA
+      - name: Publish (API + SPA + uci + chess-lab + secrets)
         run: bash scripts/pipeline.sh publish
 
       - name: Restart API + readiness gate

@@ -22,6 +22,10 @@ rem    --skip-wal     Never run pg_resetwal (use if WAL is intact)
 rem
 rem  After success: seed-foundation.cmd when you want data back.
 rem  Verify anytime:  scripts\win\verify-deploy.cmd  and  scripts\win\status.ps1
+rem
+rem  If services.msc says "started and then stopped" while psql still works:
+rem    that is an orphan postmaster holding 5432 — do NOT keep hitting Start.
+rem    Elevated:  scripts\win\reclaim-postgres.cmd
 rem ============================================================================
 call "%~dp0env.cmd"
 set "PGDATA=%LAPLACE_PGDATA%"
@@ -92,6 +96,13 @@ if "%SKIP_WAL%"=="0" (
 )
 
 echo ==== [4/6] start %SVC% ^(no preload yet^) ====
+rem Refuse orphan trap: if 5432 is live while service is down, reclaim first.
+call "%~dp0pg-service-guard.cmd"
+if errorlevel 2 if not errorlevel 3 (
+  echo ORPHAN detected — running reclaim stop/start path before cold boot continues
+  call "%~dp0reclaim-postgres.cmd" || exit /b 1
+  goto wire_gucs
+)
 sc query %SVC% | findstr /i "RUNNING" >nul && (
   echo service already running — recycling for clean boot
   net stop %SVC% >nul 2>&1
@@ -99,6 +110,7 @@ sc query %SVC% | findstr /i "RUNNING" >nul && (
 )
 net start %SVC% >nul 2>&1 || (
   echo net start failed — check latest %PGDATA%\log\postgresql-*.log
+  echo   If this was a long crash-recovery timeout, re-run reclaim-postgres.cmd after recovery finishes.
   exit /b 1
 )
 call :wait_for_pg 30 || (

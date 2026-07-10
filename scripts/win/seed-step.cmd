@@ -6,6 +6,11 @@ if "%~1"=="" goto usage
 if /i "%~1"=="help" goto usage
 if /i "%~1"=="--list" goto list
 
+set "REBUILD=0"
+:parse_flags
+if /i "%~1"=="--rebuild" ( set "REBUILD=1" & shift /1 & goto parse_flags )
+if "%~1"=="" goto usage
+
 set "STEP=%~1"
 set "EXTRA="
 if not "%~2"=="" set "EXTRA=%~2"
@@ -90,25 +95,37 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_impl
-rem `dotnet run` launches the CLI as dotnet.exe, never Laplace.Cli.exe, so an
-rem IMAGENAME-only tasklist check can never fire (.scratchpad/02 Issues 16/18).
-rem Match on the command line instead: any dotnet.exe/Laplace.Cli.exe process
-rem whose command line mentions Laplace.Cli is a live ingest (idle build-server
-rem dotnet processes don't mention it).
+rem Match on the command line: any dotnet.exe/Laplace.Cli.exe process whose
+rem command line mentions Laplace.Cli is a live ingest (idle build-server
+rem dotnet processes don't mention it). Prefer the built CLI exe so the mutex
+rem matches Laplace.Cli.exe directly (.scratchpad/02 Issues 16/18).
 call :cli_running
 if not errorlevel 1 (
   echo ERROR: a Laplace.Cli ingest is already running — wait for it to finish or stop it before seed-step %STEP%
   exit /b 2
 )
-echo ==== seed-step: build CLI Release ====
-dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q --nologo || exit /b 1
+call :ensure_cli || exit /b 1
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %STEP% %EXTRA%
+"%LAPLACE_CLI_EXE%" ingest %STEP% %EXTRA%
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" exit /b %RC%
 call :wait_cli_exit
 call :verify_step
 exit /b %ERRORLEVEL%
+
+:ensure_cli
+if "%REBUILD%"=="1" goto ensure_cli_build
+if defined LAPLACE_FORCE_CLI_BUILD goto ensure_cli_build
+if not exist "%LAPLACE_CLI_EXE%" goto ensure_cli_build
+exit /b 0
+:ensure_cli_build
+echo ==== seed-step: build CLI Release ====
+dotnet build "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo || exit /b 1
+if not exist "%LAPLACE_CLI_EXE%" (
+  echo ERROR: CLI build succeeded but exe missing: %LAPLACE_CLI_EXE%
+  exit /b 1
+)
+exit /b 0
 
 rem exit /b 0 = an ingest CLI process is running, 1 = none (same convention as
 rem the old tasklist^|find check, so callers keep `if not errorlevel 1` = running).
@@ -127,6 +144,7 @@ rem CLI's self-printed summary — ask the database whether evidence from this s
 rem source actually landed.
 :verify_step
 set "STEP_SOURCE="
+if /i "%STEP%"=="safetensors"   goto verify_model_step
 if /i "%STEP%"=="unicode"       set "STEP_SOURCE=UnicodeDecomposer"
 if /i "%STEP%"=="iso639"        set "STEP_SOURCE=ISO639Decomposer"
 if /i "%STEP%"=="cili"          set "STEP_SOURCE=CILIDecomposer"
@@ -156,14 +174,33 @@ if not defined STEP_SOURCE (
   exit /b 3
 )
 set "STEP_EVIDENCE="
-for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
 if not defined STEP_EVIDENCE goto verify_fail
 if "%STEP_EVIDENCE%"=="0" goto verify_fail
 echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====
 exit /b 0
 :verify_fail
-echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME%)
+echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME% @ %LAPLACE_PGHOST%)
 exit /b 3
+
+rem A model's source id is a content hash over its config+weights (ModelDecomposer
+rem .SourceForModel), so it cannot be recomputed here. The deposit registers the
+rem source's name via HAS_NAME_ALIAS (BootstrapIntentBuilder), so verification
+rem resolves name -> source id(s) through consensus and sums their evidence.
+:verify_model_step
+set "STEP_SOURCE="
+for /f "usebackq delims=" %%m in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0derive-model-source.ps1" "%EXTRA%"`) do set "STEP_SOURCE=%%m"
+if not defined STEP_SOURCE (
+  echo ERROR: seed-step verify: could not derive model source name from '%EXTRA%'
+  if defined LAPLACE_SKIP_VERIFY exit /b 0
+  exit /b 3
+)
+set "STEP_EVIDENCE="
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT COALESCE(SUM(laplace.evidence_count(NULL, c.subject_id)), 0) FROM laplace.consensus c WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS') AND c.object_id = laplace.word_id('%STEP_SOURCE%');"`) do set "STEP_EVIDENCE=%%v"
+if not defined STEP_EVIDENCE goto verify_fail
+if "%STEP_EVIDENCE%"=="0" goto verify_fail
+echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====
+exit /b 0
 
 :run_model_tinyllama
 call :resolve_model LAPLACE_MODEL_TINYLLAMA LAPLACE_TINYLLAMA_DIR "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" TINYLLAMA || exit /b 1
@@ -228,14 +265,16 @@ echo stages: seed-stage floor ^| document ^| knowledge ^| usage ^| code ^| model
 exit /b 0
 
 :usage
-echo usage: seed-step.cmd ^<step^> [path]
+echo usage: seed-step.cmd [--rebuild] ^<step^> [path]
 echo        seed-step.cmd --list
 echo.
 echo examples:
 echo   seed-step.cmd unicode
-echo   seed-step.cmd wordnet
+echo   seed-step.cmd --rebuild wordnet
 echo   seed-step.cmd document "%INGEST%\test-data\text"
 echo   seed-step.cmd repo "%REPOS%\Laplace"
+echo.
+echo CLI is built only when missing or --rebuild is passed ^(seed-ladder builds once^).
 exit /b 2
 
 :unknown_step

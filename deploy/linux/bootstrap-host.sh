@@ -15,10 +15,15 @@ fi
 echo "==> app dir: $APP_DIR (owner $RUN_USER)"
 install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs"
 
+echo "==> secrets drop: /opt/laplace/secrets"
+# Seeded by setup-host from ~/.config/shell/secrets.env; systemd loads
+# EnvironmentFile=-/opt/laplace/secrets/lichess.env.
+install -d -m 2770 -o "$RUN_USER" -g "$RUN_GROUP" /opt/laplace/secrets
+
 echo "==> env file: $APP_DIR/laplace-api.env"
 if [[ ! -f "$APP_DIR/laplace-api.env" ]]; then
   install -m 0640 -o "$RUN_USER" -g "$RUN_GROUP" "$HERE/laplace-api.env.example" "$APP_DIR/laplace-api.env"
-  echo "   created from example — edit secrets in place; CICD does not overwrite it."
+  echo "   created from example — non-secret config only; secrets go in /opt/laplace/secrets/."
 else
   echo "   exists — left untouched."
 fi

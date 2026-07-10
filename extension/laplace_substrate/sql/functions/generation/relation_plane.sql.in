@@ -1,16 +1,38 @@
-CREATE OR REPLACE FUNCTION relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
+-- 2026-07-09 vocab pushdown: the foundry read every consensus row of a type
+-- over the wire so the client could keep the ~1% whose endpoints are in the
+-- synthesis vocab (12 relation heads = 27.5M rows scanned, 358K kept, 550s of a
+-- 608s synthesis). p_vocab probes consensus_type_subject_btree instead; the type
+-- id is resolved into a local FIRST (a variable is a bound parameter and
+-- therefore an index condition — Rule #4; a function call in the qual is
+-- not, lesson L12).
+DROP FUNCTION IF EXISTS relation_plane(text, text, int);
+CREATE OR REPLACE FUNCTION relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL,
+        p_vocab bytea[] DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
     g int;
+    v_type bytea;
 BEGIN
     IF p_family = 'consensus' THEN
-        RETURN QUERY
-        SELECT c.subject_id, c.object_id,
-               (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
-        FROM consensus c
-        WHERE c.type_id = relation_type_id(p_name) AND c.object_id IS NOT NULL;
+        v_type := relation_type_id(p_name);
+        IF p_vocab IS NULL THEN
+            RETURN QUERY
+            SELECT c.subject_id, c.object_id,
+                   (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+            FROM consensus c
+            WHERE c.type_id = v_type AND c.object_id IS NOT NULL;
+        ELSE
+            RETURN QUERY
+            WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
+            SELECT c.subject_id, c.object_id,
+                   (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+            FROM v
+            JOIN consensus c ON c.type_id = v_type AND c.subject_id = v.id
+            JOIN v vo ON vo.id = c.object_id
+            WHERE c.object_id IS NOT NULL;
+        END IF;
         RETURN;
     END IF;
 

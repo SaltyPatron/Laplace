@@ -49,8 +49,15 @@ foreach ($pair in @(
     } elseif ($out -match 'no work to do') {
         Write-Host ("{0,-16} up to date$lockNote" -f $tree)
     } else {
-        $pending = ($out | Where-Object { $_ -match '^\[' } | Measure-Object).Count
-        Write-Host ("{0,-16} {1} pending build step(s)$lockNote" -f $tree, $pending)
+        # Ignore cmake glob/reconfigure noise: only count real build edges.
+        $pending = ($out | Where-Object {
+            $_ -match '^\[' -and $_ -notmatch 'Re-checking globbed|Re-running CMake'
+        } | Measure-Object).Count
+        if ($pending -eq 0) {
+            Write-Host ("{0,-16} up to date$lockNote" -f $tree)
+        } else {
+            Write-Host ("{0,-16} {1} pending build step(s)$lockNote" -f $tree, $pending)
+        }
     }
 }
 
@@ -82,7 +89,23 @@ if ($stale) { Write-Host ("{0} hot-swap leftover(s) pending cleanup (next instal
 Section 'POSTGRES'
 $svc = Get-Service postgresql-x64-18
 Write-Host "service postgresql-x64-18: $($svc.Status)"
-if ($svc.Status -eq 'Running') {
+$port5432 = Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue
+$pgdata = if ($env:LAPLACE_PGDATA) { $env:LAPLACE_PGDATA } else { 'D:\Data\Postgres' }
+$pidFile = Join-Path $pgdata 'postmaster.pid'
+$orphanPid = $null
+if (Test-Path $pidFile) {
+    $orphanPid = (Get-Content $pidFile -TotalCount 1).Trim()
+}
+if ($svc.Status -ne 'Running' -and $port5432) {
+    $owner = $port5432[0].OwningProcess
+    Write-Host "BROKEN DX: service STOPPED but port 5432 owned by PID $owner (orphan postmaster)." -ForegroundColor Red
+    Write-Host "  Services.msc Start will show 'started and then stopped' until the orphan is reclaimed." -ForegroundColor Red
+    Write-Host "  Elevated fix: cmd /c `"scripts\win\reclaim-postgres.cmd`"" -ForegroundColor Yellow
+} elseif ($svc.Status -ne 'Running' -and (Test-Path $pidFile)) {
+    Write-Host "BROKEN DX: service STOPPED but postmaster.pid exists (PID $orphanPid)." -ForegroundColor Red
+    Write-Host "  Elevated fix: cmd /c `"scripts\win\reclaim-postgres.cmd`"" -ForegroundColor Yellow
+}
+if ($svc.Status -eq 'Running' -or $port5432) {
     $gucT0 = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.perfcache_path;" 2>&1 | Where-Object { $_ })
     $gucHw = (& $psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;" 2>&1 | Where-Object { $_ })
     $wantT0 = "$deployPg/share/laplace_t0_perfcache.bin"
@@ -102,9 +125,9 @@ if ($svc.Status -eq 'Running') {
 }
 
 Section 'ENDPOINT (serve.cmd port 5187)'
-$listener = Get-NetTCPConnection -LocalPort 5187 -State Listen 2>$null
+$listener = Get-NetTCPConnection -LocalPort 5187 -State Listen -ErrorAction SilentlyContinue
 if ($listener) {
-    $owner = (Get-Process -Id $listener[0].OwningProcess).ProcessName
+    $owner = (Get-Process -Id $listener[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
     Write-Host "LISTENING (PID $($listener[0].OwningProcess), $owner) -- app builds will hit locks; locks.cmd --kill clears it"
 } else {
     Write-Host 'not running'

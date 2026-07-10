@@ -19,7 +19,24 @@ if (-not (Test-Path $EnvFile)) {
 Write-Host "==> [1/6] build front-end (web/ -> dist)" -ForegroundColor Cyan
 Push-Location "$RepoRoot\web"
 try {
-  npm ci; if ($LASTEXITCODE) { throw "npm ci failed" }
+  $lock = Join-Path (Get-Location) "package-lock.json"
+  $stamp = Join-Path (Get-Location) "node_modules\.laplace-npm-ci.stamp"
+  $needCi = $true
+  if ((Test-Path "node_modules") -and (Test-Path $lock) -and (Test-Path $stamp)) {
+    $lockHash = (Get-FileHash $lock -Algorithm SHA256).Hash
+    $prev = (Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($prev -eq $lockHash) {
+      Write-Host "    npm ci skipped (package-lock stamp fresh)" -ForegroundColor DarkGray
+      $needCi = $false
+    }
+  }
+  if ($needCi) {
+    npm ci; if ($LASTEXITCODE) { throw "npm ci failed" }
+    if (Test-Path $lock) {
+      New-Item -ItemType Directory -Force -Path "node_modules" | Out-Null
+      Set-Content -LiteralPath $stamp -Value (Get-FileHash $lock -Algorithm SHA256).Hash -NoNewline -Encoding ascii
+    }
+  }
   if (-not (Test-Path "openapi\openapi.json")) { throw "web/openapi/openapi.json missing — dotnet build Laplace.Endpoints.OpenAICompat first" }
   Write-Host "    generating src/api/types.gen.ts from openapi/openapi.json"
   npm run gen:api; if ($LASTEXITCODE) { throw "npm gen:api failed" }
@@ -27,22 +44,24 @@ try {
 }
 finally { Pop-Location }
 
-Write-Host "==> [2/6] publish API -> staging" -ForegroundColor Cyan
+Write-Host "==> [2/6] publish API + UCI in parallel -> staging" -ForegroundColor Cyan
 $stage = Join-Path $env:TEMP "laplace-api-stage"
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-dotnet publish $proj -c $Configuration --no-self-contained -o $stage
-if ($LASTEXITCODE) { throw "dotnet publish failed" }
-
-Write-Host "==> [3/6] publish laplace-uci beside API (install-root contract)" -ForegroundColor Cyan
 $uciStage = Join-Path $env:TEMP "laplace-uci-stage"
+if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 if (Test-Path $uciStage) { Remove-Item $uciStage -Recurse -Force }
-dotnet publish $uciProj -c $Configuration --no-self-contained -o $uciStage
-if ($LASTEXITCODE) { throw "laplace-uci publish failed" }
+$apiLog = Join-Path $env:TEMP "laplace-publish-api.log"
+$uciLog = Join-Path $env:TEMP "laplace-publish-uci-iis.log"
+$api = Start-Process -FilePath "dotnet" -ArgumentList @("publish", $proj, "-c", $Configuration, "--no-self-contained", "-o", $stage) -PassThru -NoNewWindow -RedirectStandardOutput $apiLog -RedirectStandardError ($apiLog + ".err")
+$uci = Start-Process -FilePath "dotnet" -ArgumentList @("publish", $uciProj, "-c", $Configuration, "--no-self-contained", "-o", $uciStage) -PassThru -NoNewWindow -RedirectStandardOutput $uciLog -RedirectStandardError ($uciLog + ".err")
+Wait-Process -Id $api.Id, $uci.Id
+Get-Content $apiLog, ($apiLog + ".err"), $uciLog, ($uciLog + ".err") -ErrorAction SilentlyContinue
+if ($api.ExitCode -ne 0) { throw "dotnet publish API failed (rc=$($api.ExitCode))" }
+if ($uci.ExitCode -ne 0) { throw "laplace-uci publish failed (rc=$($uci.ExitCode))" }
 Get-ChildItem $uciStage -File | Copy-Item -Destination $stage -Force
 $uciExe = Join-Path $stage "laplace-uci.exe"
 if (-not (Test-Path $uciExe)) { throw "laplace-uci.exe missing from staging — publish step failed" }
 
-Write-Host "==> [4/6] overlay SPA into wwwroot + ensure native DLLs" -ForegroundColor Cyan
+Write-Host "==> [3/6] overlay SPA into wwwroot + ensure native DLLs" -ForegroundColor Cyan
 $wwwroot = Join-Path $stage "wwwroot"
 if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
 New-Item -ItemType Directory $wwwroot | Out-Null
@@ -50,55 +69,18 @@ Copy-Item "$RepoRoot\web\dist\*" $wwwroot -Recurse -Force
 $natives = @(
   "$engineBuild\core\laplace_core.dll",
   "$engineBuild\dynamics\laplace_dynamics.dll",
-  "$engineBuild\synthesis\laplace_synthesis.dll",
-  "C:\Program Files\PostgreSQL\18\bin\libxml2.dll"
+  "$engineBuild\synthesis\laplace_synthesis.dll"
 )
 foreach ($n in $natives) {
   if (-not (Test-Path $n)) { throw "native dep missing: $n — run scripts\win\build-engine.cmd first" }
   Copy-Item $n $stage -Force
 }
 
-Write-Host "==> [5/6] inject env config into web.config" -ForegroundColor Cyan
-$webConfig = Join-Path $stage "web.config"
-[xml]$xml = Get-Content $webConfig
-$aspNetCore = $xml.SelectSingleNode("//aspNetCore")
-if (-not $aspNetCore) { throw "web.config has no <aspNetCore> (not an in-process publish?)" }
-$envNode = $aspNetCore.SelectSingleNode("environmentVariables")
-if ($envNode) { [void]$aspNetCore.RemoveChild($envNode) }
-$envNode = $xml.CreateElement("environmentVariables")
-$envVars = [ordered]@{}
-$chessLabEnv = Join-Path $RepoRoot "deploy\secrets\chess-lab.env"
-$lichessEnv = Join-Path $RepoRoot "deploy\secrets\lichess.env"
-# laplace-uci is NOT configured here — ChessLabPaths resolves InstallRoot\laplace-uci.exe.
-$skipChessLabKeys = [System.Collections.Generic.HashSet[string]]::new(
-  [StringComparer]::OrdinalIgnoreCase
-)
-[void]$skipChessLabKeys.Add('LAPLACE_UCI')
-foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv)) {
-  if (-not (Test-Path $file)) {
-    if ($file -eq $chessLabEnv) { Write-Warning "No $chessLabEnv — cutechess/stockfish/qt must be set for chess lab gauntlets." }
-    if ($file -eq $lichessEnv) { Write-Warning "No $lichessEnv — set LICHESS_API for Lichess connectivity." }
-    continue
-  }
-  Get-Content $file | ForEach-Object {
-    $line = $_.Trim()
-    if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
-      $k, $v = $line -split "=", 2
-      $k = $k.Trim()
-      if ($skipChessLabKeys.Contains($k)) { return }
-      if (-not $envVars.Contains($k)) { $envVars[$k] = $v.Trim() }
-    }
-  }
-}
-foreach ($entry in $envVars.GetEnumerator()) {
-  $e = $xml.CreateElement("environmentVariable")
-  $e.SetAttribute("name", $entry.Key); $e.SetAttribute("value", $entry.Value)
-  [void]$envNode.AppendChild($e)
-}
-[void]$aspNetCore.AppendChild($envNode)
-$xml.Save($webConfig)
+Write-Host "==> [4/6] inject env config into web.config" -ForegroundColor Cyan
+& "$RepoRoot\scripts\win\inject-iis-env.ps1" -WebConfigPath (Join-Path $stage "web.config") -RepoRoot $RepoRoot -EnvFile $EnvFile
+if ($LASTEXITCODE) { throw "inject-iis-env failed" }
 
-Write-Host "==> [6/6] sync staging -> $OutDir" -ForegroundColor Cyan
+Write-Host "==> [5/6] sync staging -> $OutDir" -ForegroundColor Cyan
 New-Item -ItemType Directory $OutDir -Force | Out-Null
 $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
 $pool = "LaplacePool"

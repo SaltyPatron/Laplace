@@ -6,6 +6,7 @@ set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/gram_schmidt.h
     include/laplace/dynamics/bilinear_edges.h
     include/laplace/dynamics/ffn_edges.h
+    include/laplace/dynamics/model_math.h
 )
 
 set(LAPLACE_DYNAMICS_SOURCES
@@ -16,6 +17,7 @@ set(LAPLACE_DYNAMICS_SOURCES
     src/gram_schmidt.cpp
     src/bilinear_edges.cpp
     src/ffn_edges.cpp
+    src/model_math.cpp
 )
 
 add_library(laplace_dynamics SHARED ${LAPLACE_DYNAMICS_SOURCES})
@@ -33,7 +35,8 @@ if(WIN32)
         MKL_LP64
         LAPLACE_HAS_MKL=1
     )
-    target_include_directories(laplace_dynamics_static PRIVATE "$ENV{MKLROOT}/include")
+    # SYSTEM: mkl_direct_blas_kernels.h has its own unused-variable warnings under -Wall.
+    target_include_directories(laplace_dynamics_static SYSTEM PRIVATE "$ENV{MKLROOT}/include")
 
     add_library(laplace_dynamics_pg_static STATIC src/init.cpp)
     target_include_directories(laplace_dynamics_pg_static PUBLIC
@@ -44,7 +47,7 @@ if(WIN32)
         LAPLACE_HAS_MKL=1
         LAPLACE_RUNTIME_NO_TBB=1
     )
-    target_include_directories(laplace_dynamics_pg_static PRIVATE "$ENV{MKLROOT}/include")
+    target_include_directories(laplace_dynamics_pg_static SYSTEM PRIVATE "$ENV{MKLROOT}/include")
 endif()
 
 set_target_properties(laplace_dynamics PROPERTIES

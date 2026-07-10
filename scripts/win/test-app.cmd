@@ -21,8 +21,10 @@ goto parse
 :run
 set "ANYFAIL="
 set "MATCHED="
-
 set "XUNIT_TIER_EXCLUDE=Tier^!=perf"
+
+rem Semicolon-separated list for PowerShell (spaces in ARGS stay separate).
+set "PROJECTS="
 for %%P in (
   Laplace.Core.Tests
   Laplace.Substrate.Tests
@@ -36,16 +38,56 @@ for %%P in (
   )
   if defined RUNIT (
     set "MATCHED=1"
-    if "!CONTINUE_ON_FAIL!"=="1" (
-      dotnet test "%%P\%%P.csproj" -c Release -v minimal --nologo --filter "!XUNIT_TIER_EXCLUDE!" !ARGS! || set "ANYFAIL=1"
+    if defined PROJECTS (
+      set "PROJECTS=!PROJECTS!;%%P"
     ) else (
-      dotnet test "%%P\%%P.csproj" -c Release -v minimal --nologo --filter "!XUNIT_TIER_EXCLUDE!" !ARGS! || exit /b 1
+      set "PROJECTS=%%P"
     )
   )
 )
 if defined FILTER if not defined MATCHED (
   echo test-app: no test project matches "%FILTER%"
   exit /b 2
+)
+
+if defined LAPLACE_TEST_SERIAL goto serial_run
+
+echo test-app: running projects in parallel: !PROJECTS!
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$app = '%CD%';" ^
+  "$filter = 'Tier!=perf';" ^
+  "$extra = '%ARGS%'.Trim();" ^
+  "$projects = '%PROJECTS%'.Split(';') | Where-Object { $_ };" ^
+  "$procs = @();" ^
+  "foreach ($p in $projects) {" ^
+  "  $out = Join-Path $env:TEMP ('laplace-test-' + $p + '.log');" ^
+  "  $argList = @('test', (Join-Path $p ($p + '.csproj')), '-c', 'Release', '-v', 'minimal', '--nologo', '--filter', $filter);" ^
+  "  if ($extra) { $argList += $extra.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries) };" ^
+  "  Write-Host ('==== starting ' + $p + ' ====');" ^
+  "  $err = $out + '.err';" ^
+  "  $procs += [pscustomobject]@{ Name = $p; Log = $out; Err = $err; Proc = (Start-Process -FilePath 'dotnet' -ArgumentList $argList -WorkingDirectory $app -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err) }" ^
+  "};" ^
+  "$procs.Proc | Wait-Process;" ^
+  "$fail = $false;" ^
+  "foreach ($x in $procs) {" ^
+  "  Write-Host ('==== ' + $x.Name + ' ====');" ^
+  "  Get-Content $x.Log,$x.Err -ErrorAction SilentlyContinue;" ^
+  "  if ($x.Proc.ExitCode -ne 0) { Write-Host ('FAIL ' + $x.Name + ' rc=' + $x.Proc.ExitCode); $fail = $true } else { Write-Host ('PASS ' + $x.Name) }" ^
+  "};" ^
+  "if ($fail) { exit 1 }; exit 0"
+exit /b %ERRORLEVEL%
+
+:serial_run
+echo test-app: serial mode (LAPLACE_TEST_SERIAL)
+for %%P in ("!PROJECTS:;=" "!") do (
+  if not "%%~P"=="" (
+    if "!CONTINUE_ON_FAIL!"=="1" (
+      dotnet test "%%~P\%%~P.csproj" -c Release -v minimal --nologo --filter "!XUNIT_TIER_EXCLUDE!" !ARGS! || set "ANYFAIL=1"
+    ) else (
+      dotnet test "%%~P\%%~P.csproj" -c Release -v minimal --nologo --filter "!XUNIT_TIER_EXCLUDE!" !ARGS! || exit /b 1
+    )
+  )
 )
 if defined ANYFAIL exit /b 1
 exit /b 0

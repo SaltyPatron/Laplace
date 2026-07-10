@@ -8,15 +8,6 @@ static int is_ignored(uint8_t p) {
     return p == LAPLACE_SB_EXTEND || p == LAPLACE_SB_FORMAT;
 }
 
-static uint8_t prev_sig_at_or_before(const uint32_t* cps, size_t idx) {
-    for (;;) {
-        uint8_t v = sb(cps[idx]);
-        if (!is_ignored(v)) return v;
-        if (idx == 0) return 0xFF;
-        idx -= 1;
-    }
-}
-
 static int trailing_term_pattern(const uint32_t* cps, size_t i,
                                   int* out_is_aterm, int* out_had_spaces) {
     int phase_sp_ok = 1;

@@ -47,7 +47,14 @@ public static partial class CutechessRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        if (qt.Found) psi.Environment["PATH"] = qt.Path!;
+        if (qt.Found)
+        {
+            var prior = psi.Environment.TryGetValue("PATH", out var existing) ? existing
+                : Environment.GetEnvironmentVariable("PATH") ?? "";
+            psi.Environment["PATH"] = string.IsNullOrEmpty(prior)
+                ? qt.Path!
+                : qt.Path! + Path.PathSeparator + prior;
+        }
 
         psi.ArgumentList.Add("-engine");
         psi.ArgumentList.Add($"name=Laplace cmd={uci.Path}");

@@ -28,6 +28,16 @@ public sealed class BootstrapIntentBuilder
             sourceId, $"bootstrap/{sourceName}", parentIntentId: null);
 
         _inner.AddEntity(sourceId, EntityTier.Word, SourceTypeId, sourceId);
+
+        // The source names ITSELF, by the same law AddType uses for type nodes:
+        // HAS_NAME_ALIAS → the name's content root. Canonical-string sources are
+        // unaffected on the read side (render() prefers canonical_names); content-
+        // hash sources (models) stop rendering as raw hex, and name → source-id
+        // resolution becomes a consensus lookup (seed-step verify depends on it).
+        if (ContentEmitter.Emit(_inner, sourceName, sourceId) is { } sourceNameId)
+            _inner.AddAttestation(NativeAttestation.Categorical(
+                sourceId, "HAS_NAME_ALIAS", sourceNameId, sourceId, null,
+                SourceTrust.SubstrateMandate));
     }
 
 

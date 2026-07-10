@@ -30,9 +30,10 @@ static hash128_t tier_type_id(uint8_t tier) {
     return id;
 }
 
-static int codepoint_resolver(uint32_t atom, void* ,
+static int codepoint_resolver(uint32_t atom, void* ctx,
                               hash128_t* out_id, double out_coord[4],
                               hilbert128_t* out_hb) {
+    (void)ctx;
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 

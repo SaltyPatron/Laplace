@@ -14,6 +14,9 @@ rem All build/deploy/publish artifacts live under D:\Data\Laplace — never in t
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=D:\Data\Laplace"
 if not defined LAPLACE_BUILD_ROOT set "LAPLACE_BUILD_ROOT=%LAPLACE_DATA_ROOT%"
 if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_DATA_ROOT%\deploy"
+rem geos/proj/gdal (and sqlite for PROJ) from external/ — scripts\win\build-deps.cmd
+if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DATA_ROOT%\deps"
+if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"
 if not defined LAPLACE_ENGINE_BUILD set "LAPLACE_ENGINE_BUILD=%LAPLACE_BUILD_ROOT%\build-win"
 if not defined LAPLACE_EXT_BUILD set "LAPLACE_EXT_BUILD=%LAPLACE_BUILD_ROOT%\build-win-ext"
 if not defined LAPLACE_ENGINE_BUILD_ASAN set "LAPLACE_ENGINE_BUILD_ASAN=%LAPLACE_BUILD_ROOT%\build-win-asan"
@@ -31,6 +34,8 @@ set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 set "PATH=D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
 set "PATH=C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin;C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin;C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin;%PATH%"
 set "PATH=%LAPLACE_ENGINE_BUILD%\core;%LAPLACE_ENGINE_BUILD%\dynamics;%LAPLACE_ENGINE_BUILD%\synthesis;%PATH%"
+rem Runtime DLLs for laplace_geom (geos_c / proj / sqlite) — must precede system PATH.
+set "PATH=%LAPLACE_DEPS_PREFIX%\geos\bin;%LAPLACE_DEPS_PREFIX%\proj\bin;%LAPLACE_DEPS_PREFIX%\sqlite\bin;%LAPLACE_DEPS_PREFIX%\gdal\bin;%PATH%"
 set "LAPLACE_RC=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe"
 set "LAPLACE_MT=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe"
 if not defined PGPASSWORD set "PGPASSWORD=postgres"
@@ -38,7 +43,13 @@ if not defined PGPASSWORD set "PGPASSWORD=postgres"
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
 if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
 if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
-if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%;Command Timeout=0"
+rem LAPLACE_PGHOST/LAPLACE_PGUSER feed BOTH the CLI connection string below AND
+rem every scripted psql verify/health check, so the writer and the verifier can
+rem never target different databases. Remote seeding (e.g. Windows -> hart-server):
+rem set LAPLACE_PGHOST=hart-server before calling any seed script.
+if not defined LAPLACE_PGHOST set "LAPLACE_PGHOST=localhost"
+if not defined LAPLACE_PGUSER set "LAPLACE_PGUSER=postgres"
+if not defined LAPLACE_DB set "LAPLACE_DB=Host=%LAPLACE_PGHOST%;Username=%LAPLACE_PGUSER%;Password=%PGPASSWORD%;Database=%LAPLACE_DBNAME%;Command Timeout=0"
 if not defined LAPLACE_BILLING_BYPASS set "LAPLACE_BILLING_BYPASS=true"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
@@ -63,6 +74,18 @@ REM pinned workers at once. Server GC = per-core heaps + parallel collection.
 REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS.
 if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
 if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
+rem Build/test parallelism: Ninja/ctest default to logical CPU count when unset.
+rem Set LAPLACE_TEST_SERIAL=1 to force serial ctest/regress/dotnet-test orchestration.
+if not defined CMAKE_BUILD_PARALLEL_LEVEL (
+  if defined NUMBER_OF_PROCESSORS set "CMAKE_BUILD_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
+)
+if not defined CTEST_PARALLEL_LEVEL (
+  if defined LAPLACE_TEST_SERIAL (
+    set "CTEST_PARALLEL_LEVEL=1"
+  ) else (
+    if defined NUMBER_OF_PROCESSORS set "CTEST_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
+  )
+)
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin"
 if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_highway_perfcache.bin"
 rem Extension deploy MUST stay outside PGDATA (fsync/sharing-violation if under D:\Data\Postgres\laplace).

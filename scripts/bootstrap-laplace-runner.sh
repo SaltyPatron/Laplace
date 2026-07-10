@@ -49,27 +49,17 @@ usage() {
     cat <<EOF
 Usage: $0 <mode>
 
+Internal Layer-0 implementation — humans run: sudo bash scripts/setup-host.sh
+
 Modes:
-  bootstrap   Idempotent set-up (default if no mode given)
-              - Creates system account, runner, PG roles, peer auth, sudoers
-              - Safe to re-run; only adds what's missing
+  prefix      Account + apt + /opt/laplace dirs only (setup-host runs this
+              before vendor deps so pgsql-18 exists for full bootstrap)
+  bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
   status      Print current state (no changes)
+  stripe      Stripe sandbox block into runner .env
+  reset       Tear down (type RESET)
 
-    stripe      Write Stripe sandbox env block into runner .env
-                            - Writes LAPLACE_STRIPE_SUCCESS_URL / LAPLACE_STRIPE_CANCEL_URL /
-                                LAPLACE_BILLING_CURRENCY
-                            - Writes LAPLACE_STRIPE_API_KEY only if exported when invoking this script
-                                (example: sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe)
-                            - Safe to re-run (managed begin/end block)
-  reset       Tear down everything this script created
-              - Deregisters + removes runner
-              - Drops PG roles (and DBs they own)
-              - Removes pg_hba/pg_ident entries, sudoers file
-              - Removes the laplace-runner system account
-              - REQUIRES typing 'RESET' to confirm
-
-After bootstrap, Layer 1 (DbUp) creates the database + extensions:
-  just db-up   (or: dotnet run --project app/Laplace.Migrations -- up)
+CI: .github/workflows/laplace.yml → scripts/pipeline.sh
 EOF
 }
 
@@ -121,8 +111,13 @@ bootstrap_build_environment() {
         libsqlite3-dev libtiff-dev libcurl4-openssl-dev \
         libpcre2-dev libgeotiff-dev libpng-dev libwebp-dev \
         libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \
+        nginx \
+        stockfish \
+        qt6-base-dev qt6-base-dev-tools \
+        libqt6svg6-dev libqt6core5compat6-dev \
+        libqt6svg6 libqt6core5compat6 \
         >/dev/null
-    green "✓ Build-deps apt packages present"
+    green "✓ Build-deps + nginx + chess-lab apt packages present"
 
     mkdir -p /opt/laplace
     chown "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
@@ -1079,6 +1074,10 @@ do_bootstrap() {
     bootstrap_remove_legacy_sudoers
     bootstrap_runner_gh_auth
 
+    bootstrap_api_host
+    bootstrap_operator_secrets
+    bootstrap_chess_lab
+
     say "Verification"
     echo "Runner service:"
     systemctl status "$RUNNER_SERVICE" --no-pager 2>/dev/null | head -8 \
@@ -1111,22 +1110,16 @@ do_bootstrap() {
 
     echo
     green "===== LAYER 0 BOOTSTRAP COMPLETE ====="
-    echo
-    echo "Layer 0 (this script) is done."
-    echo
-    echo "Layer 1 (database + extensions + schema) — run from the repo root:"
-    echo "  just db-up         # EnsureDatabase('laplace') + apply migrations"
-    echo "                     # → CREATE EXTENSION postgis + laplace, role grants"
-    echo "                     # → substrate schema flows in via the extension"
-    echo
-    echo "Layer 2 (CI verification) — push to main, or:"
-    echo "  gh workflow run laplace.yml"
-    echo
-    echo "Layer 1 reset (start fresh without touching Layer 0):"
-    echo "  just db-nuke       # DROP DATABASE laplace, re-create empty"
-    echo
-    echo "Full reset (undo Layer 0):"
-    echo "  sudo $0 reset"
+    echo "Continue via: sudo bash scripts/setup-host.sh   (Layer 0.5 + 1)"
+    echo "Or if setup-host already running: it continues automatically."
+}
+
+do_prefix() {
+    require_root
+    bootstrap_user
+    bootstrap_build_environment
+    bootstrap_external_dirs
+    green "===== PREFIX READY (/opt/laplace + apt) — next: vendor deps, then full bootstrap ====="
 }
 
 do_stripe() {
@@ -1137,7 +1130,60 @@ do_stripe() {
     echo "  sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe"
 }
 
+# API systemd unit + nginx + /opt/laplace/app + secrets dir (Layer 0).
+bootstrap_api_host() {
+    say "API host (systemd unit, nginx, app dir, secrets drop)"
+    local here api_boot
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    api_boot="$(cd "$here/.." && pwd)/deploy/linux/bootstrap-host.sh"
+    if [ ! -f "$api_boot" ]; then
+        red "missing $api_boot"
+        return 1
+    fi
+    bash "$api_boot"
+}
+
+# Seed /opt/laplace/secrets from the operator who invoked sudo (once, Layer 0).
+# Same pattern as gh auth mirror — root may read $SUDO_USER home; the service never does.
+bootstrap_operator_secrets() {
+    say "Host secrets drop ← operator ~/.config/shell/secrets.env"
+    local src="/home/${GH_SUDO_USER}/.config/shell/secrets.env"
+    local dst_dir="/opt/laplace/secrets"
+    local dst="$dst_dir/lichess.env"
+    install -d -m 2770 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$dst_dir"
+    if [ ! -f "$src" ]; then
+        yellow "  $src absent — skip (set LICHESS_TOKEN repo secret for CI, or create the file and re-run setup)"
+        return 0
+    fi
+    local line val
+    line="$(grep -E '^(LICHESS_TOKEN|LICHESS_API)=' "$src" 2>/dev/null | head -1 || true)"
+    if [ -z "$line" ]; then
+        yellow "  no LICHESS_TOKEN/LICHESS_API in $src — skip"
+        return 0
+    fi
+    val="${line#*=}"
+    printf 'LICHESS_TOKEN=%s\n' "$val" >"$dst"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$dst"
+    chmod 640 "$dst"
+    green "✓ $dst seeded from $src"
+}
+
+bootstrap_chess_lab() {
+    say "Chess Lab (stockfish + Qt6 + cutechess)"
+    local here script
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    script="$here/bootstrap-chess-lab.sh"
+    if [ ! -f "$script" ]; then
+        yellow "missing $script — skip"
+        return 0
+    fi
+    bash "$script" || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
+}
+
 case "$MODE" in
+    prefix)
+        do_prefix
+        ;;
     bootstrap)
         require_root
         do_bootstrap

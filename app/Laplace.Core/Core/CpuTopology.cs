@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using System.Numerics;
 
 using System.Runtime.InteropServices;
@@ -539,11 +541,11 @@ public static class CpuTopology
 
 
 
-    private static bool TryDetectWindowsCpuSetPools(out TopologyPools pools)
+    private static bool TryDetectWindowsCpuSetPools([NotNullWhen(true)] out TopologyPools? pools)
 
     {
 
-        pools = default;
+        pools = null;
 
         uint size = 0;
 
@@ -623,11 +625,11 @@ public static class CpuTopology
 
 
 
-    private static bool TryBuildPoolsFromCpuSets(List<CpuSetEntry> entries, string source, out TopologyPools pools)
+    private static bool TryBuildPoolsFromCpuSets(List<CpuSetEntry> entries, string source, [NotNullWhen(true)] out TopologyPools? pools)
 
     {
 
-        pools = default;
+        pools = null;
 
         byte maxEff = entries.Max(e => e.EfficiencyClass);
 
@@ -731,11 +733,11 @@ public static class CpuTopology
 
 
 
-    private static bool TryDetectWindowsGlpiexPools(out TopologyPools pools)
+    private static bool TryDetectWindowsGlpiexPools([NotNullWhen(true)] out TopologyPools? pools)
 
     {
 
-        pools = default;
+        pools = null;
 
         const int RelationProcessorCore = 0;
 
@@ -975,11 +977,11 @@ public static class CpuTopology
 
 
 
-    private static bool TryDetectLinuxSysfsPools(out TopologyPools pools)
+    private static bool TryDetectLinuxSysfsPools([NotNullWhen(true)] out TopologyPools? pools)
 
     {
 
-        pools = default;
+        pools = null;
 
         const string pPath = "/sys/devices/cpu_core/cpus";
 

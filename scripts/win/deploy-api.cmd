@@ -23,10 +23,20 @@ if not exist "%APPCMD%" (
 )
 
 echo ==== stop IIS app pool %POOL% ====
-"%APPCMD%" stop apppool /apppool.name:%POOL%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to stop %POOL% — run elevated if needed
-  exit /b 1
+rem appcmd stop errors on an already-stopped pool — read the state first.
+rem for /f + quoted Program Files path eats quotes; stage state to a temp file.
+set "POOL_STATE="
+set "POOL_STATE_FILE=%TEMP%\laplace-iis-pool-state.txt"
+"%APPCMD%" list apppool "%POOL%" /text:state > "%POOL_STATE_FILE%" 2>nul
+if exist "%POOL_STATE_FILE%" set /p POOL_STATE=<"%POOL_STATE_FILE%"
+if /i "!POOL_STATE!"=="Stopped" (
+  echo [deploy-api] pool %POOL% already stopped
+) else (
+  "%APPCMD%" stop apppool /apppool.name:%POOL%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to stop %POOL% — run elevated if needed
+    exit /b 1
+  )
 )
 set /a "WAIT=0"
 :wait_pool_stop
@@ -41,8 +51,8 @@ if not errorlevel 1 (
   goto wait_pool_stop
 )
 
-echo ==== mirror staged endpoint -^> %LIVE% ^(preserve web.config, keep logs^) ====
-robocopy "%SRC%" "%LIVE%" /MIR /XF web.config /XD logs /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+echo ==== mirror staged endpoint -^> %LIVE% ^(incl. web.config; keep logs^) ====
+robocopy "%SRC%" "%LIVE%" /MIR /XD logs /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
 if errorlevel 8 (
   echo [deploy-api] robocopy endpoint FAILED
   goto pool_start_fail
@@ -65,15 +75,30 @@ for %%F in (
 if not "!VERIFY_FAILED!"=="0" goto pool_start_fail
 
 echo ==== start IIS app pool %POOL% ====
-"%APPCMD%" start apppool /apppool.name:%POOL%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to start %POOL%
-  exit /b 1
+set "POOL_STATE="
+"%APPCMD%" list apppool "%POOL%" /text:state > "%POOL_STATE_FILE%" 2>nul
+if exist "%POOL_STATE_FILE%" set /p POOL_STATE=<"%POOL_STATE_FILE%"
+if /i "!POOL_STATE!"=="Started" (
+  echo [deploy-api] pool %POOL% already started
+) else (
+  "%APPCMD%" start apppool /apppool.name:%POOL%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to start %POOL%
+    exit /b 1
+  )
 )
-"%APPCMD%" start site /site.name:%SITE%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to start site %SITE%
-  exit /b 1
+set "SITE_STATE="
+set "SITE_STATE_FILE=%TEMP%\laplace-iis-site-state.txt"
+"%APPCMD%" list site "%SITE%" /text:state > "%SITE_STATE_FILE%" 2>nul
+if exist "%SITE_STATE_FILE%" set /p SITE_STATE=<"%SITE_STATE_FILE%"
+if /i "!SITE_STATE!"=="Started" (
+  echo [deploy-api] site %SITE% already started
+) else (
+  "%APPCMD%" start site /site.name:%SITE%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to start site %SITE%
+    exit /b 1
+  )
 )
 
 echo ==== wait for /health/ready ====

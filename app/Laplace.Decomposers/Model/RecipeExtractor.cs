@@ -97,7 +97,7 @@ public sealed class RecipeExtractor
 
         void AddScalar(Hash128 typeId, string value)
         {
-            var valueId = Hash128.Blake3(Encoding.UTF8.GetBytes(value));
+            var valueId = ModelCoordinates.ScalarId(value);
             b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe.RecipeEntityId, typeId, valueId, sourceId, null, 1.0));
