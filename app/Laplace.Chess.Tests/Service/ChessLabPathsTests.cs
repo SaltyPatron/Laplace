@@ -106,8 +106,9 @@ public sealed class ChessLabPathsTests
     [Fact]
     public void DeployedLaplaceUciPath_IsInstallRootNeighbor()
     {
+        var name = OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci";
         Assert.Equal(
-            Path.Combine(LaplaceInstall.InstallRoot, "laplace-uci.exe"),
+            Path.Combine(LaplaceInstall.InstallRoot, name),
             ChessLabPaths.DeployedLaplaceUciPath);
     }
 
