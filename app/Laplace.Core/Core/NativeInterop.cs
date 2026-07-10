@@ -571,6 +571,10 @@ public static unsafe partial class NativeInterop
         long nowUnixUs,
         AttestationStagedNative* outStaged);
 
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_staged_batch_add")]
+    internal static unsafe partial int AttestationStagedBatchAdd(
+        IntPtr stage, AttestationStagedNative* rows, nuint n, byte* masks);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_batch_build")]
     internal static partial int AttestationAggregatedBatchBuild(
         AttestationAggregatedCellNative* cells,

@@ -581,6 +581,26 @@ int laplace_attestation_aggregated_add(
     return staged_to_intent(stage, &staged);
 }
 
+int laplace_attestation_staged_batch_add(
+    intent_stage_t* stage,
+    const laplace_attestation_staged_t* rows,
+    size_t n,
+    const uint8_t* masks /* n*32 bytes, or NULL for SQL-NULL masks */) {
+    if (!stage || (!rows && n > 0)) return -1;
+    for (size_t i = 0; i < n; ++i) {
+        const laplace_attestation_staged_t* a = &rows[i];
+        const hash128_t* obj_ptr = a->object_is_null ? NULL : &a->object_id;
+        const hash128_t* ctx_ptr = a->context_is_null ? NULL : &a->context_id;
+        if (intent_stage_add_attestation(
+                stage, &a->id, &a->subject_id, &a->type_id, obj_ptr,
+                &a->source_id, ctx_ptr, a->outcome,
+                a->last_observed_at_unix_us, a->observation_count,
+                masks ? masks + (size_t)i * 32u : NULL) != 0)
+            return -2;
+    }
+    return 0;
+}
+
 int laplace_attestation_witness_batch_add(
     intent_stage_t*                        stage,
     const laplace_attestation_witness_edge_t* edges,

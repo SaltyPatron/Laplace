@@ -90,3 +90,30 @@ public class BootstrapIntentBuilderTests
         Assert.Equal(TypeHash("HAS_TRUST_CLASS"), BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }
+
+[Collection("GrammarPerfcache")]
+public class BootstrapIntentBuilderAliasTests
+{
+    private static readonly Hash128 TrustClassId =
+        Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
+
+    // A content-hash source (an AI model) must register its own name so render()/
+    // label() stop showing raw hex and seed-step verify can resolve name → id
+    // through consensus (HAS_NAME_ALIAS → the name's content root == word_id).
+    [Fact]
+    public void Build_SourceNamesItself_HasNameAliasToContentRoot()
+    {
+        var contentHashSource = Hash128.Blake3(new byte[] { 1, 2, 3, 4 });
+        const string name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0";
+
+        var change = new BootstrapIntentBuilder(contentHashSource, name, TrustClassId).Build();
+
+        var aliasType = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
+        var alias = Assert.Single(change.Attestations,
+            a => a.TypeId == aliasType && a.SubjectId == contentHashSource);
+        var expectedRoot = ContentEmitter.RootId(name);
+        Assert.NotNull(expectedRoot);
+        Assert.Equal(expectedRoot!.Value, alias.ObjectId);
+        Assert.Equal(contentHashSource, alias.SourceId);
+    }
+}

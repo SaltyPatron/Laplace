@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""RoPE-vs-poured-QK interaction probe (remediation plan Phase 0).
+"""RoPE-vs-synthesized-QK interaction probe (remediation plan Phase 0).
 
-Poured relation heads encode QK as CONTENT relations (factored consensus
+Synthesized relation heads encode QK as CONTENT relations (factored consensus
 planes); llama-arch RoPE rotates Q/K by absolute position. If rotation
 materially changes a head's A->B attention score as the token distance
-between A and B grows, RoPE is corrupting the poured operators and the
+between A and B grows, RoPE is corrupting the synthesized operators and the
 mitigation (huge rope.freq_base) is required.
 
 Method: for each head, embed [BOS, A, pad*n, B] at n = 0..MAX_GAP pads,
@@ -106,7 +106,7 @@ def main():
         worst_median = max(worst_median, float(np.median(rel)))
 
     verdict = "CORRUPTS" if worst_median >= 0.15 else "benign"
-    print(f"\nverdict: RoPE {verdict} poured relation QK (worst median drift {worst_median:.4f})")
+    print(f"\nverdict: RoPE {verdict} synthesized relation QK (worst median drift {worst_median:.4f})")
     sys.exit(1 if worst_median >= 0.15 else 0)
 
 

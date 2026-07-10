@@ -1,5 +1,5 @@
 # 18 — TYPED RESIDUAL STREAM & THE LEXICAL-SEMANTIC MESH
-## how the ingested resources interlink, and how that mesh becomes the poured model's coordination layer
+## how the ingested resources interlink, and how that mesh becomes the synthesized model's coordination layer
 
 Date: 2026-07-08. Status: living spec. Scope: the tandem design — how layers/heads/tensors
 of a Mold-A-Model export cooperate through ILI/synsets/frames/roles instead of mashing in
@@ -16,7 +16,7 @@ latent code in the residual stream — an unnamed, superposed, emergent interlin
 nobody can address, audit, or update. The substrate does not need to DISCOVER an
 interlingua: it INGESTED one. ILI (the interlingual index) is literally that — the
 canonical concept identity that 393 languages' wordnets, plus frames, verb classes, and
-rolesets, already converge on (§1). So the poured model's internal representation should
+rolesets, already converge on (§1). So the synthesized model's internal representation should
 be ALLOCATED to the ontology's strata, not left anonymous:
 
   - A token id = an entity id at whatever tier the content is densest (tier-floor law:
@@ -26,7 +26,7 @@ be ALLOCATED to the ontology's strata, not left anonymous:
     structurally impossible — mashing is what coordination looks like when the bus is
     unnamed; name the bus and the mash has nowhere to happen.
   - The layer stack = the resolution ladder (§3), not repeated diffusion.
-  - Head firing is CONDITIONAL, gated by poured selectors (§4): the prompt's own attested
+  - Head firing is CONDITIONAL, gated by synthesized selectors (§4): the prompt's own attested
     content (EVOKES_FRAME, definitions, highway bits) chooses which relations apply.
 
 Contrast, stated once: conventional AI computes the tier hierarchy (tokenization,
@@ -146,7 +146,7 @@ provenanced edge family.
 ================================================================================
 SECTION 2 — TYPED RESIDUAL ALLOCATION
 ================================================================================
-Allocate d_model into named, orthogonal stratum subspaces (block-allocated at pour time;
+Allocate d_model into named, orthogonal stratum subspaces (block-allocated at synthesis time;
 block Gram-Schmidt — doc 14 P3 machinery — enforces disjointness):
 
   S  surface/positional identity — which token, where (hilbert content-PE dims + RoPE
@@ -201,16 +201,16 @@ concrete: the schedule is READ OFF the ontology, not authored per-recipe. Interi
 ================================================================================
 SECTION 4 — SELECTORS: CONDITIONAL HEADS FROM ATTESTED EDGES
 ================================================================================
-The single biggest architectural absence in the current pour (14 §1.8, audit-confirmed):
+The single biggest architectural absence in the current synthesis (14 §1.8, audit-confirmed):
 no head is conditional on the prompt's MEANING — QK encodes "which tokens are related
 under r," never "this context is ASKING about r." The selection knowledge is attested:
 
   - "capital" EVOKES_FRAME its frame; frames map to relation families; relation types
-    are themselves entities with definitions. Pour EVOKES_FRAME/definition planes as QK
+    are themselves entities with definitions. Synthesis EVOKES_FRAME/definition planes as QK
     so the prompt's own content activates the right relation heads. (The trained analogue
     — induction/task heads — is here a transcription of FrameNet, not a discovery.)
   - Highway band bits as FFN gates (doc 14 P2 / plan Phase 6): a token's gate is its
-    band-membership indicator — a genuine content-dependent step function, poured from
+    band-membership indicator — a genuine content-dependent step function, synthesized from
     entities.highway_mask, no gradients.
   - G-subspace bookkeeping: frame heads write "band b active" directions into G; L-rel
     heads' o_proj are scaled by G alignment (soft gating) until true conditional
@@ -222,7 +222,7 @@ SECTION 5 — RELATIONSHIP TO DOC 14 (what this unifies / extends)
 P2 (real gate) = §4 band gating. P3 (head allocation) = §2, extended from relation-band
 slices to ontology strata. P4b (tier schedule) = §3. P6 (vocab + dialogue) = the token =
 entity-id law + the L-real/lm_head composition. P7 (positions) = the S stratum. New here,
-beyond 14: the SELECTOR pour (§4 EVOKES_FRAME-as-QK) and ILI-as-internal-basis (§2 C),
+beyond 14: the SELECTOR synthesis (§4 EVOKES_FRAME-as-QK) and ILI-as-internal-basis (§2 C),
 neither named in 14's prescriptions. The 2026-07-08 remediation plan
 (.claude/plans/wild-orbiting-shamir.md) implements the mechanical prerequisites
 (P5/P4a/P3/P6/P7/P2 + rank adjudication); THIS doc is the build spec for the phase after
@@ -272,7 +272,7 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
          (NOUN 4.57M subjects/22.1M witnesses … INTJ; one IDIO outlier, 27 words).
          No Penn tags as HAS_POS objects; corpus-witnessed and usage-dominant
          ('close': VERB 567 > ADJ 284 > ADV 61 > NOUN 53). pos_transition_plane
-         v1's single-inventory + dominant-POS assumptions HOLD as poured.
+         v1's single-inventory + dominant-POS assumptions HOLD as synthesized.
        CLEAN — the multilingual hub is live and grain-consistent: top_synset('dog')
          → IS_TYPED_AS WordNet_Synset (typing de-conflated, correct);
          HAS_SYNSET_KEY '01595188-n' = POS AT HUB GRAIN (one fact, every language
@@ -284,26 +284,26 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
          between class entities ('NN' IS_A 'NOUN'). Cross-schema correspondence
          is CORRESPONDS_TO's job; as IS_A it (a) tops every eff_mu-ranked
          undisciplined read, (b) reaches hypernym walks through PUNNED tokens:
-         the pour vocab contains 'IN' and 'CD' — uppercase corpus words content-
+         the synthesis vocab contains 'IN' and 'CD' — uppercase corpus words content-
          addressed to the SAME entities as the Penn tags. Benign for current
-         recipes (no IS_A operator poured); any IS_A/crawl consumer must
+         recipes (no IS_A operator synthesized); any IS_A/crawl consumer must
          type-discipline first. Doc 16 hub-unification class.
-       GAP (query depth, next pour) — IS_SYNONYM_OF is MIXED GRAIN under one
+       GAP (query depth, next synthesis) — IS_SYNONYM_OF is MIXED GRAIN under one
          family: synset→word co-membership spokes (multilingual) AND word→word
          direct edges. The vocab-joined plane correctly keeps word→word only
          (21,083 edges) but that is the WEAKER evidence — WordNet co-membership
          synonymy is 2-hop through the synset hub and invisible to every 1-hop
-         plane. The S-stratum pour needs the derived projection: word→synset→word
+         plane. The S-stratum synthesis needs the derived projection: word→synset→word
          (same lang) server-side. Same shape for hub-POS and EVOKES_FRAME:
          the mesh's convergence points are queryable TODAY (senses/top_synset/
-         synset_members all answer) and NO poured plane consumes them yet.
+         synset_members all answer) and NO synthesized plane consumes them yet.
 
 ================================================================================
 SECTION 7 — OPEN DESIGN QUESTIONS (next docs, not this build)
 ================================================================================
   Q1  WSD operator mechanics: exact scoring for context-coherence over the synset graph
       (Lesk-like overlap vs eigenmap proximity vs walk-based); where it runs on the read
-      side (a native wsd() alongside recall) vs only as poured L-wsd layers.
+      side (a native wsd() alongside recall) vs only as synthesized L-wsd layers.
   Q2  Role-binding attention shape: FE/theta binding needs position-aware argument
       attachment — interaction with RoPE/S-stratum unresolved.
   Q3  Rival-edge cross-refutation: (s,r,o1) vs (s,r,o2) with o1 IS_ANTONYM_OF o2 /

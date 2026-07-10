@@ -10,10 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <libxml/parser.h>
-#include <libxml/SAX2.h>
-
 #include "laplace/core/hash128.h"
+#include "laplace/core/ucd_xml.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/super_fibonacci.h"
 #include "laplace/core/perfcache_format.h"
@@ -73,15 +71,15 @@ struct UcdData {
     }
 };
 
-const xmlChar* attr(const xmlChar** a, const char* n) {
+const char* attr(const char** a, const char* n) {
     if (!a) return nullptr;
-    for (int i = 0; a[i]; i += 2) if (std::strcmp((const char*)a[i], n) == 0) return a[i+1];
+    for (int i = 0; a[i]; i += 2) if (std::strcmp(a[i], n) == 0) return a[i+1];
     return nullptr;
 }
 
 struct SaxCtx { UcdData* d; bool in_rep = false; };
 
-void on_start(void* u, const xmlChar* name, const xmlChar** a) {
+void on_start(void* u, const char* name, const char** a) {
     auto* ctx = (SaxCtx*)u;
     if (std::strcmp((const char*)name, "repertoire") == 0) { ctx->in_rep = true; return; }
     if (!ctx->in_rep) return;
@@ -115,9 +113,9 @@ void on_start(void* u, const xmlChar* name, const xmlChar** a) {
         d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid; d->ccc[c]=ccv;
     }
 }
-void on_end(void* u, const xmlChar* name) {
+void on_end(void* u, const char* name) {
     auto* ctx = (SaxCtx*)u;
-    if (std::strcmp((const char*)name,"repertoire")==0) ctx->in_rep = false;
+    if (std::strcmp(name,"repertoire")==0) ctx->in_rep = false;
 }
 
 struct DucetKeys {
@@ -203,45 +201,45 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
 
     UcdData d;
     SaxCtx ctx{&d, false};
-    xmlSAXHandler sax{}; sax.initialized = XML_SAX2_MAGIC;
-    sax.startElement = on_start; sax.endElement = on_end;
-    LIBXML_TEST_VERSION
 
     bool is_zip = false;
     {
         size_t n = std::strlen(ucdxml_path);
         is_zip = (n > 4 && std::strcmp(ucdxml_path + n - 4, ".zip") == 0);
     }
-    int parse_rc;
+    /* Both branches produce the same in-memory document; only the FILE* source
+     * differs (zip: streamed out of the archive; plain: the file itself). The
+     * parse itself goes through the vendored tree-sitter XML grammar — the same
+     * container-unpacking path as every other format in the tree. */
+    FILE* p;
+    int (*closer)(FILE*);
     if (is_zip) {
 #ifdef _WIN32
         std::string cmd = std::string("tar -xOf \"") + ucdxml_path + "\"";
-        FILE* p = _popen(cmd.c_str(), "rb");
+        p = _popen(cmd.c_str(), "rb");
+        closer = [](FILE* c) -> int { return _pclose(c); };
 #else
         std::string cmd = std::string("unzip -p '") + ucdxml_path + "'";
-        FILE* p = popen(cmd.c_str(), "r");
+        p = popen(cmd.c_str(), "r");
+        closer = [](FILE* c) -> int { return pclose(c); };
 #endif
-        if (!p) { xmlCleanupParser(); return -2; }
-        xmlParserCtxtPtr pctx = xmlCreateIOParserCtxt(&sax, &ctx,
-            [](void* c, char* buf, int len) -> int { return (int)std::fread(buf, 1, (size_t)len, (FILE*)c); },
-#ifdef _WIN32
-            [](void* c) -> int { return _pclose((FILE*)c); },
-#else
-            [](void* c) -> int { return pclose((FILE*)c); },
-#endif
-            p, XML_CHAR_ENCODING_NONE);
-#ifdef _WIN32
-        if (!pctx) { _pclose(p); xmlCleanupParser(); return -2; }
-#else
-        if (!pctx) { pclose(p); xmlCleanupParser(); return -2; }
-#endif
-        parse_rc = xmlParseDocument(pctx);
-        xmlFreeParserCtxt(pctx);
     } else {
-        parse_rc = xmlSAXUserParseFile(&sax, &ctx, ucdxml_path);
+        p = std::fopen(ucdxml_path, "rb");
+        closer = [](FILE* c) -> int { return std::fclose(c); };
     }
-    if (parse_rc != 0) { xmlCleanupParser(); return -2; }
-    xmlCleanupParser();
+    if (!p) return -2;
+    std::vector<uint8_t> doc;
+    {
+        uint8_t chunk[1 << 16];
+        size_t got;
+        while ((got = std::fread(chunk, 1, sizeof chunk, p)) > 0)
+            doc.insert(doc.end(), chunk, chunk + got);
+    }
+    if (closer(p) != 0 && is_zip) return -2;
+    if (doc.empty()) return -2;
+    if (laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx) != 0)
+        return -2;
+    std::vector<uint8_t>().swap(doc);
 
     DucetKeys dk;
     int rc = parse_ducet(ducet_path, dk);

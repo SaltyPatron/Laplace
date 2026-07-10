@@ -70,8 +70,12 @@ internal sealed class NpgsqlIndexCycle
                 await using var conn = await ds.OpenConnectionAsync(token);
                 await using (var guc = conn.CreateCommand())
                 {
+                    // search_path: journaled defs from pg_get_indexdef leave function
+                    // references (e.g. laplace_highway_mask_bits in the highway GIN)
+                    // unqualified — without laplace on the path the rebuild fails.
                     guc.CommandText =
-                        $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+                        "SET search_path = laplace, public; "
+                        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
                         + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
                     await guc.ExecuteNonQueryAsync(token);
                 }
@@ -177,8 +181,11 @@ internal sealed class NpgsqlIndexCycle
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 await using (var guc = conn.CreateCommand())
                 {
+                    // search_path: same reason as RecoverAsync — unqualified function
+                    // references in journaled index defs.
                     guc.CommandText =
-                        $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+                        "SET search_path = laplace, public; "
+                        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
                         + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
                     await guc.ExecuteNonQueryAsync(token);
                 }

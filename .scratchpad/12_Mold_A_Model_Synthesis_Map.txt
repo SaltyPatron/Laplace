@@ -185,7 +185,7 @@ Nothing here is trained. Every weight is a projection of a KNOWN operator
 (consensus edge, S³ kernel, trajectory shape, voronoi cell) into the eigenbasis
 of the consensus Laplacian. Because the operators are folds over a preserved
 attestation log (§11), every weight decomposes back to its witnesses — the
-crystal ball, poured into GGUF shapes. Ingest builds the substrate; export molds
+crystal ball, synthesized into GGUF shapes. Ingest builds the substrate; export molds
 the model; the geometry is not decoration — it is literally the heads, the
 positions, and the routing.
 ================================================================================

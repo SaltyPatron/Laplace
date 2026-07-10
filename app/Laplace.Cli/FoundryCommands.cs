@@ -88,7 +88,7 @@ internal static class FoundryCommands
                 return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
                           + "   or: laplace synthesize substrate --native-vocab <N> --dim <D> [--layers L --heads H --kv-heads K --ffn F] <output.gguf>\n"
-                          + "  [--scope-source <name,name,...>]  Build-A-Bear: pour ONLY the named sources' re-folded consensus (laplace.recipe pours)");
+                          + "  [--scope-source <name,name,...>]  Build-A-Bear: synthesis ONLY the named sources' re-folded consensus (laplace.recipe synthesis runs)");
 
             if (nativeVocab > 0)
             {
@@ -111,8 +111,8 @@ internal static class FoundryCommands
 
         return Fail(
             "usage: laplace synthesize <subcommand> [args]\n"
-            + "  substrate <recipe.json> [output.gguf]                        pour consensus into a recipe-file mold\n"
-            + "  substrate --recipe-from <id-prefix> --tokenizer <dir> [out]  pour a mold discovered from a deposed model ('*' = the only one)\n");
+            + "  substrate <recipe.json> [output.gguf]                        synthesis consensus into a recipe-file mold\n"
+            + "  substrate --recipe-from <id-prefix> --tokenizer <dir> [out]  synthesis a mold discovered from a deposed model ('*' = the only one)\n");
     }
 
 
@@ -470,7 +470,7 @@ internal static class FoundryCommands
             return await SynthesizeMoldAModelAsync(moldDesc, moldDir, outputPath, scopeSource);
         }
         if (scopeSource is not null)
-            return Fail("--scope-source is supported for laplace.recipe (Mold-A-Model) pours only");
+            return Fail("--scope-source is supported for laplace.recipe (Mold-A-Model) synthesis runs only");
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -988,7 +988,7 @@ internal static class FoundryCommands
     {
         Console.WriteLine($"synthesize Mold-A-Model: {desc.Name} ({desc.Structure}) → {outputPath}");
         // Real wall-clock stage timing (2026-07-09: the old "complete in Xs" timed
-        // only the tensor write — a fake number for a multi-minute pour).
+        // only the tensor write — a fake number for a multi-minute synthesis).
         var swTotal = Stopwatch.StartNew();
         var swStage = Stopwatch.StartNew();
         void Stage(string label)
@@ -1063,10 +1063,10 @@ internal static class FoundryCommands
         }
 
 
-        // Plan Phase 8 (Build-A-Bear): a scoped pour re-folds ONLY the named sources'
+        // Plan Phase 8 (Build-A-Bear): a scoped synthesis re-folds ONLY the named sources'
         // attestations (laplace.scoped_consensus) into pg_temp.consensus on every
         // physical connection — the temp table shadows laplace.consensus inside all
-        // plane functions (pg_temp resolves first), so the entire pour reads the
+        // plane functions (pg_temp resolves first), so the entire synthesis reads the
         // scoped world with zero plane changes.
         string? scopedInitSql = null;
         if (!string.IsNullOrWhiteSpace(scopeSource))
@@ -1091,7 +1091,7 @@ internal static class FoundryCommands
                 "CREATE TEMP TABLE IF NOT EXISTS consensus AS " +
                 $"SELECT * FROM laplace.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
                 "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
-            Console.WriteLine($"  scope: {names.Length} source(s) — pour reads a re-folded scoped consensus ({scopeSource})");
+            Console.WriteLine($"  scope: {names.Length} source(s) — synthesis reads a re-folded scoped consensus ({scopeSource})");
         }
         var dsb = new NpgsqlDataSourceBuilder(ConnString);
         if (scopedInitSql is not null)
@@ -1099,7 +1099,7 @@ internal static class FoundryCommands
             // Pool reset (DISCARD ALL) drops temp tables while the physical
             // connection survives — the initializer would not re-fire and later
             // readers would silently see the UNSCOPED world (observed live:
-            // type planes scoped, adjacency unscoped in one pour).
+            // type planes scoped, adjacency unscoped in one synthesis).
             dsb.ConnectionStringBuilder.NoResetOnClose = true;
             dsb.UsePhysicalConnectionInitializer(
                 conn => { using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; c.ExecuteNonQuery(); },
@@ -1160,7 +1160,7 @@ internal static class FoundryCommands
             else if (opKey is "conditional" or "conditional_pos")
                 plane = FoundryExport.PlaneCoo.Empty; // floor mode: handled at embed/lm_head construction
             else
-                return Fail($"recipe operator '{opKey}' has no plane reader — supported: relation:<TYPE>, metric:<name>, trajectory, unary, sentence_order, context, conditional, conditional_pos. A silently-empty plane here poured dead tensors before 2026-07-08.");
+                return Fail($"recipe operator '{opKey}' has no plane reader — supported: relation:<TYPE>, metric:<name>, trajectory, unary, sentence_order, context, conditional, conditional_pos. A silently-empty plane here synthesized dead tensors before 2026-07-08.");
             planeByOp[opKey] = plane;
             Console.WriteLine($"  operator {opKey}: {plane.Nnz:N0} edges");
         }
@@ -1208,7 +1208,7 @@ internal static class FoundryCommands
         {
             // Finish-line Phase 3: embed/lm_head = the two factors of the smoothed
             // LOG-CONDITIONAL table M[x,y] = log P̂(y|x). h(x)·lm(y) ≈ M[x,y] with
-            // Eckart–Young-optimal rank-d error — the poured floor IS the table.
+            // Eckart–Young-optimal rank-d error — the synthesized floor IS the table.
             // NO normalization, NO recentering, NO PE: calibration is the payload.
             if (desc.HiddenSizeAuto)
                 return Fail("embed op 'conditional' requires an explicit hidden_size (the floor's rank IS the budget)");
@@ -1269,12 +1269,16 @@ internal static class FoundryCommands
             var U = new float[(long)vocab * vocab];
             var S = new float[vocab];
             var Vt = new float[(long)vocab * vocab];
-            nuint outRank = 0;
-            int rcSvd;
-            unsafe
+            int rcSvd = SvdTruncate(M, U, S, Vt, vocab, out nuint outRank);
+
+            static unsafe int SvdTruncate(float[] M, float[] U, float[] S, float[] Vt, int vocab, out nuint outRank)
             {
+                nuint rank = 0;
+                int rc;
                 fixed (float* pa = M) fixed (float* pu = U) fixed (float* ps = S) fixed (float* pvt = Vt)
-                    rcSvd = SynthInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0, &outRank, pu, ps, pvt, (nuint)vocab);
+                    rc = SynthInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0, &rank, pu, ps, pvt, (nuint)vocab);
+                outRank = rank;
+                return rc;
             }
             if (rcSvd != 0) return Fail($"conditional-floor SVD failed rc={rcSvd} (vocab={vocab})");
             int kEff = Math.Min(kF, (int)outRank);
@@ -1394,7 +1398,7 @@ internal static class FoundryCommands
         int kFfn = Math.Min(intermR, dModel);
         var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
         double split = Math.Pow(Math.Max(1, nLayers), -0.25);
-        // Floor pours: corrections perturb the calibrated floor, never overwrite it.
+        // Floor synthesis runs: corrections perturb the calibrated floor, never overwrite it.
         double floorGain = conditionalFloor ? FoundryDefaults.FloorCorrectionGain : 1.0;
         double attnScale = FoundryDefaults.AttnGain * split;
         double layerScale = FoundryDefaults.ResidGain * split * floorGain;
@@ -1673,10 +1677,10 @@ internal static class FoundryCommands
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
-        // 2026-07-09 bisect: poured-PairNorm norm weights REVERTED to all-ones —
+        // 2026-07-09 bisect: synthesized-PairNorm norm weights REVERTED to all-ones —
         // shipped ungated and implicated in the 15/16→5/16 behavioral regression
         // (with E-accumulation). The per-dim SNR idea stays documented in doc 14
-        // §6b; it may return only through a gated pour.
+        // §6b; it may return only through a gated synthesis.
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -2005,9 +2009,9 @@ internal static class FoundryCommands
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count_kv", (uint)recipe.NumKvHeads);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.vocab_size", (uint)recipe.VocabSize);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", (float)recipe.RmsNormEps);
-        // Phase 0 rope-probe verdict (2026-07-08): RoPE corrupts poured content-QK.
+        // Phase 0 rope-probe verdict (2026-07-08): RoPE corrupts synthesized content-QK.
         // Huge freq_base flattens rotary pairs j>=1; pair 0 rotates regardless
-        // (~2/headDim residual exposure, re-probed per pour).
+        // (~2/headDim residual exposure, re-probed per synthesis).
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",
             FoundryDefaults.DisableRope ? 1e9f : (float)recipe.RopeTheta);
 

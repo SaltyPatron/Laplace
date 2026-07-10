@@ -21,7 +21,7 @@ public static class FoundryDefaults
     /// token 3:1 and the final state goes shared-dominated (cos 0.99 measured).
     public const double AttnGain = 0.5;
     public const double ResidGain = 0.5;
-    /// Conditional-floor pours: correction layers must ride ON the calibrated
+    /// Conditional-floor synthesis runs: correction layers must ride ON the calibrated
     /// floor (MaxEnt: log-linear perturbations), not overwrite it — measured
     /// 2026-07-09: at full scale the layers erased the determiner slot
     /// (the→close/short became the→before/after; Spearman L0↔full 0.1).
@@ -39,11 +39,11 @@ public static class FoundryDefaults
     public const double CapFrac = 0.05;
     public const bool Ppmi = true;
     public const bool Procrustes = true;
-    /// Plan Phase 0 (2026-07-08 rope-probe verdict: CORRUPTS, 191% drift): poured
+    /// Plan Phase 0 (2026-07-08 rope-probe verdict: CORRUPTS, 191% drift): synthesized
     /// QK operators are content-relational; llama-arch RoPE rotates them by absolute
     /// position. True = write rope.freq_base=1e9, flattening every rotary pair
     /// except pair 0 (which rotates at frequency 1 regardless of theta — residual
-    /// exposure ~2/headDim of Q·K energy; re-probe each pour, gate at 0.15 drift).
+    /// exposure ~2/headDim of Q·K energy; re-probe each synthesis, gate at 0.15 drift).
     public const bool DisableRope = true;
     /// Plan Phase 5 (doc 14 P7): scale of the hilbert content-PE written into the
     /// trailing capacity dims of the embedding (content dims are row-normalized to 1).
@@ -55,7 +55,7 @@ public static class FoundryDefaults
     /// sqrt(s/s0)); 0.25 flattens the spectrum enough for sub-dominant structure
     /// to survive the stack while preserving ordering.
     public const double FactorSpectrumAlpha = 0.25;
-    public const bool CoordOnly = false;
+    public static readonly bool CoordOnly = false;
     public const bool CoordDirect = false;
     public const bool Generative = true;
     public const string AttnMetric = "";

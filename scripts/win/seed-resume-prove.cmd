@@ -8,8 +8,6 @@ if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 set "LAPLACE_LADDER_START=proof"
 
 call "%~dp0build-engine-libs.cmd" || exit /b 1
-cd app
-dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 
 call "%~dp0seed-ladder.cmd" || exit /b 1

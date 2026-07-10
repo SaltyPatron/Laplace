@@ -11,16 +11,21 @@ if /i "%1"=="authority" (
     setlocal EnableDelayedExpansion
     set "AUTH=!INGEST!\code-authority"
     if not exist "!AUTH!" mkdir "!AUTH!"
-    for %%R in ("postgres/postgres" "python/cpython" "dotnet/docs" "dotnet/runtime") do (
-        for /f "tokens=2 delims=/" %%N in ("%%~R") do (
-            if not exist "!AUTH!\%%N" (
-                echo ==== clone %%~R ====
-                git clone --depth 1 "https://github.com/%%~R" "!AUTH!\%%N" || exit /b 1
-            ) else (
-                echo ==== [have] %%N ====
-            )
-        )
-    )
+    echo ==== clone authority repos in parallel ====
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$ErrorActionPreference='Stop';" ^
+      "$auth='%AUTH%';" ^
+      "$repos=@('postgres/postgres','python/cpython','dotnet/docs','dotnet/runtime');" ^
+      "$jobs=@();" ^
+      "foreach ($r in $repos) {" ^
+      "  $name=$r.Split('/')[1]; $dest=Join-Path $auth $name;" ^
+      "  if (Test-Path $dest) { Write-Host ('==== [have] '+$name+' ===='); continue };" ^
+      "  Write-Host ('==== clone '+$r+' ====');" ^
+      "  $jobs += Start-Process -FilePath 'git' -ArgumentList @('clone','--depth','1',('https://github.com/'+$r),$dest) -PassThru -NoNewWindow" ^
+      "};" ^
+      "if ($jobs.Count -gt 0) { Wait-Process -Id ($jobs.Id); $bad=$jobs | Where-Object { $_.ExitCode -ne 0 }; if ($bad) { exit 1 } };" ^
+      "exit 0"
+    if errorlevel 1 exit /b 1
     echo ==== AUTHORITY SOURCES READY: !AUTH! ====
     exit /b 0
 )

@@ -100,12 +100,40 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             // like apply_batch did (latest-ts representative, summed games)
             // instead of dropping the later observations on the floor.
             foreach (var c in changes)
-                foreach (var a in c.Attestations)
+            {
+                // Bulk door: the whole change marshals in ONE native call.
+                // Masks ride a flat n*32 buffer, bit-identical to the per-row
+                // path (bytea = raw little-endian uint64 w[4] memory).
+                var atts = c.Attestations;
+                if (atts.IsEmpty) continue;
+                var stagedRows = new AttestationStagedNative[atts.Length];
+                var masksFlat = new byte[atts.Length * 32];
+                for (int i = 0; i < atts.Length; i++)
                 {
-                    managedStage.AddAttestation(
-                        a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
-                        (short)a.Outcome, a.LastObservedAtUnixUs, a.ObservationCount, a.HighwayMask);
+                    var a = atts[i];
+                    stagedRows[i] = new AttestationStagedNative
+                    {
+                        Id = a.Id, SubjectId = a.SubjectId, TypeId = a.TypeId,
+                        ObjectId = a.ObjectId ?? default, SourceId = a.SourceId,
+                        ContextId = a.ContextId ?? default,
+                        ObjectIsNull = (byte)(a.ObjectId is null ? 1 : 0),
+                        ContextIsNull = (byte)(a.ContextId is null ? 1 : 0),
+                        Outcome = (short)a.Outcome,
+                        LastObservedAtUnixUs = a.LastObservedAtUnixUs,
+                        ObservationCount = a.ObservationCount,
+                    };
+                    int off = i * 32;
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                        masksFlat.AsSpan(off), a.HighwayMask.W0);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                        masksFlat.AsSpan(off + 8), a.HighwayMask.W1);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                        masksFlat.AsSpan(off + 16), a.HighwayMask.W2);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                        masksFlat.AsSpan(off + 24), a.HighwayMask.W3);
                 }
+                managedStage.AddAttestationsStaged(stagedRows, atts.Length, masksFlat);
+            }
         }
 
         var sourceStages = new List<IntentStage>(prebuiltStages.Count + 1);

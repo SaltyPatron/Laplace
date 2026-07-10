@@ -13,10 +13,17 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
     add_compile_options(-Wall -Wextra)
-    set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma-)
+    # The engine is portable C/C++ on standard functions (getenv/fopen/strncpy);
+    # MSVC's CRT "unsafe" deprecations are vendor-specific and already silenced
+    # this same way in extension/. Keep parity.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+    # /Qfma- deliberately overrides the FMA contraction /fp:precise would allow
+    # (determinism gate: no fused-multiply-add). icx's driver warns about that
+    # exact override; the override is the point, so silence only that diagnostic.
+    set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma- -Wno-overriding-option)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
-    set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma)
+    set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option)
 endif()
 
 # Emit CodeView debug info + a linker PDB for optimized Release native builds so a
@@ -126,14 +133,14 @@ if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
 endif()
 
 add_library(laplace_eigen INTERFACE)
-target_include_directories(laplace_eigen INTERFACE "${LAPLACE_EXTERNAL}/eigen")
+target_include_directories(laplace_eigen SYSTEM INTERFACE "${LAPLACE_EXTERNAL}/eigen")
 target_compile_definitions(laplace_eigen INTERFACE
     EIGEN_NO_DEBUG
     EIGEN_DONT_PARALLELIZE
 )
 
 add_library(laplace_spectra INTERFACE)
-target_include_directories(laplace_spectra INTERFACE "${LAPLACE_EXTERNAL}/spectra/include")
+target_include_directories(laplace_spectra SYSTEM INTERFACE "${LAPLACE_EXTERNAL}/spectra/include")
 target_link_libraries(laplace_spectra INTERFACE laplace_eigen)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM"
@@ -160,8 +167,16 @@ if(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM"
     endif()
 endif()
 
+# Vendored third-party: not ours to warn about (same policy as tree_sitter_rt
+# below). CMAKE_WARN_DEPRECATED is scoped off around the add_subdirectory so
+# blake3's pre-3.10 cmake_minimum_required doesn't emit a deprecation warning.
+# Must be the CACHE entry — cmake_minimum_required ignores the directory-scope
+# variable (verified against this CMake version); restored to ON right after.
+set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
     "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
+set(CMAKE_WARN_DEPRECATED ON CACHE BOOL "" FORCE)
+target_compile_options(blake3 PRIVATE -w)
 
 
 
@@ -188,9 +203,11 @@ if(BUILD_TESTING)
         add_subdirectory("${LAPLACE_EXTERNAL}/googletest"
             "${CMAKE_BINARY_DIR}/_deps/googletest" EXCLUDE_FROM_ALL)
         if(WIN32)
+            # Vendored third-party: gtest's own TUs compile its headers non-SYSTEM,
+            # so its internal warnings (e.g. -Wcharacter-conversion) surface here.
             foreach(_gt gtest gtest_main gmock gmock_main)
                 if(TARGET ${_gt})
-                    target_compile_options(${_gt} PRIVATE -Wno-error=character-conversion)
+                    target_compile_options(${_gt} PRIVATE -w)
                 endif()
             endforeach()
         endif()
@@ -203,6 +220,9 @@ add_subdirectory(dynamics)
 add_subdirectory(synthesis)
 
 add_subdirectory(core/tools/ucd_tables_emit)
+# Order-only: emit must exist before first perfcache generation, but rebuilding
+# the tool must NOT dirty the blob (see core/CMakeLists.txt custom_command note).
+add_dependencies(laplace_t0_perfcache laplace_ucd_tables_emit)
 
 foreach(_laplace_engine_target IN ITEMS
         laplace_core laplace_core_static

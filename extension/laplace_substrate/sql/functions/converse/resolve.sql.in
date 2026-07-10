@@ -1,0 +1,17 @@
+-- THE one string→id gateway (Issue 46): every read surface resolves text to a
+-- content root through THIS function. Single words resolve by the perfcache-
+-- backed word law; multi-token text by the native phrase resolver (both
+-- in-system — ids are never constructed outside the extension's native hash).
+-- Callers that already hold an id keep it; callers that hold TEXT call
+-- resolve(). One implementation per fact (Rule #6): word_id/resolve_phrase
+-- remain the primitives, this is the one door in front of them.
+CREATE OR REPLACE FUNCTION resolve(p_text text)
+    RETURNS bytea
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT CASE
+        WHEN position(' ' IN btrim(p_text)) = 0
+            THEN word_id(btrim(p_text))
+        ELSE resolve_phrase(p_text)
+    END
+$$;

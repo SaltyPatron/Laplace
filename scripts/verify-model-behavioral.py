@@ -5,7 +5,7 @@ The project's defining failure mode has been SIMULATED success: models that
 load, emit tokens, and pass exit-code smoke tests while producing nothing
 real (see .scratchpad/02 and the FAITHFUL/LOOKUP retirement). This harness
 gates on CONTENT: the expected continuations for each probe word are pulled
-from the substrate's own consensus — the same evidence the model was poured
+from the substrate's own consensus — the same evidence the model was synthesized
 from — so a passing model demonstrably carries the knowledge it claims to
 transcribe, and the known failure shapes (global-frequency-hub collapse,
 prompt-echo loops, flat/empty output) are each detected explicitly.

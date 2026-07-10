@@ -46,15 +46,11 @@ gtest_discover_tests(laplace_core_tests
 )
 
 if(WIN32)
-    set(_LAPLACE_LIBXML2_DLL "C:/Program Files/PostgreSQL/18/bin/libxml2.dll")
     add_custom_command(TARGET laplace_core_tests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:laplace_core>
                 $<TARGET_FILE_DIR:laplace_core_tests>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_LAPLACE_LIBXML2_DLL}"
-                $<TARGET_FILE_DIR:laplace_core_tests>
-        COMMENT "Copy laplace_core.dll + libxml2.dll beside laplace_core_tests.exe")
+        COMMENT "Copy laplace_core.dll beside laplace_core_tests.exe")
 
     if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address" OR CMAKE_C_FLAGS MATCHES "fsanitize=address")
         get_filename_component(_ICX_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)

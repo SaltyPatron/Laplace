@@ -132,7 +132,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 c.eff_mu,
                 c.witnesses,
                 laplace.label_or_hex(c.object_id) AS object_label
-            FROM laplace.completions(laplace.word_id(@prompt), @limit) c
+            FROM laplace.completions(laplace.resolve(@prompt), @limit) c
             ORDER BY c.eff_mu DESC;
             """;
         try
@@ -295,7 +295,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 gt.eff_mu,
                 gt.path_mu,
                 gt.witnesses
-            FROM laplace.walk_branches(laplace.word_id(@prompt), NULL, @depth, @beam) gt
+            FROM laplace.walk_branches(laplace.resolve(@prompt), NULL, @depth, @beam) gt
             ORDER BY gt.depth, gt.path_mu DESC;
             """;
 

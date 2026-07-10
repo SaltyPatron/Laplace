@@ -51,9 +51,7 @@ cmake -B "%LAPLACE_ENGINE_BUILD_ASAN%" -S engine -G Ninja ^
   "-DLAPLACE_UCD_PATH=%LAPLACE_UCD%" ^
   "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.nounihan.flat.zip" ^
   "-DLAPLACE_DUCET_FILE=%LAPLACE_UCD%\uca\allkeys.txt" ^
-  "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd" ^
-  "-DLIBXML2_INCLUDE_DIR=C:/Program Files/PostgreSQL/18/include" ^
-  "-DLIBXML2_LIBRARY=C:/Program Files/PostgreSQL/18/lib/libxml2.lib"
+  "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd"
 if errorlevel 1 goto fail
 
 :build

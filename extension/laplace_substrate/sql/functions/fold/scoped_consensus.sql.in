@@ -2,12 +2,12 @@
 -- into a scoped consensus edge set — the "I know kung fu" package fold. The
 -- caller materializes this as pg_temp.consensus, which shadows laplace.consensus
 -- inside every plane function for that connection (pg_temp resolves first), so
--- the entire pour reads the scoped world with no plane changes.
+-- the entire synthesis reads the scoped world with no plane changes.
 --
 -- v1 approximation, stated: every witness plays a NEUTRAL opponent at
 -- glicko2_initial_rd (the ingest fold's per-source trust phi is a client-side
 -- quantity); games = observation_count; score = outcome/2 per game. A scoped
--- pour is a different artifact by definition — bit-parity with the ingest fold
+-- synthesis is a different artifact by definition — bit-parity with the ingest fold
 -- is not a goal here.
 CREATE OR REPLACE FUNCTION scoped_consensus(p_source_ids bytea[])
     RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,

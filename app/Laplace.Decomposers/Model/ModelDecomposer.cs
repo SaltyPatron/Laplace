@@ -67,6 +67,17 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
     public static readonly Hash128 ModelLayerTypeId = EntityTypeRegistry.ModelLayer;
 
+    // Analyzer watermark, chess parity (ChessVocabulary.AnalysisMarkerId): one
+    // deterministic marker per (model source, planes mode, analyzer version).
+    // The analyzer probes it to skip an already-derived pass (a re-run would
+    // double-fold consensus) and deposits it as its final change. Bump the
+    // version to evict + re-derive without touching the witnessed layer.
+    public static readonly Hash128 AnalysisMarkerTypeId = EntityTypeRegistry.Id("Model_AnalysisMarker");
+    internal const int AnalyzerVersion = 1;
+
+    public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
+        => Hash128.OfCanonical($"model/analyzed/{modelSource}/{planesMode}/v{AnalyzerVersion}");
+
     private readonly string _modelDir;
     private readonly Hash128 _source;
     private readonly string _sourceName;
@@ -117,7 +128,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
-                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane"],
+                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker"],
             relationNodeNames: ["MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
                 "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO", "APPEARS_IN",
                 "CONTAINS", "PRECEDES",
@@ -253,12 +264,37 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
         const int finalEpoch = 1;
 
+        // Analyzer watermark (chess FilterUnanalyzedAsync parity): a completed
+        // pass at this (source, mode, version) must not re-fold its planes.
+        string planesMode = ModelTokenEdgeETL.ResolvePlanesMode();
+        Hash128 analysisMarker = AnalysisMarkerId(_source, planesMode);
+        if (!recorderRun)
+        {
+            byte[] bm = await context.Reader.EntitiesExistBitmapAsync([analysisMarker], ct);
+            if (bm.Length > 0 && (bm[0] & 1) != 0)
+            {
+                log.LogInformation(
+                    "phase=analyzer: planes mode '{Mode}' already derived at v{V} for '{Name}' "
+                    + "— skipping (a re-run would double-fold; bump AnalyzerVersion or evict the marker to re-derive)",
+                    planesMode, AnalyzerVersion, _sourceName);
+                yield break;
+            }
+        }
+
         var classifier = new HeadClassifier(context.Reader, Source, log);
         var edges = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log, classifier);
         await foreach (var change in edges.EmitAsync(finalEpoch, context.Reader, options, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
+        }
+
+        if (!recorderRun)
+        {
+            var mb = new SubstrateChangeBuilder(_source, $"model/analysis-marker/{planesMode}", null,
+                entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
+            mb.AddEntity(analysisMarker, EntityTier.Word, AnalysisMarkerTypeId, firstObservedBy: _source);
+            yield return mb.Build();
         }
     }
 
@@ -321,9 +357,9 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // Matches ModelTokenEdgeETL's enforced emission bound for the active mode,
-        // so this estimate is what the pipeline actually emits rather than a
-        // 3-6 orders-optimistic guess.
+        // Matches ModelTokenEdgeETL's untruncated emission for the active mode:
+        // every token per circuit in structure mode; every pair per plane in
+        // analyzer modes (identical ids merge across circuits at apply).
         if (ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
         {
             // Per layer: attention + OV heads, plus either one dense MLP circuit or
@@ -333,12 +369,11 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             catch (Exception) { }
             long mlpSlots = Math.Max(1, numExperts);
             long circuits = (2L * Math.Max(1, r.NumHeads) + mlpSlots) * r.NumLayers;
-            long occurrences = circuits * Math.Min(distinctVocab, ModelTokenEdgeETL.OccurrencesPerCircuit);
+            long occurrences = circuits * distinctVocab;
             return distinctVocab + occurrences;
         }
-        long partners = Math.Min(distinctVocab, ModelTokenEdgeETL.EdgeTopK);
-        long perLayerPlanes = 3L * distinctVocab * partners * r.NumLayers;
-        long similarTo = distinctVocab * partners;
+        long perLayerPlanes = 3L * distinctVocab * distinctVocab * r.NumLayers;
+        long similarTo = distinctVocab * distinctVocab;
         return distinctVocab + perLayerPlanes + similarTo;
     }
 

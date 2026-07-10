@@ -28,3 +28,16 @@ runs:
         # so builds stop leaking processes.
         echo "MSBUILDDISABLENODEREUSE=1" >> "$GITHUB_ENV"
         echo "UseSharedCompilation=false" >> "$GITHUB_ENV"
+        # Build/test parallelism (parity with scripts/win/env.cmd).
+        # Set LAPLACE_TEST_SERIAL=1 on the runner to force serial ctest.
+        nproc_n="$(nproc 2>/dev/null || echo 1)"
+        if [ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]; then
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
+        fi
+        if [ -z "${CTEST_PARALLEL_LEVEL:-}" ]; then
+          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
+            echo "CTEST_PARALLEL_LEVEL=1" >> "$GITHUB_ENV"
+          else
+            echo "CTEST_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
+          fi
+        fi

@@ -221,6 +221,12 @@ typedef struct {
     int64_t          observation_count;
 } laplace_attestation_witness_edge_t;
 
+int laplace_attestation_staged_batch_add(
+    intent_stage_t*                     stage,
+    const laplace_attestation_staged_t* rows,
+    size_t                              n,
+    const uint8_t*                      masks /* n*32 bytes or NULL */);
+
 int laplace_attestation_witness_batch_add(
     intent_stage_t*                        stage,
     const laplace_attestation_witness_edge_t* edges,

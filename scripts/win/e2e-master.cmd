@@ -53,7 +53,7 @@ cd "%LAPLACE_ROOT%\app"
 if exist "!INGEST!\test-data\text" (
   for %%f in ("!INGEST!\test-data\text\*.txt") do (
     echo ==== db-roundtrip proof %%~nxf ====
-    dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%%~f" || exit /b 1
+    "%LAPLACE_CLI_EXE%" db-roundtrip "%%~f" || exit /b 1
   )
 )
 
@@ -63,7 +63,7 @@ echo ===== VERIFY =====
 cd /d "%LAPLACE_ROOT%"
 
 echo ==== engine gtest (excl. regress label) ====
-call "%~dp0test-engine.cmd" -LE regress -j1 || exit /b 1
+call "%~dp0test-engine.cmd" -LE regress || exit /b 1
 
 echo ==== pg_regress ====
 call "%~dp0regress.cmd" || exit /b 1

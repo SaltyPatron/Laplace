@@ -29,9 +29,6 @@
     <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.pdb"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
           Condition="Exists('$(LaplaceBuildWin)\core\laplace_core.pdb')" />
-    <Copy SourceFiles="C:\Program Files\PostgreSQL\18\bin\libxml2.dll"
-          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
-          Condition="Exists('C:\Program Files\PostgreSQL\18\bin\libxml2.dll')" />
     <Copy SourceFiles="$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
           Condition="Exists('$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll')" />

@@ -1,6 +1,6 @@
 -- Finish-line Phase 3 (the conditional theorem, doc 14 §6b): the smoothed
 -- row-normalized LOG-CONDITIONAL of continuation evidence. A trained LM's
--- logits are log P(y|prefix); the pour must factor THIS table, not affinity —
+-- logits are log P(y|prefix); the synthesis must factor THIS table, not affinity —
 -- P(y|x) = P(x,y)/P(x), and the division is what lets content words win their
 -- slots (glue has high joint AND high marginal; content is concentrated).
 --
