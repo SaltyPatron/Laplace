@@ -57,10 +57,14 @@ def validate_retired_workflows() -> list[str]:
     else:
         text = read_text(laplace)
         compact = re.sub(r"\s+", "", text)
-        if "pull_request:branches:[main]" not in compact:
-            errs.append("laplace.yml: expected pull_request trigger on main")
+        # Main-only self-hosted pipeline: push + manual dispatch. No pull_request —
+        # PRs must not burn the laplace runner (see laplace.yml on: comment).
         if "push:branches:[main]" not in compact:
             errs.append("laplace.yml: expected push trigger on main")
+        if "workflow_dispatch:" not in compact:
+            errs.append("laplace.yml: expected workflow_dispatch trigger")
+        if "pull_request:" in compact:
+            errs.append("laplace.yml: pull_request trigger forbidden (self-hosted runner)")
         for stale in ("integration.yml", "deploy-app.yml", "seed-ladder.yml"):
             if stale in text:
                 errs.append(f"laplace.yml: references retired workflow {stale}")
