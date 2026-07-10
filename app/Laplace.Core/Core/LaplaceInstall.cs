@@ -339,8 +339,8 @@ public static class LaplaceInstall
 
     private static IEnumerable<string> DeploySecretCandidatePaths(string fileName)
     {
-        // Install-prefix secrets drop (Linux): scripts/publish-host-secrets.sh →
-        // /opt/laplace/secrets/{fileName}. Service account + group read; never /home/*.
+        // Install-prefix secrets drop (Linux): setup-host seeds
+        // /opt/laplace/secrets/{fileName} from ~/.config/shell/secrets.env.
         var prefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
         if (string.IsNullOrWhiteSpace(prefix))
             prefix = OperatingSystem.IsWindows() ? null : "/opt/laplace";

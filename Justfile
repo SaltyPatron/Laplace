@@ -18,22 +18,24 @@ check-prereqs:
     @scripts/check-prereqs.sh
 
 bootstrap:
-    sudo scripts/bootstrap-laplace-runner.sh bootstrap
+    @echo "Use: sudo bash scripts/setup-host.sh"
+    @echo "(just bootstrap is not a parallel entry — setup-host is the only human path)"
+    @exit 2
 
 bootstrap-status:
-    sudo scripts/bootstrap-laplace-runner.sh status
+    sudo bash scripts/setup-host.sh status
 
 bootstrap-reset:
-    sudo scripts/bootstrap-laplace-runner.sh reset
+    sudo bash scripts/setup-host.sh reset
 
 setup-host:
-    scripts/setup-host.sh setup
+    sudo bash scripts/setup-host.sh setup
 
 setup-host-status:
-    scripts/setup-host.sh status
+    sudo bash scripts/setup-host.sh status
 
 setup-host-reset:
-    scripts/setup-host.sh reset
+    sudo bash scripts/setup-host.sh reset
 
 submodule-sanity:
     @scripts/normalize-submodule-attributes.sh
@@ -230,4 +232,4 @@ publish:
     bash scripts/pipeline.sh publish
 
 publish-force-npm:
-    bash deploy/linux/deploy.sh --force-npm
+    LAPLACE_FORCE_NPM=1 bash scripts/pipeline.sh publish

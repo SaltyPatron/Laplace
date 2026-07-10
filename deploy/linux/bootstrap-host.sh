@@ -16,9 +16,8 @@ echo "==> app dir: $APP_DIR (owner $RUN_USER)"
 install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs"
 
 echo "==> secrets drop: /opt/laplace/secrets"
-# Seeded by setup-host Layer 0 from operator ~/.config/shell/secrets.env;
-# refreshed by CI publish when LICHESS_TOKEN is set. Service reads via
-# EnvironmentFile=-/opt/laplace/secrets/lichess.env — never /home/*.
+# Seeded by setup-host from ~/.config/shell/secrets.env; systemd loads
+# EnvironmentFile=-/opt/laplace/secrets/lichess.env.
 install -d -m 2770 -o "$RUN_USER" -g "$RUN_GROUP" /opt/laplace/secrets
 
 echo "==> env file: $APP_DIR/laplace-api.env"

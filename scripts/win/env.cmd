@@ -14,6 +14,9 @@ rem All build/deploy/publish artifacts live under D:\Data\Laplace — never in t
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=D:\Data\Laplace"
 if not defined LAPLACE_BUILD_ROOT set "LAPLACE_BUILD_ROOT=%LAPLACE_DATA_ROOT%"
 if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_DATA_ROOT%\deploy"
+rem geos/proj/gdal (and sqlite for PROJ) from external/ — scripts\win\build-deps.cmd
+if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DATA_ROOT%\deps"
+if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"
 if not defined LAPLACE_ENGINE_BUILD set "LAPLACE_ENGINE_BUILD=%LAPLACE_BUILD_ROOT%\build-win"
 if not defined LAPLACE_EXT_BUILD set "LAPLACE_EXT_BUILD=%LAPLACE_BUILD_ROOT%\build-win-ext"
 if not defined LAPLACE_ENGINE_BUILD_ASAN set "LAPLACE_ENGINE_BUILD_ASAN=%LAPLACE_BUILD_ROOT%\build-win-asan"
@@ -31,6 +34,8 @@ set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 set "PATH=D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
 set "PATH=C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin;C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin;C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin;%PATH%"
 set "PATH=%LAPLACE_ENGINE_BUILD%\core;%LAPLACE_ENGINE_BUILD%\dynamics;%LAPLACE_ENGINE_BUILD%\synthesis;%PATH%"
+rem Runtime DLLs for laplace_geom (geos_c / proj / sqlite) — must precede system PATH.
+set "PATH=%LAPLACE_DEPS_PREFIX%\geos\bin;%LAPLACE_DEPS_PREFIX%\proj\bin;%LAPLACE_DEPS_PREFIX%\sqlite\bin;%LAPLACE_DEPS_PREFIX%\gdal\bin;%PATH%"
 set "LAPLACE_RC=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe"
 set "LAPLACE_MT=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe"
 if not defined PGPASSWORD set "PGPASSWORD=postgres"

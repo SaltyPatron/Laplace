@@ -25,6 +25,11 @@ if not exist "%DEPLOY%\share" mkdir "%DEPLOY%\share"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
 del /q "%DEPLOY%\lib\*.stale~*" 2>nul
 del /q "%DEPLOY%\share\*.stale~*" 2>nul
+rem Locked stale leftovers: move out of deploy (same law as hot-swap).
+powershell -NoProfile -Command ^
+  "$d='%DEPLOY%\lib'; $t='%TEMP%\laplace-deploy-stale'; New-Item -ItemType Directory -Force -Path $t | Out-Null;" ^
+  "Get-ChildItem -LiteralPath $d -Filter '*.stale~*' -ErrorAction SilentlyContinue | ForEach-Object {" ^
+  "  Move-Item -LiteralPath $_.FullName -Destination (Join-Path $t $_.Name) -Force -ErrorAction SilentlyContinue }"
 
 if not exist "%T0_SRC%" (
   echo ERROR: T0 perfcache missing at %T0_SRC%
@@ -74,6 +79,9 @@ call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.d
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\mkl\latest\bin\mkl_tbb_thread.2.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libmmd.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\libiomp5md.dll"
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\svml_dispmd.dll" || exit /b 1
+
+rem geos/proj/sqlite are STATIC into laplace_geom — no runtime DLLs to deploy for them.
 
 call :verify_deploy || exit /b 1
 echo deployed: %DEPLOY%
@@ -118,6 +126,7 @@ for %%P in (
   "%DEPLOY%\lib\laplace_substrate.dll"
   "%DEPLOY%\lib\laplace_geom.dll"
   "%DEPLOY%\lib\laplace_core.dll"
+  "%DEPLOY%\lib\svml_dispmd.dll"
   "%T0_DST%"
   "%HW_DST%"
 ) do (
@@ -149,10 +158,22 @@ echo missing build artifact: "%SRC%"
 exit /b 1
 :sc_copy
 copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul && exit /b 0
-ren "%DESTDIR%\%BASE%" "%BASE%.stale~%RANDOM%" 2>nul || goto sc_fail
+rem Locked DLL: rename aside, then MOVE the stale image OUT of deploy (not next to
+rem live libs). Leaving *.stale~* under deploy\lib has crashed the postmaster
+rem (VCRUNTIME / fsync of hot-swap leftovers).
+set "STALE_NAME=%BASE%.stale~%RANDOM%"
+set "STALE_DIR=%TEMP%\laplace-deploy-stale"
+if not exist "%STALE_DIR%" mkdir "%STALE_DIR%" >nul 2>&1
+ren "%DESTDIR%\%BASE%" "%STALE_NAME%" 2>nul || goto sc_fail
 copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul || goto sc_fail
-echo   hot-swapped %BASE% -- old image renamed; backends pick up the new copy on reconnect
+move /y "%DESTDIR%\%STALE_NAME%" "%STALE_DIR%\%STALE_NAME%" >nul 2>nul
+if exist "%DESTDIR%\%STALE_NAME%" (
+  echo ERROR: could not move %STALE_NAME% out of deploy — delete it before continuing
+  exit /b 1
+)
+echo   hot-swapped %BASE% -- old image moved to %STALE_DIR% ^(reconnect to load new DLL^)
 exit /b 0
 :sc_fail
 echo FAILED to deploy %BASE% into %DESTDIR%
+echo   If the file is locked, recycle backends or reclaim the service — do not leave stale~ in deploy.
 exit /b 1

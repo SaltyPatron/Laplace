@@ -24,9 +24,25 @@ echo tune-pg: applying machine-derived cluster GUCs ^(Cpu/MemoryTopology^):
 type "%PGTUNE_SQL%"
 %PSQL% -f "%PGTUNE_SQL%" || exit /b 1
 
-powershell -NoProfile -Command "Restart-Service postgresql-x64-18 -ErrorAction Stop" && goto verify
-echo restart denied: run elevated:  net stop postgresql-x64-18 ^&^& net start postgresql-x64-18
-exit /b 3
+rem Preflight: refuse orphan / down states. Never UAC. Never pg_ctl start.
+call "%~dp0pg-service-guard.cmd"
+if errorlevel 2 if not errorlevel 3 (
+  echo tune-pg: GUCs applied; restart BLOCKED — orphan postmaster. User must run reclaim-postgres.cmd elevated.
+  exit /b 4
+)
+if errorlevel 3 (
+  echo tune-pg: GUCs applied; restart BLOCKED — service down. Elevated: net start postgresql-x64-18
+  exit /b 3
+)
+
+powershell -NoProfile -Command "Restart-Service postgresql-x64-18 -ErrorAction Stop"
+if errorlevel 1 (
+  echo tune-pg: Restart-Service denied ^(not elevated^). GUCs are applied; pending_restart may remain.
+  echo   When YOU elevate ^(no agent UAC^): net stop postgresql-x64-18 ^&^& net start postgresql-x64-18
+  echo   Or: cmd /c "scripts\win\reclaim-postgres.cmd"
+  exit /b 3
+)
+goto verify
 
 :verify
 %PSQL% -P pager=off -c "SELECT name, setting, unit, pending_restart FROM pg_settings WHERE name IN ('shared_buffers','effective_cache_size','synchronous_commit','max_wal_size','work_mem','maintenance_work_mem','max_connections','max_parallel_workers','max_parallel_maintenance_workers','wal_buffers','random_page_cost','effective_io_concurrency') ORDER BY name;"

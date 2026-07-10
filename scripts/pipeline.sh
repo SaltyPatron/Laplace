@@ -77,7 +77,7 @@ usage() {
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
 Phases: clean codegen build install migrate sync-extension tune-pg tune-laplace
-        perfcache-guc api-env chess-lab publish foundation test
+        perfcache-guc api-env publish foundation test
 
 Options:
   --fresh-db        nuke DB before migrate
@@ -441,14 +441,16 @@ phase_runtime_secrets() {
   local dst="$dst_dir/lichess.env"
   mkdir -p "$dst_dir"
   chmod 2770 "$dst_dir" 2>/dev/null || true
+  # Prefer process env (optional CI override). Otherwise keep setup-host seed
+  # from ~/.config/shell/secrets.env — do not invent a second source of truth.
   if [ -n "${LICHESS_TOKEN:-}${LICHESS_API:-}" ]; then
     printf 'LICHESS_TOKEN=%s\n' "${LICHESS_TOKEN:-$LICHESS_API}" >"$dst"
     chmod 640 "$dst"
     echo "lichess.env refreshed from process env"
   elif [ -f "$dst" ]; then
-    echo "lichess.env present (seeded at setup-host / prior publish)"
+    echo "lichess.env present (from setup-host)"
   else
-    echo "::warning::no LICHESS_TOKEN — set GitHub Actions secret LICHESS_TOKEN, or re-run setup-host.sh with ~/.config/shell/secrets.env"
+    echo "::warning::no /opt/laplace/secrets/lichess.env — re-run sudo bash scripts/setup-host.sh with LICHESS_TOKEN in ~/.config/shell/secrets.env"
   fi
 }
 
@@ -482,7 +484,7 @@ while [[ $# -gt 0 ]]; do
     --force-rebuild)  FORCE_REBUILD=1; shift ;;
     --serial-tests)   SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
+    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -502,7 +504,6 @@ for phase in "${PHASES[@]}"; do
     tune-laplace)   phase_tune_laplace ;;
     perfcache-guc)  phase_perfcache_guc ;;
     api-env)        phase_api_env ;;
-    chess-lab)      phase_chess_lab ;;
     publish)        phase_publish ;;
     foundation)     phase_foundation ;;
     test)           phase_test ;;

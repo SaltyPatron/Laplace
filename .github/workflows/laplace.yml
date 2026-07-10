@@ -371,8 +371,6 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Publish (API + SPA + uci + chess-lab + secrets)
-        env:
-          LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
         run: bash scripts/pipeline.sh publish
 
       - name: Restart API + readiness gate

@@ -41,19 +41,30 @@ cmd /c "call scripts\win\env.cmd && cd build-win && cmake --build . --target lap
 cmake/ninja, PG 18 paths, DB env, GC tuning). Scripts self-load it; ad-hoc native builds
 must `call` it first, as above.
 
-## Build & test quick reference (Windows, the real workflow)
+## Build & test quick reference
+
+### Windows (local)
 
 | Task | Command (wrap in `cmd /c` from pwsh) |
 |------|--------------------------------------|
 | Full clean rebuild + codegen + perfcache | `scripts\win\rebuild-all.cmd` |
 | Engine only / extensions only | `scripts\win\build-engine.cmd` / `scripts\win\build-extensions.cmd` |
+| Publish API → IIS (incl. chess/lichess env) | `scripts\win\publish-deploy.cmd` |
 | .NET tests (5 xunit projects, excludes `Tier=perf`) | `scripts\win\test-app.cmd [project-substring]` |
 | Engine gtests | `scripts\win\test-engine.cmd` (ctest over `build-win`) |
 | pg_regress | `scripts\win\regress.cmd` |
 | Everything (toolchain + gtest + regress + dotnet + FK verify) | `scripts\win\test-all.cmd` (logs to `build-win-ext\test-all.log`) |
 | DB reset / foundation seed / one source | `scripts\win\db-reset.cmd` / `seed-foundation.cmd` / `seed-step.cmd <source>` (`--list` to enumerate) |
 
-`Justfile` + root CMake = Linux/CI only; do not use them for local Windows work.
+### Linux (hart-server / CI)
+
+| Task | Command |
+|------|---------|
+| Full host bring-up (once) | `sudo bash scripts/setup-host.sh` |
+| CI / ongoing deploy | push to main → `laplace.yml` → `scripts/pipeline.sh` |
+| Manual publish | `bash scripts/pipeline.sh publish` |
+
+`Justfile` is a thin Linux convenience layer; prefer the scripts above when they disagree.
 
 DB: `psql -h localhost -U postgres -d laplace` (password `postgres`), then
 `SET search_path = laplace, public;`. `SELECT * FROM api('<substring>');` lists the
@@ -63,10 +74,21 @@ schema's own helper catalog — check it before assuming something doesn't exist
 
 - One ingest at a time; never run parallel agent sessions against Postgres mid-write.
 - Never edit a `.cmd` while it is executing.
-- After ANY engine rebuild, run `build-extensions.cmd`; `senses('dog') > 0` is the real
-  health check. MSB3027 copy failure ⇒ clean-rebuild.
+- After ANY engine rebuild, run `build-extensions.cmd`; `senses(word_id('dog')) > 0` is the real
+  health check (`senses('dog')` always returns 0). MSB3027 copy failure ⇒ clean-rebuild.
 - `seed-step.cmd` runs an independent `:verify_step` — trust it, not the CLI summary line.
 - Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L11).
+- Postgres service: never `pg_ctl start` (orphans outside SCM); never agent UAC
+  (`Start-Process -Verb RunAs`); never `db-reset`/`DROP DATABASE` unless the user
+  explicitly asked this turn. Orphan = service Stopped + port 5432 live → point at
+  `scripts\win\reclaim-postgres.cmd` (user elevates themselves) and stop. Preflight:
+  `scripts\win\pg-service-guard.cmd`. Hot-swap leftovers must leave `deploy\` (see
+  `install-extensions.cmd`), not sit as `*.stale~*` next to live DLLs.
+- Index-cycle crash (2026-07-10): concurrent `CREATE INDEX` sessions in
+  `NpgsqlIndexCycle` (full `maintenance_work_mem` each) AV'd a backend in
+  `VCRUNTIME140.dll` during attestations/consensus rebuilds and detached the
+  service. Outer index-build concurrency is capped at 1; do not reintroduce
+  ApplyParallelism across multiple CREATE INDEX connections.
 
 ## Binding design docs (read before deep work in the area)
 

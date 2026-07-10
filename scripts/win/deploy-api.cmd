@@ -24,8 +24,11 @@ if not exist "%APPCMD%" (
 
 echo ==== stop IIS app pool %POOL% ====
 rem appcmd stop errors on an already-stopped pool — read the state first.
+rem for /f + quoted Program Files path eats quotes; stage state to a temp file.
 set "POOL_STATE="
-for /f "usebackq delims=" %%S in (`"%APPCMD%" list apppool "%POOL%" /text:state`) do set "POOL_STATE=%%S"
+set "POOL_STATE_FILE=%TEMP%\laplace-iis-pool-state.txt"
+"%APPCMD%" list apppool "%POOL%" /text:state > "%POOL_STATE_FILE%" 2>nul
+if exist "%POOL_STATE_FILE%" set /p POOL_STATE=<"%POOL_STATE_FILE%"
 if /i "!POOL_STATE!"=="Stopped" (
   echo [deploy-api] pool %POOL% already stopped
 ) else (
@@ -48,8 +51,8 @@ if not errorlevel 1 (
   goto wait_pool_stop
 )
 
-echo ==== mirror staged endpoint -^> %LIVE% ^(preserve web.config, keep logs^) ====
-robocopy "%SRC%" "%LIVE%" /MIR /XF web.config /XD logs /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+echo ==== mirror staged endpoint -^> %LIVE% ^(incl. web.config; keep logs^) ====
+robocopy "%SRC%" "%LIVE%" /MIR /XD logs /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
 if errorlevel 8 (
   echo [deploy-api] robocopy endpoint FAILED
   goto pool_start_fail
@@ -73,7 +76,8 @@ if not "!VERIFY_FAILED!"=="0" goto pool_start_fail
 
 echo ==== start IIS app pool %POOL% ====
 set "POOL_STATE="
-for /f "usebackq delims=" %%S in (`"%APPCMD%" list apppool "%POOL%" /text:state`) do set "POOL_STATE=%%S"
+"%APPCMD%" list apppool "%POOL%" /text:state > "%POOL_STATE_FILE%" 2>nul
+if exist "%POOL_STATE_FILE%" set /p POOL_STATE=<"%POOL_STATE_FILE%"
 if /i "!POOL_STATE!"=="Started" (
   echo [deploy-api] pool %POOL% already started
 ) else (
@@ -84,7 +88,9 @@ if /i "!POOL_STATE!"=="Started" (
   )
 )
 set "SITE_STATE="
-for /f "usebackq delims=" %%S in (`"%APPCMD%" list site "%SITE%" /text:state`) do set "SITE_STATE=%%S"
+set "SITE_STATE_FILE=%TEMP%\laplace-iis-site-state.txt"
+"%APPCMD%" list site "%SITE%" /text:state > "%SITE_STATE_FILE%" 2>nul
+if exist "%SITE_STATE_FILE%" set /p SITE_STATE=<"%SITE_STATE_FILE%"
 if /i "!SITE_STATE!"=="Started" (
   echo [deploy-api] site %SITE% already started
 ) else (

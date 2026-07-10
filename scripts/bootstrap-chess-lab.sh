@@ -1,23 +1,7 @@
 #!/usr/bin/env bash
-# Chess Lab host deps for Linux (hart-server / laplace-runner).
-#
-# Idempotent. Safe to re-run.
-#
-#   Root (one-shot package install + build):
-#     sudo bash scripts/bootstrap-chess-lab.sh
-#       - apt: stockfish + Qt6 build/runtime deps
-#       - build cutechess-cli into /opt/laplace/bin
-#       - write binary paths into /opt/laplace/app/laplace-api.env
-#
-#   laplace-runner (CI / pipeline.sh chess-lab):
-#     bash scripts/bootstrap-chess-lab.sh
-#       - skips apt
-#       - rebuilds cutechess-cli if needed
-#       - refreshes binary-path block in laplace-api.env
-#
-# Lichess tokens are NOT handled here. Operator publishes them with:
-#   bash scripts/publish-host-secrets.sh
-# → /opt/laplace/secrets/lichess.env (systemd EnvironmentFile)
+# Chess Lab binaries for Linux — implementation detail.
+# Invoked by: setup-host (via bootstrap-laplace-runner) and pipeline.sh publish.
+# Humans: do not run this; run sudo bash scripts/setup-host.sh once, then CI.
 
 set -euo pipefail
 
@@ -47,21 +31,18 @@ run_as_owner() {
 }
 
 install_apt_deps() {
-  say "apt: stockfish + Qt6 (cutechess build/runtime)"
+  say "apt: stockfish + Qt6"
   if [ "$(id -u)" -ne 0 ]; then
-    yellow "not root — skipping apt (one-shot: sudo bash scripts/bootstrap-chess-lab.sh)"
+    yellow "not root — skipping apt (installed by setup-host Layer 0)"
     return 0
   fi
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     stockfish \
-    qt6-base-dev \
-    qt6-base-dev-tools \
-    libqt6svg6-dev \
-    libqt6core5compat6-dev \
-    libqt6svg6 \
-    libqt6core5compat6 \
+    qt6-base-dev qt6-base-dev-tools \
+    libqt6svg6-dev libqt6core5compat6-dev \
+    libqt6svg6 libqt6core5compat6 \
     >/dev/null
-  green "✓ stockfish + Qt6 packages present"
+  green "✓ stockfish + Qt6 present"
 }
 
 resolve_stockfish() {
@@ -77,14 +58,8 @@ resolve_stockfish() {
 
 resolve_qt_bin() {
   local p
-  for p in /usr/lib/qt6/bin /usr/lib/x86_64-linux-gnu/qt6/bin; do
+  for p in /usr/lib/qt6/bin /usr/lib/x86_64-linux-gnu/qt6/bin /usr/lib/x86_64-linux-gnu; do
     if [ -d "$p" ]; then
-      echo "$p"
-      return 0
-    fi
-  done
-  for p in /usr/lib/x86_64-linux-gnu /usr/lib; do
-    if [ -e "$p/libQt6Core.so.6" ] || ls "$p"/libQt6Core.so* >/dev/null 2>&1; then
       echo "$p"
       return 0
     fi
@@ -113,19 +88,17 @@ ensure_dirs() {
     mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
-  green "✓ $CC_BUILD + $CC_BIN_DIR + $PREFIX/secrets ready"
 }
 
 build_cutechess() {
   say "build cutechess-cli → $CC_BIN_DIR/cutechess-cli"
   local src
   if ! src="$(resolve_cutechess_src)"; then
-    red "cutechess source missing — expected $EXTERNAL/cutechess or $REPO_ROOT/external/cutechess"
-    red "  git submodule update --init external/cutechess"
+    red "cutechess source missing under $EXTERNAL/cutechess — sync-external / setup-host first"
     return 1
   fi
   if ! resolve_qt_bin >/dev/null; then
-    red "Qt6 not found — install packages first (sudo bash scripts/bootstrap-chess-lab.sh)"
+    red "Qt6 missing — re-run: sudo bash scripts/setup-host.sh"
     return 1
   fi
 
@@ -137,7 +110,7 @@ build_cutechess() {
   local built
   built="$(find "$CC_BUILD" -type f -name cutechess-cli -perm -111 2>/dev/null | head -1 || true)"
   if [ -z "$built" ]; then
-    red "cutechess-cli binary not produced under $CC_BUILD"
+    red "cutechess-cli not produced under $CC_BUILD"
     return 1
   fi
   if [ "$(id -u)" -eq 0 ]; then
@@ -151,7 +124,7 @@ build_cutechess() {
 write_api_env() {
   say "api env chess-lab paths → $ENV_FILE"
   if [ ! -d "$APP_DIR" ]; then
-    yellow "$APP_DIR missing — create via deploy/linux/bootstrap-host.sh first"
+    yellow "$APP_DIR missing — setup-host creates it"
     return 0
   fi
 
@@ -170,17 +143,13 @@ write_api_env() {
         cp "$REPO_ROOT/deploy/linux/laplace-api.env.example" "$ENV_FILE"
         chmod 0640 "$ENV_FILE"
       fi
-      yellow "created $ENV_FILE from example"
     else
-      red "no $ENV_FILE and no example — skipping env write"
       return 1
     fi
   fi
 
   local marker_begin="# >>> laplace-runner managed: chess-lab env >>>"
   local marker_end="# <<< laplace-runner managed: chess-lab env <<<"
-  # Strip any LICHESS_* that older revisions stuffed into this managed block —
-  # tokens live in /opt/laplace/secrets/lichess.env only.
   sed -i -e "/$marker_begin/,/$marker_end/d" "$ENV_FILE"
   {
     echo "$marker_begin"
@@ -200,37 +169,24 @@ write_api_env() {
     mkdir -p "$PREFIX/chess-lab-work"
   fi
 
-  echo "  CUTECHESS=${cc:-MISSING}"
-  echo "  STOCKFISH=${sf:-MISSING}"
-  echo "  QT_BIN=${qt:-MISSING}"
+  echo "  CUTECHESS=${cc:-MISSING}  STOCKFISH=${sf:-MISSING}  QT=${qt:-MISSING}"
   if [ -f "$PREFIX/secrets/lichess.env" ]; then
-    green "✓ secrets drop present: $PREFIX/secrets/lichess.env"
+    green "✓ secrets drop present"
   else
-    yellow "✓ no $PREFIX/secrets/lichess.env yet — run: bash scripts/publish-host-secrets.sh"
+    yellow "✓ no lichess.env yet — seeded by setup-host from ~/.config/shell/secrets.env"
   fi
-  green "✓ chess-lab path block written"
 }
 
 verify() {
   say "verify"
-  local fail=0
-  local sf qt
+  local fail=0 sf qt
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
-  [ -x "$CC_BIN_DIR/cutechess-cli" ] || { red "✗ cutechess-cli missing"; fail=1; }
-  [ -n "$sf" ] || { red "✗ stockfish missing"; fail=1; }
-  [ -n "$qt" ] || { red "✗ Qt6 missing"; fail=1; }
-  if [ "$fail" -eq 0 ]; then
-    green "===== CHESS LAB BOOTSTRAP OK ====="
-    echo "  cutechess: $CC_BIN_DIR/cutechess-cli"
-    echo "  stockfish: $sf"
-    echo "  qt:        $qt"
-    echo "  api env:   $ENV_FILE"
-    echo "  secrets:   $PREFIX/secrets/lichess.env"
-  else
-    red "===== CHESS LAB BOOTSTRAP INCOMPLETE ====="
-    return 1
-  fi
+  [ -x "$CC_BIN_DIR/cutechess-cli" ] || { red "✗ cutechess-cli"; fail=1; }
+  [ -n "$sf" ] || { red "✗ stockfish"; fail=1; }
+  [ -n "$qt" ] || { red "✗ Qt6"; fail=1; }
+  [ "$fail" -eq 0 ] || return 1
+  green "===== CHESS LAB OK ====="
 }
 
 main() {

@@ -1,0 +1,133 @@
+cmake_minimum_required(VERSION 3.22)
+project(laplace-windows-deps LANGUAGES NONE)
+
+# Orchestrates geos → sqlite → proj → gdal from external/ into LAPLACE_DEPS_PREFIX.
+# Invoked by scripts/win/build-deps.cmd. Does NOT touch Linux /opt/laplace.
+
+include(ExternalProject)
+
+if(NOT LAPLACE_EXTERNAL)
+  set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../../external")
+endif()
+if(NOT LAPLACE_DEPS_PREFIX)
+  message(FATAL_ERROR "LAPLACE_DEPS_PREFIX is required (e.g. D:/Data/Laplace/deps)")
+endif()
+
+set(LAPLACE_DEPS_BUILD "${CMAKE_BINARY_DIR}" CACHE PATH "Build tree for Windows deps")
+file(MAKE_DIRECTORY "${LAPLACE_DEPS_PREFIX}")
+
+if(NOT CMAKE_C_COMPILER)
+  set(CMAKE_C_COMPILER icx)
+endif()
+if(NOT CMAKE_CXX_COMPILER)
+  set(CMAKE_CXX_COMPILER icx)
+endif()
+
+set(_NINJA "")
+if(CMAKE_MAKE_PROGRAM)
+  set(_NINJA "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
+endif()
+
+set(_COMMON_ARGS
+  -G Ninja
+  ${_NINJA}
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+  -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+  -DBUILD_TESTING=OFF
+)
+if(DEFINED CMAKE_RC_COMPILER AND CMAKE_RC_COMPILER)
+  list(APPEND _COMMON_ARGS "-DCMAKE_RC_COMPILER=${CMAKE_RC_COMPILER}")
+endif()
+if(DEFINED CMAKE_MT AND CMAKE_MT)
+  list(APPEND _COMMON_ARGS "-DCMAKE_MT=${CMAKE_MT}")
+endif()
+
+# --- GEOS 3.12.2 (STATIC — avoid PG bin geos_c.dll shadowing deploy/lib) ---
+ExternalProject_Add(geos
+  SOURCE_DIR "${LAPLACE_EXTERNAL}/geos"
+  BINARY_DIR "${LAPLACE_DEPS_BUILD}/geos-build"
+  INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/geos"
+  CMAKE_ARGS
+    ${_COMMON_ARGS}
+    "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+    -DBUILD_SHARED_LIBS=OFF
+    -DBUILD_BENCHMARKS=OFF
+    -DBUILD_DOCUMENTATION=OFF
+  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+# --- SQLite amalgamation (STATIC — baked into proj → laplace_geom; no DLL shadowing) ---
+ExternalProject_Add(sqlite
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/sqlite"
+  BINARY_DIR "${LAPLACE_DEPS_BUILD}/sqlite-build"
+  INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/sqlite"
+  CMAKE_ARGS
+    ${_COMMON_ARGS}
+    "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+    -DBUILD_SHARED_LIBS=OFF
+  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+# --- PROJ 9.4.1 (STATIC — same shadowing reason as GEOS) ---
+ExternalProject_Add(proj
+  SOURCE_DIR "${LAPLACE_EXTERNAL}/proj"
+  BINARY_DIR "${LAPLACE_DEPS_BUILD}/proj-build"
+  INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/proj"
+  DEPENDS sqlite
+  CMAKE_ARGS
+    ${_COMMON_ARGS}
+    "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+    "-DCMAKE_PREFIX_PATH=${LAPLACE_DEPS_PREFIX}/sqlite"
+    "-DSQLite3_INCLUDE_DIR=${LAPLACE_DEPS_PREFIX}/sqlite/include"
+    "-DSQLite3_LIBRARY=${LAPLACE_DEPS_PREFIX}/sqlite/lib/sqlite3.lib"
+    "-DEXE_SQLITE3=${LAPLACE_DEPS_PREFIX}/sqlite/bin/sqlite3.exe"
+    -DBUILD_SHARED_LIBS=OFF
+    -DENABLE_CURL=OFF
+    -DENABLE_TIFF=OFF
+    -DBUILD_APPS=OFF
+  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+# --- GDAL (shared OK — not linked into laplace_geom; CI parity artifact) ---
+ExternalProject_Add(gdal
+  SOURCE_DIR "${LAPLACE_EXTERNAL}/gdal"
+  BINARY_DIR "${LAPLACE_DEPS_BUILD}/gdal-build"
+  INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/gdal"
+  DEPENDS proj geos sqlite
+  CMAKE_ARGS
+    ${_COMMON_ARGS}
+    "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+    "-DCMAKE_PREFIX_PATH=${LAPLACE_DEPS_PREFIX}/proj;${LAPLACE_DEPS_PREFIX}/geos;${LAPLACE_DEPS_PREFIX}/sqlite"
+    "-DPROJ_INCLUDE_DIR=${LAPLACE_DEPS_PREFIX}/proj/include"
+    "-DPROJ_LIBRARY=${LAPLACE_DEPS_PREFIX}/proj/lib/proj.lib"
+    "-DSQLite3_INCLUDE_DIR=${LAPLACE_DEPS_PREFIX}/sqlite/include"
+    "-DSQLite3_LIBRARY=${LAPLACE_DEPS_PREFIX}/sqlite/lib/sqlite3.lib"
+    "-DGEOS_INCLUDE_DIR=${LAPLACE_DEPS_PREFIX}/geos/include"
+    "-DGEOS_LIBRARY=${LAPLACE_DEPS_PREFIX}/geos/lib/geos_c.lib"
+    -DBUILD_SHARED_LIBS=ON
+    -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF
+    -DOGR_BUILD_OPTIONAL_DRIVERS=OFF
+    -DBUILD_APPS=OFF
+    -DBUILD_PYTHON_BINDINGS=OFF
+    -DBUILD_JAVA_BINDINGS=OFF
+    -DBUILD_CSHARP_BINDINGS=OFF
+    -DGDAL_USE_EXTERNAL_LIBS=OFF
+    -DGDAL_USE_GEOS=ON
+    -DGDAL_USE_SQLITE3=ON
+    -DGDAL_USE_TIFF=OFF
+    -DGDAL_USE_JPEG=OFF
+    -DGDAL_USE_PNG=OFF
+    -DGDAL_USE_ZLIB=OFF
+    -DGDAL_USE_CURL=OFF
+    -DGDAL_USE_LIBXML2=OFF
+    -DGDAL_USE_EXPAT=OFF
+    -DGDAL_USE_XERCESC=OFF
+  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+add_custom_target(deps ALL DEPENDS geos sqlite proj gdal)

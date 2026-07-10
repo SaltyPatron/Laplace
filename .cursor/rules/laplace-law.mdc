@@ -22,3 +22,24 @@ Hard law (violations have corrupted state before):
   stabilization notes — verify against code before trusting; it is NOT the active plan.
   Active remediation work: `.cursor/plans/full_stack_remediation_bdaba5c3.plan.md`,
   evidence in `.scratchpad/16` + `17`.
+
+Postgres service law (orphan / detach — do not recreate):
+
+- The Windows service `postgresql-x64-18` runs as `NT AUTHORITY\NetworkService`.
+  That is the installer default. Unelevated shells cannot signal those PIDs.
+- NEVER `pg_ctl start` against the live cluster. It creates an orphan postmaster
+  outside SCM; Services.msc then shows "started and then stopped" because 5432
+  is already taken. Service start/stop is `net start`/`net stop` only, and only
+  when the user has already elevated (or the service is already Running).
+- NEVER `Start-Process -Verb RunAs`, UAC prompts, or hidden elevation. If a step
+  needs Administrator, say so in one line and stop — do not pop UAC.
+- NEVER `db-reset`, `DROP DATABASE`, or other destructive SQL unless the user
+  explicitly asked for that exact action in the current turn.
+- If service is Stopped but port 5432 is listening: that is an orphan. Do not
+  Start in services.msc, do not `pg_ctl start`, do not kill from an unelevated
+  agent shell. Point at `scripts\win\reclaim-postgres.cmd` (user runs elevated
+  themselves) and stop.
+- Before any extension deploy hot-swap: clear `deploy\lib\*.stale~*` and
+  `deploy\share\*.stale~*`. Never leave stale~ next to live DLLs (fsync/crash).
+- `scripts\win\pg-service-guard.cmd` is the preflight — run it (or its checks)
+  before tune-pg / install-extensions restart paths.
