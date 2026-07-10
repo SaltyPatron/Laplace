@@ -116,8 +116,7 @@ public sealed class LlamaRecipeExtractor
 
         void AddScalar(Hash128 typeId, string value)
         {
-            var valueBytes = Encoding.UTF8.GetBytes(value);
-            var valueId = Hash128.Blake3(valueBytes);
+            var valueId = ModelCoordinates.ScalarId(value);
             b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             AddAttestation(typeId, valueId);
         }

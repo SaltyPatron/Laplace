@@ -34,6 +34,22 @@ public sealed class ModelTokenEdgeETL
         b.AddAttestation(NativeAttestation.Aggregated(
             rec.Subject, rec.TypeId, rec.Object, sourceId, null, 1, rec.ScoreFp, rec.Weight));
 
+    public readonly record struct OccurrenceRecord(Hash128 Token, Hash128 Coordinate, long ScoreFp);
+
+    // Witnessed occurrence: this token APPEARS_IN this circuit coordinate, at the
+    // salience the checkpoint itself assigns. The salience IS the token's best
+    // native pair score in that circuit (the tiles apply laplace_score_fp
+    // internally) — no parallel math exists on this side of the marshal. The
+    // coordinate is shared content across models; the model is only the source, so
+    // consensus (token, APPEARS_IN, coord) rates cross-model convergence.
+    internal const int OccurrencesPerCircuit = 64;
+
+    internal static string ResolvePlanesMode()
+    {
+        var m = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES");
+        return string.IsNullOrWhiteSpace(m) ? "structure" : m.Trim().ToLowerInvariant();
+    }
+
     private const int RowTile = 256;
     private const int AttsPerChange = 200_000;
     private const int EigTargetDim = 64;
@@ -58,10 +74,14 @@ public sealed class ModelTokenEdgeETL
 
 
 
-    private const string PlanesMode = "all";
-    private static bool RunSimilarity => PlanesMode is "all" or "similarity" or "shallow";
-    private static bool RunContinues => PlanesMode is "all" or "continues" or "shallow";
-    private static bool RunLayers => PlanesMode == "all";
+    // "structure" (default) deposits bounded APPEARS_IN occurrences aggregated from
+    // the native pair tiles; the token-pair planes themselves are the versioned
+    // analyzer's business ("all"/"similarity"/"continues"/"shallow").
+    private readonly string _mode = ResolvePlanesMode();
+    private bool StructureMode => _mode == "structure";
+    private bool RunSimilarity => _mode is "all" or "similarity" or "shallow";
+    private bool RunContinues => _mode is "all" or "continues" or "shallow";
+    private bool RunLayers => _mode is "all" or "structure";
 
 
 
@@ -323,6 +343,8 @@ public sealed class ModelTokenEdgeETL
         double weight = WeightFor("ATTENDS");
         var Qh = new double[(long)n * hd];
         var Kh = new double[(long)n * hd];
+        var salQ = StructureMode ? new double[n] : null;
+        var salK = StructureMode ? new double[n] : null;
         // The layer's ATTENDS budget is shared across heads so one layer's attention
         // plane emits ~V*EdgeTopK edges total, matching the OV/MLP planes.
         int perHeadK = Math.Max(1, EdgeTopK / Math.Max(1, H));
@@ -333,6 +355,23 @@ public sealed class ModelTokenEdgeETL
             SliceHead(Kexp, Kh, n, attn, h, hd);
             if (gQ is not null) ScaleColsD(Qh, n, hd, gQ);
             if (gK is not null) ScaleColsD(Kh, n, hd, gK);
+            if (StructureMode)
+            {
+                // Salience = the token's magnitude in the head's QK subspace:
+                // sqrt(||q_h(t)||² + ||k_h(t)||²) — same law as the OV/MLP planes,
+                // read straight off the native projections. The n×n pair tile is
+                // the analyzer's business, not the recorder's (VTune: the per-row
+                // managed sort it forced was 83% of the ingest's CPU).
+                RowNorms(Qh, n, hd, salQ!);
+                RowNorms(Kh, n, hd, salK!);
+                for (int i = 0; i < n; i++)
+                    salQ![i] = Math.Sqrt(salQ[i] * salQ[i] + salK![i] * salK[i]);
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, h, "attention", "ATTENDS"), salQ!, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+                continue;
+            }
             await foreach (var change in EmitBilinearPairs(
                 Qh, Kh, n, hd, typeId, weight, ents, ents, commitEpoch,
                 new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true,
@@ -374,7 +413,6 @@ public sealed class ModelTokenEdgeETL
 
         var Vraw = new double[(long)n * kvDim];
         var Vexp = new double[(long)n * attn];
-        var OVout = new double[(long)n * d];
         int rcv, rce, rco;
         unsafe
         {
@@ -382,21 +420,61 @@ public sealed class ModelTokenEdgeETL
                 rcv = DynInterop.ProjectEmbedding(pa, (nuint)n, (nuint)d, pw, (nuint)kvDim, pv);
             fixed (double* pv = Vraw) fixed (double* pe = Vexp)
                 rce = DynInterop.ExpandKvHeadsD(pv, (nuint)n, (nuint)H, (nuint)Hkv, (nuint)hd, pe);
-
-            fixed (double* pv = Vexp) fixed (float* pw = Wo) fixed (double* po = OVout)
-                rco = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)attn, pw, (nuint)d, po);
         }
-        if (rcv != 0 || rce != 0 || rco != 0)
-        { _log.LogWarning("phase=edges L{L}: OV projection rc=({A},{B},{C}); skipping", L, rcv, rce, rco); yield break; }
+        if (rcv != 0 || rce != 0)
+        { _log.LogWarning("phase=edges L{L}: OV projection rc=({A},{B}); skipping", L, rcv, rce); yield break; }
 
-        NormRows(OVout, n, d);
+        if (StructureMode)
+        {
+            // Per-head OV occurrences: each head is its own circuit coordinate, and
+            // its salience for token t is the write magnitude ||Wo_h·v_h(t)|| — a
+            // direct read of what the head moves, from the native GEMM output. No
+            // n×n pair tile at rank d (that is the analyzer's petaflop, not the
+            // recorder's). Scores go through the native score law (arena = RMS).
+            var Vh = new double[(long)n * hd];
+            var WoH = new float[(long)d * hd];
+            var OVh = new double[(long)n * d];
+            var sal = new double[n];
+            for (int h = 0; h < H; h++)
+            {
+                ct.ThrowIfCancellationRequested();
+                SliceHead(Vexp, Vh, n, attn, h, hd);
+                for (int row = 0; row < d; row++)
+                    Array.Copy(Wo, (long)row * attn + (long)h * hd, WoH, (long)row * hd, hd);
+                int rcoH;
+                unsafe
+                {
+                    fixed (double* pv = Vh) fixed (float* pw = WoH) fixed (double* po = OVh)
+                        rcoH = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)hd, pw, (nuint)d, po);
+                }
+                if (rcoH != 0)
+                { _log.LogWarning("phase=edges L{L}.H{H2}: OV head projection rc={Rc}; skipping", L, h, rcoH); continue; }
+                RowNorms(OVh, n, d, sal);
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, h, "ov", "OV_RELATES"), sal, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+            }
+            yield break;
+        }
+
         var En = (double[])Ad.Clone();
         NormRows(En, n, d);
-
         var typeId = RelationTypeRegistry.Resolve("OV_RELATES").Id;
         double weight = WeightFor("OV_RELATES");
+
+        var OVfull = new double[(long)n * d];
+        unsafe
+        {
+            fixed (double* pv = Vexp) fixed (float* pw = Wo) fixed (double* po = OVfull)
+                rco = DynInterop.ProjectEmbeddingD(pv, (nuint)n, (nuint)attn, pw, (nuint)d, po);
+        }
+        if (rco != 0)
+        { _log.LogWarning("phase=edges L{L}: OV projection rc={Rc}; skipping", L, rco); yield break; }
+
+        NormRows(OVfull, n, d);
         await foreach (var change in EmitBilinearPairs(
-            OVout, En, n, d, typeId, weight, ents, ents, commitEpoch,
+            OVfull, En, n, d, typeId, weight, ents, ents, commitEpoch,
             new CircuitDescriptor(L, -1, "ov", "OV_RELATES"), sampleForDecoder: true,
             topK: EdgeTopK, reader, options, ct))
             yield return change;
@@ -410,12 +488,91 @@ public sealed class ModelTokenEdgeETL
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
+
+        // MoE layer: the router tensor IS the model's literal token→expert routing
+        // map. One GEMM per layer; each expert is its own coordinate
+        // [expert-plane, layer, expert] taking its top tokens by routing logit.
+        // Expert FFN internals are the analyzer's business.
+        if (StructureMode && cfg.NumExperts > 0)
+        {
+            var routerRole = _manifest.Single(L, TensorRoleKind.MoeRouter);
+            if (routerRole is null)
+            { _log.LogWarning("phase=edges L{L}: MoE layer without router tensor; skipping", L); yield break; }
+            int E = cfg.NumExperts;
+            float[] router;
+            try { router = WeightTensorETL.LoadTensorF32(refMap, routerRole.Name, (long)E * d); }
+            catch (Exception ex)
+            { _log.LogWarning("phase=edges L{L}: router load failed: {Msg}", L, ex.Message); yield break; }
+
+            if (NormFold)
+            {
+                var gPostR = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+                if (gPostR is not null) ScaleCols(router, E, d, gPostR);
+            }
+
+            var proj = new double[(long)n * E];
+            int rcR;
+            unsafe
+            {
+                fixed (double* pa = Ad) fixed (float* pw = router) fixed (double* po = proj)
+                    rcR = DynInterop.ProjectEmbeddingD(pa, (nuint)n, (nuint)d, pw, (nuint)E, po);
+            }
+            if (rcR != 0)
+            { _log.LogWarning("phase=edges L{L}: router projection rc={Rc}; skipping", L, rcR); yield break; }
+
+            var salE = new double[n];
+            for (int e = 0; e < E; e++)
+            {
+                ct.ThrowIfCancellationRequested();
+                for (int i = 0; i < n; i++) salE[i] = proj[(long)i * E + e];
+                await foreach (var change in EmitNormOccurrences(
+                    new CircuitDescriptor(L, e, "expert", "APPEARS_IN"), salE, ents, n,
+                    commitEpoch, reader, options, ct))
+                    yield return change;
+            }
+            yield break;
+        }
+
         var upRole = _manifest.Single(L, TensorRoleKind.MlpUp);
         var downRole = _manifest.Single(L, TensorRoleKind.MlpDown);
         var gateRole = _manifest.Single(L, TensorRoleKind.MlpGate);
         if (upRole is null || downRole is null) yield break;
         int I = cfg.IntermediateSize;
         if (I <= 0) yield break;
+
+        var descriptor = new CircuitDescriptor(L, -1, "mlp", "COMPLETES_TO");
+
+        if (StructureMode)
+        {
+            // MLP occurrences from the token's gated-activation magnitude
+            // ||silu(gate·x)⊙(up·x)|| — native GEMM tiles + the native score law.
+            // The n×n COMPLETES_TO pair tile is the analyzer's business.
+            float[] upF; float[]? gateF = null;
+            try
+            {
+                upF = WeightTensorETL.LoadTensorF32(refMap, upRole.Name, (long)I * d);
+                if (gateRole is not null)
+                    gateF = WeightTensorETL.LoadTensorF32(refMap, gateRole.Name, (long)I * d);
+            }
+            catch (Exception ex)
+            { _log.LogWarning("phase=edges L{L}: MLP load failed: {Msg}", L, ex.Message); yield break; }
+
+            if (NormFold)
+            {
+                var gPostF = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+                if (gPostF is not null)
+                {
+                    ScaleCols(upF, I, d, gPostF);
+                    if (gateF is not null) ScaleCols(gateF, I, d, gPostF);
+                }
+            }
+
+            var sal = ComputeMlpActivationNorms(Ad, n, d, upF, gateF, I, L);
+            if (sal is null) yield break;
+            await foreach (var change in EmitNormOccurrences(descriptor, sal, ents, n, commitEpoch, reader, options, ct))
+                yield return change;
+            yield break;
+        }
 
         double[]? gate = null, up, down;
         try
@@ -440,7 +597,6 @@ public sealed class ModelTokenEdgeETL
 
         var typeId = RelationTypeRegistry.Resolve("COMPLETES_TO").Id;
         double weight = WeightFor("COMPLETES_TO");
-        var descriptor = new CircuitDescriptor(L, -1, "mlp", "COMPLETES_TO");
 
         long cap = (long)RowTile * n;
         var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
@@ -486,6 +642,126 @@ public sealed class ModelTokenEdgeETL
 
         await foreach (var change in EmitClassifyChange(descriptor, collector, commitEpoch, reader, options, ct))
             yield return change;
+    }
+
+    private static void RowNorms(double[] m, int n, int dim, double[] outNorms)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            double s2 = 0; long off = (long)i * dim;
+            for (int c = 0; c < dim; c++) { double v = m[off + c]; s2 += v * v; }
+            outNorms[i] = Math.Sqrt(s2);
+        }
+    }
+
+    // Salience norms → occurrence rows through the NATIVE score law
+    // (NativeAttestation.ScoreFp → score.c); arena = the RMS of the circuit's
+    // salience distribution — the MERGES_WITH arena convention.
+    private async IAsyncEnumerable<SubstrateChange> EmitNormOccurrences(
+        CircuitDescriptor descriptor, double[] sal, List<Hash128> ents, int n, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        double sum2 = 0;
+        for (int i = 0; i < n; i++) sum2 += sal[i] * sal[i];
+        double arena = Math.Sqrt(sum2 / Math.Max(1, n));
+        if (arena <= 0) yield break;
+
+        var idx = new int[n];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        Array.Sort(idx, (a, b) => sal[b].CompareTo(sal[a]));
+        int k = Math.Min(OccurrencesPerCircuit, n);
+        var best = new Dictionary<Hash128, long>(k);
+        for (int j = 0; j < k; j++)
+            best[ents[idx[j]]] = NativeAttestation.ScoreFp(sal[idx[j]], arena);
+
+        await foreach (var change in EmitOccurrenceChange(descriptor, best, commitEpoch, reader, options, ct))
+            yield return change;
+    }
+
+    private double[]? ComputeMlpActivationNorms(
+        double[] Ad, int n, int d, float[] upF, float[]? gateF, int I, int L)
+    {
+        const int TileRows = 1024;
+        var sal = new double[n];
+        var U = new double[(long)TileRows * I];
+        var G = gateF is null ? null : new double[(long)TileRows * I];
+        for (int rb = 0; rb < n; rb += TileRows)
+        {
+            int t = Math.Min(TileRows, n - rb);
+            int rcU, rcG = 0;
+            unsafe
+            {
+                fixed (double* pa = Ad) fixed (float* pw = upF) fixed (double* po = U)
+                    rcU = DynInterop.ProjectEmbeddingD(pa + (long)rb * d, (nuint)t, (nuint)d, pw, (nuint)I, po);
+                if (G is not null)
+                {
+                    fixed (double* pa = Ad) fixed (float* pw = gateF) fixed (double* po = G)
+                        rcG = DynInterop.ProjectEmbeddingD(pa + (long)rb * d, (nuint)t, (nuint)d, pw, (nuint)I, po);
+                }
+            }
+            if (rcU != 0 || rcG != 0)
+            {
+                _log.LogWarning("phase=edges L{L}: MLP activation projection rc=({A},{B}); skipping", L, rcU, rcG);
+                return null;
+            }
+            for (int i = 0; i < t; i++)
+            {
+                double s2 = 0; long off = (long)i * I;
+                for (long c = 0; c < I; c++)
+                {
+                    double u = U[off + c];
+                    double a = G is null ? u : u * Silu(G[off + c]);
+                    s2 += a * a;
+                }
+                sal[rb + i] = Math.Sqrt(s2);
+            }
+        }
+        return sal;
+    }
+
+    // Matches the native FFN tile's activation (ffn_edges.cpp: silu(gate·x)⊙(up·x)).
+    private static double Silu(double x) => x / (1.0 + Math.Exp(-x));
+
+    private async IAsyncEnumerable<SubstrateChange> EmitOccurrenceChange(
+        CircuitDescriptor descriptor, Dictionary<Hash128, long> salience, int commitEpoch,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (salience.Count == 0) yield break;
+        var coord = ModelCoordinates.CoordinateId(descriptor);
+        var top = salience.OrderByDescending(kv => kv.Value)
+                          .Take(OccurrencesPerCircuit).ToList();
+        double weight = WeightFor("APPEARS_IN");
+        bool metaStaged = false;
+        await foreach (var batch in IngestComposePipeline.RunAsync(
+                           EnumerateOccurrenceRecords(top, coord, ct),
+                           (rec, b) =>
+                           {
+                               if (!metaStaged)
+                               {
+                                   ModelCoordinates.StageCoordinate(b, descriptor, _source);
+                                   metaStaged = true;
+                               }
+                               b.AddAttestation(NativeAttestation.Aggregated(
+                                   rec.Token, ModelCoordinates.AppearsInTypeId, rec.Coordinate,
+                                   _source, null, 1, rec.ScoreFp, weight));
+                           },
+                           _source, EdgeBatchLabel(descriptor) + "/occ", AttsPerChange,
+                           reader, options, ct, commitEpoch, AttsPerChange))
+            yield return batch;
+    }
+
+    private static async IAsyncEnumerable<OccurrenceRecord> EnumerateOccurrenceRecords(
+        List<KeyValuePair<Hash128, long>> top, Hash128 coord,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var kv in top)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new OccurrenceRecord(kv.Key, coord, kv.Value);
+        }
+        await Task.CompletedTask;
     }
 
     private static string EdgeBatchLabel(CircuitDescriptor descriptor)

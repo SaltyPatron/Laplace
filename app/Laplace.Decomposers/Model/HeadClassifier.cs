@@ -27,22 +27,13 @@ public sealed class HeadClassifier
 
     private readonly ISubstrateReader _reader;
     private readonly Hash128 _source;
-    private readonly string _modelName;
     private readonly ILogger _log;
 
-    public HeadClassifier(ISubstrateReader reader, Hash128 source, string modelName, ILogger? log = null)
+    public HeadClassifier(ISubstrateReader reader, Hash128 source, ILogger? log = null)
     {
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _source = source;
-        _modelName = modelName;
         _log = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-    }
-
-    public Hash128 CircuitEntityId(CircuitDescriptor c)
-    {
-        string layer = c.Layer >= 0 ? $"L{c.Layer}" : "embed";
-        string head = c.Head >= 0 ? $".H{c.Head}" : "";
-        return Hash128.OfCanonical($"substrate/entity/{_modelName}/circuit/{layer}{head}.{c.Plane}/v1");
     }
 
     public readonly record struct CircuitClassifyRecord(
@@ -87,7 +78,9 @@ public sealed class HeadClassifier
 
         double dominance = best / total;
         double witnessWeight = SourceTrust.AiModelProbe * dominance;
-        var circuit = CircuitEntityId(descriptor);
+        // The circuit COORDINATE (shared content across models) carries the verdict;
+        // this model's vote is just one witness on it via source.
+        var circuit = ModelCoordinates.CoordinateId(descriptor);
 
         _log.LogInformation("decoder-ring: {Plane} L{L}H{H} ENCODES (dominance {Dom:P0}, {N} seed hits)",
             descriptor.Plane, descriptor.Layer, descriptor.Head, dominance, hits.Count);
@@ -97,7 +90,7 @@ public sealed class HeadClassifier
     public static void StageClassifyRecord(
         SubstrateChangeBuilder b, CircuitClassifyRecord rec, Hash128 sourceId)
     {
-        b.AddEntity(rec.CircuitId, EntityTier.Word, ModelCircuitTypeId, firstObservedBy: sourceId);
+        ModelCoordinates.StageCoordinate(b, rec.Descriptor, sourceId);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             rec.CircuitId, EncodesTypeId, rec.WinnerTypeId, sourceId, null, rec.WitnessWeight));
     }

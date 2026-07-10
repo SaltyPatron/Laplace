@@ -32,6 +32,64 @@ symmetry = "asymmetric"
 parent = "RELATED_TO"
 family_root = "RELATED_TO"
 
+# APPEARS_IN: witnessed occurrence of a token inside a model circuit COORDINATE
+# (plane/layer/head — content shared across every ingested model, like a board square).
+# Subject = token content entity, object = coordinate entity, source = the model,
+# score = the token's salience (projection norm) in that circuit's subspace. The
+# consensus cell (token, APPEARS_IN, coord) therefore rates cross-model structural
+# convergence; per-model provenance stays on the evidence rows via source.
+[[relation]]
+canonical = "APPEARS_IN"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "APPEARS_IN"
+
+# Model-recipe scalar relations (ModelDecomposer). Previously minted as raw hashes
+# outside the manifest — the zero-highway-mask governance gap this file's ENCODES
+# comment describes. Scalar-valued: they attach numeric Scalar entities to a recipe.
+[[relation]]
+canonical = "HAS_HIDDEN_SIZE"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_HIDDEN_SIZE"
+
+[[relation]]
+canonical = "HAS_NUM_LAYERS"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NUM_LAYERS"
+
+[[relation]]
+canonical = "HAS_NUM_HEADS"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NUM_HEADS"
+
+[[relation]]
+canonical = "HAS_NUM_KV_HEADS"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NUM_KV_HEADS"
+
+[[relation]]
+canonical = "HAS_INTERMEDIATE_SIZE"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_INTERMEDIATE_SIZE"
+
+[[relation]]
+canonical = "HAS_VOCAB_SIZE"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_VOCAB_SIZE"
+
 [[relation]]
 canonical = "ATTENDS"
 rank = "tensor_calculation"
