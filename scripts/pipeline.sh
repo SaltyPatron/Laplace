@@ -283,60 +283,15 @@ phase_sync_extension() {
 
 phase_tune_pg() {
   echo "===== PHASE — TUNE PG ====="
-  # Sized from the machine, not hardcoded: ~25% RAM shared_buffers, ~65%
-  # effective_cache_size, parallel workers from cores. PG18 async I/O via
-  # io_uring + huge_pages=try (needs vm.nr_hugepages; try degrades quietly).
-  # wal_level=minimal: single-node ingest server, no replicas — bulk COPY
-  # WAL volume drops; flip to replica/logical the day a standby exists.
-  local mem_kb cores pcores pdeg sb ecs mwp avw
-  mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-  cores=$(nproc)
-  # Hybrid-CPU awareness (Intel P/E since Alder Lake, ARM big.LITTLE). nproc counts P-threads
-  # and E-threads as equal — wrong for parallel DEGREE: a worker dragged onto an efficiency
-  # core stalls the whole gather at the slowest participant. Size parallelism to the count of
-  # max-capacity (performance) threads, read from the kernel's cpu_capacity topology. On a
-  # homogeneous CPU (the 6850K exposes no cpu_capacity) every core is max-capacity, so
-  # pcores==nproc and this is a no-op — the 14900KS is where it bites (P-threads only).
-  pcores=$cores
-  if compgen -G "/sys/devices/system/cpu/cpu*/cpu_capacity" >/dev/null 2>&1; then
-    local maxcap
-    maxcap=$(cat /sys/devices/system/cpu/cpu*/cpu_capacity 2>/dev/null | sort -n | tail -1)
-    pcores=$(grep -lxF "$maxcap" /sys/devices/system/cpu/cpu*/cpu_capacity 2>/dev/null | wc -l)
-    (( pcores < 1 )) && pcores=$cores
-  fi
-  pdeg=$(( (pcores + 1) / 2 ))                 # per-gather / per-maintenance degree
-  sb=$(( mem_kb / 4 / 1024 ))MB
-  ecs=$(( mem_kb * 65 / 100 / 1024 ))MB
-  # max_worker_processes is the shared ceiling that parallel query ($pcores), parallel
-  # maintenance, PG18 io_workers, and autovacuum ALL draw from. A hardcoded 32 was wrong in
-  # both directions — oversized on a 12-thread 6850K, and STARVING on a 32-thread 14900KS
-  # (max_parallel_workers==nproc would consume the whole pool, leaving zero slots for
-  # io/autovacuum). Derive it from performance-core parallelism plus io/autovacuum headroom.
-  mwp=$(( pcores + pdeg + 8 ))
-  # autovacuum_max_workers default (3) is thin for 4 bulk-ingest tables under aggressive
-  # per-table analyze thresholds (phase_tune_laplace); scale with total cores, clamp to [3,6].
-  avw=$(( cores / 4 )); (( avw < 3 )) && avw=3; (( avw > 6 )) && avw=6
-  # maintenance_work_mem / work_mem / wal_buffers derived from RAM — the SAME formulas as
-  # MemoryTopology.cs (the canonical .NET authority: RAM/32, RAM/256, RAM/512 with the same
-  # clamps). Kept in bash here because this phase also needs runtime PG introspection
-  # (io_method capability probe below) that the static `cpu-topology --pg-tuning` emitter
-  # cannot do. NO hardcoded GB literals.
-  local mwm wm wb
-  mwm=$(( mem_kb / 32 / 1024 )); (( mwm < 256 )) && mwm=256; (( mwm > 4096 )) && mwm=4096; mwm=${mwm}MB
-  wm=$(( mem_kb / 256 / 1024 )); (( wm < 32 )) && wm=32; (( wm > 512 )) && wm=512; wm=${wm}MB
-  wb=$(( mem_kb / 512 / 1024 )); (( wb < 16 )) && wb=16; (( wb > 1024 )) && wb=1024; wb=${wb}MB
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1     -c "ALTER SYSTEM SET shared_buffers = '$sb'"     -c "ALTER SYSTEM SET effective_cache_size = '$ecs'"     -c "ALTER SYSTEM SET maintenance_work_mem = '$mwm'"     -c "ALTER SYSTEM SET work_mem = '$wm'"     -c "ALTER SYSTEM SET max_wal_size = '32GB'"     -c "ALTER SYSTEM SET min_wal_size = '4GB'"     -c "ALTER SYSTEM SET wal_compression = on"     -c "ALTER SYSTEM SET wal_buffers = '$wb'"     -c "ALTER SYSTEM SET wal_level = minimal"     -c "ALTER SYSTEM SET max_wal_senders = 0"     -c "ALTER SYSTEM SET checkpoint_timeout = '30min'"     -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9"     -c "ALTER SYSTEM SET max_worker_processes = $mwp"     -c "ALTER SYSTEM SET autovacuum_max_workers = $avw"     -c "ALTER SYSTEM SET jit = off"     -c "ALTER SYSTEM SET max_parallel_workers = $pcores"     -c "ALTER SYSTEM SET max_parallel_workers_per_gather = $pdeg"     -c "ALTER SYSTEM SET max_parallel_maintenance_workers = $pdeg"     -c "ALTER SYSTEM SET effective_io_concurrency = 256"     -c "ALTER SYSTEM SET maintenance_io_concurrency = 256"     -c "ALTER SYSTEM SET random_page_cost = 1.1"     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0"     -c "ALTER SYSTEM SET huge_pages = try"     -c "ALTER SYSTEM SET io_workers = $pdeg"     -c "SELECT pg_reload_conf()"
-  # io_uring only exists when PG was built with liburing; fall back to worker.
-  local io
-  io=$(psql -d "$PGDATABASE" -U laplace_admin -tAc     "SELECT CASE WHEN 'io_uring' = ANY(enumvals) THEN 'io_uring' ELSE 'worker' END FROM pg_settings WHERE name = 'io_method'")
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET io_method = $io"
-  echo "tune-pg: io_method=$io"
+  # shellcheck source=scripts/pg-machine-tuning.sh
+  source "$ROOT/scripts/pg-machine-tuning.sh"
+  PG_TUNE_PSQL=(psql -d "${PGDATABASE:-laplace}" -U laplace_admin)
+  pg_apply_machine_tuning
   local pending
-  pending=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
+  pending=$(pg_tune_psql -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart")
   if [[ "$pending" != "0" ]]; then
     restart_postgres "tune-pg: $pending setting(s) pending"
   fi
-  echo "tune-pg: shared_buffers=$sb effective_cache_size=$ecs maintenance_work_mem=$mwm work_mem=$wm wal_buffers=$wb cores=$cores pcores=$pcores pdeg=$pdeg max_worker_processes=$mwp autovacuum_max_workers=$avw jit=off"
 }
 
 phase_tune_laplace() {
