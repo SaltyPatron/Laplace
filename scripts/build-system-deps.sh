@@ -75,15 +75,19 @@ installs_present() {
 }
 
 run_as_builder() {
+  local cmd="$*"
   if [ "$(id -u)" -eq 0 ] && id -u "$RUN_AS" >/dev/null 2>&1; then
-    # PTY so ExternalProject/make stream under sudo -u (no TTY otherwise).
+    # laplace-runner is nologin. `script -c` runs via $SHELL/pw_shell — without
+    # SHELL=/bin/bash that prints "This account is currently not available."
+    # PTY still wanted so ExternalProject/make stream under sudo -u.
     if command -v script >/dev/null 2>&1; then
-      sudo -u "$RUN_AS" -H PATH="$PATH" script -qefc "$*" /dev/null
+      sudo -u "$RUN_AS" -H env SHELL=/bin/bash PATH="$PATH" \
+        script -qefc "$cmd" /dev/null
     else
-      sudo -u "$RUN_AS" -H PATH="$PATH" stdbuf -oL -eL bash -c "$*" 2>&1
+      sudo -u "$RUN_AS" -H PATH="$PATH" stdbuf -oL -eL /bin/bash -c "$cmd"
     fi
   else
-    bash -c "$*" 2>&1
+    /bin/bash -c "$cmd"
   fi
 }
 
