@@ -61,6 +61,7 @@ must `call` it first, as above.
 | Task | Command |
 |------|---------|
 | Full host bring-up (once) | `sudo bash scripts/setup-host.sh` |
+| Vendor deps rebuild | `bash scripts/build-system-deps.sh` (no-op if stamp matches; `LAPLACE_FORCE_DEPS=1` to force) |
 | CI / ongoing deploy | push to main → `laplace.yml` → `scripts/pipeline.sh` |
 | Manual publish | `bash scripts/pipeline.sh publish` |
 

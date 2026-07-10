@@ -40,9 +40,10 @@ setup-host-reset:
 submodule-sanity:
     @scripts/normalize-submodule-attributes.sh
 
+# Fingerprinted vendor deps (proj/geos/gdal/pg/postgis/…). No-op unless pins change.
+# Force: LAPLACE_FORCE_DEPS=1 just build-deps
 build-deps: submodule-sanity
-    cmake -B build/deps -S external -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL="{{env_var_or_default('LAPLACE_EXTERNAL', '/opt/laplace/external')}}"
-    umask 0002 && cmake --build build/deps -j
+    bash scripts/build-system-deps.sh
 
 verify-deps:
     @chmod +x scripts/verify-pg-postgis.sh

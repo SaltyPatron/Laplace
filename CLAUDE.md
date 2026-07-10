@@ -239,8 +239,9 @@ Two toolchains, not interchangeable:
 | Task | Entry point |
 |------|-------------|
 | Full host bring-up | `sudo bash scripts/setup-host.sh` (runner, PG, nginx, chess-lab, secrets from `~/.config/shell/secrets.env`, migrations) |
+| Vendor deps (pg/postgis/gdal/…) | `scripts/build-system-deps.sh` — fingerprinted; skips unless pins/CMakeLists/ISA change. Force: `LAPLACE_FORCE_DEPS=1`. Do not wipe `/opt/laplace/build/deps` casually. |
 | CI build/deploy/publish | `scripts/pipeline.sh` (invoked by `laplace.yml`; `publish` = chess + secrets + API/SPA/uci) |
-| Convenience aliases | `Justfile` → `setup-host` / `publish` only; may drift — trust the scripts |
+| Convenience aliases | `Justfile` → `setup-host` / `publish` / `build-deps`; may drift — trust the scripts |
 
 - **Never invoke `scripts/win/*.cmd` through PowerShell** (confirmed pwsh .cmd-launch
   regression). Use Bash: `cmd //c "scripts\\win\\seed-step.cmd wordnet"`.

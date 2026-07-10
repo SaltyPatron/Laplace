@@ -88,27 +88,13 @@ layer1_status() {
 
 layer0_5_build_deps() {
     say "Layer 0.5 — sync external + build vendor deps into /opt/laplace"
-    local ext="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
-    local deps_build_dir="/opt/laplace/build/deps"
     if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
         bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
     fi
-    sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
-    # Must match CI: SOURCE_DIR=/opt/laplace/external (laplace-runner-owned).
-    # Live logs under sudo -u (no TTY): merge stderr + line-buffer. ExternalProject
-    # also needs USES_TERMINAL_* in external/CMakeLists.txt or child builds stay silent.
-    echo "==== cmake configure $deps_build_dir (LAPLACE_EXTERNAL=$ext) ===="
-    sudo -u "$RUNNER_USER" -H PATH="$PATH" \
-      stdbuf -oL -eL \
-      cmake -B "$deps_build_dir" -S "$REPO_DIR/external" \
-        -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL="$ext" \
-      2>&1
-    echo "==== cmake --build $deps_build_dir -j (long; live output) ===="
-    sudo -u "$RUNNER_USER" -H PATH="$PATH" \
-      stdbuf -oL -eL \
-      cmake --build "$deps_build_dir" -j \
-      2>&1
-    green "✓ Vendor deps built into /opt/laplace"
+    # Fingerprinted: skips cmake when /opt/laplace/external pins + CMakeLists + ISA
+    # match the stamp and install artifacts exist. Force: LAPLACE_FORCE_DEPS=1.
+    # NEVER wipe /opt/laplace/build/deps unless forcing a clean rebuild.
+    bash "$REPO_DIR/scripts/build-system-deps.sh"
 }
 
 layer1_build_install_extensions() {

@@ -57,6 +57,9 @@ set(_COMMON_CMAKE_ARGS
 )
 
 ExternalProject_Add(proj
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/proj"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/proj-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/proj"
@@ -67,13 +70,12 @@ ExternalProject_Add(proj
         "-DENABLE_TIFF=ON"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(geos
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/geos"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/geos-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/geos"
@@ -83,13 +85,12 @@ ExternalProject_Add(geos
         "-DCMAKE_INSTALL_RPATH=${LAPLACE_DEPS_PREFIX}/geos/lib"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(gdal
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/gdal"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/gdal-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/gdal"
@@ -105,13 +106,12 @@ ExternalProject_Add(gdal
         "-DGDAL_USE_INTERNAL_LIBS=WHEN_NO_EXTERNAL"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(tree-sitter
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/tree-sitter"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/tree-sitter"
     BUILD_IN_SOURCE 1
@@ -123,13 +123,12 @@ ExternalProject_Add(tree-sitter
         "PREFIX=<INSTALL_DIR>"
     INSTALL_COMMAND
         make install "PREFIX=<INSTALL_DIR>"
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(postgresql
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/postgresql"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/postgresql-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
@@ -151,10 +150,6 @@ ExternalProject_Add(postgresql
             COMMAND env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS MAKELEVEL=0 make install
             COMMAND env -u PGXS MAKELEVEL=0 make -C contrib install
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 set(_POSTGIS_LDFLAGS
@@ -163,6 +158,9 @@ set(_POSTGIS_LDFLAGS
 -L${LAPLACE_DEPS_PREFIX}/gdal/lib -Wl,-rpath,${LAPLACE_DEPS_PREFIX}/gdal/lib")
 
 ExternalProject_Add(postgis
+    ${_LAPLACE_EP_TERMINAL}
+    UPDATE_DISCONNECTED TRUE
+
     SOURCE_DIR  "${LAPLACE_EXTERNAL}/postgis"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
     DEPENDS     postgresql geos proj gdal
@@ -200,10 +198,6 @@ ExternalProject_Add(postgis
     COMMAND ${CMAKE_COMMAND} -E copy
             "<SOURCE_DIR>/liblwgeom/.libs/liblwgeom.a"
             "${LAPLACE_DEPS_PREFIX}/pgsql-18/lib/liblwgeom.a"
-    
-
-    \n
-    ${_LAPLACE_EP_TERMINAL}
 )
 
 add_custom_target(deps ALL

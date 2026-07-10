@@ -173,10 +173,11 @@ jobs:
           done
           scripts/sync-external.sh
 
-      - name: Build system deps (ExternalProject — idempotent)
+      - name: Build system deps (fingerprinted — skip unless pins change)
         run: |
-          cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-          umask 0002 && cmake --build build/deps -j
+          # Stamp + installs live under /opt/laplace; LAPLACE_FORCE_DEPS=1 to rebuild.
+          umask 0002
+          bash scripts/build-system-deps.sh
 
       - name: Verify installed dep artifacts
         run: |
