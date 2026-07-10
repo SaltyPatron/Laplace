@@ -86,31 +86,40 @@ layer1_status() {
         || yellow "(database not yet present; run setup)"
 }
 
+layer0_5_build_deps() {
+    say "Layer 0.5 — sync external + build vendor deps into /opt/laplace"
+    local ext="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
+    local deps_build_dir="/opt/laplace/build/deps"
+    if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
+        bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
+    fi
+    sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
+    # Must match CI: SOURCE_DIR=/opt/laplace/external (laplace-runner-owned).
+    # Live logs under sudo -u (no TTY): merge stderr + line-buffer. ExternalProject
+    # also needs USES_TERMINAL_* in external/CMakeLists.txt or child builds stay silent.
+    echo "==== cmake configure $deps_build_dir (LAPLACE_EXTERNAL=$ext) ===="
+    sudo -u "$RUNNER_USER" -H PATH="$PATH" \
+      stdbuf -oL -eL \
+      cmake -B "$deps_build_dir" -S "$REPO_DIR/external" \
+        -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL="$ext" \
+      2>&1
+    echo "==== cmake --build $deps_build_dir -j (long; live output) ===="
+    sudo -u "$RUNNER_USER" -H PATH="$PATH" \
+      stdbuf -oL -eL \
+      cmake --build "$deps_build_dir" -j \
+      2>&1
+    green "✓ Vendor deps built into /opt/laplace"
+}
+
 layer1_build_install_extensions() {
     say "Layer 1 — Build + install laplace_geom + laplace_substrate extensions"
     (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DLAPLACE_INSTALL_STAGED=ON \
         -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
-        -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" | tail -3)
-    (cd "$REPO_DIR" && cmake --build build | tail -3)
-    (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" | tail -3)
+        -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}") 2>&1
+    (cd "$REPO_DIR" && cmake --build build) 2>&1
+    (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}") 2>&1
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-}
-
-layer0_5_build_deps() {
-    say "Layer 0.5 — sync external + build vendor deps into /opt/laplace"
-    if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
-        bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
-    fi
-    local deps_build_dir="/opt/laplace/build/deps"
-    sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
-    sudo -u "$RUNNER_USER" -H \
-        PATH="$PATH" \
-        bash -c "cd '$REPO_DIR' && cmake -B '$deps_build_dir' -S external" 2>&1 | tail -5
-    sudo -u "$RUNNER_USER" -H \
-        PATH="$PATH" \
-        bash -c "cd '$REPO_DIR' && cmake --build '$deps_build_dir' -j" 2>&1 | tail -10
-    green "✓ Vendor deps built into /opt/laplace"
 }
 
 do_setup() {

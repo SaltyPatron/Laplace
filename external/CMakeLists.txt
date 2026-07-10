@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.22)
 project(laplace-deps LANGUAGES NONE)
 
 include(ExternalProject)
+# Stream ExternalProject logs to the console (non-TTY / sudo -u otherwise silent).
+set(_LAPLACE_EP_TERMINAL
+    USES_TERMINAL_DOWNLOAD TRUE
+    USES_TERMINAL_UPDATE TRUE
+    USES_TERMINAL_PATCH TRUE
+    USES_TERMINAL_CONFIGURE TRUE
+    USES_TERMINAL_BUILD TRUE
+    USES_TERMINAL_INSTALL TRUE
+)
 include(ProcessorCount)
 
 set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH
@@ -58,6 +67,10 @@ ExternalProject_Add(proj
         "-DENABLE_TIFF=ON"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(geos
@@ -70,6 +83,10 @@ ExternalProject_Add(geos
         "-DCMAKE_INSTALL_RPATH=${LAPLACE_DEPS_PREFIX}/geos/lib"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(gdal
@@ -88,6 +105,10 @@ ExternalProject_Add(gdal
         "-DGDAL_USE_INTERNAL_LIBS=WHEN_NO_EXTERNAL"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(tree-sitter
@@ -102,6 +123,10 @@ ExternalProject_Add(tree-sitter
         "PREFIX=<INSTALL_DIR>"
     INSTALL_COMMAND
         make install "PREFIX=<INSTALL_DIR>"
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 ExternalProject_Add(postgresql
@@ -126,6 +151,10 @@ ExternalProject_Add(postgresql
             COMMAND env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS MAKELEVEL=0 make install
             COMMAND env -u PGXS MAKELEVEL=0 make -C contrib install
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 set(_POSTGIS_LDFLAGS
@@ -171,6 +200,10 @@ ExternalProject_Add(postgis
     COMMAND ${CMAKE_COMMAND} -E copy
             "<SOURCE_DIR>/liblwgeom/.libs/liblwgeom.a"
             "${LAPLACE_DEPS_PREFIX}/pgsql-18/lib/liblwgeom.a"
+    
+
+    \n
+    ${_LAPLACE_EP_TERMINAL}
 )
 
 add_custom_target(deps ALL

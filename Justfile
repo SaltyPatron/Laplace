@@ -41,7 +41,7 @@ submodule-sanity:
     @scripts/normalize-submodule-attributes.sh
 
 build-deps: submodule-sanity
-    cmake -B build/deps -S external
+    cmake -B build/deps -S external -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL="{{env_var_or_default('LAPLACE_EXTERNAL', '/opt/laplace/external')}}"
     umask 0002 && cmake --build build/deps -j
 
 verify-deps:

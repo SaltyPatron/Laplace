@@ -15,9 +15,9 @@ name: Laplace — build, deploy, test
 # substrate. This order keeps that gate valid on the fresh_db path too.
 
 on:
+  # Main only — PRs must not burn the self-hosted runner. Manual re-runs via
+  # workflow_dispatch. Merge-to-main is the gate.
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -132,8 +132,6 @@ jobs:
           exit "$violations"
 
   deps:
-    # Runs on pull_request too: the PR gate must exercise the same build the
-    # merge will run, or merges land blind and main becomes the test bench.
     name: Runner capabilities + system deps (no-op when current)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
@@ -247,7 +245,6 @@ jobs:
 
   deploy:
     name: Deploy — stage install to /opt/laplace
-    if: github.event_name != 'pull_request'
     needs: unit-test
     runs-on: [self-hosted, laplace]
     timeout-minutes: 15
@@ -264,7 +261,6 @@ jobs:
 
   db-ops:
     name: DB — migrate, extension sync, perfcache GUC
-    if: github.event_name != 'pull_request'
     needs: deploy
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
@@ -283,7 +279,6 @@ jobs:
 
   integration-test:
     name: Integration tests — pg_regress || dotnet (parallel)
-    if: github.event_name != 'pull_request'
     needs: db-ops
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
@@ -342,7 +337,6 @@ jobs:
 
   seed:
     name: Seed — foundation ladder (idempotent, no-op when present)
-    if: github.event_name != 'pull_request'
     needs: integration-test
     runs-on: [self-hosted, laplace]
     timeout-minutes: 240
@@ -361,7 +355,6 @@ jobs:
 
   publish:
     name: Publish — API + SPA, restart service
-    if: github.event_name != 'pull_request'
     needs: seed
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
@@ -399,7 +392,6 @@ jobs:
 
   smoke:
     name: Smoke — live endpoint + substrate counts
-    if: github.event_name != 'pull_request'
     needs: publish
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
@@ -428,7 +420,7 @@ jobs:
 
   restore-api:
     name: Restore API (always — even after failed stages)
-    if: always() && github.event_name != 'pull_request' && needs.deploy.result != 'skipped'
+    if: always() && needs.deploy.result != 'skipped'
     needs: [deploy, publish, seed, smoke]
     runs-on: [self-hosted, laplace]
     timeout-minutes: 10

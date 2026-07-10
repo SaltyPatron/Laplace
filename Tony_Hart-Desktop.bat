@@ -1,8 +1,22 @@
 @echo off
 rem Tony_Hart-Desktop — local Hart-Desktop pipeline (localhost Postgres + IIS).
-rem Run from an elevated cmd.exe if you need tune-pg restart / deploy-api.
+rem Self-elevates so tune-pg can restart Postgres and deploy-api can recycle IIS.
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
+
+rem Double-click / unelevated → UAC relaunch as Administrator, then continue.
+net session >nul 2>&1
+if errorlevel 1 (
+  echo Elevating for Postgres restart / IIS deploy...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Start-Process -LiteralPath '%~f0' -WorkingDirectory (Split-Path -LiteralPath '%~f0') -Verb RunAs"
+  if errorlevel 1 (
+    echo Elevation failed or denied.
+    pause
+    exit /b 1
+  )
+  exit /b 0
+)
 
 set "LAPLACE_PGHOST=localhost"
 set "LAPLACE_ENV_LOADED="
@@ -40,11 +54,13 @@ call :run_args seed-step "opensubtitles" "" opensubtitles || goto :fail
 
 echo.
 echo ===== Tony_Hart-Desktop OK %DATE% %TIME% =====
+pause
 exit /b 0
 
 :fail
 echo.
 echo ===== Tony_Hart-Desktop FAILED at !LAST_STEP! — see %OUT%\!LAST_LOG!.log =====
+pause
 exit /b 1
 
 :run
