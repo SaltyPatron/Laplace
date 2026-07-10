@@ -19,6 +19,16 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// whatever a crash left journaled and runs before any cycling decision.
 /// Only plain secondary indexes cycle — PK/unique/exclusion constraints
 /// stay (verification probes and merge lanes depend on them).
+///
+/// Concurrent CREATE INDEX is forbidden here. 2026-07-10 evidence: FinishAsync /
+/// RecoverAsync previously ran up to ApplyParallelism connections, each with
+/// full MemoryTopology.MaintenanceWorkMemBytes and ParallelMaintenanceWorkers,
+/// while shared_buffers was ~25% of RAM. Two multi-GB builds
+/// (attestations_relation_btree + consensus_object_btree) overlapped, spilled
+/// many 1 GiB temp filesets, then a backend ACCESS_VIOLATIONed in
+/// VCRUNTIME140.dll (1.6 GiB minidump) and tore the postmaster off SCM.
+/// Parallelism belongs INSIDE one CREATE INDEX (max_parallel_maintenance_workers),
+/// not across multiple CREATE INDEX sessions.
 /// </summary>
 internal sealed class NpgsqlIndexCycle
 {
@@ -27,6 +37,9 @@ internal sealed class NpgsqlIndexCycle
     private readonly List<(string Name, string Def)> _dropped = new();
 
     public static readonly bool Enabled = true;
+
+    /// <summary>Hard cap: one CREATE INDEX session at a time (see class note).</summary>
+    private const int MaxConcurrentIndexBuilds = 1;
 
     /// <summary>Cycle when staged rows ≥ this (absolute). The run-scoped cycle
     /// drops once and rebuilds once at run end, so a bulk source cycles even as
@@ -39,6 +52,17 @@ internal sealed class NpgsqlIndexCycle
         _ds = ds;
         _log = log;
     }
+
+    /// <summary>
+    /// Per-connection GUCs for one index build. Outer concurrency is
+    /// <see cref="MaxConcurrentIndexBuilds"/>; inner parallel workers stay on
+    /// for a single sort-based build, with maintenance_work_mem left at the
+    /// topology value because only one build runs at a time.
+    /// </summary>
+    private static string IndexBuildGucs() =>
+        "SET search_path = laplace, public; "
+        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
+        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
 
     public static async Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
     {
@@ -53,12 +77,8 @@ internal sealed class NpgsqlIndexCycle
         }
         if (pending.Count == 0) return;
 
-        // Recovery rebuilds every index a crashed run left dropped, on the FULL table,
-        // BEFORE any ingest can start. Doing it serially on one connection made post-crash
-        // startup take as long as the crash itself. Parallelize exactly like the normal
-        // rebuild path (RebuildAsync below): one connection per worker, same maintenance
-        // GUCs, up to ApplyParallelism concurrent builds.
-        int workers = Math.Min(pending.Count, NpgsqlSubstrateWriter.ApplyParallelism);
+        // Serial rebuild only — see class note on the 2026-07-10 VCRUNTIME crash.
+        int workers = Math.Min(pending.Count, MaxConcurrentIndexBuilds);
         int next = -1;
         await Laplace.Engine.Core.CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
         {
@@ -70,13 +90,7 @@ internal sealed class NpgsqlIndexCycle
                 await using var conn = await ds.OpenConnectionAsync(token);
                 await using (var guc = conn.CreateCommand())
                 {
-                    // search_path: journaled defs from pg_get_indexdef leave function
-                    // references (e.g. laplace_highway_mask_bits in the highway GIN)
-                    // unqualified — without laplace on the path the rebuild fails.
-                    guc.CommandText =
-                        "SET search_path = laplace, public; "
-                        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
-                        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
+                    guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 await using (var mk = conn.CreateCommand())
@@ -162,14 +176,14 @@ internal sealed class NpgsqlIndexCycle
         return _dropped.Count > 0;
     }
 
-    /// <summary>Rebuilds every dropped index — one connection per index,
-    /// parallel maintenance workers inside each build.</summary>
+    /// <summary>Rebuilds every dropped index — one CREATE INDEX at a time.
+    /// Parallel maintenance workers run inside that single build only.</summary>
     public async Task FinishAsync(CancellationToken ct)
     {
         if (_dropped.Count == 0) return;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        int workers = Math.Min(_dropped.Count, NpgsqlSubstrateWriter.ApplyParallelism);
+        int workers = Math.Min(_dropped.Count, MaxConcurrentIndexBuilds);
         int next = -1;
         await Laplace.Engine.Core.CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
         {
@@ -181,12 +195,7 @@ internal sealed class NpgsqlIndexCycle
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 await using (var guc = conn.CreateCommand())
                 {
-                    // search_path: same reason as RecoverAsync — unqualified function
-                    // references in journaled index defs.
-                    guc.CommandText =
-                        "SET search_path = laplace, public; "
-                        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
-                        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
+                    guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 await using (var mk = conn.CreateCommand())

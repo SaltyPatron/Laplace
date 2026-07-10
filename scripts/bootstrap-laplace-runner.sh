@@ -49,17 +49,17 @@ usage() {
     cat <<EOF
 Usage: $0 <mode>
 
-Modes:
-  bootstrap   Idempotent Layer-0 set-up (default if no mode given).
-              Invoked by scripts/setup-host.sh — do not invent parallel entry points.
-              Account, runner, PG, /opt/laplace, API systemd+nginx, chess-lab
-              packages/build, operator secrets → /opt/laplace/secrets/.
-  status      Print current state (no changes)
-  stripe      Write Stripe sandbox env block into runner .env
-  reset       Tear down everything this script created (type RESET)
+Internal Layer-0 implementation — humans run: sudo bash scripts/setup-host.sh
 
-After bootstrap, scripts/setup-host.sh continues Layer 0.5 + 1.
-CI thereafter: .github/workflows/laplace.yml → scripts/pipeline.sh
+Modes:
+  prefix      Account + apt + /opt/laplace dirs only (setup-host runs this
+              before vendor deps so pgsql-18 exists for full bootstrap)
+  bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
+  status      Print current state (no changes)
+  stripe      Stripe sandbox block into runner .env
+  reset       Tear down (type RESET)
+
+CI: .github/workflows/laplace.yml → scripts/pipeline.sh
 EOF
 }
 
@@ -111,8 +111,13 @@ bootstrap_build_environment() {
         libsqlite3-dev libtiff-dev libcurl4-openssl-dev \
         libpcre2-dev libgeotiff-dev libpng-dev libwebp-dev \
         libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \
+        nginx \
+        stockfish \
+        qt6-base-dev qt6-base-dev-tools \
+        libqt6svg6-dev libqt6core5compat6-dev \
+        libqt6svg6 libqt6core5compat6 \
         >/dev/null
-    green "✓ Build-deps apt packages present"
+    green "✓ Build-deps + nginx + chess-lab apt packages present"
 
     mkdir -p /opt/laplace
     chown "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
@@ -1105,22 +1110,16 @@ do_bootstrap() {
 
     echo
     green "===== LAYER 0 BOOTSTRAP COMPLETE ====="
-    echo
-    echo "Layer 0 (this script) is done."
-    echo
-    echo "Layer 1 (database + extensions + schema) — run from the repo root:"
-    echo "  just db-up         # EnsureDatabase('laplace') + apply migrations"
-    echo "                     # → CREATE EXTENSION postgis + laplace, role grants"
-    echo "                     # → substrate schema flows in via the extension"
-    echo
-    echo "Layer 2 (CI verification) — push to main, or:"
-    echo "  gh workflow run laplace.yml"
-    echo
-    echo "Layer 1 reset (start fresh without touching Layer 0):"
-    echo "  just db-nuke       # DROP DATABASE laplace, re-create empty"
-    echo
-    echo "Full reset (undo Layer 0):"
-    echo "  sudo $0 reset"
+    echo "Continue via: sudo bash scripts/setup-host.sh   (Layer 0.5 + 1)"
+    echo "Or if setup-host already running: it continues automatically."
+}
+
+do_prefix() {
+    require_root
+    bootstrap_user
+    bootstrap_build_environment
+    bootstrap_external_dirs
+    green "===== PREFIX READY (/opt/laplace + apt) — next: vendor deps, then full bootstrap ====="
 }
 
 do_stripe() {
@@ -1182,6 +1181,9 @@ bootstrap_chess_lab() {
 }
 
 case "$MODE" in
+    prefix)
+        do_prefix
+        ;;
     bootstrap)
         require_root
         do_bootstrap

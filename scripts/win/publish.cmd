@@ -68,11 +68,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$uci = Start-Process -FilePath 'dotnet' -ArgumentList $uciArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $uciLog -RedirectStandardError ($uciLog+'.err');" ^
   "$migArgs = @('publish','app\Laplace.Migrations\Laplace.Migrations.csproj','-c',$cfg,'-o',$migOut);" ^
   "$mig = Start-Process -FilePath 'dotnet' -ArgumentList $migArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $migLog -RedirectStandardError ($migLog+'.err');" ^
-  "Wait-Process -Id $web.Id,$uci.Id,$mig.Id;" ^
+  "foreach ($p in @($web,$uci,$mig)) { $null = $p.WaitForExit(); $p.Refresh() };" ^
+  "$fail=$false;" ^
   "foreach ($pair in @(@('web',$webLog,$web),@('uci',$uciLog,$uci),@('migrations',$migLog,$mig))) {" ^
   "  Write-Host ('---- '+$pair[0]+' ----'); Get-Content $pair[1],($pair[1]+'.err') -ErrorAction SilentlyContinue;" ^
-  "  if ($pair[2].ExitCode -ne 0) { Write-Host ('FAIL '+$pair[0]+' rc='+$pair[2].ExitCode); exit 1 }" ^
-  "}; exit 0"
+  "  $rc = $pair[2].ExitCode; if ($null -eq $rc) { $rc = -1 };" ^
+  "  if ($rc -ne 0) { Write-Host ('FAIL '+$pair[0]+' rc='+$rc); $fail=$true }" ^
+  "}; if ($fail) { exit 1 }; exit 0"
 if errorlevel 1 (
   echo [publish] parallel web/UCI/migrations FAILED
   exit /b 1
@@ -111,12 +113,21 @@ for %%D in (core dynamics synthesis) do (
   copy /y "%LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll" "%PUBLISH_OUT%\" >nul
 )
 
-echo ==== [5/5] verify ====
+echo ==== [5/6] inject chess-lab + lichess + api env into web.config ====
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0inject-iis-env.ps1" ^
+  -WebConfigPath "%PUBLISH_OUT%\web.config" -RepoRoot "%LAPLACE_ROOT%"
+if errorlevel 1 (
+  echo [publish] inject-iis-env FAILED
+  exit /b 1
+)
+
+echo ==== [6/6] verify ====
 call :require_file "%PUBLISH_OUT%\Laplace.Endpoints.OpenAICompat.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\Laplace.Core.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\Laplace.Chess.dll" || exit /b 1
 call :require_file "%PUBLISH_OUT%\Laplace.Substrate.dll" || exit /b 1
 call :require_file "%LAPLACE_PUBLISH_MIGRATIONS%\Laplace.Migrations.dll" || exit /b 1
+call :require_file "%PUBLISH_OUT%\web.config" || exit /b 1
 
 echo.
 echo [publish] OK

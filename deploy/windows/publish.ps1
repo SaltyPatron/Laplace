@@ -77,44 +77,8 @@ foreach ($n in $natives) {
 }
 
 Write-Host "==> [4/6] inject env config into web.config" -ForegroundColor Cyan
-$webConfig = Join-Path $stage "web.config"
-[xml]$xml = Get-Content $webConfig
-$aspNetCore = $xml.SelectSingleNode("//aspNetCore")
-if (-not $aspNetCore) { throw "web.config has no <aspNetCore> (not an in-process publish?)" }
-$envNode = $aspNetCore.SelectSingleNode("environmentVariables")
-if ($envNode) { [void]$aspNetCore.RemoveChild($envNode) }
-$envNode = $xml.CreateElement("environmentVariables")
-$envVars = [ordered]@{}
-$chessLabEnv = Join-Path $RepoRoot "deploy\secrets\chess-lab.env"
-$lichessEnv = Join-Path $RepoRoot "deploy\secrets\lichess.env"
-# laplace-uci is NOT configured here — ChessLabPaths resolves InstallRoot\laplace-uci.exe.
-$skipChessLabKeys = [System.Collections.Generic.HashSet[string]]::new(
-  [StringComparer]::OrdinalIgnoreCase
-)
-[void]$skipChessLabKeys.Add('LAPLACE_UCI')
-foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv)) {
-  if (-not (Test-Path $file)) {
-    if ($file -eq $chessLabEnv) { Write-Warning "No $chessLabEnv — cutechess/stockfish/qt must be set for chess lab gauntlets." }
-    if ($file -eq $lichessEnv) { Write-Warning "No $lichessEnv — set LICHESS_API for Lichess connectivity." }
-    continue
-  }
-  Get-Content $file | ForEach-Object {
-    $line = $_.Trim()
-    if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
-      $k, $v = $line -split "=", 2
-      $k = $k.Trim()
-      if ($skipChessLabKeys.Contains($k)) { return }
-      if (-not $envVars.Contains($k)) { $envVars[$k] = $v.Trim() }
-    }
-  }
-}
-foreach ($entry in $envVars.GetEnumerator()) {
-  $e = $xml.CreateElement("environmentVariable")
-  $e.SetAttribute("name", $entry.Key); $e.SetAttribute("value", $entry.Value)
-  [void]$envNode.AppendChild($e)
-}
-[void]$aspNetCore.AppendChild($envNode)
-$xml.Save($webConfig)
+& "$RepoRoot\scripts\win\inject-iis-env.ps1" -WebConfigPath (Join-Path $stage "web.config") -RepoRoot $RepoRoot -EnvFile $EnvFile
+if ($LASTEXITCODE) { throw "inject-iis-env failed" }
 
 Write-Host "==> [5/6] sync staging -> $OutDir" -ForegroundColor Cyan
 New-Item -ItemType Directory $OutDir -Force | Out-Null

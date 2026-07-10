@@ -1,13 +1,49 @@
+# Laplace geom — Windows builds liblwgeom from external/postgis with real GEOS+PROJ
+# from LAPLACE_DEPS_PREFIX (scripts/win/build-deps.cmd). Linux links the prebuilt
+# liblwgeom.a from just build-deps (/opt/laplace). Same external/ sources either way.
+
 if(WIN32)
+    if(NOT LAPLACE_DEPS_PREFIX)
+        if(DEFINED ENV{LAPLACE_DEPS_PREFIX})
+            set(LAPLACE_DEPS_PREFIX "$ENV{LAPLACE_DEPS_PREFIX}")
+        else()
+            set(LAPLACE_DEPS_PREFIX "D:/Data/Laplace/deps")
+        endif()
+    endif()
+    set(LAPLACE_DEPS_PREFIX "${LAPLACE_DEPS_PREFIX}" CACHE PATH
+        "Windows install prefix for geos/proj/gdal from scripts/win/build-deps.cmd")
+
+    set(_geos_inc "${LAPLACE_DEPS_PREFIX}/geos/include")
+    set(_geos_libdir "${LAPLACE_DEPS_PREFIX}/geos/lib")
+    set(_proj_inc "${LAPLACE_DEPS_PREFIX}/proj/include")
+    set(_proj_libdir "${LAPLACE_DEPS_PREFIX}/proj/lib")
+
+    if(NOT EXISTS "${_geos_inc}/geos_c.h")
+        message(FATAL_ERROR
+            "laplace_geom: missing ${_geos_inc}/geos_c.h — run scripts\\win\\build-deps.cmd "
+            "(builds external/geos into ${LAPLACE_DEPS_PREFIX}).")
+    endif()
+    if(NOT EXISTS "${_proj_inc}/proj.h")
+        message(FATAL_ERROR
+            "laplace_geom: missing ${_proj_inc}/proj.h — run scripts\\win\\build-deps.cmd "
+            "(builds external/proj into ${LAPLACE_DEPS_PREFIX}).")
+    endif()
+
+    find_library(LAPLACE_LIBGEOS_C NAMES geos_c HINTS "${_geos_libdir}" NO_DEFAULT_PATH REQUIRED)
+    find_library(LAPLACE_LIBGEOS NAMES geos HINTS "${_geos_libdir}" NO_DEFAULT_PATH REQUIRED)
+    find_library(LAPLACE_LIBPROJ NAMES proj HINTS "${_proj_libdir}" NO_DEFAULT_PATH REQUIRED)
+    find_library(LAPLACE_LIBSQLITE3 NAMES sqlite3 HINTS "${LAPLACE_DEPS_PREFIX}/sqlite/lib" NO_DEFAULT_PATH REQUIRED)
+
     set(POSTGIS_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/postgis")
     set(LWGEOM_DIR "${POSTGIS_SRCDIR}/liblwgeom")
-    set(PROJ_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/proj")
 
     set(POSTGIS_MAJOR_VERSION 3)
     set(POSTGIS_MINOR_VERSION 6)
     set(POSTGIS_MICRO_VERSION 3)
     set(POSTGIS_LIB_VERSION "3.6.3")
-    set(POSTGIS_GEOS_VERSION "")
+    # external/geos Version.txt = 3.12.2 → 31202; external/proj = 9.4.1 → 90401
+    set(POSTGIS_GEOS_VERSION 31202)
+    set(POSTGIS_PROJ_VERSION 90401)
     set(POSTGIS_PGSQL_VERSION 180)
     set(SRID_MAX 999999)
     set(SRID_USR_MAX 998999)
@@ -39,22 +75,26 @@ if(WIN32)
         lwout_encoded_polyline.c lwgeom_debug.c
         lwunionfind.c effectivearea.c lwchaikins.c lwmval.c lwkmeans.c
         varint.c lwgeom_remove_irrelevant_points_for_view.c
+        # GEOS + PROJ — same objects PostGIS liblwgeom Makefile.in builds
+        lwgeom_geos.c lwgeom_geos_clean.c lwgeom_geos_cluster.c
+        lwgeom_geos_node.c lwgeom_geos_split.c
+        lwspheroid.c lwgeom_transform.c
     )
     set(_lwgeom_srcs "")
     foreach(_s IN LISTS LWGEOM_CORE_SOURCES)
         if(EXISTS "${LWGEOM_DIR}/${_s}")
             list(APPEND _lwgeom_srcs "${LWGEOM_DIR}/${_s}")
+        else()
+            message(FATAL_ERROR "laplace_geom: missing liblwgeom source ${LWGEOM_DIR}/${_s}")
         endif()
     endforeach()
     list(APPEND _lwgeom_srcs "${POSTGIS_SRCDIR}/deps/ryu/d2s.c")
-    list(APPEND _lwgeom_srcs "${CMAKE_CURRENT_SOURCE_DIR}/src/lwgeom_win32_stubs.c")
 
-    add_library(lwgeom_static STATIC ${_lwgeom_srcs})
-    # High TU count — UNITY batches compile jobs. Flex/bison outputs stay out of unity
-    # batches (they often break when concatenated with other TUs).
+    add_library(lwgeom_static OBJECT ${_lwgeom_srcs})
     set_source_files_properties(
         "${LWGEOM_DIR}/lwin_wkt_parse.c"
         "${LWGEOM_DIR}/lwin_wkt_lex.c"
+        "${POSTGIS_SRCDIR}/deps/ryu/d2s.c"
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     set_target_properties(lwgeom_static PROPERTIES
         UNITY_BUILD ON
@@ -66,31 +106,52 @@ if(WIN32)
         "${POSTGIS_SRCDIR}"
         "${POSTGIS_SRCDIR}/deps"
         "${POSTGIS_SRCDIR}/deps/ryu"
-        "${PROJ_SRCDIR}/src"
+        "${_proj_inc}"
+        "${_geos_inc}"
     )
     target_compile_options(lwgeom_static PRIVATE /w
         "/FI${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/win32_lwgeom_compat.h")
+    # icx MSVC-mode + ryu: avoid broken mmintrin.h path (RYU_ONLY_64_BIT_OPS).
+    # PROJ_DLL= : proj.h defaults to dllimport on MSVC; we link static proj.lib.
     target_compile_definitions(lwgeom_static PRIVATE
-        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32
+        RYU_ONLY_64_BIT_OPS
+        "PROJ_DLL=")
 
-    add_library(laplace_geom MODULE src/laplace_geom.c)
+    add_library(laplace_geom MODULE src/laplace_geom.c $<TARGET_OBJECTS:lwgeom_static>)
     set_target_properties(laplace_geom PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_geom SUFFIX ".dll"
-        WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
-    # SYSTEM: PG server headers carry their own clang warnings (generic-msvc.h).
+        WINDOWS_EXPORT_ALL_SYMBOLS TRUE
+        LINKER_LANGUAGE CXX)
     target_include_directories(laplace_geom SYSTEM PRIVATE
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}"
         "${LAPLACE_PG_INCLUDEDIR}"
     )
+    target_include_directories(laplace_geom PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/lwgeom_inc"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${LWGEOM_DIR}"
+        "${POSTGIS_SRCDIR}"
+        "${_proj_inc}"
+        "${_geos_inc}"
+    )
     target_compile_definitions(laplace_geom PRIVATE
-        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32
+        "PROJ_DLL=")
     target_link_libraries(laplace_geom PRIVATE
         laplace_core
-        lwgeom_static
+        ${LAPLACE_LIBGEOS_C}
+        ${LAPLACE_LIBGEOS}
+        ${LAPLACE_LIBPROJ}
+        ${LAPLACE_LIBSQLITE3}
         "${LAPLACE_PG_LIBDIR}/postgres.lib"
     )
+
+    set(EXT_NAME laplace_geom)
+    set(EXT_VERSION ${PROJECT_VERSION})
+
 else()
 
 set(EXT_NAME    laplace_geom)
@@ -111,7 +172,10 @@ target_include_directories(${EXT_NAME} SYSTEM PRIVATE
     ${LAPLACE_PG_INCLUDEDIR_SERVER}
 )
 
-set(LAPLACE_DEPS_LWGEOM_PREFIX "/opt/laplace/pgsql-18"
+if(NOT LAPLACE_DEPS_PREFIX)
+    set(LAPLACE_DEPS_PREFIX "/opt/laplace")
+endif()
+set(LAPLACE_DEPS_LWGEOM_PREFIX "${LAPLACE_DEPS_PREFIX}/pgsql-18"
     CACHE PATH "Prefix where liblwgeom.{h,a} are installed by external/CMakeLists.txt's postgis step")
 find_path(LAPLACE_LIBLWGEOM_INCLUDE_DIR
     NAMES liblwgeom.h
@@ -138,31 +202,31 @@ target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_LIBLWGEOM_INCLUDE_DIR})
 
 find_path(LAPLACE_PROJ_INCLUDE_DIR
     NAMES proj.h
-    HINTS "/opt/laplace/proj/include"
+    HINTS "${LAPLACE_DEPS_PREFIX}/proj/include"
     NO_DEFAULT_PATH
 )
 if(NOT LAPLACE_PROJ_INCLUDE_DIR)
     message(FATAL_ERROR
         "laplace_geom needs proj.h (transitively pulled in by liblwgeom.h). "
-        "Expected /opt/laplace/proj/include/proj.h. Run `just build-deps`.")
+        "Expected ${LAPLACE_DEPS_PREFIX}/proj/include/proj.h. Run `just build-deps`.")
 endif()
 target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_PROJ_INCLUDE_DIR})
 
 find_library(LAPLACE_LIBGEOS_C geos_c
-    HINTS "/opt/laplace/geos/lib"
+    HINTS "${LAPLACE_DEPS_PREFIX}/geos/lib"
     NO_DEFAULT_PATH)
 find_library(LAPLACE_LIBGEOS geos
-    HINTS "/opt/laplace/geos/lib"
+    HINTS "${LAPLACE_DEPS_PREFIX}/geos/lib"
     NO_DEFAULT_PATH)
 find_library(LAPLACE_LIBPROJ proj
-    HINTS "/opt/laplace/proj/lib"
+    HINTS "${LAPLACE_DEPS_PREFIX}/proj/lib"
     NO_DEFAULT_PATH)
 if(NOT LAPLACE_LIBGEOS_C OR NOT LAPLACE_LIBGEOS OR NOT LAPLACE_LIBPROJ)
     message(FATAL_ERROR
-        "laplace_geom needs libgeos_c.so + libgeos.so (transitive: "
-        "liblwgeom GEOS algorithms) + libproj.so (transitive: liblwgeom "
-        "spheroid math). Expected libgeos*.so in /opt/laplace/geos/lib/ "
-        "and libproj.so in /opt/laplace/proj/lib/. Run `just build-deps`.")
+        "laplace_geom needs libgeos_c + libgeos (transitive: "
+        "liblwgeom GEOS algorithms) + libproj (transitive: liblwgeom "
+        "spheroid math). Expected under ${LAPLACE_DEPS_PREFIX}/geos|proj. "
+        "Run `just build-deps`.")
 endif()
 
 target_link_libraries(${EXT_NAME} PRIVATE

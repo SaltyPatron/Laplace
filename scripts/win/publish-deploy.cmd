@@ -7,6 +7,10 @@ if /i "%~1"=="--full" (
   call "%~dp0build-engine.cmd" || exit /b 1
   call "%~dp0build-extensions.cmd" || exit /b 1
   call "%~dp0install-extensions.cmd" || exit /b 1
+  if exist "%LAPLACE_ROOT%\external\cutechess\CMakeLists.txt" (
+    echo ==== [publish-deploy] cutechess ====
+    call "%~dp0build-cutechess.cmd" || echo [publish-deploy] WARN: build-cutechess failed — chess lab may be incomplete
+  )
   shift
 )
 

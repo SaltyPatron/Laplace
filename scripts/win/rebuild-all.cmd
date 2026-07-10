@@ -50,6 +50,14 @@ echo ===== PHASE 2 — CODEGEN =====
 powershell -NoProfile -ExecutionPolicy Bypass -File "%LAPLACE_ROOT%\scripts\codegen-attestation-law.ps1" || exit /b 1
 
 echo.
+echo ===== PHASE 2b — EXTERNAL DEPS (geos/proj/gdal) =====
+if exist "%LAPLACE_DEPS_PREFIX%\geos\include\geos_c.h" if exist "%LAPLACE_DEPS_PREFIX%\proj\include\proj.h" if exist "%LAPLACE_DEPS_PREFIX%\gdal\include\gdal.h" (
+  echo deps already present under %LAPLACE_DEPS_PREFIX% — skipping build-deps
+) else (
+  call "%~dp0build-deps.cmd" || exit /b 1
+)
+
+echo.
 echo ===== PHASE 3 — BUILD ENGINE =====
 call "%~dp0build-engine.cmd" %NATIVE_FLAGS% || exit /b 1
 

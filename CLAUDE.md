@@ -207,8 +207,16 @@ a mind and not a lookup.
 
 ## Build / deploy / seed
 
-Two toolchains, not interchangeable: `Justfile` + root CMake = Linux/CI. The Windows
-workflow is `scripts/win/*.cmd`. **If a script covers the task, use the script.**
+Two toolchains, not interchangeable:
+
+| Host | Human once | Ongoing / CI |
+|------|------------|--------------|
+| **Linux (hart-server)** | `sudo bash scripts/setup-host.sh` | `.github/workflows/laplace.yml` → `scripts/pipeline.sh` |
+| **Windows** | `scripts/win/*.cmd` (see table) | Local `rebuild-all.cmd` / `publish-deploy.cmd` — no Windows CI publish |
+
+**If a script covers the task, use the script.** Do not call `bootstrap-laplace-runner.sh` or `bootstrap-chess-lab.sh` directly on Linux — setup-host owns them.
+
+### Windows (`scripts/win/`)
 
 | Task | Entry point |
 |------|-------------|
@@ -219,10 +227,20 @@ workflow is `scripts/win/*.cmd`. **If a script covers the task, use the script.*
 | dotnet tests | `test-app.cmd [project-substring]` |
 | native ctest / pg_regress | `test-engine.cmd` / `regress.cmd` |
 | Seed | `db-reset.cmd`, `seed-foundation.cmd`, `seed-step.cmd <source>` (trust `:verify_step`), `seed-everything.cmd` |
+| Publish API → IIS | `publish.cmd` then `deploy-api.cmd` (or `publish-deploy.cmd`) — injects `deploy/secrets/chess-lab.env` + `lichess.env` into web.config |
+| Chess lab binaries | `build-cutechess.cmd` once; paths in `deploy/secrets/chess-lab.env` |
 | CLI | `cli.cmd` (never `dotnet run` — the ingest mutex matches the command line) |
 | Locks / stuck processes | `locks.cmd` (`locks.ps1 -Kill`) |
 | Status / deploy checks | `status.cmd`, `verify-deploy.cmd`, `verify-toolchain.cmd` |
 | PG recovery / tuning | `fix-postgres.cmd`, `recover-pgdata.cmd`, `tune-pg.cmd`, `tune-laplace.cmd` |
+
+### Linux
+
+| Task | Entry point |
+|------|-------------|
+| Full host bring-up | `sudo bash scripts/setup-host.sh` (runner, PG, nginx, chess-lab, secrets from `~/.config/shell/secrets.env`, migrations) |
+| CI build/deploy/publish | `scripts/pipeline.sh` (invoked by `laplace.yml`; `publish` = chess + secrets + API/SPA/uci) |
+| Convenience aliases | `Justfile` → `setup-host` / `publish` only; may drift — trust the scripts |
 
 - **Never invoke `scripts/win/*.cmd` through PowerShell** (confirmed pwsh .cmd-launch
   regression). Use Bash: `cmd //c "scripts\\win\\seed-step.cmd wordnet"`.

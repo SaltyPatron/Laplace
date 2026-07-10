@@ -25,6 +25,15 @@ if "%SKIP_CODEGEN%"=="0" (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
 
+if not exist "%LAPLACE_DEPS_PREFIX%\geos\include\geos_c.h" (
+  echo ERROR: geos missing under %LAPLACE_DEPS_PREFIX% — run scripts\win\build-deps.cmd first
+  goto fail
+)
+if not exist "%LAPLACE_DEPS_PREFIX%\proj\include\proj.h" (
+  echo ERROR: proj missing under %LAPLACE_DEPS_PREFIX% — run scripts\win\build-deps.cmd first
+  goto fail
+)
+
 if "%RECONF%"=="1" goto configure
 if not exist "%LAPLACE_EXT_BUILD%\build.ninja" goto configure
 goto build
@@ -40,7 +49,8 @@ cmake -B "%LAPLACE_EXT_BUILD%" -S extension -G Ninja ^
   "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2026/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" ^
   -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
   "-DCMAKE_RC_COMPILER=%LAPLACE_RC%" "-DCMAKE_MT=%LAPLACE_MT%" ^
-  "-DLAPLACE_ENGINE_BUILD=%LAPLACE_ENGINE_BUILD:\=/%"
+  "-DLAPLACE_ENGINE_BUILD=%LAPLACE_ENGINE_BUILD:\=/%" ^
+  "-DLAPLACE_DEPS_PREFIX=%LAPLACE_DEPS_PREFIX:\=/%"
 if errorlevel 1 goto fail
 
 :build
