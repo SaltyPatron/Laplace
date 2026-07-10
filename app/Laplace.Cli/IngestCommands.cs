@@ -197,6 +197,10 @@ internal static class IngestCommands
         }
 
         var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
+        // Analyzer modes (LAPLACE_MODEL_PLANES != "structure") are calculated
+        // re-passes over an already-recorded model; the recorder's re-deposition
+        // guard must not block them.
+        if (Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
             await using var chkCmd = chkConn.CreateCommand();
