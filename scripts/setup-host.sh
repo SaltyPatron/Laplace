@@ -98,13 +98,25 @@ layer0_5_build_deps() {
 }
 
 layer1_build_install_extensions() {
-    say "Layer 1 — Build + install laplace_geom + laplace_substrate extensions"
-    (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DLAPLACE_INSTALL_STAGED=ON \
-        -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
-        -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}") 2>&1
-    (cd "$REPO_DIR" && cmake --build build) 2>&1
-    (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}") 2>&1
+    say "Layer 1 — Build + install extensions (pipeline.sh; same path as CI)"
+    local setvars=/opt/intel/oneapi/setvars.sh
+    if [ ! -f "$setvars" ]; then
+        red "missing $setvars — install Intel oneAPI before setup-host Layer 1"
+        return 1
+    fi
+    # oneAPI env is required by root CMakeLists (MKLROOT/TBBROOT/CMPLR_ROOT RPATH).
+    # CI gets this from the runner .env; interactive sudo does not.
+    # shellcheck disable=SC1090
+    source "$setvars" --force >/dev/null
+    if [ -z "${MKLROOT:-}" ] || [ -z "${TBBROOT:-}" ] || [ -z "${CMPLR_ROOT:-}" ]; then
+        red "oneAPI setvars did not export MKLROOT/TBBROOT/CMPLR_ROOT"
+        return 1
+    fi
+    (
+        cd "$REPO_DIR"
+        bash scripts/pipeline.sh build
+        bash scripts/pipeline.sh install
+    )
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
