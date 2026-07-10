@@ -44,7 +44,7 @@ public sealed class ModelTokenEdgeETL
     // consensus (token, APPEARS_IN, coord) rates cross-model convergence.
     internal const int OccurrencesPerCircuit = 64;
 
-    internal static string ResolvePlanesMode()
+    public static string ResolvePlanesMode()
     {
         var m = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES");
         return string.IsNullOrWhiteSpace(m) ? "structure" : m.Trim().ToLowerInvariant();
@@ -159,6 +159,7 @@ public sealed class ModelTokenEdgeETL
             Array.Copy(embed, (long)rowOfToken[i] * d, Af, (long)i * d, d);
 
 
+
         if (RunSimilarity)
             await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, reader, options, ct))
                 yield return change;
@@ -192,6 +193,40 @@ public sealed class ModelTokenEdgeETL
             await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
                 yield return change;
         }
+    }
+
+    // The operator's own signal boundary, exact and model-derived (no chosen k):
+    // ||L·Rᵀ||_F² = trace((LᵀL)(RᵀR)), floor = 2 × RMS pair energy. Everything the
+    // model asserts above its own noise is emitted; the native tile's contract is
+    // strictly |score| > θ.
+    private static double OperatorNoiseFloor(double[] left, int n, double[] right, int m, int r)
+    {
+        var g1 = GramUpper(left, n, r);
+        var g2 = GramUpper(right, m, r);
+        double fro2 = 0;
+        for (int a = 0; a < r; a++)
+            for (int b = 0; b < r; b++)
+                fro2 += g1[(long)a * r + b] * g2[(long)b * r + a];
+        double rms = Math.Sqrt(Math.Max(fro2, 0) / ((double)n * m));
+        return 2.0 * rms;
+    }
+
+    private static double[] GramUpper(double[] mArr, int n, int r)
+    {
+        var g = new double[(long)r * r];
+        for (int i = 0; i < n; i++)
+        {
+            long off = (long)i * r;
+            for (int a = 0; a < r; a++)
+            {
+                double va = mArr[off + a];
+                if (va == 0) continue;
+                for (int b = a; b < r; b++) g[(long)a * r + b] += va * mArr[off + b];
+            }
+        }
+        for (int a = 0; a < r; a++)
+            for (int b = 0; b < a; b++) g[(long)a * r + b] = g[(long)b * r + a];
+        return g;
     }
 
 
@@ -635,7 +670,7 @@ public sealed class ModelTokenEdgeETL
 
         await foreach (var batch in IngestComposePipeline.RunAsync(
                            EnumerateBilinearEdgeRecords(left, right, n, r, typeId, weight, rowEnts, colEnts,
-                               canonicalize, topK, collector, ct),
+                               canonicalize, topK, Theta, collector, ct),
                            (rec, b) => StageEdgeAttestation(b, rec, _source),
                            _source, label, AttsPerChange, reader, options, ct, commitEpoch, AttsPerChange))
             yield return batch;
@@ -776,7 +811,7 @@ public sealed class ModelTokenEdgeETL
         double[] left, double[] right, int n, int r,
         Hash128 typeId, double weight,
         List<Hash128> rowEnts, List<Hash128> colEnts,
-        bool canonicalize, int topK,
+        bool canonicalize, int topK, double theta,
         TopPairCollector? collector,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -786,7 +821,7 @@ public sealed class ModelTokenEdgeETL
         {
             ct.ThrowIfCancellationRequested();
             int re = Math.Min(rb + RowTile, n);
-            int cnt = RunBilinearTile(left, rb, re, right, n, r, oR, oC, oV, oS, cap);
+            int cnt = RunBilinearTile(left, rb, re, right, n, r, oR, oC, oV, oS, cap, theta);
             if (cnt < 0) yield break;
             cnt = SelectTopKPerRow(cnt, rb, re, oR, oC, oV, oS, topK);
             for (int e = 0; e < cnt; e++)
@@ -918,7 +953,7 @@ public sealed class ModelTokenEdgeETL
     }
 
     private static int RunBilinearTile(double[] left, int rb, int re, double[] right, int n, int dim,
-        int[] oR, int[] oC, double[] oV, long[] oS, long cap)
+        int[] oR, int[] oC, double[] oV, long[] oS, long cap, double theta = Theta)
     {
         unsafe
         {
@@ -927,7 +962,7 @@ public sealed class ModelTokenEdgeETL
             fixed (int* pR = oR) fixed (int* pC = oC) fixed (double* pV = oV) fixed (long* pS = oS)
             {
                 int rc = DynInterop.BilinearEdgesTile(pl, (nuint)rb, (nuint)re, pr, (nuint)n,
-                    (nuint)dim, Theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
+                    (nuint)dim, theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
                 if (rc == 0 && overflow != 0)
                     throw new InvalidOperationException(
                         $"bilinear_edges_tile overflow at cap {cap}: the native tile drops edges in scan "
