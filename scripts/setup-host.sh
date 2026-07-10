@@ -4,10 +4,12 @@
 #
 #   sudo bash scripts/setup-host.sh
 #
-# That is the only command you run to stand up a machine. After it succeeds,
-# push to main — CI (pipeline.sh) owns the runtime forever.
+# That is the only command a human runs to stand up a machine. It seeds
+# Lichess + Stripe from ~/.config/shell/secrets.env (or repo .env), installs
+# the API unit, and leaves CI (pipeline.sh publish) owning runtime forever.
 #
-# Do not call bootstrap-laplace-runner.sh / bootstrap-chess-lab.sh yourself.
+# Do not call bootstrap-laplace-runner.sh / bootstrap-chess-lab.sh / stripe
+# scripts yourself — setup owns them.
 # =============================================================================
 
 set -euo pipefail
@@ -30,10 +32,12 @@ usage() {
     cat <<EOF
 Usage: sudo bash $0
 
-  setup   (default) Full host bring-up. Idempotent.
-  status / reset / stripe   Debug / teardown / Stripe only.
+  setup   (default) Full host bring-up including Lichess/Stripe secret seed. Idempotent.
+  status / reset    Debug / teardown.
 
 After setup: push to main (or: gh workflow run laplace.yml).
+Secrets: put LICHESS_TOKEN + STRIPE_API_SECRET (+ optional STRIPE_WEBHOOK_SECRET)
+in ~/.config/shell/secrets.env — setup + CI publish keep /opt/laplace/secrets fresh.
 EOF
 }
 
@@ -42,6 +46,39 @@ ensure_dotnet_present() {
         red "dotnet not found in PATH. Install .NET 10 SDK first."
         exit 1
     fi
+}
+
+# Non-interactive: load STRIPE_API_SECRET from secrets.env / repo .env into the
+# operator stripe-dev.env + runner .env. Never prompts.
+seed_billing_from_operator_files() {
+    say "Billing secrets — non-interactive seed from secrets.env / .env"
+    local home_src="/home/${SUDO_USER:-ahart}/.config/shell/secrets.env"
+    local repo_src="$REPO_DIR/.env"
+    local src=""
+    if [ -f "$home_src" ]; then src="$home_src"
+    elif [ -f "$repo_src" ]; then src="$repo_src"
+    fi
+    if [ -z "$src" ]; then
+        yellow "  no secrets file — skip local stripe-dev.env (host drop may still be empty)"
+        return 0
+    fi
+
+    local stripe_line stripe_key
+    stripe_line="$(grep -E '^(STRIPE_API_SECRET|LAPLACE_STRIPE_API_KEY)=' "$src" 2>/dev/null | head -1 || true)"
+    if [ -z "$stripe_line" ]; then
+        yellow "  no STRIPE_API_SECRET in $src"
+        return 0
+    fi
+    stripe_key="${stripe_line#*=}"
+
+    if [ -x "$STRIPE_BOOTSTRAP" ]; then
+        # Export so bootstrap-stripe-dev.sh does not prompt.
+        STRIPE_API_SECRET="$stripe_key" \
+            "$STRIPE_BOOTSTRAP" --api-key "$stripe_key" --persist-zsh || yellow "stripe-dev.env bootstrap warned"
+    fi
+    # Runner + /opt/laplace/secrets/stripe.env (also done inside bootstrap, safe to re-run).
+    sudo STRIPE_API_SECRET="$stripe_key" "$BOOTSTRAP" stripe || yellow "runner stripe env warned"
+    green "✓ billing secrets seeded from $src"
 }
 
 layer1_clean_foreign_build_artifacts() {
@@ -91,9 +128,6 @@ layer0_5_build_deps() {
     if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
         bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
     fi
-    # Fingerprinted: skips cmake when /opt/laplace/external pins + CMakeLists + ISA
-    # match the stamp and install artifacts exist. Force: LAPLACE_FORCE_DEPS=1.
-    # NEVER wipe /opt/laplace/build/deps unless forcing a clean rebuild.
     bash "$REPO_DIR/scripts/build-system-deps.sh"
 }
 
@@ -104,10 +138,10 @@ layer1_build_install_extensions() {
         red "missing $setvars — install Intel oneAPI before setup-host Layer 1"
         return 1
     fi
-    # oneAPI env is required by root CMakeLists (MKLROOT/TBBROOT/CMPLR_ROOT RPATH).
-    # CI gets this from the runner .env; interactive sudo does not.
+    set +u
     # shellcheck disable=SC1090
     source "$setvars" --force >/dev/null
+    set -u
     if [ -z "${MKLROOT:-}" ] || [ -z "${TBBROOT:-}" ] || [ -z "${CMPLR_ROOT:-}" ]; then
         red "oneAPI setvars did not export MKLROOT/TBBROOT/CMPLR_ROOT"
         return 1
@@ -127,7 +161,6 @@ do_setup() {
     fi
     ensure_dotnet_present
 
-    # Order matters on a virgin host: prefix → deps (pgsql-18) → full Layer 0 → Layer 1.
     say "Layer 0a — account, apt (incl. nginx/stockfish/Qt), /opt/laplace"
     sudo "$BOOTSTRAP" prefix
 
@@ -135,6 +168,9 @@ do_setup() {
 
     say "Layer 0b — runner, PG cluster, API unit, chess-lab, secrets seed"
     sudo "$BOOTSTRAP" bootstrap
+
+    # Billing is part of setup — not a separate human mode.
+    seed_billing_from_operator_files
 
     layer1_build_install_extensions
     layer1_up
@@ -144,6 +180,7 @@ do_setup() {
 
   Human once:  sudo bash scripts/setup-host.sh
   CI forever:  push to main → laplace.yml → pipeline.sh publish
+  Secrets:     ~/.config/shell/secrets.env  (LICHESS_TOKEN, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET)
 
 EOF
 }
@@ -184,15 +221,10 @@ EOF
     green "===== HOST RESET COMPLETE ====="
 }
 
+# Kept as alias — setup already seeds billing. Useful to re-seed after editing secrets.env.
 do_stripe() {
-    say "Stripe sandbox bootstrap (local user + runner)"
-    if [ ! -x "$STRIPE_BOOTSTRAP" ]; then
-        red "Missing: $STRIPE_BOOTSTRAP"
-        exit 1
-    fi
-    "$STRIPE_BOOTSTRAP" --persist-zsh
-    sudo "$BOOTSTRAP" stripe
-    green "✓ Stripe sandbox setup complete"
+    seed_billing_from_operator_files
+    green "✓ Stripe/Lichess secret re-seed complete"
 }
 
 case "$MODE" in
@@ -202,7 +234,7 @@ case "$MODE" in
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/status/reset/stripe"
+        red "Unknown mode: $MODE — use setup/status/reset"
         usage
         exit 64
         ;;
