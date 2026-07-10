@@ -49,8 +49,15 @@ foreach ($pair in @(
     } elseif ($out -match 'no work to do') {
         Write-Host ("{0,-16} up to date$lockNote" -f $tree)
     } else {
-        $pending = ($out | Where-Object { $_ -match '^\[' } | Measure-Object).Count
-        Write-Host ("{0,-16} {1} pending build step(s)$lockNote" -f $tree, $pending)
+        # Ignore cmake glob/reconfigure noise: only count real build edges.
+        $pending = ($out | Where-Object {
+            $_ -match '^\[' -and $_ -notmatch 'Re-checking globbed|Re-running CMake'
+        } | Measure-Object).Count
+        if ($pending -eq 0) {
+            Write-Host ("{0,-16} up to date$lockNote" -f $tree)
+        } else {
+            Write-Host ("{0,-16} {1} pending build step(s)$lockNote" -f $tree, $pending)
+        }
     }
 }
 
@@ -118,9 +125,9 @@ if ($svc.Status -eq 'Running' -or $port5432) {
 }
 
 Section 'ENDPOINT (serve.cmd port 5187)'
-$listener = Get-NetTCPConnection -LocalPort 5187 -State Listen 2>$null
+$listener = Get-NetTCPConnection -LocalPort 5187 -State Listen -ErrorAction SilentlyContinue
 if ($listener) {
-    $owner = (Get-Process -Id $listener[0].OwningProcess).ProcessName
+    $owner = (Get-Process -Id $listener[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
     Write-Host "LISTENING (PID $($listener[0].OwningProcess), $owner) -- app builds will hit locks; locks.cmd --kill clears it"
 } else {
     Write-Host 'not running'
