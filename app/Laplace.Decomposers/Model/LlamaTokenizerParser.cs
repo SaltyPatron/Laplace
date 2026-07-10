@@ -118,7 +118,7 @@ public sealed class LlamaTokenizerParser
         return records;
     }
 
-    private static bool TryDecomposeRoot(
+    internal static bool TryDecomposeRoot(
         byte[] canonical,
         out Hash128 entityId, out byte tier,
         out double cx, out double cy, out double cz, out double cm)

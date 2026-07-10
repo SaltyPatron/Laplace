@@ -117,9 +117,10 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
-                "Ngram", "Model_Layer", "Model_Circuit"],
+                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane"],
             relationNodeNames: ["MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
-                "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO",
+                "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO", "APPEARS_IN",
+                "CONTAINS", "PRECEDES",
                 "HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS", "HAS_NUM_HEADS", "HAS_NUM_KV_HEADS",
                 "HAS_INTERMEDIATE_SIZE", "HAS_VOCAB_SIZE", "IS_A"],
             ct: ct);
@@ -160,11 +161,19 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        await foreach (var batch in RunPhaseAsync(new LegacyRecipePhase(this, configPath, log), context, options, ct))
-            yield return batch;
+        // Analyzer modes (LAPLACE_MODEL_PLANES != "structure") deposit CALCULATED
+        // planes only. The witnessed phases (recipe/tokenizer/vocab/merges/maps-to)
+        // belong to the recorder and must not re-fold their witnesses on re-runs.
+        bool recorderRun = ModelTokenEdgeETL.ResolvePlanesMode() == "structure";
 
-        await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
-            yield return batch;
+        if (recorderRun)
+        {
+            await foreach (var batch in RunPhaseAsync(new LegacyRecipePhase(this, configPath, log), context, options, ct))
+                yield return batch;
+
+            await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
+                yield return batch;
+        }
 
         if (manifest.Coverage == Coverage.Unsupported)
         {
@@ -181,50 +190,59 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
-        await foreach (var batch in RunPhaseAsync(new TokenizerEntityPhase(this, tokEntityId), context, options, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-        }
-
         phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         log.LogInformation("phase=vocab parsed: {Count} tokens ({Ms} ms)",
             tokens.Count, phaseSw.ElapsedMilliseconds);
         int batchSz = Math.Max(options.BatchSize, 8192);
-        phaseSw.Restart();
-        int vocabBatches = 0;
-        await foreach (var batch in RunPhaseAsync(new VocabPhase(this, tokens, batchSz), context, options, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-            vocabBatches++;
-        }
-        log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
-            vocabBatches, phaseSw.ElapsedMilliseconds);
 
-        phaseSw.Restart();
-        var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
-        int mergeBatches = 0;
-        await foreach (var batch in RunPhaseAsync(new MergesPhase(this, merges, batchSz), context, options, ct))
+        if (recorderRun)
         {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-            mergeBatches++;
-        }
-        log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
-            merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
+            await foreach (var batch in RunPhaseAsync(new TokenizerEntityPhase(this, tokEntityId), context, options, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return batch;
+            }
 
-        int mapsBatches = 0;
-        await foreach (var batch in RunPhaseAsync(
-                           new MapsToPhase(this, tokens, tokEntityId, batchSz), context, options, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-            mapsBatches++;
+            phaseSw.Restart();
+            int vocabBatches = 0;
+            await foreach (var batch in RunPhaseAsync(new VocabPhase(this, tokens, batchSz), context, options, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return batch;
+                vocabBatches++;
+            }
+            log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
+                vocabBatches, phaseSw.ElapsedMilliseconds);
+
+            phaseSw.Restart();
+            var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
+            int mergeBatches = 0;
+            await foreach (var batch in RunPhaseAsync(new MergesPhase(this, merges, batchSz), context, options, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return batch;
+                mergeBatches++;
+            }
+            log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
+                merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
+
+            int mapsBatches = 0;
+            await foreach (var batch in RunPhaseAsync(
+                               new MapsToPhase(this, tokens, tokEntityId, batchSz), context, options, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return batch;
+                mapsBatches++;
+            }
+            log.LogInformation("phase=maps-to emitted: {Batches} batches ({Ms} ms)",
+                mapsBatches, phaseSw.ElapsedMilliseconds);
         }
-        log.LogInformation("phase=maps-to emitted: {Batches} batches ({Ms} ms)",
-            mapsBatches, phaseSw.ElapsedMilliseconds);
+        else
+        {
+            log.LogInformation("phase=analyzer: planes mode '{Mode}' — witnessed phases skipped",
+                ModelTokenEdgeETL.ResolvePlanesMode());
+        }
 
 
 
@@ -235,7 +253,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
         const int finalEpoch = 1;
 
-        var classifier = new HeadClassifier(context.Reader, Source, _sourceName, log);
+        var classifier = new HeadClassifier(context.Reader, Source, log);
         var edges = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log, classifier);
         await foreach (var change in edges.EmitAsync(finalEpoch, context.Reader, options, ct))
         {
@@ -303,8 +321,21 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // Matches ModelTokenEdgeETL's enforced per-row edge budget, so this estimate
-        // is the actual emission bound rather than a 3-6 orders-optimistic guess.
+        // Matches ModelTokenEdgeETL's enforced emission bound for the active mode,
+        // so this estimate is what the pipeline actually emits rather than a
+        // 3-6 orders-optimistic guess.
+        if (ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
+        {
+            // Per layer: attention + OV heads, plus either one dense MLP circuit or
+            // one router coordinate per expert.
+            int numExperts = 0;
+            try { numExperts = ModelConfigReader.Read(configPath).Config.NumExperts; }
+            catch (Exception) { }
+            long mlpSlots = Math.Max(1, numExperts);
+            long circuits = (2L * Math.Max(1, r.NumHeads) + mlpSlots) * r.NumLayers;
+            long occurrences = circuits * Math.Min(distinctVocab, ModelTokenEdgeETL.OccurrencesPerCircuit);
+            return distinctVocab + occurrences;
+        }
         long partners = Math.Min(distinctVocab, ModelTokenEdgeETL.EdgeTopK);
         long perLayerPlanes = 3L * distinctVocab * partners * r.NumLayers;
         long similarTo = distinctVocab * partners;

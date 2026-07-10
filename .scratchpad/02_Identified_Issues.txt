@@ -305,3 +305,55 @@ L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
     ORDER BY, CTEs — Rule #2) appear as opaque Function Scans the planner
     cannot see through; chains of them compound. Candidate Rule #13 for 06.
 ================================================================================
+
+ISSUE 53 (2026-07-09) — Model ingestion lane rebuilt as RECORDER (witnessed structure),
+first model deposited. TinyLlama-1.1B ingested in 216s: 91,520 APPEARS_IN occurrences
+(1,430 circuits × 64), 52,345 MERGES_WITH, 26,622 TOKEN_MAPS_TO, 4,224 CONTAINS +
+2,838 PRECEDES coordinate-structure rows, 175,748 consensus relations folded.
+Design (author-decided this session, the chess/scholar's-mate pattern):
+  - Circuit COORDINATE = shared content across models (plane anchor + layer/head
+    Scalars, Merkle) — the model NEVER enters an id; it is the SOURCE. Consensus
+    (token, APPEARS_IN, coord) rates cross-model structural convergence.
+  - Occurrence salience = token magnitude in the circuit's subspace (QK: combined
+    q/k projection norm; OV: per-head write magnitude ||Wo_h·v_h||; MLP: gated
+    activation norm), scored via native laplace_score_fp (arena = RMS).
+  - Token-pair planes (ATTENDS/OV_RELATES/COMPLETES_TO/SIMILAR_TO/CONTINUES_TO pairs)
+    are CALCULATED, not witnessed — deferred to a versioned analyzer pass
+    (LAPLACE_MODEL_PLANES=all keeps the old path for it). Doc 08 split.
+  - APPEARS_IN + the six HAS_* recipe relations added to relation_types.toml
+    (189 highway bits) — recipe scalars no longer mint zero-mask raw hashes.
+VTune (attached per user direction) caught the recorder's first draft spending 83%
+of CPU in a managed per-row sort under SelectTopKPerRow feeding theta=0 tile output;
+fix = norms path, 18h trajectory → 216s. Lesson: profile the lane BEFORE running it.
+OPEN residuals:
+  a) HIGHWAY BIT LAYOUT SHIFTED: codegen assigns bits alphabetically, so adding
+     APPEARS_IN (+HAS_*) renumbered ~180 existing bits. The live DB generation's
+     stored highway_masks predate the 189-bit layout — Rule #5 says regenerate,
+     never backfill. Next full reseed heals it; until then mask-band filtering
+     against pre-2026-07-09 rows decodes against the wrong layout.
+  b) seed-step.cmd :verify_step has no source mapping for the safetensors step
+     (verify_fail unless LAPLACE_SKIP_VERIFY); PrintIngestValidationAsync's
+     "witness/tensor-role" queries are old-lane and report 0 for a good deposit.
+  c) EstimateMatchupUnits undercounts structure mode (composed 216k vs 118k —
+     CONTAINS/PRECEDES + per-head OV coords not in the formula).
+  d) LAPLACE_MODEL_EDGE_FLOOR is a phantom knob: named in two overflow error
+     strings, read nowhere (Theta is const 0.0).
+  e) HeadClassifier ENCODES verdicts now land on content coordinates but only run
+     in analyzer mode (pair planes); recorder deposits no ENCODES.
+  f) Norm salience is dominated by rare-token representation degeneration (top
+     occupancy: 'listade', 'släktet', 'printStackTrace' — Gao et al. anisotropy).
+     Recorder records what the checkpoint asserts; a mean-centered/whitened variant
+     is an analyzer question, not a recorder change.
+  g) SCALAR IDENTITY FRAGMENTATION (found 2026-07-09 evening, FIXED in code): the
+     recipe-scalar convention (LlamaRecipeExtractor/RecipeExtractor.AddScalar) minted
+     scalar entities as Blake3(raw utf8 bytes), which coincides with the text content
+     law only for single-codepoint values — word_id('14') resolved to a DIFFERENT id
+     than the deposited scalar "14" (zero CONTAINS hits; hex labels in decode views).
+     ModelCoordinates.ScalarId inherited it. Fix: ScalarId = the text-root content law
+     (TryDecomposeRoot, perfcache-backed), both recipe extractors converted to it —
+     one implementation per fact. The deposited TinyLlama/phi-2 generation carries the
+     old multi-digit ids; heals with the redeposit the highway-layout reseed (53a)
+     already owes. Query law reaffirmed the same evening: ids are NEVER constructed
+     outside the system (python blake3 was used for demo addressing and rejected) —
+     SQL addressing uses canonical_id()/word_id()/relation_type_id()/consensus_id(),
+     all of which resolve through the extension's native hash.
