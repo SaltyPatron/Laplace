@@ -50,26 +50,16 @@ usage() {
 Usage: $0 <mode>
 
 Modes:
-  bootstrap   Idempotent set-up (default if no mode given)
-              - Creates system account, runner, PG roles, peer auth, sudoers
-              - Safe to re-run; only adds what's missing
+  bootstrap   Idempotent Layer-0 set-up (default if no mode given).
+              Invoked by scripts/setup-host.sh — do not invent parallel entry points.
+              Account, runner, PG, /opt/laplace, API systemd+nginx, chess-lab
+              packages/build, operator secrets → /opt/laplace/secrets/.
   status      Print current state (no changes)
+  stripe      Write Stripe sandbox env block into runner .env
+  reset       Tear down everything this script created (type RESET)
 
-    stripe      Write Stripe sandbox env block into runner .env
-                            - Writes LAPLACE_STRIPE_SUCCESS_URL / LAPLACE_STRIPE_CANCEL_URL /
-                                LAPLACE_BILLING_CURRENCY
-                            - Writes LAPLACE_STRIPE_API_KEY only if exported when invoking this script
-                                (example: sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe)
-                            - Safe to re-run (managed begin/end block)
-  reset       Tear down everything this script created
-              - Deregisters + removes runner
-              - Drops PG roles (and DBs they own)
-              - Removes pg_hba/pg_ident entries, sudoers file
-              - Removes the laplace-runner system account
-              - REQUIRES typing 'RESET' to confirm
-
-After bootstrap, Layer 1 (DbUp) creates the database + extensions:
-  just db-up   (or: dotnet run --project app/Laplace.Migrations -- up)
+After bootstrap, scripts/setup-host.sh continues Layer 0.5 + 1.
+CI thereafter: .github/workflows/laplace.yml → scripts/pipeline.sh
 EOF
 }
 
@@ -1079,6 +1069,10 @@ do_bootstrap() {
     bootstrap_remove_legacy_sudoers
     bootstrap_runner_gh_auth
 
+    bootstrap_api_host
+    bootstrap_operator_secrets
+    bootstrap_chess_lab
+
     say "Verification"
     echo "Runner service:"
     systemctl status "$RUNNER_SERVICE" --no-pager 2>/dev/null | head -8 \
@@ -1135,6 +1129,56 @@ do_stripe() {
     green "===== STRIPE SANDBOX ENV BOOTSTRAP COMPLETE ====="
     echo "Tip: to write key non-interactively:"
     echo "  sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe"
+}
+
+# API systemd unit + nginx + /opt/laplace/app + secrets dir (Layer 0).
+bootstrap_api_host() {
+    say "API host (systemd unit, nginx, app dir, secrets drop)"
+    local here api_boot
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    api_boot="$(cd "$here/.." && pwd)/deploy/linux/bootstrap-host.sh"
+    if [ ! -f "$api_boot" ]; then
+        red "missing $api_boot"
+        return 1
+    fi
+    bash "$api_boot"
+}
+
+# Seed /opt/laplace/secrets from the operator who invoked sudo (once, Layer 0).
+# Same pattern as gh auth mirror — root may read $SUDO_USER home; the service never does.
+bootstrap_operator_secrets() {
+    say "Host secrets drop ← operator ~/.config/shell/secrets.env"
+    local src="/home/${GH_SUDO_USER}/.config/shell/secrets.env"
+    local dst_dir="/opt/laplace/secrets"
+    local dst="$dst_dir/lichess.env"
+    install -d -m 2770 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$dst_dir"
+    if [ ! -f "$src" ]; then
+        yellow "  $src absent — skip (set LICHESS_TOKEN repo secret for CI, or create the file and re-run setup)"
+        return 0
+    fi
+    local line val
+    line="$(grep -E '^(LICHESS_TOKEN|LICHESS_API)=' "$src" 2>/dev/null | head -1 || true)"
+    if [ -z "$line" ]; then
+        yellow "  no LICHESS_TOKEN/LICHESS_API in $src — skip"
+        return 0
+    fi
+    val="${line#*=}"
+    printf 'LICHESS_TOKEN=%s\n' "$val" >"$dst"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$dst"
+    chmod 640 "$dst"
+    green "✓ $dst seeded from $src"
+}
+
+bootstrap_chess_lab() {
+    say "Chess Lab (stockfish + Qt6 + cutechess)"
+    local here script
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    script="$here/bootstrap-chess-lab.sh"
+    if [ ! -f "$script" ]; then
+        yellow "missing $script — skip"
+        return 0
+    fi
+    bash "$script" || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
 }
 
 case "$MODE" in

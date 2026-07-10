@@ -56,7 +56,7 @@ internal static class FoundryExport
     {
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         // Vocab pushdown (2026-07-09): unfiltered consensus-family reads streamed
-        // 27.5M rows per pour so this loop could keep ~1%; the vocab probes the
+        // 27.5M rows per synthesis so this loop could keep ~1%; the vocab probes the
         // (type_id, subject_id) index server-side instead. Client filter retained
         // as the correctness net (traj family still returns unfiltered).
         var vocab = new byte[tokenSlots.Count][];
@@ -1400,7 +1400,7 @@ internal static class FoundryExport
         bool coordOnly = FoundryDefaults.CoordOnly;
         // Phase 5: when a hilbert content-PE is requested, RESERVE its trailing dims
         // up front — otherwise a full-rank spectrum (k = dModel-1) leaves peDims = 0
-        // and the PE silently vanishes (observed on the first Path-A pour).
+        // and the PE silently vanishes (observed on the first Path-A synthesis).
         int peReserve = (hilbertKeys is not null && dModel > 24) ? 8 : 0;
         int k = coordOnly
             ? Math.Min(4, dModel - 1)
@@ -1793,7 +1793,7 @@ internal static class FoundryExport
     /// Phase 0 RoPE mitigation, second half: rotary pair 0 (head components 0 and
     /// hd/2) rotates at frequency 1 REGARDLESS of freq_base, and the factor's
     /// strongest row otherwise lands exactly there. When skipping, factor row r
-    /// maps to component r+1 (or r+2 past the pair partner) so poured content
+    /// maps to component r+1 (or r+2 past the pair partner) so synthesized content
     /// operators never occupy the always-rotating plane. Q and K must use the
     /// SAME mapping (components pair in the dot product); V is not rotated.
     private static int RotarySafeComponent(int r, int headDim, bool skip)

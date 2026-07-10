@@ -11,6 +11,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "engine/manifest"
 OUT_CORE = ROOT / "engine/core"
+
+
+def _write_if_changed(path: Path, data: bytes) -> None:
+    """Skip the write when bytes are identical. Two reasons: (1) the runtime
+    mmaps the perfcache blobs, and Windows refuses to truncate a user-mapped
+    file (ERROR_USER_MAPPED_FILE -> EINVAL) -- an unchanged manifest must not
+    fail the build under a live ingest; (2) unchanged outputs keep their mtime,
+    so ninja's restat skips downstream rebuilds."""
+    try:
+        if path.exists() and path.read_bytes() == data:
+            return
+    except OSError:
+        pass
+    path.write_bytes(data)
+
+
+def _write_text_if_changed(path: Path, text: str) -> None:
+    _write_if_changed(path, text.encode("utf-8"))
+
 OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/seed_relation_types.sql.in"
 
 
@@ -291,7 +310,7 @@ def emit_relation_law(rel: dict) -> None:
         alias_entries.append((a["surface"], name_to_idx[canon], a["flip"]))
 
     header = OUT_CORE / "include/laplace/core/relation_law.h"
-    header.write_text(
+    _write_text_if_changed(header, 
         """#pragma once
 
 #include <stddef.h>
@@ -350,8 +369,7 @@ int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_ty
 #ifdef __cplusplus
 }
 #endif
-""",
-        encoding="utf-8",
+"""
     )
 
     lines = [
@@ -482,12 +500,9 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
                                      double* out_rank, laplace_rel_symmetry_t* out_symmetry,
                                      uint8_t* out_flip, hash128_t* out_parent_id) {{
     if (!surface || !out_type_id) return -1;
-    const char* canon_name = surface;
     uint8_t flip = 0;
     int16_t idx = -1;
-    if (alias_lookup(surface, &idx, &flip) == 0) {{
-        canon_name = laplace_relation_table[idx].canonical;
-    }} else {{
+    if (alias_lookup(surface, &idx, &flip) != 0) {{
         for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
             if (cmp_str(laplace_relation_table[i].canonical, surface) == 0) {{
                 idx = (int16_t)i;
@@ -575,8 +590,8 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
 """
     dynamic_impl = emit_dynamic_resolvers(rel.get("dynamic", {}), ranks)
     (OUT_CORE / "src/generated/relation_law.c").parent.mkdir(parents=True, exist_ok=True)
-    (OUT_CORE / "src/generated/relation_law.c").write_text(
-        "\n".join(lines) + impl + dynamic_impl, encoding="utf-8"
+    _write_text_if_changed(OUT_CORE / "src/generated/relation_law.c",
+        "\n".join(lines) + impl + dynamic_impl
     )
 
     
@@ -595,7 +610,7 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     sql_lines.append(") AS v(name)")
     sql_lines.append("ON CONFLICT (id) DO NOTHING;")
     OUT_SEED_FRAG.parent.mkdir(parents=True, exist_ok=True)
-    OUT_SEED_FRAG.write_text("\n".join(sql_lines) + "\n", encoding="utf-8")
+    _write_text_if_changed(OUT_SEED_FRAG, "\n".join(sql_lines) + "\n")
 
 
 def emit_pos_law(pos: dict) -> None:
@@ -608,7 +623,7 @@ def emit_pos_law(pos: dict) -> None:
         enum_lines.append(f"    LAPLACE_POS_TAGSET_{name.upper():<10} = {i},")
 
     header = OUT_CORE / "include/laplace/core/pos_law.h"
-    header.write_text(
+    _write_text_if_changed(header, 
         "#pragma once\n"
         "\n"
         '#include "laplace/core/hash128.h"\n'
@@ -626,8 +641,7 @@ def emit_pos_law(pos: dict) -> None:
         "\n"
         "#ifdef __cplusplus\n"
         "}\n"
-        "#endif\n",
-        encoding="utf-8",
+        "#endif\n"
     )
 
     lines = [
@@ -714,7 +728,7 @@ def emit_pos_law(pos: dict) -> None:
     lines.append("    return k_upos;")
     lines.append("}")
 
-    (OUT_CORE / "src/generated/pos_law.c").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_text_if_changed(OUT_CORE / "src/generated/pos_law.c", "\n".join(lines) + "\n")
 
     
     pos_seeds = [f"substrate/pos/{u}/v1" for u in upos_list]
@@ -728,7 +742,7 @@ def emit_pos_law(pos: dict) -> None:
         sql.append(f"    ('{n}')" + ("," if i < len(pos_seeds) - 1 else ""))
     sql.append(") AS v(name)")
     sql.append("ON CONFLICT (id) DO NOTHING;")
-    pos_frag.write_text("\n".join(sql) + "\n", encoding="utf-8")
+    _write_text_if_changed(pos_frag, "\n".join(sql) + "\n")
 
 
 _HIGHWAY_MAGIC = 0x5957484C
@@ -825,7 +839,7 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
 
     bin_out_dir.mkdir(parents=True, exist_ok=True)
     out_bin = bin_out_dir / "laplace_highway_perfcache.bin"
-    out_bin.write_bytes(bytes(binary))
+    _write_if_changed(out_bin, bytes(binary))
 
     bucket_size = 1
     while bucket_size < N * 4:
@@ -857,7 +871,7 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         lines.append(f"#define HIGHWAY_BAND_{band_name.upper():<45} {band_idx}u")
 
     out_manifest = OUT_CORE / "include/laplace/core/highway_manifest.h"
-    out_manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_text_if_changed(out_manifest, "\n".join(lines) + "\n")
 
     print(f"highway perfcache ok: {out_bin} ({len(binary)} bytes,"
           f" {N} relations, {N_BANDS} bands, {bucket_size}-slot table)")

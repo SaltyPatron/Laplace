@@ -15,7 +15,11 @@ function(laplace_add_grammar tgt srcdir)
     endif()
     add_library(${tgt} OBJECT ${_srcs})
     target_include_directories(${tgt} PRIVATE "${srcdir}")
-    set_target_properties(${tgt} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    # UNITY merges parser+scanner into one TU when both exist (halves grammar compile jobs).
+    set_target_properties(${tgt} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        UNITY_BUILD ON
+        UNITY_BUILD_BATCH_SIZE 4)
     target_compile_options(${tgt} PRIVATE -w)   
 endfunction()
 

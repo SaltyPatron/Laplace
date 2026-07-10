@@ -13,8 +13,10 @@ public static class ChessLabPaths
 
     public readonly record struct Probe(string? Path, bool Found, string Source);
 
-    /// <summary>Deployed API hosts ship <c>laplace-uci.exe</c> beside the entry assembly.</summary>
-    public static string DeployedLaplaceUciPath => Path.Combine(LaplaceInstall.InstallRoot, "laplace-uci.exe");
+    /// <summary>Deployed API hosts ship <c>laplace-uci</c> (<c>.exe</c> on Windows) beside the entry assembly.</summary>
+    public static string DeployedLaplaceUciPath => Path.Combine(
+        LaplaceInstall.InstallRoot,
+        OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci");
 
     public static string LabDir
     {
@@ -34,7 +36,7 @@ public static class ChessLabPaths
 
     public static Probe Stockfish => ResolveExecutable(
         "LAPLACE_STOCKFISH",
-        _ => TryDefaultCutechessCandidate("stockfish.exe"),
+        _ => TryDefaultCutechessCandidate(OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish"),
         StockfishPathNames);
 
     public static Probe LaplaceUci => ResolveLaplaceUci();
@@ -114,11 +116,14 @@ public static class ChessLabPaths
         return new Probe(installed, false, "missing");
     }
 
-    private static string? TryDefaultCutechessCandidate(string name = "cutechess-cli.exe")
+    private static string? TryDefaultCutechessCandidate(string? name = null)
     {
+        name ??= OperatingSystem.IsWindows() ? "cutechess-cli.exe" : "cutechess-cli";
         var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD");
         if (string.IsNullOrWhiteSpace(fromEnv) && OperatingSystem.IsWindows())
             fromEnv = Path.Combine(LaplaceInstall.DefaultBuildRoot, "build-cutechess");
+        if (string.IsNullOrWhiteSpace(fromEnv) && !OperatingSystem.IsWindows())
+            fromEnv = "/opt/laplace/build-cutechess";
         if (string.IsNullOrWhiteSpace(fromEnv))
             return null;
         return Path.Combine(fromEnv.Trim(), name);
@@ -130,14 +135,20 @@ public static class ChessLabPaths
         if (!LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
             return false;
 
+        var names = OperatingSystem.IsWindows()
+            ? new[] { "laplace-uci.exe" }
+            : new[] { "laplace-uci", "laplace-uci.exe" };
         foreach (var cfg in new[] { "Release", "Debug" })
         {
-            var candidate = Path.Combine(
-                buildRoot.Trim(), "app", "bin", "Laplace.Chess.Uci", cfg, "net10.0", "laplace-uci.exe");
-            if (File.Exists(candidate))
+            foreach (var name in names)
             {
-                path = candidate;
-                return true;
+                var candidate = Path.Combine(
+                    buildRoot.Trim(), "app", "bin", "Laplace.Chess.Uci", cfg, "net10.0", name);
+                if (File.Exists(candidate))
+                {
+                    path = candidate;
+                    return true;
+                }
             }
         }
 
@@ -187,33 +198,74 @@ public static class ChessLabPaths
                 return new Probe(p, true, "config");
         }
 
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var p in new[]
+                     {
+                         "/usr/lib/qt6/bin",
+                         "/usr/lib/x86_64-linux-gnu/qt6/bin",
+                         "/usr/lib/x86_64-linux-gnu",
+                     })
+            {
+                if (Directory.Exists(p))
+                    return new Probe(p, true, "system");
+            }
+        }
+
         return new Probe(null, false, "missing");
     }
 
     private static bool TryFindOnPath(string[] names, out string found)
     {
         found = "";
-        if (!OperatingSystem.IsWindows()) return false;
-
         foreach (var name in names)
         {
             try
             {
-                using var proc = Process.Start(new ProcessStartInfo
+                if (OperatingSystem.IsWindows())
                 {
-                    FileName = "where.exe",
-                    Arguments = name,
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                });
-                if (proc is null) continue;
-                var line = proc.StandardOutput.ReadLine()?.Trim();
-                proc.WaitForExit();
-                if (!string.IsNullOrEmpty(line) && File.Exists(line))
+                    using var proc = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "where.exe",
+                        Arguments = name,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    });
+                    if (proc is null) continue;
+                    var line = proc.StandardOutput.ReadLine()?.Trim();
+                    proc.WaitForExit();
+                    if (!string.IsNullOrEmpty(line) && File.Exists(line))
+                    {
+                        found = line;
+                        return true;
+                    }
+                }
+                else
                 {
-                    found = line;
-                    return true;
+                    using var proc = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "/usr/bin/which",
+                        Arguments = name,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    });
+                    if (proc is null) continue;
+                    var line = proc.StandardOutput.ReadLine()?.Trim();
+                    proc.WaitForExit();
+                    if (!string.IsNullOrEmpty(line) && File.Exists(line))
+                    {
+                        found = line;
+                        return true;
+                    }
+
+                    // Debian/Ubuntu stockfish lives in /usr/games (often not on PATH for services).
+                    if (name == "stockfish" && File.Exists("/usr/games/stockfish"))
+                    {
+                        found = "/usr/games/stockfish";
+                        return true;
+                    }
                 }
             }
             catch

@@ -23,10 +23,17 @@ if not exist "%APPCMD%" (
 )
 
 echo ==== stop IIS app pool %POOL% ====
-"%APPCMD%" stop apppool /apppool.name:%POOL%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to stop %POOL% — run elevated if needed
-  exit /b 1
+rem appcmd stop errors on an already-stopped pool — read the state first.
+set "POOL_STATE="
+for /f "usebackq delims=" %%S in (`"%APPCMD%" list apppool "%POOL%" /text:state`) do set "POOL_STATE=%%S"
+if /i "!POOL_STATE!"=="Stopped" (
+  echo [deploy-api] pool %POOL% already stopped
+) else (
+  "%APPCMD%" stop apppool /apppool.name:%POOL%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to stop %POOL% — run elevated if needed
+    exit /b 1
+  )
 )
 set /a "WAIT=0"
 :wait_pool_stop
@@ -65,15 +72,27 @@ for %%F in (
 if not "!VERIFY_FAILED!"=="0" goto pool_start_fail
 
 echo ==== start IIS app pool %POOL% ====
-"%APPCMD%" start apppool /apppool.name:%POOL%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to start %POOL%
-  exit /b 1
+set "POOL_STATE="
+for /f "usebackq delims=" %%S in (`"%APPCMD%" list apppool "%POOL%" /text:state`) do set "POOL_STATE=%%S"
+if /i "!POOL_STATE!"=="Started" (
+  echo [deploy-api] pool %POOL% already started
+) else (
+  "%APPCMD%" start apppool /apppool.name:%POOL%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to start %POOL%
+    exit /b 1
+  )
 )
-"%APPCMD%" start site /site.name:%SITE%
-if errorlevel 1 (
-  echo [deploy-api] ERROR: failed to start site %SITE%
-  exit /b 1
+set "SITE_STATE="
+for /f "usebackq delims=" %%S in (`"%APPCMD%" list site "%SITE%" /text:state`) do set "SITE_STATE=%%S"
+if /i "!SITE_STATE!"=="Started" (
+  echo [deploy-api] site %SITE% already started
+) else (
+  "%APPCMD%" start site /site.name:%SITE%
+  if errorlevel 1 (
+    echo [deploy-api] ERROR: failed to start site %SITE%
+    exit /b 1
+  )
 )
 
 echo ==== wait for /health/ready ====

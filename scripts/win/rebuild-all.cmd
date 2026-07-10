@@ -3,6 +3,7 @@ setlocal EnableDelayedExpansion
 
 set "SKIP_CLEAN=0"
 set "SKIP_APP=0"
+set "APP_TREE_WIPED=0"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -34,6 +35,7 @@ if "%SKIP_CLEAN%"=="0" (
   if exist "%LAPLACE_BUILD_ROOT%\app" (
     echo removing external app build tree ...
     rmdir /s /q "%LAPLACE_BUILD_ROOT%\app"
+    set "APP_TREE_WIPED=1"
   )
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
@@ -53,17 +55,19 @@ call "%~dp0build-engine.cmd" %NATIVE_FLAGS% || exit /b 1
 
 echo.
 echo ===== PHASE 4 — BUILD EXTENSIONS =====
-call "%~dp0build-extensions.cmd" %NATIVE_FLAGS% || exit /b 1
+rem Codegen just ran in Phase 2 — skip the duplicate PS1 invoke.
+call "%~dp0build-extensions.cmd" --skip-codegen %NATIVE_FLAGS% || exit /b 1
 
 echo.
-echo ===== PHASE 5 — PERF CACHE (before deploy — install-extensions copies these) =====
-cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_t0_perfcache laplace_highway_perfcache || exit /b 1
+echo ===== PHASE 5 — PERF CACHE (existence check; ALL targets already built them) =====
 if not exist "%LAPLACE_PERFCACHE_BIN%" (
   echo ERROR: T0 perfcache blob missing at %LAPLACE_PERFCACHE_BIN%
+  echo        engine ALL build should have emitted it — check laplace_t0_perfcache target
   exit /b 1
 )
 if not exist "%LAPLACE_HIGHWAY_PERFCACHE_BIN%" (
   echo ERROR: highway perfcache blob missing at %LAPLACE_HIGHWAY_PERFCACHE_BIN%
+  echo        engine ALL build should have emitted it — check laplace_highway_perfcache target
   exit /b 1
 )
 for %%F in ("%LAPLACE_PERFCACHE_BIN%") do echo T0 perfcache ready: %%~zF bytes — %%F
@@ -71,14 +75,19 @@ for %%F in ("%LAPLACE_HIGHWAY_PERFCACHE_BIN%") do echo highway perfcache ready: 
 
 echo.
 echo ===== PHASE 6 — DEPLOY / INSTALL =====
-call "%~dp0install-extensions.cmd" || exit /b 1
+rem Extensions just built — skip redundant SQL target cmake hop.
+call "%~dp0install-extensions.cmd" --skip-build || exit /b 1
 
 if "%SKIP_APP%"=="0" (
   echo.
   echo ===== PHASE 7 — BUILD APP =====
   cd "%LAPLACE_ROOT%\app"
-  echo dotnet clean Release ...
-  dotnet clean Laplace.slnx -c Release --nologo -v minimal || exit /b 1
+  if "%APP_TREE_WIPED%"=="0" (
+    echo dotnet clean Release ...
+    dotnet clean Laplace.slnx -c Release --nologo -v minimal || exit /b 1
+  ) else (
+    echo dotnet clean skipped — app tree wiped in Phase 1
+  )
   echo dotnet build Release ...
   dotnet build Laplace.slnx -c Release -v minimal || exit /b 1
   cd /d "%LAPLACE_ROOT%"

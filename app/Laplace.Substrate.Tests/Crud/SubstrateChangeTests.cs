@@ -13,7 +13,7 @@ public class SubstrateChangeTests
     public void Builder_IntentStagesEmptyByDefault()
     {
         var change = new SubstrateChangeBuilder(H(0), "empty").Build();
-        Assert.Equal(0, change.IntentStages.Length);
+        Assert.Empty(change.IntentStages);
         Assert.True(change.IntentStages.IsDefaultOrEmpty);
     }
 

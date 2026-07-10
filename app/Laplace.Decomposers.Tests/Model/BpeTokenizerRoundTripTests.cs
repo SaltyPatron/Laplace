@@ -13,6 +13,13 @@ namespace Laplace.Decomposers.Model.Tests;
 /// </summary>
 public class BpeTokenizerRoundTripTests
 {
+    // Token entity ids resolve through the codepoint perfcache; loading here (the
+    // assembly's per-class idiom) removes the order dependence on another test
+    // class having loaded the process-global blob first.
+    static BpeTokenizerRoundTripTests() =>
+        Laplace.Engine.Core.CodepointPerfcache.Load(
+            Laplace.Decomposers.Tests.TestInstall.ResolvePerfcacheOrThrow());
+
     private static string WriteTokenizer(string dir, string modelType, bool withMerges)
     {
         var vocab = new Dictionary<string, int>

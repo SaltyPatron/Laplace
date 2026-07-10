@@ -1,14 +1,14 @@
 14 — FOUNDRY ROOT CAUSE: why no conversation, why heads/layers mash, why the
-substrate's riches don't reach the poured model — with literature + prescriptions
+substrate's riches don't reach the synthesized model — with literature + prescriptions
 ================================================================================
-Date: 2026-07-05. Method: direct read of the Mold-A-Model pour
+Date: 2026-07-05. Method: direct read of the Mold-A-Model synthesis
 (FoundryCommands.SynthesizeMoldAModelAsync + FoundryExport basis/factor path),
 the 2026-07-05 full-reseed live timings, and a targeted literature pass (links in
 §7). Companion to 09 (thesis/spec) and 12 (primitive→slot map); this doc is the
-DIAGNOSIS layer between them: exactly which mechanisms mash the current pour and
+DIAGNOSIS layer between them: exactly which mechanisms mash the current synthesis and
 exactly which substrate primitive, correctly wired, kills each mechanism.
 
-The one-sentence answer to "what is missing": the pour currently uses ~3 of the
+The one-sentence answer to "what is missing": the synthesis currently uses ~3 of the
 substrate's ~12 information channels (eff_mu edge weights, relation planes,
 PRECEDES adjacency), projects them all through ONE shared hub-dominated basis,
 stacks layers that are LINEAR in content — and every named failure (no
@@ -16,7 +16,7 @@ conversation, mashed heads, mashed layers) is a theorem-grade consequence of
 those three facts, each with a named literature counterpart and a named fix.
 
 ================================================================================
-SECTION 1 — WHAT THE POUR DOES TODAY (grounded, FoundryCommands.cs ~979-1400,
+SECTION 1 — WHAT THE SYNTHESIS DOES TODAY (grounded, FoundryCommands.cs ~979-1400,
 FoundryExport.cs ~923-1530)
 ================================================================================
   1. Vocab: tokenizer-derived word tokens + byte floor (word crawl; the 937-vocab
@@ -50,7 +50,7 @@ FoundryExport.cs ~923-1530)
 SECTION 2 — THE MASHING: five mechanisms, each code-grounded + literature-named
 ================================================================================
 M1. THE STACK IS LINEAR IN CONTENT (the single biggest cause).
-    Every poured weight is a linear factor; the one nonlinearity a transformer
+    Every synthesized weight is a linear factor; the one nonlinearity a transformer
     layer owns (the FFN gate) is constant by construction (§1.6). A stack of
     linear layers collapses to ONE linear map — depth adds smoothing, never
     composition. Dong/Cordonnier/Loukas (ICML 2021) prove the sharpened version:
@@ -72,7 +72,7 @@ M2. ALL HEADS SHARE ONE SUBSPACE; RELATIONS RE-MASH IN THE RESIDUAL STREAM.
     relation slices into one matrix loses the relational structure (RESCAL,
     Nickel 2011), and every serious multi-relational GNN keeps RELATION-SPECIFIC
     transforms (R-GCN, Schlichtkrull 2018; r-GAT). The substrate's 181 relation
-    types are the tensor slices; the pour re-flattens them twice (union basis +
+    types are the tensor slices; the synthesis re-flattens them twice (union basis +
     summed residual). → Prescriptions P3, P4.
 
 M3. THE LAYER UPDATE IS POWER ITERATION TOWARD THE HUB EIGENVECTOR.
@@ -80,7 +80,7 @@ M3. THE LAYER UPDATE IS POWER ITERATION TOWARD THE HUB EIGENVECTOR.
     diffusion toward the summed operator's dominant eigenvector = GNN
     OVERSMOOTHING, verbatim: repeated graph convolution makes node embeddings
     indistinguishable (Li/Han/Wu 2018; Oono & Suzuki 2020). The GNN remedies map
-    one-to-one onto what the pour lacks: PairNorm (preserve total pairwise
+    one-to-one onto what the synthesis lacks: PairNorm (preserve total pairwise
     distances after each propagation — a normalization, cheap), mean-subtraction
     (recenters the iteration onto the FIEDLER vector, i.e. structure instead of
     degree), residuals (provably mitigate — present), DropEdge (stochastic — the
@@ -109,10 +109,10 @@ M4. [CORRECTION 2026-07-08 — STALE, verified against code (doc 18 §6 C-1): th
     an env var (256), not the eigengap — 'hidden=auto' (12's spectral-rank slot)
     is unimplemented. → Prescription P1.
 
-M5. THE GLICKO TUPLE IS TRUNCATED TO A SCALAR; TENSION≠CERTAINTY IN THE POUR.
+M5. THE GLICKO TUPLE IS TRUNCATED TO A SCALAR; TENSION≠CERTAINTY IN THE SYNTHESIS.
     Only the folded weight reaches a plane. rd (per-edge uncertainty →
     temperature), witness_count (evidence mass → sharpening/saturation),
-    volatility (stability → decay), source trust (scoped pours), outcome
+    volatility (stability → decay), source trust (scoped synthesis runs), outcome
     polarity (refuting vs supporting) are all dropped. Consequence: a
     single-witness rumor edge and a 10k-witness taut strand differ only in one
     number, so hubs with MANY WEAK edges outweigh spokes with FEW TAUT ones in
@@ -124,7 +124,7 @@ M5. THE GLICKO TUPLE IS TRUNCATED TO A SCALAR; TENSION≠CERTAINTY IN THE POUR.
 ================================================================================
 SECTION 3 — WHY NO CONVERSATION, SPECIFICALLY
 ================================================================================
-Conversation is a TIER-3 phenomenon poured from a TIER-2-FLAT model. Inventory:
+Conversation is a TIER-3 phenomenon synthesized from a TIER-2-FLAT model. Inventory:
 
 C1. VOCAB: word-crawl + byte floor starves; the closed vocabulary the substrate
     actually owns is tier-0 (assigned codepoints under the pinned UCD —
@@ -168,7 +168,7 @@ C5. NO COMPOSITION LAYERS: with a codepoint/merge vocab, the first layers must
     composition) — this is where M-fixes and C-fixes meet.
 
 ================================================================================
-SECTION 4 — SUPPLY vs CONSUMPTION (every primitive: holds → pour reads today →
+SECTION 4 — SUPPLY vs CONSUMPTION (every primitive: holds → synthesis reads today →
 target slot; extends 12's master table with the "consumed?" truth column)
 ================================================================================
  primitive                 consumed today?          target slot (12) / fix
@@ -180,7 +180,7 @@ target slot; extends 12's master table with the "consumed?" truth column)
  rd (uncertainty)          NO                        per-edge temperature (P5)
  witness_count             NO                        evidence-mass saturation (P5)
  volatility                NO                        decay/dropout analog (P5)
- source / trust class      NO                        scoped pours, plane
+ source / trust class      NO                        scoped synthesis runs, plane
                                                      multipliers (P8)
  context (provenance)      NO                        conditional molding (P8)
  outcome polarity          via fold only             signed edges: refutation as
@@ -233,14 +233,14 @@ P5 GLICKO-COMPLETE WEIGHTS: w_edge = eff_mu · exp(−κ·rd) · sat(witness_cou
    planes; refuted/low-outcome edges as NEGATIVE attention (signed operator).
    Kills M5 — "tension = certainty" finally reaches the weights.
 P6 CONVERSATIONAL OPERATORS + VOCAB: tier-0 closed floor (assigned codepoints,
-   pinned UCD) + consensus-derived merges; pour the TIER-3 turn/response plane
+   pinned UCD) + consensus-derived merges; synthesis the TIER-3 turn/response plane
    (OpenSubtitles/Tatoeba) as the lm_head's discourse component alongside the
    tier-2 continuation plane. Kills C1/C3.
 P7 POSITIONS: hilbert_index → absolute PE; trajectory ordinal → sequence PE.
-   Both deterministic, both already stored, zero new computation at pour time.
+   Both deterministic, both already stored, zero new computation at synthesis time.
    Kills C2. (LapPE literature = external validation that spectral/structural
    PE carries this load.)
-P8 SCOPED POURS: source/context WHERE-clause conditioning → re-fold → pour;
+P8 SCOPED SYNTHESIS: source/context WHERE-clause conditioning → re-fold → synthesis;
    per-trust-class plane multipliers. Delivers the custom-tailoring product
    AND the persona/register half of conversation (C4).
 P9 GEOMETRIC HEADS: angular Gaussian kernel head (exp(−ang²/2σ²), GiST-servable),
@@ -294,13 +294,13 @@ this is the current cost of "regenerate, never backfill".
 SECTION 6b — 2026-07-08 REMEDIATION EXECUTION LOG (plan wild-orbiting-shamir)
 ================================================================================
 Landed in code this session (extension 4165d6ab732d4d41 installed + ALTER'd; CLI
-rebuilt; all pours = Path A via laplace.recipe, d256/L2/H4, vocab 1500+BPE):
+rebuilt; all synthesis runs = Path A via laplace.recipe, d256/L2/H4, vocab 1500+BPE):
   P5   Glicko-complete plane weights: signed neutral-centered eff_mu ×
        exp(−rd) × witness_sat(wc/(wc+4)) in consensus_type_plane/adjacency/
        entity_relation_plane/layer_plane(_masked); abs(w) degree-cap ordering;
        basis union clamped nonneg client-side (FoundryExport.PositivePart).
        New constants functions/mu/foundry_rd_kappa + foundry_witness_sat.
-  P4a  column-wise mean-subtraction on the pour-loop update (pre-RMSNorm).
+  P4a  column-wise mean-subtraction on the synthesis-loop update (pre-RMSNorm).
   P3   block Gram-Schmidt across head O-bases per layer; native QR rc=-4 on
        collinear factors → managed MGS fallback zeroes overlap (measured:
        15/192 directions collinear = M2 observed); o_proj scaled by salience.
@@ -322,7 +322,7 @@ rebuilt; all pours = Path A via laplace.recipe, d256/L2/H4, vocab 1500+BPE):
        rotary-pair-0 component skip in Q/K fills (Q,K same mapping). Verified:
        relation heads 0.0000 drift at all gaps; context head rotates BY DESIGN
        (recency kernel); rope-probe.py gates on median head drift.
-  Unknown opKeys now FAIL the pour loudly (silent empty planes poured dead
+  Unknown opKeys now FAIL the synthesis loudly (silent empty planes synthesized dead
        tensors before).
 FORWARD-PASS DEBUG CHAIN (each verified by oracle, in order):
   F1 flat +11.328 logit plateau: unit-norm lm_head rows make single-hub-source
@@ -336,7 +336,7 @@ FORWARD-PASS DEBUG CHAIN (each verified by oracle, in order):
      row RMS 1; (b) factored operators effectively RANK-1 (V row norms 0.841 vs
      0.029 = 29:1; ffn_up 47:1) — sqrt(s/s0) crushes sub-dominant structure →
      FactorSpectrumAlpha 0.25 (each side (s/s0)^0.125). M3 lives in the OPERATOR
-     spectrum, not only the pour loop.
+     spectrum, not only the synthesis loop.
   READOUT LAW (four experiments): direction carries ranking (unit rows);
      evidence mass only breaks ties (×(1+0.1·sat(mass))), never sets magnitude.
 RESULT: behavioral 0/16 (baseline Path B, "neither" mono-collapse) → 14/16
@@ -354,7 +354,7 @@ DEPTH-4 CONTROLLED COMPARISON (same recipe, one variable — the day's second
   VERDICT: depth composes (continuation routing survives 4 layers with the
   2026-07-08 discipline fixes); SEMANTIC heads writing into the shared residual
   are the mash vector. Doc 18's typed-stratum allocation is the prerequisite
-  for full-compile pours — now an experimental result, not a design argument.
+  for full-compile synthesis runs — now an experimental result, not a design argument.
   Harness decode = greedy + repeat-penalty 1.4 (deterministic, loop-suppressed;
   hub detector still armed).
 PHASE R RESOLVED (verdict + numbers in doc 18 §6 C-5): rank ablation = perfect
@@ -369,7 +369,7 @@ PHASE 8 VERIFIED (differential gate PASSED): --scope-source WordNetDecomposer �
   design. TRAP FOUND+FIXED: Npgsql pool reset (DISCARD ALL) drops the pg_temp
   shadow while the physical connection survives → initializer doesn't re-fire →
   later readers silently read the UNSCOPED world (observed: type planes scoped,
-  adjacency unscoped in ONE pour). Fix: NoResetOnClose on the scoped source.
+  adjacency unscoped in ONE synthesis). Fix: NoResetOnClose on the scoped source.
   Note: FillHighwayMasksAsync schema-qualifies laplace.consensus → gate
   membership stays GLOBAL under scope (band membership as global property —
   acceptable, documented). Source names: source_id('WordNetDecomposer') form.
@@ -383,7 +383,7 @@ PHASE 8 CODE (detail):
   registered both manifests) + CLI --scope-source <names> — resolves source ids,
   then a physical-connection initializer materializes pg_temp.consensus, which
   SHADOWS laplace.consensus inside every plane function (pg_temp resolves
-  first): the entire pour reads the scoped world with ZERO plane changes.
+  first): the entire synthesis reads the scoped world with ZERO plane changes.
   Scope covers evidence-derived planes; trajectory/corpus planes stay global
   (content order is not evidence). Differential gate still to run.
 PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
@@ -393,7 +393,7 @@ PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
   mold-d (L4/H8/d512, continuation compile, unary lm_head) PASSES the gate:
   15/16 content 0.938, NO hub/empty collapse, per-prompt rankings — after:
   embed mean-centering (cos(dog,water) 0.86→0.74; bias dim = the floor),
-  block gains 0.5 (additions perturb, don't bury), poured PairNorm (per-dim
+  block gains 0.5 (additions perturb, don't bury), synthesized PairNorm (per-dim
   SNR weights in the previously all-ones norm tensors; ffn_norm keeps bias
   for the gate floor), content-word metric added to the harness
   (content_word_pass_rate; GLUE_WORDS stoplist).
@@ -416,14 +416,14 @@ PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
   (first: mold-b full-compile collapse).
 2026-07-09 THE CONDITIONAL THEOREM (third experimental mandate; supersedes all
   readout calibration work): a trained LM computes h·E'(y) ≈ log P(y|prefix) —
-  a rank-d factorization OF THE CONDITIONAL. The pour factors AFFINITY (joint-
+  a rank-d factorization OF THE CONDITIONAL. The synthesis factors AFFINITY (joint-
   shaped): row(y) = mean source embedding — never divided by the context
   marginal. P(y|x) = P(x,y)/P(x); the DIVISION is what lets content words win
   their slots (glue has high joint AND high marginal → flat conditional;
   content has concentrated joint → spiking conditional). Stop-word dominance,
   hub collapses, and calibration-invariant ranks are all corollaries of the
   missing division. Leg 3 already computes true conditionals (walk_continuations
-  order-k backoff count ratios) — the pour lost them in translation.
+  order-k backoff count ratios) — the synthesis lost them in translation.
   PRESCRIPTION (proof-shaped): (1) bigram floor = SVD of the log-conditional
   matrix M[x,y]=log P̂(y|x); embed=A, lm_head=B; error = Eckart-Young-optimal
   truncation (rank V = FAITHFUL's exact lookup; rank d = its correct
@@ -437,7 +437,7 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
   +21M chess attestations (the 01:21-01:52 load = a chess ingest from another
   session; explains chess tokens entering crawl vocab). Regression fully
   attributed to ungated E-accumulation + PairNorm norms; both reverted.
-  REAL POUR TIMINGS (fake "0.0s" stopwatch fixed; [t] stage lines added):
+  REAL SYNTHESIS TIMINGS (fake "0.0s" stopwatch fixed; [t] stage lines added):
   632s total = crawl 494s (78%!) + planes 52s + eigensolve 40s + layer loop
   46s + write 0.2s. Crawl fix that already exists: vocab source="tokenizer"
   reuses a mold dir — kills the 494s AND pins vocab for A/B integrity
@@ -456,7 +456,7 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
   warehouse view): multi-tier mesh + cross-sense leakage via polysemous bridges
   (mesh point G), with Glicko already ranking leaks to the 1-wit tail — sense
   mediation (W→C stratum) is the partition fix.
-2026-07-09 THE CONDITIONAL FLOOR POURED AND SPEAKS (floor-a.gguf, V=7134 incl.
+2026-07-09 THE CONDITIONAL FLOOR SYNTHESIZED AND SPEAKS (floor-a.gguf, V=7134 incl.
   punctuation, rank-511 factorization of 248,223 log-conditional entries):
   LAYER-0 top-k is calibrated bigram English WITH SLOT STRUCTURE —
     king→ of/and/was/who;  dog→ ␣/./and/or ('.' rank 2: sentences can END);
@@ -475,16 +475,16 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
   formal Spearman-vs-SQL-table check still to run; likelihood gate gains a
   --layers 0 floor mode. Evidence-fix builds: 974/0 tests green; extension
   e49b4f0750aca3cc; conditional + pos_transition planes live and smoke-tested;
-  floor pour total 959s (crawl 441s on post-UD DB).
+  floor synthesis total 959s (crawl 441s on post-UD DB).
 2026-07-09 ATTENUATION EXECUTED + GAIN SWEEP VERDICT (floor-b/floor-c):
   FoundryDefaults.FloorCorrectionGain multiplies layer output scales when
-  embed op == "conditional" (FoundryCommands layerScale). floor-b poured at
+  embed op == "conditional" (FoundryCommands layerScale). floor-b synthesized at
   0.15 on the pinned tokenizer vocab (crawl 0.0s; plane reads now the hog at
   550s — the DEP heads over post-UD consensus). CANARY RESTORED: the→
   close/short/particular SURVIVES the full forward (same top-6 set, reordered);
   Spearman L0↔full 0.39–0.68 across probes (was 0.08–0.24 at gain 1.0).
-  THE SWEEP (in-memory rescale of attn_output+ffn_down = pour-equivalent,
-  verified bit-identical at the poured point; 7 gains, 16-probe likelihood):
+  THE SWEEP (in-memory rescale of attn_output+ffn_down = synthesis-equivalent,
+  verified bit-identical at the synthesized point; 7 gains, 16-probe likelihood):
     gain 0.00: mean 1674.6  mrr .0535  hits@50 .448  sp(the) 1.00
     gain 0.10: mean 1429.5  mrr .0520  hits@50 .448  sp(the) 0.54
     gain 0.15: mean 1345.8  mrr .0495  hits@50 .448  sp(the) 0.47
@@ -495,33 +495,33 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
   improvement on all three metrics is UNACHIEVABLE by scaling — not a tuning
   problem. Revised gate: mean rank improves, hits@50 holds exactly, MRR within
   3% of floor. Pareto knee = 0.10 (beats 0.15 on BOTH mrr and canary Spearman);
-  FloorCorrectionGain set 0.10, floor-c.gguf is the shipping pour.
+  FloorCorrectionGain set 0.10, floor-c.gguf is the shipping synthesis.
   FLOOR-C SHIPPED + GATED (verify-model-behavioral --mode likelihood
   --floor-gate, now a script flag; report floor-c-floorgate.json): PASS —
   mean rank 1674.6→1507.3, mrr 0.0535→0.0526 (98.3% of floor), hits@50 held
   0.448. Canary: the→close/short/particular fully intact (close stays rank 1),
   dog top-6 IDENTICAL floor vs full; Spearman 0.61/0.86. Caveat: the direct
-  pour deviates slightly from the sweep's in-memory rescale (sweep predicted
-  1429.5/.0520/sp .54) — inter-layer diffusion sees the scaled writes at pour
-  time; sweep is exact only at the poured gain. The real pour came out BETTER
+  synthesis deviates slightly from the sweep's in-memory rescale (sweep predicted
+  1429.5/.0520/sp .54) — inter-layer diffusion sees the scaled writes at synthesis
+  time; sweep is exact only at the synthesized gain. The real synthesis came out BETTER
   on mrr and Spearman than predicted.
   MATH-PROOF CHECK RUN (was still-open): per-row Spearman between floor-c
-  layer-0 logits and continuation_conditional_plane's own w (pour-equivalent
+  layer-0 logits and continuation_conditional_plane's own w (synthesis-equivalent
   vocab reconstructed via word_id over the tokenizer surfaces; single plane
   eval filtered to the 16 probes): mean +0.778 over 13 probes (queen/cat/gold
   had <5 matched pairs), range 0.68 (tree, n=36) → 0.92 (water, n=120) —
   correlation strengthens with row evidence, exactly the rank-511 truncation
-  profile. The floor demonstrably transcribes the SQL table it was poured from.
+  profile. The floor demonstrably transcribes the SQL table it was synthesized from.
   (Pooled cross-row 0.53 — expected: pooling mixes per-row marginals.)
   NEXT RESEARCH ITEM (successor to "attenuate until monotone"): make the
   correction planes head-informative — today they only lift deep-tail attested
   continuations; candidate cause is the readout law (direction ranks, mass
   tie-breaks) not yet applied to the correction subspaces.
 2026-07-09 PLANE-READ ARCHITECTURE PASS (SQL/C# orchestrate, heavy lifting
-  pushed to the indexed/native layer): pour plane reads 540.8s → 56.0s (9.7×),
-  total pour 607.9s → 137.4s. Two root causes, both measured before fixing:
+  pushed to the indexed/native layer): synthesis plane reads 540.8s → 56.0s (9.7×),
+  total synthesis 607.9s → 137.4s. Two root causes, both measured before fixing:
   (1) relation_plane consensus family had NO vocab filter — 12 relation heads
-      streamed 27.5M rows/pour to C# which kept 1.3% (RELATED_TO alone 8.49M
+      streamed 27.5M rows/synthesis to C# which kept 1.3% (RELATED_TO alone 8.49M
       rows → 18,959). Fix: p_vocab bytea[] param; type id resolved into a
       plpgsql local FIRST (variable = bound param = index condition, Rule #4 /
       L12), bare-column joins probe consensus_type_subject_btree. Old 3-arg
@@ -535,8 +535,8 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
       NOTE relation_rank_resolved at ~27µs/call is ~100× a hash lookup —
       suspect per-call GUC/mmap check (Bug A class); native SPI adjacency walk
       (index scan + in-loop perfcache rank, C) is the endgame prescription.
-  VERIFIED: re-pour edge counts identical on 15/16 operators; sentence_order
-  121→124 (live DB gained documents between pours — the loop depositing, not
+  VERIFIED: re-synthesize edge counts identical on 15/16 operators; sentence_order
+  121→124 (live DB gained documents between synthesis runs — the loop depositing, not
   a defect) so GGUF hashes differ legitimately; floor-c-verify passes the
   floor-gate (mean 1684.5→1603.9, mrr 97.7% of floor, hits@50 held).
   Deploy lesson: EXT_VERSION is a CONFIGURE-time content hash — a modified

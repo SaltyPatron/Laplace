@@ -1,201 +1,262 @@
 # Laplace
 
-Content-addressable geometric-attestation substrate, and a construction (not training)
-path from it to runnable transformer models. This file is the entry point: what the
-invention is, where the truth lives, and how to operate the repo. It points; the
-`.scratchpad/` docs hold the substance. Last full overhaul: 2026-07-05.
+Content-addressable geometric-attestation substrate; a construction (not training) path
+from it to runnable transformer models; and a graph-walk inference engine that closes a
+self-improvement loop. Omni-modal (text, chess, code, AI models — per-modality tier
+ladders under one identity law) and omni-glottal (every language meshes at the ILI
+concept hub). SQL/C# orchestrate; native C/C++/SPI does the math. It replaces the two
+primitives modern ML is built on — GEMM similarity and nearest-neighbor search in a
+trained embedding — with graph search over a Glicko-weighted evidence graph and a
+deterministic, lossless, content-addressed identity system.
 
-## The invention, in one arc
+## The invention — three layers, three keys
 
-Every fact from every source — WordNet, ConceptNet, a chess game, a user prompt, a probed
-neural network's own weights — reduces to one **attestation** 5-tuple
-`(subject, relation_type, object, source, outcome)`. Three layers with three keys carry
-everything (this is the load-bearing mental model, from `.scratchpad/11` §0):
+Every fact from every source — WordNet, ConceptNet, a chess game, a user prompt, an AI
+model's weights — reduces to one **attestation** 5-tuple
+`(subject, relation_type, object, source, outcome/score)`.
 
-- **CONTENT** (`entities`/`physicalities`), keyed by BLAKE3 content hash. Deduped:
-  identical content = identical id, at every tier, from every source — cross-source
-  merging is a hash collision, not an entity-resolution pass. "Pawn E2→E4" is ONE entity
-  no matter who played it.
-- **EVIDENCE** (`attestations`), one row per occurrence, with source/context/outcome.
-  Nothing is mashed: Magnus's E2E4 and yours are distinct provenanced rows.
-  `outcome ∈ {Loss=0, Draw=1, Win=2}` is bit-identical to chess's `PlyOutcome` on purpose.
-- **CONSENSUS** (`consensus`), keyed by `consensus_id(subject,type,object)`, folding
-  evidence into literal Glicko-2 (`rating`, `rd`, `volatility`, `witness_count`). The
-  same math that rates chess players rates epistemic confidence; `eff_mu = rating − 2·rd`
-  is the conservative estimate everything ranks by. Chess is the proving domain because
-  its ground truth is objectively checkable.
+- **CONTENT** (`entities`/`physicalities`), keyed by BLAKE3 content hash. Identical
+  content = identical id, at every tier, from every source — cross-source merging is a
+  hash collision, never an entity-resolution pass. "Pawn E2→E4" is ONE entity no matter
+  who played it.
+- **EVIDENCE** (`attestations`): one row per assertion, with source/context/outcome.
+  Provenance is never mashed — Magnus's E2E4 and yours are distinct provenanced rows.
+- **CONSENSUS** (`consensus`), keyed by `(subject, type, object)`, folding evidence into
+  literal Glicko-2 (`rating`, `rd`, `volatility`, `witness_count`). `eff_mu = rating −
+  2·rd` is the conservative estimate everything ranks by. The fold input is a continuous
+  score; trust enters as the opponent RD — trust is inside the rating math. The fold plus
+  read-side RD/eff_mu IS the noise model: no operator-invented floors, caps, or top-k
+  anywhere. Top-k exists only as a query LIMIT.
 
-This is a reinvention of AI, not a knowledge warehouse. It replaces the two primitives
-modern ML is built on — GEMM (similarity via matrix multiply) and nearest-neighbor search
-in a *trained* embedding space — with graph search over a Glicko-weighted evidence graph
-and a deterministic, lossless, content-addressed identity system standing in for the
-embedding. There is no GPU code in `engine/` or `extension/` and that is structural, not an
-omission. If you find yourself describing this as "ETL into a database you can query," you
-have lost the invention: ingestion is one leg of three.
+Geometry (`physicalities.coord`/`trajectory`) is a lossless, deterministic,
+content-addressed identity and serialization system — tier-0 codepoints pinned on S³ by
+UCA order; composed entities store exactly-invertible ordered constituent sequences
+(`ContentRoundtrip` rebuilds a document's original bytes from its id alone); `mantissa.c`
+bit-packs ids/scores/counts through the same PointZM columns. Geometry is identity and
+reconstruction, NOT semantics. The semantics live in the Glicko-weighted attestation
+graph: **a colony of spider webs — pull one strand and Glicko-2 tells you what tugs back
+and how hard.** That web IS a weighted graph Laplacian; tension = certainty (witnessing
+shrinks RD and tightens the strand).
 
-**Three legs, one system** (do not collapse to the first):
-1. **Ingest** — content → attestations → Glicko-folded consensus + S³/trajectory geometry
-   (the substrate; Rule #8 spine, decomposers).
-2. **Foundry / Mold-A-Model** — that consensus+geometry is MOLDED into a runnable
-   transformer, deterministically, no gradient descent. The consensus graph IS a weighted
-   graph Laplacian; its eigenmap (the "colony at rest") IS the semantic embedding,
-   CONSTRUCTED from the spectrum, never trained. Architecture is READ OFF the data — heads =
-   relation types, layers = tiers/hops, hidden dim = spectral rank — not chosen as
-   hyperparameters. The bridge is bidirectional: a trained neural net decomposes INTO
-   attestations (a witness on equal epistemic footing with WordNet) and a fresh GGUF molds
-   OUT (`engine/dynamics` eigenmaps/gram_schmidt/procrustes, `engine/synthesis`,
-   `FoundryCommands`). Every exported weight decomposes back to its witnesses.
-3. **Inference (the Gödel/OODA engine, doc 15)** — the walk IS the forward pass, run as
-   indexed graph search (`recall()`, `generate_walk()`, native A* frontier) with MORE
-   information per step than a trained dot-product: the full Glicko tuple, relation
-   salience, highway bits, S³ geometry, provenance down to witnesses. No context window —
-   a prompt is ingested as content, so "attention over the prompt" is unbounded retrieval.
-   Explainability is a literal returned field (`eff_mu`, witness count), not a metaphor. And
-   it CLOSES: the engine's own responses are content-addressed and deposited as witnesses;
-   feedback folds into the same consensus the next walk reads. **Evaluation IS ingestion.**
-   That self-reference + self-improvement loop is what makes this a mind and not a lookup.
+## Tiers and modalities
 
-**The trap every fresh reader falls into** (it happened twice in doc 01; do not repeat it):
-`physicalities.coord`/`trajectory` geometry is **NOT a semantic embedding**. It is
-(a) a lossless, deterministic, content-addressed identity/serialization system — tier-0
-codepoints get fixed S³ positions seeded by Unicode's own UCA collation order; composed
-entities store an exactly-invertible ordered sequence of their children's coordinates
-(`ContentRoundtrip.cs` rebuilds original bytes from a document id alone) — and (b) a raw
-bit-packed payload channel (`mantissa.c`) smuggling hash ids/scores/counts through the
-same PointZM columns, disambiguated only by a flag bit. Distance on S³ ≠ meaning. The
-SEMANTICS live in the Glicko-weighted attestation graph: "a colony of spider webs — pull
-one strand and Glicko-2 tells you what tugs back and how hard." That web IS a weighted
-graph Laplacian; its eigenmap (the colony at rest) is the semantic embedding, CONSTRUCTED
-from the consensus spectrum, never trained (`.scratchpad/09`).
+Tiers are a FLOOR, not identity: 0 codepoint (the Rosetta stone), 1 grapheme, 2 word,
+3 sentence, 4 document. Same content = same id at every tier; tier is never mixed into
+the hash ("Fine" as a one-word reply IS the sentence IS the word — one id). Each
+modality gets its own ladder under the same law: text rides codepoints; the chess board
+is its own modality (squares/pieces → resolved moves → positions → games); code and AI
+checkpoints ride their containers. Tree-sitter's job is narrow: unpack container
+formats, then hand off.
 
-**Mold-A-Model** (`.scratchpad/12`): every substrate primitive has a transformer slot —
-consensus adjacency → weights/topology; relation types + salience bands → attention heads;
-S³/angular/fréchet/intersects geometry → geometric heads, positions, sparsity; hilbert
-index → positional encoding; voronoi cells → MoE routing; spectral rank of the Laplacian
-→ hidden dim; the completion operator → lm_head. Deterministic closed-form GGUF export
-(`engine/synthesis`, `FoundryCommands`); every weight decomposes back to its witnesses.
-The one open research question: does consensus × geometry × trajectory ROUTE as well as
-trained attention at depth (09's "reduced residue"). The FAITHFUL flattening was a bigram
-lookup with the layers off — a finished diagnosis, not anti-goal evidence.
+## Decomposers — the witness boundary
 
-Ingestion is RECORDING, not processing (`.scratchpad/08`): transcribe what a source
-literally asserts (witnessed layer); defer everything derived to a versioned, evictable
-analysis pass (calculated layer). Calc outranks observation only where both claim the
-same fact; trust binds to source/method, and their divergence is itself signal.
+Verified inventory: 24 decomposer classes in `Laplace.Decomposers` (Atomic2020, CILI,
+Code, ConceptNet, FrameNet, ISO, MapNet, Model, OMW, OpenSubtitles, PropBank, Recipe,
+Repo, SemLink, Stack, Tabular, Tatoeba, TinyCodes, UD, Unicode, VerbNet, Wiktionary,
+WordFrameNet, WordNet) plus 3 in `Laplace.Chess` (ChessPgn, ChessAnalyze,
+ChessOpenings). All are pure content → `SubstrateChange` record streams with ZERO inline
+SQL; the pipeline spine (`IngestBatchPipeline` working-set mode →
+`ConsensusAccumulatingWriter` → `NpgsqlWorkingSetApply`, bracketed by `IngestRunner`)
+does batching/dedup/fold/COPY.
 
-## Doc map (`.scratchpad/`) — read before deep work in the relevant area
+**Ingestion is RECORDING, not processing.** Two layers everywhere:
+witnessed = what a source literally asserts, transcribed verbatim;
+calculated = anything derived by interpreting the witnessed layer — deferred, versioned,
+evictable, under its own analysis source/trust. Calc outranks observation only where
+both claim the same fact; trust binds to source/method; their divergence is itself
+signal. Attest each fact ONCE, at the tier, identity, and provenance the source asserts
+it (a corpus asserts a sentence's language at the sentence root, not per word).
 
-| Doc | Role | Status |
-|-----|------|--------|
-| 01 Initial review | First reconstruction of the invention + flaws | historical; corrections preserved in-line |
-| 02 Identified issues | THE issue tracker (compacted 2026-07-05: status index + open detail + lessons L1-L11) | living |
-| 03 / 04 Chess audit + fixes | Chess subsystem inventory/defects | living, chess-scoped |
-| 05 Substrate invariants | Axioms: what a collision/bit/tier certifies | living — binding |
-| 06 Engineering ruleset | Rules #1-#12: how substrate code must be written; Rule #8 = the ingest sequence | living — binding |
-| 07 SQL surface audit | Inline-SQL/duplication/missing-views audit + P0-P3 roadmap | living; §5 re-baselined 2026-07-05 |
-| 08 Record vs Calculate | Witnessed/calculated split spec | living spec |
-| 09 Substrate-as-LM | Synthesis thesis, FAITHFUL diagnosis, proper-build spec, spider-web=Laplacian | living spec |
-| 10 SQL consolidation | Zero-loss numbered-file removal + lockout gates | done; the gate pattern to reuse |
-| 11 Chess provenance/consensus | Three-layer model; chess geometry ladder spec | living spec |
-| 12 Mold-A-Model map | Substrate primitive → transformer slot bijection | living spec |
-| 13 Stabilization audit + plan | Agent draft 2026-07-05 — verify against code before trusting | historical; NOT the active plan |
-| 14 Foundry root cause | Why heads/layers mash + why no conversation: 5 mechanisms (M1-M5), supply-vs-consumption table, prescriptions P1-P10, live reseed baseline, literature panel | living — the foundry build's working doc |
-| 15 Gödel engine / OODA loop | The RUNNING inference engine: the walk IS the forward pass; evaluation IS ingestion; the engine's own outputs are witnesses folding into the same consensus the next walk reads — a closed self-improving loop. This is the AI, not a query layer. | living spec — the read/serve side |
-| 16 Tier-correct attestation + hub unification | "Record each fact once, at the tier/identity/provenance the source asserts it"; decomposer tier/identity/provenance defect audit + fix sequence | living spec |
-| 17 Decomposer full-stack audit | Code-verified inventory of every decomposer vs the Rule #8 spine; trust order (code > binding docs > ops > doc 13); spine-brand fork map | living |
-| 18 Typed residual stream + mesh | The mesh inventory (6 convergence points: ILI hub, VerbNet/FrameNet/PropBank/sense/surface) + typed-stratum pour spec (subspaces S/W/C/F/G, resolution-ladder layers, EVOKES_FRAME selectors); §6 = 2026-07-08 audit corrections (14 M4 stale, 14 C3 wrong, 182 bits) | living spec — the post-remediation foundry build |
+### The AI-model decomposer — a decomposer like every other decomposer
 
-Current state in one line: the invention is whole and largely built — a content-addressed
-attestation substrate (ingest), a consensus-Laplacian model foundry (Mold-A-Model export,
-`engine/dynamics`+`synthesis`), and a running graph-walk inference engine with a closed
-self-improvement loop (docs 09/12/15, `extension/.../recall.c`+`generate_walk.c`). The
-OPEN FRONTIER is one research question (doc 09): does consensus × geometry × trajectory
-ROUTE as well as trained attention at depth. Everything else — seven ingestion lanes
-(Issue 45), read-side fragmentation (Issue 46), foundry gaps (Issues 04/05/06), sequenced
-in `.cursor/plans/full_stack_remediation_bdaba5c3.plan.md` (evidence: `.scratchpad/16` + `17`)
-— is plumbing UNDER the invention, not the invention. Do not mistake the cleanup backlog for
-the thing.
+WordNet's decomposer reads XML rows and emits attestations. The model decomposer reads
+tensor rows/columns and emits attestations. Nothing else is special about it.
 
-## Build / deploy / seed — READ BEFORE RUNNING ANYTHING
+- A checkpoint is a WITNESS on equal epistemic footing with WordNet (trust class
+  AiModelProbe — one voice among many, outranked by design). Its tensors assert
+  token→token couplings: **A attenuates to B with this intensity** — a row/column
+  lookup. The raw intensity is the outcome signal: coupling → `laplace_score_fp` → the
+  Glicko-2 fold, under the governed relation type of its plane (ATTENDS, OV_RELATES,
+  COMPLETES_TO, CONTINUES_TO, SIMILAR_TO). "Dog attenuates to noun" becomes a rated,
+  provenanced, walkable consensus row.
+- It also attests occurrence: `(token, APPEARS_IN, layer/head coordinate)`. Circuit
+  coordinates are shared content across models (plane anchor + layer/head scalars;
+  scalar ids follow the text content law) — the model NEVER enters an id; it is the
+  attestation source. Cross-model agreement is a hash collision at one consensus cell.
+- **The circuit is the game (chess-trajectory parity).** Every circuit (layer/head
+  coordinate) deposits ONE testimony-packed linestring on its coordinate entity —
+  its entire relational assertion, every token with its score, exactly as a game's
+  trajectory carries its whole move sequence. Anatomy queries read one row per
+  circuit per model; pair knowledge folds in consensus; provenance is never mashed
+  and evidence never balloons. The decoder ring (`HeadClassifier` → ENCODES) names
+  circuits against the rated web ("L10.H3 ENCODES capital-of"), and
+  `model_jitter_catalog()` convicts artifacts by failed corroboration (one witness,
+  wide RD) — mechanistic interpretability as indexed queries.
+- **One-time scrape; compute at ingest; store meaning only.** Stream the safetensors 1D
+  float buffer record by record; native math (MKL/Eigen/Spectra kernels) converts
+  records into token→token attestations. Raw floats are consumed and discarded — never
+  stored, never deferred to query time. If the knowledge isn't in the substrate after
+  ingest, the ingest didn't do its job.
+- **Aggregate, don't balloon:** pair evidence collapses across circuits at plane grain
+  (observation_count / sum_score via the aggregated-attestation builders); content
+  addressing merges across models at consensus. One evidence row per (token, plane,
+  token) per model.
+- Tokens are the same content entities the text lanes mint. Hidden dims, learned bases,
+  tensors-as-arrays are packaging — they appear nowhere. No truncation of what the
+  source asserts: near-zero couplings are draws the fold rates; nothing else decides.
+- Recorder/analyzer split, as in chess: recorder = witnessed structure (bytes, recipe
+  scalars, vocab, merges, TOKEN_MAPS_TO, coordinates); analyzer = the calculated scrape,
+  versioned and evictable. The decoder ring (`HeadClassifier` → ENCODES) names circuits
+  in the web's own vocabulary — the model's anatomy made legible.
 
-Two toolchains; not interchangeable: `Justfile` + root CMake = Linux/CI. The real Windows
-workflow is `scripts/win/*.cmd`. **LAW: if a script covers the task, use the script — never
-hand-roll `call env.cmd && …` chains.** The scripts carry correctness the chains miss
-(test-app strips the billing dev-bypass; %VAR% in a composed cmd line expands before
-env.cmd runs and silently breaks; tree locks; log routing). Operational map:
+## Chess — the proving domain
+
+Chess is the proving domain because its ground truth is objectively checkable.
+`outcome ∈ {Loss=0, Draw=1, Win=2}` is bit-identical to chess's `PlyOutcome` on purpose —
+the same math that rates chess players rates every epistemic claim. Every ply emits BOTH
+edge kinds: provenance edges (subject/context game-specific — who/when/which game) and
+aggregating edges (deduped move/position subjects carrying the game outcome into the
+fold — how good/how common). A move played in 10M games is stored once; every play is a
+preserved witness; the rating engine runs on the board. Record = PGN tokens verbatim
+(SAN, clocks, eval tokens, comments, NAGs); calculate = replay/positions/geometry/motifs
+under the versioned ChessAnalysis source. The board geometry ladder (square/piece S³
+anchors → resolved-move transitions → position geometry → mantissa-packed game
+trajectories) is specified in `.scratchpad/11`.
+
+## The mesh — omni-glottal by construction
+
+Every node id is content-addressed from a canonical key, so two decomposers producing
+the same key produce the SAME node — the collision IS the mesh. The master hub is the
+synset ≡ ILI node (addressed by its ILI string): CILI mints it; WordNet, OMW's
+multilingual lemmas, ConceptNet's /wn/ suffixes, Wiktionary sense links, SemLink,
+PredicateMatrix, MapNet, WordFrameNet all converge on it. Companion hubs: VerbNet class,
+FrameNet frame/LU, PropBank roleset, WordNet sense, and the word-surface node.
+surface → lemma → sense → ILI concept → frame/class/roleset → roles is a fully attested,
+multi-witnessed, calibrated factorization of meaning — each arrow a typed,
+Glicko-weighted, provenanced edge family. Cross-lingual transfer is free because ILI is
+the address. Relations are governed in `engine/manifest/relation_types.toml` — verified
+right now: 189 relations, 13 salience bands, manifest and generated
+`highway_manifest.h` in parity. Codegen assigns highway bits alphabetically: adding a
+relation renumbers bits and owes a reseed — regenerate, never backfill.
+
+## The SQL surface and the extension
+
+`laplace_substrate` carries the read/serve side natively: 27 SQL function families
+(analysis, cascade, consensus, contrast, converse, corpus, fold, generation, geometry,
+glicko2, highway, identity, inference, ingest, inspect, lexical, link, mu, ops,
+readback, realize, recall, relation, structural, taxonomy, trajectory, variant) plus
+native C for the hot paths: `recall.c` (intent-routed serving), `generate_walk.c`
+(batched beam frontier, ranked natively by `relation_rank × eff_mu`), `astar_path.c`,
+`trajectory_generate.c` (n-gram descent with consensus fallback), `consensus_fold_*`,
+`highway_mask.c` (perfcache-backed bit ops), `perfcache.c` (mmap'd blobs, postmaster
+prewarm). `SELECT * FROM api('<substring>')` is the schema's self-introspection catalog
+— check it before assuming a helper doesn't exist.
+
+## Foundry — Mold-A-Model (export)
+
+Consensus + geometry are MOLDED into a runnable transformer, deterministically, no
+gradient descent. "Pour" is EXPORT vocabulary exclusively. Every substrate primitive has
+a transformer slot: consensus adjacency → weights/topology (edge weight = rank ×
+(eff_mu − neutral) × exp(−κ·rd) × witness-saturation — the Glicko-complete signed
+weight, live in `consensus_adjacency`); relation types + salience bands → attention
+heads; the normalized-Laplacian eigenmap of the consensus graph (the colony at rest,
+`eigenmaps.cpp`) → the constructed embedding, hidden dim = spectral rank; S³ anchors →
+Procrustes canonical orientation; hilbert index → positional encoding; trajectories →
+sequence position; voronoi cells → MoE routing; the completion operator → lm_head, with
+the conditional floor (rank-d factorization of log P(y|x) from attested continuations,
+POS-corrected) as the calibrated base and correction layers gated to improve it
+monotonically. Scoped pours (filter attestations by source/context → re-fold → pour)
+are the custom-molding product mechanism. Export spine: `engine/synthesis`
+(gguf_writer, tensor_decompose, qk kernels) + `engine/dynamics` (eigenmaps,
+gram_schmidt, procrustes) + `FoundryCommands`. Every exported weight decomposes back to
+its witnesses. The one open research question (doc 09): does consensus × geometry ×
+trajectory ROUTE as well as trained attention at depth.
+
+## Inference — the Gödel/OODA engine
+
+The walk IS the forward pass, run as indexed graph search with MORE information per
+step than a trained dot product: the full Glicko tuple, relation salience, highway
+bits, geometry, source trust, provenance down to witnesses — explainability is a
+literal returned field (`eff_mu`, `witnesses`), not a metaphor. A prompt is ingested as
+content, so attention over it is unbounded retrieval — no context window. And it
+CLOSES: prompts and responses deposit as witnesses (UserPrompt/Response sources),
+feedback confirms/refutes triples through one lane (`FeedbackContent` → writer spine →
+immediate fold), and the next walk reads the updated consensus. **Evaluation IS
+ingestion.** Self-signals are outranked by design (Response/UserFeedback/AiModelProbe
+trust classes) — one voice among many. This closed self-improving loop is what makes it
+a mind and not a lookup.
+
+## Binding engineering laws
+
+- Content-hash identity is exact. Tier is a floor, never mixed into the hash.
+  Coord/hilbert equality is not identity for tier>0 (centroids commute); order-sensitive
+  judgments need trajectory metrics.
+- Ids are NEVER constructed outside the system: `canonical_id()`, `word_id()`,
+  `relation_type_id()`, `consensus_id()` resolve through the native hash.
+- All math in C/C++/SPI. C# and SQL orchestrate. One implementation per fact —
+  duplication needs a documented reason.
+- The ingest pipeline is a SEQUENCE: unpack → records → client-side dedup across the
+  working set → client-side Glicko accumulation → one bulk tier descent → pure COPY of
+  proven-novel rows. The right algorithm at the wrong point is a violation.
+- KNN comparison points must reach the planner as bound parameters; EXPLAIN before
+  trusting an index. An expensive STABLE function in a filter runs per row; a
+  MATERIALIZED CTE fences.
+- Verify against live data. Diagnose root cause at the source. Profile before
+  optimizing (VTune is installed). Run long commands bare — no output filters over live
+  progress.
+
+## Build / deploy / seed
+
+Two toolchains, not interchangeable: `Justfile` + root CMake = Linux/CI. The Windows
+workflow is `scripts/win/*.cmd`. **If a script covers the task, use the script.**
 
 | Task | Entry point |
 |------|-------------|
-| Full clean rebuild | `rebuild-all.cmd` (clean+codegen+build+perfcache) |
-| Engine only / extensions | `build-engine.cmd [--reconfigure]` / `build-extensions.cmd` then `install-extensions.cmd` |
-| ASAN engine (native corruption hunts) | `build-engine-asan.cmd` |
-| All tests (the gate) | `test-all.cmd` — toolchain + gtest + pg_regress + dotnet + verify-fk; log at `%LAPLACE_EXT_BUILD%\test-all.log` |
-| dotnet tests only | `test-app.cmd [project-substring]` |
+| Full clean rebuild | `rebuild-all.cmd` |
+| Engine / extensions | `build-engine.cmd [--reconfigure]` / `build-extensions.cmd` then `install-extensions.cmd` |
+| ASAN engine | `build-engine-asan.cmd` |
+| All tests (the gate) | `test-all.cmd` — log at `%LAPLACE_EXT_BUILD%\test-all.log` |
+| dotnet tests | `test-app.cmd [project-substring]` |
 | native ctest / pg_regress | `test-engine.cmd` / `regress.cmd` |
-| Seed | `db-reset.cmd`, `seed-foundation.cmd` (10 layers), `seed-step.cmd <source>` (`--list`; trust `:verify_step`, never the CLI summary), `seed-everything.cmd` (hours) |
-| CLI invocation | `cli.cmd` (not `dotnet run` — mutex matches command line) |
-| Stuck processes / who holds files | `locks.cmd` (`locks.ps1 -Kill`) |
-| Stack status / deploy checks | `status.cmd`, `verify-deploy.cmd`, `verify-toolchain.cmd` |
+| Seed | `db-reset.cmd`, `seed-foundation.cmd`, `seed-step.cmd <source>` (trust `:verify_step`), `seed-everything.cmd` |
+| CLI | `cli.cmd` (never `dotnet run` — the ingest mutex matches the command line) |
+| Locks / stuck processes | `locks.cmd` (`locks.ps1 -Kill`) |
+| Status / deploy checks | `status.cmd`, `verify-deploy.cmd`, `verify-toolchain.cmd` |
 | PG recovery / tuning | `fix-postgres.cmd`, `recover-pgdata.cmd`, `tune-pg.cmd`, `tune-laplace.cmd` |
 
-Script logs land in `D:\Data\Output\<script>.log` — check there before rerunning anything.
-`scripts/win/env.cmd` is the toolchain source of truth (cmake/ninja/icx paths, Server-GC
-vars; `dotnet` stays bare).
-
-**CRITICAL: never invoke `scripts/win/*.cmd` through the PowerShell tool.** This
-machine's pwsh has a confirmed .cmd-launch regression
-([PowerShell#27634](https://github.com/PowerShell/PowerShell/issues/27634), KB5095093) —
-bogus `'ocal' is not recognized` before the script runs. Always use the Bash tool:
-`cmd //c "scripts\\win\\seed-step.cmd wordnet"`.
-
-Other operational law, earned the hard way (details: 02 lessons L1-L11):
-- Ingest mutex guard matches on process COMMAND LINE (`Laplace.Cli` via Win32_Process) —
-  `dotnet run` launches as `dotnet.exe`.
-- After ANY engine rebuild, run build-extensions (static-lib import means extension DLL
-  freshness ≠ engine freshness); `senses('dog') > 0` is the real health check.
-- MSB3027 copy failure ⇒ output tree poisoned ⇒ clean-rebuild.
-- Never edit a `.cmd` while it is executing; recycle PG backends only between stages.
-- One ingest at a time; parallel agent sessions have killed Postgres mid-write before.
-
-DB access: `psql -h localhost -U postgres -d laplace` (password `postgres`);
-`SET search_path = laplace, public;` first. `SELECT * FROM api('<substring>');` is the
-schema's self-introspection catalog — check it before assuming a helper doesn't exist.
-
-## Core concepts (fast reference)
-
-- **Tiers** (floor, not identity — 05 Rule #1b): 0 codepoint ("Rosetta stone"),
-  1 grapheme, 2 word, 3 sentence, 4 document; per-modality ladders. Same content = same
-  id at every tier; tier is NEVER mixed into the hash. Tree-sitter's job is narrow:
-  unpack container formats (~37 of ~300 vendored grammars wired), then hand off.
-- **Decomposers** (`Laplace.Decomposers`, 26 of them): pure content → `SubstrateChange`
-  record streams; ZERO inline SQL (protected property). The pipeline spine
-  (`IngestBatchPipeline` working-set mode → `ConsensusAccumulatingWriter` →
-  `NpgsqlWorkingSetApply`, bracketed by `IngestRunner`) does batching/dedup/fold/COPY —
-  Rule #8 is the sequence spec; doc 13 Phase 1 unifies the seven adapter lanes onto it.
-- **highway_mask**: 256-bit relation-TYPE bitmask on entities+attestations, generated
-  from `engine/manifest/relation_types.toml` (182 assigned bits, 13 salience bands
-  mandate=1.0 … probationary=0.05 — the same number weights read-time confidence and
-  export planes). Fixed + live-verified (05 Rule #5); pre-2026-07-01 DB generations are
-  regenerated, never backfilled.
-- **perfcache**: two mmap'd deterministic blobs required at runtime —
-  `laplace_t0_perfcache.bin` (codepoint geometry/hash/segmentation, CI determinism gate)
-  and `laplace_highway_perfcache.bin` (relation bit/rank/band); PG side gated on the
+- **Never invoke `scripts/win/*.cmd` through PowerShell** (confirmed pwsh .cmd-launch
+  regression). Use Bash: `cmd //c "scripts\\win\\seed-step.cmd wordnet"`.
+- Script logs land in `D:\Data\Output\<script>.log`. `scripts/win/env.cmd` is the
+  toolchain source of truth (`dotnet` stays bare).
+- After ANY engine rebuild, run build-extensions + install-extensions (static-lib
+  import: extension freshness ≠ engine freshness). Extension SQL changes need
+  `build-extensions.cmd --reconfigure` (configure-time version hash).
+- Health check: `senses(word_id('dog')) > 0`. The text-literal form `senses('dog')`
+  always returns 0.
+- One ingest at a time. Never kill `Laplace.Cli`/psql/backends you didn't start —
+  unexplained COPY = active ingest, stand down. Long processes launch detached
+  (Start-Process, log to `D:\Data\Output`).
+- MSB3027 ⇒ output tree poisoned ⇒ clean rebuild. Never edit a `.cmd` while it is
+  executing. Recycle PG backends only between stages.
+- perfcache: two mmap'd deterministic blobs required at runtime
+  (`laplace_t0_perfcache.bin`, `laplace_highway_perfcache.bin`); PG side gated on the
   `laplace_substrate.perfcache_path` GUC.
-- **Consolidated layout**: 13 projects — libs `Laplace.Core` / `Laplace.Substrate` /
-  `Laplace.Decomposers` / `Laplace.Chess`; deployables `Laplace.Cli` /
-  `Laplace.Endpoints.OpenAICompat` / `Laplace.Chess.Uci` / `Laplace.Migrations`; 5 test
-  projects. Namespaces preserved byte-identically; SourceIds untouched (verified by
-  re-ingest hash identity). xunit suites share process-global native state — fixtures
-  must never `CodepointPerfcache.Unload()`.
+- DB access: `psql -h localhost -U postgres -d laplace` (password `postgres`);
+  `SET search_path = laplace, public;` first.
 
-## Non-negotiable working rules
+## Layout
 
-- Verify against live data; never present a narrow patch as the architectural fix
-  (Issue 19 is the canonical example of the distinction).
-- The spec is the SEQUENCE (Rule #8): the right algorithm at the wrong point in the
-  pipeline is a violation.
-- Diagnose root cause at the source; no iterative scrambling, no system changes on
-  guesses; profile before batching/SIMD (02 L6/L7).
-- SQL/C# orchestrate; native C does heavy lifting; KNN comparison points must be bound
-  parameters (06 Rules #1/#4); one implementation per fact — duplication needs a
-  documented reason (Rule #6).
+13 projects (verified): libs `Laplace.Core` / `Laplace.Substrate` /
+`Laplace.Decomposers` / `Laplace.Chess`; deployables `Laplace.Cli` /
+`Laplace.Endpoints.OpenAICompat` / `Laplace.Chess.Uci` / `Laplace.Migrations`;
+5 test projects. xunit suites share process-global native state — fixtures must never
+`CodepointPerfcache.Unload()`.
+
+## Docs
+
+`.scratchpad/02` is the issue tracker; `.scratchpad/21` is the invention catalog
+(41 mechanisms, enumerated and code-cited). Specs, when deep work touches their area:
+05 substrate invariants, 06 engineering rules, 08 record-vs-calculate, 11 three-layer
+provenance/consensus + chess ladder, 12 Mold-A-Model map, 14 foundry working doc,
+15 Gödel/OODA loop, 16 tier-correct attestation, 17 decomposer audit, 18 typed strata +
+mesh.

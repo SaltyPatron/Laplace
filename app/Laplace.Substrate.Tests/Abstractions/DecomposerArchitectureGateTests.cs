@@ -60,6 +60,12 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly HashSet<string> ParallelIngestAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Laplace.Chess/Service/ChessLabService.cs",
+        // Reviewed 2026-07-10: model-lane layer fan-out — independent layers
+        // produced into ONE bounded channel (single reader preserves the
+        // async-enumerator contract for the runner); width machine-derived
+        // (WorkingSetBudgetBytes / per-layer buffer footprint, clamped to
+        // ComposeWorkers). Migrates to the spine with Issue 45's remainder.
+        "Laplace.Decomposers/Model/ModelTokenEdgeETL.cs",
     };
 
     private static readonly Regex ResolveFileWorkersCall = new(

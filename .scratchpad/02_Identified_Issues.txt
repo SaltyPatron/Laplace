@@ -110,7 +110,7 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
                COORDS via ST_MakeLine — two different metrics under one name family.
                Fix: native lane should build the coord curve (word_curve semantics)
                or batch-unpack constituents to coords before the Fréchet SPI call.
-               Read-side only; does not block the foundry pour.
+               Read-side only; does not block the foundry synthesis.
 52  OPEN       request-time full-table aggregates killed 5 API endpoints at 135M
                attestations / 124M consensus: consensus_stats (exact count(*)),
                source_counts (GROUP BY all attestations + count(DISTINCT) join),
@@ -331,15 +331,88 @@ OPEN residuals:
      stored highway_masks predate the 189-bit layout — Rule #5 says regenerate,
      never backfill. Next full reseed heals it; until then mask-band filtering
      against pre-2026-07-09 rows decodes against the wrong layout.
-  b) seed-step.cmd :verify_step has no source mapping for the safetensors step
-     (verify_fail unless LAPLACE_SKIP_VERIFY); PrintIngestValidationAsync's
-     "witness/tensor-role" queries are old-lane and report 0 for a good deposit.
+  b) FIXED IN CODE (2026-07-10; live proof rides the 53a redeposit): sources now
+     name THEMSELVES — BootstrapIntentBuilder emits (source, HAS_NAME_ALIAS,
+     name content root) in the ctor, the same law AddType already used for type
+     nodes, so content-hash model sources stop rendering as raw hex (render()/
+     label()/source_counts already consult the alias; canonical-string sources
+     unaffected — canonical_names wins first). seed-step :verify_model_step
+     derives the model name (scripts/win/derive-model-source.ps1, parity with
+     ModelDecomposer.DeriveModelName, tested on all three path shapes) and
+     resolves name -> source id(s) via the alias consensus, summing
+     evidence_count. Verify query proven executable on the live schema; returns
+     0 against the CURRENT generation because the four deposited models predate
+     the alias — heals with the 189-bit redeposit 53a already owes.
+     PrintIngestValidationAsync's old-lane "witness/tensor-role" queries remain
+     to fix. Tests: alias law pinned (BootstrapIntentBuilderAliasTests);
+     Substrate 407 green, Decomposers 130 green. Also fixed in the same pass:
+     BpeTokenizerRoundTripTests lacked the per-class perfcache load and was
+     order-dependent (flaked when scheduled first) — assembly idiom applied.
   c) EstimateMatchupUnits undercounts structure mode (composed 216k vs 118k —
      CONTAINS/PRECEDES + per-head OV coords not in the formula).
-  d) LAPLACE_MODEL_EDGE_FLOOR is a phantom knob: named in two overflow error
-     strings, read nowhere (Theta is const 0.0).
-  e) HeadClassifier ENCODES verdicts now land on content coordinates but only run
-     in analyzer mode (pair planes); recorder deposits no ENCODES.
+  d) FIXED (2026-07-10): the phantom LAPLACE_MODEL_EDGE_FLOOR strings died with
+     the truncation stack — EdgeTopK/perHeadK/SelectTopKPerRow, the
+     OccurrencesPerCircuit=64 cap, and the dead OperatorNoiseFloor/GramUpper
+     C# math are all deleted from ModelTokenEdgeETL; emission is the tiles'
+     full |score| > 0 contract, aggregated across circuits by identical
+     attestation ids (plane grain). EstimateMatchupUnits updated to the
+     untruncated formulas (its 53c undercount of CONTAINS/PRECEDES structure
+     rows remains open). Decomposers suite green post-change.
+  e) FIXED (2026-07-10): decoder ring ungated — every plane's circuits classify
+     when a classifier is present (sampleForDecoder parameter deleted);
+     ENCODES verdicts deposit for similarity/continues/attention/ov/mlp alike.
+  i) LANE COMPLETED ON THE CORRECTED DESIGN (2026-07-10, all tests green):
+     (1) THE CIRCUIT IS THE GAME — every circuit deposits ONE testimony-packed
+     Projection physicality on its coordinate entity (full vocabulary,
+     (token, scoreFp) vertices via TestimonyWalk.Pack; PhysicalityId =
+     (coord, Projection)) — chess game-trajectory parity; anatomy = 1 row per
+     circuit per model. (2) ALL MATH NATIVE — engine/dynamics/model_math.cpp:
+     center_columns_d/f, scale_cols_f/d, slice_head_d, row_norms_out_d,
+     f32_to_f64, hypot_rows_d, ffn_activation_norms (MKL GEMM + silu inside,
+     TBB row-parallel); every managed math loop in ModelTokenEdgeETL replaced
+     (centering, scaling, slicing, norms, widenings, salience combine, MLP
+     activation, SVD Y-scale, arena norm). Remaining loops are orchestration/
+     Array.Copy movement only. (3) Batched emission: one AggregatedBatch
+     P/Invoke per machine-sized chunk (IngestSizing.CommitRows), double-buffered
+     tile/stage overlap, per-record path deleted. (4) PrintIngestValidationAsync
+     layer-10 block rewritten lane-true: content-hash source id (never
+     source_id(name)), TOKEN_MAPS_TO/MERGES_WITH/APPEARS_IN/structure counts +
+     circuit-trajectory count; retired tensor-role relations dropped (53b
+     residual closed). 53c subsumed: estimate = circuits×vocab (uncapped)
+     dominates meta rows. Zero build warnings solution-wide (--no-incremental
+     verified). Similarity scrape from the pre-marker build was KILLED mid-fold
+     by owner order — DB is to be dropped and reseeded before any model ingest
+     runs again; no marker owed on a dropped generation.
+  j) BULK/PARALLEL PASS 2 (2026-07-10 afternoon): occurrence lane chunked
+     (one AggregatedBatch call per machine-sized chunk — the 38M per-row
+     P/Invokes died); writer spine bulk door — native
+     laplace_attestation_staged_batch_add carries per-row 32-byte masks
+     bit-identically (mask semantics verified against intent_stage.c:405 and
+     the builder's stamp at SubstrateChangeBuilder:174 — the first maskless
+     bulk design was DEAD CODE and was replaced); kernels on MKL proper
+     (cblas_ddot norms, vdHypot, vdExp silu, parallel column-mean reduction,
+     parallel widens); layer-level bounded fan-out (channel merge, width =
+     WorkingSetBudgetBytes / per-layer buffer footprint, clamped to
+     ComposeWorkers — machine-derived, no constant). DESIGN FACT, not
+     deferral: EdgeRowChunk's staged→AttestationRow materialization stays —
+     the builder's dedup + mask-stamp contract requires row form; the
+     interop wall it once fed is gone (one native call per change).
+     First clean-generation TinyLlama recorder deposit VERIFIED live:
+     appears_in=38,069,460 = 1,430×26,622 exact, circuit_trajectories=1,430,
+     verify-by-alias passed, 478s on the pre-bulk binary.
+  h) ANALYZER WATERMARK ADDED (2026-07-10, chess FilterUnanalyzedAsync parity):
+     ModelDecomposer.AnalysisMarkerId(source, planesMode) — probe before the
+     pass, marker entity deposited as the pass's final change; a completed
+     (model, mode, version) never re-folds. skipSourceCompletion for analyzer
+     modes wired at the safetensors call site (doc 08's chess-analyze law: the
+     recorder's completion marker neither blocks nor is re-written by analysis
+     passes). CAVEATS: grain is per-(model, mode) — a pass that crashes midway
+     re-folds its completed portion on re-run (chess avoids this with per-game
+     grain; per-circuit markers are the refinement if it bites). The 2026-07-10
+     TinyLlama 'similarity' run launched from the pre-marker build: it deposits
+     NO marker, so do not re-run similarity on TinyLlama this generation
+     without first depositing the marker or evicting the plane. Decomposers
+     130/130 green with the change.
   f) Norm salience is dominated by rare-token representation degeneration (top
      occupancy: 'listade', 'släktet', 'printStackTrace' — Gao et al. anisotropy).
      Recorder records what the checkpoint asserts; a mean-centered/whitened variant

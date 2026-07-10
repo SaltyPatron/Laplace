@@ -50,6 +50,15 @@ if(WIN32)
     list(APPEND _lwgeom_srcs "${CMAKE_CURRENT_SOURCE_DIR}/src/lwgeom_win32_stubs.c")
 
     add_library(lwgeom_static STATIC ${_lwgeom_srcs})
+    # High TU count — UNITY batches compile jobs. Flex/bison outputs stay out of unity
+    # batches (they often break when concatenated with other TUs).
+    set_source_files_properties(
+        "${LWGEOM_DIR}/lwin_wkt_parse.c"
+        "${LWGEOM_DIR}/lwin_wkt_lex.c"
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    set_target_properties(lwgeom_static PROPERTIES
+        UNITY_BUILD ON
+        UNITY_BUILD_BATCH_SIZE 16)
     target_include_directories(lwgeom_static PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/lwgeom_inc"
         "${CMAKE_CURRENT_BINARY_DIR}"
@@ -68,7 +77,8 @@ if(WIN32)
     set_target_properties(laplace_geom PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_geom SUFFIX ".dll"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
-    target_include_directories(laplace_geom PRIVATE
+    # SYSTEM: PG server headers carry their own clang warnings (generic-msvc.h).
+    target_include_directories(laplace_geom SYSTEM PRIVATE
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}"
@@ -97,7 +107,7 @@ set_target_properties(${EXT_NAME} PROPERTIES
     OUTPUT_NAME ${EXT_NAME}
 )
 
-target_include_directories(${EXT_NAME} PRIVATE
+target_include_directories(${EXT_NAME} SYSTEM PRIVATE
     ${LAPLACE_PG_INCLUDEDIR_SERVER}
 )
 

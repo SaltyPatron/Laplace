@@ -1,6 +1,6 @@
 -- Plan Phase 6 (doc 14 P2): per-entity 256-bit relation-membership mask for the
 -- foundry's content-dependent FFN gate — which relation families a token
--- participates in is a genuine step function of content, poured, not learned.
+-- participates in is a genuine step function of content, synthesized, not learned.
 CREATE OR REPLACE FUNCTION entity_highway_masks(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, highway_mask bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

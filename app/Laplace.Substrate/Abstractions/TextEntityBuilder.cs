@@ -330,7 +330,7 @@ public sealed class TextEntityBuilder
     // 2026-07-09: was HasAlphanumericLeaf — which silently dropped PUNCTUATION
     // from every PRECEDES chain ("dog, cat" attested dog→cat; sentence-final
     // periods and question marks were never attested by ANY text source), so no
-    // poured model could learn sentence rhythm and the walker's consensus floor
+    // synthesized model could learn sentence rhythm and the walker's consensus floor
     // had no boundary evidence. UAX29 records punctuation faithfully (it is in
     // every trajectory); this derivation was the discard point. Only WHITESPACE
     // is a separator — punctuation, numerals, and symbols are content.

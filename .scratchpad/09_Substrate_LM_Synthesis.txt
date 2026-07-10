@@ -1,7 +1,7 @@
 09 — SUBSTRATE-AS-LM: synthesis thesis, FAITHFUL diagnosis, and the proper-build spec
 ================================================================================
 Captured 2026-07-04 from a long design conversation. This is a side-thread to the chess
-work but load-bearing for the foundry/recipe-pour. Corrects the sabotaged "faithful =
+work but load-bearing for the foundry/recipe-synthesis. Corrects the sabotaged "faithful =
 hallucination" verdict that a prior agent wrote into memory. Companion to memory
 project_llm_legs_and_foundry_history + the audited defects there.
 

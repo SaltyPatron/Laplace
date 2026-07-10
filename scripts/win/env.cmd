@@ -69,6 +69,18 @@ REM pinned workers at once. Server GC = per-core heaps + parallel collection.
 REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS.
 if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
 if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
+rem Build/test parallelism: Ninja/ctest default to logical CPU count when unset.
+rem Set LAPLACE_TEST_SERIAL=1 to force serial ctest/regress/dotnet-test orchestration.
+if not defined CMAKE_BUILD_PARALLEL_LEVEL (
+  if defined NUMBER_OF_PROCESSORS set "CMAKE_BUILD_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
+)
+if not defined CTEST_PARALLEL_LEVEL (
+  if defined LAPLACE_TEST_SERIAL (
+    set "CTEST_PARALLEL_LEVEL=1"
+  ) else (
+    if defined NUMBER_OF_PROCESSORS set "CTEST_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
+  )
+)
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin"
 if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_highway_perfcache.bin"
 rem Extension deploy MUST stay outside PGDATA (fsync/sharing-violation if under D:\Data\Postgres\laplace).

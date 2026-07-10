@@ -163,6 +163,7 @@ inference/language_coverage.sql.in
 functions/converse/hypernyms.sql.in
 functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
+functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path.sql.in
@@ -339,6 +340,7 @@ functions/analysis/laplace_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
+functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
 functions/inference/laplace_l2_sq.sql.in
 functions/inference/laplace_attention_centroid.sql.in

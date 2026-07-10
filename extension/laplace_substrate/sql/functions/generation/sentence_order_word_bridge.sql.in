@@ -1,7 +1,7 @@
 -- Plan Phase 4 (doc 18 §3 L-real / doc 14 C3): the DIALOGUE/discourse plane at
 -- word granularity — for each consecutive sentence pair in a tier-4 document
 -- trajectory, bridge last-in-vocab-word(s_i) -> first-in-vocab-word(s_{i+1}).
--- Composes with the tier-2 continuation plane in the lm_head so the poured
+-- Composes with the tier-2 continuation plane in the lm_head so the synthesized
 -- model can cross a sentence boundary instead of speaking document-internal
 -- word adjacency only.
 CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs int DEFAULT 100000)

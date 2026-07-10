@@ -31,7 +31,7 @@ core failure of this session was the operator deciding such things by convention
 - The spectral machinery in the engine (laplacian_eigenmaps, tensor_svd_truncate,
   gram_schmidt_orthonormalize, procrustes_fit/apply, MKL/Eigen/Spectra) exists for
   exactly this bidirectional weight↔substrate conversion — and for model EXPORT
-  (Mold-A-Model). "Pour" is EXPORT vocabulary exclusively. Ingestion DEPOSITS and
+  (Mold-A-Model). "Synthesis" is EXPORT vocabulary exclusively. Ingestion DEPOSITS and
   FOLDS.
 - Placement law (doc 06 Rules #1/#4, restated by the author this session):
   ALL math lives in C/C++/SPI. C# and SQL orchestrate. Never compute in C#.
@@ -116,8 +116,8 @@ V13. **"Weights-only reading" framing** — treating ingestion as external analy
    a file instead of full parsing of the model's content into the substrate,
    after which everything is a substrate query.
 
-V14. **Vocabulary violation**: "pour" used repeatedly for ingestion-side deposits.
-   Pour = Mold-A-Model export only.
+V14. **Vocabulary violation**: "synthesis" used repeatedly for ingestion-side deposits.
+   Synthesis = Mold-A-Model export only.
 
 V15. **Process/stall violations**: sleep-poll loops re-reading logs; re-launching
    the slow per-model chains after being told they were too slow; watching broken
@@ -188,7 +188,7 @@ analyzer-guard bypass, ModelDecomposer phase split.
    time). Ask nothing of convention; read docs 08/11/12 and the fold code first.
 4. Everything in the substrate; files only as derived caches (Issue-49 class),
    never primary.
-5. Dims never appear anywhere. "Pour" never describes ingestion.
+5. Dims never appear anywhere. "Synthesis" never describes ingestion.
 6. Acceptance gate, unchanged: model-source-only token→token evidence must surface
    the capital of Argentina (Buenos Aires) through the substrate's own query
    surface — or the miss is reported exactly as measured.

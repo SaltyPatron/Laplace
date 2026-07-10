@@ -61,6 +61,7 @@ set(LAPLACE_CORE_SOURCES
     src/normalize_nfc.c
     src/text_decomposer.c
     src/content_witness_batch.c
+    src/ucd_xml.cpp
     src/unicode_seed.cpp
     src/generated/relation_law.c
     src/generated/pos_law.c
@@ -103,7 +104,7 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3 LibXml2::LibXml2)
+        PRIVATE blake3)
 endif()
 
 
@@ -126,6 +127,10 @@ add_custom_command(
     VERBATIM
 )
 
+# Blob is a pure function of UCD inputs — NOT of the emit binary. Listing the
+# tool in DEPENDS re-runs emit on every laplace_core relink (emit links core),
+# which under ASAN turns a no-op rebuild into a multi-hour tree-sitter crawl.
+# Order-only: add_dependencies ensures the tool exists before first emit.
 add_custom_command(
     OUTPUT ${LAPLACE_PERFCACHE_BIN}
     COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
@@ -134,13 +139,15 @@ add_custom_command(
             --ucd-version "${LAPLACE_UNICODE_VERSION}"
             --uca-version "${LAPLACE_UCA_VERSION}"
             --output      ${LAPLACE_PERFCACHE_BIN}
-    DEPENDS laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
+    DEPENDS ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
     COMMENT "Emitting T0 perf-cache blob (UCD ${LAPLACE_UNICODE_VERSION} / UCA ${LAPLACE_UCA_VERSION})"
     VERBATIM
 )
 
 add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
+# Order-only dep on laplace_ucd_tables_emit is attached in engine/CMakeLists.txt
+# after that target exists (tools/ is added after core/).
 
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
@@ -171,11 +178,9 @@ target_include_directories(laplace_core
         $<INSTALL_INTERFACE:include>
 )
 
-find_package(LibXml2 REQUIRED)
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
     PRIVATE blake3
-    PRIVATE LibXml2::LibXml2
 )
 
 if(BUILD_TESTING)

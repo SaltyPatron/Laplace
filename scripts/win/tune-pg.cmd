@@ -13,8 +13,10 @@ rem ---------------------------------------------------------------------------
 set "PGTUNE_SQL=%TEMP%\laplace-pg-tuning.sql"
 
 pushd "%LAPLACE_ROOT%\app" >nul 2>&1
-dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q --nologo >nul 2>&1
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --pg-tuning > "%PGTUNE_SQL%" 2>nul
+if not exist "%LAPLACE_CLI_EXE%" (
+  dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q --nologo >nul 2>&1
+)
+"%LAPLACE_CLI_EXE%" cpu-topology --pg-tuning > "%PGTUNE_SQL%" 2>nul
 popd >nul 2>&1
 
 if not exist "%PGTUNE_SQL%" ( echo tune-pg: FAILED to emit tuning SQL & exit /b 1 )

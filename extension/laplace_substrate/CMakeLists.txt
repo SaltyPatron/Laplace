@@ -74,7 +74,9 @@ if(WIN32)
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME ${EXT_NAME} SUFFIX ".dll"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
-    target_include_directories(${EXT_NAME} PRIVATE
+    # SYSTEM: the PG server headers trip clang pointer-sign/compat warnings
+    # (generic-msvc.h) that are PostgreSQL's to fix, not ours — keep our build clean.
+    target_include_directories(${EXT_NAME} SYSTEM PRIVATE
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}"
@@ -93,7 +95,7 @@ else()
         PREFIX ""
         OUTPUT_NAME ${EXT_NAME}
     )
-    target_include_directories(${EXT_NAME} PRIVATE
+    target_include_directories(${EXT_NAME} SYSTEM PRIVATE
         ${LAPLACE_PG_INCLUDEDIR_SERVER}
     )
     target_link_libraries(${EXT_NAME} PRIVATE laplace_core laplace_dynamics)

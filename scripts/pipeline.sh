@@ -8,20 +8,30 @@
 #
 # Phases (in canonical order):
 #   clean           rm -rf build/
-#   build           codegen + cmake configure/build + perfcache + dotnet build
+#   codegen         attestation-law codegen (stamp-skipped unless --force-codegen)
+#   build           codegen + cmake configure/build + dotnet build
 #   install         cmake --install to $LAPLACE_INSTALL_PREFIX
 #   migrate         Laplace.Migrations up (idempotent; --fresh-db nukes first)
 #   sync-extension  CREATE/ALTER EXTENSION laplace_substrate to built version
 #   tune-pg         machine-sized ALTER SYSTEM tuning (restarts if pending)
 #   tune-laplace    db/table-scoped ALTER TABLE tuning (run after migrate; skips empty DB)
 #   perfcache-guc   point laplace_substrate.perfcache_path at installed blob
-#   api-env         ensure laplace-api.env has current perfcache path
-#   publish         deploy/linux/deploy.sh (API + SPA to $LAPLACE_INSTALL_PREFIX/app)
+#   api-env         ensure laplace-api.env has current perfcache path + DB
+#   publish         FULL publish-target contract: chess-lab binaries/paths,
+#                   secrets drop refresh, API + SPA + laplace-uci deploy
 #   foundation      scripts/ensure-foundation.sh (no-ops on present layers; --force)
+#   test            scripts/test-parallel.sh (ctest ∥ regress, then dotnet)
+#
+# (chess-lab is not a separate human/CI step — publish owns it.)
 #
 # Options:
-#   --fresh-db   nuke DB before migrate
-#   --force      pass --force to ensure-foundation.sh
+#   --fresh-db        nuke DB before migrate
+#   --force           pass --force to ensure-foundation.sh
+#   --force-codegen   ignore attestation-law stamp; always run Python codegen
+#   --skip-codegen    skip codegen in build (CMake custom_command remains SoT)
+#   --clean-first     cmake --build --clean-first (rebuild objects, keep configure)
+#   --force-rebuild   wipe build/ then build (same as: clean build)
+#   --serial-tests    set LAPLACE_TEST_SERIAL=1 for the test phase
 
 set -euo pipefail
 
@@ -35,6 +45,22 @@ PGDATABASE="${PGDATABASE:-laplace}"
 
 FRESH_DB=0
 FORCE_FOUNDATION=0
+FORCE_CODEGEN=0
+SKIP_CODEGEN=0
+CLEAN_FIRST=0
+FORCE_REBUILD=0
+SERIAL_TESTS=0
+
+# Parallelism defaults (parity with scripts/win/env.cmd).
+nproc_n="$(nproc 2>/dev/null || echo 1)"
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$nproc_n}"
+if [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
+  if [[ "${LAPLACE_TEST_SERIAL:-}" == "1" ]]; then
+    export CTEST_PARALLEL_LEVEL=1
+  else
+    export CTEST_PARALLEL_LEVEL="$nproc_n"
+  fi
+fi
 
 PYTHON=""
 if command -v python3 >/dev/null 2>&1; then
@@ -47,7 +73,21 @@ else
 fi
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'EOF'
+Usage: pipeline.sh <phase> [<phase> ...] [options]
+
+Phases: clean codegen build install migrate sync-extension tune-pg tune-laplace
+        perfcache-guc api-env chess-lab publish foundation test
+
+Options:
+  --fresh-db        nuke DB before migrate
+  --force           pass --force to ensure-foundation.sh
+  --force-codegen   ignore attestation-law stamp; always run Python codegen
+  --skip-codegen    skip codegen in build (CMake custom_command remains SoT)
+  --clean-first     cmake --build --clean-first (rebuild objects, keep configure)
+  --force-rebuild   wipe build/ then build (same as: clean build)
+  --serial-tests    set LAPLACE_TEST_SERIAL=1 for the test phase
+EOF
   exit 2
 }
 
@@ -106,18 +146,60 @@ restart_postgres() {
 phase_clean() {
   echo "===== PHASE — CLEAN ====="
   rm -rf "$ROOT/build"
+  # Stale generated SQL fragments trip the manifest-completeness gate on reconfigure.
+  find "$ROOT/extension/laplace_substrate/sql/generated" -name '[0-9]*_*.sql.in' -delete 2>/dev/null || true
+}
+
+# Stamp path matches scripts/codegen-attestation-law.ps1 (Windows).
+_codegen_stamp_path() {
+  echo "$ROOT/engine/core/src/generated/.attestation-law-stamp"
+}
+
+_codegen_manifest_key() {
+  # ticks-equivalent: mtimes of inputs the PS1 stamps on
+  local a b c
+  a=$(stat -c %Y "$ROOT/engine/manifest/relation_types.toml" 2>/dev/null || echo 0)
+  b=$(stat -c %Y "$ROOT/engine/manifest/pos_tags.toml" 2>/dev/null || echo 0)
+  c=$(stat -c %Y "$ROOT/scripts/codegen-attestation-law.py" 2>/dev/null || echo 0)
+  echo "${a}:${b}:${c}"
 }
 
 phase_codegen() {
   echo "===== PHASE — CODEGEN ====="
+  if [[ "$SKIP_CODEGEN" -eq 1 ]]; then
+    echo "codegen skipped (--skip-codegen)"
+    return 0
+  fi
+  local stamp key prev
+  stamp="$(_codegen_stamp_path)"
+  key="$(_codegen_manifest_key)"
+  if [[ "$FORCE_CODEGEN" -eq 0 && -f "$stamp" ]]; then
+    prev=$(cat "$stamp" 2>/dev/null || true)
+    if [[ "$prev" == "$key" ]]; then
+      echo "attestation law codegen skipped (stamp fresh)"
+      return 0
+    fi
+  fi
   "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
+  mkdir -p "$(dirname "$stamp")"
+  printf '%s' "$key" > "$stamp"
+  echo "attestation law codegen complete"
 }
 
 phase_build() {
-  phase_codegen
+  if [[ "$FORCE_REBUILD" -eq 1 ]]; then
+    phase_clean
+  fi
+  if [[ "$SKIP_CODEGEN" -eq 0 ]]; then
+    phase_codegen
+  else
+    echo "===== PHASE — CODEGEN [skipped] ====="
+  fi
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
   local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
+  local build_flags=()
+  [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
@@ -129,10 +211,26 @@ phase_build() {
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
   LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build build
-  cmake --build build --target laplace_t0_perfcache
+    cmake --build build "${build_flags[@]}"
+  # Perfcache targets are ALL — existence check only (parity with rebuild-all.cmd).
+  local t0 hw
+  t0=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
+  hw=$(find "$ROOT/build" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | head -1 || true)
+  if [[ -z "$t0" || -z "$hw" ]]; then
+    echo "::error::perfcache blobs missing after ALL build — expected under build/"
+    exit 1
+  fi
+  echo "T0 perfcache ready: $t0"
+  echo "highway perfcache ready: $hw"
   echo "===== PHASE — BUILD APP ====="
   ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+}
+
+phase_test() {
+  echo "===== PHASE — TEST ====="
+  local args=()
+  [[ "$SERIAL_TESTS" -eq 1 || "${LAPLACE_TEST_SERIAL:-}" == "1" ]] && args+=(--serial)
+  bash "$ROOT/scripts/test-parallel.sh" "${args[@]}"
 }
 
 phase_install() {
@@ -145,8 +243,12 @@ phase_install() {
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
-  dotnet build "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release
   local mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
+  if [[ ! -f "$mig" || "$FORCE_REBUILD" -eq 1 || "$CLEAN_FIRST" -eq 1 ]]; then
+    dotnet build "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release
+  else
+    echo "migrate: using existing $mig"
+  fi
   if [[ "$FRESH_DB" -eq 1 ]]; then
     dotnet "$mig" nuke --yes
   fi
@@ -327,9 +429,38 @@ phase_api_env() {
   echo "LAPLACE_DB -> Database=${PGDATABASE:-laplace}"
 }
 
+phase_chess_lab() {
+  echo "===== PHASE — CHESS LAB (stockfish / Qt / cutechess / path env) ====="
+  bash "$ROOT/scripts/bootstrap-chess-lab.sh"
+}
+
+# Refresh /opt/laplace/secrets from CI env when provided; otherwise keep drop.
+phase_runtime_secrets() {
+  echo "===== PHASE — RUNTIME SECRETS DROP ====="
+  local dst_dir="$LAPLACE_INSTALL_PREFIX/secrets"
+  local dst="$dst_dir/lichess.env"
+  mkdir -p "$dst_dir"
+  chmod 2770 "$dst_dir" 2>/dev/null || true
+  if [ -n "${LICHESS_TOKEN:-}${LICHESS_API:-}" ]; then
+    printf 'LICHESS_TOKEN=%s\n' "${LICHESS_TOKEN:-$LICHESS_API}" >"$dst"
+    chmod 640 "$dst"
+    echo "lichess.env refreshed from process env"
+  elif [ -f "$dst" ]; then
+    echo "lichess.env present (seeded at setup-host / prior publish)"
+  else
+    echo "::warning::no LICHESS_TOKEN — set GitHub Actions secret LICHESS_TOKEN, or re-run setup-host.sh with ~/.config/shell/secrets.env"
+  fi
+}
+
 phase_publish() {
-  echo "===== PHASE — PUBLISH API + SPA ====="
-  bash "$ROOT/deploy/linux/deploy.sh"
+  echo "===== PHASE — PUBLISH (full runtime contract) ====="
+  # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
+  phase_chess_lab
+  phase_runtime_secrets
+  local deploy_args=()
+  [[ "${LAPLACE_FORCE_NPM:-}" == "1" ]] && deploy_args+=(--force-npm)
+  [[ "${LAPLACE_PUBLISH_SERIAL:-}" == "1" ]] && deploy_args+=(--serial)
+  bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
 }
 
 phase_foundation() {
@@ -343,10 +474,15 @@ phase_foundation() {
 PHASES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --fresh-db) FRESH_DB=1; shift ;;
-    --force) FORCE_FOUNDATION=1; shift ;;
+    --fresh-db)       FRESH_DB=1; shift ;;
+    --force)          FORCE_FOUNDATION=1; shift ;;
+    --force-codegen)  FORCE_CODEGEN=1; shift ;;
+    --skip-codegen)   SKIP_CODEGEN=1; shift ;;
+    --clean-first)    CLEAN_FIRST=1; shift ;;
+    --force-rebuild)  FORCE_REBUILD=1; shift ;;
+    --serial-tests)   SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation)
+    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -366,8 +502,10 @@ for phase in "${PHASES[@]}"; do
     tune-laplace)   phase_tune_laplace ;;
     perfcache-guc)  phase_perfcache_guc ;;
     api-env)        phase_api_env ;;
+    chess-lab)      phase_chess_lab ;;
     publish)        phase_publish ;;
     foundation)     phase_foundation ;;
+    test)           phase_test ;;
   esac
 done
 

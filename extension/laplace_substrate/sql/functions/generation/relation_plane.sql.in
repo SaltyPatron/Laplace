@@ -1,7 +1,7 @@
 -- 2026-07-09 vocab pushdown: the foundry read every consensus row of a type
 -- over the wire so the client could keep the ~1% whose endpoints are in the
--- pour vocab (12 relation heads = 27.5M rows scanned, 358K kept, 550s of a
--- 608s pour). p_vocab probes consensus_type_subject_btree instead; the type
+-- synthesis vocab (12 relation heads = 27.5M rows scanned, 358K kept, 550s of a
+-- 608s synthesis). p_vocab probes consensus_type_subject_btree instead; the type
 -- id is resolved into a local FIRST (a variable is a bound parameter and
 -- therefore an index condition — Rule #4; a function call in the qual is
 -- not, lesson L12).

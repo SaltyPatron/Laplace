@@ -244,7 +244,12 @@ internal static class IngestCommands
         {
             var result = await runner.RunAsync(
                 dec,
-                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli)
+                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli,
+                    // Analyzer modes are calculated re-passes over an already-recorded
+                    // model (doc 08's chess-analyze pattern): the recorder's
+                    // completion marker must neither block them nor be re-written.
+                    skipSourceCompletion:
+                        Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() != "structure")
                 with
                 {
                     DecomposerOptions =                     DecomposerOptions.ForWitness(
@@ -674,29 +679,36 @@ internal static class IngestCommands
 
         if (decomposer.LayerOrder == 10)
         {
-            string[] tensorRoles =
-            [
-                "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
-                "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
-            ];
-            long roleAtts;
-            // ONE round-trip: sum evidence_count over all ten tensor-role relation types
-            // server-side instead of a per-role query loop. sum() over bigint is numeric,
-            // so cast back to bigint to match the old accumulated long total exactly.
-            await using (var roleCmd = Cmd())
+            // Lane-true model validation (Issue 53b): a model's source id is a CONTENT
+            // hash (never source_id(name)), and the recorder/analyzer emit
+            // TOKEN_MAPS_TO/MERGES_WITH/APPEARS_IN + per-circuit Projection
+            // trajectories — not the retired tensor-role relations.
+            byte[] srcId = decomposer.SourceId.ToBytes();
+            async Task<long> Rel(string rel)
             {
-                roleCmd.CommandText =
-                    "SELECT COALESCE(sum(laplace.evidence_count("
-                    + "p_type => laplace.relation_type_id(t), "
-                    + "p_source => laplace.source_id($2))), 0)::bigint "
-                    + "FROM unnest($1::text[]) AS t";
-                var pRoles = roleCmd.Parameters.AddWithValue(tensorRoles);
-                pRoles.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text;
-                roleCmd.Parameters.AddWithValue(srcKey);
-                roleAtts = (long)(await roleCmd.ExecuteScalarAsync() ?? 0L);
+                await using var c = Cmd();
+                c.CommandText = "SELECT laplace.evidence_count("
+                    + "p_type => laplace.relation_type_id($1), p_source => $2)";
+                c.Parameters.AddWithValue(rel);
+                c.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = srcId, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+                return (long)(await c.ExecuteScalarAsync() ?? 0L);
             }
-            Console.WriteLine($"  check safetensor deposition: {roleAtts:N0} tensor-role attestations "
-                            + $"(snapshot witness, trust=AIModelProbe)");
+            long maps = await Rel("TOKEN_MAPS_TO");
+            long merges = await Rel("MERGES_WITH");
+            long occ = await Rel("APPEARS_IN");
+            long structure = await Rel("CONTAINS") + await Rel("PRECEDES");
+            long circuits;
+            await using (var c = Cmd())
+            {
+                c.CommandText = "SELECT count(*) FROM laplace.physicalities p "
+                    + "JOIN laplace.entities e ON e.id = p.entity_id "
+                    + "WHERE p.type = 3 AND e.type_id = laplace.canonical_id('Model_Circuit')";
+                circuits = (long)(await c.ExecuteScalarAsync() ?? 0L);
+            }
+            Console.WriteLine(
+                $"  check model deposition: maps_to={maps:N0} merges={merges:N0} "
+                + $"appears_in={occ:N0} structure={structure:N0} circuit_trajectories={circuits:N0} "
+                + "(source = content hash, trust=AIModelProbe)");
             return;
         }
 

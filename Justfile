@@ -7,6 +7,10 @@ set shell := ["bash", "-uc"]
 
 export LAPLACE_DATA_ROOT := env_var_or_default("LAPLACE_DATA_ROOT", "/vault/Data")
 
+# Parallelism defaults (override with env, or LAPLACE_TEST_SERIAL=1 for serial tests).
+export CMAKE_BUILD_PARALLEL_LEVEL := env_var_or_default("CMAKE_BUILD_PARALLEL_LEVEL", `nproc 2>/dev/null || echo 1`)
+export CTEST_PARALLEL_LEVEL := env_var_or_default("CTEST_PARALLEL_LEVEL", `nproc 2>/dev/null || echo 1`)
+
 default:
     @just --list
 
@@ -42,17 +46,24 @@ verify-deps:
     @chmod +x scripts/verify-pg-postgis.sh
     @scripts/verify-pg-postgis.sh
 
+# Incremental build (stamp-skips codegen when manifests unchanged).
 build:
-    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-        -DLAPLACE_PG_PREFIX=${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18} \
-        -DCMAKE_INSTALL_PREFIX=${LAPLACE_INSTALL_PREFIX:-/opt/laplace} \
-        -DLAPLACE_INSTALL_STAGED=${LAPLACE_INSTALL_STAGED:-ON}
-    LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" cmake --build build
+    bash scripts/pipeline.sh build
+
+# Wipe build/ then full rebuild (force codegen + clean tree).
+rebuild:
+    bash scripts/pipeline.sh --force-rebuild --force-codegen build
+
+# Keep configure, rebuild all objects.
+build-clean-first:
+    bash scripts/pipeline.sh --clean-first --force-codegen build
+
+# Force codegen even when stamp is fresh.
+build-force-codegen:
+    bash scripts/pipeline.sh --force-codegen build
 
 install: build
-    umask 0002
-    cmake --install build
+    bash scripts/pipeline.sh install
 
 install-laplace-prefix: install
 
@@ -66,7 +77,11 @@ build-perfcache:
     cmake --build build --target laplace_t0_perfcache
 
 clean:
-    rm -rf build
+    bash scripts/pipeline.sh clean
+
+clean-all: clean
+    rm -rf app/*/bin app/*/obj web/node_modules web/dist 2>/dev/null || true
+    @echo "cleaned build/ + app bin/obj + web node_modules/dist"
 
 launch-db:
     sudo systemctl start laplace-postgresql.service
@@ -86,15 +101,15 @@ db-nuke:
 migrate-new name:
     set -euo pipefail
     if [[ ! "{{name}}" =~ ^[a-z][a-z0-9_]*$ ]]; then
-        echo "✗ Migration name must be snake_case (a-z0-9_), starting with a letter."
+        echo "Migration name must be snake_case (a-z0-9_), starting with a letter."
         exit 1
     fi
     stamp=$(date -u +%Y%m%d%H%M%S)
     file="db/migrations/${stamp}_{{name}}.sql"
     cat > "$file" <<EOF
     EOF
-    echo "✓ Created $file"
-    echo "⚠ Layer-1 only — substrate objects belong in extension/laplace_substrate/sql/ (see its README.md)"
+    echo "Created $file"
+    echo "Layer-1 only — substrate objects belong in extension/laplace_substrate/sql/ (see its README.md)"
 
 seed-t0: build-perfcache build-app
     cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
@@ -109,7 +124,7 @@ db-fresh: build-perfcache build-app
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke --yes
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
     dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
-    echo "✓ db-fresh: empty substrate + current extension + T0 seeded (consensus folded, layer-0 marker set)"
+    echo "db-fresh: empty substrate + current extension + T0 seeded (consensus folded, layer-0 marker set)"
 
 setup: launch-db db-up seed-t0
     @echo "Laplace ready. Try: just query 'SELECT laplace_version();'"
@@ -188,16 +203,31 @@ anchor issue="":
 issue n:
     @scripts/agent-anchor.sh {{n}}
 
+# Parallel test gate (ctest || regress, then dotnet). Use test-serial to force old order.
+test:
+    @chmod +x scripts/test-parallel.sh
+    bash scripts/test-parallel.sh
 
-test: test-engine regress test-app
+test-serial:
+    @chmod +x scripts/test-parallel.sh
+    bash scripts/test-parallel.sh --serial
 
 test-no-docker: test-engine regress
 
 test-engine:
-    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" ctest --output-on-failure -LE regress
+    @chmod +x scripts/test-parallel.sh
+    bash scripts/test-parallel.sh --engine
 
 regress:
-    cd build && ctest --output-on-failure -L regress
+    @chmod +x scripts/test-parallel.sh
+    bash scripts/test-parallel.sh --regress
 
 test-app:
-    cd app && dotnet test Laplace.slnx -c Release
+    @chmod +x scripts/test-parallel.sh
+    bash scripts/test-parallel.sh --app
+
+publish:
+    bash scripts/pipeline.sh publish
+
+publish-force-npm:
+    bash deploy/linux/deploy.sh --force-npm
