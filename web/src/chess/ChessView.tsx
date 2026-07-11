@@ -32,11 +32,18 @@ import {
 
 } from './gameHistory';
 
+import {
+  clearSavedPlayGame,
+  loadSavedPlayGame,
+  savePlayGame,
+  savedGameIsResumable,
+} from './playPersist';
+
 import styles from './ChessView.module.css';
 
 
 
-interface PlayStart { sessionId: string; fen: string; }
+interface PlayStart { sessionId: string; fen: string; status?: string; ply?: number; }
 
 interface PlayMoveResult { fen: string; terminal: boolean; status: string; legal: boolean; ply: number; motifs?: string[]; }
 
@@ -50,7 +57,7 @@ interface BestMove {
 
 }
 
-interface PositionEval { whiteScoreCp: number; depth: number; nodes: number; }
+interface PositionEval { whiteScoreCp: number; depth: number; nodes: number; substrate?: boolean; terminal?: boolean; status?: string; }
 
 export interface SearchInfo { scoreCp: number; depth: number; nodes: number; substrate: boolean; pv: string[]; }
 
@@ -66,9 +73,18 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function ChessView() {
 
-  const [positions, setPositions] = useState<PositionSnapshot[]>(initialPositions);
+  const savedBoot = useMemo(() => {
+    const saved = loadSavedPlayGame();
+    return savedGameIsResumable(saved) ? saved : null;
+  }, []);
 
-  const [viewPly, setViewPly] = useState(0);
+  const [positions, setPositions] = useState<PositionSnapshot[]>(
+    () => savedBoot?.positions ?? initialPositions(),
+  );
+
+  const [viewPly, setViewPly] = useState(() =>
+    savedBoot ? savedBoot.positions.length - 1 : 0,
+  );
 
   const [legal, setLegal] = useState<MoveScore[]>([]);
 
@@ -82,7 +98,7 @@ export function ChessView() {
 
   const [busy, setBusy] = useState(false);
 
-  const [autoReply, setAutoReply] = useState(true);
+  const [autoReply, setAutoReply] = useState(() => savedBoot?.autoReply ?? true);
 
   const [train, setTrain] = useState<TrainStatus | null>(null);
 
@@ -90,24 +106,27 @@ export function ChessView() {
 
   const [knobs, setKnobs] = useState<TrainKnobs>({ games: 200, temp: 120, maxPlies: 200, weight: 0.5 });
 
-  const [searchDepth, setSearchDepth] = useState(4);
+  const [searchDepth, setSearchDepth] = useState(() => savedBoot?.searchDepth ?? 4);
 
-  const [useSubstrate, setUseSubstrate] = useState(true);
-  const [recordToSubstrate, setRecordToSubstrate] = useState(true);
+  const [useSubstrate, setUseSubstrate] = useState(() => savedBoot?.useSubstrate ?? true);
+  const [recordToSubstrate, setRecordToSubstrate] = useState(() => savedBoot?.recordToSubstrate ?? true);
   const [playSessionId, setPlaySessionId] = useState<string | null>(null);
 
-  const [evalMode, setEvalMode] = useState(false);
+  const [evalMode, setEvalMode] = useState(() => savedBoot?.evalMode ?? false);
 
-  const [flip, setFlip] = useState(false);
+  const [flip, setFlip] = useState(() => savedBoot?.flip ?? false);
 
   const [promo, setPromo] = useState<{ from: string; to: string } | null>(null);
 
   const [search, setSearch] = useState<SearchInfo | null>(null);
   const [searchPickUci, setSearchPickUci] = useState<string | null>(null);
 
-  const [positionEval, setPositionEval] = useState<PositionEval | null>(null);
+  const [positionEval, setPositionEval] = useState<(PositionEval & { fen: string }) | null>(null);
 
   const [motifs, setMotifs] = useState<string[]>([]);
+  const [resumeNote, setResumeNote] = useState<string | null>(
+    () => (savedBoot ? `Resumed · ${savedBoot.positions.length - 1} plies in browser` : null),
+  );
 
 
 
@@ -226,34 +245,33 @@ export function ChessView() {
 
 
   useEffect(() => {
-
-    if (status !== 'ongoing' || busy) {
-
-      if (status !== 'ongoing') {
-
-        setPositionEval({ whiteScoreCp: terminalWhiteCp(status), depth: 0, nodes: 0 });
-
-      }
-
+    if (status !== 'ongoing') {
+      setPositionEval({
+        fen,
+        whiteScoreCp: terminalWhiteCp(status),
+        depth: 0,
+        nodes: 0,
+        substrate: useSubstrate,
+        terminal: true,
+        status,
+      });
       return;
-
     }
 
     let cancelled = false;
-
+    const fenAtRequest = fen;
     const timer = setTimeout(() => {
-
-      void apiPost<PositionEval>('/chess/eval', { fen, depth: searchDepth, substrate: useSubstrate })
-
-        .then((r) => { if (!cancelled) setPositionEval(r); })
-
-        .catch(() => { if (!cancelled) setPositionEval(null); });
-
-    }, 200);
+      void apiPost<PositionEval>('/chess/eval', { fen: fenAtRequest, depth: searchDepth, substrate: useSubstrate })
+        .then((r) => {
+          if (!cancelled) setPositionEval({ ...r, fen: fenAtRequest });
+        })
+        .catch(() => {
+          /* keep last good eval — never snap the bar to 0 on a transient failure */
+        });
+    }, 120);
 
     return () => { cancelled = true; clearTimeout(timer); };
-
-  }, [fen, searchDepth, useSubstrate, status, busy]);
+  }, [fen, searchDepth, useSubstrate, status]);
 
 
 
@@ -333,21 +351,53 @@ export function ChessView() {
 
 
 
-  const startPlaySession = useCallback(async (record: boolean) => {
-    if (!record) {
-      setPlaySessionId(null);
-      return;
-    }
+  const startPlaySession = useCallback(async (record: boolean, moves?: string[]) => {
     try {
-      const r = await apiPost<PlayStart>('/chess/play/start', { record: true });
+      const r = await apiPost<PlayStart>('/chess/play/start', {
+        record,
+        moves: moves && moves.length > 0 ? moves : undefined,
+      });
       setPlaySessionId(r.sessionId);
+      return r;
     } catch (e) {
       setErr(`play session failed: ${msg(e)}`);
       setPlaySessionId(null);
+      return null;
     }
   }, []);
 
-  useEffect(() => { void startPlaySession(recordToSubstrate); }, [recordToSubstrate, startPlaySession]);
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
+
+  // Always keep a server play session (repetition history lives there). Replay local
+  // moves when booting or when the record flag changes.
+  useEffect(() => {
+    const moves = historyFromPositions(positionsRef.current);
+    void startPlaySession(recordToSubstrate, moves.length ? moves : undefined).then((r) => {
+      if (r && moves.length > 0) {
+        setResumeNote((prev) => prev ?? `Server session rebuilt · ${moves.length} plies`);
+      }
+    });
+  }, [recordToSubstrate, startPlaySession]);
+
+  useEffect(() => {
+    savePlayGame({
+      positions,
+      recordToSubstrate,
+      searchDepth,
+      useSubstrate,
+      autoReply,
+      flip,
+      evalMode,
+    });
+  }, [positions, recordToSubstrate, searchDepth, useSubstrate, autoReply, flip, evalMode]);
+
+  const ensurePlaySession = useCallback(async () => {
+    if (playSessionId) return playSessionId;
+    const moves = historyFromPositions(positionsRef.current);
+    const r = await startPlaySession(recordToSubstrate, moves.length ? moves : undefined);
+    return r?.sessionId ?? null;
+  }, [playSessionId, recordToSubstrate, startPlaySession]);
 
   const appendSnapshot = useCallback((uci: string, nextFen: string, nextStatus: string) => {
     setPositions((p) => {
@@ -355,6 +405,7 @@ export function ChessView() {
       setViewPly(next.length - 1);
       return next;
     });
+    setResumeNote(null);
   }, []);
 
 
@@ -364,14 +415,34 @@ export function ChessView() {
     setBusy(true);
 
     try {
+      let sid = await ensurePlaySession();
+      if (!sid) throw new Error('no play session');
 
-      const r = recordToSubstrate && playSessionId
-        ? await apiPost<BestMove>('/chess/play/bestmove', {
-            sessionId: playSessionId, fen: f, depth: searchDepth, substrate: useSubstrate,
-          })
-        : await apiPost<BestMove>('/chess/bestmove', { fen: f, depth: searchDepth, substrate: useSubstrate });
+      let r = await apiPost<BestMove>('/chess/play/bestmove', {
+        sessionId: sid, fen: f, depth: searchDepth, substrate: useSubstrate,
+      });
 
-      if (r.uci) appendSnapshot(r.uci, r.fen, r.status);
+      if (r.status === 'session expired') {
+        const moves = historyFromPositions(positionsRef.current);
+        const restarted = await startPlaySession(recordToSubstrate, moves);
+        if (!restarted) throw new Error('session expired');
+        sid = restarted.sessionId;
+        r = await apiPost<BestMove>('/chess/play/bestmove', {
+          sessionId: sid, fen: f, depth: searchDepth, substrate: useSubstrate,
+        });
+      }
+
+      if (r.uci) {
+        appendSnapshot(r.uci, r.fen, r.status);
+      } else if (r.terminal && r.status !== 'ongoing') {
+        setPositions((p) => {
+          if (p.length === 0) return p;
+          const next = p.slice();
+          const last = next[next.length - 1]!;
+          next[next.length - 1] = { ...last, status: r.status, fen: r.fen || last.fen };
+          return next;
+        });
+      }
 
       setSearch({ scoreCp: r.scoreCp, depth: r.depth, nodes: r.nodes, substrate: useSubstrate, pv: r.pv ?? [] });
 
@@ -385,7 +456,7 @@ export function ChessView() {
 
     finally { setBusy(false); }
 
-  }, [searchDepth, useSubstrate, appendSnapshot, recordToSubstrate, playSessionId]);
+  }, [searchDepth, useSubstrate, appendSnapshot, ensurePlaySession, startPlaySession, recordToSubstrate]);
 
 
 
@@ -402,10 +473,18 @@ export function ChessView() {
     setBusy(true);
 
     try {
+      let sid = await ensurePlaySession();
+      if (!sid) throw new Error('no play session');
 
-      const r = recordToSubstrate && playSessionId
-        ? await apiPost<PlayMoveResult>('/chess/play/move', { sessionId: playSessionId, fen: liveFen, uci })
-        : await apiPost<PlayMoveResult>('/chess/move', { fen: liveFen, uci });
+      let r = await apiPost<PlayMoveResult>('/chess/play/move', { sessionId: sid, fen: liveFen, uci });
+
+      if (r.status === 'session expired') {
+        const moves = historyFromPositions(positionsRef.current);
+        const restarted = await startPlaySession(recordToSubstrate, moves);
+        if (!restarted) throw new Error('session expired');
+        sid = restarted.sessionId;
+        r = await apiPost<PlayMoveResult>('/chess/play/move', { sessionId: sid, fen: liveFen, uci });
+      }
 
       if (!r.legal) { setErr(`illegal move: ${uci}`); return; }
 
@@ -423,7 +502,7 @@ export function ChessView() {
 
     finally { setBusy(false); }
 
-  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing, recordToSubstrate, playSessionId]);
+  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing, ensurePlaySession, startPlaySession, recordToSubstrate]);
 
 
 
@@ -528,6 +607,9 @@ export function ChessView() {
       } catch { /* best effort */ }
     }
 
+    clearSavedPlayGame();
+    setResumeNote(null);
+
     const r = await apiGet<{ fen: string }>('/chess/new');
 
     setPositions([{ fen: r.fen, status: 'ongoing', lastMove: null }]);
@@ -573,11 +655,13 @@ export function ChessView() {
 
   const showPick = !reviewing && !!botBestTo && ((!sel && !drag) || sel === botBestFrom);
 
-  const whiteCp = positionEval?.whiteScoreCp ?? 0;
-
-  const { lead: evalLead, detail: evalDetail } = formatPositionEval(whiteCp);
-
-  const evalFrac = whiteCpToBarFraction(whiteCp);
+  // Prefer eval bound to the visible fen. While a fresh /chess/eval is in flight, keep the
+  // last score so the bar doesn't flash 0.0 / 50% on every ply.
+  const evalForFen = positionEval?.fen === fen ? positionEval : null;
+  const whiteCp = evalForFen?.whiteScoreCp ?? positionEval?.whiteScoreCp;
+  const evalPending = positionEval == null || positionEval.fen !== fen;
+  const { lead: evalLead, detail: evalDetail } = formatPositionEval(whiteCp ?? 0);
+  const evalFrac = whiteCpToBarFraction(whiteCp ?? 0);
 
   const sideToMove = whiteToMove(fen) ? 'White' : 'Black';
 
@@ -607,11 +691,15 @@ export function ChessView() {
 
           : status)
 
-        : inCheck
+        : resumeNote
 
-          ? `${sideToMove} in check`
+          ? `${resumeNote} · ${inCheck ? `${sideToMove} in check` : `${sideToMove} to move`}`
 
-          : `${sideToMove} to move`;
+          : inCheck
+
+            ? `${sideToMove} in check`
+
+            : `${sideToMove} to move`;
 
 
 
@@ -639,11 +727,13 @@ export function ChessView() {
 
           botBestTo={botBestTo}
 
-          whiteEval={evalLead}
+          whiteEval={evalPending ? '…' : evalLead}
 
           evalFrac={evalFrac}
 
-          evalDetail={evalDetail}
+          evalDetail={evalPending ? 'Evaluating…' : evalDetail}
+
+          evalPending={evalPending}
 
           boardRef={boardRef}
 

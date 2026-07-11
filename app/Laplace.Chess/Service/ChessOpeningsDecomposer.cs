@@ -10,8 +10,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningRecord>
+public sealed class ChessOpeningsDecomposer(bool recursive = false) : ComposeDecomposer<ChessOpeningRecord>
 {
+    private readonly SearchOption _scope =
+        recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
     public override Hash128 SourceId => ChessVocabulary.OpeningsSourceId;
     public override string SourceName => "ChessOpenings";
     public override int LayerOrder => 20;
@@ -22,8 +25,11 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
 
     private const double OpeningWitnessWeight = 0.7;
 
-    private static long OpeningGames =>
-        Math.Clamp(4L, 1, 64);
+    // One game's weight per book line (doc 03 C09): a catalog line asserts the line EXISTS, not
+    // an outcome — at games=4 the fabricated Draw mass systematically dragged sharp book lines
+    // toward neutral against real-game evidence. games=1 keeps the existence witness while real
+    // outcomes dominate as soon as any actual games fold in.
+    private static long OpeningGames => 1;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -36,7 +42,7 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        foreach (var file in EnumerateFiles(ecosystemPath))
+        foreach (var file in EnumerateFiles(ecosystemPath, _scope))
         {
             await foreach (var row in StreamRowsAsync(file, ct))
             {
@@ -57,7 +63,7 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long lines = 0;
-        foreach (var f in EnumerateFiles(context.EcosystemPath))
+        foreach (var f in EnumerateFiles(context.EcosystemPath, _scope))
         {
             try
             {
@@ -131,12 +137,12 @@ public sealed class ChessOpeningsDecomposer : ComposeDecomposer<ChessOpeningReco
                 yield return row;
     }
 
-    private static IEnumerable<string> EnumerateFiles(string path)
+    private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
     {
         if (string.IsNullOrEmpty(path)) yield break;
         if (File.Exists(path)) { yield return Path.GetFullPath(path); yield break; }
         if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.tsv", SearchOption.AllDirectories)
+        foreach (var f in Directory.EnumerateFiles(path, "*.tsv", scope)
                                    .OrderBy(p => p, StringComparer.Ordinal))
             yield return f;
     }

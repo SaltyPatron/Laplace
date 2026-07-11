@@ -205,6 +205,27 @@ public static class ChessLabRunners
             }
         }
         lab.AddArtifact(slot, "games.pgn", pgnOut);
+
+        // Loop closure: cutechess games are played by the external laplace-uci binary, which
+        // cannot record its own plies — without this the PGN artifact is where the evidence
+        // dies. Opt out with config ingest=false.
+        if (Config(slot.Job.Config, "ingest", "true") == "true" && File.Exists(pgnOut))
+        {
+            try
+            {
+                lab.Publish(slot, new ChessLabLogEvent("info", "ingesting games.pgn into substrate…"));
+                await using var ingestor = await ChessPgnIngestor.CreateAsync(ct);
+                var r = await ingestor.IngestFileAsync(
+                    pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
+                lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                lab.Publish(slot, new ChessLabLogEvent(
+                    "error", $"substrate ingest failed ({ex.Message}) — artifact kept, retry via /ingest"));
+            }
+        }
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 

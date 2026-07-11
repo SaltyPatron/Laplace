@@ -2429,7 +2429,8 @@
           "fen",
           "temperature",
           "depth",
-          "substrate"
+          "substrate",
+          "moves"
         ],
         "type": "object",
         "properties": {
@@ -2459,6 +2460,15 @@
               "null",
               "boolean"
             ]
+          },
+          "moves": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5797,7 +5807,8 @@
       "MoveRequest": {
         "required": [
           "fen",
-          "uci"
+          "uci",
+          "moves"
         ],
         "type": "object",
         "properties": {
@@ -5806,6 +5817,15 @@
           },
           "uci": {
             "type": "string"
+          },
+          "moves": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -6089,7 +6109,8 @@
       },
       "PlayStartRequest": {
         "required": [
-          "record"
+          "record",
+          "moves"
         ],
         "type": "object",
         "properties": {
@@ -6098,6 +6119,15 @@
               "null",
               "boolean"
             ]
+          },
+          "moves": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

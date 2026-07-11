@@ -56,7 +56,7 @@ echo test-app: running projects in parallel: !PROJECTS!
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$app = '%CD%';" ^
-  "$filter = 'Tier!=perf';" ^
+  "$filter = '!XUNIT_TIER_EXCLUDE!';" ^
   "$extra = '%ARGS%'.Trim();" ^
   "$projects = '%PROJECTS%'.Split(';') | Where-Object { $_ };" ^
   "$procs = @();" ^

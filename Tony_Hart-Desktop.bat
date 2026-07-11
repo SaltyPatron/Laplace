@@ -33,25 +33,25 @@ call :run tune-pg || goto :fail
 call :run build-cutechess || goto :fail
 call :run build-deps || goto :fail
 call :run rebuild-all || goto :fail
-call :run build-engine-asan || goto :fail
+rem call :run build-engine-asan || goto :fail
 call :run build-web || goto :fail
 call :run install-extensions || goto :fail
 call :run publish || goto :fail
 call :run deploy-api || goto :fail
 call :run db-reset || goto :fail
 call :run seed-foundation || goto :fail
-
-call :run_args seed-step "document" "D:\Data\Ingest\test-data\text" documents || goto :fail
 call :run_args seed-step "openings" "D:\Data\Ingest\Games\Chess\openings" openings || goto :fail
-call :run_args seed-step "atomic2020" "" atomic2020 || goto :fail
-call :run_args seed-step "omw" "" omw || goto :fail
-call :run_args seed-step "conceptnet" "" conceptnet || goto :fail
-call :run_args seed-step "ud" "" ud || goto :fail
+call :run_args seed-step "chess-books" "D:\Data\Ingest\test-data\text" chess-books || goto :fail
+call :run_args seed-step "document" "D:\Data\Ingest\test-data\text" documents || goto :fail
 call :run_args seed-step "chess" "D:\Data\Ingest\Games\Chess" chess-chesscom || goto :fail
-call :run_args seed-step "chess" "D:\Data\Ingest\Games\Chess\Lumbras\otb" chess-otb || goto :fail
-call :run_args seed-step "wiktionary" "" wiktionary || goto :fail
-call :run_args seed-step "tatoeba" "" tatoeba || goto :fail
-call :run_args seed-step "opensubtitles" "" opensubtitles || goto :fail
+rem call :run_args seed-step "chess" "D:\Data\Ingest\Games\Chess\Lumbras\otb" chess-otb || goto :fail
+rem call :run_args seed-step "atomic2020" "" atomic2020 || goto :fail
+rem call :run_args seed-step "omw" "" omw || goto :fail
+rem call :run_args seed-step "conceptnet" "" conceptnet || goto :fail
+rem call :run_args seed-step "ud" "" ud || goto :fail
+rem call :run_args seed-step "wiktionary" "" wiktionary || goto :fail
+rem call :run_args seed-step "tatoeba" "" tatoeba || goto :fail
+rem call :run_args seed-step "opensubtitles" "" opensubtitles || goto :fail
 
 echo.
 echo ===== Tony_Hart-Desktop OK %DATE% %TIME% =====

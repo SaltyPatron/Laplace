@@ -59,7 +59,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var outv = new double[edgeIds.Count];
         for (int i = 0; i < edgeIds.Count; i++)
-            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? Shrink(v.Mu, v.W) : GlickoPriors.UnratedEffMu;
+            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? ChessShrink.Apply(v.Mu, v.W) : GlickoPriors.UnratedEffMu;
         return outv;
     }
 
@@ -67,9 +67,6 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
 
 
-    private const double ShrinkK0 = 15000d;
-    private static double Shrink(double effMu, double witness)
-        => GlickoPriors.NeutralMu + (effMu - GlickoPriors.NeutralMu) * (witness / (witness + ShrinkK0));
 
 
 

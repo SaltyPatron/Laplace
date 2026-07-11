@@ -10,8 +10,14 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
+// Non-recursive by default: pointing at Games\Chess must not silently swallow every nested
+// corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
+// (laplace ingest chess <dir> --recursive).
+public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecomposer<ChessGameRecord>
 {
+    private readonly SearchOption _scope =
+        recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
     public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
     public override string SourceName => "ChessPgn";
     public override int LayerOrder => 20;
@@ -36,18 +42,18 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
         await foreach (var game in StreamNovelGamesAsync(
-                           ecosystemPath, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
+                           ecosystemPath, _scope, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
             yield return game;
     }
 
     protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b) => RecordGame(record, b);
 
     private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(
-        string ecosystemPath, ISubstrateReader? reader, int chunkSize, bool reObservePresent,
-        [EnumeratorCancellation] CancellationToken ct)
+        string ecosystemPath, SearchOption scope, ISubstrateReader? reader, int chunkSize,
+        bool reObservePresent, [EnumeratorCancellation] CancellationToken ct)
     {
         var chunk = new List<ChessGameRecord>(chunkSize);
-        await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, ct))
+        await foreach (var gameText in StreamAllGamesAsync(ecosystemPath, scope, ct))
         {
             if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
             if (chunk.Count < chunkSize) continue;
@@ -105,9 +111,9 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
     }
 
     internal static async IAsyncEnumerable<string> StreamAllGamesAsync(
-        string ecosystemPath, [EnumeratorCancellation] CancellationToken ct)
+        string ecosystemPath, SearchOption scope, [EnumeratorCancellation] CancellationToken ct)
     {
-        foreach (var file in EnumerateFiles(ecosystemPath))
+        foreach (var file in EnumerateFiles(ecosystemPath, scope))
         {
             ct.ThrowIfCancellationRequested();
             await foreach (var gameText in StreamGamesAsync(file, ct).WithCancellation(ct))
@@ -135,18 +141,20 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
     // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
     // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
     // (ChessAnalyze), run later off this witnessed layer. See .scratchpad/08_Record_vs_Calculate.
-    internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b)
+    // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
+    // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
+    internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
         var (gameText, moves, result, gameId) = parsed;
         var walk = parsed.Walk;
-        var src = ChessVocabulary.PgnSourceId;
+        var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
         var (whiteName, blackName) = ParseNames(gameText);
-        var whitePlayer = EmitPlayer(b, whiteName);
-        var blackPlayer = EmitPlayer(b, blackName);
+        var whitePlayer = EmitPlayer(b, whiteName, src);
+        var blackPlayer = EmitPlayer(b, blackName, src);
 
-        EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo);
+        EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
         RecordStartPosition(b, gameId, gameText, src);
         RecordOpeningHeaders(b, gameId, gameText, src);
         RecordMovetext(b, gameId, moves, src);
@@ -270,9 +278,8 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
 
     private static void EmitGame(
         SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
-        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo)
+        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo, Hash128 src)
     {
-        var src = ChessVocabulary.PgnSourceId;
         b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
 
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
@@ -321,22 +328,22 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
     private static (string White, string Black) ParseNames(string game)
         => (PgnGames.TagStr(game, "White"), PgnGames.TagStr(game, "Black"));
 
-    private static Hash128? EmitPlayer(SubstrateChangeBuilder b, string name)
+    private static Hash128? EmitPlayer(SubstrateChangeBuilder b, string name, Hash128 src)
     {
         if (string.IsNullOrWhiteSpace(name) || name == "?") return null;
         var canonicalId = ChessVocabulary.PlayerId(name);
-        ChessVocabulary.EmitPlayer(b, canonicalId, name, ChessVocabulary.PgnSourceId);
+        ChessVocabulary.EmitPlayer(b, canonicalId, name, src);
         var legacyId = ChessVocabulary.LegacyPlayerId(name);
         if (legacyId != canonicalId)
             b.AddAttestation(NativeAttestation.Categorical(
-                canonicalId, "CORRESPONDS_TO", legacyId, ChessVocabulary.PgnSourceId, null, PgnWitnessWeight));
+                canonicalId, "CORRESPONDS_TO", legacyId, src, null, PgnWitnessWeight));
         return canonicalId;
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long games = 0;
-        foreach (var f in EnumerateFiles(context.EcosystemPath))
+        foreach (var f in EnumerateFiles(context.EcosystemPath, _scope))
         {
             try
             {
@@ -354,12 +361,12 @@ public sealed class ChessPgnDecomposer : ComposeDecomposer<ChessGameRecord>
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
 
-    private static IEnumerable<string> EnumerateFiles(string path)
+    private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
     {
         if (string.IsNullOrEmpty(path)) yield break;
         if (File.Exists(path)) { yield return Path.GetFullPath(path); yield break; }
         if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.pgn", SearchOption.AllDirectories)
+        foreach (var f in Directory.EnumerateFiles(path, "*.pgn", scope)
                                    .OrderBy(p => p, StringComparer.Ordinal))
             yield return f;
     }

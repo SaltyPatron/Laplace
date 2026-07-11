@@ -1,4 +1,7 @@
 using System.Linq;
+using global::Npgsql;
+using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Uci;
@@ -9,13 +12,29 @@ public sealed class UciEngine
     public const string Author = "Laplace";
 
     private Board _board = Board.FromFen(ChessModality.StartFen);
-    private readonly Search _search = new();
+    private Search _search = new();
     private readonly object _outputLock = new();
     private CancellationTokenSource? _searchCts;
     private Task? _searchTask;
 
+    // Substrate wiring (doc 21 #24: "a UCI engine whose play is a read of the consensus, not a
+    // search"). Mode "fold" = SubstructureFoldBias (generalizes via substructure OUTCOME folds),
+    // "edge" = SubstrateRootBias (raw MOVE-edge popularity), "off" = pure alpha-beta. The engine
+    // must keep speaking UCI when the database is unreachable — cutechess drives this binary on
+    // hosts where Postgres may be down — so init failure degrades to "off" with an info string
+    // instead of dying.
+    private string _substrateMode =
+        NormalizeMode(Environment.GetEnvironmentVariable("LAPLACE_UCI_SUBSTRATE")) ?? "fold";
+    private bool _substrateTried;
+    private bool _searchStale = true;
+    private string? _builtMode;
+    private NpgsqlDataSource? _ds;
+    private GuardedBias? _bias;
+    private TextWriter? _lastOutput;
+
     public bool Handle(string line, TextWriter output)
     {
+        _lastOutput = output;
         var tok = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (tok.Length == 0) return true;
 
@@ -26,19 +45,27 @@ public sealed class UciEngine
                 {
                     output.WriteLine($"id name {Name}");
                     output.WriteLine($"id author {Author}");
+                    output.WriteLine($"option name Substrate type combo default {_substrateMode} var fold var edge var off");
                     output.WriteLine("uciok");
                 }
                 return true;
 
+            case "setoption":
+                ApplyOption(tok);
+                return true;
+
             case "isready":
-                // Must answer promptly even while a search is in flight — no lock contention risk
-                // here since this never blocks on _searchTask, only on the (short) output lock.
+                // Substrate init happens here, where GUIs expect the engine to do slow setup —
+                // never inside "go", whose latency is game time.
+                EnsureSearch(output, allowInit: true);
                 lock (_outputLock) output.WriteLine("readyok");
                 return true;
 
             case "ucinewgame":
                 StopSearch();
                 _board = Board.FromFen(ChessModality.StartFen);
+                // Learned PST comes from consensus that the previous game may have folded into.
+                _searchStale = true;
                 return true;
 
             case "position":
@@ -47,6 +74,10 @@ public sealed class UciEngine
                 return true;
 
             case "go":
+                // No first-time DB init on the move clock: every real driver sends isready
+                // before the first go (cutechess does). A bare go without prior isready plays
+                // pure — zero added latency, no DB dependency.
+                EnsureSearch(output, allowInit: false);
                 StartSearch(ParseGo(tok), output);
                 return true;
 
@@ -63,6 +94,140 @@ public sealed class UciEngine
         }
     }
 
+    private static string? NormalizeMode(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "fold" => "fold",
+        "edge" => "edge",
+        "off" or "false" or "none" => "off",
+        "true" or "on" => "fold",
+        _ => null,
+    };
+
+    private void ApplyOption(string[] tok)
+    {
+        int nameIdx = Array.IndexOf(tok, "name");
+        int valueIdx = Array.IndexOf(tok, "value");
+        if (nameIdx < 0 || valueIdx < 0 || valueIdx <= nameIdx + 1 || valueIdx + 1 >= tok.Length) return;
+        string name = string.Join(' ', tok[(nameIdx + 1)..valueIdx]);
+        string value = string.Join(' ', tok[(valueIdx + 1)..]);
+
+        if (name.Equals("Substrate", StringComparison.OrdinalIgnoreCase)
+            && NormalizeMode(value) is { } mode && mode != _substrateMode)
+        {
+            _substrateMode = mode;
+            _searchStale = true;
+        }
+    }
+
+    // (Re)build the search to match the requested substrate mode. Cheap no-op when current.
+    // allowInit gates the one-time DB connection; without it, an uninitialized substrate mode
+    // keeps the current (pure) search rather than paying connect latency here.
+    private void EnsureSearch(TextWriter? output, bool allowInit)
+    {
+        if (!_searchStale && _builtMode == _substrateMode) return;
+
+        if (_substrateMode == "off")
+        {
+            _search = new Search();
+            _bias = null;
+            _builtMode = "off";
+            _searchStale = false;
+            return;
+        }
+
+        if (!_substrateTried)
+        {
+            if (!allowInit) return;
+            _substrateTried = true;
+            try
+            {
+                CodepointPerfcache.LoadDefault();
+                var csb = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
+                {
+                    Timeout = 3,
+                    CommandTimeout = 5,
+                };
+                var ds = new NpgsqlDataSourceBuilder(csb.ConnectionString).Build();
+                using (ds.OpenConnection()) { } // fail fast while we can still report it
+                _ds = ds;
+            }
+            catch (Exception ex)
+            {
+                Info(output, $"substrate unavailable ({FirstLine(ex.Message)}) — pure search");
+                _substrateMode = "off";
+                EnsureSearch(output, allowInit);
+                return;
+            }
+        }
+
+        if (_ds is null)
+        {
+            // A previous init attempt failed; stay pure until asked to retry via setoption.
+            _substrateMode = "off";
+            EnsureSearch(output, allowInit);
+            return;
+        }
+
+        int[][]? mg = null, eg = null;
+        try
+        {
+            var (lm, le) = LearnedPst.BuildTables(_ds);
+            (mg, eg) = Evaluation.BlendPeStoWith(lm, le);
+        }
+        catch
+        {
+            // Learned PST is an overlay; the bias alone is still worth having.
+        }
+
+        IRootBias inner = _substrateMode == "edge"
+            ? new SubstrateRootBias(_ds)
+            : new SubstructureFoldBias(_ds);
+        _bias = new GuardedBias(inner, msg => Info(_lastOutput, msg));
+        _search = new Search(EvalTerm.All, _bias, ttBits: 20, mgPst: mg, egPst: eg);
+        _builtMode = _substrateMode;
+        _searchStale = false;
+        Info(output, $"substrate bias active (mode {_substrateMode}, learned pst {(mg is not null ? "on" : "off")})");
+    }
+
+    private void Info(TextWriter? output, string msg)
+    {
+        if (output is null) return;
+        lock (_outputLock)
+        {
+            output.WriteLine($"info string {msg}");
+            output.Flush();
+        }
+    }
+
+    private static string FirstLine(string s)
+    {
+        int nl = s.IndexOfAny(['\r', '\n']);
+        return nl >= 0 ? s[..nl] : s;
+    }
+
+    // The bias runs a synchronous consensus read at the search root. A database that goes away
+    // mid-game must cost one failed query, not the game: first failure zeroes the bias and
+    // disables it for the rest of the process.
+    private sealed class GuardedBias(IRootBias inner, Action<string> onDisabled) : IRootBias
+    {
+        private volatile bool _dead;
+
+        public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
+        {
+            if (_dead) return new int[moves.Count];
+            try
+            {
+                return inner.Bonus(root, moves);
+            }
+            catch (Exception ex)
+            {
+                _dead = true;
+                onDisabled($"substrate bias disabled ({FirstLine(ex.Message)}) — pure search");
+                return new int[moves.Count];
+            }
+        }
+    }
+
     // Runs the search on a background task so "stop" (and the next "position"/"quit") can be
     // read from stdin immediately instead of blocking behind Think() — real UCI GUIs (including
     // cutechess-cli, which drives this exact path with tc=inf/depth=N, i.e. no time control at
@@ -73,10 +238,11 @@ public sealed class UciEngine
         var cts = new CancellationTokenSource();
         _searchCts = cts;
         var board = Board.FromFen(_board.ToFen()); // stable snapshot; _board may be reassigned by a later "position"
+        var search = _search; // stable snapshot; a later setoption may rebuild _search
         _searchTask = Task.Run(() =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var result = _search.Think(board, limits, cts.Token);
+            var result = search.Think(board, limits, cts.Token);
             sw.Stop();
             string best = result.BestMove?.ToUci()
                 ?? (MoveGen.Legal(board) is { Count: > 0 } l ? l[0].ToUci() : "0000");

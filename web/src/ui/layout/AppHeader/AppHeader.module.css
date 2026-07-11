@@ -6,12 +6,15 @@
     padding: 0.6rem 1.2rem;
     background: var(--color-bg-panel);
     border-bottom: 1px solid var(--color-border-default);
+    flex-wrap: wrap;
+    flex-shrink: 0;
   }
 
   .title {
     font-size: var(--text-lg);
     margin: 0;
     letter-spacing: 0.04em;
+    min-width: 0;
   }
 
   .tagline {
@@ -24,9 +27,27 @@
   .nav {
     display: flex;
     gap: var(--space-2);
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .tenantSlot {
     margin-left: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .header {
+    gap: var(--space-3);
+    padding: 0.55rem 0.85rem;
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .tenantSlot {
+    margin-left: 0;
+    width: 100%;
   }
 }

@@ -6,7 +6,7 @@
     gap: 0.35rem;
     flex-wrap: wrap;
     width: 100%;
-    max-width: min(78vh, 760px);
+    max-width: 100%;
   }
 
   .controls {

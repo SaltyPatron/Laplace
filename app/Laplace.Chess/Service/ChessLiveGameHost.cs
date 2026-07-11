@@ -40,12 +40,14 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         _turnHost = turnHost;
     }
 
+    // connString overrides the installed default — REQUIRED for tests: the default resolves to
+    // the production substrate, and a per-ply recorder pointed there writes real consensus rows.
     public static async Task<ChessLiveGameHost> CreateAsync(
         double witnessWeight = 0.5d, string defaultLearnContext = "chess/live/game",
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? connString = null)
     {
         CodepointPerfcache.LoadDefault();
-        var conn = ChessEngineService.ResolveConnString();
+        var conn = connString ?? ChessEngineService.ResolveConnString();
         var ds = new NpgsqlDataSourceBuilder(conn).Build();
         var inner = new NpgsqlSubstrateWriter(ds);
         var writer = new ConsensusAccumulatingWriter(
@@ -314,4 +316,11 @@ public sealed class PlaySession(Hash128 gameId, string learnContext, bool record
     public string LearnContext { get; } = learnContext;
     public bool RecordToSubstrate { get; } = recordToSubstrate;
     public int PlyCount { get; set; }
+
+    /// <summary>
+    /// Live modality state including repetition history. FEN alone cannot detect threefold.
+    /// </summary>
+    public ChessState? State { get; set; }
+
+    public List<string> Moves { get; } = new();
 }

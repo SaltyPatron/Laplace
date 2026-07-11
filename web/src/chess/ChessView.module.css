@@ -4,7 +4,10 @@
     gap: 1.5rem;
     padding: 1rem;
     height: 100%;
-    overflow: auto;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .main {
@@ -13,25 +16,30 @@
     gap: 0.75rem;
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
   }
 
   .side {
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    flex: 0 1 20rem;
+    flex: 0 1 22rem;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
   }
 }
 
 @media (max-width: 900px) {
   .layout {
     flex-direction: column;
+    overflow: auto;
   }
 
   .side {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
+    overflow: visible;
   }
 }

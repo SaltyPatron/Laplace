@@ -267,7 +267,8 @@ public sealed class LichessBot : IAsyncDisposable
                         int whiteCp = boardNow.WhiteToMove ? result.Score : -result.Score;
                         string comment = await ChessMoveCommentary.BuildAsync(
                             _host.DataSource,
-                            new ChessMoveCommentary.Inputs(whiteCp, result.Depth, pv, motifs),
+                            new ChessMoveCommentary.Inputs(whiteCp, result.Depth, pv, motifs,
+                                PositionSurface: toKey),
                             ct);
                         if (!string.IsNullOrWhiteSpace(comment))
                             await PostChatAsync(lichessGameId, "player", comment, ct);

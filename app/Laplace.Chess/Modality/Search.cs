@@ -56,6 +56,15 @@ public sealed class Search
     private readonly int[][]? _egPst;
     private Dictionary<string, int>? _rootBonusByUci;
 
+    // Root bonuses are added AFTER the child search, so sibling comparisons are only sound if
+    // every move that could still win post-bonus comes back with an EXACT score. Fail-hard
+    // pruning at the root window breaks that: a sibling cut at alpha returns the bound itself,
+    // the bonus lands on top, and each later move "beats" the best by bonus deltas — observed
+    // flipping a mate-in-1 into a king shuffle. Searching root children with alpha widened by
+    // a margin that strictly dominates every bias cap (both IRootBias impls cap at ±150cp)
+    // keeps candidates exact; moves failing outside the margin can never win post-bonus.
+    private const int RootBiasMargin = 256;
+
     public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
         int[][]? mgPst = null, int[][]? egPst = null)
     {
@@ -170,11 +179,13 @@ public sealed class Search
         {
             var m = moves[mi];
             var undo = MoveApply.MakeWithUndo(b, m);
-            int score = -Negamax(b, depth - 1, -beta, -alpha, ply + 1);
+            int windowAlpha = ply == 0 && _rootBonusByUci is not null ? alpha - RootBiasMargin : alpha;
+            int score = -Negamax(b, depth - 1, -beta, -windowAlpha, ply + 1);
             MoveApply.Unmake(b, m, undo);
             if (_aborted) { _path.RemoveAt(_path.Count - 1); return 0; }
 
-            if (_rootBonusByUci is not null && ply == 0
+            // A proven mate outranks any bias nudge — bonusing it only corrupts mate distance.
+            if (_rootBonusByUci is not null && ply == 0 && Math.Abs(score) < MateThreshold
                 && _rootBonusByUci.TryGetValue(m.ToUci(), out int bon))
                 score += bon;
             if (score > best) { best = score; bestMove = m; }

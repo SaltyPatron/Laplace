@@ -122,9 +122,6 @@ public class ModalityTests
     [Fact]
     public void Threefold_KnightShuffle_IsDraw()
     {
-
-
-
         var s = M.FromFen("4k1n1/8/8/8/8/8/8/4K1N1 w - - 0 1");
         s = Play(s, "g1f3");
         s = Play(s, "g8f6");
@@ -138,6 +135,26 @@ public class ModalityTests
         Assert.NotNull(outcome);
         Assert.True(outcome!.Value.IsDraw);
     }
+
+    [Fact]
+    public void Threefold_FromFenAlone_DoesNotSeeHistory()
+    {
+        // HTTP play used to rebuild from FEN each ply — that cannot detect threefold.
+        var s = M.FromFen("4k1n1/8/8/8/8/8/8/4K1N1 w - - 0 1");
+        s = Play(s, "g1f3");
+        s = Play(s, "g8f6");
+        s = Play(s, "f3g1");
+        s = Play(s, "f6g8");
+        s = Play(s, "g1f3");
+        s = Play(s, "g8f6");
+        s = Play(s, "f3g1");
+        s = Play(s, "f6g8");
+        Assert.NotNull(M.Terminal(s));
+
+        var fenOnly = M.FromFen(s.Board.ToFen());
+        Assert.Null(M.Terminal(fenOnly));
+    }
+
 
     [Fact]
     public void Initial_FenRoundTrip()

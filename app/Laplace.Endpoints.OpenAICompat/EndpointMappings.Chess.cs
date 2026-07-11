@@ -16,13 +16,13 @@ internal static class ChessEndpoints
             Results.Json(await svc.LegalAsync(req.Fen, ct))).WithTags("chess");
 
         app.MapPost("/chess/move", async (MoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, ct))).WithTags("chess");
+            Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, req.Moves, ct))).WithTags("chess");
 
         app.MapPost("/chess/eval", async (EvalRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.EvalPositionAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
 
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
+            Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct))).WithTags("chess");
 
         app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
             Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) }))
@@ -38,7 +38,7 @@ internal static class ChessEndpoints
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
         app.MapPost("/chess/play/start", (PlayStartRequest req, ChessEngineService svc) =>
-            Results.Json(svc.StartPlaySession(req.Record ?? true))).WithTags("chess");
+            Results.Json(svc.StartPlaySession(req.Record ?? true, req.Moves))).WithTags("chess");
 
         app.MapPost("/chess/play/move", async (PlayMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))).WithTags("chess");
@@ -135,12 +135,16 @@ internal static class ChessEndpoints
             return Results.File(path, "application/x-chess-pgn", name);
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (string jobId, ChessLabService lab) =>
+        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (string jobId, ChessLabService lab, CancellationToken ct) =>
         {
             var job = lab.GetJob(jobId);
             if (job is null || !job.Artifacts.TryGetValue("games.pgn", out var path) || !File.Exists(path))
                 return Results.NotFound(new { error = "no games.pgn artifact" });
-            return Results.Json(new { queued = true, path, hint = $"laplace ingest chess \"{path}\"" });
+            // Record + analyze the artifact through the writer spine, in-process. Novelty-gated
+            // on game ids, so re-posting is idempotent (cutechess jobs already auto-ingest).
+            await using var ingestor = await ChessPgnIngestor.CreateAsync(ct);
+            var r = await ingestor.IngestFileAsync(path, log: null, ct);
+            return Results.Json(new { path, parsed = r.Parsed, ingested = r.Applied, alreadyPresent = r.Parsed - r.Novel });
         }).WithTags("chess-lab");
     }
 
@@ -158,12 +162,12 @@ internal static class ChessEndpoints
     };
 
     private sealed record FenRequest(string Fen);
-    private sealed record MoveRequest(string Fen, string Uci);
+    private sealed record MoveRequest(string Fen, string Uci, string[]? Moves);
     private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
-    private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate);
+    private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth, int? MaxConcurrent, bool? Substrate, string[]? Speeds);
-    private sealed record PlayStartRequest(bool? Record);
+    private sealed record PlayStartRequest(bool? Record, string[]? Moves);
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);

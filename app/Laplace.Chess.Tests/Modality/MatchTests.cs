@@ -5,6 +5,7 @@ namespace Laplace.Modality.Chess.Tests;
 public sealed class MatchTests
 {
     [Fact]
+    [Trait("Tier", "perf")]
     public void Search_CrushesRandomMover()
     {
         var r = MatchRunner.Play(
@@ -14,6 +15,7 @@ public sealed class MatchTests
     }
 
     [Fact]
+    [Trait("Tier", "perf")]
     public void DeeperSearch_BeatsShallower()
     {
         var r = MatchRunner.Play(

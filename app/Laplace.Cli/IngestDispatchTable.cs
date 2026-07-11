@@ -93,7 +93,12 @@ internal static class IngestDispatchTable
                 new Laplace.Chess.Service.ChessAnalyzeDecomposer(), "",
                 skipLayerCheck: true, cli, skipSourceCompletion: true),
             ["openings"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessOpeningsDecomposer(), cli.Path ?? "",
+                new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
+                skipLayerCheck: true, cli),
+            // Single pass: the book decomposer records AND derives per record in one Compose
+            // (in-memory parse; no hydrate read-back), stamping ANALYZED_AT itself.
+            ["chess-books"] = cli => IngestCommands.IngestViaRunnerAsync(
+                new Laplace.Chess.Service.ChessBookDecomposer(cli.Recursive), cli.Path ?? "",
                 skipLayerCheck: true, cli),
             ["omw-probe"] = cli => IngestCommands.OmwProbeAsync(cli),
         };
@@ -101,7 +106,7 @@ internal static class IngestDispatchTable
     private static async Task<int> IngestChessRecordAndAnalyzeAsync(IngestCommands.IngestCliArgs cli)
     {
         int rc = await IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessPgnDecomposer(), cli.Path ?? "",
+            new Laplace.Chess.Service.ChessPgnDecomposer(cli.Recursive), cli.Path ?? "",
             skipLayerCheck: true, cli, skipSourceCompletion: true);
         if (rc != 0 || cli.NoAnalyze) return rc;
 

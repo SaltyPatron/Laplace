@@ -124,6 +124,17 @@ public static class ChessGraph
         b.AddAttestation(NativeAttestation.Categorical(gameId, relation, vid, sourceId, null, witnessWeight));
     }
 
+    /// <summary>
+    /// Emit the position (and its substructures) as content nodes and return the position id.
+    /// For lanes that attest onto a position without emitting a MOVE edge for it — e.g. the
+    /// chess-book decomposer grounding prose commentary to the exact position it explains.
+    /// </summary>
+    public static Hash128 EmitPosition(SubstrateChangeBuilder b, string surface, Hash128 src)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        return EmitNodes(b, surface, nowUs, src).Position.Id;
+    }
+
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);

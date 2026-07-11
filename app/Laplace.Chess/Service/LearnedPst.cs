@@ -43,18 +43,39 @@ public static class LearnedPst
         return outv;
     }
 
+    // The learned overlay must stay a positional nudge on top of PeSTO, never a material-scale
+    // force: raw eff_mu deviations from a draw-heavy or thin fold run to hundreds of points per
+    // square, which summed over a position crosses the MATE threshold and breaks the search
+    // outright (observed: depth-1 "mate -94" from the openings-only fold). Three guards:
+    // witness-shrink toward zero, mean-centering per piece type (a uniform shift is the fold's
+    // prior showing through — it carries no square preference, only distorts material trades),
+    // and a hard per-square clamp at bishop-pair scale.
+    private const int ClampCp = 75;
+
     public static (int[][] Mg, int[][] Eg) BuildTables(NpgsqlDataSource ds, double scaleCpPerPoint = 6.0)
     {
         var learned = ReadWhite(ds);
-        var mg = new int[6][]; var eg = new int[6][];
-        for (int t = 0; t < 6; t++) { mg[t] = new int[64]; eg[t] = new int[64]; }
+        var raw = new double[6][];
+        for (int t = 0; t < 6; t++) raw[t] = new double[64];
         foreach (var s in learned)
         {
             int t = WhitePieces.IndexOf(s.Piece);
             if (t < 0) continue;
             int idx = (7 - s.Rank) * 8 + s.File;
-            int cp = (int)Math.Round(s.DevPoints * scaleCpPerPoint);
-            mg[t][idx] = cp; eg[t][idx] = cp;
+            double shrink = s.Witness / (s.Witness + ChessShrink.DefaultK0);
+            raw[t][idx] = s.DevPoints * shrink * scaleCpPerPoint;
+        }
+
+        var mg = new int[6][]; var eg = new int[6][];
+        for (int t = 0; t < 6; t++)
+        {
+            mg[t] = new int[64]; eg[t] = new int[64];
+            double mean = raw[t].Average();
+            for (int idx = 0; idx < 64; idx++)
+            {
+                int cp = Math.Clamp((int)Math.Round(raw[t][idx] - mean), -ClampCp, ClampCp);
+                mg[t][idx] = cp; eg[t][idx] = cp;
+            }
         }
         return (mg, eg);
     }

@@ -30,7 +30,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// Parallelism belongs INSIDE one CREATE INDEX (max_parallel_maintenance_workers),
 /// not across multiple CREATE INDEX sessions.
 /// </summary>
-internal sealed class NpgsqlIndexCycle
+public sealed class NpgsqlIndexCycle
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger _log;
@@ -46,6 +46,19 @@ internal sealed class NpgsqlIndexCycle
     /// an increment onto an already-large table — where per-row secondary
     /// maintenance (esp. the coord GiST) otherwise dominates.</summary>
     private const long MinRowsToCycle = 1_000_000;
+
+    /// <summary>
+    /// Indexes the cycle must NOT drop, comma-separated in LAPLACE_INDEX_CYCLE_KEEP.
+    /// Cycling takes every plain secondary offline for the whole run — hours on a corpus
+    /// seed — which turns every walk/hydrate/inspection query into an 89M-row scan while
+    /// the ingest runs (and until recovery, if the run is killed). Naming the
+    /// serving-critical indexes here keeps the database usable during bulk loads at some
+    /// COPY cost. Empty (the default) preserves the tuned full-cycle behavior.
+    /// </summary>
+    private static readonly IReadOnlySet<string> KeepIndexes =
+        (Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE_KEEP") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public NpgsqlIndexCycle(NpgsqlDataSource ds, ILogger log)
     {
@@ -148,8 +161,14 @@ internal sealed class NpgsqlIndexCycle
                     secondaries.Add((rd.GetString(0), rd.GetString(1)));
             }
 
+            int droppedHere = 0;
             foreach (var (name, def) in secondaries)
             {
+                if (KeepIndexes.Contains(name))
+                {
+                    _log.LogInformation("INDEX_CYCLE {Table}: keeping {Index} (LAPLACE_INDEX_CYCLE_KEEP)", table, name);
+                    continue;
+                }
                 await using (var journal = conn.CreateCommand())
                 {
                     journal.CommandText =
@@ -167,11 +186,12 @@ internal sealed class NpgsqlIndexCycle
                     await drop.ExecuteNonQueryAsync(ct);
                 }
                 _dropped.Add((name, def));
+                droppedHere++;
             }
-            if (secondaries.Count > 0)
+            if (droppedHere > 0)
                 _log.LogInformation(
                     "INDEX_CYCLE {Table}: dropped {Count} secondary index(es) for {Staged:N0}-row bulk load (live≈{Live:N0})",
-                    table, secondaries.Count, staged, live);
+                    table, droppedHere, staged, live);
         }
         return _dropped.Count > 0;
     }

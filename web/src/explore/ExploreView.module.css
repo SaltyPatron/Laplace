@@ -3,6 +3,7 @@
     display: flex;
     height: 100%;
     min-height: 0;
+    width: 100%;
   }
 
   .sidebar {
@@ -31,8 +32,39 @@
 
   .content {
     flex: 1;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
     padding: 1.2rem;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Route page fills remaining height; pages scroll themselves when needed. */
+  .content > :last-child {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-default);
+    padding: 0.65rem 1rem;
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
   }
 }

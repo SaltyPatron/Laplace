@@ -57,6 +57,7 @@ export interface BoardProps {
   whiteEval: string;
   evalFrac: number;
   evalDetail: string;
+  evalPending?: boolean;
   boardRef: RefObject<HTMLDivElement | null>;
   flip?: boolean;
   lastMove?: { from: string; to: string } | null;
@@ -71,7 +72,7 @@ export interface BoardProps {
 
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
-  whiteEval, evalFrac, evalDetail, boardRef, flip = false, lastMove, matedKing, checkedKing,
+  whiteEval, evalFrac, evalDetail, evalPending = false, boardRef, flip = false, lastMove, matedKing, checkedKing,
   readOnly = false, footer,
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
@@ -118,15 +119,34 @@ export function Board({
       <div className={styles.wrap}>
         <div className={styles.area}>
           <div className={styles.evalCol}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className={styles.evalBar}>
-                  <div className={styles.evalWhite} style={{ height: `${evalFrac * 100}%` }} />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>{evalDetail}</TooltipContent>
-            </Tooltip>
-            <div className={styles.evalReadout}><b>{whiteEval}</b><span>white&rsquo;s view</span></div>
+            <div className={styles.evalBarSlot}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className={cn(styles.evalBar, evalPending && styles.evalBarPending)}
+                    role="meter"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(evalFrac * 100)}
+                    aria-label={evalDetail}
+                  >
+                    <div
+                      className={styles.evalWhite}
+                      style={
+                        flip
+                          ? { top: 0, bottom: 'auto', height: `${evalFrac * 100}%` }
+                          : { bottom: 0, top: 'auto', height: `${evalFrac * 100}%` }
+                      }
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>{evalDetail}</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className={styles.evalReadout}>
+              <b>{whiteEval}</b>
+              <span>white&rsquo;s view</span>
+            </div>
           </div>
           <div
             className={styles.board}

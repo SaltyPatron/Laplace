@@ -52,7 +52,8 @@
   }
 
   .catalog {
-    max-width: 50rem;
+    max-width: none;
+    width: 100%;
   }
 }
 

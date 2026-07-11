@@ -27,6 +27,15 @@ internal static class ChessWitnessHydrator
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
         reader is NpgsqlSubstrateReader npg ? npg.DataSource : null;
 
+    // Witness sources whose recorded games the analyzer derives. Live/self-play games
+    // (ChessSelfPlay source) fold their own outcomes at play time and must NOT be re-derived
+    // here — that would double-count them.
+    private static byte[][] WitnessSources() =>
+    [
+        ChessVocabulary.PgnSourceId.ToBytes(),
+        ChessVocabulary.BookSourceId.ToBytes(),
+    ];
+
     internal static async Task<long?> CountRecordedGamesAsync(NpgsqlDataSource ds, CancellationToken ct)
     {
         await using var cmd = ds.CreateCommand(@"
@@ -35,11 +44,11 @@ internal static class ChessWitnessHydrator
             JOIN laplace.attestations mt
               ON mt.subject_id = e.id
              AND mt.type_id = $2
-             AND mt.source_id = $3
+             AND mt.source_id = ANY($3::bytea[])
             WHERE e.type_id = $1");
         cmd.Parameters.AddWithValue(ChessVocabulary.GameType.ToBytes());
         cmd.Parameters.AddWithValue(RelHasMovetext.ToBytes());
-        cmd.Parameters.AddWithValue(ChessVocabulary.PgnSourceId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
         var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return total is long n ? n : 0L;
     }
@@ -132,14 +141,14 @@ internal static class ChessWitnessHydrator
             JOIN laplace.attestations mt
               ON mt.subject_id = e.id
              AND mt.type_id = $2
-             AND mt.source_id = $3
+             AND mt.source_id = ANY($3::bytea[])
             WHERE e.type_id = $1
               AND (octet_length($4) = 0 OR e.id > $4)
             ORDER BY e.id
             LIMIT $5");
         cmd.Parameters.AddWithValue(ChessVocabulary.GameType.ToBytes());
         cmd.Parameters.AddWithValue(RelHasMovetext.ToBytes());
-        cmd.Parameters.AddWithValue(ChessVocabulary.PgnSourceId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, afterId.Length == 0 ? Array.Empty<byte>() : afterId);
         cmd.Parameters.AddWithValue(limit);
 

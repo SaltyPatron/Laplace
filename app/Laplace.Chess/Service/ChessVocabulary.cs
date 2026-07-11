@@ -97,6 +97,12 @@ public static class ChessVocabulary
     public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
     public static readonly Hash128 GameHasMotifType = EntityTypeRegistry.Id("GAME_HAS_MOTIF");
     public static readonly Hash128 ConceptType = EntityTypeRegistry.Id("Chess_Concept");
+    // Idempotency marker for a grounded book prose line — content-addressed from
+    // (book title, sans), probed by the chess-books extractor so re-ingesting a book
+    // never re-witnesses lines it already deposited.
+    public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
+    public static Hash128 BookLineId(string bookTitle, IReadOnlyList<string> sans)
+        => Hash128.OfCanonical($"chess/bookline/{bookTitle}|{string.Join(' ', sans)}");
     public static readonly Hash128 ExplainsType = EntityTypeRegistry.Id("EXPLAINS");
     public static readonly Hash128 IsExampleOfType = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
     // Reuses the manifest's existing HAS_DEFINITION relation (same one WordNet/Wiktionary glosses
@@ -179,6 +185,7 @@ public static class ChessVocabulary
         boot.AddRelationType("GAME_HAS_ECO");
         boot.AddRelationType("GAME_HAS_MOTIF");
         boot.AddType("Chess_Concept");
+        boot.AddType("Chess_BookLine");
         boot.AddRelationType("EXPLAINS");
         boot.AddRelationType("IS_EXAMPLE_OF");
         boot.AddRelationType("HAS_DEFINITION");

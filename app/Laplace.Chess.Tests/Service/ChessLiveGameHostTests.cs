@@ -5,6 +5,18 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
+// DB-coupled tests in this file are INTEGRATION tests: ChessLiveGameHost is a per-ply substrate
+// WRITER, and its default connection resolves to the installed (production) database. They run
+// only when LAPLACE_TEST_DB names an explicit, disposable test database (the chess-platform-seed
+// convention: laplace_chess_test) and are no-ops otherwise. Tests must never write into the
+// production substrate as a side effect of running the gate.
+internal static class TestDb
+{
+    public static string? ConnString =>
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_DB") is { Length: > 0 } cs ? cs : null;
+}
+
+[Trait("Tier", "fast")]
 public sealed class ChessMoveCommentaryTests
 {
     [Fact]
@@ -28,7 +40,10 @@ public sealed class ChessMoveCommentaryTests
     [InlineData(29_500, 8, true)]
     public async Task BuildAsync_IncludesEvalLine(int scoreCp, int depth, bool mating)
     {
-        await using var host = await ChessLiveGameHost.CreateAsync(defaultLearnContext: "chess/test/commentary");
+        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+
+        await using var host = await ChessLiveGameHost.CreateAsync(
+            defaultLearnContext: "chess/test/commentary", connString: cs);
         var text = await ChessMoveCommentary.BuildAsync(
             host.DataSource,
             new ChessMoveCommentary.Inputs(scoreCp, depth, ["e2e4", "e7e5"], ["fork"]),
@@ -46,6 +61,7 @@ public sealed class ChessMoveCommentaryTests
 public sealed class ChessLiveGameHostTests
 {
     [Fact]
+    [Trait("Tier", "fast")]
     public void LichessGameId_IsStable()
     {
         var a = ChessLiveGameHost.LichessGameId("abc123");
@@ -57,7 +73,10 @@ public sealed class ChessLiveGameHostTests
     [Fact]
     public async Task RecordPly_ReusesPositionEntity_ForRepeatedSurface()
     {
-        await using var host = await ChessLiveGameHost.CreateAsync(defaultLearnContext: "chess/test/ply-fold");
+        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+
+        await using var host = await ChessLiveGameHost.CreateAsync(
+            defaultLearnContext: "chess/test/ply-fold", connString: cs);
         var gameId = Hash128.OfCanonical("chess/test/ply-fold/game-1");
         await host.OpenGameAsync(gameId, "chess/test/ply-fold");
 
@@ -79,7 +98,10 @@ public sealed class ChessLiveGameHostTests
     [Fact]
     public async Task CompleteGame_IncrementsGamesCompleted()
     {
-        await using var host = await ChessLiveGameHost.CreateAsync(defaultLearnContext: "chess/test/complete");
+        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+
+        await using var host = await ChessLiveGameHost.CreateAsync(
+            defaultLearnContext: "chess/test/complete", connString: cs);
         var gameId = Hash128.OfCanonical("chess/test/complete/g1");
         await host.OpenGameAsync(gameId, "chess/test/complete");
 
@@ -96,7 +118,9 @@ public sealed class ChessLiveGameHostTests
     [Fact]
     public async Task BuildSearch_SubstrateOff_HasNoBias()
     {
-        await using var host = await ChessLiveGameHost.CreateAsync();
+        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+
+        await using var host = await ChessLiveGameHost.CreateAsync(connString: cs);
         var classical = host.BuildSearch(substrate: false);
         var search = host.BuildSearch(substrate: true);
         Assert.NotNull(classical);

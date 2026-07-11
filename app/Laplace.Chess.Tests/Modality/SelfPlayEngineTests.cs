@@ -86,6 +86,7 @@ public sealed class SelfPlayEngineTests
     }
 
     [Fact]
+    [Trait("Tier", "perf")]
     public async Task SelfPlay_ProducesLegalCompleteGames()
     {
         var engine = NewEngine(out var modality, out var sub);

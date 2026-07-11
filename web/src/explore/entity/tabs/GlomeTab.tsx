@@ -3,6 +3,7 @@ import { GatePrompt } from '../../components/GatePrompt';
 import { GlomeCanvasFromPhysicalities, type GlomeNode } from '../../glome/GlomeCanvas';
 import type { ExploreEntityResponse } from '../../types';
 import type { NeighborMode } from './types';
+import styles from './GlomeTab.module.css';
 
 export function GlomeTab({
   entity,
@@ -22,8 +23,8 @@ export function GlomeTab({
   onLoadNeighbors: () => void;
 }) {
   return (
-    <Panel title="S³ geometry">
-      <Stack gap={3}>
+    <Panel title="S³ geometry" fill>
+      <Stack gap={3} className={styles.body}>
         <SegmentedControl
           value={neighborMode}
           onValueChange={(v) => onNeighborModeChange(v as NeighborMode)}
@@ -38,13 +39,16 @@ export function GlomeTab({
             onReady={onLoadNeighbors}
           />
         ) : (
-          <GlomeCanvasFromPhysicalities
-            physicalities={entity.physicalities}
-            label={entity.label}
-            idHex={entity.id_hex}
-            extraNodes={glomeExtraNodes}
-            highlightIds={walkHighlight}
-          />
+          <div className={styles.viewer}>
+            <GlomeCanvasFromPhysicalities
+              physicalities={entity.physicalities}
+              label={entity.label}
+              idHex={entity.id_hex}
+              extraNodes={glomeExtraNodes}
+              highlightIds={walkHighlight}
+              fill
+            />
+          </div>
         )}
       </Stack>
     </Panel>

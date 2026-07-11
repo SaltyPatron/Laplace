@@ -16,13 +16,14 @@ export function GraphTab({
   onNodeClick: (id: string) => void;
 }) {
   return (
-    <Panel title="Consensus neighborhood">
+    <Panel title="Consensus neighborhood" fill>
       <ConsensusGraph
         centerId={centerId}
         centerLabel={centerLabel}
         edges={edges}
         walkPath={walkPath}
         onNodeClick={onNodeClick}
+        fill
       />
     </Panel>
   );

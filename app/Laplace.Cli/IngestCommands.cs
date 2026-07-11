@@ -47,7 +47,8 @@ internal static class IngestCommands
         bool SkipEvidence,
         bool RegisterOnly,
         bool Force = false,
-        bool NoAnalyze = false);
+        bool NoAnalyze = false,
+        bool Recursive = false);
 
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
@@ -59,6 +60,7 @@ internal static class IngestCommands
         bool registerOnly = false;
         bool force = false;
         bool noAnalyze = false;
+        bool recursive = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -92,6 +94,11 @@ internal static class IngestCommands
                 noAnalyze = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--recursive")
+            {
+                recursive = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -102,7 +109,8 @@ internal static class IngestCommands
             skipEvidence,
             registerOnly,
             force,
-            noAnalyze);
+            noAnalyze,
+            recursive);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
@@ -508,6 +516,53 @@ internal static class IngestCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await PrintIngestValidationAsync(ds, decomposer: null);
         return 0;
+    }
+
+    // Restore secondary indexes a killed or crashed bulk ingest left dropped (journaled in
+    // laplace.index_cycle_journal by NpgsqlIndexCycle). The pipeline recovers automatically at
+    // the START of the next bulk run — this is the ops entry for the window in between, when
+    // every non-pkey query on attestations/consensus/entities is a full scan. Refreshes
+    // planner statistics afterwards: freshly built indexes without stats still plan badly.
+    public static async Task<int> RecoverCycledIndexesAsync()
+    {
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+
+        async Task<long> JournalCountAsync()
+        {
+            await using var conn = await ds.OpenConnectionAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT count(*) FROM laplace.index_cycle_journal";
+            return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+        }
+
+        long pending = await JournalCountAsync();
+        if (pending == 0)
+        {
+            Console.WriteLine("index-cycle journal empty — nothing to recover");
+            return 0;
+        }
+
+        Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
+        var log = ConsoleLoggerProvider.Factory().CreateLogger("index-cycle");
+        var sw = Stopwatch.StartNew();
+        await NpgsqlIndexCycle.RecoverAsync(ds, log, CancellationToken.None);
+
+        Console.WriteLine("refreshing planner statistics ...");
+        await using (var conn = await ds.OpenConnectionAsync())
+        await using (var stats = conn.CreateCommand())
+        {
+            stats.CommandTimeout = 0;
+            stats.CommandText =
+                "ANALYZE laplace.attestations; ANALYZE laplace.consensus; ANALYZE laplace.entities";
+            await stats.ExecuteNonQueryAsync();
+        }
+        sw.Stop();
+
+        long remaining = await JournalCountAsync();
+        Console.WriteLine(
+            $"recovered {pending - remaining}/{pending} index(es) in {sw.Elapsed.TotalSeconds:F0}s"
+            + (remaining > 0 ? $" — {remaining} still journaled (rerun)" : ""));
+        return remaining == 0 ? 0 : 1;
     }
 
     public static async Task<int> RebuildPhysIndexesAsync()

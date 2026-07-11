@@ -8,18 +8,18 @@ namespace Laplace.Chess.Service;
 
 public sealed class SubstrateRootBias : IRootBias
 {
-    private const double ShrinkK0 = 15_000d;
-
     private readonly NpgsqlDataSource _ds;
     private readonly ChessModality _modality = new();
     private readonly double _cpPerPoint;
     private readonly int _capCp;
+    private readonly double? _shrinkK0;
 
-    public SubstrateRootBias(NpgsqlDataSource ds, double cpPerPoint = 8.0, int capCp = 150)
+    public SubstrateRootBias(NpgsqlDataSource ds, double cpPerPoint = 8.0, int capCp = 150, double? shrinkK0 = null)
     {
         _ds = ds ?? throw new ArgumentNullException(nameof(ds));
         _cpPerPoint = cpPerPoint;
         _capCp = capCp;
+        _shrinkK0 = shrinkK0;
     }
 
     public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
@@ -70,8 +70,7 @@ public sealed class SubstrateRootBias : IRootBias
             while (r.Read())
             {
                 double mu = r.GetDouble(1), w = r.GetDouble(2);
-                double shrunk = GlickoPriors.NeutralMu + (mu - GlickoPriors.NeutralMu) * (w / (w + ShrinkK0));
-                map[Hash128.FromBytes((byte[])r[0])] = shrunk;
+                map[Hash128.FromBytes((byte[])r[0])] = ChessShrink.Apply(mu, w, _shrinkK0);
             }
         }
 

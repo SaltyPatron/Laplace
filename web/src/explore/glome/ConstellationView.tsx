@@ -71,7 +71,7 @@ export function ConstellationView() {
   return (
     <div className={styles.root}>
       <h2>Substrate constellation</h2>
-      <Muted>Warehouse-scale S³ sample via visualization.deep_export.</Muted>
+      <Muted className={styles.lead}>Warehouse-scale S³ sample via visualization.deep_export.</Muted>
       {!unlocked ? (
         <GatePrompt
           serviceId="visualization.deep_export"
@@ -81,7 +81,9 @@ export function ConstellationView() {
           onReady={() => setUnlocked(true)}
         />
       ) : graph ? (
-        <GlomeCanvas nodes={nodes} />
+        <div className={styles.viewer}>
+          <GlomeCanvas nodes={nodes} fill />
+        </div>
       ) : err ? (
         <ErrorText>{err}</ErrorText>
       ) : (
