@@ -290,7 +290,9 @@ bootstrap_runner_oom_guard
 
 
 bootstrap_runner_job_env() {
-    grep -q '^LAPLACE_TEST_DB=' "$RUNNER_DIR/.env" 2>/dev/null || echo 'LAPLACE_TEST_DB=laplace' >> "$RUNNER_DIR/.env"
+    # LAPLACE_TEST_DB is a disposable DB *name* for ChessLiveGameHost writer tests.
+    # Never default it to the production database — that either writes into laplace or
+    # (when mis-parsed as a conn string) fails Npgsql at index 0. Unset = tests no-op.
     say "Runner job env: oneAPI machine-static vars → $RUNNER_DIR/.env"
     if [ ! -d "$RUNNER_DIR" ] || [ ! -d /opt/intel/oneapi ]; then
         yellow "runner dir or oneAPI missing — skipping .env block"

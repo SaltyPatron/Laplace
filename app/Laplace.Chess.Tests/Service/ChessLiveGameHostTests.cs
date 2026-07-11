@@ -12,8 +12,21 @@ namespace Laplace.Chess.Service.Tests;
 // production substrate as a side effect of running the gate.
 internal static class TestDb
 {
-    public static string? ConnString =>
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_DB") is { Length: > 0 } cs ? cs : null;
+    // LAPLACE_TEST_DB is a database NAME, not a connection string. The runner .env used to
+    // set LAPLACE_TEST_DB=laplace; treating that as a conn string blows up Npgsql at index 0.
+    public static string? ConnString
+    {
+        get
+        {
+            var name = Environment.GetEnvironmentVariable("LAPLACE_TEST_DB");
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            // Refuse production / canonical substrate names — these tests write consensus rows.
+            if (string.Equals(name, "laplace", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "laplace-dev", StringComparison.OrdinalIgnoreCase))
+                return null;
+            return LaplaceInstall.PostgresConnectionString(name.Trim());
+        }
+    }
 }
 
 [Trait("Tier", "fast")]
