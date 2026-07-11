@@ -75,15 +75,9 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public static readonly Hash128 AnalysisMarkerTypeId = EntityTypeRegistry.Id("Model_AnalysisMarker");
     internal const int AnalyzerVersion = 1;
 
-    // Ledger §6 step 1 — the checkpoint as CONTENT. Tensor entities are Blake3 of
-    // the LITERAL BYTE RANGES of the stored file (the tokenizer.json law extended);
-    // the checkpoint root is Merkle over the ordered tensor ids; structure rides
-    // CONTAINS/PRECEDES with context = root (text-lane law). The model never
-    // enters an id — it is the SOURCE.
-    public static readonly Hash128 ModelTensorTypeId = EntityTypeRegistry.Id("Model_Tensor");
-    public static readonly Hash128 ModelCheckpointTypeId = EntityTypeRegistry.Id("Model_Checkpoint");
-    public static readonly Hash128 ContainsTypeId = RelationTypeRegistry.RelationTypeId("CONTAINS");
-    public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
+    // Ledger §6 step 1 — the checkpoint as CONTENT — lives in ModelCheckpoint
+    // (Blake3 of literal tensor byte ranges → Merkle root, CONTAINS/PRECEDES),
+    // mirroring ModelCoordinates' structure law. The model never enters an id.
 
     public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
         => Hash128.OfCanonical($"model/analyzed/{modelSource}/{planesMode}/v{AnalyzerVersion}");
@@ -195,6 +189,31 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
             await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
                 yield return batch;
+
+            // §6 step 1 — the checkpoint as content: tensor byte-range identities +
+            // Merkle root + CONTAINS/PRECEDES structure. Recipe-only models (no
+            // weight blobs) skip it; a single deposit, insert-if-absent.
+            SubstrateChange? checkpointChange = null;
+            try
+            {
+                var tensors = SafetensorsContainerParser.ParseModel(_modelDir);
+                if (tensors.Count > 0)
+                {
+                    var cb = new SubstrateChangeBuilder(_source, "checkpoint/byte-ranges", null,
+                        entityCapacity: tensors.Count + 1, physicalityCapacity: 0,
+                        attestationCapacity: 2 * tensors.Count);
+                    var root = ModelCheckpoint.StageCheckpoint(cb, tensors, _source);
+                    checkpointChange = cb.Build();
+                    log.LogInformation("phase=checkpoint: {Tensors} tensor byte-ranges deposited, root={Root}",
+                        tensors.Count, Convert.ToHexString(root.ToBytes()).ToLowerInvariant()[..16]);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning("phase=checkpoint: byte-range deposit skipped ({Msg})", ex.Message);
+            }
+            if (checkpointChange is not null)
+                yield return checkpointChange;
         }
 
         if (manifest.Coverage == Coverage.Unsupported)
