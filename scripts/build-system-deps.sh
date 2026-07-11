@@ -99,6 +99,26 @@ invalidate_ep_stamps() {
   done
 }
 
+# /opt/laplace/build/deps is shared across checkouts (setup-host under ~/Projects,
+# CI under actions-runner/_work/...). CMake refuses -S when CMAKE_HOME_DIRECTORY
+# in the cache differs — scrub top-level cache only; EP binary dirs stay.
+scrub_cmake_cache_if_source_moved() {
+  local cache="$BUILD/CMakeCache.txt"
+  local want src
+  [ -f "$cache" ] || return 0
+  want="$(cd "$ROOT/external" && pwd -P)"
+  src="$(grep -E '^CMAKE_HOME_DIRECTORY:' "$cache" | head -n1 | cut -d= -f2- || true)"
+  [ -n "$src" ] || return 0
+  if [ -d "$src" ]; then
+    src="$(cd "$src" && pwd -P)"
+  fi
+  if [ "$src" != "$want" ]; then
+    yellow "cmake source moved: cache=$src want=$want — scrubbing CMakeCache (+ CMakeFiles)"
+    rm -f "$cache"
+    rm -rf "$BUILD/CMakeFiles"
+  fi
+}
+
 # --- main ---
 if [ ! -d "$EXT" ]; then
   red "missing $EXT — run sync-external / setup-host prefix first"
@@ -157,11 +177,20 @@ elif ! installs_present; then
   yellow "install artifacts missing under $PREFIX — building"
 fi
 
+scrub_cmake_cache_if_source_moved
+
 echo "==== cmake configure $BUILD (LAPLACE_EXTERNAL=$EXT) ===="
-run_as_builder "cmake -B '$BUILD' -S '$ROOT/external' -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL='$EXT' -DLAPLACE_DEPS_PREFIX='$PREFIX'"
+# Fail loud: do not swallow cmake configure/build errors (set -e already; keep explicit).
+if ! run_as_builder "cmake -B '$BUILD' -S '$ROOT/external' -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL='$EXT' -DLAPLACE_DEPS_PREFIX='$PREFIX'"; then
+  red "cmake configure failed for $BUILD (source=$ROOT/external)"
+  exit 1
+fi
 
 echo "==== cmake --build $BUILD -j ===="
-run_as_builder "cmake --build '$BUILD' -j"
+if ! run_as_builder "cmake --build '$BUILD' -j"; then
+  red "cmake --build failed for $BUILD"
+  exit 1
+fi
 
 if ! installs_present; then
   red "build finished but install artifacts still missing under $PREFIX"
