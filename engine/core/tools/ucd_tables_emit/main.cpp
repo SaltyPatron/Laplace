@@ -190,8 +190,12 @@ int main(int argc, char** argv) {
         if (!xf) { std::fprintf(stderr, "cannot open %s\n", cli.ucdxml.string().c_str()); return 4; }
         doc.assign(std::istreambuf_iterator<char>(xf), std::istreambuf_iterator<char>());
     }
-    if (laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx) != 0) {
-        std::fprintf(stderr, "UCDXML parse failed\n"); return 4;
+    int xml_rc = laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx);
+    if (xml_rc != 0) {
+        std::fprintf(stderr,
+            "UCDXML parse failed (rc=%d; -1=args/grammar, -2=tree-sitter error — often OOM under parallel icx)\n",
+            xml_rc);
+        return 4;
     }
     std::vector<uint8_t>().swap(doc);
 

@@ -13,6 +13,7 @@ WorkingDirectory=/opt/laplace/app
 EnvironmentFile=/opt/laplace/app/laplace-api.env
 # Operator-published secrets (setup-host seeds; CI publish may refresh). Optional (-).
 EnvironmentFile=-/opt/laplace/secrets/lichess.env
+EnvironmentFile=-/opt/laplace/secrets/stripe.env
 ExecStart=/usr/bin/dotnet /opt/laplace/app/Laplace.Endpoints.OpenAICompat.dll
 Restart=on-failure
 RestartSec=5

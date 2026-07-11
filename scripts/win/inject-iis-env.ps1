@@ -1,5 +1,5 @@
 #requires -Version 7
-# Inject deploy/windows/laplace-api.env + deploy/secrets/{chess-lab,lichess}.env
+# Inject deploy/windows/laplace-api.env + deploy/secrets/{chess-lab,lichess,stripe}.env
 # into a published web.config. Called by scripts/win/publish.cmd.
 [CmdletBinding()]
 param(
@@ -27,16 +27,20 @@ $envNode = $xml.CreateElement("environmentVariables")
 $envVars = [ordered]@{}
 $chessLabEnv = Join-Path $RepoRoot "deploy\secrets\chess-lab.env"
 $lichessEnv = Join-Path $RepoRoot "deploy\secrets\lichess.env"
+$stripeEnv = Join-Path $RepoRoot "deploy\secrets\stripe.env"
 $skip = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 [void]$skip.Add('LAPLACE_UCI')
 
-foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv)) {
+foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv)) {
   if (-not (Test-Path -LiteralPath $file)) {
     if ($file -eq $chessLabEnv) {
       Write-Warning "No $chessLabEnv — run build-cutechess.cmd and copy deploy/windows/chess-lab.env.example"
     }
     if ($file -eq $lichessEnv) {
-      Write-Warning "No $lichessEnv — add LICHESS_TOKEN for Lichess connectivity"
+      Write-Warning "No $lichessEnv — put LICHESS_API in repo .env (publish-deploy syncs it)"
+    }
+    if ($file -eq $stripeEnv) {
+      Write-Warning "No $stripeEnv — put STRIPE_API_SECRET in repo .env (publish-deploy syncs it)"
     }
     continue
   }

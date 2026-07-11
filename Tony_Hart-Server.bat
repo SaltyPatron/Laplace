@@ -2,6 +2,7 @@
 rem Tony_Hart-Server — build locally, seed/verify against hart-server Postgres.
 rem Does NOT install extensions, reset DB, or deploy IIS on this machine —
 rem those are host-local. Extensions must already be live on hart-server.
+rem Steps live-tee to console + D:\Data\Output\<step>.log (no silent redirects).
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
@@ -13,8 +14,8 @@ set "OUT=D:\Data\Output"
 if not exist "%OUT%" mkdir "%OUT%"
 
 echo ===== Tony_Hart-Server started %DATE% %TIME% =====
-echo target DB: %LAPLACE_PGHOST%  (remote — seeds only)
-echo logs:      %OUT%\
+echo target DB: %LAPLACE_PGHOST%  (remote - seeds only)
+echo logs:      %OUT%\  ^(live-teed to console^)
 echo.
 
 call :run build-cutechess || goto :fail
@@ -42,20 +43,27 @@ call :run_args seed-step "opensubtitles" "" opensubtitles || goto :fail
 
 echo.
 echo ===== Tony_Hart-Server OK %DATE% %TIME% =====
+pause
 exit /b 0
 
 :fail
 echo.
-echo ===== Tony_Hart-Server FAILED at !LAST_STEP! — see %OUT%\!LAST_LOG!.log =====
+echo ===== Tony_Hart-Server FAILED at !LAST_STEP! - see %OUT%\!LAST_LOG!.log =====
+pause
 exit /b 1
 
 :run
 set "LAST_STEP=%~1"
 set "LAST_LOG=%~1"
 echo ==== %~1 ====
-cmd /c "call scripts\win\%~1.cmd" > "%OUT%\%~1.log" 2>&1
+echo log: %OUT%\%~1.log
+del /q "%OUT%\%~1.log" >nul 2>&1
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+  -LogPath "%OUT%\%~1.log" ^
+  -WorkingDirectory "%CD%" ^
+  -CommandLine "call scripts\win\%~1.cmd"
 if errorlevel 1 (
-  echo FAILED %~1 — %OUT%\%~1.log
+  echo FAILED %~1 - %OUT%\%~1.log
   exit /b 1
 )
 echo OK %~1
@@ -66,13 +74,21 @@ rem %1=script  %2=arg1  %3=arg2  %4=log-name
 set "LAST_STEP=%~1 %~2"
 set "LAST_LOG=%~4"
 echo ==== %~1 %~2 ====
+echo log: %OUT%\%~4.log
+del /q "%OUT%\%~4.log" >nul 2>&1
 if "%~3"=="" (
-  cmd /c "call scripts\win\%~1.cmd %~2" > "%OUT%\%~4.log" 2>&1
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+    -LogPath "%OUT%\%~4.log" ^
+    -WorkingDirectory "%CD%" ^
+    -CommandLine "call scripts\win\%~1.cmd %~2"
 ) else (
-  cmd /c "call scripts\win\%~1.cmd %~2 \"%~3\"" > "%OUT%\%~4.log" 2>&1
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+    -LogPath "%OUT%\%~4.log" ^
+    -WorkingDirectory "%CD%" ^
+    -CommandLine "call scripts\win\%~1.cmd %~2 \"%~3\""
 )
 if errorlevel 1 (
-  echo FAILED %~1 %~2 — %OUT%\%~4.log
+  echo FAILED %~1 %~2 - %OUT%\%~4.log
   exit /b 1
 )
 echo OK %~1 %~2

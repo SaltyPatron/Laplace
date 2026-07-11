@@ -49,7 +49,9 @@ must `call` it first, as above.
 |------|--------------------------------------|
 | Full clean rebuild + codegen + perfcache | `scripts\win\rebuild-all.cmd` |
 | Engine only / extensions only | `scripts\win\build-engine.cmd` / `scripts\win\build-extensions.cmd` |
-| Publish API → IIS (incl. chess/lichess env) | `scripts\win\publish-deploy.cmd` |
+| Publish API → IIS (incl. chess/lichess/stripe) | `scripts\win\publish-deploy.cmd` |
+| Push Lichess/Stripe to GitHub Secrets (CI deploy) | `scripts\win\sync-github-secrets.cmd` |
+| Windows secrets + Stripe listen (elevated once) | `scripts\win\setup-host.cmd` |
 | .NET tests (5 xunit projects, excludes `Tier=perf`) | `scripts\win\test-app.cmd [project-substring]` |
 | Engine gtests | `scripts\win\test-engine.cmd` (ctest over `build-win`) |
 | pg_regress | `scripts\win\regress.cmd` |

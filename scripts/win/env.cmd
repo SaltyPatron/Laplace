@@ -9,7 +9,7 @@ setlocal EnableDelayedExpansion
 set "_LIB="
 for %%D in ("!LIB:;=" "!") do (if not "%%~D"=="" if exist "%%~D\" set "_LIB=!_LIB!%%~D;")
 endlocal & set "LIB=%_LIB%"
-set "LAPLACE_ROOT=%~dp0..\.."
+for %%I in ("%~dp0..\..") do set "LAPLACE_ROOT=%%~fI"
 rem All build/deploy/publish artifacts live under D:\Data\Laplace — never in the repo tree.
 if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=D:\Data\Laplace"
 if not defined LAPLACE_BUILD_ROOT set "LAPLACE_BUILD_ROOT=%LAPLACE_DATA_ROOT%"
@@ -74,16 +74,17 @@ REM pinned workers at once. Server GC = per-core heaps + parallel collection.
 REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS.
 if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
 if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
-rem Build/test parallelism: Ninja/ctest default to logical CPU count when unset.
+rem Build/test parallelism: Ninja defaults to logical CPU count (32 on i9-14900KS).
+rem icx + Eigen under -j32 AV's in Live Interval Analysis (gram_schmidt ICE) and the
+rem concurrent 67MB UCDXML tree-sitter emit fails with "UCDXML parse failed". Cap to the
+rem same P-core budget as MKL/TBB/GCHeapCount. Override CMAKE_BUILD_PARALLEL_LEVEL to raise.
 rem Set LAPLACE_TEST_SERIAL=1 to force serial ctest/regress/dotnet-test orchestration.
-if not defined CMAKE_BUILD_PARALLEL_LEVEL (
-  if defined NUMBER_OF_PROCESSORS set "CMAKE_BUILD_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
-)
+if not defined CMAKE_BUILD_PARALLEL_LEVEL set "CMAKE_BUILD_PARALLEL_LEVEL=8"
 if not defined CTEST_PARALLEL_LEVEL (
   if defined LAPLACE_TEST_SERIAL (
     set "CTEST_PARALLEL_LEVEL=1"
   ) else (
-    if defined NUMBER_OF_PROCESSORS set "CTEST_PARALLEL_LEVEL=%NUMBER_OF_PROCESSORS%"
+    set "CTEST_PARALLEL_LEVEL=8"
   )
 )
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin"

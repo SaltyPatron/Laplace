@@ -359,6 +359,13 @@ jobs:
     needs: seed
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
+    # Runtime credentials: repository Secrets (encrypted), not machine secrets.env.
+    # Non-secret knobs stay in vars / workflow env above.
+    env:
+      LICHESS_API: ${{ secrets.LICHESS_API }}
+      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }

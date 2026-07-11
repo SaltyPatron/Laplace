@@ -141,6 +141,9 @@ add_custom_command(
             --output      ${LAPLACE_PERFCACHE_BIN}
     DEPENDS ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
     COMMENT "Emitting T0 perf-cache blob (UCD ${LAPLACE_UNICODE_VERSION} / UCA ${LAPLACE_UCA_VERSION})"
+    # Serialize: emit loads ~67MB XML + ~85MB records; racing 32 icx Eigen TUs OOMs
+    # into "UCDXML parse failed" under the old -j=logical default.
+    USES_TERMINAL
     VERBATIM
 )
 

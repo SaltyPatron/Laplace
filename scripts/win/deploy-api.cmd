@@ -18,9 +18,13 @@ if not exist "%LIVE%\" (
 )
 
 if not exist "%APPCMD%" (
-  echo [deploy-api] ERROR: appcmd.exe not found — cannot manage IIS app pool
+  echo [deploy-api] ERROR: appcmd.exe not found - cannot manage IIS app pool
   exit /b 1
 )
+
+echo ==== ensure IIS services ^(WAS + W3SVC^) ====
+call :ensure_svc WAS || exit /b 1
+call :ensure_svc W3SVC || exit /b 1
 
 echo ==== stop IIS app pool %POOL% ====
 rem appcmd stop errors on an already-stopped pool — read the state first.
@@ -101,16 +105,20 @@ if /i "!SITE_STATE!"=="Started" (
   )
 )
 
-echo ==== wait for /health/ready ====
+echo ==== wait for /health ^(liveness — ready requires DB+seed which come later^) ====
 set /a "READY_WAIT=0"
 :wait_ready
 powershell -NoProfile -Command ^
-  "try { $r = Invoke-RestMethod 'http://localhost:8080/health/ready' -TimeoutSec 5; if ($r.ready) { exit 0 }; Write-Host ('not ready: ' + $r.detail); exit 2 } catch { Write-Host $_.Exception.Message; exit 1 }"
+  "try { $r = Invoke-RestMethod 'http://localhost:8080/health' -TimeoutSec 5; if ($r.status -eq 'ok') { exit 0 }; Write-Host ('not ok: ' + ($r | ConvertTo-Json -Compress)); exit 2 } catch { Write-Host $_.Exception.Message; exit 1 }"
 set "READY_RC=!ERRORLEVEL!"
 if "!READY_RC!"=="0" goto ready_ok
 set /a "READY_WAIT+=1"
 if !READY_WAIT! geq 30 (
-  echo [deploy-api] ERROR: /health/ready did not become ready within 30s
+  echo [deploy-api] ERROR: /health did not become ok within 30s
+  echo [deploy-api] hint: check W3SVC/site %SITE%/pool %POOL%, and %LIVE%\logs
+  sc query W3SVC | "%SystemRoot%\System32\find.exe" /i "STATE"
+  "%APPCMD%" list site "%SITE%" /text:state 2>nul
+  "%APPCMD%" list apppool "%POOL%" /text:state 2>nul
   exit /b 1
 )
 timeout /t 1 /nobreak >nul 2>nul
@@ -118,7 +126,8 @@ goto wait_ready
 
 :ready_ok
 echo.
-echo [deploy-api] OK — %LIVE% mirrored from %SRC% and /health/ready is ready
+echo [deploy-api] OK - %LIVE% mirrored from %SRC% and /health is ok
+echo [deploy-api] note: /health/ready needs db-reset + seed-foundation ^(later in Tony_Hart-Desktop^)
 exit /b 0
 
 :verify_hash
@@ -141,6 +150,35 @@ if /i not "!SRC_HASH!"=="!LIVE_HASH!" (
 )
 echo   verified !NAME!
 exit /b 0
+
+:ensure_svc
+rem %1 = service name (WAS / W3SVC). Start if not RUNNING; wait up to 30s.
+set "SVC=%~1"
+sc query "%SVC%" | "%SystemRoot%\System32\find.exe" /i "RUNNING" >nul
+if not errorlevel 1 (
+  echo [deploy-api] %SVC% already RUNNING
+  exit /b 0
+)
+echo [deploy-api] starting %SVC% ...
+net start "%SVC%"
+if errorlevel 1 (
+  echo [deploy-api] ERROR: failed to start %SVC% - run elevated
+  exit /b 1
+)
+set /a "SVC_WAIT=0"
+:wait_svc
+sc query "%SVC%" | "%SystemRoot%\System32\find.exe" /i "RUNNING" >nul
+if not errorlevel 1 (
+  echo [deploy-api] %SVC% RUNNING
+  exit /b 0
+)
+set /a "SVC_WAIT+=1"
+if !SVC_WAIT! geq 30 (
+  echo [deploy-api] ERROR: %SVC% did not reach RUNNING within 30s
+  exit /b 1
+)
+timeout /t 1 /nobreak >nul 2>nul
+goto wait_svc
 
 :pool_start_fail
 echo ==== restart IIS app pool %POOL% after failure ====

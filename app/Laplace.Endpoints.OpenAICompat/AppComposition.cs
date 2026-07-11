@@ -53,9 +53,18 @@ internal static class AppComposition
 
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {
-            options.Currency = "usd";
-            options.SuccessUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/success";
-            options.CancelUrl = $"{LaplaceInstall.EndpointBaseUrl}/billing/cancel";
+            // Prefer operator names (repo .env / secrets.env): STRIPE_API_SECRET.
+            // LAPLACE_STRIPE_* kept as fallback for older runner bootstrap blocks.
+            options.ApiKey = FirstConfig(
+                "STRIPE_API_SECRET", "LAPLACE_STRIPE_API_KEY", secretFile: "stripe.env");
+            options.WebhookSecret = FirstConfig(
+                "STRIPE_WEBHOOK_SECRET", "LAPLACE_STRIPE_WEBHOOK_SECRET", secretFile: "stripe.env");
+
+            options.Currency = FirstConfig("LAPLACE_BILLING_CURRENCY") ?? "usd";
+            options.SuccessUrl = FirstConfig("LAPLACE_STRIPE_SUCCESS_URL")
+                ?? $"{LaplaceInstall.EndpointBaseUrl}/billing/success";
+            options.CancelUrl = FirstConfig("LAPLACE_STRIPE_CANCEL_URL")
+                ?? $"{LaplaceInstall.EndpointBaseUrl}/billing/cancel";
             // LAPLACE_BILLING_BYPASS was set by e2e-web.cmd and stripped by test-app.cmd
             // while the code hardcoded `true` and read the env nowhere — the scripts were
             // toggling a placebo. Honor it: default stays true (local dev auto-unlocks the
@@ -72,5 +81,23 @@ internal static class AppComposition
     {
         var header = request.Headers["X-Laplace-Quote-Id"].ToString();
         return string.IsNullOrWhiteSpace(header) ? null : header.Trim();
+    }
+
+    /// <summary>Process env, then <c>deploy/secrets/{secretFile}</c>, first non-empty key wins.</summary>
+    private static string? FirstConfig(params string[] keys) => FirstConfig(keys, secretFile: null);
+
+    private static string? FirstConfig(string key1, string key2, string? secretFile)
+        => FirstConfig(new[] { key1, key2 }, secretFile);
+
+    private static string? FirstConfig(string[] keys, string? secretFile)
+    {
+        foreach (var key in keys)
+        {
+            var value = LaplaceInstall.TryReadConfig(key, secretFile);
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return null;
     }
 }

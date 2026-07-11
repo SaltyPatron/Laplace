@@ -1,6 +1,7 @@
 @echo off
 rem Tony_Hart-Desktop — local Hart-Desktop pipeline (localhost Postgres + IIS).
 rem Self-elevates so tune-pg can restart Postgres and deploy-api can recycle IIS.
+rem Steps live-tee to console + D:\Data\Output\<step>.log (no silent redirects).
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
@@ -9,7 +10,7 @@ net session >nul 2>&1
 if errorlevel 1 (
   echo Elevating for Postgres restart / IIS deploy...
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Start-Process -LiteralPath '%~f0' -WorkingDirectory (Split-Path -LiteralPath '%~f0') -Verb RunAs"
+    "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0.' -Verb RunAs"
   if errorlevel 1 (
     echo Elevation failed or denied.
     pause
@@ -25,7 +26,7 @@ if not exist "%OUT%" mkdir "%OUT%"
 
 echo ===== Tony_Hart-Desktop started %DATE% %TIME% =====
 echo target DB: %LAPLACE_PGHOST%
-echo logs:      %OUT%\
+echo logs:      %OUT%\  ^(live-teed to console^)
 echo.
 
 call :run tune-pg || goto :fail
@@ -59,7 +60,7 @@ exit /b 0
 
 :fail
 echo.
-echo ===== Tony_Hart-Desktop FAILED at !LAST_STEP! — see %OUT%\!LAST_LOG!.log =====
+echo ===== Tony_Hart-Desktop FAILED at !LAST_STEP! - see %OUT%\!LAST_LOG!.log =====
 pause
 exit /b 1
 
@@ -67,9 +68,14 @@ exit /b 1
 set "LAST_STEP=%~1"
 set "LAST_LOG=%~1"
 echo ==== %~1 ====
-cmd /c "call scripts\win\%~1.cmd" > "%OUT%\%~1.log" 2>&1
+echo log: %OUT%\%~1.log
+del /q "%OUT%\%~1.log" >nul 2>&1
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+  -LogPath "%OUT%\%~1.log" ^
+  -WorkingDirectory "%CD%" ^
+  -CommandLine "call scripts\win\%~1.cmd"
 if errorlevel 1 (
-  echo FAILED %~1 — %OUT%\%~1.log
+  echo FAILED %~1 - %OUT%\%~1.log
   exit /b 1
 )
 echo OK %~1
@@ -80,13 +86,21 @@ rem %1=script  %2=arg1  %3=arg2  %4=log-name
 set "LAST_STEP=%~1 %~2"
 set "LAST_LOG=%~4"
 echo ==== %~1 %~2 ====
+echo log: %OUT%\%~4.log
+del /q "%OUT%\%~4.log" >nul 2>&1
 if "%~3"=="" (
-  cmd /c "call scripts\win\%~1.cmd %~2" > "%OUT%\%~4.log" 2>&1
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+    -LogPath "%OUT%\%~4.log" ^
+    -WorkingDirectory "%CD%" ^
+    -CommandLine "call scripts\win\%~1.cmd %~2"
 ) else (
-  cmd /c "call scripts\win\%~1.cmd %~2 \"%~3\"" > "%OUT%\%~4.log" 2>&1
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
+    -LogPath "%OUT%\%~4.log" ^
+    -WorkingDirectory "%CD%" ^
+    -CommandLine "call scripts\win\%~1.cmd %~2 \"%~3\""
 )
 if errorlevel 1 (
-  echo FAILED %~1 %~2 — %OUT%\%~4.log
+  echo FAILED %~1 %~2 - %OUT%\%~4.log
   exit /b 1
 )
 echo OK %~1 %~2

@@ -389,23 +389,69 @@ phase_chess_lab() {
   bash "$ROOT/scripts/bootstrap-chess-lab.sh"
 }
 
-# Refresh /opt/laplace/secrets from CI env when provided; otherwise keep drop.
+# Materialize /opt/laplace/secrets from the job environment.
+# CI source of truth: GitHub repository Secrets injected by laplace.yml publish
+# (LICHESS_API, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET) + optional var
+# STRIPE_API_PUBLISHABLE. Machine ~/.config/shell/secrets.env is NOT a deploy path.
 phase_runtime_secrets() {
   echo "===== PHASE — RUNTIME SECRETS DROP ====="
   local dst_dir="$LAPLACE_INSTALL_PREFIX/secrets"
-  local dst="$dst_dir/lichess.env"
   mkdir -p "$dst_dir"
   chmod 2770 "$dst_dir" 2>/dev/null || true
-  # Prefer process env (optional CI override). Otherwise keep setup-host seed
-  # from ~/.config/shell/secrets.env — do not invent a second source of truth.
-  if [ -n "${LICHESS_TOKEN:-}${LICHESS_API:-}" ]; then
-    printf 'LICHESS_TOKEN=%s\n' "${LICHESS_TOKEN:-$LICHESS_API}" >"$dst"
+  local in_ci=0
+  [ -n "${GITHUB_ACTIONS:-}" ] && in_ci=1
+
+  local dst tok stripe_secret stripe_whsec missing=0
+  dst="$dst_dir/lichess.env"
+  # Canonical name matches operator .env: LICHESS_API. LICHESS_TOKEN accepted as alias.
+  tok="${LICHESS_API:-${LICHESS_TOKEN:-}}"
+  if [ -n "$tok" ]; then
+    {
+      printf 'LICHESS_API=%s\n' "$tok"
+      printf 'LICHESS_TOKEN=%s\n' "$tok"
+    } >"$dst"
     chmod 640 "$dst"
-    echo "lichess.env refreshed from process env"
+    echo "lichess.env written from job env"
+  elif [ "$in_ci" -eq 1 ]; then
+    echo "::error::LICHESS_API secret missing — set with: gh secret set LICHESS_API"
+    missing=1
   elif [ -f "$dst" ]; then
-    echo "lichess.env present (from setup-host)"
+    echo "lichess.env kept (local drop; not refreshed)"
   else
-    echo "::warning::no /opt/laplace/secrets/lichess.env — re-run sudo bash scripts/setup-host.sh with LICHESS_TOKEN in ~/.config/shell/secrets.env"
+    echo "::warning::no lichess.env — set GitHub secret LICHESS_API for CI publish"
+  fi
+
+  dst="$dst_dir/stripe.env"
+  stripe_secret="${STRIPE_API_SECRET:-${LAPLACE_STRIPE_API_KEY:-}}"
+  stripe_whsec="${STRIPE_WEBHOOK_SECRET:-${LAPLACE_STRIPE_WEBHOOK_SECRET:-}}"
+  if [ -n "$stripe_secret" ]; then
+    {
+      printf 'STRIPE_API_SECRET=%s\n' "$stripe_secret"
+      if [ -n "${STRIPE_API_Publishable:-${STRIPE_API_PUBLISHED:-${STRIPE_API_PUBLISHABLE:-}}}" ]; then
+        printf 'STRIPE_API_Publishable=%s\n' "${STRIPE_API_Publishable:-${STRIPE_API_PUBLISHED:-$STRIPE_API_PUBLISHABLE}}"
+      fi
+      if [ -n "$stripe_whsec" ]; then
+        printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$stripe_whsec"
+      fi
+    } >"$dst"
+    chmod 640 "$dst"
+    echo "stripe.env written from job env (webhook_secret=$([ -n "$stripe_whsec" ] && echo set || echo missing))"
+  elif [ "$in_ci" -eq 1 ]; then
+    echo "::error::STRIPE_API_SECRET secret missing — set with: gh secret set STRIPE_API_SECRET"
+    missing=1
+  elif [ -f "$dst" ]; then
+    echo "stripe.env kept (local drop; not refreshed)"
+  else
+    echo "::warning::no stripe.env — set GitHub secret STRIPE_API_SECRET for CI publish"
+  fi
+
+  if [ "$in_ci" -eq 1 ] && [ -z "$stripe_whsec" ] && [ -n "$stripe_secret" ]; then
+    echo "::warning::STRIPE_WEBHOOK_SECRET unset — Checkout works; signed webhooks will fail until set"
+  fi
+
+  if [ "$missing" -eq 1 ]; then
+    echo "::error::runtime secrets incomplete — push from Windows: cmd /c scripts\\win\\sync-github-secrets.cmd"
+    return 1
   fi
 }
 

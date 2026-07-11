@@ -2,8 +2,11 @@
 
 #include <Eigen/Core>
 #include <Eigen/QR>
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 
 extern "C"
 int gram_schmidt_orthonormalize(double* vectors,

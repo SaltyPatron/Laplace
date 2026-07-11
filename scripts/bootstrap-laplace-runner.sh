@@ -358,6 +358,10 @@ bootstrap_runner_stripe_env() {
         return 0
     fi
 
+    # Prefer operator name STRIPE_API_SECRET; accept legacy LAPLACE_STRIPE_API_KEY.
+    local stripe_secret="${STRIPE_API_SECRET:-${LAPLACE_STRIPE_API_KEY:-}}"
+    local stripe_whsec="${STRIPE_WEBHOOK_SECRET:-${LAPLACE_STRIPE_WEBHOOK_SECRET:-}}"
+
     local marker_begin="# >>> laplace-runner managed: stripe sandbox env >>>"
     local marker_end="# <<< laplace-runner managed: stripe sandbox env <<<"
     local envfile="$RUNNER_DIR/.env"
@@ -368,17 +372,20 @@ bootstrap_runner_stripe_env() {
         echo "LAPLACE_STRIPE_SUCCESS_URL=$LAPLACE_STRIPE_SUCCESS_URL_DEFAULT"
         echo "LAPLACE_STRIPE_CANCEL_URL=$LAPLACE_STRIPE_CANCEL_URL_DEFAULT"
         echo "LAPLACE_BILLING_CURRENCY=$LAPLACE_BILLING_CURRENCY_DEFAULT"
-        if [ -n "${LAPLACE_STRIPE_API_KEY:-}" ]; then
-            echo "LAPLACE_STRIPE_API_KEY=${LAPLACE_STRIPE_API_KEY}"
+        if [ -n "$stripe_secret" ]; then
+            echo "STRIPE_API_SECRET=${stripe_secret}"
+        fi
+        if [ -n "$stripe_whsec" ]; then
+            echo "STRIPE_WEBHOOK_SECRET=${stripe_whsec}"
         fi
         echo "$marker_end"
     } >> "$envfile"
     chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
     systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
-    if [ -n "${LAPLACE_STRIPE_API_KEY:-}" ]; then
+    if [ -n "$stripe_secret" ]; then
         green "✓ runner .env Stripe sandbox block written with API key (service restarted)"
     else
-        yellow "✓ runner .env Stripe sandbox block written without API key; set LAPLACE_STRIPE_API_KEY when ready"
+        yellow "✓ runner .env Stripe sandbox block written without API key; set STRIPE_API_SECRET when ready"
     fi
 }
 
@@ -913,10 +920,15 @@ do_status() {
     if [ -f "$RUNNER_DIR/.env" ] && grep -q "laplace-runner managed: stripe sandbox env" "$RUNNER_DIR/.env"; then
         grep -E '^(LAPLACE_STRIPE_SUCCESS_URL|LAPLACE_STRIPE_CANCEL_URL|LAPLACE_BILLING_CURRENCY)=' "$RUNNER_DIR/.env" \
             | sed 's/^/  /'
-        if grep -q '^LAPLACE_STRIPE_API_KEY=' "$RUNNER_DIR/.env"; then
-            echo "  LAPLACE_STRIPE_API_KEY=***set***"
+        if grep -qE '^(STRIPE_API_SECRET|LAPLACE_STRIPE_API_KEY)=' "$RUNNER_DIR/.env"; then
+            echo "  STRIPE_API_SECRET=***set***"
         else
-            echo "  LAPLACE_STRIPE_API_KEY=(not set)"
+            echo "  STRIPE_API_SECRET=(not set)"
+        fi
+        if grep -qE '^(STRIPE_WEBHOOK_SECRET|LAPLACE_STRIPE_WEBHOOK_SECRET)=' "$RUNNER_DIR/.env"; then
+            echo "  STRIPE_WEBHOOK_SECRET=***set***"
+        else
+            echo "  STRIPE_WEBHOOK_SECRET=(not set)"
         fi
     else
         echo "  (no managed Stripe sandbox block in $RUNNER_DIR/.env)"
@@ -1114,7 +1126,7 @@ do_stripe() {
     bootstrap_runner_stripe_env
     green "===== STRIPE SANDBOX ENV BOOTSTRAP COMPLETE ====="
     echo "Tip: to write key non-interactively:"
-    echo "  sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe"
+    echo "  sudo STRIPE_API_SECRET=sk_test_xxx $0 stripe"
 }
 
 # API systemd unit + nginx + /opt/laplace/app + secrets dir (Layer 0).
@@ -1132,27 +1144,61 @@ bootstrap_api_host() {
 
 # Seed /opt/laplace/secrets from the operator who invoked sudo (once, Layer 0).
 # Same pattern as gh auth mirror — root may read $SUDO_USER home; the service never does.
+# Names match operator secrets.env / repo .env: LICHESS_* and STRIPE_API_*.
+# Source order: ~/.config/shell/secrets.env, then $REPO/.env (Windows-parity).
 bootstrap_operator_secrets() {
-    say "Host secrets drop ← operator ~/.config/shell/secrets.env"
-    local src="/home/${GH_SUDO_USER}/.config/shell/secrets.env"
+    say "Host secrets drop ← operator secrets.env / repo .env"
+    local src=""
+    local home_src="/home/${GH_SUDO_USER}/.config/shell/secrets.env"
+    local repo_src
+    repo_src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.env"
+    if [ -f "$home_src" ]; then
+        src="$home_src"
+    elif [ -f "$repo_src" ]; then
+        src="$repo_src"
+        yellow "  using $repo_src (no $home_src)"
+    fi
     local dst_dir="/opt/laplace/secrets"
-    local dst="$dst_dir/lichess.env"
     install -d -m 2770 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$dst_dir"
-    if [ ! -f "$src" ]; then
-        yellow "  $src absent — skip (set LICHESS_TOKEN repo secret for CI, or create the file and re-run setup)"
+    if [ -z "$src" ]; then
+        yellow "  no secrets.env or repo .env — skip (CI may refresh from process env on publish)"
         return 0
     fi
-    local line val
-    line="$(grep -E '^(LICHESS_TOKEN|LICHESS_API)=' "$src" 2>/dev/null | head -1 || true)"
-    if [ -z "$line" ]; then
-        yellow "  no LICHESS_TOKEN/LICHESS_API in $src — skip"
-        return 0
+
+    local line val dst
+    line="$(grep -E '^(LICHESS_API|LICHESS_TOKEN)=' "$src" 2>/dev/null | head -1 || true)"
+    if [ -n "$line" ]; then
+        val="${line#*=}"
+        dst="$dst_dir/lichess.env"
+        {
+            printf 'LICHESS_API=%s\n' "$val"
+            printf 'LICHESS_TOKEN=%s\n' "$val"
+        } >"$dst"
+        chown "$RUNNER_USER:$RUNNER_GROUP" "$dst"
+        chmod 640 "$dst"
+        green "✓ $dst seeded from $src"
+    else
+        yellow "  no LICHESS_API in $src — skip lichess.env"
     fi
-    val="${line#*=}"
-    printf 'LICHESS_TOKEN=%s\n' "$val" >"$dst"
-    chown "$RUNNER_USER:$RUNNER_GROUP" "$dst"
-    chmod 640 "$dst"
-    green "✓ $dst seeded from $src"
+
+    line="$(grep -E '^(STRIPE_API_SECRET|LAPLACE_STRIPE_API_KEY)=' "$src" 2>/dev/null | head -1 || true)"
+    if [ -n "$line" ]; then
+        val="${line#*=}"
+        dst="$dst_dir/stripe.env"
+        {
+            printf 'STRIPE_API_SECRET=%s\n' "$val"
+            local pub whsec
+            pub="$(grep -E '^(STRIPE_API_Publishable|STRIPE_API_PUBLISHED|STRIPE_API_PUBLISHABLE)=' "$src" 2>/dev/null | head -1 || true)"
+            [ -n "$pub" ] && printf '%s\n' "STRIPE_API_Publishable=${pub#*=}"
+            whsec="$(grep -E '^(STRIPE_WEBHOOK_SECRET|LAPLACE_STRIPE_WEBHOOK_SECRET)=' "$src" 2>/dev/null | head -1 || true)"
+            [ -n "$whsec" ] && printf 'STRIPE_WEBHOOK_SECRET=%s\n' "${whsec#*=}"
+        } >"$dst"
+        chown "$RUNNER_USER:$RUNNER_GROUP" "$dst"
+        chmod 640 "$dst"
+        green "✓ $dst seeded from $src"
+    else
+        yellow "  no STRIPE_API_SECRET in $src — skip stripe.env"
+    fi
 }
 
 bootstrap_chess_lab() {

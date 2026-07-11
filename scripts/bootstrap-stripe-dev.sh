@@ -9,23 +9,26 @@ DEFAULT_CANCEL_URL="http://127.0.0.1:5187/billing/cancel"
 DEFAULT_CURRENCY="usd"
 PERSIST_ZSH=0
 PRINT_ONLY=0
-API_KEY="${LAPLACE_STRIPE_API_KEY:-}"
+# Prefer operator name; accept legacy LAPLACE_STRIPE_API_KEY.
+API_KEY="${STRIPE_API_SECRET:-${LAPLACE_STRIPE_API_KEY:-}}"
+WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-${LAPLACE_STRIPE_WEBHOOK_SECRET:-}}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/bootstrap-stripe-dev.sh [options]
 
 Options:
-  --api-key <value>   Stripe test key (sk_test_...)
+  --api-key <value>   Stripe test secret (sk_test_...) → STRIPE_API_SECRET
   --persist-zsh       Append source line to ~/.zshrc if missing
   --print-only        Print export lines only, do not write files
   -h, --help          Show this help
 
 Recommended flow:
-  1) Get your test key from https://dashboard.stripe.com/test/apikeys
-  2) Run this script and enter sk_test_... when prompted
+  1) Put STRIPE_API_SECRET=sk_test_... in ~/.config/shell/secrets.env (and repo .env on Windows)
+  2) Or run this script and enter sk_test_... when prompted
   3) source ~/.config/laplace/stripe-dev.env
-  4) Run endpoint app and call /v1/billing/preflight before execution
+  4) On Windows: scripts\win\install-stripe-listen.cmd (NSSM) for webhook forwarding
+  5) Call /v1/billing/catalog/sync then preflight with LAPLACE_BILLING_BYPASS=false
 EOF
 }
 
@@ -75,12 +78,16 @@ if [[ "${API_KEY}" != sk_test_* && "${API_KEY}" != rk_test_* ]]; then
 fi
 
 ENV_CONTENT=$(cat <<EOF
-export LAPLACE_STRIPE_API_KEY='${API_KEY}'
+export STRIPE_API_SECRET='${API_KEY}'
 export LAPLACE_STRIPE_SUCCESS_URL='${DEFAULT_SUCCESS_URL}'
 export LAPLACE_STRIPE_CANCEL_URL='${DEFAULT_CANCEL_URL}'
 export LAPLACE_BILLING_CURRENCY='${DEFAULT_CURRENCY}'
 EOF
 )
+if [[ -n "${WEBHOOK_SECRET}" ]]; then
+  ENV_CONTENT="${ENV_CONTENT}
+export STRIPE_WEBHOOK_SECRET='${WEBHOOK_SECRET}'"
+fi
 
 if [[ "${PRINT_ONLY}" -eq 1 ]]; then
   printf "%s\n" "${ENV_CONTENT}"
@@ -98,7 +105,7 @@ echo "Load now: source ${ENV_FILE}"
 echo
 echo "Optional Stripe CLI checks:"
 echo "  stripe whoami"
-echo "  stripe listen --forward-to http://127.0.0.1:5187/v1/billing/webhooks/stripe"
+echo "  stripe listen --forward-to http://127.0.0.1:5187/v1/billing/webhooks/stripe --device-name laplace-dev"
 
 auto_line="source ${ENV_FILE}"
 if [[ "${PERSIST_ZSH}" -eq 1 ]]; then
@@ -114,6 +121,6 @@ fi
 
 echo
 echo "How to set key in CI/runner environment:"
-echo "  1) Store test key as a secret in your runner host (not in git)."
-echo "  2) Export LAPLACE_STRIPE_API_KEY before starting endpoint process."
+echo "  1) Store STRIPE_API_SECRET in ~/.config/shell/secrets.env (setup-host seeds /opt/laplace/secrets/stripe.env)."
+echo "  2) Or export STRIPE_API_SECRET before pipeline publish (refreshes the drop)."
 echo "  3) Keep live keys separate; never reuse test keys in live mode."

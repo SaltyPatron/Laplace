@@ -221,13 +221,14 @@ Two toolchains, not interchangeable:
 | Task | Entry point |
 |------|-------------|
 | Full clean rebuild | `rebuild-all.cmd` |
+| Host secrets + Stripe listen (elevated once) | `setup-host.cmd` |
 | Engine / extensions | `build-engine.cmd [--reconfigure]` / `build-extensions.cmd` then `install-extensions.cmd` |
 | ASAN engine | `build-engine-asan.cmd` |
 | All tests (the gate) | `test-all.cmd` — log at `%LAPLACE_EXT_BUILD%\test-all.log` |
 | dotnet tests | `test-app.cmd [project-substring]` |
 | native ctest / pg_regress | `test-engine.cmd` / `regress.cmd` |
 | Seed | `db-reset.cmd`, `seed-foundation.cmd`, `seed-step.cmd <source>` (trust `:verify_step`), `seed-everything.cmd` |
-| Publish API → IIS | `publish.cmd` then `deploy-api.cmd` (or `publish-deploy.cmd`) — injects `deploy/secrets/chess-lab.env` + `lichess.env` into web.config |
+| Publish API → IIS | `publish-deploy.cmd` (syncs `.env` → secrets, ensures Stripe listen, injects chess/lichess/stripe into web.config) |
 | Chess lab binaries | `build-cutechess.cmd` once; paths in `deploy/secrets/chess-lab.env` |
 | CLI | `cli.cmd` (never `dotnet run` — the ingest mutex matches the command line) |
 | Locks / stuck processes | `locks.cmd` (`locks.ps1 -Kill`) |
@@ -238,7 +239,8 @@ Two toolchains, not interchangeable:
 
 | Task | Entry point |
 |------|-------------|
-| Full host bring-up | `sudo bash scripts/setup-host.sh` (runner, PG, nginx, chess-lab, secrets from `~/.config/shell/secrets.env`, migrations) |
+| Full host bring-up | `sudo bash scripts/setup-host.sh` (runner, PG, nginx, chess-lab, migrations) |
+| Runtime secrets (Lichess/Stripe) | GitHub Secrets → `laplace.yml` publish → `/opt/laplace/secrets` (`scripts\win\sync-github-secrets.cmd`) |
 | Vendor deps (pg/postgis/gdal/…) | `scripts/build-system-deps.sh` — fingerprinted; skips unless pins/CMakeLists/ISA change. Force: `LAPLACE_FORCE_DEPS=1`. Do not wipe `/opt/laplace/build/deps` casually. |
 | CI build/deploy/publish | `scripts/pipeline.sh` (invoked by `laplace.yml`; `publish` = chess + secrets + API/SPA/uci) |
 | Convenience aliases | `Justfile` → `setup-host` / `publish` / `build-deps`; may drift — trust the scripts |
