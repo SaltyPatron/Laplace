@@ -15,6 +15,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// last_observed_at semantics across a second period folding against priors.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Tier", "db")]
 public class ConsensusClientFoldTests
 {
     private readonly LocalPgFixture _pg;

@@ -1,0 +1,31 @@
+CREATE OR REPLACE FUNCTION source_counts_approx()
+    RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    -- Issue 52: source_counts() full-scans attestations twice (GROUP BY everything
+    -- plus a count(DISTINCT) join) — minutes at 135M rows, killed the catalog
+    -- endpoints. This is the planner-statistics form, the same sanctioned pattern
+    -- as substrate_counts' reltuples estimates: per-source evidence share = MCV
+    -- frequency x reltuples. ANALYZE freshness bounds the error; sources below the
+    -- MCV cutoff don't appear (raise attestations.source_id statistics target if a
+    -- long tail matters). Exact per-source numbers stay available through
+    -- evidence_count(NULL, source_id) — this function never replaces them.
+    WITH st AS (
+        SELECT s.most_common_vals::text::bytea[] AS vals,
+               s.most_common_freqs               AS freqs
+        FROM pg_stats s
+        WHERE s.schemaname = '@extschema@'
+          AND s.tablename  = 'attestations'
+          AND s.attname    = 'source_id'
+    ), rt AS (
+        SELECT c.reltuples
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = '@extschema@' AND c.relname = 'attestations'
+    )
+    SELECT render(m.sid)                        AS source,
+           m.sid                                AS source_id,
+           (m.freq * rt.reltuples)::bigint      AS evidence_approx
+    FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
+    ORDER BY evidence_approx DESC
+$$;

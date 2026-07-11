@@ -12,6 +12,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Ingestion.Tests;
 
 [Trait("Tier", "perf")]
+[Trait("Tier", "db")]
 public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {
     private readonly LocalPgFixture _pg;

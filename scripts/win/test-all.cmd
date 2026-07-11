@@ -7,6 +7,19 @@ set "LOG=%LAPLACE_EXT_BUILD%\test-all.log"
 if not exist "%LAPLACE_EXT_BUILD%" mkdir "%LAPLACE_EXT_BUILD%"
 > "%LOG%" echo test-all started %DATE% %TIME%
 
+rem This is the FUNCTIONALITY gate: pg_regress, DB-integration dotnet tiers, and
+rem verify-fk all require live local Postgres. Fail that dependency in ONE line
+rem here instead of 98 cascading connection errors twenty minutes in.
+rem (The no-DB unit signal is test-fast.cmd, ~40s.)
+"%PGBIN%\pg_isready.exe" -h localhost -q
+if errorlevel 1 (
+  echo test-all: local Postgres is DOWN — this gate is DB-integration by design and cannot run.
+  echo   unit signal instead:  scripts\win\test-fast.cmd  ^(no DB, ~40s^)
+  echo   recover local PG:     scripts\win\fix-postgres.cmd / pg-auto-recover.cmd
+  >> "%LOG%" echo test-all aborted: local Postgres down (pg_isready failed)
+  exit /b 3
+)
+
 echo === verify-toolchain ===
 >> "%LOG%" echo === verify-toolchain ===
 rem Full ctest runs below — skip the toolchain subset to avoid double work.

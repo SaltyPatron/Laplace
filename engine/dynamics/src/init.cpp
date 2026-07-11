@@ -4,7 +4,9 @@
 #include "laplace/dynamics/tbb_parallel.h"
 #endif
 
+#include <atomic>
 #include <cstdlib>
+#include <mutex>
 
 #ifdef LAPLACE_HAS_MKL
 #include <mkl.h>
@@ -75,9 +77,21 @@ extern "C" int laplace_runtime_init(int host, int mkl_threads) {
     (void)mkl_threads;
     return -2;
 #else
-    static int initialized = 0;
+    // `static int initialized` was a non-atomic double-checked guard: two
+    // threads first-touching the Dynamics and Synthesis natives concurrently
+    // (any host without Laplace.Cli's single-threaded Program.Main warm-up —
+    // the xunit host is the live case) could both enter the body and race
+    // MKL's process-global first-init (torn CBWR/threading state). The mutex
+    // serializes the body; the atomic keeps the completed fast path lock-free.
+    // Early -1 returns stay outside the completed state so they remain
+    // retryable, preserving the original contract.
+    static std::mutex init_mu;
+    static std::atomic<int> initialized{0};
     static int init_rc = 0;
-    if (initialized)
+    if (initialized.load(std::memory_order_acquire))
+        return init_rc;
+    std::lock_guard<std::mutex> lk(init_mu);
+    if (initialized.load(std::memory_order_relaxed))
         return init_rc;
 
     g_runtime_host = host;
@@ -101,7 +115,7 @@ extern "C" int laplace_runtime_init(int host, int mkl_threads) {
 
     const int rc = mkl_cbwr_set(LAPLACE_MKL_CBWR_MODE);
     init_rc = (rc == MKL_CBWR_SUCCESS) ? 0 : -1;
-    initialized = 1;
+    initialized.store(1, std::memory_order_release);
     return init_rc;
 #endif
 }

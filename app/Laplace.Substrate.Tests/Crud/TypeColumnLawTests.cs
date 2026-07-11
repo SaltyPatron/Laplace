@@ -3,6 +3,7 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 [Collection("substrate-pg")]
+[Trait("Tier", "db")]
 public class TypeColumnLawTests
 {
 

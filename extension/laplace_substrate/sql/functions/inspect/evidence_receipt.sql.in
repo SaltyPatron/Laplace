@@ -50,41 +50,51 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
                        '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1')) AS source_labels
         FROM filtered f
         GROUP BY f.type_id, f.object_id
-    ), labeled AS (
+    ), ranked AS (
+        -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim
+        -- (type_label + _realize_synset_lemma/render_text, ~6ms/row — 3,129 labels
+        -- to return 3 rows, >25s cold) and only then ordered/limited. Ranking needs
+        -- only the indexed consensus probe, so it runs first over everything; labels
+        -- run over a small over-fetched pool (labels can drop rows via the ellipsis/
+        -- empty filters below — 3x+8 makes top-N starvation implausible while
+        -- keeping labeling O(pool), not O(claims)).
         SELECT fo.type_id, fo.object_id, fo.witness_count, fo.source_labels,
-               type_label(fo.type_id) AS rel,
-               COALESCE(
-                   NULLIF(_realize_synset_lemma(fo.object_id, word_language(p_id)), ''),
-                   NULLIF(render_text(fo.object_id, 12), ''),
-                   left(encode(fo.object_id, 'hex'), 16)) AS obj
+               COALESCE(cm.mu_raw, 0)  AS mu_raw,
+               COALESCE(cm.mu_disp, 0) AS eff_mu_disp
         FROM folded fo
+        LEFT JOIN LATERAL (
+            SELECT eff_mu(c.rating, c.rd) AS mu_raw,
+                   eff_mu_display(c.rating, c.rd) AS mu_disp
+            FROM consensus c
+            WHERE c.subject_id IN (SELECT id FROM subj)
+              AND c.type_id = fo.type_id
+              AND c.object_id = fo.object_id
+            ORDER BY eff_mu(c.rating, c.rd) DESC
+            LIMIT 1
+        ) cm ON true
         WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
+        ORDER BY edge_rank(fo.type_id, COALESCE(cm.mu_raw, 0)) DESC,
+                 fo.witness_count DESC
+        LIMIT GREATEST(1, p_limit) * 3 + 8
+    ), labeled AS (
+        SELECT rk.type_id, rk.object_id, rk.witness_count, rk.source_labels,
+               rk.mu_raw, rk.eff_mu_disp,
+               type_label(rk.type_id) AS rel,
+               COALESCE(
+                   NULLIF(_realize_synset_lemma(rk.object_id, word_language(p_id)), ''),
+                   NULLIF(render_text(rk.object_id, 12), ''),
+                   left(encode(rk.object_id, 'hex'), 16)) AS obj
+        FROM ranked rk
     )
     SELECT lb.type_id, lb.object_id, lb.rel, lb.obj,
-           COALESCE((
-               SELECT eff_mu_display(c.rating, c.rd)
-               FROM consensus c
-               WHERE c.subject_id IN (SELECT id FROM subj)
-                 AND c.type_id = lb.type_id
-                 AND c.object_id = lb.object_id
-               ORDER BY eff_mu(c.rating, c.rd) DESC
-               LIMIT 1
-           ), 0),
+           lb.eff_mu_disp,
            lb.witness_count,
            lb.source_labels
     FROM labeled lb
     WHERE lb.obj IS NOT NULL AND lb.obj <> ''
       AND right(lb.obj, 1) <> U&'\2026'
       AND right(lb.rel, 1) <> U&'\2026'
-    ORDER BY edge_rank(lb.type_id, COALESCE((
-               SELECT eff_mu(c.rating, c.rd)
-               FROM consensus c
-               WHERE c.subject_id IN (SELECT id FROM subj)
-                 AND c.type_id = lb.type_id
-                 AND c.object_id = lb.object_id
-               ORDER BY eff_mu(c.rating, c.rd) DESC
-               LIMIT 1
-           ), 0)) DESC,
+    ORDER BY edge_rank(lb.type_id, lb.mu_raw) DESC,
              lb.witness_count DESC
     LIMIT GREATEST(1, p_limit)
 $$;

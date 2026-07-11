@@ -157,6 +157,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
         bool boundary = false;
         List<SubstrateChange>? accChanges = null;
+        List<TestimonyWalkRow>? pendingWalks = null;
         foreach (var c in changes)
         {
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
@@ -176,8 +177,19 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                 (accChanges ??= new List<SubstrateChange>(changes.Count)).Add(c);
             }
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
-                foreach (var w in c.TestimonyWalks) BufferWalk(w);
+                foreach (var w in c.TestimonyWalks) (pendingWalks ??= new List<TestimonyWalkRow>()).Add(w);
         }
+
+        // Evidence apply FIRST; fold state only after it succeeds. The old order
+        // accumulated (and could period-flush) before the inner apply, so a
+        // transient apply failure + IngestRunner retry re-accumulated the whole
+        // batch — silently doubling games/sum_score in the fold (the phi
+        // invariant can't catch it: same phi) — and an abandoned batch left
+        // staged matchups whose evidence never landed. A throw below leaves the
+        // accumulator untouched, so a retried batch folds exactly once.
+        var result = workingSet
+            ? await _inner.ApplyWorkingSetAsync(ForwardChanges(changes), ct)
+            : await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
 
         if (accChanges is not null)
             AccumulateChangesParallel(accChanges, ct);
@@ -187,6 +199,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
             foreach (var acc in commitBatchAcc.Values)
                 BufferWalkCore(ConvertPartialToWalk(acc));
         }
+        if (pendingWalks is not null)
+            foreach (var w in pendingWalks) BufferWalk(w);
 
         if (_walkBuffered >= WalkFlushRows)
             await FlushWalksAsync(ct);
@@ -194,12 +208,6 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
         if ((boundary && _accumulation.Count >= Math.Max(1, _stagingThreshold / 8))
             || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
-
-        var result = workingSet
-            ? await _inner.ApplyWorkingSetAsync(ForwardChanges(changes), ct)
-            : await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
-
-
 
         if (_stageAsWalks && _walkBuffered > 0)
             await FlushWalksAsync(ct);
@@ -268,6 +276,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
         bool boundary = false;
         List<SubstrateChange>? accChanges = null;
+        List<TestimonyWalkRow>? pendingWalks = null;
         foreach (var c in changes)
         {
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
@@ -280,11 +289,17 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
             if (!c.Attestations.IsEmpty)
                 (accChanges ??= new List<SubstrateChange>(changes.Count)).Add(c);
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
-                foreach (var w in c.TestimonyWalks) BufferWalk(w);
+                foreach (var w in c.TestimonyWalks) (pendingWalks ??= new List<TestimonyWalkRow>()).Add(w);
         }
+
+        // Same retry law as ApplyManyCoreAsync: evidence lands first, fold
+        // state mutates only after success, so retries fold exactly once.
+        var result = await _inner.AppendAsync(ForwardChanges(changes), sourceId, ct);
 
         if (accChanges is not null)
             AccumulateChangesParallel(accChanges, ct);
+        if (pendingWalks is not null)
+            foreach (var w in pendingWalks) BufferWalk(w);
 
         if (_walkBuffered >= WalkFlushRows)
             await FlushWalksAsync(ct);
@@ -293,7 +308,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
             || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
 
-        return await _inner.AppendAsync(ForwardChanges(changes), sourceId, ct);
+        return result;
     }
 
     public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(

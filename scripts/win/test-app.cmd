@@ -21,7 +21,7 @@ goto parse
 :run
 set "ANYFAIL="
 set "MATCHED="
-set "XUNIT_TIER_EXCLUDE=Tier^!=perf"
+if not defined XUNIT_TIER_EXCLUDE set "XUNIT_TIER_EXCLUDE=Tier^!=perf"
 
 rem Semicolon-separated list for PowerShell (spaces in ARGS stay separate).
 set "PROJECTS="

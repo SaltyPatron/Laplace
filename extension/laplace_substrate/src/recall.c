@@ -766,7 +766,6 @@ pg_laplace_define_fast(PG_FUNCTION_ARGS)
 typedef struct ShapeCandidate
 {
     Datum entity_id;
-    Datum trajectory;
     Datum coord;
     double ang;
     double fr;
@@ -803,7 +802,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     Oid    types1[1] = { BYTEAOID };
     Datum  args1[1] = { p_word };
     int    rc;
-    Datum  me_traj, me_coord, me_type_id;
+    Datum  me_curve, me_coord, me_type_id;
     int32  me_nconst;
     Oid    geom_oid;
     char  *me_case_class = NULL;
@@ -812,8 +811,16 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     ShapeCandidate *survivors;
     int    n_survivors = 0;
 
+    /* Issue 51: the Frechet gate must run on GEOMETRY. physicalities.trajectory
+     * vertices are mantissa-packed child IDENTITIES (exponent pinned 0x3FF) --
+     * feeding them to the DP measured hash bits, behaving as a rough aligned
+     * sequence-identity test. word_curve() rebuilds the constituent COORD curve
+     * (ST_MakeLine ORDER BY ordinal) -- the same metric word_shape_distance uses.
+     * The anchor curve is fetched once here and passed as a bound parameter;
+     * candidate curves build inside the batched call below (STABLE functions in
+     * filters run per row -- the anchor must never be recomputed per candidate). */
     rc = SPI_execute_with_args(
-        "SELECT p.trajectory, p.coord, e.type_id, p.n_constituents "
+        "SELECT laplace.word_curve($1), p.coord, e.type_id, p.n_constituents "
         "FROM laplace.physicalities p "
         "JOIN laplace.entities e ON e.id = p.entity_id "
         "WHERE p.entity_id = $1 AND p.type = 1 "
@@ -828,11 +835,15 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         TupleDesc me_td  = SPI_tuptable->tupdesc;
         bool n0, n1, n2, n3;
 
-        me_traj    = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 1, &n0));
+        me_curve   = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 1, &n0));
         me_coord   = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 2, &n1));
         me_type_id = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 3, &n2));
         me_nconst  = DatumGetInt32(SPI_getbinval(me_tup, me_td, 4, &n3));
         geom_oid   = SPI_gettypeid(me_td, 2);
+        /* word_curve is NULL when the word has no constituent coords -- no
+         * shape to gate on; empty result, same contract as a missing anchor. */
+        if (n0)
+            return PointerGetDatum(construct_empty_array(BYTEAOID));
     }
 
     {
@@ -854,7 +865,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Datum args2[3] = { p_word, me_coord, Int32GetDatum(500) };
 
         rc = SPI_execute_with_args(
-            "SELECT p2.entity_id, p2.trajectory, p2.coord, e2.type_id, p2.n_constituents "
+            "SELECT p2.entity_id, p2.coord, e2.type_id, p2.n_constituents "
             "FROM laplace.physicalities p2 "
             "JOIN laplace.entities e2 ON e2.id = p2.entity_id "
             "WHERE p2.type = 1 AND p2.trajectory IS NOT NULL AND p2.coord IS NOT NULL "
@@ -869,18 +880,16 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         {
             HeapTuple tup = SPI_tuptable->vals[r];
             TupleDesc td  = SPI_tuptable->tupdesc;
-            bool cn0, cn1, cn2, cn3, cn4;
+            bool cn0, cn1, cn2, cn3;
             Datum eid   = SPI_getbinval(tup, td, 1, &cn0);
-            Datum traj  = SPI_getbinval(tup, td, 2, &cn1);
-            Datum coord = SPI_getbinval(tup, td, 3, &cn2);
-            Datum tid   = SPI_getbinval(tup, td, 4, &cn3);
-            Datum ncst  = SPI_getbinval(tup, td, 5, &cn4);
+            Datum coord = SPI_getbinval(tup, td, 2, &cn1);
+            Datum tid   = SPI_getbinval(tup, td, 3, &cn2);
+            Datum ncst  = SPI_getbinval(tup, td, 4, &cn3);
 
-            if (cn1 || cn2 || cn3 || cn4) continue;
+            if (cn0 || cn1 || cn2 || cn3) continue;
             if (!bytea_eq(tid, me_type_id)) continue;
             if (DatumGetInt32(ncst) != me_nconst) continue;
             raw[n_raw].entity_id  = copy_bytea_datum(eid);
-            raw[n_raw].trajectory = copy_bytea_datum(traj);
             raw[n_raw].coord      = copy_bytea_datum(coord);
             n_raw++;
         }
@@ -943,21 +952,21 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         {
             int    n_matched = 0;
             int   *matched_raw_idx = (int *) palloc(sizeof(int) * (n_raw + 1));
-            Datum *trajarr = (Datum *) palloc(sizeof(Datum) * (n_raw + 1));
+            Datum *eidarr = (Datum *) palloc(sizeof(Datum) * (n_raw + 1));
             Datum *coordarr = (Datum *) palloc(sizeof(Datum) * (n_raw + 1));
 
             for (int i = 0; i < n_raw; i++)
             {
                 if (!case_ok[i]) continue;
                 matched_raw_idx[n_matched] = i;
-                trajarr[n_matched] = raw[i].trajectory;
+                eidarr[n_matched] = raw[i].entity_id;
                 coordarr[n_matched] = raw[i].coord;
                 n_matched++;
             }
 
             if (n_matched > 0)
             {
-                ArrayType *traj_array = construct_array(trajarr, n_matched, geom_oid, -1, false, 'i');
+                ArrayType *eid_array = construct_array(eidarr, n_matched, BYTEAOID, -1, false, 'i');
                 ArrayType *coord_array = construct_array(coordarr, n_matched, geom_oid, -1, false, 'i');
                 Oid   geom_arr_oid = get_array_type(geom_oid);
                 int   grc;
@@ -970,15 +979,17 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
 
                 /* Frechet stays SQL-computed (order-sensitive, variable-length DP
                  * recurrence -- doesn't batch across candidates the same way a
-                 * fixed-width angular distance does; deliberately out of scope for
-                 * this pass, see .scratchpad/06_Engineering_Ruleset.txt). */
+                 * fixed-width angular distance does). Issue 51: it now runs over
+                 * word_curve(entity) -- the constituent COORD curve, word_shape_
+                 * distance's metric -- never the mantissa-packed identity
+                 * trajectory, whose vertices are hash bits, not S3 shape. */
                 {
-                    Oid   ftypes[2] = { geom_arr_oid, geom_oid };
-                    Datum fargs[2] = { PointerGetDatum(traj_array), me_traj };
+                    Oid   ftypes[2] = { BYTEAARRAYOID, geom_oid };
+                    Datum fargs[2] = { PointerGetDatum(eid_array), me_curve };
 
                     grc = SPI_execute_with_args(
-                        "SELECT t.idx, public.laplace_frechet_4d(t.traj, $2) "
-                        "FROM unnest($1) WITH ORDINALITY AS t(traj, idx)",
+                        "SELECT t.idx, public.laplace_frechet_4d(laplace.word_curve(t.entity_id), $2) "
+                        "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx)",
                         2, ftypes, fargs, NULL, true, 0);
                     if (grc == SPI_OK_SELECT)
                     {
@@ -1080,7 +1091,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                 pfree(ok_by_pos);
             }
             pfree(matched_raw_idx);
-            pfree(trajarr);
+            pfree(eidarr);
             pfree(coordarr);
         }
         pfree(case_ok);

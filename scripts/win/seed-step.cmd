@@ -105,10 +105,18 @@ if not errorlevel 1 (
   exit /b 2
 )
 call :ensure_cli || exit /b 1
+rem clrjit.dll 0xc0000409 fail-fast during background tier-1 recompile killed the
+rem 2026-07-11 conceptnet ingest ~100s in (WER-confirmed, .NET 10.0.9 = newest
+rem installed). Disabling tiered compilation removes that recompile path; scoped
+rem to ingest launches only, overridable by presetting the variable.
+if not defined DOTNET_TieredCompilation set "DOTNET_TieredCompilation=0"
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 "%LAPLACE_CLI_EXE%" ingest %STEP% %EXTRA%
 set "RC=%ERRORLEVEL%"
-if not "%RC%"=="0" exit /b %RC%
+if not "%RC%"=="0" (
+  echo ERROR: seed-step %STEP%: Laplace.Cli exited %RC% ^(negative = NTSTATUS crash code^)
+  exit /b %RC%
+)
 call :wait_cli_exit
 call :verify_step
 exit /b %ERRORLEVEL%

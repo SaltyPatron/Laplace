@@ -133,6 +133,7 @@ functions/ops/multi_source_entity_count.sql.in
 functions/ops/substrate_counts.sql.in
 functions/ops/arena_counts.sql.in
 functions/ops/source_counts.sql.in
+functions/ops/source_counts_approx.sql.in
 functions/ops/entity_type_counts.sql.in
 functions/ops/consensus_tier_distribution.sql.in
 functions/ops/render_gaps.sql.in

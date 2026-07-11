@@ -4,10 +4,10 @@ overview: "One execution plan: harness unfuck → dead code → spine + gates �
 todos:
   - id: p0-harness
     content: "P0 Harness: CLAUDE.md doc map, laplace-law.mdc L21 (still says doc 13 active), banner doc 13, AGENTS/next-task"
-    status: pending
+    status: completed # verified 2026-07-11: laplace-law.mdc L21-24 re-pointed to this plan; AGENTS.md + next-task demote doc 13; doc 13 carries the historical banner
   - id: p1-dead
     content: "P1 Delete dead lanes — 17 §5 list + NativeGrammarIngest orphans + etl_witness_conceptnet.c eval"
-    status: pending
+    status: completed # verified 2026-07-11: OMWEtlRegistration.cs, WiktionaryEtlRegistration.cs, PCoreParallelCompose.cs, NativeGrammarIngest.cs, etl_witness_conceptnet.c all absent; dispatch table-driven (IngestDispatchTable.cs)
   - id: p2-spine-gates
     content: "P2 Decomposer<T> + shared extractors + ContentWitnessBatch→ContentTierSpine + extend architecture gate BEFORE migration"
     status: pending

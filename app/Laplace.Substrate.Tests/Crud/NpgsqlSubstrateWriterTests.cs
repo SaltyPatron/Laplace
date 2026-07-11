@@ -9,6 +9,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.SubstrateCRUD.Tests;
 
 [Collection("substrate-pg")]
+[Trait("Tier", "db")]
 public class NpgsqlSubstrateWriterTests
 {
     private readonly LocalPgFixture _pg;

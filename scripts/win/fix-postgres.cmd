@@ -19,6 +19,11 @@ rem    --wire-only    Deploy + GUC wire + service restart; NO db-reset (keeps la
 rem    --continue     PG already running — skip deploy/wal/start; run wire + restart (+ db-reset)
 rem    --nuke-db      DROP DATABASE laplace before db-reset (schema wipe, not whole cluster)
 rem    --skip-wal     Never run pg_resetwal (use if WAL is intact)
+rem    --reset-wal    Force pg_resetwal even when pg_wal has segment files — the
+rem                   "invalid magic number / could not locate a valid checkpoint
+rem                   record" PANIC leaves segments present but unreadable, which
+rem                   the empty-dir check cannot see. Safe when pg_control reports
+rem                   a clean shutdown (data files already flushed to base\).
 rem
 rem  After success: seed-foundation.cmd when you want data back.
 rem  Verify anytime:  scripts\win\verify-deploy.cmd  and  scripts\win\status.ps1
@@ -35,11 +40,13 @@ set "WIRE_ONLY=0"
 set "CONTINUE=0"
 set "NUKE=0"
 set "SKIP_WAL=0"
+set "RESET_WAL=0"
 for %%A in (%*) do (
   if /i "%%~A"=="--wire-only" set "WIRE_ONLY=1"
   if /i "%%~A"=="--continue" set "CONTINUE=1"
   if /i "%%~A"=="--nuke-db" set "NUKE=1"
   if /i "%%~A"=="--skip-wal" set "SKIP_WAL=1"
+  if /i "%%~A"=="--reset-wal" set "RESET_WAL=1"
 )
 
 net session >nul 2>&1
@@ -84,12 +91,15 @@ if "%SKIP_WAL%"=="0" (
   echo ==== [3/6] WAL check ====
   set "WAL_SEG=0"
   for %%F in ("%PGDATA%\pg_wal\0*") do set "WAL_SEG=1"
-  if "!WAL_SEG!"=="0" (
+  if "%RESET_WAL%"=="1" (
+    echo --reset-wal: running pg_resetwal on %PGDATA% ^(invalid-checkpoint recovery; keeps base\^)
+    "%PGBIN%\pg_resetwal.exe" -f "%PGDATA%" || exit /b 1
+  ) else if "!WAL_SEG!"=="0" (
     echo pg_wal has no segment files — running pg_resetwal on %PGDATA%
     echo   ^(keeps base\; only needed after WAL was deleted or cluster won't recover^)
     "%PGBIN%\pg_resetwal.exe" -f "%PGDATA%" || exit /b 1
   ) else (
-    echo pg_wal segments present — skipping pg_resetwal
+    echo pg_wal segments present — skipping pg_resetwal ^(unreadable-checkpoint PANIC with segments present needs --reset-wal^)
   )
 ) else (
   echo ==== [3/6] WAL check skipped ^(--skip-wal^) ====

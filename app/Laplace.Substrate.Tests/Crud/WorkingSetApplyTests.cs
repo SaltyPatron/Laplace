@@ -12,6 +12,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// makes a replayed flush a no-op instead of double-counting testimony.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Tier", "db")]
 public class WorkingSetApplyTests
 {
     private readonly LocalPgFixture _pg;

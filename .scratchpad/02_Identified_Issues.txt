@@ -32,7 +32,9 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
 15  FIXED      concurrent-ingest crash — all 3 layers (lock/guard/disposal-ownership)
 16/18 FIXED    mutex guard wrong process name — Win32_Process command-line match
 17  FIXED      apply_batch write race — advisory lock (lock lives on in the new lane)
-19  SPLIT      per-call O(n²) descent FIXED; O(tiers) BULK descent OPEN → 13 Phase 1.6
+19  SPLIT      per-call O(n²) descent FIXED; flush-batch bulk descent LANDED
+               (BulkDescent.ProbeFlushBatchAsync, one BatchExistenceEmitBitmapsAsync
+               per flush batch, gate-tested); whole-working-set single pass still OPEN
 20  CLOSED     content_root_id rc=-2 — a ZIP in the text dir; decomposer glob fixed
 21  FIXED      framenet batch-label error — reverted to call-form dispatch (see below)
 22  CLOSED     word_shape_peers SQL rewrite — superseded by _fast + deletion (33c)
@@ -41,15 +43,18 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
                instance; remaining routers listed in 07 §2.2c)  → plan 13 Phase 3
 24  RESOLVED   decomposer consolidation — folded into Issue 08's waves
 25  FIXED      MarkProven cache poisoning (orphaned trajectories) — verified corpus-wide
-               RESIDUAL OPEN: ~900-row tier-0 entities/physicalities count mismatch
+               RESIDUAL: dual-path id divergence FIXED in code (both paths use
+               PhysicalityId.Compute(entityId,type) — geometry never enters the id;
+               PhysicalityIdRegressionTests pins it). Count re-verify on next reseed.
 26  FIXED      anagram false-positive (OR ang branch) — Frechet is sole admission gate
 27  FIXED      GIN large-array probe collapse — native containers_of() hop loop
 28  FIXED      walk_branches exponential blowup — per-level batch + global HTAB dedup;
                depth6/breadth12: never-completed → 45.8s. Follow-up profiling OPEN
                (dominant cost at scale unknown: SPI replan vs qsort/HTAB vs repalloc)
 29  FIXED      IntentStage null-vs-zero mask marshal (regression test in place)
-30  RESOLVED   v_consensus_unrefuted built + 21 files migrated; last 4 inliners:
-               consensus_peer DONE (ee3bfef); relate_path + senses_with_context x2 OPEN
+30  RESOLVED   v_consensus_unrefuted built + all inliners migrated — relate_path +
+               senses_with_context x2 verified on the view 2026-07-11 (zero inline
+               refuted predicates remain)
 31  RESOLVED   native incremental fold built + proven — then SUPERSEDED: fold is now
                CLIENT-side (NpgsqlConsensusFold, parity-tested; see Rule #8 note below)
 32  RESOLVED   SIMD angular batch kernel — real but modest end-to-end (lesson kept below)
@@ -216,6 +221,15 @@ degrade to empty/null (contracts tolerate it; stage grid renders from the static
 witness catalog); (d) ReadTopRelationsAsync = bounded-candidate form: top-M raw eff_mu
 via consensus_eff_mu_btree (index-served), THEN the same edge_rank readout law over the
 pool — 9min → 0.5s measured; (e) 5-min TTL single-flight cache on the catalog response.
+EXTENSION-SIDE STATUS 2026-07-11: prescriptions 1-3 LANDED in source (top_relations
+bounded-candidate two-arm form; evidence_receipt rank-first-label-last with 3x+8
+over-fetch pool; source_counts_approx() from pg_stats MCV x reltuples, manifest-
+registered). Prescription 4 (multi_source_entity_count) deliberately NOT estimated:
+distinct-overlap has no honest planner-stats estimator (sampling undercounts
+multi-source subjects without capture-recapture math — a fabricated number is worse
+than the current bounded-degrade); the calculated-layer counter remains the fix.
+ReadTopRelationsAsync inline SQL retires only after the new extension deploys to the
+serving hosts — retiring first would regress the API onto the old >9min function.
 EXTENSION-SIDE PRESCRIPTIONS (the durable fix, do when the manifest isn't contended):
   1. source_counts_approx() from pg_stats MCV × reltuples (same sanctioned pattern as
      substrate_counts' planner estimates) or a calculated-layer stats table maintained

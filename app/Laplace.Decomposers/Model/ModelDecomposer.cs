@@ -75,6 +75,16 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public static readonly Hash128 AnalysisMarkerTypeId = EntityTypeRegistry.Id("Model_AnalysisMarker");
     internal const int AnalyzerVersion = 1;
 
+    // Ledger §6 step 1 — the checkpoint as CONTENT. Tensor entities are Blake3 of
+    // the LITERAL BYTE RANGES of the stored file (the tokenizer.json law extended);
+    // the checkpoint root is Merkle over the ordered tensor ids; structure rides
+    // CONTAINS/PRECEDES with context = root (text-lane law). The model never
+    // enters an id — it is the SOURCE.
+    public static readonly Hash128 ModelTensorTypeId = EntityTypeRegistry.Id("Model_Tensor");
+    public static readonly Hash128 ModelCheckpointTypeId = EntityTypeRegistry.Id("Model_Checkpoint");
+    public static readonly Hash128 ContainsTypeId = RelationTypeRegistry.RelationTypeId("CONTAINS");
+    public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
+
     public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
         => Hash128.OfCanonical($"model/analyzed/{modelSource}/{planesMode}/v{AnalyzerVersion}");
 
@@ -128,7 +138,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
-                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker"],
+                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker",
+                "Model_Tensor", "Model_Checkpoint"],
             relationNodeNames: ["MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
                 "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO", "APPEARS_IN",
                 "CONTAINS", "PRECEDES",

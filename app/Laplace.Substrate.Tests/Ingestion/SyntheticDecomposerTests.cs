@@ -10,6 +10,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Ingestion.Tests;
 
+[Trait("Tier", "db")]
 public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {
     private readonly LocalPgFixture _pg;

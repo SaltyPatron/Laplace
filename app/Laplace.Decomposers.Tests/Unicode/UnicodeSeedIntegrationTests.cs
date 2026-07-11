@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Unicode.Tests;
 
+[Trait("Tier", "db")]
 public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 {
     public const string DatabaseName = "laplace_unicode_seed_test";

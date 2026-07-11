@@ -276,7 +276,10 @@ route_prompt_impl(const char *prompt, RouteResult *r)
                    r, "what_is", NULL, false))
         goto done;
 
-    if (try_groups(p, "^(?:tell\\s+me\\s+about|describe|about)\\s+(.+?)\\??$",
+    /* "facts about give" previously fell to the fallback, whose leftmost-span
+     * resolution took 'facts' as the topic (Issue 50). Route the facts/info
+     * framing to describe so the phrase after the preposition is the topic. */
+    if (try_groups(p, "^(?:tell\\s+me\\s+about|describe|about|(?:facts|information|info)\\s+(?:about|on|of|for))\\s+(.+?)\\??$",
                    r, "describe", NULL, false))
         goto done;
 

@@ -17,6 +17,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// registration. A fold+swap cycle here must leave all of those intact.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Tier", "db")]
 public class SqlConsolidationTests
 {
     private readonly LocalPgFixture _pg;
