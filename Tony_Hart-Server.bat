@@ -20,7 +20,8 @@ echo.
 
 call :run build-cutechess || goto :fail
 call :run build-deps || goto :fail
-call :run rebuild-all || goto :fail
+rem Build only — no local install-extensions / IIS. Target DB is hart-server.
+call :run_args rebuild-all "--skip-install" "" rebuild-all || goto :fail
 call :run build-engine-asan || goto :fail
 call :run build-web || goto :fail
 call :run publish || goto :fail
@@ -62,8 +63,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
   -LogPath "%OUT%\%~1.log" ^
   -WorkingDirectory "%CD%" ^
   -CommandLine "call scripts\win\%~1.cmd"
-if errorlevel 1 (
-  echo FAILED %~1 - %OUT%\%~1.log
+rem String compare, not `if errorlevel 1`: negative NTSTATUS exit codes
+rem (crash 0xC0000005, Ctrl+C 0xC000013A) are < 1 and would read as success.
+if not "%ERRORLEVEL%"=="0" (
+  echo FAILED %~1 exit=%ERRORLEVEL% - %OUT%\%~1.log
   exit /b 1
 )
 echo OK %~1
@@ -87,8 +90,8 @@ if "%~3"=="" (
     -WorkingDirectory "%CD%" ^
     -CommandLine "call scripts\win\%~1.cmd %~2 \"%~3\""
 )
-if errorlevel 1 (
-  echo FAILED %~1 %~2 - %OUT%\%~4.log
+if not "%ERRORLEVEL%"=="0" (
+  echo FAILED %~1 %~2 exit=%ERRORLEVEL% - %OUT%\%~4.log
   exit /b 1
 )
 echo OK %~1 %~2

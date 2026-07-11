@@ -75,8 +75,7 @@ REM Heap count capped to the P-core budget so 32 logical procs don't inflate RSS
 if not defined DOTNET_gcServer set "DOTNET_gcServer=1"
 if not defined DOTNET_GCHeapCount set "DOTNET_GCHeapCount=8"
 rem Build/test parallelism: Ninja defaults to logical CPU count (32 on i9-14900KS).
-rem icx + Eigen under -j32 AV's in Live Interval Analysis (gram_schmidt ICE) and the
-rem concurrent 67MB UCDXML tree-sitter emit fails with "UCDXML parse failed". Cap to the
+rem icx + Eigen under -j32 AV's in Live Interval Analysis (gram_schmidt ICE). Cap to the
 rem same P-core budget as MKL/TBB/GCHeapCount. Override CMAKE_BUILD_PARALLEL_LEVEL to raise.
 rem Set LAPLACE_TEST_SERIAL=1 to force serial ctest/regress/dotnet-test orchestration.
 if not defined CMAKE_BUILD_PARALLEL_LEVEL set "CMAKE_BUILD_PARALLEL_LEVEL=8"

@@ -192,9 +192,7 @@ int main(int argc, char** argv) {
     }
     int xml_rc = laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx);
     if (xml_rc != 0) {
-        std::fprintf(stderr,
-            "UCDXML parse failed (rc=%d; -1=args/grammar, -2=tree-sitter error — often OOM under parallel icx)\n",
-            xml_rc);
+        std::fprintf(stderr, "UCDXML parse failed (rc=%d; -1=args, -2=malformed)\n", xml_rc);
         return 4;
     }
     std::vector<uint8_t>().swap(doc);

@@ -3,12 +3,14 @@ setlocal EnableDelayedExpansion
 
 set "SKIP_CLEAN=0"
 set "SKIP_APP=0"
+set "SKIP_INSTALL=0"
 set "APP_TREE_WIPED=0"
 
 :parse_args
 if "%~1"=="" goto args_done
-if /i "%~1"=="--skip-clean" ( set "SKIP_CLEAN=1"  & shift /1 & goto parse_args )
-if /i "%~1"=="--skip-app"   ( set "SKIP_APP=1"    & shift /1 & goto parse_args )
+if /i "%~1"=="--skip-clean"   ( set "SKIP_CLEAN=1"   & shift /1 & goto parse_args )
+if /i "%~1"=="--skip-app"     ( set "SKIP_APP=1"     & shift /1 & goto parse_args )
+if /i "%~1"=="--skip-install" ( set "SKIP_INSTALL=1" & shift /1 & goto parse_args )
 echo unknown flag: %~1
 exit /b 2
 
@@ -83,8 +85,13 @@ for %%F in ("%LAPLACE_HIGHWAY_PERFCACHE_BIN%") do echo highway perfcache ready: 
 
 echo.
 echo ===== PHASE 6 — DEPLOY / INSTALL =====
-rem Extensions just built — skip redundant SQL target cmake hop.
-call "%~dp0install-extensions.cmd" --skip-build || exit /b 1
+if "%SKIP_INSTALL%"=="1" (
+  echo skipped ^(--skip-install^): no local install-extensions / postgresql.auto.conf
+  echo   ^(remote hosts: deploy extensions on the target; this machine only builds^)
+) else (
+  rem Extensions just built — skip redundant SQL target cmake hop.
+  call "%~dp0install-extensions.cmd" --skip-build || exit /b 1
+)
 
 if "%SKIP_APP%"=="0" (
   echo.
@@ -103,7 +110,11 @@ if "%SKIP_APP%"=="0" (
 
 echo.
 echo ===== PHASE 8 — PUBLISH + IIS DEPLOY =====
-call "%~dp0publish-deploy.cmd" --skip-managed-build || exit /b 1
+if "%SKIP_INSTALL%"=="1" (
+  echo skipped ^(--skip-install^): no local publish-deploy / IIS
+) else (
+  call "%~dp0publish-deploy.cmd" --skip-managed-build || exit /b 1
+)
 
 echo.
 echo ===== REBUILD-ALL COMPLETE =====

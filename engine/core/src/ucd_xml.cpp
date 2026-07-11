@@ -4,59 +4,94 @@
 #include <string>
 #include <vector>
 
-#include "tree_sitter/api.h"
-
-#include "laplace/core/grammar_registry.h"
+/* UCD flat XML is a property TABLE — millions of shallow elements with fat
+ * attribute lists — not a nested container. tree-sitter's full AST on the
+ * 67MB nounihan flat file peaks at multiple GiB and returns NULL / ERROR
+ * under ordinary build memory pressure (the "rc=-2 often OOM" failure).
+ *
+ * Tree-sitter remains the unpacker for nested containers (code, JSON, …).
+ * This path keeps the same SAX2 callback shape and fires the same events;
+ * it just does not materialize an AST. */
 
 namespace {
 
-std::string node_text(TSNode n, const uint8_t* buf) {
-    uint32_t a = ts_node_start_byte(n), b = ts_node_end_byte(n);
-    return std::string((const char*)buf + a, b - a);
-}
-
-/* AttValue's span includes its quote delimiters; the value is what's inside. */
-std::string attvalue_text(TSNode n, const uint8_t* buf) {
-    uint32_t a = ts_node_start_byte(n), b = ts_node_end_byte(n);
-    if (b - a >= 2 && (buf[a] == '"' || buf[a] == '\'') && buf[b - 1] == buf[a]) {
-        a += 1; b -= 1;
-    }
-    return std::string((const char*)buf + a, b - a);
-}
-
 struct TagEvent {
     std::string name;
-    std::vector<std::string> kv;      /* n0,v0,n1,v1,... */
-    std::vector<const char*> attrs;   /* pointers into kv + trailing NULL */
+    std::vector<std::string> kv;
+    std::vector<const char*> attrs;
 
-    void load(TSNode tag, const uint8_t* buf) {
-        name.clear(); kv.clear(); attrs.clear();
-        uint32_t n = ts_node_named_child_count(tag);
-        for (uint32_t i = 0; i < n; ++i) {
-            TSNode c = ts_node_named_child(tag, i);
-            const char* t = ts_node_type(c);
-            if (std::strcmp(t, "Name") == 0 && name.empty()) {
-                name = node_text(c, buf);
-            } else if (std::strcmp(t, "Attribute") == 0) {
-                std::string an, av;
-                uint32_t m = ts_node_named_child_count(c);
-                for (uint32_t j = 0; j < m; ++j) {
-                    TSNode g = ts_node_named_child(c, j);
-                    const char* gt = ts_node_type(g);
-                    if (std::strcmp(gt, "Name") == 0) an = node_text(g, buf);
-                    else if (std::strcmp(gt, "AttValue") == 0) av = attvalue_text(g, buf);
-                }
-                kv.push_back(std::move(an));
-                kv.push_back(std::move(av));
-            }
-        }
-        for (const auto& s : kv) attrs.push_back(s.c_str());
-        attrs.push_back(nullptr);
+    void clear() {
+        name.clear();
+        kv.clear();
+        attrs.clear();
     }
 
-    /* SAX2 passes NULL when the element has no attributes. */
-    const char** attr_array() { return kv.empty() ? nullptr : attrs.data(); }
+    const char** attr_array() {
+        attrs.clear();
+        if (kv.empty()) return nullptr;
+        for (const auto& s : kv) attrs.push_back(s.c_str());
+        attrs.push_back(nullptr);
+        return attrs.data();
+    }
 };
+
+/* True if buf[i..] starts with lit (byte compare). */
+bool starts_with(const uint8_t* buf, size_t len, size_t i, const char* lit) {
+    for (size_t k = 0; lit[k]; ++k) {
+        if (i + k >= len || buf[i + k] != (uint8_t)lit[k]) return false;
+    }
+    return true;
+}
+
+size_t skip_ws(const uint8_t* buf, size_t len, size_t i) {
+    while (i < len) {
+        uint8_t c = buf[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') ++i;
+        else break;
+    }
+    return i;
+}
+
+/* NameStartChar / NameChar subset sufficient for UCD element + attribute names. */
+bool is_name_start(uint8_t c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == ':';
+}
+bool is_name_char(uint8_t c) {
+    return is_name_start(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
+}
+
+size_t read_name(const uint8_t* buf, size_t len, size_t i, std::string& out) {
+    out.clear();
+    if (i >= len || !is_name_start(buf[i])) return i;
+    size_t j = i + 1;
+    while (j < len && is_name_char(buf[j])) ++j;
+    out.assign((const char*)buf + i, j - i);
+    return j;
+}
+
+/* Parse attributes from i up to the tag-closer (`>` or `/>`). Leaves i on the closer. */
+int read_attrs(const uint8_t* buf, size_t len, size_t& i, TagEvent& ev) {
+    for (;;) {
+        i = skip_ws(buf, len, i);
+        if (i >= len) return -2;
+        if (buf[i] == '>' || (buf[i] == '/' && i + 1 < len && buf[i + 1] == '>'))
+            return 0;
+        std::string an;
+        size_t j = read_name(buf, len, i, an);
+        if (j == i || an.empty()) return -2;
+        i = skip_ws(buf, len, j);
+        if (i >= len || buf[i] != '=') return -2;
+        i = skip_ws(buf, len, i + 1);
+        if (i >= len || (buf[i] != '"' && buf[i] != '\'')) return -2;
+        uint8_t q = buf[i++];
+        size_t v0 = i;
+        while (i < len && buf[i] != q) ++i;
+        if (i >= len) return -2;
+        ev.kv.push_back(std::move(an));
+        ev.kv.emplace_back((const char*)buf + v0, i - v0);
+        ++i; /* closing quote */
+    }
+}
 
 }  // namespace
 
@@ -65,50 +100,76 @@ extern "C" int laplace_ucd_xml_parse(const uint8_t* buf, size_t len,
                                      laplace_ucd_xml_end_cb on_end,
                                      void* user) {
     if (!buf || !on_start || !on_end) return -1;
-    const TSLanguage* lang = laplace_grammar_lookup_by_id("xml");
-    if (!lang) return -1;
+    if (len == 0) return -2;
 
-    TSParser* parser = ts_parser_new();
-    if (!parser) return -1;
-    if (!ts_parser_set_language(parser, lang)) { ts_parser_delete(parser); return -1; }
-
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, (const char*)buf, (uint32_t)len);
-    ts_parser_delete(parser);
-    if (!tree) return -2;
-
-    TSNode root = ts_tree_root_node(tree);
-    if (ts_node_has_error(root)) { ts_tree_delete(tree); return -2; }
-
-    /* Iterative DFS firing start/end at STag/EmptyElemTag/ETag reproduces SAX
-     * event order exactly; tag internals are never descended into. */
-    TSTreeCursor cur = ts_tree_cursor_new(root);
     TagEvent ev;
-    for (;;) {
-        TSNode n = ts_tree_cursor_current_node(&cur);
-        const char* t = ts_node_type(n);
-        bool descend = true;
-        if (std::strcmp(t, "STag") == 0) {
-            ev.load(n, buf);
-            on_start(user, ev.name.c_str(), ev.attr_array());
-            descend = false;
-        } else if (std::strcmp(t, "EmptyElemTag") == 0) {
-            ev.load(n, buf);
-            on_start(user, ev.name.c_str(), ev.attr_array());
-            on_end(user, ev.name.c_str());
-            descend = false;
-        } else if (std::strcmp(t, "ETag") == 0) {
-            ev.load(n, buf);
-            on_end(user, ev.name.c_str());
-            descend = false;
+    size_t i = 0;
+    while (i < len) {
+        /* Advance to next '<'. */
+        while (i < len && buf[i] != '<') ++i;
+        if (i >= len) break;
+        ++i;
+        if (i >= len) return -2;
+
+        /* Comment */
+        if (starts_with(buf, len, i, "!--")) {
+            i += 3;
+            while (i + 2 < len &&
+                   !(buf[i] == '-' && buf[i + 1] == '-' && buf[i + 2] == '>'))
+                ++i;
+            if (i + 2 >= len) return -2;
+            i += 3;
+            continue;
         }
-        if (descend && ts_tree_cursor_goto_first_child(&cur)) continue;
-        bool at_root = false;
-        while (!ts_tree_cursor_goto_next_sibling(&cur)) {
-            if (!ts_tree_cursor_goto_parent(&cur)) { at_root = true; break; }
+        /* PI / XML decl */
+        if (buf[i] == '?') {
+            ++i;
+            while (i + 1 < len && !(buf[i] == '?' && buf[i + 1] == '>')) ++i;
+            if (i + 1 >= len) return -2;
+            i += 2;
+            continue;
         }
-        if (at_root) break;
+        /* CDATA — UCD flat has none, but reject cleanly if present. */
+        if (starts_with(buf, len, i, "![CDATA[")) {
+            i += 8;
+            while (i + 2 < len &&
+                   !(buf[i] == ']' && buf[i + 1] == ']' && buf[i + 2] == '>'))
+                ++i;
+            if (i + 2 >= len) return -2;
+            i += 3;
+            continue;
+        }
+        /* End tag */
+        if (buf[i] == '/') {
+            ++i;
+            i = skip_ws(buf, len, i);
+            ev.clear();
+            size_t j = read_name(buf, len, i, ev.name);
+            if (j == i || ev.name.empty()) return -2;
+            i = skip_ws(buf, len, j);
+            if (i >= len || buf[i] != '>') return -2;
+            ++i;
+            on_end(user, ev.name.c_str());
+            continue;
+        }
+        /* Start / empty-element tag */
+        ev.clear();
+        size_t j = read_name(buf, len, i, ev.name);
+        if (j == i || ev.name.empty()) return -2;
+        i = j;
+        if (read_attrs(buf, len, i, ev) != 0) return -2;
+        if (i >= len) return -2;
+        bool empty = false;
+        if (buf[i] == '/') {
+            empty = true;
+            ++i;
+            if (i >= len || buf[i] != '>') return -2;
+        } else if (buf[i] != '>') {
+            return -2;
+        }
+        ++i;
+        on_start(user, ev.name.c_str(), ev.attr_array());
+        if (empty) on_end(user, ev.name.c_str());
     }
-    ts_tree_cursor_delete(&cur);
-    ts_tree_delete(tree);
     return 0;
 }

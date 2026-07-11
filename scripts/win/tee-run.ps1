@@ -1,6 +1,10 @@
 #requires -Version 7
-# Live-tail a cmd.exe script: child writes the log; console tails it; exit code preserved.
-# Avoids silent >log redirects that leave the Tony_* windows looking stalled.
+# Run a cmd.exe script ATTACHED to this console, teeing output live to the log.
+# Attached = one console, one lifetime: Ctrl+C / closing the window terminates
+# the actual work, not just a log tail — no hidden orphaned ingest trees.
+# The child's exit code is preserved verbatim, including negative NTSTATUS
+# crash codes (0xC0000005 access violation, 0xC000013A Ctrl+C) that a detached
+# wrapper plus `if errorlevel 1` callers previously misread as success.
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][string]$LogPath,
@@ -15,45 +19,23 @@ if ($logDir -and -not (Test-Path -LiteralPath $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 if (Test-Path -LiteralPath $LogPath) { Remove-Item -LiteralPath $LogPath -Force }
-New-Item -ItemType File -Path $LogPath -Force | Out-Null
 
-# Entire command + redirect must be ONE /c argument so & chaining stays inside cmd.
-$p = Start-Process -FilePath "cmd.exe" `
-  -ArgumentList @("/c", "$CommandLine > `"$LogPath`" 2>&1") `
-  -WorkingDirectory $WorkingDirectory `
-  -PassThru -WindowStyle Hidden
+# Hand the command line to cmd through an environment variable: pwsh passes the
+# bare token %LAPLACE_TEE_CMDLINE% (no spaces, so no re-quoting) and cmd expands
+# it itself. Embedded quotes in $CommandLine never cross the pwsh->native
+# argument-quoting boundary — the pwsh .cmd-launch mangling lived exactly there.
+$env:LAPLACE_TEE_CMDLINE = "$CommandLine 2>&1"
 
-$fs = $null
-$sr = $null
+# AutoFlush StreamWriter = true tee: every line hits the log the moment it hits
+# the console, so a killed run's log ends where the run ended.
+$sw = [System.IO.StreamWriter]::new($LogPath, $false, [System.Text.UTF8Encoding]::new($false))
+$sw.AutoFlush = $true
 try {
-  while (-not $p.HasExited) {
-    if ($null -eq $fs) {
-      try {
-        $fs = [System.IO.File]::Open(
-          $LogPath,
-          [System.IO.FileMode]::Open,
-          [System.IO.FileAccess]::Read,
-          [System.IO.FileShare]::ReadWrite)
-        $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $true, 4096, $true)
-      } catch {
-        Start-Sleep -Milliseconds 50
-        continue
-      }
-    }
-    while ($null -ne ($line = $sr.ReadLine())) {
-      Write-Host $line
-    }
-    Start-Sleep -Milliseconds 50
-  }
-  $null = $p.WaitForExit()
-  if ($null -ne $sr) {
-    while ($null -ne ($line = $sr.ReadLine())) {
-      Write-Host $line
-    }
+  & cmd.exe /c '%LAPLACE_TEE_CMDLINE%' | ForEach-Object {
+    $sw.WriteLine($_)
+    Write-Host $_
   }
 } finally {
-  if ($null -ne $sr) { $sr.Dispose() }
-  if ($null -ne $fs) { $fs.Dispose() }
+  $sw.Dispose()
 }
-
-exit $p.ExitCode
+exit $LASTEXITCODE

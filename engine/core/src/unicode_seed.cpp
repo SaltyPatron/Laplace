@@ -208,9 +208,8 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
         is_zip = (n > 4 && std::strcmp(ucdxml_path + n - 4, ".zip") == 0);
     }
     /* Both branches produce the same in-memory document; only the FILE* source
-     * differs (zip: streamed out of the archive; plain: the file itself). The
-     * parse itself goes through the vendored tree-sitter XML grammar — the same
-     * container-unpacking path as every other format in the tree. */
+     * differs (zip: streamed out of the archive; plain: the file itself). Parse
+     * is the streaming UCDXML SAX in ucd_xml.cpp — not a full AST. */
     FILE* p;
     int (*closer)(FILE*);
     if (is_zip) {
