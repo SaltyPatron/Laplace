@@ -29,6 +29,9 @@ public sealed class GoldenFactory : WebApplicationFactory<Program>
 
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                // Goldens assert the unconfigured-Stripe wire shape. Host
+                // deploy/secrets/stripe.env must not leak into the test host.
+                TestBillingOptions.IsolateFromHostStripe(o);
                 o.Bypass = false;
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = true;

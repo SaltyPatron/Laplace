@@ -8,6 +8,18 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
+/// <summary>
+/// AppComposition loads STRIPE_* from process env / deploy/secrets. Contract and
+/// golden tests must not call live Stripe or inherit host checkout URLs / price ids.
+/// </summary>
+internal static class TestBillingOptions
+{
+    public static void IsolateFromHostStripe(StripeBillingOptions o)
+    {
+        o.ApiKey = null;
+    }
+}
+
 public sealed class SignedWebhookFactory : WebApplicationFactory<Program>
 {
     public const string WebhookSecret = "whsec_laplace_ci_test_secret";
@@ -19,6 +31,7 @@ public sealed class SignedWebhookFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISubstrateClient, UnreachableSubstrateClient>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                TestBillingOptions.IsolateFromHostStripe(o);
                 o.Bypass = false;
                 o.WebhookSecret = WebhookSecret;
                 o.SkipSignatureVerification = true;
@@ -38,6 +51,7 @@ internal sealed class StrictWebhookFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = false;
             }));
@@ -47,5 +61,9 @@ internal sealed class UnconfiguredWebhookFactory : WebApplicationFactory<Program
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
-            services.PostConfigure<StripeBillingOptions>(o => o.WebhookSecret = null));
+            services.PostConfigure<StripeBillingOptions>(o =>
+            {
+                TestBillingOptions.IsolateFromHostStripe(o);
+                o.WebhookSecret = null;
+            }));
 }

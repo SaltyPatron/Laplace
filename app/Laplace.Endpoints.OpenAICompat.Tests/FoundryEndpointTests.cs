@@ -160,6 +160,7 @@ public sealed class FoundryTestFactory : WebApplicationFactory<Program>
             services.AddSingleton<IFoundryExportService, StubFoundryExportService>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = true;
                 o.Bypass = false;

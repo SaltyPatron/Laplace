@@ -128,6 +128,7 @@ public sealed class ExploreBillingFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
+                TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = true;
                 o.Bypass = false;
