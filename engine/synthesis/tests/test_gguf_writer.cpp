@@ -2,32 +2,41 @@
 
 #include <cstring>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 #include "laplace/synthesis/gguf_writer.h"
 
-static const char* kTestPath = "/tmp/laplace_synthesis_test.gguf";
+// Each gtest is a separate ctest process under gtest_discover_tests + -jN.
+// A shared path races: one test's cleanup() deletes another's just-written file.
+static std::string testPath() {
+    const ::testing::TestInfo* info =
+        ::testing::UnitTest::GetInstance()->current_test_info();
+    return std::string("/tmp/laplace_gguf_") + info->name() + ".gguf";
+}
 
-static void cleanup() {
-    std::remove(kTestPath);
+static void cleanup(const std::string& path) {
+    std::remove(path.c_str());
 }
 
 TEST(LaplaceSynthesisGgufWriter, CreateReturnsNonNull) {
-    cleanup();
-    gguf_writer_t* w = gguf_writer_create(kTestPath);
+    const std::string path = testPath();
+    cleanup(path);
+    gguf_writer_t* w = gguf_writer_create(path.c_str());
     ASSERT_NE(w, nullptr);
     gguf_writer_free(w);
-    cleanup();
+    cleanup(path);
 }
 
 TEST(LaplaceSynthesisGgufWriter, FinalizeWritesMagic) {
-    cleanup();
-    gguf_writer_t* w = gguf_writer_create(kTestPath);
+    const std::string path = testPath();
+    cleanup(path);
+    gguf_writer_t* w = gguf_writer_create(path.c_str());
     ASSERT_NE(w, nullptr);
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    FILE* f = std::fopen(kTestPath, "rb");
+    FILE* f = std::fopen(path.c_str(), "rb");
     ASSERT_NE(f, nullptr);
     uint8_t hdr[8];
     ASSERT_EQ(std::fread(hdr, 1, 8, f), 8u);
@@ -41,40 +50,43 @@ TEST(LaplaceSynthesisGgufWriter, FinalizeWritesMagic) {
                  | ((uint32_t)hdr[6] << 16) | ((uint32_t)hdr[7] << 24);
     EXPECT_EQ(ver, 3u);
 
-    cleanup();
+    cleanup(path);
 }
 
 TEST(LaplaceSynthesisGgufWriter, AddMetadataStr) {
-    cleanup();
-    gguf_writer_t* w = gguf_writer_create(kTestPath);
+    const std::string path = testPath();
+    cleanup(path);
+    gguf_writer_t* w = gguf_writer_create(path.c_str());
     ASSERT_NE(w, nullptr);
     EXPECT_EQ(gguf_writer_add_metadata_str(w, "general.architecture", "llama"), 0);
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    FILE* f = std::fopen(kTestPath, "rb");
+    FILE* f = std::fopen(path.c_str(), "rb");
     ASSERT_NE(f, nullptr);
     std::fseek(f, 0, SEEK_END);
     long sz = std::ftell(f);
     std::fclose(f);
     EXPECT_GT(sz, 32L);
 
-    cleanup();
+    cleanup(path);
 }
 
 TEST(LaplaceSynthesisGgufWriter, AddMetadataU32) {
-    cleanup();
-    gguf_writer_t* w = gguf_writer_create(kTestPath);
+    const std::string path = testPath();
+    cleanup(path);
+    gguf_writer_t* w = gguf_writer_create(path.c_str());
     ASSERT_NE(w, nullptr);
     EXPECT_EQ(gguf_writer_add_metadata_u32(w, "llama.attention.head_count", 32), 0);
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
-    cleanup();
+    cleanup(path);
 }
 
 TEST(LaplaceSynthesisGgufWriter, AddBF16Tensor) {
-    cleanup();
-    gguf_writer_t* w = gguf_writer_create(kTestPath);
+    const std::string path = testPath();
+    cleanup(path);
+    gguf_writer_t* w = gguf_writer_create(path.c_str());
     ASSERT_NE(w, nullptr);
 
     const uint16_t data[8] = {0x3F80, 0x3F00, 0x0000, 0x4000,
@@ -84,14 +96,14 @@ TEST(LaplaceSynthesisGgufWriter, AddBF16Tensor) {
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    FILE* f = std::fopen(kTestPath, "rb");
+    FILE* f = std::fopen(path.c_str(), "rb");
     ASSERT_NE(f, nullptr);
     std::fseek(f, 0, SEEK_END);
     long sz = std::ftell(f);
     std::fclose(f);
     EXPECT_GT(sz, 64L);
 
-    cleanup();
+    cleanup(path);
 }
 
 TEST(LaplaceSynthesisGgufWriter, NullPathReturnsNull) {
