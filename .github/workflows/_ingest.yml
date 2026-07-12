@@ -1,0 +1,131 @@
+name: _ingest (reusable phase core)
+
+# One implementation of the ingest → (idempotency) → (gate) contract, called by
+# every seed-*.yml phase workflow. Staged-and-gated (seed-models.yml extends the
+# same shape with synthesize/verify) but source-agnostic: the phase workflow
+# supplies the source, path, and which verifications apply. No per-source tuning lives here — worker/commit sizing is
+# machine-sized inside the CLI (IngestSizing/CpuTopology); language scope is the
+# one operator knob (LAPLACE_INGEST_LANGS, blank = ALL, the witness-manifest law).
+#
+# Assumes the runner already carries a deployed build (run laplace.yml first if the
+# schema or engine changed). Ingest writes PG directly through the CLI — no API dep.
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: "ingest-source.sh source key (single source per call)"
+        type: string
+        required: true
+      path:
+        description: "optional <path> — single file, bare dir, or corpus root (IngestInput.ResolveFiles)"
+        type: string
+        default: ""
+      langs:
+        description: "LAPLACE_INGEST_LANGS scope (blank = ALL languages — the default and the law)"
+        type: string
+        default: ""
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: string
+        default: laplace
+      timeout_minutes:
+        description: "ingest job timeout — sized to the phase, never the silent 360 default"
+        type: number
+        default: 720
+      run_gate:
+        description: "run scripts/decomposer-gate-check.py (only for sources present in decomposer-gates.json)"
+        type: boolean
+        default: true
+      run_idempotency:
+        description: "re-ingest and prove the attestation count is stable (no double-count)"
+        type: boolean
+        default: false
+
+concurrency:
+  # Serialize every ingest against a given DB — one ingest at a time (substrate law).
+  group: laplace-ingest-${{ inputs.database }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_DATA_ROOT: /vault/Data
+
+jobs:
+  ingest:
+    name: "ingest ${{ inputs.source }} → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    env:
+      LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+      PGDATABASE: ${{ inputs.database }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Ingest
+        run: |
+          # Unset LAPLACE_INGEST_LANGS = ALL languages (witness-manifest law).
+          # Narrowing a run is an explicit operator decision via the langs input.
+          langs="${{ inputs.langs }}"
+          [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
+          echo "source=${{ inputs.source }} db=${{ inputs.database }} path='${{ inputs.path }}' langs='${LAPLACE_INGEST_LANGS:-}' (empty=all)"
+          if [ -n "${{ inputs.path }}" ]; then
+            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
+          else
+            scripts/ingest-source.sh "${{ inputs.source }}"
+          fi
+
+  idempotency:
+    name: "verify — re-ingest ${{ inputs.source }} does not double-count"
+    needs: ingest
+    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    env:
+      LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+      PGDATABASE: ${{ inputs.database }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Re-ingest must be a no-op on the evidence count
+        run: |
+          P(){ psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
+          before=$(P "SELECT count(*) FROM laplace.attestations;")
+          echo "attestations before re-ingest: ${before}"
+          langs="${{ inputs.langs }}"; [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
+          if [ -n "${{ inputs.path }}" ]; then
+            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
+          else
+            scripts/ingest-source.sh "${{ inputs.source }}"
+          fi
+          after=$(P "SELECT count(*) FROM laplace.attestations;")
+          echo "attestations after  re-ingest: ${after}"
+          [ "${before}" = "${after}" ] || {
+            echo "::error::idempotency broken — attestations grew ${before} → ${after} on re-ingest (double-count)"; exit 1; }
+          echo "::notice::idempotent — ${after} attestations unchanged on re-ingest"
+
+  gate:
+    name: "gate — ${{ inputs.source }} consensus checks"
+    needs: [ingest, idempotency]
+    # always(): idempotency is skipped when run_idempotency=false; still gate once ingest is green.
+    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.idempotency.result != 'failure' }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Decomposer consensus + layer gates
+        run: |
+          python3 scripts/decomposer-gate-check.py \
+            --source "${{ inputs.source }}" \
+            --dbname "${{ inputs.database }}" \
+            --host /var/run/postgresql \
+            --user laplace_admin

@@ -1,0 +1,41 @@
+name: Seed — chess
+
+# The chess modality as its own phase. Each choice is a distinct decomposer, one
+# per run (no bucket):
+#   chess        — PGN games: record (ChessPgn) + substrate analyze pass
+#   openings     — opening book (ChessOpenings)
+#   chess-books  — annotated chess books (ChessBook): record + derive in one pass
+# All take an explicit corpus dir (no DATA_ROOT default — the <path> is required).
+# Delegates to _ingest.yml; chess is not in decomposer-gates.json, so run_gate:false.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "chess source (one per run)"
+        type: choice
+        required: true
+        options: [chess, openings, chess-books]
+      path:
+        description: "corpus dir (e.g. /vault/Data/Games/Chess) — required"
+        type: string
+        required: true
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: false
+      run_idempotency: false

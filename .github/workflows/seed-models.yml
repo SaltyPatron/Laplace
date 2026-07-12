@@ -1,9 +1,19 @@
-name: Laplace — model pipeline
+name: Seed — models
 
-# Model ingest → idempotency proof → consensus gates → ranked-mu query →
-# GGUF synthesis → GGUF verify. Dispatchable port of the archived
-# model-pipeline.yml (which was workflow_call-only and had no caller).
+# The model modality as a phase, uniform with the other seed-*.yml: a checkpoint is
+# a witness like WordNet — its tensors assert token→token couplings that fold into
+# consensus. Stages (each gates the next), the model-specific extension of the
+# _ingest.yml ingest→idempotency→gate contract:
+#   ingest (token×token bilinear circuits) → idempotency → consensus-gates
+#     → ranked-mu query → synthesize (substrate → GGUF) → verify GGUF
 # Runs against the live seeded substrate — never nukes.
+#
+# NOTE: this box (hart-desktop) is the intended model processor — it holds the
+# checkpoints (LAPLACE_MODEL_HUB=D:\Models\hub) and the compute; only the folded
+# attestations cross the wire to hart-server. That requires hart-desktop registered
+# as a self-hosted runner for this repo. Until then this workflow has no runner and
+# will not start — expected. The operator path meanwhile is the CLI / Tony_Hart-*.bat
+# with LAPLACE_PGHOST=hart-server (env.cmd), not a fallback script.
 
 on:
   workflow_dispatch:
@@ -12,9 +22,15 @@ on:
         description: "HF snapshot dir to ingest + synthesize (blank = $LAPLACE_TINYLLAMA_DIR on the runner)"
         type: string
         default: ""
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
 
 concurrency:
-  group: laplace-model
+  # Serialize against every other ingest on this DB — one ingest at a time.
+  group: laplace-ingest-${{ inputs.database }}
   cancel-in-progress: false
 
 permissions:
@@ -24,6 +40,8 @@ env:
   MODEL_DIR_INPUT: ${{ inputs.model_dir }}
   GGUF_OUT: /tmp/laplace-model-substrate-ci.gguf
   CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build --"
+  LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+  PGDATABASE: ${{ inputs.database }}
 
 jobs:
   ingest:
@@ -62,7 +80,7 @@ jobs:
 
       - name: Gate relation types (consensus)
         run: |
-          P(){ psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
+          P(){ psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
           gate() {
             n=$(P "SELECT laplace.consensus_count(laplace.relation_type_id('$1'));")
             [ "${n:-0}" -ge "$2" ] || { echo "::error::consensus type $1 has ${n:-0} relations (need >= $2)"; exit 1; }
@@ -75,7 +93,7 @@ jobs:
 
       - name: Verify consensus materialized by the ingest period fold
         run: |
-          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          PSQL=(psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
           cn=$("${PSQL[@]}" "SELECT count(*) FROM laplace.consensus;")
           fresh=$("${PSQL[@]}" "SELECT count(*) FROM laplace.consensus WHERE last_observed_at > now() - interval '1 day';")
           echo "consensus rows = $cn (touched this period: $fresh)"
@@ -84,8 +102,8 @@ jobs:
 
       - name: Ranked-mu SQL inference over consensus (no GPU)
         run: |
-          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
-          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "SELECT * FROM laplace.top_relations_readable(10);"
+          PSQL=(psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "SELECT * FROM laplace.top_relations_readable(10);"
           rows=$("${PSQL[@]}" "SELECT count(*) FROM laplace.top_relations_readable(10);")
           [ "${rows:-0}" -gt 0 ] || { echo "::error::ranked-mu query returned no rows"; exit 1; }
           echo "::notice::ranked-mu query OK — $rows top relations rendered readable"

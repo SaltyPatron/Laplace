@@ -1,0 +1,49 @@
+name: Seed — knowledge
+
+# The non-foundation lexical + usage sources, each an individually-triggerable
+# source (one per run) — no bucket, the dropdown IS the per-source selector:
+#   omw · conceptnet · atomic2020 · ud · wiktionary · tatoeba · opensubtitles
+# All carry an IngestDataPaths default and a decomposer-gates.json entry, so the
+# consensus gate runs. langs matters for ud/wiktionary (blank = ALL — the law).
+# Delegates to _ingest.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "knowledge source (one per run)"
+        type: choice
+        required: true
+        options: [omw, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
+      path:
+        description: "optional <path> — single file, bare dir, or corpus root (blank = DATA_ROOT default)"
+        type: string
+        default: ""
+      langs:
+        description: "LAPLACE_INGEST_LANGS scope (blank = ALL languages — the default and the law)"
+        type: string
+        default: ""
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      langs: ${{ inputs.langs }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
