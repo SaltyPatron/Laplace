@@ -69,8 +69,13 @@ jobs:
           fail=0
           for f in \
             .github/workflows/laplace.yml \
-            .github/workflows/ingest.yml \
-            .github/workflows/model.yml \
+            .github/workflows/_ingest.yml \
+            .github/workflows/seed-foundation.yml \
+            .github/workflows/seed-knowledge.yml \
+            .github/workflows/seed-documents.yml \
+            .github/workflows/seed-chess.yml \
+            .github/workflows/seed-code.yml \
+            .github/workflows/seed-models.yml \
             .github/actions/setup-laplace-env/action.yml \
             scripts/pipeline.sh \
             scripts/test-parallel.sh \

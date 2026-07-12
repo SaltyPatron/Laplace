@@ -13,7 +13,8 @@ USAGE=(tatoeba opensubtitles)
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
-    echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} safetensors" >&2
+    echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
+    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books safetensors" >&2
     exit 2
 fi
 
@@ -50,7 +51,11 @@ case "$source" in
         build_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink)
+    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes)
+        # Default-path sources: IngestDataPaths resolves a DATA_ROOT-relative default
+        # when no <path> is given (stack=stack-v2, tiny-codes=tiny-codes, document=text…).
+        # An explicit <path> (single file, bare dir, or ecosystem root) always wins via
+        # IngestInput.ResolveFiles — `ingest ud <one.conllu>` validates in seconds.
         build_cli
         if [[ "$source" == "document" && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
@@ -61,10 +66,19 @@ case "$source" in
             ingest "$source"
         fi
         ;;
-    chess|openings)
-        # Chess corpora are plain .NET decomposers (ChessPgn / ChessOpenings) like every
-        # other source — cross-platform, not a Windows-only thing. They just take an explicit
-        # corpus dir (no fixed default under DATA_ROOT).
+    code|repo|tabular|recipe)
+        # Witness-unit code/data sources: the <path> IS the witness boundary (a file,
+        # a repository root, a table), so it is REQUIRED — no DATA_ROOT default. Same
+        # table-driven CLI dispatch as everything else (IngestCodeAsync / IngestRepoAsync
+        # / IngestTabularAsync / IngestRecipeAsync).
+        build_cli
+        [[ -n "$path" ]] || { echo "Usage: $0 $source <file-or-directory>" >&2; exit 2; }
+        ingest "$source" "$path"
+        ;;
+    chess|openings|chess-books)
+        # Chess corpora are plain .NET decomposers (ChessPgn / ChessOpenings / ChessBook)
+        # like every other source — cross-platform, not a Windows-only thing. They just
+        # take an explicit corpus dir (no fixed default under DATA_ROOT).
         build_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"

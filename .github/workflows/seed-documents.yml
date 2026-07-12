@@ -1,0 +1,40 @@
+name: Seed — documents
+
+# Document ingestion as its own first-class phase (previously shoehorned into the
+# generic ingest dropdown). Text rides the codepoint ladder via IngestDocumentAsync.
+# The <path> is single-file capable (IngestInput.ResolveFiles) — point it at one
+# file to validate in seconds, or a directory / corpus root for a full run.
+# Blank <path> falls back to the DATA_ROOT/test-data/text default. Delegates to
+# _ingest.yml; document carries a decomposer-gates.json entry (skip_layer_complete,
+# no consensus gates) so the gate is a lenient presence check.
+
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "<path> — a single file (fast validate), a directory, or a corpus root (blank = DATA_ROOT/test-data/text)"
+        type: string
+        default: ""
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: document
+      path: ${{ inputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 480
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}

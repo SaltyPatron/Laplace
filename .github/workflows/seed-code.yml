@@ -1,0 +1,46 @@
+name: Seed — code
+
+# Code lane as an individual phase. Every choice is a distinct table-driven CLI
+# dispatch (IngestDispatchTable) — no grouping, one source per run:
+#   code / repo / tabular / recipe  — witness-unit sources; <path> REQUIRED
+#                                     (a file, a repository root, a table).
+#   stack / tiny-codes              — carry an IngestDataPaths default; <path> optional.
+# The code corpus lives at /vault/Data/code-authority (cpython, postgres, docs,
+# runtime). Delegates to _ingest.yml; no decomposer-gates.json entry for these yet,
+# so the consensus gate is off (run_gate: false).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "code source (one per run)"
+        type: choice
+        required: true
+        options: [code, repo, stack, tiny-codes, tabular, recipe]
+      path:
+        description: "<path> — required for code/repo/tabular/recipe (e.g. /vault/Data/code-authority/cpython); optional for stack/tiny-codes"
+        type: string
+        default: ""
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: false
+      run_idempotency: ${{ inputs.run_idempotency }}

@@ -1,0 +1,50 @@
+name: Seed — foundation ladder
+
+# The floor + core-lexical ladder as a single dispatchable phase:
+#   unicode → iso639 → cili → wordnet → verbnet → propbank
+#           → framenet → mapnet → wordframenet → semlink
+# Ordered and idempotent — each rung no-ops when its layer is already complete
+# (ensure-foundation.sh checks HasLayerCompleted per decomposer). This is the one
+# phase that is a multi-source ladder rather than a single ingest, so it drives
+# ensure-foundation.sh directly instead of the _ingest.yml single-source core.
+
+on:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        type: choice
+        options: [laplace, laplace-dev]
+        default: laplace
+      force:
+        description: "re-ingest every rung even if its layer is already complete"
+        type: boolean
+        default: false
+
+concurrency:
+  group: laplace-ingest-${{ inputs.database }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_DATA_ROOT: /vault/Data
+  PGDATABASE: ${{ inputs.database }}
+  LAPLACE_DBNAME: ${{ inputs.database }}
+
+jobs:
+  foundation:
+    name: "foundation ladder → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Ensure foundation
+        run: |
+          args=()
+          [ "${{ inputs.force }}" = "true" ] && args+=(--force)
+          bash scripts/ensure-foundation.sh "${args[@]}"
