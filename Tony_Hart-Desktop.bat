@@ -40,15 +40,18 @@ call :tee rebuild-all "rebuild-all.cmd %MODULES%" || goto :fail
 rem call :tee build-engine-asan "build-engine-asan.cmd" || goto :fail
 
 rem ---- optional DB / seed campaigns (uncomment as needed) ----
-rem call :tee db-reset "db-reset.cmd" || goto :fail
-rem call :tee seed-foundation "seed-foundation.cmd" || goto :fail
-rem call :tee seed-openings "seed-step.cmd openings \"D:\Data\Ingest\Games\Chess\openings\"" || goto :fail
-rem call :tee seed-chesscom "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
-rem call :tee seed-documents "seed-step.cmd document \"D:\Data\Ingest\test-data\text\"" || goto :fail
-rem call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
-rem call :tee seed-omw "seed-step.cmd omw" || goto :fail
-rem call :tee seed-conceptnet "seed-step.cmd conceptnet" || goto :fail
-rem call :tee seed-ud "seed-step.cmd ud" || goto :fail
+call :tee db-reset "db-reset.cmd" || goto :fail
+call :tee seed-foundation "seed-foundation.cmd" || goto :fail
+call :tee seed-openings "seed-step.cmd openings \"D:\Data\Ingest\Games\Chess\openings\"" || goto :fail
+rem ---- personal chess.com PGNs (unrem one/more; chess.com export max=1000) ----
+rem call :tee seed-chess-anthony "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
+rem call :tee seed-chess-games "seed-step.cmd chess \"C:\Users\ahart\Downloads\games.pgn\"" || goto :fail
+rem call :tee seed-chess-games1 "seed-step.cmd chess \"C:\Users\ahart\Downloads\games(1).pgn\"" || goto :fail
+call :tee seed-documents "seed-step.cmd document \"D:\Data\Ingest\test-data\text\"" || goto :fail
+call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
+call :tee seed-omw "seed-step.cmd omw" || goto :fail
+call :tee seed-conceptnet "seed-step.cmd conceptnet" || goto :fail
+call :tee seed-ud "seed-step.cmd ud" || goto :fail
 rem call :tee seed-wiktionary "seed-step.cmd wiktionary" || goto :fail
 rem call :tee seed-tatoeba "seed-step.cmd tatoeba" || goto :fail
 rem call :tee seed-opensubtitles "seed-step.cmd opensubtitles" || goto :fail
