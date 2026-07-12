@@ -1,0 +1,26 @@
+-- witness_precedes_chain(text, source): deposit a text's consecutive-token PRECEDES
+-- bigrams as attestations under a source -- the OODA ACT/OBSERVE deposit. This is how a
+-- prompt becomes witnessed content and a response becomes a first-class witness: the
+-- generated text's own edges fold into the SAME consensus the next walk reads
+-- (evaluation IS ingestion). Self-signals are outranked by design (Response/UserPrompt
+-- trust classes), so self-witnessing cannot outshout curated sources.
+CREATE OR REPLACE FUNCTION witness_precedes_chain(p_text text, p_source bytea)
+    RETURNS int
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    r_prec bytea := relation_type_id('PRECEDES');
+    ids    bytea[];
+    n      int;
+    c      int := 0;
+BEGIN
+    SELECT array_agg(id ORDER BY ord) INTO ids
+    FROM prompt_state(p_text) WHERE id IS NOT NULL;
+    n := COALESCE(array_length(ids,1), 0);
+    FOR i IN 1 .. GREATEST(n-1, 0) LOOP
+        PERFORM laplace_witness(ids[i], r_prec, ids[i+1], p_source, 1000000000);
+        c := c + 1;
+    END LOOP;
+    RETURN c;
+END;
+$$;
