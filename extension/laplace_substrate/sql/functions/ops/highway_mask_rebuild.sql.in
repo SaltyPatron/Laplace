@@ -2,10 +2,14 @@
 -- by pkey range with a COMMIT per batch (10M+ entities in one tx would bloat and
 -- lock). This is the REGENERATE tool: run after any highway bit renumbering (adding
 -- a relation reorders the alphabetical codegen) or to populate a generation seeded
--- before the fold-time refresh existed. Idempotent; safe to re-run.
+-- before the fold-time refresh existed. Idempotent; safe to re-run and to interrupt
+-- (committed batches persist).
+--
+-- No SET clause on the procedure: a PL/pgSQL procedure carrying a SET clause is
+-- barred from transaction control (COMMIT), so references are schema-qualified
+-- instead. Invoke with: CALL @extschema@.highway_mask_rebuild();
 CREATE OR REPLACE PROCEDURE highway_mask_rebuild(p_batch int DEFAULT 500000)
-    LANGUAGE plpgsql
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql AS $$
 DECLARE
     last_id bytea := decode(repeat('00', 16), 'hex');
     ids bytea[];
@@ -15,9 +19,9 @@ DECLARE
 BEGIN
     LOOP
         SELECT array_agg(s.id ORDER BY s.id) INTO ids FROM (
-            SELECT id FROM entities WHERE id > last_id ORDER BY id LIMIT p_batch) s;
+            SELECT id FROM @extschema@.entities WHERE id > last_id ORDER BY id LIMIT p_batch) s;
         EXIT WHEN ids IS NULL;
-        n := highway_mask_refresh(ids);
+        n := @extschema@.highway_mask_refresh(ids);
         total := total + n;
         scanned := scanned + cardinality(ids);
         last_id := ids[cardinality(ids)];
