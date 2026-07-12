@@ -1,0 +1,29 @@
+-- Full-table population of entities.highway_mask via highway_mask_refresh, batched
+-- by pkey range with a COMMIT per batch (10M+ entities in one tx would bloat and
+-- lock). This is the REGENERATE tool: run after any highway bit renumbering (adding
+-- a relation reorders the alphabetical codegen) or to populate a generation seeded
+-- before the fold-time refresh existed. Idempotent; safe to re-run.
+CREATE OR REPLACE PROCEDURE highway_mask_rebuild(p_batch int DEFAULT 500000)
+    LANGUAGE plpgsql
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    last_id bytea := decode(repeat('00', 16), 'hex');
+    ids bytea[];
+    n bigint;
+    total bigint := 0;
+    scanned bigint := 0;
+BEGIN
+    LOOP
+        SELECT array_agg(s.id ORDER BY s.id) INTO ids FROM (
+            SELECT id FROM entities WHERE id > last_id ORDER BY id LIMIT p_batch) s;
+        EXIT WHEN ids IS NULL;
+        n := highway_mask_refresh(ids);
+        total := total + n;
+        scanned := scanned + cardinality(ids);
+        last_id := ids[cardinality(ids)];
+        RAISE NOTICE 'highway_mask_rebuild: % masks written / % entities scanned (through %)',
+            total, scanned, encode(last_id, 'hex');
+        COMMIT;
+    END LOOP;
+    RAISE NOTICE 'highway_mask_rebuild done: % masks written / % entities scanned', total, scanned;
+END $$;

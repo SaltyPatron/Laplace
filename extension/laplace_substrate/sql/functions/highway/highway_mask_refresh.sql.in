@@ -1,0 +1,48 @@
+-- Recompute entities.highway_mask for the given entity ids from their CONSENSUS
+-- participation (subject or object) — the one derivation of the relation-membership
+-- mask, matching the foundry's authoritative fallback (FoundryExport
+-- FillHighwayMasksAsync): OR of the relation bits over every distinct governed
+-- relation type the entity has edges under. Recompute-not-accumulate: idempotent,
+-- self-healing, no drift. Entities whose every edge type is ungoverned keep NULL.
+-- Called per fold epoch by the ingest spine (every decomposer rides it) and by
+-- highway_mask_rebuild for full population. No-ops with a warning when the highway
+-- perfcache is not configured (hart-server before its blob deploys) so the fold
+-- never faults on mask maintenance.
+CREATE OR REPLACE FUNCTION highway_mask_refresh(p_ids bytea[])
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    updated bigint;
+BEGIN
+    IF NOT laplace_highway_ready() THEN
+        RAISE WARNING 'highway_mask_refresh: highway perfcache not configured — masks not refreshed (set laplace_substrate.highway_perfcache_path)';
+        RETURN 0;
+    END IF;
+
+    WITH t AS (SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)),
+    tp AS (
+        SELECT t.id, c.type_id FROM t JOIN consensus c ON c.subject_id = t.id
+        GROUP BY t.id, c.type_id
+        UNION
+        SELECT t.id, c.type_id FROM t JOIN consensus c ON c.object_id = t.id
+        GROUP BY t.id, c.type_id
+    ),
+    bits AS (
+        SELECT q.id, q.bit
+        FROM (SELECT tp.id, relation_highway_bit(tp.type_id) AS bit FROM tp) q
+        WHERE q.bit IS NOT NULL
+    ),
+    m AS (
+        SELECT bits.id, laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
+        FROM bits GROUP BY bits.id
+    ),
+    upd AS (
+        UPDATE entities e SET highway_mask = m.mask
+        FROM m
+        WHERE e.id = m.id AND m.mask IS DISTINCT FROM e.highway_mask
+        RETURNING 1
+    )
+    SELECT count(*) INTO updated FROM upd;
+    RETURN updated;
+END $$;
