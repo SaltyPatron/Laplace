@@ -276,6 +276,37 @@ internal static class ExploreEndpoints
         .Produces<ExploreContainersDetailResponse>()
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/entities/{idHex}/graph", async (
+            HttpRequest request,
+            string idHex,
+            int? hops,
+            int? fanout,
+            ISubstrateClient substrate,
+            IBillingOrchestrator billing,
+            CancellationToken ct) =>
+        {
+            return await RunGatedExploreAsync(request, billing, "visualization.deep_export", ct, async gateQuote =>
+            {
+                var graph = await substrate.ExploreConsensusGraphAsync(
+                    idHex, hops ?? 2, fanout ?? 10, ct);
+                if (graph is null)
+                    return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
+
+                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+
+                return Results.Json(new ExploreGraphDetailResponse(
+                    Id: $"graph-{Guid.NewGuid():N}",
+                    Object: "laplace.explore.consensus_graph",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Graph: graph,
+                    Billing: gateQuote is null ? null : QuoteGate.MakeReceipt(gateQuote)));
+            });
+        })
+        .WithTags("explore")
+        .Produces<ExploreGraphDetailResponse>()
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<IResult> RunGatedExploreAsync(

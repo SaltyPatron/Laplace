@@ -127,7 +127,7 @@ goto wait_ready
 :ready_ok
 echo.
 echo [deploy-api] OK - %LIVE% mirrored from %SRC% and /health is ok
-echo [deploy-api] note: /health/ready needs db-reset + seed-foundation ^(later in Tony_Hart-Desktop^)
+echo [deploy-api] note: /health/ready needs db-reset + seed-foundation ^(later on HART-DESKTOP^)
 exit /b 0
 
 :verify_hash

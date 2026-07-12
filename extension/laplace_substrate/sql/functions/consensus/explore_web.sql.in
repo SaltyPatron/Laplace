@@ -1,0 +1,15 @@
+CREATE OR REPLACE FUNCTION explore_web(
+    p_seed bytea,
+    p_hops int DEFAULT 2,
+    p_fanout int DEFAULT 10,
+    p_max_nodes int DEFAULT 160)
+    RETURNS TABLE(
+        source_id bytea,
+        type_id bytea,
+        object_id bytea,
+        hop smallint,
+        rating bigint,
+        rd bigint,
+        witness_count bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_explore_web'
+    LANGUAGE C STABLE;

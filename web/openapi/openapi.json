@@ -1009,6 +1009,79 @@
         }
       }
     },
+    "/v1/explore/entities/{idHex}/graph": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hops",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "fanout",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreGraphDetailResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/recipe/compile": {
       "post": {
         "tags": [
@@ -4726,6 +4799,185 @@
           }
         }
       },
+      "ExploreGraphDetailResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "graph",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/ExploreGraphResponse"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExploreGraphEdge": {
+        "required": [
+          "source_id_hex",
+          "target_id_hex",
+          "type",
+          "eff_mu",
+          "witnesses",
+          "hop"
+        ],
+        "type": "object",
+        "properties": {
+          "source_id_hex": {
+            "type": "string"
+          },
+          "target_id_hex": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "hop": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ExploreGraphNode": {
+        "required": [
+          "id_hex",
+          "label",
+          "hop",
+          "tier"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "hop": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          }
+        }
+      },
+      "ExploreGraphResponse": {
+        "required": [
+          "id_hex",
+          "label",
+          "hops",
+          "fanout",
+          "nodes",
+          "edges"
+        ],
+        "type": "object",
+        "properties": {
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "hops": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "fanout": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreGraphNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreGraphEdge"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_nodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          }
+        }
+      },
       "ExploreMemberRow": {
         "required": [
           "member_id_hex",
@@ -4851,6 +5103,57 @@
           },
           "axis": {
             "type": "string"
+          },
+          "neighbor_id_hex": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "z": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "m": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "radius": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },

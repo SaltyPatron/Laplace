@@ -117,7 +117,13 @@ public sealed record ExploreNeighborRow(
     [property: JsonPropertyName("neighbor")] string Neighbor,
     [property: JsonPropertyName("geodesic")] double Geodesic,
     [property: JsonPropertyName("frechet")] double? Frechet,
-    [property: JsonPropertyName("axis")] string Axis);
+    [property: JsonPropertyName("axis")] string Axis,
+    [property: JsonPropertyName("neighbor_id_hex")] string? NeighborIdHex = null,
+    [property: JsonPropertyName("x")] double? X = null,
+    [property: JsonPropertyName("y")] double? Y = null,
+    [property: JsonPropertyName("z")] double? Z = null,
+    [property: JsonPropertyName("m")] double? M = null,
+    [property: JsonPropertyName("radius")] double? Radius = null);
 
 public sealed record ExploreNeighborsResponse(
     [property: JsonPropertyName("id_hex")] string IdHex,
@@ -156,6 +162,37 @@ public sealed record ExplorePeersDetailResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("created")] long Created,
     [property: JsonPropertyName("peers")] ExplorePeersResponse Peers,
+    [property: JsonPropertyName("billing")] BillingReceipt? Billing);
+
+public sealed record ExploreGraphNode(
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("hop")] int Hop,
+    [property: JsonPropertyName("tier")] short? Tier);
+
+public sealed record ExploreGraphEdge(
+    [property: JsonPropertyName("source_id_hex")] string SourceIdHex,
+    [property: JsonPropertyName("target_id_hex")] string TargetIdHex,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("eff_mu")] decimal EffMu,
+    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("hop")] int Hop);
+
+public sealed record ExploreGraphResponse(
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("hops")] int Hops,
+    [property: JsonPropertyName("fanout")] int Fanout,
+    [property: JsonPropertyName("nodes")] IReadOnlyList<ExploreGraphNode> Nodes,
+    [property: JsonPropertyName("edges")] IReadOnlyList<ExploreGraphEdge> Edges,
+    [property: JsonPropertyName("truncated")] bool Truncated = false,
+    [property: JsonPropertyName("max_nodes")] int MaxNodes = 0);
+
+public sealed record ExploreGraphDetailResponse(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("created")] long Created,
+    [property: JsonPropertyName("graph")] ExploreGraphResponse Graph,
     [property: JsonPropertyName("billing")] BillingReceipt? Billing);
 
 public sealed record ExploreContainerRow(

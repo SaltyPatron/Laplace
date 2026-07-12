@@ -1,8 +1,9 @@
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Muted } from '@ui';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
 import type { ExplorePhysicalityRow } from '../types';
+import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
 import styles from './GlomeCanvas.module.css';
 
 export interface GlomeNode {
@@ -24,20 +25,53 @@ function spherePos(n: GlomeNode): [number, number, number] {
   return [(n.x / len) * s, (n.y / len) * s, (n.z / len) * s];
 }
 
+/** Demand-mode: redraw when node set changes; OrbitControls still invalidates on input. */
+function InvalidateOnData({ revision }: { revision: string }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    invalidate();
+  }, [revision, invalidate]);
+  return null;
+}
+
+function ContextLossGuard() {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+    };
+    canvas.addEventListener('webglcontextlost', onLost, false);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', onLost, false);
+      try {
+        gl.dispose();
+      } catch {
+        /* already gone */
+      }
+    };
+  }, [gl]);
+  return null;
+}
+
 function GlomeScene({
   nodes,
   trajectory,
   highlightIds,
+  revision,
 }: {
   nodes: GlomeNode[];
   trajectory: [number, number, number][];
   highlightIds: Set<string>;
+  revision: string;
 }) {
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const limited = nodes.slice(0, MAX_NODES);
 
   return (
     <>
+      <ContextLossGuard />
+      <InvalidateOnData revision={revision} />
       <ambientLight intensity={0.55} />
       <pointLight position={[4, 4, 4]} intensity={1.2} />
       {limited.map((n) => {
@@ -74,7 +108,7 @@ function GlomeScene({
           </div>
         </Html>
       ) : null}
-      <OrbitControls enablePan enableZoom />
+      <OrbitControls enablePan enableZoom makeDefault />
     </>
   );
 }
@@ -109,11 +143,16 @@ export function GlomeCanvas({
   /** Stretch to fill a flex parent instead of a fixed viewport box. */
   fill?: boolean;
 }) {
+  const webGlReady = useDeferredWebGlMount(nodes.length > 0);
   const trajectory = useMemo(
     () => trajectoryPoints ?? nodes.filter((n) => n.kind === 'constituent').map((n) => spherePos(n)),
     [nodes, trajectoryPoints],
   );
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
+  const revision = useMemo(
+    () => `${nodes.length}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes],
+  );
 
   if (nodes.length === 0) {
     return <div className={styles.empty}>No S³ coordinates to render.</div>;
@@ -125,11 +164,29 @@ export function GlomeCanvas({
         <Muted className={styles.cap}>Showing {MAX_NODES} of {nodes.length} nodes</Muted>
       ) : null}
       <div className={fill ? `${styles.canvas} ${styles.canvasFill}` : styles.canvas}>
-        <Canvas camera={{ position: [0, 0, 2.2], fov: 50 }}>
-          <Suspense fallback={null}>
-            <GlomeScene nodes={nodes} trajectory={trajectory} highlightIds={highlights} />
-          </Suspense>
-        </Canvas>
+        {webGlReady ? (
+          <Canvas
+            frameloop="demand"
+            dpr={[1, 1.5]}
+            camera={{ position: [0, 0, 2.2], fov: 50 }}
+            gl={{
+              antialias: true,
+              powerPreference: 'default',
+              failIfMajorPerformanceCaveat: false,
+              // Avoid leaking a second context if React StrictMode remounts.
+              preserveDrawingBuffer: false,
+            }}
+          >
+            <Suspense fallback={null}>
+              <GlomeScene
+                nodes={nodes}
+                trajectory={trajectory}
+                highlightIds={highlights}
+                revision={revision}
+              />
+            </Suspense>
+          </Canvas>
+        ) : null}
       </div>
       <p className={styles.note}>Structural identity on S³ — not semantic embedding.</p>
     </div>

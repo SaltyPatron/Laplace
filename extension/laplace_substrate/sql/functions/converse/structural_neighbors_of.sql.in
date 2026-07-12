@@ -1,0 +1,62 @@
+-- Entity-id keyed structural KNN with S³ coords (explore glome overlay).
+-- Unlike structural_neighbors(text), does not re-resolve via prompt_state.
+CREATE OR REPLACE FUNCTION structural_neighbors_of(
+    p_id bytea,
+    p_k  integer DEFAULT 10)
+    RETURNS TABLE(
+        neighbor_id bytea,
+        neighbor    text,
+        x           double precision,
+        y           double precision,
+        z           double precision,
+        m           double precision,
+        radius      double precision,
+        geodesic    double precision,
+        frechet     double precision)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $sn$
+DECLARE
+    v_coord geometry;
+    v_traj  geometry;
+BEGIN
+    SELECT p.coord, p.trajectory
+      INTO v_coord, v_traj
+    FROM physicalities p
+    WHERE p.entity_id = p_id
+      AND p.type = 1
+      AND p.coord IS NOT NULL
+    ORDER BY p.id
+    LIMIT 1;
+    IF v_coord IS NULL THEN RETURN; END IF;
+
+    RETURN QUERY
+    WITH knn AS (
+        SELECT p.entity_id, p.coord, p.trajectory, p.radius_origin
+        FROM physicalities p
+        WHERE p.type = 1
+          AND p.coord IS NOT NULL
+        ORDER BY p.coord <<->> v_coord
+        LIMIT GREATEST(p_k * 20, 200)),
+    dedup AS (
+        SELECT DISTINCT ON (k.entity_id)
+               k.entity_id, k.coord, k.trajectory, k.radius_origin,
+               public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
+        FROM knn k
+        ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
+    nearest AS (
+        SELECT entity_id, coord, trajectory, radius_origin, geo
+        FROM dedup
+        WHERE entity_id <> p_id
+        ORDER BY geo
+        LIMIT GREATEST(1, p_k))
+    SELECT n.entity_id,
+           COALESCE(NULLIF(render_text_fast(n.entity_id, 8), ''), left(encode(n.entity_id, 'hex'), 16)),
+           ST_X(n.coord), ST_Y(n.coord), ST_Z(n.coord), ST_M(n.coord),
+           n.radius_origin,
+           n.geo,
+           CASE WHEN n.trajectory IS NOT NULL AND v_traj IS NOT NULL
+                THEN public.laplace_frechet_4d(n.trajectory, v_traj) END
+    FROM nearest n
+    ORDER BY n.geo;
+END;
+$sn$;

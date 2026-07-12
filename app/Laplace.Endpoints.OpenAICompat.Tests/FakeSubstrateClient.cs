@@ -78,6 +78,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<ExploreContainersResponse?> ExploreContainersAsync(
         string idHex, int maxHops, int limit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
+        string idHex, int hops, int fanout, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -270,7 +274,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<ExploreNeighborsResponse?> ExploreNeighborsAsync(string idHex, int k, CancellationToken ct) =>
         Task.FromResult<ExploreNeighborsResponse?>(new ExploreNeighborsResponse(
             idHex,
-            [new ExploreNeighborRow("cetacean", 0.12, 0.34, "structural")],
+            [new ExploreNeighborRow("cetacean", 0.12, 0.34, "structural",
+                NeighborIdHex: CetaceanIdHex, X: 0.1, Y: 0.2, Z: 0.3, M: 0.4, Radius: 0.5)],
             [new SalientFactRow("IS_A", "cetacean", 0.91m, 42)]));
 
     public Task<ExploreMembersResponse?> ExploreMembersAsync(string idHex, int limit, CancellationToken ct) =>
@@ -285,6 +290,25 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         string idHex, int maxHops, int limit, CancellationToken ct) =>
         Task.FromResult<ExploreContainersResponse?>(new ExploreContainersResponse(
             idHex, [new ExploreContainerRow(WhaleIdHex, "whale document", 4, "Document", 1)]));
+
+    public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
+        string idHex, int hops, int fanout, CancellationToken ct) =>
+        Task.FromResult<ExploreGraphResponse?>(new ExploreGraphResponse(
+            IdHex: idHex,
+            Label: "whale",
+            Hops: hops,
+            Fanout: fanout,
+            Nodes:
+            [
+                new ExploreGraphNode(idHex, "whale", 0, 2),
+                new ExploreGraphNode(CetaceanIdHex, "cetacean", 1, 2),
+            ],
+            Edges:
+            [
+                new ExploreGraphEdge(idHex, CetaceanIdHex, "IS_A", 0.91m, 42, 1),
+            ],
+            Truncated: false,
+            MaxNodes: 160));
 
     private static ExploreEntityResponse SampleEntity(string idHex) => new(
         idHex, "whale", 2, "Word", true, 42,

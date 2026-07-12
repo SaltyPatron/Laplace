@@ -1,0 +1,28 @@
+-- Undirected consensus probe for explore_web SPI beam (out ∪ in).
+-- Same grain as foundry_crawl_neighbors, but typed + bidirectional.
+CREATE OR REPLACE FUNCTION explore_web_neighbors(
+    p_subject bytea,
+    p_limit   int)
+    RETURNS TABLE(
+        nbr bytea,
+        type_id bytea,
+        rating bigint,
+        rd bigint,
+        witness_count bigint,
+        outbound boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT nbr, type_id, rating, rd, witness_count, outbound
+    FROM (
+        SELECT c.object_id AS nbr, c.type_id, c.rating, c.rd, c.witness_count, true AS outbound
+        FROM consensus c
+        WHERE c.subject_id = p_subject
+          AND c.object_id IS NOT NULL
+        UNION ALL
+        SELECT c.subject_id AS nbr, c.type_id, c.rating, c.rd, c.witness_count, false AS outbound
+        FROM consensus c
+        WHERE c.object_id = p_subject
+    ) e
+    ORDER BY eff_mu(rating, rd) DESC
+    LIMIT GREATEST(1, p_limit)
+$$;

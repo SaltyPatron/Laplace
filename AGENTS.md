@@ -47,7 +47,7 @@ must `call` it first, as above.
 
 | Task | Command (wrap in `cmd /c` from pwsh) |
 |------|--------------------------------------|
-| Full clean rebuild + codegen + perfcache | `scripts\win\rebuild-all.cmd` |
+| Rebuild modules (default native+install+app; `--clean` / `ship`) | `scripts\win\rebuild-all.cmd` |
 | Engine only / extensions only | `scripts\win\build-engine.cmd` / `scripts\win\build-extensions.cmd` |
 | Publish API → IIS (incl. chess/lichess/stripe) | `scripts\win\publish-deploy.cmd` |
 | Push Lichess/Stripe to GitHub Secrets (CI deploy) | `scripts\win\sync-github-secrets.cmd` |

@@ -2,7 +2,6 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-
 const endpoint = process.env.LAPLACE_API_URL ?? 'http://localhost:5187';
 
 export default defineConfig({
@@ -11,6 +10,11 @@ export default defineConfig({
     alias: {
       '@ui': path.resolve(__dirname, 'src/ui'),
     },
+    // One Matrix4 prototype across R3F + force-graph (avoids determinantAffine crashes).
+    dedupe: ['three'],
+  },
+  optimizeDeps: {
+    include: ['three', 'react-force-graph-3d', 'react-force-graph-2d'],
   },
   server: {
     port: 5173,
@@ -35,7 +39,7 @@ export default defineConfig({
         manualChunks: {
           three: ['three'],
           r3f: ['@react-three/fiber', '@react-three/drei'],
-          'force-graph': ['react-force-graph-2d'],
+          'force-graph': ['react-force-graph-2d', 'react-force-graph-3d'],
           react: ['react', 'react-dom', 'react-router-dom'],
         },
       },

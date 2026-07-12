@@ -31,10 +31,16 @@ export function GlomeTab({
           options={['structural', 'semantic']}
           label="Overlay mode"
         />
+        {neighborsUnlocked && neighborMode === 'semantic' ? (
+          <p className={styles.hint}>
+            Semantic mode lists consensus facts in the neighbors response; it does not plant
+            points on S³ (geometry is structural identity, not meaning).
+          </p>
+        ) : null}
         {!neighborsUnlocked ? (
           <GatePrompt
             serviceId="nn"
-            label="Load nearest-neighbor overlay (structural axis on S³)."
+            label="Load structural nearest neighbors on S³ (real coords, geodesic-ranked)."
             receipt={null}
             onReady={onLoadNeighbors}
           />

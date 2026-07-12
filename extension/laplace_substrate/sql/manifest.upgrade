@@ -182,6 +182,7 @@ functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
 functions/converse/recall_session.sql.in
 functions/converse/structural_neighbors.sql.in
+functions/converse/structural_neighbors_of.sql.in
 functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
 inference/attention.sql.in
@@ -271,6 +272,8 @@ functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
+functions/consensus/explore_web_neighbors.sql.in
+functions/consensus/explore_web.sql.in
 functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
 functions/realize/realize_synset_lemma.sql.in

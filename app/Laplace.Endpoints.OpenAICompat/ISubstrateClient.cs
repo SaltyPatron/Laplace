@@ -61,4 +61,7 @@ internal interface ISubstrateClient
     Task<ExplorePeersResponse?> ExplorePeersAsync(string idHex, int limit, CancellationToken ct);
 
     Task<ExploreContainersResponse?> ExploreContainersAsync(string idHex, int maxHops, int limit, CancellationToken ct);
+
+    Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
+        string idHex, int hops, int fanout, CancellationToken ct);
 }

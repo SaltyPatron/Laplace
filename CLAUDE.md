@@ -235,7 +235,8 @@ Two toolchains, not interchangeable:
 
 | Task | Entry point |
 |------|-------------|
-| Full clean rebuild | `rebuild-all.cmd` |
+| Rebuild modules (default: native+install+app; `ship` adds IIS) | `rebuild-all.cmd` [`native`\|`ship`\|`engine`…] |
+| Wipe build trees | `rebuild-clean.cmd` or `rebuild-all.cmd --clean` |
 | Host secrets + Stripe listen (elevated once) | `setup-host.cmd` |
 | Engine / extensions | `build-engine.cmd [--reconfigure]` / `build-extensions.cmd` then `install-extensions.cmd` |
 | ASAN engine | `build-engine-asan.cmd` |
