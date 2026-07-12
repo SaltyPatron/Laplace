@@ -214,7 +214,14 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     int (*closer)(FILE*);
     if (is_zip) {
 #ifdef _WIN32
-        std::string cmd = std::string("tar -xOf \"") + ucdxml_path + "\"";
+        /* Invoke the OS-bundled bsdtar (System32) by absolute path. A GNU tar on
+         * PATH (Git/MSYS) both cannot read ZIP and misreads a "D:\" drive letter
+         * as a remote host ("Cannot connect to D:"); bsdtar does neither. */
+        const char* sysroot = std::getenv("SystemRoot");
+        std::string tarexe = sysroot
+            ? std::string(sysroot) + "\\System32\\tar.exe"
+            : std::string("tar");
+        std::string cmd = std::string("\"\"") + tarexe + "\" -xOf \"" + ucdxml_path + "\"\"";
         p = _popen(cmd.c_str(), "rb");
         closer = [](FILE* c) -> int { return _pclose(c); };
 #else
