@@ -28,14 +28,13 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord>, IIngestI
         await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
             typeNodeNames: ["UD_Feature"],
             relationNodeNames: ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
-                "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
+                "HAS_POS", "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
             readbackNames: _canonicalNames, ct: ct);
 
     protected override IMultiFileRecordStream<UdIngestRecord> CreateMultiFileStream(
         string ecosystemPath, DecomposerOptions options)
     {
-        string treebanksDir = Path.Combine(ecosystemPath, "ud-treebanks-v2.17");
-        var files = ListTreebankFiles(treebanksDir, options);
+        var files = ListTreebankFiles(ecosystemPath, options);
         var labeled = files.Select(p =>
         {
             string stem = Path.GetFileNameWithoutExtension(p);
@@ -55,10 +54,7 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord>, IIngestI
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
-        if (!Directory.Exists(treebanksDir))
-            return Task.FromResult<IngestInventory?>(null);
-        var paths = ListTreebankFiles(treebanksDir, options);
+        var paths = ListTreebankFiles(context.EcosystemPath, options);
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
         if (options.MaxInputUnits > 0)
             return Task.FromResult(IngestInventory.FromFiles("sentences", paths, options.MaxInputUnits, ct));
@@ -81,13 +77,18 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord>, IIngestI
         options.Languages is { IsActive: true } ? options.Languages
         : LanguageFilter.ForSource("UDDecomposer");
 
-    private static List<string> ListTreebankFiles(string treebanksDir, DecomposerOptions options)
+    // Root may be a single .conllu file, a directory of treebanks, or the ecosystem
+    // root containing ud-treebanks-v2.17 — resolved by the shared IngestInput valet.
+    private static List<string> ListTreebankFiles(string root, DecomposerOptions options)
     {
-        var all = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories).ToList();
+        var all = IngestInput.ResolveFiles(root, "*.conllu", "ud-treebanks-v2.17");
+        // Explicit single file: the operator named it — honour it, skip the language filter.
+        if (IngestInput.IsSingleFile(root)) return all;
         var langs = EffectiveLanguages(options);
         if (langs is { IsActive: true })
             return all.Where(p => langs.MatchesUdTreebankFile(Path.GetFileName(p))).ToList();
-        Console.Error.WriteLine($"UD: no language filter — ingesting all {all.Count} treebank files (multilingual).");
+        if (all.Count > 0)
+            Console.Error.WriteLine($"UD: no language filter — ingesting all {all.Count} treebank files (multilingual).");
         return all;
     }
 }
