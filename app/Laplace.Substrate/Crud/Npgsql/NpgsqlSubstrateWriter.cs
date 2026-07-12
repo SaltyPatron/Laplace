@@ -99,40 +99,52 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             // real observation counts. The apply core collapses them exactly
             // like apply_batch did (latest-ts representative, summed games)
             // instead of dropping the later observations on the floor.
+            // Bulk door: marshal each change's attestations into the native arena in
+            // BOUNDED chunks. `atts.Length * 32` is int*int and the arrays are MANAGED, so a
+            // monolithic change (the tier-0 completeness preamble, or a UD/ConceptNet flush =
+            // tens of millions of rows) would overflow int AND blow the ~2 GiB managed-array
+            // limit in ONE marshal. AttestationStagedBatchAdd APPENDS to the arena, so N
+            // chunked calls stage the exact same content as one call -- bit-identical, just
+            // wall-safe. Buffers are sized once to the first chunk and reused across chunks
+            // (n <= cap always, so no re-alloc and no LOH churn); the native call only reads
+            // the first `n` rows / `n*32` mask bytes.
+            const int MaxAttsPerMarshal = 1 << 20; // masksFlat <= 32 MiB, stagedRows well under 2 GiB
             foreach (var c in changes)
             {
-                // Bulk door: the whole change marshals in ONE native call.
-                // Masks ride a flat n*32 buffer, bit-identical to the per-row
-                // path (bytea = raw little-endian uint64 w[4] memory).
                 var atts = c.Attestations;
                 if (atts.IsEmpty) continue;
-                var stagedRows = new AttestationStagedNative[atts.Length];
-                var masksFlat = new byte[atts.Length * 32];
-                for (int i = 0; i < atts.Length; i++)
+                int cap = Math.Min(MaxAttsPerMarshal, atts.Length);
+                var stagedRows = new AttestationStagedNative[cap];
+                var masksFlat = new byte[cap * 32];
+                for (int chunkStart = 0; chunkStart < atts.Length; chunkStart += MaxAttsPerMarshal)
                 {
-                    var a = atts[i];
-                    stagedRows[i] = new AttestationStagedNative
+                    int n = Math.Min(MaxAttsPerMarshal, atts.Length - chunkStart);
+                    for (int i = 0; i < n; i++)
                     {
-                        Id = a.Id, SubjectId = a.SubjectId, TypeId = a.TypeId,
-                        ObjectId = a.ObjectId ?? default, SourceId = a.SourceId,
-                        ContextId = a.ContextId ?? default,
-                        ObjectIsNull = (byte)(a.ObjectId is null ? 1 : 0),
-                        ContextIsNull = (byte)(a.ContextId is null ? 1 : 0),
-                        Outcome = (short)a.Outcome,
-                        LastObservedAtUnixUs = a.LastObservedAtUnixUs,
-                        ObservationCount = a.ObservationCount,
-                    };
-                    int off = i * 32;
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                        masksFlat.AsSpan(off), a.HighwayMask.W0);
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                        masksFlat.AsSpan(off + 8), a.HighwayMask.W1);
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                        masksFlat.AsSpan(off + 16), a.HighwayMask.W2);
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                        masksFlat.AsSpan(off + 24), a.HighwayMask.W3);
+                        var a = atts[chunkStart + i];
+                        stagedRows[i] = new AttestationStagedNative
+                        {
+                            Id = a.Id, SubjectId = a.SubjectId, TypeId = a.TypeId,
+                            ObjectId = a.ObjectId ?? default, SourceId = a.SourceId,
+                            ContextId = a.ContextId ?? default,
+                            ObjectIsNull = (byte)(a.ObjectId is null ? 1 : 0),
+                            ContextIsNull = (byte)(a.ContextId is null ? 1 : 0),
+                            Outcome = (short)a.Outcome,
+                            LastObservedAtUnixUs = a.LastObservedAtUnixUs,
+                            ObservationCount = a.ObservationCount,
+                        };
+                        int off = i * 32;
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off), a.HighwayMask.W0);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 8), a.HighwayMask.W1);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 16), a.HighwayMask.W2);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 24), a.HighwayMask.W3);
+                    }
+                    managedStage.AddAttestationsStaged(stagedRows, n, masksFlat);
                 }
-                managedStage.AddAttestationsStaged(stagedRows, atts.Length, masksFlat);
             }
         }
 
