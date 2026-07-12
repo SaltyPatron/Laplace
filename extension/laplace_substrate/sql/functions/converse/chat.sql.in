@@ -1,0 +1,171 @@
+-- chat(prompt, session, lang): a conversational turn -- a THIN orchestrator over the
+-- EXISTING intent machinery, not a reinvention of it.
+--
+--   PARSE   parse_ask(prompt) -> (ask_kind, phrase, phrase2, type_name)   [recall_route.c]
+--   RESOLVE resolve_topic(phrase, session-context) -> topic concept       [content_resolve]
+--   ROUTE   by ask_kind to the pre-existing recall_*_response composers; describe/what_is/
+--           fallback answer with the free-form fused walk (converse_walk).
+--   CARRY   session is metadata: unresolved follow-ups ("it"/"more") carry the session's
+--           last resolved topic; "more" advances through non-empty fact layers.
+--   CLOSE   witness the prompt (UserPrompt) and response (Response) back as PRECEDES
+--           edges -- evaluation IS ingestion; next walk reads this turn.
+CREATE OR REPLACE FUNCTION chat(p_prompt text, p_session bytea DEFAULT NULL,
+                                p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    b_part int := 4; b_tax int := 2; b_assoc int := 7;
+    ask   text; phrase text; phrase2 text; tname text;
+    ctx   bytea; topic bytea; topic2 bytea;
+    xl    text;
+    more  bool := p_prompt ~* '\m(more|else|another|continue|elaborate)\M';
+    depth int;
+    layers text[]; s text;
+    resolved bytea;
+    out   text := '';
+BEGIN
+    -- PARSE (existing route_prompt_impl) + session context for pronoun resolution.
+    SELECT pa.ask_kind, pa.phrase, pa.phrase2, pa.type_name
+      INTO ask, phrase, phrase2, tname
+      FROM parse_ask(p_prompt) pa;
+    IF p_session IS NOT NULL THEN ctx := session_last_resolved(p_session); END IF;
+
+    -- TOPIC = the prompt token whose SYNSET carries the most content-band mass.
+    -- Content-band mass ranks the real topic noun above function/intent words
+    -- (river>part, water>there, anger>cause) -- more robust than resolve_topic/
+    -- resolve_last_word for multi-word prompts, and it yields the SYNSET the band
+    -- queries and recall_*_response need. parse_ask still owns the INTENT.
+    -- FOLLOW-UP carry: a pronoun referent ("what is IT made of") or "more" points at
+    -- the session's last topic, NOT a word in the prompt ("it"/"made"/"more" would
+    -- otherwise resolve as their own concepts).
+    IF p_session IS NOT NULL AND ctx IS NOT NULL
+       AND (more OR p_prompt ~* '\m(it|its|they|them|that|this|those|these)\M') THEN
+        topic := ctx;
+    ELSE
+        -- richest content-band SYNSET over parse_ask's PHRASE (intent verb already
+        -- split into ask_kind, so define/about/describe can't be picked; no stoplist).
+        SELECT x.syn INTO topic
+        FROM (SELECT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
+              FROM prompt_state(COALESCE(phrase, p_prompt)) p WHERE p.id IS NOT NULL) x
+        WHERE x.syn IS NOT NULL
+        ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
+                 (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                    AND relation_highway_band(c.type_id) IN (1,2,4,7)) DESC,
+                 char_length(x.surface) DESC
+        LIMIT 1;
+        IF topic IS NULL THEN topic := ctx; END IF;
+    END IF;
+    IF topic IS NULL THEN
+        out := converse(p_prompt);              -- nothing to resolve: free-form
+    ELSE
+        resolved := topic;  xl := realize(topic, p_lang);
+
+        IF more AND p_session IS NOT NULL THEN
+            -- ELABORATE: advance through NON-EMPTY fact layers by prior mentions.
+            layers := ARRAY[]::text[];
+            SELECT initcap(xl)||' has parts such as '||string_agg(l,', ' ORDER BY m DESC)||'.'
+              INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
+                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_part
+                ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
+            IF s IS NOT NULL THEN layers := layers||s; END IF;
+            SELECT 'Kinds of '||xl||' include '||string_agg(l,', ' ORDER BY m DESC)||'.'
+              INTO s FROM (SELECT realize(c.subject_id,p_lang) l,(c.rating-2*c.rd) m
+                FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=b_tax
+                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
+            IF s IS NOT NULL THEN layers := layers||s; END IF;
+            SELECT initcap(xl)||' is related to '||string_agg(l,' and ' ORDER BY m DESC)||'.'
+              INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
+                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_assoc
+                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z
+               WHERE l IS NOT NULL AND l !~ '^[0-9]{6,}-[nvasr]$' AND l !~ '^(noun|verb|adj|adv)\.' AND l !~ ' ' LIMIT 3;
+            IF s IS NOT NULL THEN layers := layers||s; END IF;
+            SELECT count(*) INTO depth FROM session_topics t
+              WHERE t.session_id=p_session AND t.resolved_id=topic;
+            out := CASE WHEN depth BETWEEN 1 AND COALESCE(array_length(layers,1),0)
+                        THEN layers[depth]
+                        ELSE 'That is the core of what I hold about '||xl||'.' END;
+
+        -- parts / kinds / causes: intents parse_ask does not model (it labels them
+        -- what_is) -- supplement with a band listing over the resolved topic.
+        ELSIF p_prompt ~* '\m(part|parts|made of|consist|contain|component|comprise)\M' THEN
+            SELECT string_agg(l, ', ' ORDER BY m DESC) INTO out FROM (
+                SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m FROM consensus c
+                WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_part
+                ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
+            out := CASE WHEN out IS NULL THEN 'I hold no witnessed parts of '||xl||' yet.'
+                        ELSE initcap(xl)||' has parts such as '||out||'.' END;
+
+        ELSIF p_prompt ~* '\m(kind|kinds|type|types|sort|instance)\M' THEN
+            SELECT string_agg(l, ', ' ORDER BY m DESC) INTO out FROM (
+                SELECT realize(c.subject_id,p_lang) l,(c.rating-2*c.rd) m FROM consensus c
+                WHERE c.object_id=topic AND relation_highway_band(c.type_id)=b_tax
+                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
+            out := CASE WHEN out IS NULL THEN 'I hold no witnessed kinds of '||xl||' yet.'
+                        ELSE 'Kinds of '||xl||' include '||out||'.' END;
+
+        ELSIF p_prompt ~* '\m(cause|causes|caused|why|because|effect|effects)\M'
+              OR (ask='related_in' AND tname='CAUSES') THEN
+            SELECT string_agg(realize(c.object_id,p_lang), ', ' ORDER BY (c.rating-2*c.rd) DESC)
+              INTO out FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=5;
+            IF out IS NOT NULL THEN out := initcap(xl)||' causes '||out||'.'; END IF;
+            SELECT string_agg(realize(c.subject_id,p_lang), ', ' ORDER BY (c.rating-2*c.rd) DESC)
+              INTO s FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=5;
+            IF s IS NOT NULL THEN out := btrim(COALESCE(out,'')||' '||initcap(xl)||' is caused by '||s||'.'); END IF;
+            IF out IS NULL OR out='' THEN
+                out := 'I hold no witnessed causes for '||xl||' yet; '||converse(xl); END IF;
+
+        ELSIF ask = 'reason' OR p_prompt ~* '(relat|connect|between|compar|\mvs\M)' THEN
+            -- TWO concepts -> existing relation-summary composer. Second concept =
+            -- parse_ask's phrase2, else (pronoun-relational "how does IT relate to the
+            -- sea") the richest OTHER concept in the prompt.
+            topic2 := top_synset(resolve_last_word(phrase2));
+            IF topic2 IS NULL OR topic2 = topic THEN
+                SELECT x.syn INTO topic2
+                FROM (SELECT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
+                      FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
+                WHERE x.syn IS NOT NULL AND x.syn <> topic
+                ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
+                         (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                            AND relation_highway_band(c.type_id) IN (1,2,4,7)) DESC
+                LIMIT 1;
+            END IF;
+            IF topic2 IS NOT NULL THEN
+                SELECT string_agg(reply, ' ') INTO out
+                  FROM recall_relation_summary_response(topic, topic2);
+            END IF;
+            IF out IS NULL OR out = '' THEN out := converse(xl); END IF;
+
+        ELSIF ask IN ('related','related_in') AND tname IS NOT NULL THEN
+            SELECT string_agg(reply, ' ') INTO out FROM recall_related_response(topic, tname);
+            IF out IS NULL OR out = '' THEN
+                out := 'I hold no witnessed '||lower(tname)||' for '||xl||' yet.';
+            END IF;
+
+        ELSIF ask = 'define' THEN
+            SELECT string_agg(reply, ' ') INTO out FROM recall_define_response(p_prompt, topic);
+
+        ELSIF ask = 'synonyms' THEN
+            SELECT string_agg(reply, ' ') INTO out FROM recall_synonyms_response(topic);
+
+        ELSIF ask = 'examples' THEN
+            SELECT string_agg(reply, ' ') INTO out FROM recall_examples_response(topic);
+
+        ELSE
+            -- what_is / describe / walk / fallback: free-form fused walk (my value-add).
+            out := converse(COALESCE(xl, p_prompt));
+        END IF;
+
+        IF out IS NULL OR out = '' THEN out := converse(COALESCE(xl, p_prompt)); END IF;
+    END IF;
+
+    -- RECORD + OODA CLOSE.
+    IF p_session IS NOT NULL THEN
+        PERFORM session_record_prompt(p_session, p_prompt, resolved);
+        PERFORM witness_precedes_chain(p_prompt, source_id('substrate/source/UserPrompt/v1'));
+        PERFORM witness_precedes_chain(out,      source_id('substrate/source/Response/v1'));
+    END IF;
+
+    RETURN btrim(out);
+END;
+$$;

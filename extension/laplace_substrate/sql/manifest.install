@@ -176,6 +176,10 @@ functions/converse/contrast.sql.in
 functions/converse/parse_ask.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
+functions/converse/witness_precedes_chain.sql.in
+functions/converse/converse.sql.in
+functions/converse/converse_walk.sql.in
+functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
 functions/converse/recall_session.sql.in
 functions/converse/structural_neighbors.sql.in
