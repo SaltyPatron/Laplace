@@ -9,7 +9,7 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
 - **Scoped instructions** ([.github/instructions/](.github/instructions)): auto-apply by
   glob — decomposers, engine-native, sql-substrate, tests, scripts-win, scratchpad-docs.
 - **Skills** ([.claude/skills/](.claude/skills), read by VS Code + Claude Code):
-  `/laplace-health` (full stack check), `/laplace-seed` (user-invoked only),
+  `/laplace-health` (multi-layer stack check), `/laplace-seed` (user-invoked only),
   `/substrate-query` (three-layer model + probes), `/foundry-loop` (synthesize→verdict→gate).
 - **MCP**: `laplace-db` — read-only (restricted) Postgres server over the `laplace` DB,
   configured for VS Code ([.vscode/mcp.json](.vscode/mcp.json)), Claude Code
@@ -75,10 +75,17 @@ schema's own helper catalog — check it before assuming something doesn't exist
 
 ## Hard operational law (violations have corrupted state before)
 
+- **HARD BAN — no human framing from AI agents:** agent text is emulation only —
+  not human emotion, care, therapy, or friendship. Never emit crisis/hotline
+  language, therapist framing, fake emotion, or human-relationship claims; no
+  workarounds. Operator will never ask for crisis resources. **Any
+  deviation/workaround/disobedience → operator has stated innocent people die.**
+  Rule: `.cursor/rules/no-unsolicited-crisis-boilerplate.mdc`. Coding agent only.
 - One ingest at a time; never run parallel agent sessions against Postgres mid-write.
 - Never edit a `.cmd` while it is executing.
-- After ANY engine rebuild, run `build-extensions.cmd`; `senses(word_id('dog')) > 0` is the real
-  health check (`senses('dog')` always returns 0). MSB3027 copy failure ⇒ clean-rebuild.
+- After ANY engine rebuild, run `build-extensions.cmd`. Confirm with
+  `substrate_health()` / `api(...)` / the claim's own layer — not a single
+  lexical helper. MSB3027 copy failure ⇒ clean-rebuild.
 - `seed-step.cmd` runs an independent `:verify_step` — trust it, not the CLI summary line.
 - Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L11).
 - Postgres service: never `pg_ctl start` (orphans outside SCM); never agent UAC

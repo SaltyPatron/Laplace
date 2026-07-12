@@ -200,8 +200,10 @@ framenet/semlink+PM):
 - Tatoeba identity fix: PASS (unit test). IS_TRANSLATION_OF anchors on content roots that
   also carry HAS_LANGUAGE, never on Tatoeba_Sentence ref entities; link to an absent
   sentence id emits no dangling edge.
-- Health: senses(word_id('dog')) = 8 (NOT senses('dog') — that text literal casts to raw
-  bytea and always returns 0; the extension is healthy).
+- Lexical sample after WordNet land (ordinary API usage, not a gate):
+  `SELECT count(*) FROM senses(word_id('dog'));` returned 8. Note: text-literal
+  `senses('dog')` casts to raw bytea and returns 0 — that is an API misuse, not a
+  health ritual.
 
 Pending live validation (need their seeds): UD HAS_LANGUAGE-at-sentence-tier + XPOS IS_A
 UPOS; ConceptNet HAS_POS; Tatoeba translation-on-content-root at scale; Wiktionary < 10 min.

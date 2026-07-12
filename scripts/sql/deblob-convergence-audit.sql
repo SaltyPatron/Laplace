@@ -49,10 +49,6 @@ SELECT count(*) AS verbnet_to_wordnet_via_sense FROM (
     AND EXISTS (SELECT 1 FROM consensus w WHERE w.subject_id=s.subject_id AND w.type_id=relation_type_id('IS_SENSE_OF'))
 ) x;
 
-\echo '== readback still works through the de-blobbed path (dog) =='
-SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
-SELECT definition FROM define(word_id('dog'), 1);
-
 \echo '== STRUCTURAL blob scan: entities with NO physicality (identity = bare hash, NOT decomposed =='
 \echo '== content) grouped by type. Closed bootstrap anchors (substrate/type|source|trust_class,    =='
 \echo '== ordinal, relation_type) are legitimately content-free; ANY OTHER type here is a surviving  =='

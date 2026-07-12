@@ -23,8 +23,10 @@ present a narrow patch as the architectural fix" (Issue 19 is the canonical exam
 3. Ranking uses `eff_mu = rating - 2*rd`. The three layers are entities/physicalities
    (content), attestations (evidence), consensus (Glicko fold) — check the right layer
    for the claim.
-4. Baseline sanity: `senses('dog') > 0` (extension freshness) before trusting any
-   deeper result.
+4. Extension / catalog sanity before deep claims: `SELECT * FROM substrate_health();`
+   and `SELECT * FROM api('<substring>');`. Lexical helpers (`senses`, `word_id`,
+   `define`, …) are ordinary API — use them when the claim is about that lemma or
+   function, not as a universal baseline gate.
 5. Distinguish "the query returned nothing" from "the helper doesn't exist" from "the
    extension is stale" — these have different remediations.
 

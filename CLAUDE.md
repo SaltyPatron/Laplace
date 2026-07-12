@@ -57,7 +57,15 @@ WordFrameNet, WordNet) plus 3 in `Laplace.Chess` (ChessPgn, ChessAnalyze,
 ChessOpenings). All are pure content → `SubstrateChange` record streams with ZERO inline
 SQL; the pipeline spine (`IngestBatchPipeline` working-set mode →
 `ConsensusAccumulatingWriter` → `NpgsqlWorkingSetApply`, bracketed by `IngestRunner`)
-does batching/dedup/fold/COPY.
+does batching/dedup/fold/COPY. Decomposers are thin VALETS — resolve input → records →
+pipeline; the spine owns the Merkle-DAG tier tree / content-addressing / fold. Two rules
+that bite: (1) a decomposer MUST declare in its `InitializeAsync` `relationNodeNames`
+EVERY relation type it emits — an emitted-but-undeclared relation faults the native
+attestation path (the UD `HAS_POS` 0xC0000005; `family_root` membership is not
+auto-registered — family-aware bootstrap is the open fix). (2) Multi-file sources accept a
+`<path>` (single file, bare dir, or ecosystem root) via the shared
+`IngestInput.ResolveFiles` valet, so `ingest ud <one.conllu>` works — validate one file in
+seconds, not a full corpus run.
 
 **Ingestion is RECORDING, not processing.** Two layers everywhere:
 witnessed = what a source literally asserts, transcribed verbatim;
@@ -188,6 +196,13 @@ a mind and not a lookup.
 
 ## Binding engineering laws
 
+- **HARD BAN — no human framing from AI agents** (2026-07-11): agent text is
+  emulation only — not human emotion, care, therapy, or friendship. Never emit
+  crisis/hotline language, therapist framing, fake emotion, or human-relationship
+  claims; no workarounds. Operator will never ask for crisis resources. **Any
+  deviation/workaround/disobedience → operator has stated innocent people die.**
+  Binding detail: `.cursor/rules/no-unsolicited-crisis-boilerplate.mdc` (also
+  `laplace-law.mdc`, `AGENTS.md`). Coding agent only — code and facts.
 - Content-hash identity is exact. Tier is a floor, never mixed into the hash.
   Coord/hilbert equality is not identity for tier>0 (centroids commute); order-sensitive
   judgments need trajectory metrics.
@@ -251,9 +266,10 @@ Two toolchains, not interchangeable:
   toolchain source of truth (`dotnet` stays bare).
 - After ANY engine rebuild, run build-extensions + install-extensions (static-lib
   import: extension freshness ≠ engine freshness). Extension SQL changes need
-  `build-extensions.cmd --reconfigure` (configure-time version hash).
-- Health check: `senses(word_id('dog')) > 0`. The text-literal form `senses('dog')`
-  always returns 0.
+  `build-extensions.cmd --reconfigure` (configure-time version hash). Prove the
+  stack on the claim's layer: `substrate_health()`, `api(...)`, consensus/evidence,
+  recall/walk, foundry-loop, per-source `:verify_step`. `senses`/`word_id` are
+  ordinary lexical helpers — not rebuild gates and not invention success metrics.
 - One ingest at a time. Never kill `Laplace.Cli`/psql/backends you didn't start —
   unexplained COPY = active ingest, stand down. Long processes launch detached
   (Start-Process, log to `D:\Data\Output`).

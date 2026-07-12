@@ -5,6 +5,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Laplace.Cli</RootNamespace>
     <AssemblyName>Laplace.Cli</AssemblyName>
+    <!-- ReadyToRun for Release publish: precompile the managed closure so ingest
+         does not depend on runtime clrjit tiered recompile (WER 0xc0000409 on
+         .NET 10.0.9 killed ConceptNet/WordNet mid-seed). seed-step :ensure_cli
+         publishes with this flag — do not reintroduce DOTNET_TieredCompilation=0
+         as the primary mitigation. -->
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

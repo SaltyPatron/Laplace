@@ -30,7 +30,8 @@ for %%S in (omw ud) do (
   echo.
   echo ==== %%S %TIME% ====
   call "%~dp0seed-step.cmd" %%S
-  if errorlevel 1 (
+  rem NTSTATUS crash codes are negative, so `if errorlevel 1` misses them
+  if not "!ERRORLEVEL!"=="0" (
     echo FAILED: %%S exit=!ERRORLEVEL!
     set "ERR=1"
     goto done
@@ -41,7 +42,7 @@ for %%S in (omw ud) do (
 echo.
 echo ==== document %TIME% ====
 call "%~dp0seed-step.cmd" document "%INGEST%\test-data\text"
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
   echo FAILED: document exit=!ERRORLEVEL!
   set "ERR=1"
   goto done
@@ -51,7 +52,7 @@ echo OK: document
 echo.
 echo ==== chess %TIME% ====
 call "%~dp0seed-step.cmd" chess "%INGEST%\Games\Chess"
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
   echo FAILED: chess exit=!ERRORLEVEL!
   set "ERR=1"
   goto done

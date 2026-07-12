@@ -64,6 +64,7 @@ if /i "%STEP%"=="tatoeba"       goto run_ingest
 if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
 if /i "%STEP%"=="chess"         goto run_ingest_path
+if /i "%STEP%"=="chess-books"   goto run_ingest_path
 if /i "%STEP%"=="openings"      goto run_ingest_path
 if /i "%STEP%"=="stack"         goto run_ingest_path
 if /i "%STEP%"=="repo"          goto run_ingest_path
@@ -105,16 +106,12 @@ if not errorlevel 1 (
   exit /b 2
 )
 call :ensure_cli || exit /b 1
-rem clrjit.dll 0xc0000409 fail-fast during background tier-1 recompile killed the
-rem 2026-07-11 conceptnet ingest ~100s in (WER-confirmed, .NET 10.0.9 = newest
-rem installed). Disabling tiered compilation removes that recompile path; scoped
-rem to ingest launches only, overridable by presetting the variable.
-if not defined DOTNET_TieredCompilation set "DOTNET_TieredCompilation=0"
 echo ==== seed-step: ingest %STEP% %EXTRA% ====
 "%LAPLACE_CLI_EXE%" ingest %STEP% %EXTRA%
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" (
-  echo ERROR: seed-step %STEP%: Laplace.Cli exited %RC% ^(negative = NTSTATUS crash code^)
+  echo ERROR: seed-step %STEP%: Laplace.Cli exited %RC%
+  if %RC% LSS 0 echo   ^(negative exit = NTSTATUS crash code^)
   exit /b %RC%
 )
 call :wait_cli_exit
@@ -122,17 +119,30 @@ call :verify_step
 exit /b %ERRORLEVEL%
 
 :ensure_cli
+rem Ingest CLI is a ReadyToRun publish tree (net10.0-r2r), not the plain build
+rem output. Publishing into BaseOutputPath silently kept non-R2R assemblies and
+rem left clrjit on the hot path (WER 0xc0000409 on ConceptNet/WordNet 2026-07-11).
+set "CLI_R2R_OUT=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0-r2r"
+set "LAPLACE_CLI_EXE=%CLI_R2R_OUT%\Laplace.Cli.exe"
 if "%REBUILD%"=="1" goto ensure_cli_build
 if defined LAPLACE_FORCE_CLI_BUILD goto ensure_cli_build
 if not exist "%LAPLACE_CLI_EXE%" goto ensure_cli_build
+if not exist "%LAPLACE_CLI_EXE%.r2r-stamp" goto ensure_cli_build
 exit /b 0
 :ensure_cli_build
-echo ==== seed-step: build CLI Release ====
-dotnet build "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo || exit /b 1
+echo ==== seed-step: publish CLI Release ^(ReadyToRun → net10.0-r2r^) ====
+rem Fix for clrjit.dll 0xc0000409 fail-fast (.NET 10.0.9 WER on ConceptNet/WordNet):
+rem publish the managed closure as ReadyToRun into a dedicated output dir so ingest
+rem does not depend on runtime tiered recompile. DOTNET_TieredCompilation=0 is NOT
+rem the fix — do not re-add it.
+if exist "%CLI_R2R_OUT%" rmdir /s /q "%CLI_R2R_OUT%"
+dotnet publish "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo ^
+  -p:PublishReadyToRun=true -o "%CLI_R2R_OUT%" || exit /b 1
 if not exist "%LAPLACE_CLI_EXE%" (
-  echo ERROR: CLI build succeeded but exe missing: %LAPLACE_CLI_EXE%
+  echo ERROR: CLI ReadyToRun publish succeeded but exe missing: %LAPLACE_CLI_EXE%
   exit /b 1
 )
+echo r2r %DATE% %TIME%> "%LAPLACE_CLI_EXE%.r2r-stamp"
 exit /b 0
 
 rem exit /b 0 = an ingest CLI process is running, 1 = none (same convention as
@@ -175,6 +185,7 @@ if /i "%STEP%"=="stack"         set "STEP_SOURCE=StackDecomposer"
 if /i "%STEP%"=="repo"          set "STEP_SOURCE=RepoDecomposer"
 if /i "%STEP%"=="tiny-codes"    set "STEP_SOURCE=TinyCodesDecomposer"
 if /i "%STEP%"=="chess"         set "STEP_SOURCE=ChessPgn"
+if /i "%STEP%"=="chess-books"   set "STEP_SOURCE=ChessBook"
 if /i "%STEP%"=="openings"      set "STEP_SOURCE=ChessOpenings"
 if not defined STEP_SOURCE (
   echo ERROR: seed-step verify: no source mapping for '%STEP%'
@@ -266,6 +277,7 @@ echo   floor:     unicode  iso639
 echo   document:  document ^<path^>
 echo   knowledge: wordnet  omw  verbnet  propbank  framenet  mapnet  wordframenet  semlink  conceptnet  atomic2020  ud  wiktionary
 echo   usage:     tatoeba  opensubtitles
+echo   chess:     chess ^<path^>  openings ^<path^>  chess-books ^<path^>
 echo   code:      stack ^<path^>  repo ^<path^>  tiny-codes ^<path^>
 echo   models:    model-tinyllama  model-phi  model-qwen  safetensors ^<snapshot-dir^>
 echo.
