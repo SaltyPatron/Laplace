@@ -41,7 +41,12 @@ cd "$ROOT"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
+# Peer auth over the runner-owned unix socket (laplace_admin). Bare psql without
+# these defaults looks for OS-user role "ahart" / a missing system socket.
+export PGHOST="${PGHOST:-/var/run/postgresql}"
+export PGUSER="${PGUSER:-laplace_admin}"
 PGDATABASE="${PGDATABASE:-laplace}"
+export PGDATABASE
 
 FRESH_DB=0
 FORCE_FOUNDATION=0
@@ -105,26 +110,34 @@ restart_postgres() {
   datadir=$(psql -d postgres -U laplace_admin -tAc "SHOW data_directory")
   pidfile="$datadir/postmaster.pid"
   oldpid=$(head -1 "$pidfile" 2>/dev/null || true)
+  # data_directory is often 0700 owner=laplace-runner; fall back to unit MainPID.
+  if [[ -z "$oldpid" ]]; then
+    oldpid=$(systemctl show -p MainPID --value laplace-postgresql.service 2>/dev/null || true)
+    [[ "$oldpid" == "0" ]] && oldpid=""
+  fi
 
   if [[ -n "$oldpid" ]] && kill -0 "$oldpid" 2>/dev/null; then
     echo "restart_postgres ($reason): fast-shutdown SIGINT to owned postmaster pid $oldpid (systemd resurrects it)"
     kill -INT "$oldpid"
   else
-    local unit=""
-    if command -v systemctl >/dev/null 2>&1; then
+    local unit="laplace-postgresql.service"
+    if ! sudo -n systemctl restart "$unit" 2>/dev/null; then
       unit=$(systemctl list-units --type=service --state=running --plain --no-legend \
                'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
-    fi
-    if [[ -z "$unit" ]] || ! sudo -n systemctl restart "$unit" 2>/dev/null; then
-      echo "::error::restart_postgres ($reason): postmaster pid ${oldpid:-unknown} is not signalable by $(id -un) and no rootless path exists — bounce PostgreSQL manually, then rerun this phase" >&2
-      return 1
+      if [[ -z "$unit" ]] || ! sudo -n systemctl restart "$unit" 2>/dev/null; then
+        echo "::error::restart_postgres ($reason): postmaster pid ${oldpid:-unknown} is not signalable by $(id -un) and no rootless path exists — bounce PostgreSQL manually, then rerun this phase" >&2
+        return 1
+      fi
     fi
     echo "restart_postgres ($reason): restarted $unit via passwordless systemctl fallback"
   fi
 
   local tries=0 newpid=""
-  until newpid=$(head -1 "$pidfile" 2>/dev/null) && [[ -n "$newpid" && "$newpid" != "$oldpid" ]] \
-        && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
+  until { newpid=$(head -1 "$pidfile" 2>/dev/null || true)
+          [[ -z "$newpid" || "$newpid" == "0" ]] \
+            && newpid=$(systemctl show -p MainPID --value laplace-postgresql.service 2>/dev/null || true)
+          [[ -n "$newpid" && "$newpid" != "0" && "$newpid" != "$oldpid" ]]
+        } && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
     tries=$((tries + 1))
     if (( tries > 120 )); then
       echo "::error::restart_postgres ($reason): PostgreSQL did not come back within ${tries}s (old pid ${oldpid:-unknown}) — if the unit lacks Restart=always, apply the drop-in from bootstrap-laplace-runner.sh and start it manually" >&2
@@ -239,6 +252,18 @@ phase_install() {
   umask 0002
   cmake --install build
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
+  # shared_preload_libraries pins the extension image in the postmaster. cmake
+  # --install replaces the .so on disk, but CREATE FUNCTION / ALTER EXTENSION
+  # still dlsym against the preloaded handle — so a newly-exported symbol
+  # (e.g. pg_laplace_explore_web) faults as "could not find function ... in
+  # file" until bounce. Same class as Windows install-extensions --recycle;
+  # terminate-backends is not enough when the library is preloaded.
+  local preload
+  preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
+  if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
+     || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
+    restart_postgres "install: refresh preloaded extension .so"
+  fi
 }
 
 phase_migrate() {
@@ -270,9 +295,35 @@ phase_sync_extension() {
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
       -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
   elif [[ "$installed" != "$avail" ]]; then
+    # Defense in depth: deploy/install should already have bounced when the
+    # extension is preloaded, but sync-extension is a separate CI job — if
+    # install skipped the bounce (or a human ran sync alone), UPDATE still
+    # needs a live image that matches the just-installed SQL.
+    local preload
+    preload=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
+    if [[ ",${preload// /}," == *",laplace_substrate,"* ]]; then
+      restart_postgres "sync-extension: refresh preloaded laplace_substrate before UPDATE"
+    fi
     share=$(dirname "$(find "$LAPLACE_INSTALL_PREFIX" -name laplace_substrate.control -not -path '*/build*' 2>/dev/null | head -1)")
     test -n "$share" || { echo "::error::could not locate laplace_substrate.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
-    cp "$share/laplace_substrate_upgrade.sql" "$share/laplace_substrate--${installed}--${avail}.sql"
+    # install -m 664 (not cp): group-writable so a leftover bridge script can be
+    # refreshed; cmake install already ships extension SQL as 0664.
+    local bridge="$share/laplace_substrate--${installed}--${avail}.sql"
+    install -m 664 "$share/laplace_substrate_upgrade.sql" "$bridge"
+    # Fail fast if on-disk .so is missing any C symbol the upgrade SQL binds.
+    # Usual cause: install wrote a new .so but shared_preload still holds the
+    # old image (or build tree was never reinstalled).
+    local so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
+    if [[ -f "$so" ]] && command -v nm >/dev/null 2>&1; then
+      local sym
+      while IFS= read -r sym; do
+        [[ -z "$sym" ]] && continue
+        if ! nm -D "$so" 2>/dev/null | grep -q "T ${sym}\$"; then
+          echo "::error::installed $so lacks $sym but $bridge requires it — rebuild+install (preload bounce) before sync-extension" >&2
+          exit 1
+        fi
+      done < <(grep -oE "'pg_laplace_[A-Za-z0-9_]+'" "$bridge" | tr -d "'" | sort -u)
+    fi
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
       -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'"
     echo "OK upgraded laplace_substrate $installed -> $avail in place"
