@@ -507,11 +507,13 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
     private void EnsureComputed(IDecomposerContext context)
     {
         if (_records is not null) return;
-        if (CodepointPerfcache.IsLoaded)
-        {
-            _records = CodepointPerfcache.Records.ToArray();
-            return;
-        }
+        // Single-origin law: the DB seed computes from raw UCD, never from the
+        // perfcache blob. The blob is a sibling OUTPUT of this same compute
+        // (native laplace_unicode_seed_compute), not a seed input — reading it back
+        // to seed would invert the calculated←witnessed dependency and make the DB
+        // only as trustworthy as the blob. The CLI supplies the UCD path
+        // (IngestUnicodeViaRunnerAsync → IngestDataPaths.Resolve("unicode")); both
+        // hosts carry the raw UCD, so there is no environment that needs the shortcut.
         var (xml, duc) = ResolveSource(context);
         _records = UnicodeSeed.Compute(xml, duc);
     }

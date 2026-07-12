@@ -167,8 +167,72 @@ static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
 }
 
 
+// Bump when the emit LOGIC changes (not the inputs) so a generator change
+// invalidates the source-hash gate and forces a regenerate.
+static const char* GENERATOR_TAG = "ucd_tables_emit/v1";
+
+static bool read_file_bytes(const fs::path& p, std::vector<uint8_t>& out) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return false;
+    out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    return true;
+}
+
+// source_hash = blake3( blake3(xml) || blake3(ducet) || ucd_ver || uca_ver || tag ).
+// Hashing the two big files once each (in place) then combining the small digests
+// avoids a >64 MiB concat. This is the gate the build no-ops on: unchanged sources
+// => matching header hash => skip the multi-minute tree-sitter crawl entirely.
+static void compute_source_hash(const std::vector<uint8_t>& xml,
+                                const std::vector<uint8_t>& ducet,
+                                const std::string& ucd_ver, const std::string& uca_ver,
+                                hash128_t* out) {
+    hash128_t hx, hd;
+    hash128_blake3(xml.data(), xml.size(), &hx);
+    hash128_blake3(ducet.data(), ducet.size(), &hd);
+    std::vector<uint8_t> mix;
+    put_h128(mix, hx);
+    put_h128(mix, hd);
+    for (char c : ucd_ver) mix.push_back((uint8_t)c);
+    mix.push_back(0);
+    for (char c : uca_ver) mix.push_back((uint8_t)c);
+    mix.push_back(0);
+    for (const char* t = GENERATOR_TAG; *t; ++t) mix.push_back((uint8_t)*t);
+    hash128_blake3(mix.data(), mix.size(), out);
+}
+
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
+
+    // --- source-hash gate: read raw source bytes, hash, and no-op if the existing
+    // output already carries a matching source hash in its header. Reading 66 MiB to
+    // hash is ~sub-second; the crawl it guards is minutes. On a miss the compute below
+    // re-reads the XML — negligible next to the crawl it is about to do. ---
+    std::vector<uint8_t> xml_bytes, ducet_bytes;
+    if (!read_file_bytes(cli.ucdxml, xml_bytes)) {
+        std::fprintf(stderr, "cannot open %s\n", cli.ucdxml.string().c_str());
+        return 4;
+    }
+    if (!read_file_bytes(cli.ducet, ducet_bytes)) {
+        std::fprintf(stderr, "cannot open %s\n", cli.ducet.string().c_str());
+        return 4;
+    }
+    hash128_t source_hash;
+    compute_source_hash(xml_bytes, ducet_bytes, cli.ucd_version, cli.uca_version, &source_hash);
+    {
+        std::ifstream prev(cli.output, std::ios::binary);
+        if (prev) {
+            laplace_perfcache_header_t hdr{};
+            prev.read((char*)&hdr, sizeof(hdr));
+            if (prev.gcount() == (std::streamsize)sizeof(hdr)
+                && hdr.magic == LAPLACE_PERFCACHE_MAGIC
+                && hdr.format_version == LAPLACE_PERFCACHE_VERSION
+                && std::memcmp(&hdr.ucd_hash, &source_hash, sizeof(hash128_t)) == 0) {
+                std::fprintf(stderr,
+                    "perfcache: sources unchanged (source-hash match) — crawl skipped\n");
+                return 0;
+            }
+        }
+    }
 
     std::vector<laplace_perfcache_record_t> rec_array(CP_COUNT);
     int rc = laplace_unicode_seed_compute(cli.ucdxml.string().c_str(),
@@ -184,12 +248,8 @@ int main(int argc, char** argv) {
 
     UcdData d;
     SaxCtx ctx{&d, false};
-    std::vector<uint8_t> doc;
-    {
-        std::ifstream xf(cli.ucdxml, std::ios::binary);
-        if (!xf) { std::fprintf(stderr, "cannot open %s\n", cli.ucdxml.string().c_str()); return 4; }
-        doc.assign(std::istreambuf_iterator<char>(xf), std::istreambuf_iterator<char>());
-    }
+    // Reuse the bytes already read for the source-hash gate instead of a third read.
+    std::vector<uint8_t> doc = std::move(xml_bytes);
     int xml_rc = laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx);
     if (xml_rc != 0) {
         std::fprintf(stderr, "UCDXML parse failed (rc=%d; -1=args, -2=malformed)\n", xml_rc);
@@ -253,7 +313,7 @@ int main(int argc, char** argv) {
     put_u64(blob, off_decomp_d);
     put_u64(blob, comps.size());
     put_u64(blob, off_compose_r);
-    { hash128_t z; hash128_zero(&z); put_h128(blob, z); }
+    put_h128(blob, source_hash);   // header.ucd_hash = source-hash gate key
     for (int i=0;i<16;++i) blob.push_back(0);
     blob.insert(blob.end(), records.begin(), records.end());
     blob.insert(blob.end(), decomp_recs.begin(), decomp_recs.end());
