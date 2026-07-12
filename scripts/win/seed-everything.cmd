@@ -35,11 +35,12 @@ set "LAPLACE_SKIP_MODELS=0"
 
 echo ===== DB RESET ===== >> "%LOG%"
 call "%~dp0db-reset.cmd" --recycle >> "%LOG%" 2>&1
-if errorlevel 1 goto fail
+rem NTSTATUS crash codes are negative, so `if errorlevel 1` misses them
+if not "%ERRORLEVEL%"=="0" goto fail
 
 echo ===== BUILD ===== >> "%LOG%"
 dotnet build "%LAPLACE_ROOT%\app\Laplace.slnx" -c Release >> "%LOG%" 2>&1
-if errorlevel 1 goto fail
+if not "%ERRORLEVEL%"=="0" goto fail
 
 echo ===== SEED LADDER (all stages, one step at a time) ===== >> "%LOG%"
 call "%~dp0seed-ladder.cmd" >> "%LOG%" 2>&1
@@ -48,7 +49,7 @@ if not "%RC%"=="0" goto fail
 
 echo ===== SUBSTRATE AUDIT ===== >> "%LOG%"
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -f "%LAPLACE_ROOT%\scripts\sql\substrate-audit.sql" >> "%LOG%" 2>&1
-if errorlevel 1 goto fail
+if not "%ERRORLEVEL%"=="0" goto fail
 
 echo ==== SEED-EVERYTHING COMPLETE ==== >> "%LOG%"
 if exist "%LOCK%" del "%LOCK%"

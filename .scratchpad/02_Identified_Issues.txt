@@ -288,8 +288,9 @@ L3  After ANY build reporting MSB3027 copy failures, the output tree is poisoned
     not chess bugs).
 L4  Extension DLLs statically import laplace_core_static.lib: extension freshness
     does NOT imply engine freshness. build-extensions after ANY engine rebuild.
-    Split-hash-universe symptom: word_id() disagrees with seeded data; `senses>0`
-    is the real health check, `id_ok` is near-useless.
+    Split-hash-universe symptom: word_id() disagrees with seeded data — diagnose
+    with substrate_health()/api()/evidence vs seeded ids. Lexical helpers are
+    ordinary API, not a universal health or invention gate.
 L5  Never edit a .cmd while any invocation is executing (cmd.exe re-reads by byte
     offset). Recycle PG backends only BETWEEN stages (57P01 kills the seed shell).
 L6  In a backpressured pipeline producer rate == consumer rate by construction —
@@ -444,3 +445,32 @@ OPEN residuals:
      outside the system (python blake3 was used for demo addressing and rejected) —
      SQL addressing uses canonical_id()/word_id()/relation_type_id()/consensus_id(),
      all of which resolve through the extension's native hash.
+
+================================================================================
+OPEN FOLLOW-UPS — 2026-07-12 session (conversational engine + UD ingest)
+================================================================================
+54. FAMILY-AWARE BOOTSTRAP. SourceVocabularyBootstrap.RegisterAsync registers LITERAL
+    relation names, so a decomposer can declare a family CHILD (HAS_XPOS) without its
+    ROOT (HAS_POS) and fault the native attestation path (UD 0xC0000005; one-off fix
+    PR #289 added HAS_POS to UDDecomposer). Real fix: walk family_root on register so
+    declaring any member pulls its root. The band/family "sister mask" (highway_table.h
+    band_masks / laplace_highway_band_mask) already encodes that POS/UPOS/XPOS collapse.
+55. REFOLD ON RE-INGEST. rows_new=0 (novelty gate dedupes entities/attestations) YET the
+    consensus fold re-folds everything (5.7M relations on a no-op UD re-run; update-path
+    ~12k rel/s vs novel-insert ~232k = 20x). Fold IS parallel (Parallel.ForEach/FoldWorkers)
+    — the cost is redundant read-prior->fold->write, not core count. The novelty gate must
+    reach the FOLD (skip already-folded observations), else re-ingest is slow AND risks
+    double-counting witness_count.
+56. TREE-SITTER DOC/FORMAT ROUTER. tree-sitter here is 313 grammars (every language PLUS
+    markdown/rst/html/json/csv/yaml/toml/...), the universal container unpacker. The T-SQL
+    docs ingest was a NO-OP because .md went through the document(UAX29) lane; markdown is a
+    tree-sitter container. Build a generic format router on the IngestInput valet (detect
+    extension -> grammar) to fix doc/code ingest and mesh doc code-blocks with real code.
+57. FULL UD RESEED. UD is ~33% (crashed at et_edt pre-fix); needs a clean full 686-file
+    reseed now that HAS_POS is fixed (ideally after #55 so re-ingest isn't 45min of refold).
+58. CONVERSATIONAL ENGINE (branch claude/conversational-engine, NOT merged; see .scratchpad/
+    22). converse/converse_walk/chat SQL functions deployed on hart-server. converse_walk is
+    plpgsql RBAR that should move to native C (extend trajectory_generate.c for topic-restricted
+    steered generation). Omni-glottal wired but needs OMW seed. Native highway perfcache +
+    entities.highway_mask are UNBUILT on hart-server (band gating works via relation_highway_band
+    on the read side; the native bitmask fast-path is doc-15 §3C OPEN).

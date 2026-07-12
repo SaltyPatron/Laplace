@@ -14,7 +14,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// enforced at accumulation); the fold is the same native glicko-2 the
 /// server called — glicko2_fold_uniform_period against the neutral opponent
 /// — run in-process at microseconds per edge, then written with exactly two
-/// bulk statements: COPY for new edges, one unnest UPDATE for existing.
+/// bulk statements: COPY for new edges + chunked unnest UPDATE for existing,
+/// both on the fold advisory-lock transaction (atomic period write).
 ///
 /// Parity with the retired materialize_period_partition is by construction:
 /// neutral seeds and tau are read in-transaction from the same SQL functions
@@ -28,6 +29,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public sealed partial class ConsensusAccumulatingWriter
 {
     private const int FoldProbeChunkIds = 131_072;
+    // Write unnests stay smaller than prior-read chunks: a single ~219k-row
+    // bytea[]+bigint[] UPDATE AV'd postgres 18.0.1 (0xc0000005) mid-WordNet fold.
+    private const int FoldWriteChunkIds = 32_768;
 
     private async Task FoldChainClientAsync(Task prev, int epoch, ICollection<Acc> edges)
     {
@@ -177,60 +181,43 @@ public sealed partial class ConsensusAccumulatingWriter
 
             if (novel.Count > 0)
             {
+                // Novel COPY must ride the SAME transaction as the prior UPDATE.
+                // Parallel side-connection COPYs used to Commit before UPDATE — a
+                // postgres AV mid-UPDATE (WordNet 2026-07-11) then left millions of
+                // consensus rows durable while the fold failed. One conn/tx: crash
+                // rolls back the whole period fold.
                 var copySw = System.Diagnostics.Stopwatch.StartNew();
-                int groups = (int)Math.Min(NpgsqlSubstrateWriter.ApplyParallelism,
-                    Math.Max(1L, novel.Count / 16_384));
-                // Disjoint id ranges per connection — same
-                // LWLock:BufferContent avoidance as the apply lane.
                 novel.Sort((a, b) => cids[a].CompareToBytewise(cids[b]));
-                int per = (novel.Count + groups - 1) / groups;
-                await CpuTopology.RunPinnedAsyncParallel(groups, async (g, token) =>
+                await using (var stream = await conn.BeginRawBinaryCopyAsync(
+                    "COPY laplace.consensus (id, subject_id, type_id, object_id, "
+                    + "rating, rd, volatility, witness_count, last_observed_at) "
+                    + "FROM STDIN (FORMAT BINARY)", ct))
                 {
-                    int start = g * per;
-                    if (start >= novel.Count) return;
-                    int count = Math.Min(per, novel.Count - start);
-
-                    await using var groupConn = await _ds.OpenConnectionAsync(token);
-                    await using var groupTx = await groupConn.BeginTransactionAsync(token);
-                    await using (var guc = groupConn.CreateCommand())
+                    var copy = new PgCopyRowBuffer(stream);
+                    for (int k = 0; k < novel.Count; k++)
                     {
-                        guc.Transaction = groupTx;
-                        guc.CommandText =
-                            "SET LOCAL session_replication_role = replica; "
-                            + "SET LOCAL synchronous_commit = off; SET LOCAL jit = off";
-                        await guc.ExecuteNonQueryAsync(token);
+                        int i = novel[k];
+                        await copy.EnsureRoomAsync(FoldRowMaxBytes, ct);
+                        copy.Commit(WriteConsensusRow(
+                            copy.Array, copy.Filled, cids[i], accs[i],
+                            foldedStates[i], foldedWitness[i]));
                     }
-                    await using (var stream = await groupConn.BeginRawBinaryCopyAsync(
-                        "COPY laplace.consensus (id, subject_id, type_id, object_id, "
-                        + "rating, rd, volatility, witness_count, last_observed_at) "
-                        + "FROM STDIN (FORMAT BINARY)", token))
-                    {
-                        var copy = new PgCopyRowBuffer(stream);
-                        for (int k = start; k < start + count; k++)
-                        {
-                            int i = novel[k];
-                            await copy.EnsureRoomAsync(FoldRowMaxBytes, token);
-                            copy.Commit(WriteConsensusRow(
-                                copy.Array, copy.Filled, cids[i], accs[i],
-                                foldedStates[i], foldedWitness[i]));
-                        }
-                        await copy.FinalizeAsync(token);
-                    }
-                    await groupTx.CommitAsync(token);
-                }, ct);
+                    await copy.FinalizeAsync(ct);
+                }
                 copySw.Stop();
                 _log.LogInformation(
-                    "consensus fold copy: {Rows:N0} novel relations across {Groups} connection(s) in {Ms:N0}ms ({Rps:N0} rows/s)",
-                    novel.Count, groups, copySw.ElapsedMilliseconds,
+                    "consensus fold copy: {Rows:N0} novel relations on fold tx in {Ms:N0}ms ({Rps:N0} rows/s)",
+                    novel.Count, copySw.ElapsedMilliseconds,
                     novel.Count / Math.Max(1e-3, copySw.Elapsed.TotalSeconds));
             }
 
             if (updIds.Count > 0)
             {
-                await using var upd = conn.CreateCommand();
-                upd.Transaction = tx;
-                upd.CommandTimeout = 0;
-                upd.CommandText =
+                // Chunk the prior-refresh UPDATE. A single unnest of hundreds of
+                // thousands of bytea[]+bigint[] arrays AV'd postgres.exe
+                // (0xc0000005) mid-WordNet fold 2026-07-11 16:40:38 WER — the
+                // client saw "connection forcibly closed" / crash recovery.
+                const string updSql =
                     "UPDATE laplace.consensus c SET "
                     + "  rating = d.rating, rd = d.rd, volatility = d.volatility, "
                     + "  witness_count = d.witness_count, last_observed_at = d.ts "
@@ -238,19 +225,27 @@ public sealed partial class ConsensusAccumulatingWriter
                     + "             unnest($3::bigint[]) AS rd, unnest($4::bigint[]) AS volatility, "
                     + "             unnest($5::bigint[]) AS witness_count, unnest($6::timestamptz[]) AS ts) d "
                     + "WHERE c.id = d.id";
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updIds.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updRating.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updRd.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updVol.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updWitness.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                upd.Parameters.Add(new NpgsqlParameter
-                { Value = updTs.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                await upd.ExecuteNonQueryAsync(ct);
+                for (int off = 0; off < updIds.Count; off += FoldWriteChunkIds)
+                {
+                    int m = Math.Min(FoldWriteChunkIds, updIds.Count - off);
+                    await using var upd = conn.CreateCommand();
+                    upd.Transaction = tx;
+                    upd.CommandTimeout = 0;
+                    upd.CommandText = updSql;
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updIds.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updRating.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updRd.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updVol.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updWitness.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    await upd.ExecuteNonQueryAsync(ct);
+                }
             }
 
             await tx.CommitAsync(ct);

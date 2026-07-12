@@ -351,24 +351,32 @@ public sealed partial class NpgsqlSubstrateWriter
 
             if (mergeIds.Count > 0)
             {
-                await using var merge = conn.CreateCommand();
-                merge.Transaction = tx;
-                merge.CommandTimeout = 0;
-                merge.CommandText =
+                // Same class as consensus fold: unbounded unnest UPDATE AVs
+                // postgres 18 on large bytea[] arrays — chunk writes.
+                const int mergeChunk = 32_768;
+                const string mergeSql =
                     "UPDATE laplace.attestations a SET "
                     + "  observation_count = a.observation_count + d.games, "
                     + "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
                     + "FROM (SELECT unnest($1::bytea[]) AS id, unnest($2::bigint[]) AS games, "
                     + "             unnest($3::timestamptz[]) AS ts) d "
                     + "WHERE a.id = d.id";
-                merge.Parameters.Add(new NpgsqlParameter
-                { Value = mergeIds.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                merge.Parameters.Add(new NpgsqlParameter
-                { Value = mergeGames.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                merge.Parameters.Add(new NpgsqlParameter
-                { Value = mergeTs.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                aFold = await merge.ExecuteNonQueryAsync(ct);
-                rt++;
+                for (int off = 0; off < mergeIds.Count; off += mergeChunk)
+                {
+                    int m = Math.Min(mergeChunk, mergeIds.Count - off);
+                    await using var merge = conn.CreateCommand();
+                    merge.Transaction = tx;
+                    merge.CommandTimeout = 0;
+                    merge.CommandText = mergeSql;
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = mergeIds.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = mergeGames.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = mergeTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    aFold += await merge.ExecuteNonQueryAsync(ct);
+                    rt++;
+                }
             }
 
             await tx.CommitAsync(ct);

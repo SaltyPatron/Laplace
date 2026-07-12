@@ -22,7 +22,9 @@ applyTo: 'engine/**,extension/**'
 - Rebuild one target: `cmd /c "call scripts\win\env.cmd && cd build-win && cmake --build . --target laplace_dynamics"`.
 - After ANY engine rebuild, run `scripts\win\build-extensions.cmd` — extension DLLs
   statically import `laplace_core_static.lib`, so extension freshness ≠ engine freshness
-  (lesson L4). Real health check: `senses('dog') > 0` in psql.
+  (lesson L4). Confirm with `SELECT * FROM substrate_health();` and
+  `SELECT * FROM api('<substring>');` — do not treat any single lexical helper
+  as a rebuild or invention gate.
 - MSB3027 copy failure ⇒ output tree is poisoned ⇒ clean-rebuild (lesson L3).
 
 ## Conventions

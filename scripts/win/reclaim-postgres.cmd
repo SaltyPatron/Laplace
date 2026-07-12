@@ -129,7 +129,6 @@ if errorlevel 1 (
   exit /b 0
 )
 echo laplace_substrate present.
-"%PSQL%" -h localhost -U postgres -d laplace -tAc "SET search_path=laplace,public; SELECT senses(word_id('dog')) AS dog_senses;" 2>nul
 echo.
 echo RECLAIM OK: service owns Postgres. Do not Start from services.msc while an orphan holds 5432.
 exit /b 0

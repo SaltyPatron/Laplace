@@ -634,9 +634,9 @@ internal static class IngestCommands
                 "ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id); "
                 + "ANALYZE laplace.physicalities (entity_id, type); "
                 + "ANALYZE laplace.entities (id, tier, type_id); "
-                // consensus is freshly folded here; senses()/define()/edge reads plan against
+                // consensus is freshly folded here; lexical/edge reads plan against
                 // it, and without stats the planner picks a nested loop that never returns under
-                // CommandTimeout=0 (the WordNet 'dog' confirmation query hung ~17 min on this).
+                // CommandTimeout=0 (post-ingest confirmation queries hung ~17 min on this).
                 + "ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd);";
             await an.ExecuteNonQueryAsync();
         }
@@ -802,30 +802,10 @@ internal static class IngestCommands
                     break;
                 }
             case "WordNetDecomposer":
-                {
-                    await using var cmd = Cmd();
-                    cmd.CommandText = @"
-                    SELECT laplace.word_id('dog') IS NOT NULL AS dog_ok,
-                           (SELECT count(*) FROM laplace.senses(laplace.word_id('dog'))) AS sense_n,
-                           (SELECT definition FROM laplace.define(laplace.word_id('dog'), 1) LIMIT 1) AS gloss,
-                           laplace.evidence_count(p_type => laplace.relation_type_id('IS_A'),
-                                                  p_source => laplace.source_id('WordNetDecomposer')) AS is_a_n,
-                           laplace.evidence_count(p_type => laplace.relation_type_id('HAS_SENSE'),
-                                                  p_source => laplace.source_id('WordNetDecomposer')) AS has_sense_n";
-                    await using var rdr = await cmd.ExecuteReaderAsync();
-                    if (await rdr.ReadAsync())
-                    {
-                        bool dogOk = rdr.GetBoolean(0);
-                        long senses = rdr.GetInt64(1);
-                        string? gloss = rdr.IsDBNull(2) ? null : rdr.GetString(2);
-                        long isA = rdr.GetInt64(3);
-                        long hasSense = rdr.GetInt64(4);
-                        Console.WriteLine($"  check wordnet/dog: id_ok={dogOk} senses={senses:N0} IS_A={isA:N0} HAS_SENSE={hasSense:N0}");
-                        if (gloss is not null) Console.WriteLine($"    define  : {gloss}");
-                        if (!dogOk || senses == 0) Console.WriteLine("  FAIL: wordnet lexicon not queryable");
-                    }
-                    break;
-                }
+                Console.WriteLine($"  check wordnet: IS_A={await RelationEvidence("IS_A", srcKey):N0} "
+                                + $"HAS_SENSE={await RelationEvidence("HAS_SENSE", srcKey):N0} "
+                                + $"HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0}");
+                break;
             case "VerbNetDecomposer":
                 Console.WriteLine($"  check verbnet: HAS_VERB_FRAME={await RelationEvidence("HAS_VERB_FRAME", srcKey):N0} "
                                 + $"HAS_THEMATIC_ROLE={await RelationEvidence("HAS_THEMATIC_ROLE", srcKey):N0}");

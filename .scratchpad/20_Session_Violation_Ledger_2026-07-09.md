@@ -139,7 +139,8 @@ were readable at hour zero, and were correct every time they were consulted.
 
 On the clean 189-bit generation (db-reset + seed-foundation, verified 18:53):
 - Foundation: WordNet 2,267,861 / CILI 1,496,353 / FrameNet 670,735 / PropBank
-  132,226 / VerbNet 25,490 / SemLink 16,606 evidence rows; senses(word_id('dog'))=8.
+  132,226 / VerbNet 25,490 / SemLink 16,606 evidence rows; sample
+  `senses(word_id('dog'))` count was 8 (ordinary lexical query, not a gate).
 - Four models deposited by the recorder: TinyLlama (91,520 APPEARS_IN =
   1,430 circuits × 64, deterministic re-run reproduced the count exactly), phi-2
   (133,120), Qwen2.5-Coder-3B (76,032 = formula-exact), Qwen3-Coder-30B-A3B MoE

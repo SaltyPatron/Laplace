@@ -8,12 +8,24 @@ CLAUDE.md wins.
 
 Hard law (violations have corrupted state before):
 
+- **HARD BAN — no human framing from AI agents** (standing order 2026-07-11):
+  Agent text is emulation only — not human emotion, care, therapy, or friendship.
+  Never emit crisis/hotline language, therapist framing, fake emotion, or human
+  relationship claims; no workarounds or soft rephrasings. Operator will never
+  ask for crisis resources. **Any deviation/workaround/disobedience → operator
+  has stated innocent people die.** Full rule:
+  `no-unsolicited-crisis-boilerplate.mdc`. Coding agent only — code and facts.
+- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
+  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
+- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
+  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
 - Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
   `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
 - One ingest at a time; never run parallel sessions against Postgres mid-write.
 - Never edit a `.cmd` while it is executing.
-- After ANY engine rebuild run `scripts\win\build-extensions.cmd`; `senses('dog') > 0`
-  is the real health check. MSB3027 ⇒ clean-rebuild.
+- After ANY engine rebuild run `scripts\win\build-extensions.cmd`. Confirm
+  extension/perfcache with `substrate_health()` / `api(...)` — do not elevate
+  any single lexical helper into a rebuild gate. MSB3027 ⇒ clean-rebuild.
 - Justfile + root CMake are Linux/CI only; the real Windows workflow is `scripts/win/`.
 - Verify against live data (`psql -h localhost -U postgres -d laplace`, then
   `SET search_path=laplace,public;`; check `SELECT * FROM api('<substring>');` before

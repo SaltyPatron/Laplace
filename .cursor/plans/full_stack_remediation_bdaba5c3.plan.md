@@ -41,7 +41,7 @@ isProject: false
 | **Circular emptiness** | [17 §6](.scratchpad/17_Decomposer_Full_Stack_Audit.md) said "see plan §6"; plan said "finish 17 §6 during migration". Neither had file:line dupes. |
 | **Product last** | T6–T8 (live SQL recall, user recipe→GGUF export, OpenAI API) sequenced **after** migrating 34 decomposers — repeats doc-13 "pipeline chain" thinking you rejected. |
 | **Gates after migration** | T5 hardened gates **after** T3 migrated everything — backwards; gate must block new violations before bulk migration. |
-| **One verify ritual** | `seed-step :verify_step` applies to **ingest** only; SQL/foundry/endpoints need different proofs (psql `senses(word_id('dog'))`, foundry-loop, endpoint smoke). |
+| **One verify ritual** | `seed-step :verify_step` applies to **ingest** only; SQL/foundry/endpoints need different proofs (`substrate_health()` / `api()`, foundry-loop, endpoint smoke). Lexical helpers are ordinary API, not stack gates. |
 | **Missing [doc 16](.scratchpad/16_tier_correct_attestation_and_hub_unification.md)** | Author spec from 2026-07-06 with concrete P1–P7 fixes + validation results — completely absent. Real bugs (UD per-token HAS_LANGUAGE) not in plan. |
 | **Doc 18 contradiction** | Said doc 18 "precedes" plan while also listing "update doc 18" as a todo; file does not exist. Session instructions + this plan **are** the spec. |
 | **T3 blob** | "Migrate all 34" with no row checklist — unexecutable. [17 §4](.scratchpad/17_Decomposer_Full_Stack_Audit.md) table exists; plan ignored it. |
@@ -150,7 +150,7 @@ Remediation touches **all three subgraphs**, not just supply.
 | P5 UD XPOS → IS_A UPOS + FEAT_* | Pending | UD emitter |
 | P6 Wiktionary → synset hub | Pending | Wiktionary grammar ingest |
 
-**Verify:** doc 16 §8 probes after affected `seed-step`; `senses(word_id('dog')) > 0` (not `senses('dog')` — 16 §8 landmine)
+**Verify:** doc 16 §8 probes after affected `seed-step`; claim-layer SQL via `api(...)`.
 
 ---
 
@@ -207,7 +207,8 @@ One cross-working-set O(tiers) descent ([06](.scratchpad/06_Engineering_Ruleset.
 - [`QueryCommands.cs`](app/Laplace.Cli/QueryCommands.cs) — parallel CLI read path
 - [07](.scratchpad/07_SQL_Surface_Audit.txt) P2 — duplicate NOT-refuted predicates, fragmented read helpers
 
-**Verify:** `psql` → `SET search_path=laplace,public;` → `SELECT senses(word_id('dog'));` → `SELECT * FROM api('recall');` — latency + correctness
+**Verify:** `psql` → `SET search_path=laplace,public;` → `SELECT * FROM api('recall');`
+plus claim-specific recall/define probes — latency + correctness.
 
 ---
 
