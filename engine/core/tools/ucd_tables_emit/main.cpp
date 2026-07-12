@@ -22,9 +22,36 @@
 
 namespace fs = std::filesystem;
 
-static const uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;
+static const uint32_t CP_FULL = LAPLACE_PERFCACHE_RECORD_COUNT;
 
-struct Cli { fs::path ucdxml, ducet, output; std::string ucd_version, uca_version; };
+enum class ScopeKind { Ascii, Bmp, Full };
+
+struct Cli {
+    fs::path ucdxml, ducet, output;
+    std::string ucd_version, uca_version;
+    ScopeKind scope = ScopeKind::Full;
+    uint32_t scope_count = CP_FULL;
+    const char* scope_tag = "full";
+};
+
+static uint32_t scope_to_count(ScopeKind s) {
+    switch (s) {
+    case ScopeKind::Ascii: return 0x80u;
+    case ScopeKind::Bmp:   return 0x10000u;
+    case ScopeKind::Full:  return CP_FULL;
+    }
+    return CP_FULL;
+}
+
+static const char* scope_to_tag(ScopeKind s) {
+    switch (s) {
+    case ScopeKind::Ascii: return "ascii";
+    case ScopeKind::Bmp:   return "bmp";
+    case ScopeKind::Full:  return "full";
+    }
+    return "full";
+}
+
 static Cli parse_cli(int argc, char** argv) {
     Cli c;
     for (int i = 1; i < argc; ++i) {
@@ -38,11 +65,20 @@ static Cli parse_cli(int argc, char** argv) {
         else if (a == "--output")      c.output = nx();
         else if (a == "--ucd-version") c.ucd_version = nx();
         else if (a == "--uca-version") c.uca_version = nx();
+        else if (a == "--scope") {
+            auto v = nx();
+            if (v == "ascii") c.scope = ScopeKind::Ascii;
+            else if (v == "bmp") c.scope = ScopeKind::Bmp;
+            else if (v == "full") c.scope = ScopeKind::Full;
+            else { std::fprintf(stderr, "--scope must be ascii|bmp|full\n"); std::exit(2); }
+        }
         else { std::fprintf(stderr, "unknown arg %s\n", argv[i]); std::exit(2); }
     }
     if (c.ucdxml.empty() || c.ducet.empty() || c.output.empty()) {
         std::fprintf(stderr, "required: --ucdxml --ducet --output\n"); std::exit(2);
     }
+    c.scope_count = scope_to_count(c.scope);
+    c.scope_tag = scope_to_tag(c.scope);
     return c;
 }
 
@@ -91,13 +127,13 @@ struct UcdData {
     std::unordered_map<uint32_t, std::vector<uint32_t>> decomp;
     std::vector<uint8_t> comp_ex;
     UcdData() {
-        gb.assign(CP_COUNT, LAPLACE_GB_OTHER);
-        wb.assign(CP_COUNT, LAPLACE_WB_OTHER);
-        sb.assign(CP_COUNT, LAPLACE_SB_OTHER);
-        incb.assign(CP_COUNT, LAPLACE_INCB_NONE);
-        ccc.assign(CP_COUNT, 0);
-        ext_pict.assign(CP_COUNT, 0);
-        comp_ex.assign(CP_COUNT, 0);
+        gb.assign(CP_FULL, LAPLACE_GB_OTHER);
+        wb.assign(CP_FULL, LAPLACE_WB_OTHER);
+        sb.assign(CP_FULL, LAPLACE_SB_OTHER);
+        incb.assign(CP_FULL, LAPLACE_INCB_NONE);
+        ccc.assign(CP_FULL, 0);
+        ext_pict.assign(CP_FULL, 0);
+        comp_ex.assign(CP_FULL, 0);
     }
 };
 
@@ -126,7 +162,7 @@ extern "C" void on_start(void* u, const char* name, const char** a) {
         first = (uint32_t)std::stoul((const char*)f, nullptr, 16);
         last  = (uint32_t)std::stoul((const char*)l, nullptr, 16);
     }
-    if (last >= CP_COUNT) return;
+    if (last >= CP_FULL) return;
 
     UcdData* d = ctx->d;
     auto gcb = attr(a,"GCB"); auto wbv = attr(a,"WB"); auto sbv = attr(a,"SB");
@@ -169,7 +205,7 @@ static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
 
 // Bump when the emit LOGIC changes (not the inputs) so a generator change
 // invalidates the source-hash gate and forces a regenerate.
-static const char* GENERATOR_TAG = "ucd_tables_emit/v1";
+static const char* GENERATOR_TAG = "ucd_tables_emit/v2-scope";
 
 static bool read_file_bytes(const fs::path& p, std::vector<uint8_t>& out) {
     std::ifstream f(p, std::ios::binary);
@@ -178,13 +214,12 @@ static bool read_file_bytes(const fs::path& p, std::vector<uint8_t>& out) {
     return true;
 }
 
-// source_hash = blake3( blake3(xml) || blake3(ducet) || ucd_ver || uca_ver || tag ).
-// Hashing the two big files once each (in place) then combining the small digests
-// avoids a >64 MiB concat. This is the gate the build no-ops on: unchanged sources
-// => matching header hash => skip the multi-minute tree-sitter crawl entirely.
+// source_hash = blake3( blake3(xml) || blake3(ducet) || ucd_ver || uca_ver || tag || scope ).
+// Scope enters the hash so ascii/bmp/full blobs no-op independently.
 static void compute_source_hash(const std::vector<uint8_t>& xml,
                                 const std::vector<uint8_t>& ducet,
                                 const std::string& ucd_ver, const std::string& uca_ver,
+                                const char* scope_tag,
                                 hash128_t* out) {
     hash128_t hx, hd;
     hash128_blake3(xml.data(), xml.size(), &hx);
@@ -197,6 +232,8 @@ static void compute_source_hash(const std::vector<uint8_t>& xml,
     for (char c : uca_ver) mix.push_back((uint8_t)c);
     mix.push_back(0);
     for (const char* t = GENERATOR_TAG; *t; ++t) mix.push_back((uint8_t)*t);
+    mix.push_back(0);
+    for (const char* t = scope_tag; *t; ++t) mix.push_back((uint8_t)*t);
     hash128_blake3(mix.data(), mix.size(), out);
 }
 
@@ -217,7 +254,8 @@ int main(int argc, char** argv) {
         return 4;
     }
     hash128_t source_hash;
-    compute_source_hash(xml_bytes, ducet_bytes, cli.ucd_version, cli.uca_version, &source_hash);
+    compute_source_hash(xml_bytes, ducet_bytes, cli.ucd_version, cli.uca_version,
+                        cli.scope_tag, &source_hash);
     {
         std::ifstream prev(cli.output, std::ios::binary);
         if (prev) {
@@ -234,7 +272,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::vector<laplace_perfcache_record_t> rec_array(CP_COUNT);
+    // Full-universe compute so shared codepoints keep identical ids/coords across scopes;
+    // the blob stores only the dense prefix [0, scope_count).
+    std::vector<laplace_perfcache_record_t> rec_array(CP_FULL);
     int rc = laplace_unicode_seed_compute(cli.ucdxml.string().c_str(),
                                           cli.ducet.string().c_str(),
                                           rec_array.data(), rec_array.size());
@@ -242,9 +282,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "laplace_unicode_seed_compute returned %d\n", rc);
         return 4;
     }
+    const uint32_t scope_count = cli.scope_count;
     std::vector<uint8_t> records;
-    records.resize(sizeof(laplace_perfcache_record_t) * CP_COUNT);
+    records.resize(sizeof(laplace_perfcache_record_t) * scope_count);
     std::memcpy(records.data(), rec_array.data(), records.size());
+    std::vector<laplace_perfcache_record_t>().swap(rec_array);
 
     UcdData d;
     SaxCtx ctx{&d, false};
@@ -264,7 +306,14 @@ int main(int argc, char** argv) {
         for (uint32_t c : it->second) full(c, out);
     };
     std::vector<std::pair<uint32_t, std::vector<uint32_t>>> decomps;
-    for (auto& kv : d.decomp) { std::vector<uint32_t> seq; full(kv.first, seq); decomps.emplace_back(kv.first, std::move(seq)); }
+    for (auto& kv : d.decomp) {
+        if (kv.first >= scope_count) continue;
+        std::vector<uint32_t> seq; full(kv.first, seq);
+        bool in_scope = true;
+        for (uint32_t c : seq) if (c >= scope_count) { in_scope = false; break; }
+        if (!in_scope) continue;
+        decomps.emplace_back(kv.first, std::move(seq));
+    }
     std::sort(decomps.begin(), decomps.end(), [](auto&a, auto&b){ return a.first < b.first; });
 
     std::vector<uint8_t> decomp_recs, decomp_data;
@@ -276,11 +325,13 @@ int main(int argc, char** argv) {
         for (uint32_t c : dd.second) { put_u32(decomp_data, c); ++data_idx; }
     }
 
-    auto ccc_of = [&](uint32_t cp){ return cp < CP_COUNT ? d.ccc[cp] : 0; };
+    auto ccc_of = [&](uint32_t cp){ return cp < CP_FULL ? d.ccc[cp] : 0; };
     std::vector<std::array<uint32_t,3>> comps;
     for (auto& kv : d.decomp) {
         uint32_t cp = kv.first; const auto& seq = kv.second;
+        if (cp >= scope_count) continue;
         if (seq.size() != 2) continue;
+        if (seq[0] >= scope_count || seq[1] >= scope_count) continue;
         if (d.comp_ex[cp]) continue;
         if (ccc_of(seq[0]) != 0) continue;
         if (ccc_of(cp) != 0) continue;
@@ -304,7 +355,7 @@ int main(int argc, char** argv) {
     put_u32(blob, LAPLACE_PERFCACHE_VERSION);
     { char v[8]={0}; std::memcpy(v, cli.ucd_version.c_str(), std::min<size_t>(cli.ucd_version.size(), 8)); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
     { char v[8]={0}; std::memcpy(v, cli.uca_version.c_str(), std::min<size_t>(cli.uca_version.size(), 8)); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
-    put_u64(blob, CP_COUNT);
+    put_u64(blob, scope_count);
     put_u64(blob, 80);
     put_u64(blob, off_records);
     put_u64(blob, decomps.size());
@@ -346,10 +397,11 @@ int main(int argc, char** argv) {
     out.close();
 
     std::fprintf(stderr,
-        "perfcache: ucd=%s uca=%s -> %s\n"
+        "perfcache: ucd=%s uca=%s scope=%s -> %s\n"
         "  records=%u (%.1f MiB) decomp=%zu (data=%u) compose=%zu  total=%.1f MiB\n",
-        cli.ucd_version.c_str(), cli.uca_version.c_str(), cli.output.string().c_str(),
-        CP_COUNT, records.size()/1048576.0, decomps.size(), data_idx, comps.size(),
+        cli.ucd_version.c_str(), cli.uca_version.c_str(), cli.scope_tag,
+        cli.output.string().c_str(),
+        scope_count, records.size()/1048576.0, decomps.size(), data_idx, comps.size(),
         blob.size()/1048576.0);
     return 0;
 }

@@ -5,7 +5,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
+/// <summary>
+/// ETL sources route through <see cref="DecomposerMultiPhase"/> +
+/// <see cref="StructuredGrammarIngest"/> (runtime <see cref="EtlRuntimeManifest"/>).
+/// </summary>
+public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     private readonly EtlSource _src;
     private ISubstrateReader? _containmentReader;
@@ -15,10 +19,10 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
 
     public EtlDecomposer(EtlSource src) => _src = src;
 
-    public Hash128 SourceId => _src.SourceId;
-    public string SourceName => _src.Name;
-    public int LayerOrder => _src.Layer;
-    public Hash128 TrustClassId => _src.TrustClassId;
+    public override Hash128 SourceId => _src.SourceId;
+    public override string SourceName => _src.Name;
+    public override int LayerOrder => _src.Layer;
+    public override Hash128 TrustClassId => _src.TrustClassId;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
@@ -32,25 +36,14 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
         }
     }
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var langs = LanguageNamesBySource.GetOrAdd(_src.Name, _ => new(StringComparer.Ordinal));
-        await SourceVocabularyBootstrap.RegisterAsync(context, _src.SourceId, _src.Name, _src.TrustClassId,
-            relationNodeNames: BootstrapRelationNames(),
-            readbackNames: langs, ct: ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, new EtlRuntimeManifest(_src), readbackNames: langs, ct: ct);
     }
 
-    private IEnumerable<string> BootstrapRelationNames()
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        if (_src.BootstrapRelations is not null)
-            foreach (var r in _src.BootstrapRelations)
-                if (seen.Add(r)) yield return r;
-        foreach (var rule in _src.NodeEdgeMap)
-            if (seen.Add(rule.RelationType)) yield return rule.RelationType;
-    }
-
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -134,11 +127,9 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             "records", paths, options.MaxInputUnits, ct));
     }
 
-    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits;
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

@@ -127,10 +127,8 @@ add_custom_command(
     VERBATIM
 )
 
-# Blob is a pure function of UCD inputs — NOT of the emit binary. Listing the
-# tool in DEPENDS re-runs emit on every laplace_core relink (emit links core),
-# which under ASAN turns a no-op rebuild into a multi-hour tree-sitter crawl.
-# Order-only: add_dependencies ensures the tool exists before first emit.
+# Source-hash gate in laplace_ucd_tables_emit makes re-runs a sub-second no-op
+# when UCD/DUCET/generator/scope are unchanged, so DEPENDS may include the tool.
 add_custom_command(
     OUTPUT ${LAPLACE_PERFCACHE_BIN}
     COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
@@ -138,16 +136,16 @@ add_custom_command(
             --ducet       "${LAPLACE_DUCET_FILE}"
             --ucd-version "${LAPLACE_UNICODE_VERSION}"
             --uca-version "${LAPLACE_UCA_VERSION}"
+            --scope       full
             --output      ${LAPLACE_PERFCACHE_BIN}
     DEPENDS ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
+            $<TARGET_FILE:laplace_ucd_tables_emit>
     COMMENT "Emitting T0 perf-cache blob (UCD ${LAPLACE_UNICODE_VERSION} / UCA ${LAPLACE_UCA_VERSION})"
     VERBATIM
 )
 
 add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
-# Order-only dep on laplace_ucd_tables_emit is attached in engine/CMakeLists.txt
-# after that target exists (tools/ is added after core/).
 
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
@@ -158,6 +156,7 @@ add_custom_target(laplace_verify_perfcache_determinism
             --ducet       "${LAPLACE_DUCET_FILE}"
             --ucd-version "${LAPLACE_UNICODE_VERSION}"
             --uca-version "${LAPLACE_UCA_VERSION}"
+            --scope       full
             --output      ${LAPLACE_PERFCACHE_BIN}
     COMMAND ${CMAKE_COMMAND} -E compare_files ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
     DEPENDS laplace_t0_perfcache laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"

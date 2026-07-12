@@ -94,7 +94,7 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        Assert.Equal(2, writer.Captured.Count);
+        Assert.Equal(3, writer.Captured.Count); // vocabulary + license deposit + UCD classifiers
         var boot = writer.Captured[0];
 
         Assert.Contains(boot.Entities, e =>
@@ -105,6 +105,14 @@ public sealed class UnicodeDecomposerTests
             a.SubjectId == UnicodeDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == UnicodeDecomposer.TrustClass);
+
+        var license = writer.Captured[1];
+        Assert.Contains(license.Attestations, a =>
+            a.SubjectId == UnicodeDecomposer.Source
+            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_LICENSE"));
+        Assert.Contains(license.Attestations, a =>
+            a.SubjectId == UnicodeDecomposer.Source
+            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERSION"));
     }
 
     [Fact]

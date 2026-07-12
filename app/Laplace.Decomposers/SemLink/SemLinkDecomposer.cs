@@ -5,32 +5,19 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
+public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = SemLinkSource.SourceId;
+    public static readonly Hash128 TrustClass = SemLinkSource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "SemLinkDecomposer";
     public override int LayerOrder => 3;
-    public override Hash128 TrustClassId => TrustClass;
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"],
-            relationNodeNames: ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"],
-            ct: ct);
-
         // PredicateMatrix rides SemLink's seed step but is a distinct witness: register its
         // source entity so its attestations' source_id FK resolves. See .scratchpad/16 §3a.
-        await SourceVocabularyBootstrap.RegisterAsync(
-            context, PredicateMatrixIngest.Source, "PredicateMatrixDecomposer", PredicateMatrixIngest.TrustClass,
-            typeNodeNames: ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame", "FrameNet_FE"],
-            relationNodeNames: ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"],
-            ct: ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, SeedSourceManifest<PredicateMatrixSource>.Instance, ct: ct);
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(

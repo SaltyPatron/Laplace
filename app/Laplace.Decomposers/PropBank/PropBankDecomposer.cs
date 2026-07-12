@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
+public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankSource, FullScope>
 {
 
 
@@ -16,10 +16,8 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 
 
 
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/PropBankDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = PropBankSource.SourceId;
+    public static readonly Hash128 TrustClass = PropBankSource.TrustClass;
 
     private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 OrdinalTypeId = EntityTypeRegistry.Ordinal;
@@ -29,10 +27,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 
     internal static Hash128 OrdinalId(string n) => Hash128.OfCanonical($"ordinal/{n}/v1");
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "PropBankDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "propbank";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
@@ -44,12 +39,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement>
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["PropBank_Roleset", "VerbNet_Class", "FrameNet_Frame", "Ordinal"],
-            relationNodeNames: ["HAS_SENSE", "HAS_DEFINITION", "HAS_SEMANTIC_ROLE", "HAS_EXAMPLE",
-                "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_FEATURE"],
-            readbackNames: _canonicalNames, ct: ct);
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
     protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

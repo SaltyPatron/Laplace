@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
@@ -7,12 +8,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : GrammarComposeDecomposer
+public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/RepoDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = RepoSource.SourceId;
+    public static readonly Hash128 TrustClass = RepoSource.TrustClass;
 
     private static readonly Hash128 RepoTypeId = EntityTypeRegistry.RepoRoot;
     private static readonly Hash128 FileTypeId = EntityTypeRegistry.SourceFile;
@@ -23,32 +22,24 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer
             ["CMakeLists.txt"] = "cmake",
         };
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "RepoDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "repo";
 
-    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     private Hash128 _repoId;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
+
+    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["RepoRoot", "SourceFile"],
-            relationNodeNames: ["CONTAINS", "CALLS", "DEFINES", "REFERENCES",
-                "HAS_EXAMPLE", "HAS_DEFINITION"],
-            ct: ct);
-        _canonicalNames.UnionWith(boot.CanonicalNames);
-
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) return;
 
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
-        _canonicalNames.Add(repoCanonical);
+        _canonicalNames.TryAdd(repoCanonical, 0);
         _repoId = Hash128.OfCanonical(repoCanonical);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,

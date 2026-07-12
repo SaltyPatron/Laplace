@@ -1406,6 +1406,41 @@ symmetry = "asymmetric"
 parent = null
 family_root = "IS_EXAMPLE_OF"
 
+[[relation]]
+canonical = "HAS_LICENSE"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LICENSE"
+
+[[relation]]
+canonical = "HAS_ATTRIBUTION"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ATTRIBUTION"
+
+[[relation]]
+canonical = "HAS_SOURCE_URL"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SOURCE_URL"
+
+[[relation]]
+canonical = "HAS_CITATION"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CITATION"
+
+[[relation]]
+canonical = "HAS_VERSION"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_VERSION"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"

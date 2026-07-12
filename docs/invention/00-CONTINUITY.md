@@ -61,7 +61,23 @@ Never blame the user. Honest about what is verified vs. assumed. (See the memory
 
 ## The build (build-a-bear generic model generator)
 
-Plan: `C:\Users\ahart\.claude\plans\cosmic-foraging-wall.md`.
+Active valet/orchestration plan: `C:\Users\ahart\.claude\plans\jiggly-tumbling-flurry.md`
+(orchestrated by `valet_orchestration_campaign_c191b5d2`). Foundry plan
+`cosmic-foraging-wall.md` remains the A3/A4 north star — out of scope for the valet campaign.
+
+**Phase 0 done** (committed `a2a3b32`): source-hash-gated perfcache emit, `EnsureComputed`
+always computes from raw UCD (never seeds DB from the blob), doc-23 principles aligned.
+
+**Waves 1–5 landed (uncommitted until operator orders commit):**
+- Wave 1: CMake DEPENDS + `--scope` + scoped loader
+- Wave 2: ISourceManifest / ISeedSource / ISeedScope + family-aware bootstrap
+- Wave 3: Unicode MultiPhase; Etl/Model/Chess manifests; empty Unicode/hand-builder allowlists
+- Wave 4: IContentRecordAdapter + shared SeedIngestComposition DI (CLI + API)
+- Wave 5: HAS_LICENSE/… relations + DepositLicenseAsync; reseed queued in
+  `.scratchpad/24_Campaign_Reseed_Queue.md` (**do not reseed until ordered**)
+
+Remaining debt: batched highway reseed (credit relations); Foundry A3/A4; Wave 3D full
+hand-list → ISeedSource migration for every RelationTriple source.
 
 Flow: UI posts a recipe JSON → parse + ingest (content-addressed `Model_Recipe`) → export fetches
 via `model_recipes()` → native per-head materialize → model file (any arch/format).
@@ -75,7 +91,7 @@ Done / verified:
 - **A2 (partial)** `RecipeDescriptor.cs` (typed operator array) written + compiles. Export-branch
   wiring pending, lands with A3/A4.
 
-Next — A3/A4 (heavy native core):
+Next — Foundry A3/A4 (deferred; not valet):
 - A3: per-type operators via `consensus_type_plane` (replaces the 4-bucket mash); factor each type /
   metric into attention/OV/FFN factors (`ProjectOperator`/`Factor` → native `ComputeSubstrateGram`/
   `TensorSvdTruncate`).

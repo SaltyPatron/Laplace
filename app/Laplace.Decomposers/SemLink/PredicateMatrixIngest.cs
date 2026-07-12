@@ -15,10 +15,8 @@ internal static class PredicateMatrixIngest
     // two witnesses corroborating the same VN↔FN↔synset links, which is the whole point of the
     // EVIDENCE layer. Its source id is registered as an entity in SemLinkDecomposer.InitializeAsync
     // so the attestations' source_id FK is satisfied. See .scratchpad/16 §3a.
-    internal static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/PredicateMatrixDecomposer/v1");
-    internal static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    internal static readonly Hash128 Source = PredicateMatrixSource.SourceId;
+    internal static readonly Hash128 TrustClass = PredicateMatrixSource.TrustClass;
 
     private const int ColLang = 0;
     private const int ColPos = 1;

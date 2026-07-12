@@ -40,15 +40,15 @@ public class GrammarSpineConformanceTests
         {
             ("Wiktionary", ["GrammarIngestDecomposer", "WiktionaryGrammarWitness", "IGrammarWitness"]),
             ("SemLink", ["GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            ("Tatoeba", ["DecomposerMultiFile<GrammarIngestRecord>", "GrammarIngestHandler",
+            ("Tatoeba", ["DecomposerMultiFile<GrammarIngestRecord", "GrammarIngestHandler",
                 "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
             // ConceptNet + Atomic2020 are triple sources on the shared
             // RelationTripleDecomposerBase path (extraction only), NOT the grammar spine.
             ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord>", "GrammarIngestHandler",
+            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord", "GrammarIngestHandler",
                 "OMWGrammarWitness", "OMWRowParser"]),
             ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("UD", ["DecomposerMultiFile<UdIngestRecord>", "UdIngestHandler", "UdConlluParser"]),
+            ("UD", ["DecomposerMultiFile<UdIngestRecord", "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)

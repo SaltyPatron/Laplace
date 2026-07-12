@@ -5,26 +5,18 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class WordFrameNetDecomposer : DecomposerMultiFile<CategoryCorrespondenceRecord>, IIngestInventoryProvider
+public sealed class WordFrameNetDecomposer : DecomposerMultiFile<CategoryCorrespondenceRecord, WordFrameNetSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/WordFrameNetDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = WordFrameNetSource.SourceId;
+    public static readonly Hash128 TrustClass = WordFrameNetSource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "WordFrameNetDecomposer";
     public override int LayerOrder => 3;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
 
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
     {
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
-        return SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["FrameNet_LU"],
-            relationNodeNames: ["CORRESPONDS_TO"],
-            ct: ct);
+        return Task.CompletedTask;
     }
 
     protected override IMultiFileRecordStream<CategoryCorrespondenceRecord> CreateMultiFileStream(

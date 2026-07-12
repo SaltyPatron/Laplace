@@ -36,26 +36,24 @@ testable, and free of the multi-minute-crawl-every-build / "emit must exist" gym
 - CMake `engine/core/CMakeLists.txt:116-166`: extract XML → emit .bin → determinism target
   re-runs emit + `compare_files`. Gymnastics: "blob is a pure function — don't DEPENDS the
   tool or every relink re-crawls" (:130); order-only `add_dependencies(laplace_t0_perfcache
-  laplace_ucd_tables_emit)` (engine/CMakeLists.txt:225).
+  laplace_ucd_tables_emit)` (engine/CMakeLists.txt:225). Wave 1 retires this gymnastics.
 - Codegen precedent: `scripts/codegen-attestation-law.py` (add_custom_command, DEPENDS on
   manifest TOML), mix of committed header (highway_manifest.h) + gitignored src/generated/*.c.
-- VIOLATION: `UnicodeDecomposer.EnsureComputed` (~L507) reads `CodepointPerfcache.Records`
-  when the blob is loaded — seeds DB from the blob.
+- **FIXED (Phase 0 / `a2a3b32`):** `UnicodeDecomposer.EnsureComputed` always computes from
+  raw UCD via `UnicodeSeed.Compute` — never reads `CodepointPerfcache.Records` to seed the DB.
+  The blob remains a sibling OUTPUT of the same native compute, not a seed input.
 
 ## Implementation sequence
 
-1. **Source-hash header + no-op gate** (keystone). Add a `source_hash` (16B BLAKE3) field
-   to the perfcache header (`perfcache_format.h`; bump `LAPLACE_PERFCACHE_VERSION`). Emit
-   tool: hash(xml-bytes ⊕ ducet-bytes ⊕ generator-version) BEFORE the crawl; if `--output`
-   exists and its header source_hash matches → exit 0 (no crawl). Else compute + write +
-   stamp. → kills crawl-on-relink and the pure-function gymnastics.
+1. **Source-hash header + no-op gate** — **DONE (Phase 0).** `source_hash` in
+   `perfcache_format.h`; emit tool no-ops when header matches.
 2. **CMake rewire.** Codegen `add_custom_command` DEPENDS on the UCD XML + DUCET + the tool
    source; drop the order-only "emit must exist" dance. Determinism target compares against
-   a regenerate (now cheap: gate no-ops unless sources changed).
+   a regenerate (now cheap: gate no-ops unless sources changed). → Wave 1.
 3. **Gitignore** the generated blob(s) + add the artifact dir to `.gitignore`; ensure a
-   fresh checkout generates once then no-ops.
-4. **Fix the seed-from-blob violation.** `EnsureComputed` always computes from raw UCD
-   (delete the `CodepointPerfcache.Records` branch). Both hosts verified to carry raw UCD.
+   fresh checkout generates once then no-ops. (Phase 0 / Wave 1.)
+4. **Fix the seed-from-blob violation** — **DONE (Phase 0).** `EnsureComputed` always
+   computes from raw UCD; both hosts carry raw UCD.
 5. **Valet routing (C#).** A CLI path so the decomposer valet can (re)generate the perfcache
    through the same native machinery it uses to seed — one entry, two outputs. Generic hook
    so other sources can register a codegen artifact.
@@ -63,5 +61,6 @@ testable, and free of the multi-minute-crawl-every-build / "emit must exist" gym
 7. **(later, own reseed) Unihan scope tiers + credit attestations** — see
    project_source_credit_attestations + the campaign reseed queue.
 
-Steps 1-4 are the core; 1 is the bounded keystone. Nothing here owes a reseed (the blob is
-calculated-layer); the Unihan/credit/scope items do and sequence separately.
+Steps 1+4 are landed (Phase 0). Remaining core = Wave 1 CMake + `--scope` + loader.
+Nothing in the blob path owes a reseed (calculated-layer); Unihan/credit/scope items do
+and sequence separately.

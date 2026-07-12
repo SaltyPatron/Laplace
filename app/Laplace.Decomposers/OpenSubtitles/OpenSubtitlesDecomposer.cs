@@ -7,12 +7,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
+public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = OpenSubtitlesSource.SourceId;
+    public static readonly Hash128 TrustClass = OpenSubtitlesSource.TrustClass;
 
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {
@@ -28,19 +26,13 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase, IIng
         ("en-zh_CN",  22_394_812L),
     };
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "OpenSubtitlesDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: ["IS_TRANSLATION_OF", "HAS_LANGUAGE"],
-            readbackNames: LanguageNames, ct: ct);
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
     protected override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

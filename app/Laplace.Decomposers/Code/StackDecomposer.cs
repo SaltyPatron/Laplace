@@ -7,12 +7,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class StackDecomposer : GrammarComposeDecomposer
+public sealed class StackDecomposer : GrammarComposeDecomposer<StackSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/StackDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = StackSource.SourceId;
+    public static readonly Hash128 TrustClass = StackSource.TrustClass;
 
     private static readonly Dictionary<string, string?> StackLangToModality =
         new(StringComparer.OrdinalIgnoreCase)
@@ -45,21 +43,13 @@ public sealed class StackDecomposer : GrammarComposeDecomposer
             ["TOML"] = null,
         };
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "StackDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "stack-v2";
 
     private readonly HashSet<string>? _langFilter = null;
 
     public StackDecomposer() { }
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"],
-            ct: ct);
 
     protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

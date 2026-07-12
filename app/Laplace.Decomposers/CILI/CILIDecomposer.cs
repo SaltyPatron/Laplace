@@ -6,30 +6,19 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.CILI;
 
-public sealed class CILIDecomposer : DecomposerMultiPhase
+public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/CILIDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = CILISource.SourceId;
+    public static readonly Hash128 TrustClass = CILISource.TrustClass;
 
     private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
     private static readonly Hash128 EngLang = LanguageEntityId.FromIso639_3("eng");
 
     private const int DefaultBatchSize = 2048;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "CILIDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => [];
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["WordNet_Synset"],
-            relationNodeNames: ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_SYNSET_KEY"],
-            ct: ct);
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,

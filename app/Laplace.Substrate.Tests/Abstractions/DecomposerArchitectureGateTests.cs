@@ -28,12 +28,10 @@ public sealed class DecomposerArchitectureGateTests
 
     private static readonly HashSet<string> UnicodeAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Unicode/UnicodeDecomposer.cs",
     };
 
     private static readonly HashSet<string> HandBuilderAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Unicode/UnicodeDecomposer.cs",
     };
 
     /// <summary>
@@ -47,6 +45,7 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
+        "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
         "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
     };
 
@@ -373,5 +372,115 @@ public sealed class DecomposerArchitectureGateTests
         Assert.Contains("ContentTierSpine.BatchExistenceEmitBitmapsAsync", text, StringComparison.Ordinal);
         Assert.DoesNotContain("bool probe = !config.WorkingSet", text, StringComparison.Ordinal);
         Assert.Contains("BulkDescent", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeedControlPlane_ContractsExist()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var abs = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions");
+        Assert.True(File.Exists(Path.Combine(abs, "SourceManifest.cs")));
+        Assert.True(File.Exists(Path.Combine(abs, "SeedScope.cs")));
+        Assert.True(File.Exists(Path.Combine(abs, "SourceLicense.cs")));
+        var decomposer = File.ReadAllText(Path.Combine(abs, "Decomposer.cs"));
+        Assert.Contains("Decomposer<TRecord, TSource, TScope>", decomposer, StringComparison.Ordinal);
+        Assert.Contains("DecomposerMultiPhase<TSource, TScope>", decomposer, StringComparison.Ordinal);
+        Assert.Contains("ISeedSource", File.ReadAllText(Path.Combine(abs, "SourceManifest.cs")), StringComparison.Ordinal);
+        Assert.Contains("ISourceManifest", File.ReadAllText(Path.Combine(abs, "SourceManifest.cs")), StringComparison.Ordinal);
+        Assert.Contains("ISeedScope", File.ReadAllText(Path.Combine(abs, "SeedScope.cs")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FamilyAwareBootstrap_ChildPullsParentRoot()
+    {
+        var expanded = SourceVocabularyBootstrap.ExpandRelationsWithFamily(new[] { "HAS_XPOS" });
+        Assert.Contains("HAS_XPOS", expanded);
+        Assert.Contains("HAS_POS", expanded);
+        Assert.Equal("HAS_POS", SourceVocabularyBootstrap.FamilyRootCanonical("HAS_XPOS"));
+        Assert.True(SourceVocabularyBootstrap.DeclaredCoversEmitted(new[] { "HAS_XPOS" }, "HAS_POS"));
+        Assert.True(SourceVocabularyBootstrap.DeclaredCoversEmitted(new[] { "HAS_POS" }, "HAS_XPOS"));
+        Assert.False(SourceVocabularyBootstrap.DeclaredCoversEmitted(new[] { "IS_A" }, "HAS_XPOS"));
+    }
+
+    [Fact]
+    public void SeedScopes_DensePrefixesMatchPerfcache()
+    {
+        Assert.True(AsciiScope.InScope(0x7F));
+        Assert.False(AsciiScope.InScope(0x80));
+        Assert.Equal(ScopeTier.Ascii, AsciiScope.Tier);
+        Assert.True(BmpScope.InScope(0xFFFF));
+        Assert.False(BmpScope.InScope(0x10000));
+        Assert.True(FullScope.InScope(0x10FFFF));
+        Assert.False(FullScope.InScope(0x110000));
+    }
+
+    [Fact]
+    public void ProductionDecomposers_DoNotImplementIDecomposerDirectly()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            var projectRel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), dir).Replace('\\', '/');
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                var text = File.ReadAllText(file);
+                // Direct ": IDecomposer" without an intervening base class name.
+                if (Regex.IsMatch(text, @":\s*IDecomposer\b"))
+                    violations.Add($"{projectRel}/{rel}");
+            }
+        }
+        Assert.True(violations.Count == 0,
+            "Production decomposers must not implement IDecomposer directly:\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void UnicodeAndHandBuilderAllowlists_AreEmpty()
+    {
+        Assert.Empty(UnicodeAllowlist);
+        Assert.Empty(HandBuilderAllowlist);
+    }
+
+    [Fact]
+    public void HandlerHotPaths_DoNotResolveFromContainer()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        var forbidden = new Regex(
+            @"\b(GetRequiredService|GetService|CreateScope)\s*<|\.GetRequiredService\(|\.GetService\(|container\.Resolve\b",
+            RegexOptions.Compiled);
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*Handler*.cs", SearchOption.AllDirectories)
+                         .Concat(Directory.EnumerateFiles(dir, "*Compose*.cs", SearchOption.AllDirectories)))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var text = File.ReadAllText(file);
+                if (forbidden.IsMatch(text))
+                    violations.Add(Path.GetRelativePath(repoRoot, file));
+            }
+        }
+        // Composition root may resolve; handlers must not.
+        Assert.True(violations.Count == 0,
+            "No DI resolve in handler/compose hot paths:\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void SeedIngestComposition_ExistsAsSharedRoot()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var path = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Composition", "SeedIngestComposition.cs");
+        Assert.True(File.Exists(path));
+        var text = File.ReadAllText(path);
+        Assert.Contains("AddLaplaceSeedIngest", text, StringComparison.Ordinal);
+        Assert.Contains("ISeedDecomposerResolver", text, StringComparison.Ordinal);
+        Assert.Contains("IContentRecordAdapter", text, StringComparison.Ordinal);
     }
 }

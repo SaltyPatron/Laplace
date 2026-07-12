@@ -72,6 +72,7 @@ internal static class Program
         }
         try
         {
+            CliRuntime.InitializeServices();
             return args[0] switch
             {
                 "ingest" => await IngestCommands.IngestAsync(args[1..]),

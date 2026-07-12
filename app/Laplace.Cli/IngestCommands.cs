@@ -193,7 +193,7 @@ internal static class IngestCommands
         dsb.ConnectionStringBuilder.CommandTimeout = 0;
         await using var ds = dsb.Build();
 
-        var dec = new ModelDecomposer(modelDir, persistEvidence: ResolvePersistEvidence(cli));
+        var dec = CliRuntime.Decomposers.ResolveModel(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
 
 
@@ -323,7 +323,7 @@ internal static class IngestCommands
             return Fail($"ingest document: path not found: {cli.Path}");
 
         return await IngestViaRunnerAsync(
-            new DocumentDecomposer(),
+            CliRuntime.Decomposers.Resolve("document"),
             Path.GetFullPath(cli.Path),
             skipLayerCheck: true,
             cli,
@@ -339,7 +339,7 @@ internal static class IngestCommands
         if (!File.Exists(cli.Path))
             return Fail($"ingest recipe: file not found: {cli.Path}");
         return await IngestViaRunnerAsync(
-            new RecipeDecomposer(Path.GetFullPath(cli.Path)),
+            CliRuntime.Decomposers.ResolveRecipe(Path.GetFullPath(cli.Path)),
             Path.GetFullPath(cli.Path),
             skipLayerCheck: true,
             cli,
@@ -347,10 +347,10 @@ internal static class IngestCommands
     }
 
     internal static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(new UnicodeDecomposer(), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
+        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("unicode"), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
 
     internal static async Task<int> IngestISO639Async(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(new ISODecomposer(), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
+        => await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("iso639"), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
 
     private static string ResolveIngestPath(string? cliPath, string defaultPath)
         => Path.GetFullPath(string.IsNullOrWhiteSpace(cliPath) ? defaultPath : cliPath);
@@ -363,7 +363,7 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest code <file-or-directory>");
-        return await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("code"), path, skipLayerCheck: true, cli);
     }
 
     internal static async Task<int> IngestRepoAsync(IngestCliArgs cli)
@@ -371,7 +371,7 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest repo <repository-root>");
-        return await IngestViaRunnerAsync(new RepoDecomposer(), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("repo"), path, skipLayerCheck: true, cli);
     }
 
     internal static async Task<int> IngestTabularAsync(IngestCliArgs cli)
@@ -379,7 +379,7 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest tabular <file-or-directory>");
-        return await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli);
     }
 
     private static IngestRunOptions BuildIngestOptions(

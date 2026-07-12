@@ -220,8 +220,7 @@ add_subdirectory(dynamics)
 add_subdirectory(synthesis)
 
 add_subdirectory(core/tools/ucd_tables_emit)
-# Order-only: emit must exist before first perfcache generation, but rebuilding
-# the tool must NOT dirty the blob (see core/CMakeLists.txt custom_command note).
+# Tool is also listed in the blob custom_command DEPENDS (source-hash no-op).
 add_dependencies(laplace_t0_perfcache laplace_ucd_tables_emit)
 
 foreach(_laplace_engine_target IN ITEMS

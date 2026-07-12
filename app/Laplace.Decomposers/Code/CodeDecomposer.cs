@@ -7,24 +7,14 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class CodeDecomposer : GrammarComposeDecomposer
+public sealed class CodeDecomposer : GrammarComposeDecomposer<CodeSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/CodeDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = CodeSource.SourceId;
+    public static readonly Hash128 TrustClass = CodeSource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "CodeDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "code";
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: ["CALLS", "DEFINES", "REFERENCES"],
-            ct: ct);
 
     protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

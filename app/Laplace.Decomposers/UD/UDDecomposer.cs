@@ -6,30 +6,18 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord>, IIngestInventoryProvider
+public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = UDSource.SourceId;
+    public static readonly Hash128 TrustClass = UDSource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "UDDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
-
-    public override int EstimatedBytesPerRecord => IngestSourceProfile.UdSentence.EstBytesPerRecord;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["UD_Feature"],
-            relationNodeNames: ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
-                "HAS_POS", "HAS_XPOS", "HAS_LANGUAGE", "IS_A"],
-            readbackNames: _canonicalNames, ct: ct);
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
     protected override IMultiFileRecordStream<UdIngestRecord> CreateMultiFileStream(
         string ecosystemPath, DecomposerOptions options)

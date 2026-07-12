@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
+public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement, VerbNetSource, FullScope>
 {
 
 
@@ -16,10 +16,8 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
 
 
 
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = VerbNetSource.SourceId;
+    public static readonly Hash128 TrustClass = VerbNetSource.TrustClass;
 
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
 
@@ -27,20 +25,10 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement>
 
     private const long EstimatedClasses = 329L;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "VerbNetDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "verbnet";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["VerbNet_Class"],
-            relationNodeNames: ["IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE",
-                "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME_ALIAS"],
-            ct: ct);
 
     protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
