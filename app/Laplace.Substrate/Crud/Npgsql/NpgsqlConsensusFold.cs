@@ -248,6 +248,41 @@ public sealed partial class ConsensusAccumulatingWriter
                 }
             }
 
+            // Highway relation-membership masks (doc 14 P2): refresh entities.highway_mask
+            // for every entity this period's edges touched. The fold is the one generic
+            // chokepoint every decomposer's edges pass through, and the mask derives from
+            // CONSENSUS participation, so it refreshes here — on the fold tx, after the
+            // rows it derives from land. Chunked like the prior-refresh UPDATE (huge
+            // unnest arrays AV'd postgres mid-WordNet 2026-07-11).
+            {
+                var maskSw = System.Diagnostics.Stopwatch.StartNew();
+                var touched = new HashSet<Hash128>(n * 2);
+                for (int i = 0; i < n; i++)
+                {
+                    touched.Add(accs[i].Subject);
+                    if (accs[i].Object is { } obj) touched.Add(obj);
+                }
+                var touchedIds = new byte[touched.Count][];
+                int ti = 0;
+                foreach (var id in touched) touchedIds[ti++] = id.ToBytes();
+                long masksWritten = 0;
+                for (int off = 0; off < touchedIds.Length; off += FoldWriteChunkIds)
+                {
+                    int m = Math.Min(FoldWriteChunkIds, touchedIds.Length - off);
+                    await using var mask = conn.CreateCommand();
+                    mask.Transaction = tx;
+                    mask.CommandTimeout = 0;
+                    mask.CommandText = "SELECT laplace.highway_mask_refresh($1)";
+                    mask.Parameters.Add(new NpgsqlParameter
+                    { Value = touchedIds[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    masksWritten += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
+                }
+                maskSw.Stop();
+                _log.LogInformation(
+                    "consensus fold highway masks: {Written:N0} of {Touched:N0} touched entities refreshed in {Ms:N0}ms",
+                    masksWritten, touchedIds.Length, maskSw.ElapsedMilliseconds);
+            }
+
             await tx.CommitAsync(ct);
         }
         catch

@@ -1,0 +1,8 @@
+-- Whether the highway perfcache blob is loaded (laplace_substrate.highway_perfcache_path
+-- GUC configured and mmap'd). Read paths error with a hint when it is missing;
+-- write paths (highway_mask_refresh) use this to degrade to a no-op instead of
+-- faulting the ingest fold.
+CREATE OR REPLACE FUNCTION laplace_highway_ready()
+    RETURNS boolean
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_ready';

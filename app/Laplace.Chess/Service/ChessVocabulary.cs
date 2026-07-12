@@ -146,49 +146,10 @@ public static class ChessVocabulary
     CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
-        boot.AddType("Chess_Position");
-        boot.AddType("Chess_Substructure");
-        boot.AddType("Chess_Result");
-        boot.AddType("Chess_Player");
-        boot.AddRelationType("MOVE");
-        boot.AddRelationType("OUTCOME");
-        boot.AddRelationType("PLAYED_BY");
-        boot.AddRelationType("HAS_RATING");
-        boot.AddRelationType("OPENING_NAME");
-        boot.AddRelationType("HAS_ECO");
-        boot.AddType("Chess_Game");
-        boot.AddType("Chess_Ply");
-        boot.AddRelationType("HAS_MOVETEXT");
-        boot.AddRelationType("HAS_PLY");
-        boot.AddRelationType("HAS_SAN");
-        boot.AddRelationType("HAS_COMMENT");
-        boot.AddRelationType("HAS_SETUP");
-        boot.AddRelationType("ANALYZED_AT");
-        boot.AddType("Chess_AnalysisMarker");
-        boot.AddRelationType("HAS_WHITE");
-        boot.AddRelationType("HAS_BLACK");
-        boot.AddRelationType("HAS_EVENT");
-        boot.AddRelationType("ON_DATE");
-        boot.AddRelationType("HAS_TIME_CONTROL");
-        boot.AddRelationType("HAS_TC_CLASS");
-        boot.AddRelationType("HAS_TERMINATION");
-        boot.AddRelationType("HAS_RESULT");
-        boot.AddRelationType("GAME_AT");
-        boot.AddRelationType("GAME_AT_PLY");
-        boot.AddType("Chess_Eval");
-        boot.AddRelationType("HAS_EVAL");
-        boot.AddRelationType("MOVE_QUALITY");
-        boot.AddRelationType("HAS_CLOCK");
-        boot.AddRelationType("HAS_EVAL_TOKEN");
-        boot.AddRelationType("HAS_THINK_CLASS");
-        boot.AddRelationType("GAME_HAS_OPENING");
-        boot.AddRelationType("GAME_HAS_ECO");
-        boot.AddRelationType("GAME_HAS_MOTIF");
-        boot.AddType("Chess_Concept");
-        boot.AddType("Chess_BookLine");
-        boot.AddRelationType("EXPLAINS");
-        boot.AddRelationType("IS_EXAMPLE_OF");
-        boot.AddRelationType("HAS_DEFINITION");
+        foreach (var t in ChessSeedManifest.TypeNodeNames)
+            boot.AddType(t);
+        foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(ChessSeedManifest.Relations))
+            boot.AddRelationType(r);
         await writer.ApplyAsync(boot.Build(), ct);
         return boot.CanonicalNames;
     }

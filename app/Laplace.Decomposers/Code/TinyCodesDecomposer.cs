@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
@@ -7,12 +8,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TinyCodesDecomposer : GrammarComposeDecomposer
+public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/TinyCodesDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = TinyCodesSource.SourceId;
+    public static readonly Hash128 TrustClass = TinyCodesSource.TrustClass;
 
     private static readonly Hash128 CodeConceptTypeId = EntityTypeRegistry.CodeConcept;
 
@@ -34,24 +33,14 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer
             ["cypher"] = null,
         };
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "TinyCodesDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "tiny-codes";
 
-    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["CodeConcept"],
-            relationNodeNames: ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"],
-            ct: ct);
-        _canonicalNames.UnionWith(boot.CanonicalNames);
-    }
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
     protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

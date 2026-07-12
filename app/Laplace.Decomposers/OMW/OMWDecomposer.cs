@@ -6,31 +6,26 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord>, IIngestInventoryProvider
+public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMWSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = OMWSource.SourceId;
+    public static readonly Hash128 TrustClass = OMWSource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "OMWDecomposer";
     public override int LayerOrder => 3;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
+
     internal static void TrackLanguage(string? langInput) =>
         VocabularyNames.TrackLanguage(LanguageNames, langInput);
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
     {
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS"],
-            readbackNames: LanguageNames, ct: ct);
+        return Task.CompletedTask;
     }
 
     protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(

@@ -6,12 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord>, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord, TatoebaSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = TatoebaSource.SourceId;
+    public static readonly Hash128 TrustClass = TatoebaSource.TrustClass;
 
     internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
@@ -19,21 +17,14 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord>
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "TatoebaDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
 
     // Shared across sentence + link epochs: maps Tatoeba numeric id → content root.
     internal readonly ConcurrentDictionary<long, Hash128> IdToRoot = new();
     private HashSet<long>? _allowedSentenceIds;
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["Tatoeba_Sentence"],
-            relationNodeNames: ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"],
-            readbackNames: LanguageNames, ct: ct);
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
     protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
         string ecosystemPath, DecomposerOptions options)

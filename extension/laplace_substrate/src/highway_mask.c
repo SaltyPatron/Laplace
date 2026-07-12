@@ -189,6 +189,17 @@ require_highway_table(const char *fn)
                          "(install-extensions.cmd stages and configures it).")));
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_highway_ready);
+
+/* () -> bool: whether the highway perfcache is mmap'd and the bit table is
+ * usable. Write paths (highway_mask_refresh) gate on this instead of faulting
+ * the ingest fold on hosts whose GUC is not configured yet. */
+Datum
+pg_laplace_highway_ready(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(laplace_highway_ready());
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_highway_band_mask);
 
 /* (band int4) -> bytea(32): the 256-bit mask OR-ing every relation bit in the

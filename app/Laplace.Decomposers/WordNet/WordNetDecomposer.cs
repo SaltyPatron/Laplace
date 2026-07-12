@@ -8,47 +8,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
+public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, FullScope>, IIngestInventoryProvider
 {
-    public int EstimatedBytesPerRecord => IngestSourceProfile.WordNet.EstBytesPerRecord;
-    public int EstimatedComposeUnitsPerRecord => IngestSourceProfile.WordNet.EstComposeUnitsPerRecord;
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+    public static readonly Hash128 Source = WordNetSource.SourceId;
+    public static readonly Hash128 TrustClass = WordNetSource.TrustClass;
 
-
-
-
-    private static readonly Dictionary<string, string> PointerTypes = new()
-    {
-        ["!"] = "IS_ANTONYM_OF",
-        ["@"] = "HAS_HYPERNYM",
-        ["@i"] = "IS_INSTANCE_OF",
-        ["~"] = "HAS_HYPONYM",
-        ["~i"] = "HAS_INSTANCE",
-        ["#m"] = "IS_MEMBER_OF",
-        ["#s"] = "IS_SUBSTANCE_OF",
-        ["#p"] = "IS_PART_OF",
-        ["%m"] = "HAS_MEMBER",
-        ["%s"] = "HAS_SUBSTANCE",
-        ["%p"] = "HAS_PART",
-        ["="] = "HAS_ATTRIBUTE",
-        ["+"] = "DERIVATIONALLY_RELATED",
-        [";c"] = "HAS_DOMAIN_TOPIC",
-        ["-c"] = "IS_DOMAIN_TOPIC_MEMBER",
-        [";r"] = "HAS_DOMAIN_REGION",
-        ["-r"] = "IS_DOMAIN_REGION_MEMBER",
-        [";u"] = "HAS_DOMAIN_USAGE",
-        ["-u"] = "IS_DOMAIN_USAGE_MEMBER",
-        ["*"] = "ENTAILS",
-        [">"] = "CAUSES",
-        ["^"] = "ALSO_SEE",
-        ["$"] = "IN_VERB_GROUP_WITH",
-        ["&"] = "IS_SIMILAR_TO",
-        ["<"] = "IS_PARTICIPLE_OF",
-        ["\\"] = "PERTAINS_TO",
-    };
+    private static Dictionary<string, string> PointerTypes => WordNetSource.PointerTypes;
 
     private static readonly string[] Lexnames =
     {
@@ -66,29 +31,14 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase, IIngestInventoryPr
 
     private const long EstimatedSynsets = 117_700L;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "WordNetDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
 
-    private static readonly string[] PosFiles = ["data.noun", "data.verb", "data.adj", "data.adv"];
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _vocabularyNames;
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var relTypes = new List<string>(
-            ["IS_SYNONYM_OF", "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
-             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
-             "HAS_NAME_ALIAS", "MANNER_OF"]);
-        foreach (var name in PointerTypes.Values)
-            relTypes.Add(RelationTypeRegistry.Resolve(name).Canonical);
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["WordNet_Synset", "WordNet_Sense"],
-            relationNodeNames: relTypes,
-            readbackNames: _vocabularyNames, ct: ct);
-    }
+    private static readonly string[] PosFiles = ["data.noun", "data.verb", "data.adj", "data.adv"];
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,

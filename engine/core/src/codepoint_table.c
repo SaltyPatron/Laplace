@@ -114,8 +114,13 @@ int codepoint_table_load_perfcache(const char* path) {
     if (h->magic != LAPLACE_PERFCACHE_MAGIC || h->format_version != LAPLACE_PERFCACHE_VERSION) {
         pc_unmap(base, len); return -2;
     }
-    if (h->record_count != LAPLACE_PERFCACHE_RECORD_COUNT
-        || h->record_size != sizeof(laplace_perfcache_record_t)) {
+    /* Scoped blobs are dense prefixes: ascii=0x80, bmp=0x10000, full=0x110000.
+     * Lookup already returns NULL for cp >= record_count (out-of-scope). */
+    if ((h->record_count != 0x80ull
+         && h->record_count != 0x10000ull
+         && h->record_count != (uint64_t)LAPLACE_PERFCACHE_RECORD_COUNT)
+        || h->record_size != sizeof(laplace_perfcache_record_t)
+        || h->record_count > (uint64_t)LAPLACE_PERFCACHE_RECORD_COUNT) {
         pc_unmap(base, len); return -3;
     }
     uint64_t body_end = len - LAPLACE_PERFCACHE_TRAILER_BYTES;

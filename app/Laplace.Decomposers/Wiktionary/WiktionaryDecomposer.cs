@@ -7,36 +7,20 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : GrammarIngestDecomposer, IIngestInventoryProvider
+public sealed class WiktionaryDecomposer : GrammarIngestDecomposer<WiktionarySource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCuratedWithUserInput/v1");
+    public static readonly Hash128 Source = WiktionarySource.SourceId;
+    public static readonly Hash128 TrustClass = WiktionarySource.TrustClass;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "WiktionaryDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.AcademicCuratedUserInput;
     protected override string ModalityId => "json";
     protected override double WitnessWeight => 0.7;
 
-    public override int EstimatedBytesPerRecord => IngestSourceProfile.Wiktionary.EstBytesPerRecord;
-
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: ["HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_ETYMOLOGY",
-                "HAS_HYPERNYM", "HAS_HYPONYM", "IS_PART_OF", "IS_SYNONYM_OF", "IS_ANTONYM_OF",
-                "DERIVATIONALLY_RELATED", "RELATED_TO", "IS_COORDINATE_TERM_WITH",
-                "HAS_USAGE_REGISTER", "HAS_PART", "HAS_VARIANT_OF", "TRANSCRIBES_AS",
-                "IS_TRANSLATION_OF", "ETYMOLOGICALLY_DERIVED_FROM", "BORROWED_FROM",
-                "INHERITED_FROM", "ETYMOLOGICALLY_RELATED_TO", "DERIVED_FROM",
-                "FORM_OF", "HAS_FEATURE", "MANNER_OF"],
-            readbackNames: VocabularyNames, ct: ct);
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => VocabularyNames;
 
     protected override IGrammarWitness CreateWitness(DecomposerOptions options) =>
         new WiktionaryGrammarWitness(options);

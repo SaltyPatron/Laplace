@@ -6,12 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowRecord>
+public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowRecord, TabularSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/TabularDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+    public static readonly Hash128 Source = TabularSource.SourceId;
+    public static readonly Hash128 TrustClass = TabularSource.TrustClass;
 
     private static readonly Hash128 ColumnTypeId = EntityTypeRegistry.TabularColumn;
     private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
@@ -32,10 +30,7 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
         _ = numBins;
     }
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "TabularDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "tabular";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
@@ -46,12 +41,8 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");
     private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"tabular/value/{col}={tok}/v1");
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["TabularColumn", "TabularValue", "TabularOutcome"],
-            relationNodeNames: ["PREDICTS", "IS_VALUE_IN", "IS_INSTANCE_OF"],
-            ct: ct);
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 2);
         seed.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));

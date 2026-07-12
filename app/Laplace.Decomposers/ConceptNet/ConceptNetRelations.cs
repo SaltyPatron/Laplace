@@ -32,8 +32,8 @@ internal static class ConceptNetRelations
 
     private static (byte[] RelUtf8, string TypeName)[] BuildKnown()
     {
-        var list = new List<(byte[], string)>(ConceptNetDecomposer.RelMap.Count);
-        foreach (var (rel, typeName) in ConceptNetDecomposer.RelMap)
+        var list = new List<(byte[], string)>(ConceptNetSource.RelMap.Count);
+        foreach (var (rel, typeName) in ConceptNetSource.RelMap)
             list.Add((System.Text.Encoding.UTF8.GetBytes(rel), typeName));
         return list.ToArray();
     }

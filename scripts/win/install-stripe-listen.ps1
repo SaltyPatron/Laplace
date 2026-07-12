@@ -24,6 +24,30 @@ function Test-IsAdmin {
 if (-not (Test-Path -LiteralPath $StripeExe)) { throw "stripe.exe missing: $StripeExe" }
 if (-not (Test-Path -LiteralPath $NssmExe)) { throw "nssm.exe missing: $NssmExe" }
 
+# The service account has no stripe CLI login (and logins expire) — the service must
+# authenticate via STRIPE_API_KEY from the operator .env, never interactive config.
+function Read-DotEnvValue([string]$path, [string[]]$keys) {
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  $map = @{}
+  Get-Content -LiteralPath $path | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $eq = $line.IndexOf("=")
+    if ($eq -lt 1) { return }
+    $map[$line.Substring(0, $eq).Trim()] = $line.Substring($eq + 1).Trim().Trim("'").Trim('"')
+  }
+  foreach ($k in $keys) {
+    if ($map.ContainsKey($k) -and -not [string]::IsNullOrWhiteSpace($map[$k])) { return $map[$k] }
+  }
+  return $null
+}
+
+$apiKey = Read-DotEnvValue (Join-Path $RepoRoot ".env") @("STRIPE_API_SECRET", "LAPLACE_STRIPE_API_KEY")
+if (-not $apiKey) {
+  $apiKey = Read-DotEnvValue (Join-Path $RepoRoot "deploy\secrets\stripe.env") @("STRIPE_API_SECRET", "LAPLACE_STRIPE_API_KEY")
+}
+if (-not $apiKey -and -not $Uninstall) { throw "No STRIPE_API_SECRET in .env or deploy\secrets\stripe.env — the service cannot authenticate." }
+
 if ($Uninstall) {
   if (-not (Test-IsAdmin)) { throw "Uninstall requires an elevated shell (Administrator)." }
   & $NssmExe stop $ServiceName confirm 2>$null | Out-Null
@@ -53,6 +77,7 @@ if ($existing) {
 $args = "listen --forward-to $ForwardTo --device-name $DeviceName"
 & $NssmExe set $ServiceName AppDirectory (Split-Path -Parent $StripeExe) | Out-Null
 & $NssmExe set $ServiceName AppParameters $args | Out-Null
+& $NssmExe set $ServiceName AppEnvironmentExtra "STRIPE_API_KEY=$apiKey" | Out-Null
 & $NssmExe set $ServiceName DisplayName "Laplace Stripe Listen (dev webhooks)" | Out-Null
 & $NssmExe set $ServiceName Description "Forwards Stripe test webhooks to $ForwardTo" | Out-Null
 & $NssmExe set $ServiceName Start SERVICE_AUTO_START | Out-Null

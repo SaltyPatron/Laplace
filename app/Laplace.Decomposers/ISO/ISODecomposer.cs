@@ -6,12 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : DecomposerMultiPhase
+public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/ISO639Decomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+    public static readonly Hash128 Source = ISOSource.SourceId;
+    public static readonly Hash128 TrustClass = ISOSource.TrustClass;
 
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
     private static readonly Hash128 Iso639CodeTypeId = EntityTypeRegistry.Iso639Code;
@@ -26,22 +24,11 @@ public sealed class ISODecomposer : DecomposerMultiPhase
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
     private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "ISO639Decomposer";
     public override int LayerOrder => 1;
-    public override Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["Language", "ISO639Code", "LanguageVariant"],
-            relationNodeNames: ["IS_LANGUAGE_CODE", "HAS_ISO639_1_CODE", "USES_SCRIPT",
-                "MEMBER_OF_MACROLANGUAGE", "HAS_ISO639_2_CODE", "HAS_LANGUAGE_SCOPE",
-                "HAS_LANGUAGE_TYPE", "HAS_VARIANT_OF", "HAS_DEFINITION", "HAS_NAME_ALIAS"],
-            ct: ct);
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,

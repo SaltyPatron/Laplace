@@ -6,13 +6,13 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
-public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider
 {
 
 
 
-    public static readonly Hash128 Source = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
-    public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+    public static readonly Hash128 Source = UnicodeSource.SourceId;
+    public static readonly Hash128 TrustClass = UnicodeSource.TrustClass;
 
     public static readonly Hash128 CodepointType = EntityTypeRegistry.Codepoint;
 
@@ -40,27 +40,10 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         _ducet = ducet;
     }
 
-    public Hash128 SourceId => Source;
-    public string SourceName => "UnicodeDecomposer";
-    public int EstimatedBytesPerRecord => IngestSourceProfile.Unicode.EstBytesPerRecord;
-    public int LayerOrder => 0;
-    public Hash128 TrustClassId => TrustClass;
+    public override int LayerOrder => 0;
 
-    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["Codepoint", "UcdClassifier", "OrdinalContext",
-                "Byte", "Utf8Role", "CharacterEncoding"],
-            relationNodeNames: ["HAS_GENERAL_CATEGORY", "HAS_COMBINING_CLASS", "HAS_SCRIPT",
-                "HAS_BLOCK", "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",
-                "CANONICAL_DECOMPOSES_TO", "HAS_TITLECASE_MAPPING",
-                "COMPATIBILITY_DECOMPOSES_TO", "HAS_NUMERIC_VALUE", "HAS_BIDI_CLASS",
-                "HAS_MIRROR", "HAS_AGE", "HAS_NAME", "HAS_LINE_BREAK",
-                "HAS_EAST_ASIAN_WIDTH", "HAS_JOINING_TYPE", "HAS_NUMERIC_TYPE",
-                "HAS_NAME_ALIAS", "CONFUSABLE_WITH", "HAS_EMOJI_PROPERTY",
-                "DECODES_TO", "HAS_UTF8_ROLE"],
-            ct: ct);
-
         EnsureUcdProperties(context);
         var ucdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
         var ordinalContextTypeId = EntityTypeRegistry.OrdinalContext;
@@ -76,7 +59,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         await context.Writer.ApplyAsync(classifiers.Build(), ct);
     }
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -240,7 +223,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         => Task.FromResult<IngestInventory?>(
             IngestInventory.Single(UnicodeSeed.CodepointCount, "codepoints"));
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(UnicodeSeed.CodepointCount);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
@@ -271,7 +254,12 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         }
     }
 
-    public ValueTask DisposeAsync() { _records = null; _ucd = null; return ValueTask.CompletedTask; }
+    public override ValueTask DisposeAsync()
+    {
+        _records = null;
+        _ucd = null;
+        return ValueTask.CompletedTask;
+    }
 
     private SubstrateChange BuildBatch(int start, int end, long inputUnitsConsumed = 0, int commitEpoch = 0)
     {
@@ -507,11 +495,13 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
     private void EnsureComputed(IDecomposerContext context)
     {
         if (_records is not null) return;
-        if (CodepointPerfcache.IsLoaded)
-        {
-            _records = CodepointPerfcache.Records.ToArray();
-            return;
-        }
+        // Single-origin law: the DB seed computes from raw UCD, never from the
+        // perfcache blob. The blob is a sibling OUTPUT of this same compute
+        // (native laplace_unicode_seed_compute), not a seed input — reading it back
+        // to seed would invert the calculated←witnessed dependency and make the DB
+        // only as trustworthy as the blob. The CLI supplies the UCD path
+        // (IngestUnicodeViaRunnerAsync → IngestDataPaths.Resolve("unicode")); both
+        // hosts carry the raw UCD, so there is no environment that needs the shortcut.
         var (xml, duc) = ResolveSource(context);
         _records = UnicodeSeed.Compute(xml, duc);
     }

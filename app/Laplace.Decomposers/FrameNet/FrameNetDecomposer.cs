@@ -10,12 +10,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
+public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+    public static readonly Hash128 Source = FrameNetSource.SourceId;
+    public static readonly Hash128 TrustClass = FrameNetSource.TrustClass;
 
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
     private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
@@ -48,33 +46,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase, IIngestInventoryP
 
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "FrameNetDecomposer";
     public override int LayerOrder => 3;
-    public override Hash128 TrustClassId => TrustClass;
 
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _vocabularyNames;
 
-
-
-
-
-
-
-
-
-
-
-
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        var boot = await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["FrameNet_Frame", "FrameNet_FE", "FrameNet_LU", "FrameNet_Coreness"],
-            relationNodeNames: ["EVOKES_FRAME", "HAS_FRAME_ELEMENT", "REQUIRES", "EXCLUDES",
-                "HAS_VALENCE_PATTERN", "HAS_DEFINITION", "HAS_POS", "HAS_EXAMPLE",
-                "FRAME_USES", "PERSPECTIVE_ON", "INHERITS_FROM", "CAUSATIVE_OF",
-                "INCHOATIVE_OF", "PRECEDES", "ALSO_SEE", "IS_A", "HAS_SUBEVENT", "RELATED_TO"],
-            readbackNames: _vocabularyNames, ct: ct);
-
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
             entityCapacity: CorenessValues.Length + 1,

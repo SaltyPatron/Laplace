@@ -1,11 +1,30 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Laplace.Decomposers.Composition;
 using Laplace.Engine.Core;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Laplace.Cli;
 
 internal static class CliRuntime
 {
+    private static IServiceProvider? _services;
+
+    /// <summary>CLI composition root — built once at process start.</summary>
+    public static IServiceProvider Services =>
+        _services ?? throw new InvalidOperationException("CliRuntime.Services not initialized");
+
+    public static ISeedDecomposerResolver Decomposers =>
+        Services.GetRequiredService<ISeedDecomposerResolver>();
+
+    public static void InitializeServices()
+    {
+        if (_services is not null) return;
+        var sc = new ServiceCollection();
+        sc.AddLaplaceSeedIngest();
+        _services = sc.BuildServiceProvider();
+    }
+
     public static string ConnString => LaplaceInstall.PostgresConnectionString();
 
     public static int Fail(string m) { Console.Error.WriteLine(m); return 2; }

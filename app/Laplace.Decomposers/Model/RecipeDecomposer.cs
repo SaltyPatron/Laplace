@@ -9,15 +9,13 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeInfo>
 {
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
-
     private static readonly Hash128 HasHiddenSizeTypeId = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
     private static readonly Hash128 HasNumLayersTypeId = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
 
     private readonly RecipeExtractor.RecipeInfo _recipe;
     private readonly Hash128 _source;
     private readonly string _sourceName;
+    private readonly RecipeRuntimeManifest _manifest;
 
     public RecipeDecomposer(string recipePath)
     {
@@ -25,21 +23,19 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
         _recipe = RecipeExtractor.Parse(recipePath);
         _sourceName = $"recipe/{_recipe.Name}";
         _source = Hash128.OfCanonical($"substrate/source/recipe/{_recipe.Name}/v1");
+        _manifest = new RecipeRuntimeManifest(_source, _sourceName);
     }
 
     public override Hash128 SourceId => _source;
     public override string SourceName => _sourceName;
     public override int LayerOrder => 5;
-    public override Hash128 TrustClassId => TrustClass;
+    public override Hash128 TrustClassId => _manifest.TrustClass;
     protected override double SourceTrust => TC.UserCuratedResource;
     protected override string BatchLabelPrefix => "laplace.recipe";
     protected override int DefaultBatchSize => 1;
 
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, _source, _sourceName, TrustClass,
-            typeNodeNames: ["Model_Recipe", "Scalar"],
-            relationNodeNames: ["HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS"],
-            ct: ct);
+        SourceVocabularyBootstrap.RegisterManifestAsync(context, _manifest, ct: ct);
 
     protected override async IAsyncEnumerable<RecipeExtractor.RecipeInfo> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

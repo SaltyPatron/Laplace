@@ -8,75 +8,21 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
+public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptNetSource, FullScope>, IIngestInventoryProvider
 {
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/ConceptNetDecomposer/v1");
-    public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
+    public static readonly Hash128 Source = ConceptNetSource.SourceId;
+    public static readonly Hash128 TrustClass = ConceptNetSource.TrustClass;
 
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
-    internal static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
-    {
-        ["RelatedTo"] = "RELATED_TO",
-        ["FormOf"] = "FORM_OF",
-        ["IsA"] = "IS_A",
-        ["PartOf"] = "IS_PART_OF",
-        ["HasA"] = "HAS_A",
-        ["UsedFor"] = "USED_FOR",
-        ["CapableOf"] = "CAPABLE_OF",
-        ["AtLocation"] = "AT_LOCATION",
-        ["Causes"] = "CAUSES",
-        ["HasSubevent"] = "HAS_SUBEVENT",
-        ["HasFirstSubevent"] = "HAS_FIRST_SUBEVENT",
-        ["HasLastSubevent"] = "HAS_LAST_SUBEVENT",
-        ["HasPrerequisite"] = "HAS_PREREQUISITE",
-        ["HasProperty"] = "HAS_PROPERTY",
-        ["MotivatedByGoal"] = "MOTIVATED_BY_GOAL",
-        ["ObstructedBy"] = "OBSTRUCTED_BY",
-        ["Desires"] = "DESIRES",
-        ["CreatedBy"] = "CREATED_BY",
-        ["Synonym"] = "IS_SYNONYM_OF",
-        ["Antonym"] = "IS_ANTONYM_OF",
-        ["DistinctFrom"] = "DISTINCT_FROM",
-        ["DerivedFrom"] = "DERIVED_FROM",
-        ["SymbolOf"] = "SYMBOL_OF",
-        ["DefinedAs"] = "DEFINED_AS",
-        ["MannerOf"] = "MANNER_OF",
-        ["LocatedNear"] = "LOCATED_NEAR",
-        ["HasContext"] = "HAS_CONTEXT",
-        ["SimilarTo"] = "SIMILAR_TO",
-        ["EtymologicallyRelatedTo"] = "ETYMOLOGICALLY_RELATED_TO",
-        ["EtymologicallyDerivedFrom"] = "ETYMOLOGICALLY_DERIVED_FROM",
-        ["CausesDesire"] = "CAUSES_DESIRE",
-        ["MadeOf"] = "MADE_UP_OF",
-        ["ReceivesAction"] = "RECEIVES_ACTION",
-        ["InstanceOf"] = "IS_INSTANCE_OF",
-        ["NotDesires"] = "NOT_DESIRES",
-        ["NotUsedFor"] = "NOT_USED_FOR",
-        ["NotCapableOf"] = "NOT_CAPABLE_OF",
-        ["NotHasProperty"] = "NOT_HAS_PROPERTY",
-        ["Entails"] = "ENTAILS",
-    };
+    internal static Dictionary<string, string> RelMap => ConceptNetSource.RelMap;
 
-    public override Hash128 SourceId => Source;
-    public override string SourceName => "ConceptNetDecomposer";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => TrustClass;
     protected override double SourceTrust => TC.UserCuratedResource;
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
-    public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        var relTypes = new List<string>(["HAS_EXAMPLE", "HAS_LANGUAGE", "HAS_POS", "CORRESPONDS_TO"]);
-        foreach (var typeName in RelMap.Values)
-            relTypes.Add(RelationTypeRegistry.Resolve(typeName).Canonical);
-        await SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            relationNodeNames: relTypes,
-            readbackNames: LanguageNames, ct: ct);
-    }
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

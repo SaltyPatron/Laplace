@@ -130,16 +130,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     }
 
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        SourceVocabularyBootstrap.RegisterAsync(context, Source, SourceName, TrustClass,
-            typeNodeNames: ["Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
-                "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker",
-                "Model_Tensor", "Model_Checkpoint"],
-            relationNodeNames: ["MERGES_WITH", "SIMILAR_TO", "ATTENDS", "OV_RELATES",
-                "COMPLETES_TO", "CONTINUES_TO", "ENCODES", "TOKEN_MAPS_TO", "APPEARS_IN",
-                "CONTAINS", "PRECEDES",
-                "HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS", "HAS_NUM_HEADS", "HAS_NUM_KV_HEADS",
-                "HAS_INTERMEDIATE_SIZE", "HAS_VOCAB_SIZE", "IS_A"],
-            ct: ct);
+        SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, new ModelRuntimeManifest(Source, SourceName), ct: ct);
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,

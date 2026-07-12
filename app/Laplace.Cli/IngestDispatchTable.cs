@@ -33,58 +33,58 @@ internal static class IngestDispatchTable
             ["unicode"] = cli => IngestCommands.IngestUnicodeViaRunnerAsync(cli),
             ["iso639"] = cli => IngestCommands.IngestISO639Async(cli),
             ["atomic2020"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Atomic2020Decomposer(), IngestDataPaths.Resolve("atomic2020", cli.Path),
+                CliRuntime.Decomposers.Resolve("atomic2020"), IngestDataPaths.Resolve("atomic2020", cli.Path),
                 skipLayerCheck: false, cli),
             ["conceptnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new ConceptNetDecomposer(), IngestDataPaths.Resolve("conceptnet", cli.Path),
+                CliRuntime.Decomposers.Resolve("conceptnet"), IngestDataPaths.Resolve("conceptnet", cli.Path),
                 skipLayerCheck: false, cli),
             ["wiktionary"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new WiktionaryDecomposer(), IngestDataPaths.Resolve("wiktionary", cli.Path),
+                CliRuntime.Decomposers.Resolve("wiktionary"), IngestDataPaths.Resolve("wiktionary", cli.Path),
                 skipLayerCheck: false, cli),
             ["omw"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new OMWDecomposer(), IngestDataPaths.Resolve("omw", cli.Path),
+                CliRuntime.Decomposers.Resolve("omw"), IngestDataPaths.Resolve("omw", cli.Path),
                 skipLayerCheck: false, cli),
             ["wordnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path),
+                CliRuntime.Decomposers.Resolve("wordnet"), IngestDataPaths.Resolve("wordnet", cli.Path),
                 skipLayerCheck: false, cli),
             ["ud"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path),
+                CliRuntime.Decomposers.Resolve("ud"), IngestDataPaths.Resolve("ud", cli.Path),
                 skipLayerCheck: false, cli),
             ["tatoeba"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path),
+                CliRuntime.Decomposers.Resolve("tatoeba"), IngestDataPaths.Resolve("tatoeba", cli.Path),
                 skipLayerCheck: false, cli),
             ["framenet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new FrameNetDecomposer(), IngestDataPaths.Resolve("framenet", cli.Path),
+                CliRuntime.Decomposers.Resolve("framenet"), IngestDataPaths.Resolve("framenet", cli.Path),
                 skipLayerCheck: false, cli),
             ["opensubtitles"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new OpenSubtitlesDecomposer(), IngestDataPaths.Resolve("opensubtitles", cli.Path),
+                CliRuntime.Decomposers.Resolve("opensubtitles"), IngestDataPaths.Resolve("opensubtitles", cli.Path),
                 skipLayerCheck: false, cli),
             ["verbnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new VerbNetDecomposer(), IngestDataPaths.Resolve("verbnet", cli.Path),
+                CliRuntime.Decomposers.Resolve("verbnet"), IngestDataPaths.Resolve("verbnet", cli.Path),
                 skipLayerCheck: false, cli),
             ["propbank"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new PropBankDecomposer(), IngestDataPaths.Resolve("propbank", cli.Path),
+                CliRuntime.Decomposers.Resolve("propbank"), IngestDataPaths.Resolve("propbank", cli.Path),
                 skipLayerCheck: false, cli),
             ["semlink"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new SemLinkDecomposer(), IngestDataPaths.Resolve("semlink", cli.Path),
+                CliRuntime.Decomposers.Resolve("semlink"), IngestDataPaths.Resolve("semlink", cli.Path),
                 skipLayerCheck: false, cli),
             ["mapnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new MapNetDecomposer(), IngestDataPaths.Resolve("mapnet", cli.Path),
+                CliRuntime.Decomposers.Resolve("mapnet"), IngestDataPaths.Resolve("mapnet", cli.Path),
                 skipLayerCheck: false, cli),
             ["wordframenet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new WordFrameNetDecomposer(), IngestDataPaths.Resolve("wordframenet", cli.Path),
+                CliRuntime.Decomposers.Resolve("wordframenet"), IngestDataPaths.Resolve("wordframenet", cli.Path),
                 skipLayerCheck: false, cli),
             ["cili"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path),
+                CliRuntime.Decomposers.Resolve("cili"), IngestDataPaths.Resolve("cili", cli.Path),
                 skipLayerCheck: false, cli),
             ["code"] = cli => IngestCommands.IngestCodeAsync(cli),
             ["repo"] = cli => IngestCommands.IngestRepoAsync(cli),
             ["tabular"] = cli => IngestCommands.IngestTabularAsync(cli),
             ["tiny-codes"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new TinyCodesDecomposer(), IngestDataPaths.Resolve("tiny-codes", cli.Path),
+                CliRuntime.Decomposers.Resolve("tiny-codes"), IngestDataPaths.Resolve("tiny-codes", cli.Path),
                 skipLayerCheck: true, cli),
             ["stack"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new StackDecomposer(), IngestDataPaths.Resolve("stack", cli.Path),
+                CliRuntime.Decomposers.Resolve("stack"), IngestDataPaths.Resolve("stack", cli.Path),
                 skipLayerCheck: true, cli),
             ["document"] = cli => IngestCommands.IngestDocumentAsync(cli),
             ["recipe"] = cli => IngestCommands.IngestRecipeAsync(cli),
@@ -131,7 +131,7 @@ internal static class IngestDispatchTable
         if (EtlManifest.IsRoutable(sourceKey))
         {
             task = IngestCommands.IngestViaRunnerAsync(
-                new EtlDecomposer(EtlManifest.Get(sourceKey)),
+                CliRuntime.Decomposers.ResolveEtl(EtlManifest.Get(sourceKey)),
                 IngestDataPaths.Resolve(sourceKey, cli.Path),
                 skipLayerCheck: false, cli);
             return true;

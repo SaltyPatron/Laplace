@@ -448,3 +448,208 @@ public abstract class DecomposerMultiPhase : IDecomposer
             yield return change;
     }
 }
+
+/// <summary>
+/// Multi-phase orchestrator with sealed Initialize from <typeparamref name="TSource"/>.
+/// Existing non-generic <see cref="DecomposerMultiPhase"/> subclasses migrate in Wave 3.
+/// </summary>
+public abstract class DecomposerMultiPhase<TSource, TScope> : DecomposerMultiPhase
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    /// <summary>Optional vocabulary readback sink filled during sealed Initialize.</summary>
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    /// <summary>Optional pre-bootstrap hook (CILI map load, etc.).</summary>
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    /// <summary>Optional post-bootstrap hook (extra classifier entities, etc.).</summary>
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>
+/// Extract-only decomposer with sealed Initialize from compile-time
+/// <typeparamref name="TSource"/> / <typeparamref name="TScope"/>.
+/// </summary>
+public abstract class Decomposer<TRecord, TSource, TScope> : Decomposer<TRecord>
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    /// <summary>Optional vocabulary readback sink filled during sealed Initialize.</summary>
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    /// <summary>Optional pre-bootstrap hook (CILI map load, etc.).</summary>
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    /// <summary>Optional post-bootstrap hook.</summary>
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Multi-file lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : DecomposerMultiFile<TRecord>
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Compose lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecomposer<TRecord>
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Grammar-ingest lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+public abstract class GrammarIngestDecomposer<TSource, TScope> : GrammarIngestDecomposer
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Grammar-compose lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+public abstract class GrammarComposeDecomposer<TSource, TScope> : GrammarComposeDecomposer
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+

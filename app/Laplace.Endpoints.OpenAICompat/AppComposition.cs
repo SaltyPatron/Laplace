@@ -36,6 +36,8 @@ internal static class AppComposition
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
         services.AddSingleton<IFoundryExportService, CliFoundryExportService>();
 
+        Laplace.Decomposers.Composition.SeedIngestComposition.AddLaplaceSeedIngest(services);
+
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
