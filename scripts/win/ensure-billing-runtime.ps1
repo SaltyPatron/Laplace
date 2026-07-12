@@ -27,6 +27,34 @@ if (-not (Test-Path -LiteralPath $sync)) { throw "missing $sync" }
 # 1) Always materialize deploy/secrets from repo .env (and print-secret when possible).
 & $sync -RepoRoot $RepoRoot -StripeExe $StripeExe
 
+# The service account has no stripe CLI login (logins also expire): the listener must
+# authenticate via STRIPE_API_KEY in its service environment, sourced from the
+# stripe.env the sync above just wrote. Without it the service loops on interactive
+# `stripe login` pairing prompts forever while reporting Running.
+$apiKey = $null
+$stripeEnvPath = Join-Path $RepoRoot "deploy\secrets\stripe.env"
+if (Test-Path -LiteralPath $stripeEnvPath) {
+  foreach ($line in Get-Content -LiteralPath $stripeEnvPath) {
+    if ($line -match '^\s*STRIPE_API_SECRET\s*=\s*(.+?)\s*$') { $apiKey = $matches[1]; break }
+  }
+}
+if (-not $apiKey) {
+  Write-Warning "[ensure-billing-runtime] no STRIPE_API_SECRET in $stripeEnvPath — listener cannot authenticate"
+  if ($RequireService) { exit 1 }
+  exit 0
+}
+
+function Set-ListenerApiKey {
+  param([string]$Name, [string]$Key, [string]$Nssm)
+  $desired = "STRIPE_API_KEY=$Key"
+  $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name\Parameters"
+  $current = (Get-ItemProperty -Path $regPath -Name AppEnvironmentExtra -ErrorAction SilentlyContinue).AppEnvironmentExtra
+  if ($current -is [string[]]) { $current = $current -join "`n" }
+  if ($current -eq $desired) { return $false }
+  & $Nssm set $Name AppEnvironmentExtra $desired | Out-Null
+  return $true
+}
+
 $isAdmin = Test-IsAdmin
 $stripeOk = Test-Path -LiteralPath $StripeExe
 $nssmOk = Test-Path -LiteralPath $NssmExe
@@ -68,21 +96,30 @@ if ($null -eq $svc) {
   & $NssmExe set $ServiceName AppRotateBytes 1048576 | Out-Null
   & $NssmExe set $ServiceName AppExit Default Restart | Out-Null
   & $NssmExe set $ServiceName AppRestartDelay 5000 | Out-Null
+  Set-ListenerApiKey -Name $ServiceName -Key $apiKey -Nssm $NssmExe | Out-Null
   & $NssmExe start $ServiceName | Out-Null
   Start-Sleep -Seconds 2
   Write-Host "[ensure-billing-runtime] installed + started $ServiceName"
 } else {
-  if ($svc.Status -ne "Running") {
-    if ($isAdmin) {
+  if ($isAdmin) {
+    if (Set-ListenerApiKey -Name $ServiceName -Key $apiKey -Nssm $NssmExe) {
+      & $NssmExe restart $ServiceName | Out-Null
+      Start-Sleep -Seconds 2
+      Write-Host "[ensure-billing-runtime] $ServiceName API key updated + restarted"
+    } elseif ($svc.Status -ne "Running") {
       & $NssmExe start $ServiceName | Out-Null
       Start-Sleep -Seconds 1
       Write-Host "[ensure-billing-runtime] started $ServiceName"
     } else {
-      Write-Warning "[ensure-billing-runtime] $ServiceName is $($svc.Status) — start needs elevation (setup-host.cmd)"
-      if ($RequireService) { exit 2 }
+      Write-Host "[ensure-billing-runtime] $ServiceName running"
     }
   } else {
-    Write-Host "[ensure-billing-runtime] $ServiceName running"
+    if ($svc.Status -ne "Running") {
+      Write-Warning "[ensure-billing-runtime] $ServiceName is $($svc.Status) — start needs elevation (setup-host.cmd)"
+      if ($RequireService) { exit 2 }
+    } else {
+      Write-Host "[ensure-billing-runtime] $ServiceName running (elevation needed to verify/repair its API key)"
+    }
   }
 }
 

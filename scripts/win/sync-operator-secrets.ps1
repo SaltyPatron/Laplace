@@ -69,13 +69,19 @@ if (-not $SkipWebhookSecret -and (Test-Path -LiteralPath $StripeExe)) {
   $tmpOut = Join-Path $env:TEMP "laplace-stripe-print-secret.out"
   $tmpErr = Join-Path $env:TEMP "laplace-stripe-print-secret.err"
   try {
-    $p = Start-Process -FilePath $StripeExe -ArgumentList @("listen", "--print-secret") `
+    # --api-key: the CLI's stored login expires (api_key_expired); the .env key is
+    # the source of truth and print-secret must not depend on `stripe login` state.
+    $p = Start-Process -FilePath $StripeExe -ArgumentList @("listen", "--print-secret", "--api-key", $stripeSecret) `
       -NoNewWindow -Wait -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
     if ($p.ExitCode -eq 0 -and (Test-Path -LiteralPath $tmpOut)) {
       foreach ($line in Get-Content -LiteralPath $tmpOut) {
         $t = $line.Trim()
         if ($t.StartsWith("whsec_")) { $whsec = $t; break }
       }
+    }
+    if (-not $whsec -and (Test-Path -LiteralPath $tmpErr)) {
+      $errLine = (Get-Content -LiteralPath $tmpErr | Select-Object -First 1)
+      if ($errLine) { Write-Warning "[sync-operator-secrets] stripe listen --print-secret failed: $errLine" }
     }
   } finally {
     Remove-Item -LiteralPath $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue

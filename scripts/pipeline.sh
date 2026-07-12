@@ -464,6 +464,16 @@ phase_publish() {
   [[ "${LAPLACE_FORCE_NPM:-}" == "1" ]] && deploy_args+=(--force-npm)
   [[ "${LAPLACE_PUBLISH_SERIAL:-}" == "1" ]] && deploy_args+=(--serial)
   bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+
+  # Drift tripwire: publish restarts the unit but cannot reinstall it (rootless
+  # runner, no sudo — by design). A stale unit ran the API without loading
+  # stripe.env for weeks. Warn loudly; setup-host.sh owns the fix.
+  local installed_unit=/etc/systemd/system/laplace-api.service
+  local repo_unit="$ROOT/deploy/linux/laplace-api.service"
+  if [[ -r "$installed_unit" && -f "$repo_unit" ]] && ! diff -q "$installed_unit" "$repo_unit" >/dev/null 2>&1; then
+    echo "::warning title=laplace-api unit drift::installed unit differs from deploy/linux/laplace-api.service — run: sudo bash scripts/setup-host.sh"
+    diff "$installed_unit" "$repo_unit" || true
+  fi
 }
 
 phase_foundation() {
