@@ -6,9 +6,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <zlib.h>
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/ucd_xml.h"
@@ -192,6 +195,74 @@ size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
 
 }
 
+/* Read the single entry of a ZIP archive in-process: locate it via the End Of
+ * Central Directory + central-directory header (so data-descriptor zips, whose
+ * local-header sizes are zero, still resolve), zlib raw-inflate the deflate
+ * stream, and verify CRC32. No tar/unzip shell-out (which is flavor/PATH/console
+ * dependent). Only stored + deflate methods; false on any malformed input. */
+static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& out) {
+    std::ifstream f(zip_path, std::ios::binary);
+    if (!f) return false;
+    std::vector<uint8_t> z((std::istreambuf_iterator<char>(f)),
+                            std::istreambuf_iterator<char>());
+    if (z.size() < 22) return false;
+
+    auto rd16 = [&](size_t o) -> uint32_t {
+        return (uint32_t)z[o] | ((uint32_t)z[o + 1] << 8);
+    };
+    auto rd32 = [&](size_t o) -> uint32_t {
+        return (uint32_t)z[o] | ((uint32_t)z[o + 1] << 8)
+             | ((uint32_t)z[o + 2] << 16) | ((uint32_t)z[o + 3] << 24);
+    };
+
+    /* End Of Central Directory (sig 0x06054b50), scanning back over the optional
+     * trailing comment (<= 65535 bytes). */
+    size_t eocd = SIZE_MAX;
+    size_t floor_off = (z.size() > 22 + 0xFFFFu) ? z.size() - (22 + 0xFFFFu) : 0;
+    for (size_t i = z.size() - 21; i-- > floor_off; ) {
+        if (rd32(i) == 0x06054b50u) { eocd = i; break; }
+    }
+    if (eocd == SIZE_MAX) return false;
+
+    uint32_t n_entries = rd16(eocd + 10);
+    uint32_t cd_off = rd32(eocd + 16);
+    if (n_entries == 0 || (size_t)cd_off + 46 > z.size()) return false;
+
+    /* First central-directory header (sig 0x02014b50) -- authoritative sizes. */
+    size_t cd = cd_off;
+    if (rd32(cd) != 0x02014b50u) return false;
+    uint32_t method = rd16(cd + 10);
+    uint32_t crc = rd32(cd + 16);
+    uint32_t comp_size = rd32(cd + 20);
+    uint32_t uncomp_size = rd32(cd + 24);
+    uint32_t lh_off = rd32(cd + 42);
+
+    /* Local file header (sig 0x04034b50); payload follows its own name+extra. */
+    if ((size_t)lh_off + 30 > z.size() || rd32(lh_off) != 0x04034b50u) return false;
+    size_t data = (size_t)lh_off + 30 + rd16(lh_off + 26) + rd16(lh_off + 28);
+    if (data + comp_size > z.size()) return false;
+
+    if (method == 0) {                        /* stored */
+        if (comp_size != uncomp_size) return false;
+        out.assign(z.begin() + data, z.begin() + data + comp_size);
+    } else if (method == 8) {                 /* deflate */
+        out.assign(uncomp_size, 0);
+        z_stream s{};
+        if (inflateInit2(&s, -MAX_WBITS) != Z_OK) return false;
+        s.next_in = z.data() + data;
+        s.avail_in = comp_size;
+        s.next_out = out.data();
+        s.avail_out = uncomp_size;
+        int rc = inflate(&s, Z_FINISH);
+        inflateEnd(&s);
+        if (rc != Z_STREAM_END || s.total_out != uncomp_size) return false;
+    } else {
+        return false;
+    }
+
+    return crc32(0, out.data(), (uInt)out.size()) == crc;
+}
+
 extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
                                             const char* ducet_path,
                                             laplace_perfcache_record_t* out_records,
@@ -207,34 +278,22 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
         size_t n = std::strlen(ucdxml_path);
         is_zip = (n > 4 && std::strcmp(ucdxml_path + n - 4, ".zip") == 0);
     }
-    /* Both branches produce the same in-memory document; only the FILE* source
-     * differs (zip: streamed out of the archive; plain: the file itself). Parse
-     * is the streaming UCDXML SAX in ucd_xml.cpp — not a full AST. */
-    FILE* p;
-    int (*closer)(FILE*);
-    if (is_zip) {
-#ifdef _WIN32
-        std::string cmd = std::string("tar -xOf \"") + ucdxml_path + "\"";
-        p = _popen(cmd.c_str(), "rb");
-        closer = [](FILE* c) -> int { return _pclose(c); };
-#else
-        std::string cmd = std::string("unzip -p '") + ucdxml_path + "'";
-        p = popen(cmd.c_str(), "r");
-        closer = [](FILE* c) -> int { return pclose(c); };
-#endif
-    } else {
-        p = std::fopen(ucdxml_path, "rb");
-        closer = [](FILE* c) -> int { return std::fclose(c); };
-    }
-    if (!p) return -2;
+    /* In-process read: zip -> central-directory + zlib raw-inflate (no tar/unzip
+     * shell-out, which is tar-flavor/PATH/console dependent); plain -> the file
+     * bytes. Either way the whole UCDXML is materialized then fed to the streaming
+     * SAX parser (ucd_xml.cpp) -- a one-time ~67MB seed, not a hot path. */
     std::vector<uint8_t> doc;
-    {
+    if (is_zip) {
+        if (!read_zip_single_entry(ucdxml_path, doc)) return -2;
+    } else {
+        FILE* p = std::fopen(ucdxml_path, "rb");
+        if (!p) return -2;
         uint8_t chunk[1 << 16];
         size_t got;
         while ((got = std::fread(chunk, 1, sizeof chunk, p)) > 0)
             doc.insert(doc.end(), chunk, chunk + got);
+        std::fclose(p);
     }
-    if (closer(p) != 0 && is_zip) return -2;
     if (doc.empty()) return -2;
     if (laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx) != 0)
         return -2;

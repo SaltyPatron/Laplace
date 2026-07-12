@@ -22,11 +22,13 @@
     "@react-three/fiber": "^9.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "d3-force-3d": "^3.0.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-force-graph-2d": "^1.27.7",
+    "react-force-graph-3d": "^1.29.1",
     "react-router-dom": "^7.6.2",
-    "three": "^0.177.0",
+    "three": "0.185.1",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
@@ -38,7 +40,7 @@
     "@types/node": "^26.1.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "@types/three": "^0.177.0",
+    "@types/three": "0.185.0",
     "@vitejs/plugin-react": "^4.5.0",
     "cross-env": "^7.0.3",
     "openapi-typescript": "^7.8.0",

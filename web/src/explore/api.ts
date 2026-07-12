@@ -55,7 +55,18 @@ export function exploreNeighbors(idHex: string, k = 10, opts: ApiOptions = {}) {
   return apiGet<{
     neighbors: {
       id_hex: string;
-      structural: { neighbor: string; geodesic: number; frechet?: number | null; axis: string }[];
+      structural: {
+        neighbor: string;
+        geodesic: number;
+        frechet?: number | null;
+        axis: string;
+        neighbor_id_hex?: string | null;
+        x?: number | null;
+        y?: number | null;
+        z?: number | null;
+        m?: number | null;
+        radius?: number | null;
+      }[];
       semantic: SalientFactRow[];
     };
     billing?: BillingReceipt | null;
@@ -90,6 +101,29 @@ export function exploreContainers(idHex: string, maxHops = 3, limit = 50, opts: 
     };
     billing?: BillingReceipt | null;
   }>(`/v1/explore/entities/${idHex}/containers?max_hops=${maxHops}&limit=${limit}`, opts);
+}
+
+export function exploreConsensusGraph(idHex: string, hops = 2, fanout = 10, opts: ApiOptions = {}) {
+  return apiGet<{
+    graph: {
+      id_hex: string;
+      label: string;
+      hops: number;
+      fanout: number;
+      nodes: { id_hex: string; label: string; hop: number; tier?: number | null }[];
+      edges: {
+        source_id_hex: string;
+        target_id_hex: string;
+        type: string;
+        eff_mu: number;
+        witnesses: number;
+        hop: number;
+      }[];
+      truncated?: boolean;
+      max_nodes?: number;
+    };
+    billing?: BillingReceipt | null;
+  }>(`/v1/explore/entities/${idHex}/graph?hops=${hops}&fanout=${fanout}`, opts);
 }
 
 export async function preflight(serviceId: string, tenant: string, units = 1) {

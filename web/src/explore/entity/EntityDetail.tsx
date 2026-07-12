@@ -215,26 +215,21 @@ export function EntityDetail() {
   const glomeExtraNodes = useMemo((): GlomeNode[] => {
     if (!neighborsUnlocked || !neighbors) return [];
     if (neighborMode === 'structural') {
-      return neighbors.structural.map((n, i) => ({
-        id: `nn-${i}-${n.neighbor}`,
-        label: n.neighbor,
-        x: Math.sin(i) * 0.7,
-        y: Math.cos(i * 1.3) * 0.7,
-        z: Math.sin(i * 0.7) * 0.5,
-        radius: 0.8,
-        kind: 'neighbor' as const,
-      }));
+      // Real S³ coords from structural_neighbors_of — never decorative Math.sin slots.
+      return neighbors.structural
+        .filter((n) => n.x != null && n.y != null && n.z != null)
+        .map((n) => ({
+          id: n.neighbor_id_hex ?? `nn-${n.neighbor}`,
+          label: n.neighbor,
+          x: n.x!,
+          y: n.y!,
+          z: n.z!,
+          radius: n.radius ?? 0.8,
+          kind: 'neighbor' as const,
+        }));
     }
-    return neighbors.semantic.map((s, i) => ({
-      id: `sem-${i}-${s.fact}`,
-      label: s.fact,
-      x: Math.cos(i * 0.9) * 0.65,
-      y: Math.sin(i * 0.5) * 0.65,
-      z: Math.cos(i * 1.1) * 0.4,
-      radius: 0.7,
-      mu: s.eff_mu,
-      kind: 'peer' as const,
-    }));
+    // Semantic facts are consensus strings, not S³ points — do not invent positions.
+    return [];
   }, [neighbors, neighborsUnlocked, neighborMode]);
 
   if (err && !preview) return <ErrorText>{err}</ErrorText>;
@@ -297,7 +292,8 @@ export function EntityDetail() {
               <GraphTab
                 centerId={show.id_hex}
                 centerLabel={show.label}
-                edges={show.consensus_out}
+                edgesOut={show.consensus_out}
+                edgesIn={show.consensus_in}
                 walkPath={walkPath}
                 onNodeClick={(id) => nav(`/explore/entity/${id}`)}
               />

@@ -531,7 +531,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 r.id,
                 CASE
                     WHEN @target ~ '^[0-9a-f]{32}$' THEN COALESCE(
-                        NULLIF(laplace.render_text(r.id, 12), ''),
+                        NULLIF(laplace.render_text_fast(r.id, 8), ''),
                         left(encode(r.id, 'hex'), 16))
                     ELSE @target
                 END,

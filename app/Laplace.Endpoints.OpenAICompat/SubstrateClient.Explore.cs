@@ -341,20 +341,36 @@ internal sealed partial class SubstrateClient
             var label = await ReadLabelAsync(conn, id, ct);
             if (label is null) return null;
 
+            // Entity-id KNN with real S³ coords — not label→prompt_state re-resolve,
+            // and not decorative Math.sin positions on the glome.
             var structural = new List<ExploreNeighborRow>();
             await using (var cmd = new NpgsqlCommand(
-                "SELECT neighbor, geodesic, frechet FROM laplace.nearest_neighbors_4d(@w, @k);", conn))
+                """
+                SELECT encode(n.neighbor_id, 'hex'), n.neighbor,
+                       n.geodesic, n.frechet, n.x, n.y, n.z, n.m, n.radius
+                FROM laplace.structural_neighbors_of(@id, @k) n;
+                """, conn))
             {
-                cmd.Parameters.AddWithValue("w", label);
+                cmd.Parameters.AddWithValue("id", id);
                 cmd.Parameters.AddWithValue("k", k);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
+                    if (reader.IsDBNull(1)) continue;
+                    var neighbor = reader.GetString(1);
+                    if (string.IsNullOrWhiteSpace(neighbor)) continue;
+
                     structural.Add(new ExploreNeighborRow(
-                        Neighbor: reader.GetString(0),
-                        Geodesic: reader.GetDouble(1),
-                        Frechet: reader.IsDBNull(2) ? null : reader.GetDouble(2),
-                        Axis: "structural"));
+                        Neighbor: neighbor.Trim(),
+                        Geodesic: reader.GetDouble(2),
+                        Frechet: reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                        Axis: "structural",
+                        NeighborIdHex: reader.IsDBNull(0) ? null : reader.GetString(0).ToLowerInvariant(),
+                        X: reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                        Y: reader.IsDBNull(5) ? null : reader.GetDouble(5),
+                        Z: reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                        M: reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                        Radius: reader.IsDBNull(8) ? null : reader.GetDouble(8)));
                 }
             }
 
@@ -379,7 +395,8 @@ internal sealed partial class SubstrateClient
 
         const string sql = """
             SELECT encode(m.member, 'hex'), m.kind,
-                   laplace.label_or_hex(m.member), m.mu, m.witnesses
+                   COALESCE(NULLIF(laplace.render_text_fast(m.member, 8), ''),
+                            laplace.label_or_hex(m.member)), m.mu, m.witnesses
             FROM laplace.concept_members(@id) m
             ORDER BY m.mu DESC NULLS LAST, m.member
             LIMIT @limit;
@@ -460,8 +477,10 @@ internal sealed partial class SubstrateClient
 
         const string sql = """
             SELECT encode(c.entity_id, 'hex'), c.tier,
-                   laplace.render(c.type_id), c.hops,
-                   laplace.label_or_hex(c.entity_id)
+                   COALESCE(NULLIF(laplace.render_text_fast(c.type_id, 4), ''),
+                            laplace.label_or_hex(c.type_id)), c.hops,
+                   COALESCE(NULLIF(laplace.render_text_fast(c.entity_id, 8), ''),
+                            laplace.label_or_hex(c.entity_id))
             FROM laplace.containers_of(@id, @hops, @limit) c;
             """;
 
@@ -494,6 +513,164 @@ internal sealed partial class SubstrateClient
         }
     }
 
+    public async Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
+        string idHex, int hops, int fanout, CancellationToken ct)
+    {
+        var seed = TryParseIdHex(idHex);
+        if (seed is null) return null;
+
+        // Native SPI beam (pg_laplace_explore_web): one connection, undirected
+        // consensus probe, ≤fanout new nodes/hop, all tiers. Labels via render_text_fast.
+        hops = Math.Clamp(hops, 1, 4);
+        fanout = Math.Clamp(fanout, 2, 16);
+        const int maxNodes = 160;
+
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            var (label, tier, _, _) = await ReadEntityFacetsAsync(conn, seed, ct);
+            if (label is null) return null;
+
+            var seedHex = idHex.ToLowerInvariant();
+            var nodes = new Dictionary<string, ExploreGraphNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                [seedHex] = new ExploreGraphNode(seedHex, label, 0, tier),
+            };
+            var edges = new List<ExploreGraphEdge>();
+            var edgeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var typeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var unlabeled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            const string edgeSql = """
+                SELECT encode(w.source_id, 'hex'), encode(w.type_id, 'hex'), encode(w.object_id, 'hex'),
+                       w.hop, laplace.eff_mu(w.rating, w.rd), w.witness_count
+                FROM laplace.explore_web(@seed, @hops, @fanout, @max_nodes) w;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(edgeSql, conn))
+            {
+                cmd.CommandTimeout = Math.Max(SubstrateClient.DefaultCommandTimeoutSeconds, 60);
+                cmd.Parameters.AddWithValue("seed", seed);
+                cmd.Parameters.AddWithValue("hops", hops);
+                cmd.Parameters.AddWithValue("fanout", fanout);
+                cmd.Parameters.AddWithValue("max_nodes", maxNodes);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var sourceHex = reader.GetString(0).ToLowerInvariant();
+                    var typeHex = reader.GetString(1).ToLowerInvariant();
+                    var objectHex = reader.GetString(2).ToLowerInvariant();
+                    var hop = reader.GetInt16(3);
+                    var effMu = reader.GetDecimal(4);
+                    var witnesses = reader.GetInt64(5);
+
+                    typeIds.Add(typeHex);
+                    var key = $"{sourceHex}|{typeHex}|{objectHex}";
+                    if (!edgeKeys.Add(key)) continue;
+
+                    edges.Add(new ExploreGraphEdge(
+                        SourceIdHex: sourceHex,
+                        TargetIdHex: objectHex,
+                        Type: typeHex,
+                        EffMu: effMu,
+                        Witnesses: witnesses,
+                        Hop: hop));
+
+                    if (!nodes.ContainsKey(sourceHex))
+                    {
+                        nodes[sourceHex] = new ExploreGraphNode(sourceHex, sourceHex, hop, null);
+                        unlabeled.Add(sourceHex);
+                    }
+                    if (!nodes.ContainsKey(objectHex))
+                    {
+                        nodes[objectHex] = new ExploreGraphNode(objectHex, objectHex, hop, null);
+                        unlabeled.Add(objectHex);
+                    }
+                    else if (hop < nodes[objectHex].Hop)
+                    {
+                        nodes[objectHex] = nodes[objectHex] with { Hop = hop };
+                    }
+                }
+            }
+
+            // Batch-label endpoints + relation types through the native render path.
+            var idsToLabel = unlabeled.Concat(typeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (idsToLabel.Count > 0)
+            {
+                var labels = await ReadLabelsFastAsync(conn, idsToLabel, ct);
+                foreach (var (hex, entry) in labels)
+                {
+                    if (nodes.TryGetValue(hex, out var node))
+                        nodes[hex] = node with { Label = entry.Label, Tier = node.Tier ?? entry.Tier };
+                }
+
+                for (var i = 0; i < edges.Count; i++)
+                {
+                    var e = edges[i];
+                    if (labels.TryGetValue(e.Type, out var tl))
+                        edges[i] = e with { Type = tl.Label };
+                }
+            }
+
+            var truncated = nodes.Count >= maxNodes;
+            return new ExploreGraphResponse(
+                IdHex: seedHex,
+                Label: label,
+                Hops: hops,
+                Fanout: fanout,
+                Nodes: nodes.Values.OrderBy(n => n.Hop).ThenBy(n => n.Label).ToList(),
+                Edges: edges,
+                Truncated: truncated,
+                MaxNodes: maxNodes);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException or OperationCanceledException)
+        {
+            throw new SubstrateUnavailableException(
+                $"Explore consensus graph query failed: {ex.GetType().Name}: {ex.Message}", ex);
+        }
+    }
+
+    private static async Task<Dictionary<string, (string Label, short? Tier)>> ReadLabelsFastAsync(
+        NpgsqlConnection conn, IReadOnlyList<string> idHexes, CancellationToken ct)
+    {
+        var result = new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
+        if (idHexes.Count == 0) return result;
+
+        // render_text_fast = native C; label_or_hex falls back when unrealizable.
+        const string sql = """
+            SELECT encode(x.id, 'hex'),
+                   COALESCE(
+                       NULLIF(laplace.render_text_fast(x.id, 8), ''),
+                       laplace.label_or_hex(x.id)),
+                   e.tier
+            FROM unnest(@ids::bytea[]) AS x(id)
+            LEFT JOIN laplace.entities e ON e.id = x.id;
+            """;
+
+        var ids = new byte[idHexes.Count][];
+        for (var i = 0; i < idHexes.Count; i++)
+        {
+            var parsed = TryParseIdHex(idHexes[i]);
+            if (parsed is null) continue;
+            ids[i] = parsed;
+        }
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        var p = cmd.Parameters.AddWithValue("ids", ids.Where(x => x is not null).ToArray()!);
+        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var hex = reader.GetString(0).ToLowerInvariant();
+            var lab = reader.IsDBNull(1) ? hex : reader.GetString(1);
+            short? nodeTier = reader.IsDBNull(2) ? null : reader.GetInt16(2);
+            if (lab.Length > 48) lab = lab[..47] + "…";
+            result[hex] = (lab, nodeTier);
+        }
+
+        return result;
+    }
+
     private static byte[]? TryParseIdHex(string idHex)
     {
         if (string.IsNullOrWhiteSpace(idHex) || idHex.Length != 32) return null;
@@ -503,7 +680,12 @@ internal sealed partial class SubstrateClient
 
     private static async Task<string?> ReadLabelAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
-        await using var cmd = new NpgsqlCommand("SELECT laplace.label_or_hex(@id);", conn);
+        await using var cmd = new NpgsqlCommand(
+            """
+            SELECT COALESCE(
+                NULLIF(laplace.render_text_fast(@id, 8), ''),
+                laplace.label_or_hex(@id));
+            """, conn);
         cmd.Parameters.AddWithValue("id", id);
         var value = await cmd.ExecuteScalarAsync(ct);
         return value is null or DBNull ? null : (string)value;
@@ -513,7 +695,13 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(
-            "SELECT f.tier, laplace.render(f.type_id), laplace.label_or_hex(@id), laplace.entity_exists(@id) FROM laplace.entity_facets(@id) f;", conn);
+            """
+            SELECT f.tier,
+                   COALESCE(NULLIF(laplace.render_text_fast(f.type_id, 4), ''), laplace.label_or_hex(f.type_id)),
+                   COALESCE(NULLIF(laplace.render_text_fast(@id, 8), ''), laplace.label_or_hex(@id)),
+                   laplace.entity_exists(@id)
+            FROM laplace.entity_facets(@id) f;
+            """, conn);
         cmd.Parameters.AddWithValue("id", id);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
@@ -621,7 +809,7 @@ internal sealed partial class SubstrateClient
                        laplace.type_label(c.type_id),
                        COALESCE(
                            NULLIF(laplace._realize_synset_lemma(c.subject_id, laplace.word_language(@id)), ''),
-                           NULLIF(laplace.render_text(c.subject_id, 12), ''),
+                           NULLIF(laplace.render_text_fast(c.subject_id, 8), ''),
                            left(encode(c.subject_id, 'hex'), 16)),
                        laplace.eff_mu_display(c.rating, c.rd), c.witness_count
                 FROM laplace.consensus_in(@id, @limit) c;
@@ -652,7 +840,7 @@ internal sealed partial class SubstrateClient
             SELECT encode(s.sense_id, 'hex'), encode(s.synset_id, 'hex'),
                    COALESCE(
                        NULLIF(laplace._realize_synset_lemma(s.synset_id, laplace.word_language(@id)), ''),
-                       NULLIF(laplace.render_text(s.synset_id, 12), ''),
+                       NULLIF(laplace.render_text_fast(s.synset_id, 8), ''),
                        left(encode(s.synset_id, 'hex'), 16)),
                    s.eff_mu, s.witnesses
             FROM laplace.senses(@id) s;
@@ -680,7 +868,7 @@ internal sealed partial class SubstrateClient
         const string sql = """
             SELECT c.ordinal, encode(c.child_id, 'hex'), c.run_length, c.flags,
                    COALESCE(
-                       NULLIF(laplace.render_text(c.child_id, 12), ''),
+                       NULLIF(laplace.render_text_fast(c.child_id, 8), ''),
                        left(encode(c.child_id, 'hex'), 16))
             FROM laplace.constituents(@id) c
             LIMIT 512;

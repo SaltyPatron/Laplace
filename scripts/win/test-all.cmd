@@ -13,16 +13,16 @@ rem here instead of 98 cascading connection errors twenty minutes in.
 rem (The no-DB unit signal is test-fast.cmd, ~40s.)
 "%PGBIN%\pg_isready.exe" -h localhost -q
 if errorlevel 1 (
-  echo test-all: local Postgres is DOWN — this gate is DB-integration by design and cannot run.
+  echo test-all: local Postgres is DOWN -- this gate is DB-integration by design and cannot run.
   echo   unit signal instead:  scripts\win\test-fast.cmd  ^(no DB, ~40s^)
   echo   recover local PG:     scripts\win\fix-postgres.cmd / pg-auto-recover.cmd
-  >> "%LOG%" echo test-all aborted: local Postgres down (pg_isready failed)
+  >> "%LOG%" echo test-all aborted: local Postgres down ^(pg_isready failed^)
   exit /b 3
 )
 
 echo === verify-toolchain ===
 >> "%LOG%" echo === verify-toolchain ===
-rem Full ctest runs below — skip the toolchain subset to avoid double work.
+rem Full ctest runs below -- skip the toolchain subset to avoid double work.
 call "%~dp0verify-toolchain.cmd" --skip-ctest >> "%LOG%" 2>&1
 if errorlevel 1 set "FAIL=1"
 
@@ -81,7 +81,7 @@ if "%FAIL%"=="0" (
   "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace_regress_substrate -v ON_ERROR_STOP=1 -f scripts\verify-fk.sql >> "%LOG%" 2>&1
   if errorlevel 1 set "FAIL=1"
 ) else (
-  echo verify-fk skipped — prior test layer failed >> "%LOG%"
+  echo verify-fk skipped -- prior test layer failed >> "%LOG%"
 )
 
 if "%FAIL%"=="0" (
@@ -89,6 +89,6 @@ if "%FAIL%"=="0" (
   >> "%LOG%" echo ALL TEST LAYERS PASSED
   exit /b 0
 )
-echo ONE OR MORE TEST LAYERS FAILED — see %LOG%
+echo ONE OR MORE TEST LAYERS FAILED -- see %LOG%
 >> "%LOG%" echo ONE OR MORE TEST LAYERS FAILED
 exit /b 1

@@ -35,10 +35,11 @@ BEGIN
         WHERE entity_id <> v_id
         ORDER BY geo
         LIMIT p_k)
-    SELECT render_text(t.entity_id, 24), t.geo,
+    SELECT render_text_fast(t.entity_id, 8), t.geo,
            CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
                 THEN public.laplace_frechet_4d(t.trajectory, v_traj) END
     FROM nearest t
+    WHERE render_text_fast(t.entity_id, 8) IS NOT NULL
     ORDER BY t.geo;
 END;
 $sn$;

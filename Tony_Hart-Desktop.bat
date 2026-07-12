@@ -1,14 +1,13 @@
 @echo off
-rem Tony_Hart-Desktop — local Hart-Desktop pipeline (localhost Postgres + IIS).
-rem Self-elevates so tune-pg can restart Postgres and deploy-api can recycle IIS.
-rem Steps live-tee to console + D:\Data\Output\<step>.log (no silent redirects).
+rem Tony_Hart-Desktop — elevated pipeline for host target HART-DESKTOP (localhost PG + IIS).
+rem Naming: Tony_Hart-<Target>  (_ joins operator prefix; - joins host target).
+rem Self-elevates for deploy-api / optional tune-pg. Logs: D:\Data\Output\<step>.log
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
-rem Double-click / unelevated → UAC relaunch as Administrator, then continue.
 net session >nul 2>&1
 if errorlevel 1 (
-  echo Elevating for Postgres restart / IIS deploy...
+  echo Elevating for HART-DESKTOP IIS deploy...
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0.' -Verb RunAs"
   if errorlevel 1 (
@@ -24,37 +23,38 @@ set "LAPLACE_ENV_LOADED="
 set "OUT=D:\Data\Output"
 if not exist "%OUT%" mkdir "%OUT%"
 
-echo ===== Tony_Hart-Desktop started %DATE% %TIME% =====
-echo target DB: %LAPLACE_PGHOST%
-echo logs:      %OUT%\  ^(live-teed to console^)
+rem Optional override: Tony_Hart-Desktop.bat [rebuild-all modules...]
+rem Examples:  (none) → ship   ^|  native  ^|  publish  ^|  engine extensions install
+set "MODULES=%*"
+if not defined MODULES set "MODULES=ship"
+
+echo ===== Tony_Hart-Desktop / HART-DESKTOP started %DATE% %TIME% =====
+echo target:    HART-DESKTOP  PGHOST=%LAPLACE_PGHOST%
+echo modules:   %MODULES%
+echo logs:      %OUT%\
 echo.
 
-call :run tune-pg || goto :fail
-call :run build-cutechess || goto :fail
-call :run build-deps || goto :fail
-call :run rebuild-all || goto :fail
-rem call :run build-engine-asan || goto :fail
-call :run build-web || goto :fail
-call :run install-extensions || goto :fail
-call :run publish || goto :fail
-call :run deploy-api || goto :fail
-call :run db-reset || goto :fail
-call :run seed-foundation || goto :fail
-call :run_args seed-step "openings" "D:\Data\Ingest\Games\Chess\openings" openings || goto :fail
-call :run_args seed-step "chess-books" "D:\Data\Ingest\test-data\text" chess-books || goto :fail
-call :run_args seed-step "document" "D:\Data\Ingest\test-data\text" documents || goto :fail
-call :run_args seed-step "chess" "D:\Data\Ingest\Games\Chess" chess-chesscom || goto :fail
-rem call :run_args seed-step "chess" "D:\Data\Ingest\Games\Chess\Lumbras\otb" chess-otb || goto :fail
-rem call :run_args seed-step "atomic2020" "" atomic2020 || goto :fail
-rem call :run_args seed-step "omw" "" omw || goto :fail
-rem call :run_args seed-step "conceptnet" "" conceptnet || goto :fail
-rem call :run_args seed-step "ud" "" ud || goto :fail
-rem call :run_args seed-step "wiktionary" "" wiktionary || goto :fail
-rem call :run_args seed-step "tatoeba" "" tatoeba || goto :fail
-rem call :run_args seed-step "opensubtitles" "" opensubtitles || goto :fail
+rem call :tee tune-pg "tune-pg.cmd" || goto :fail
+call :tee build-cutechess "build-cutechess.cmd" || goto :fail
+call :tee rebuild-all "rebuild-all.cmd %MODULES%" || goto :fail
+rem call :tee build-engine-asan "build-engine-asan.cmd" || goto :fail
+
+rem ---- optional DB / seed campaigns (uncomment as needed) ----
+rem call :tee db-reset "db-reset.cmd" || goto :fail
+rem call :tee seed-foundation "seed-foundation.cmd" || goto :fail
+rem call :tee seed-openings "seed-step.cmd openings \"D:\Data\Ingest\Games\Chess\openings\"" || goto :fail
+rem call :tee seed-chesscom "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
+rem call :tee seed-documents "seed-step.cmd document \"D:\Data\Ingest\test-data\text\"" || goto :fail
+rem call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
+rem call :tee seed-omw "seed-step.cmd omw" || goto :fail
+rem call :tee seed-conceptnet "seed-step.cmd conceptnet" || goto :fail
+rem call :tee seed-ud "seed-step.cmd ud" || goto :fail
+rem call :tee seed-wiktionary "seed-step.cmd wiktionary" || goto :fail
+rem call :tee seed-tatoeba "seed-step.cmd tatoeba" || goto :fail
+rem call :tee seed-opensubtitles "seed-step.cmd opensubtitles" || goto :fail
 
 echo.
-echo ===== Tony_Hart-Desktop OK %DATE% %TIME% =====
+echo ===== Tony_Hart-Desktop / HART-DESKTOP OK %DATE% %TIME% =====
 pause
 exit /b 0
 
@@ -64,46 +64,20 @@ echo ===== Tony_Hart-Desktop FAILED at !LAST_STEP! - see %OUT%\!LAST_LOG!.log ==
 pause
 exit /b 1
 
-:run
-set "LAST_STEP=%~1"
+:tee
+rem %1=log stem  %2=command line under scripts\win\
 set "LAST_LOG=%~1"
-echo ==== %~1 ====
+set "LAST_STEP=%~2"
+echo ==== %~2 ====
 echo log: %OUT%\%~1.log
 del /q "%OUT%\%~1.log" >nul 2>&1
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
   -LogPath "%OUT%\%~1.log" ^
   -WorkingDirectory "%CD%" ^
-  -CommandLine "call scripts\win\%~1.cmd"
-rem String compare, not `if errorlevel 1`: negative NTSTATUS exit codes
-rem (crash 0xC0000005, Ctrl+C 0xC000013A) are < 1 and would read as success.
+  -CommandLine "call scripts\win\%~2"
 if not "%ERRORLEVEL%"=="0" (
-  echo FAILED %~1 exit=%ERRORLEVEL% - %OUT%\%~1.log
+  echo FAILED %~2 exit=%ERRORLEVEL% - %OUT%\%~1.log
   exit /b 1
 )
-echo OK %~1
-exit /b 0
-
-:run_args
-rem %1=script  %2=arg1  %3=arg2  %4=log-name
-set "LAST_STEP=%~1 %~2"
-set "LAST_LOG=%~4"
-echo ==== %~1 %~2 ====
-echo log: %OUT%\%~4.log
-del /q "%OUT%\%~4.log" >nul 2>&1
-if "%~3"=="" (
-  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
-    -LogPath "%OUT%\%~4.log" ^
-    -WorkingDirectory "%CD%" ^
-    -CommandLine "call scripts\win\%~1.cmd %~2"
-) else (
-  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
-    -LogPath "%OUT%\%~4.log" ^
-    -WorkingDirectory "%CD%" ^
-    -CommandLine "call scripts\win\%~1.cmd %~2 \"%~3\""
-)
-if not "%ERRORLEVEL%"=="0" (
-  echo FAILED %~1 %~2 exit=%ERRORLEVEL% - %OUT%\%~4.log
-  exit /b 1
-)
-echo OK %~1 %~2
+echo OK %~2
 exit /b 0

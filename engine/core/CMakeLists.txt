@@ -96,6 +96,16 @@ add_custom_command(
     VERBATIM
 )
 
+# zlib for in-process ZIP inflate (unicode_seed reads the UCD .zip without a
+# tar/unzip shell-out). Inflate is deterministic, so the system/PG zlib is
+# rock-safe. On Windows, PostgreSQL ships zlib -- locate it via PGBIN (env.cmd's
+# single toolchain source), never a hardcoded literal.
+if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
+    get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
+    set(ZLIB_ROOT "${_laplace_pg_root}")
+endif()
+find_package(ZLIB REQUIRED)
+
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 
 if(WIN32)
@@ -104,7 +114,7 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3)
+        PRIVATE blake3 ZLIB::ZLIB)
 endif()
 
 
@@ -179,7 +189,7 @@ target_include_directories(laplace_core
 
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
-    PRIVATE blake3
+    PRIVATE blake3 ZLIB::ZLIB
 )
 
 if(BUILD_TESTING)

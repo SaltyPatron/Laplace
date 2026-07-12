@@ -1,0 +1,13 @@
+@layer components {
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
+  .note {
+    flex: 0 0 auto;
+    margin-top: 0.25rem;
+  }
+}

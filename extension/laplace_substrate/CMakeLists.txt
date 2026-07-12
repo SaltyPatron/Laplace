@@ -60,6 +60,7 @@ set(EXT_C_SOURCES
     src/graph_contrast.c
     src/graph_cascade.c
     src/foundry_crawl.c
+    src/explore_web.c
     src/recall.c
     src/recall_route.c
     src/perfcache.c

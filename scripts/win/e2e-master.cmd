@@ -1,13 +1,17 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-set "SKIP_CLEAN=0"
+set "DO_CLEAN=0"
 set "SKIP_MODELS=0"
 set "DB_ONLY=0"
 
 :parse_args
 if "%~1"=="" goto args_done
-if /i "%~1"=="--skip-clean"  ( set "SKIP_CLEAN=1"  & shift /1 & goto parse_args )
+if /i "%~1"=="--clean"       ( set "DO_CLEAN=1"     & shift /1 & goto parse_args )
+if /i "%~1"=="--skip-clean"  (
+  echo e2e-master: --skip-clean is obsolete ^(incremental is now the default^); ignoring
+  shift /1 & goto parse_args
+)
 if /i "%~1"=="--skip-models" ( set "SKIP_MODELS=1" & shift /1 & goto parse_args )
 if /i "%~1"=="--db-only"    ( set "DB_ONLY=1"     & shift /1 & goto parse_args )
 echo unknown flag: %~1
@@ -24,12 +28,12 @@ set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_LEXICAL_BULK set "LAPLACE_SKIP_LEXICAL_BULK=0"
 
-if "%SKIP_CLEAN%"=="0" (
-  call "%~dp0rebuild-all.cmd" || exit /b 1
-) else (
+if "%DO_CLEAN%"=="1" (
   echo.
-  echo ===== BUILD [incremental: --skip-clean] =====
-  call "%~dp0rebuild-all.cmd" --skip-clean || exit /b 1
+  echo ===== BUILD [clean wipe: --clean] =====
+  call "%~dp0rebuild-all.cmd" --clean || exit /b 1
+) else (
+  call "%~dp0rebuild-all.cmd" || exit /b 1
 )
 
 if "%DB_ONLY%"=="1" goto phase_db_bootstrap
