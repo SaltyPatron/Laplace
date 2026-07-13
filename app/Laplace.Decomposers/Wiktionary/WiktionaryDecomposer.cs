@@ -78,6 +78,13 @@ public sealed class WiktionaryDecomposer : GrammarIngestDecomposer<WiktionarySou
 
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {
+        // Single-file valet (CLAUDE.md: multi-file sources accept <path> as a file, bare dir,
+        // or corpus root — the same way `ingest ud <one.conllu>` works). A direct path to a
+        // .jsonl file is used as-is. Without this the path was treated as a DIRECTORY and
+        // Path.Combine(<file>, "kaikki...jsonl") resolved to nothing → input_total=0 noop.
+        if (!string.IsNullOrEmpty(dir) && File.Exists(dir))
+            return dir;
+
         if (langs?.IsActive == true)
         {
             string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");
