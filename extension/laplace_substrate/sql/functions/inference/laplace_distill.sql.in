@@ -13,6 +13,11 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS
     FROM consensus c
     JOIN band_types bt ON bt.id = c.type_id
     WHERE c.object_id IS NOT NULL
-      AND eff_mu(c.rating, c.rd)::float8 / 1e9 >= p_min_eff_mu
+      -- Compare the BARE bigint eff_mu (= rating-2*rd, the indexed expression of
+      -- consensus_eff_mu_btree) against a once-computed bigint threshold, instead of
+      -- `eff_mu::float8/1e9 >= p_min` which wraps the column in ::float8/1e9 and defeats the
+      -- functional index → whole-consensus scan. EXACT: eff_mu is integer, so
+      -- `eff_mu::float8/1e9 >= p_min` ⟺ `eff_mu >= p_min*1e9` ⟺ `eff_mu >= ceil(p_min*1e9)`.
+      AND eff_mu(c.rating, c.rd) >= ceil(p_min_eff_mu * 1e9)::bigint
     ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
 $$;
