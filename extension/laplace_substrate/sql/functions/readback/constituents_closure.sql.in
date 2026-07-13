@@ -1,5 +1,24 @@
 -- Bulk constituent closure for native no-SPI render assembly (R1).
--- One indexed/lateral expansion of the trajectory DAG; C assembles text.
+-- The C render (generate_walk.c) runs this ONCE per render call and assembles text in C.
+--
+-- History / why this shape: the prior version called the SQL wrapper constituents(id) per
+-- node — and constituents() is NON-INLINABLE (ORDER BY ... LIMIT 1 + a lateral SRF), so the
+-- planner emitted a real function-call per node, in BOTH the recursive term AND the final
+-- projection (every node expanded twice, through the slow path). Rendering ~15 short names
+-- fanned into hundreds of per-node function calls and timed out under load.
+--
+-- This version removes the per-node function entirely and keeps the work bounded:
+--   * reach  — node-recursion (dedup on entity_id, so a shared node is expanded once per depth
+--               it is reached at, NOT once per incoming edge; edge-recursion would re-expand a
+--               common word/codepoint once per parent — a fan-in blow-up on real documents).
+--               The physicalities probe + trajectory SRF are INLINED, not the constituents()
+--               wrapper.
+--   * picked — ONE physicalities row per reached node, chosen SET-BASED via DISTINCT ON over a
+--               join, replacing N correlated `ORDER BY id LIMIT 1` subqueries with one sort.
+--   * final  — expand each distinct node exactly once to emit its edges.
+-- Termination: the content law makes the constituent DAG acyclic (constituents are strictly
+-- lower-tier), and the depth cap is a belt-and-braces bound; leaves (codepoints, no type-1
+-- trajectory) yield zero rows and stop the descent.
 CREATE OR REPLACE FUNCTION constituents_closure(
     p_roots bytea[],
     p_max_depth integer DEFAULT 32
@@ -13,27 +32,38 @@ RETURNS TABLE(
 )
 LANGUAGE sql STABLE PARALLEL SAFE
 SET search_path = @extschema@, public AS $$
-WITH RECURSIVE frontier(entity_id, depth) AS (
+WITH RECURSIVE reach(entity_id, depth) AS (
     SELECT r.id, 0
     FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
     WHERE r.id IS NOT NULL
     UNION
-    SELECT c.child_id, f.depth + 1
-    FROM frontier f
-    CROSS JOIN LATERAL constituents(f.entity_id) c
-    WHERE f.depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+    SELECT u.entity_id, rc.depth + 1
+    FROM reach rc
+    CROSS JOIN LATERAL (
+        SELECT p2.trajectory
+        FROM physicalities p2
+        WHERE p2.entity_id = rc.entity_id AND p2.type = 1 AND p2.trajectory IS NOT NULL
+        ORDER BY p2.id
+        LIMIT 1
+    ) ph
+    CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) AS u
+    WHERE rc.depth < GREATEST(COALESCE(p_max_depth, 32), 0)
 ),
-nodes AS (
+node AS (
     SELECT DISTINCT entity_id
-    FROM frontier
+    FROM reach
     WHERE depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+),
+picked AS (
+    -- One deterministic physicalities row per node, set-based (not a per-node LIMIT 1).
+    SELECT DISTINCT ON (p2.entity_id) p2.entity_id, p2.trajectory
+    FROM physicalities p2
+    JOIN node n ON n.entity_id = p2.entity_id
+    WHERE p2.type = 1 AND p2.trajectory IS NOT NULL
+    ORDER BY p2.entity_id, p2.id
 )
-SELECT n.entity_id AS parent_id,
-       c.ordinal,
-       c.child_id,
-       c.run_length,
-       c.flags
-FROM nodes n
-CROSS JOIN LATERAL constituents(n.entity_id) c
-ORDER BY n.entity_id, c.ordinal
+SELECT pk.entity_id AS parent_id, u.ordinal, u.entity_id AS child_id, u.run_length, u.flags
+FROM picked pk
+CROSS JOIN LATERAL public.laplace_trajectory_constituents(pk.trajectory) AS u
+ORDER BY pk.entity_id, u.ordinal
 $$;
