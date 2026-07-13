@@ -12,15 +12,25 @@ namespace Laplace.Engine.Core;
 public static class MemoryTopology
 {
     /// <summary>
-    /// Hard PostgreSQL binary-COPY safety ceiling for one working-set apply. A single-table
-    /// COPY-tuple buffer is addressed with a native length and, historically, validated
-    /// through int-addressed paths; concatenating a whole working set per table (attestations
-    /// dominate) must never approach the 2 GiB int wall. Capping the *total* apply footprint
-    /// at 1 GiB keeps the largest single-table buffer well under that wall on any machine,
-    /// regardless of RAM. This is a correctness invariant, not a tuning knob — do not raise it
-    /// to chase throughput.
+    /// Ceiling for one working-set apply's byte budget. HISTORY: this was 1 GiB, sized so a
+    /// single-table COPY buffer could never approach a 2 GiB int wall in the then int-addressed
+    /// validate/COPY paths. That wall has since been eliminated — the apply/COPY path is now
+    /// long/size_t-addressed end to end (native IntentStage arena is size_t; TupleBuffer,
+    /// CollectBlobs, CopyBlobValidator, CopyTupleParser.Parse*, and WriteFilteredAsync are all
+    /// long, and the write streams from the unmanaged arena in 8 MiB windows — audited: no
+    /// managed byte[] ever concatenates a whole single-table working set). So the 1 GiB clamp
+    /// had become a throughput tourniquet, not a safety invariant: on a 48 GiB box it truncated
+    /// the RAM/16 budget (~3.2 GiB) down to 1 GiB while tune-pg hands PG shared_buffers = RAM/4.
+    ///
+    /// The REAL remaining bound is row-COUNT, not bytes: CopyTupleParser's per-table metadata
+    /// lists (List&lt;Hash128&gt;, List&lt;StagedRowRef&gt;) are int-indexed managed arrays that
+    /// cap near ~134M rows/table (~2 GiB / 16 B); for the smallest rows (entities ~70 B) that is
+    /// ~10 GiB of buffer. This ceiling is 4 GiB — ~2.5× under that row-count wall even for the
+    /// smallest rows — so the RAM/16 budget flows through unclamped on typical boxes. To lift it
+    /// further, first convert those row-metadata lists to long-indexed; do NOT raise ABOVE the
+    /// row-count bound without that conversion.
     /// </summary>
-    public const long MaxApplyBufferBytes = 1L << 30;
+    public const long MaxApplyBufferBytes = 4L << 30;
 
     /// <summary>Floor so tiny/constrained hosts still make forward progress per apply.</summary>
     public const long MinWorkingSetBudgetBytes = 256L << 20;
