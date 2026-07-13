@@ -1,0 +1,25 @@
+-- relation_in_family: dynamic-aware family membership.
+--
+-- The C companion relation_type_in_family() is IMMUTABLE and only knows the
+-- STATIC governed relation set baked into the highway manifest. Dynamic
+-- relations minted at ingest (EDEP_nsubj, DEP_obj, FEAT_case, ...) are NOT in
+-- that set, so the C function returns FALSE for them even though they belong to
+-- their family. Each dynamic child carries an IS_A edge to its static family
+-- root in consensus (emitted by RelationTypeRegistry.SeedDynamic), so we resolve
+-- membership by (a) the static C check OR (b) that IS_A -> family-root edge.
+--
+-- STABLE, not IMMUTABLE: it reads consensus. The static OR-branch delegates to
+-- the exact same C function, so for static-only data this is bit-identical to
+-- relation_type_in_family(); it only ADDS recognition of dynamic children.
+CREATE OR REPLACE FUNCTION relation_in_family(p_type_id bytea, p_family text)
+    RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT relation_type_in_family(p_type_id, p_family)
+        OR EXISTS (
+            SELECT 1 FROM consensus c
+            WHERE c.subject_id = p_type_id
+              AND c.type_id = relation_type_id('IS_A')
+              AND c.object_id = relation_type_id(p_family)
+        )
+$$;
