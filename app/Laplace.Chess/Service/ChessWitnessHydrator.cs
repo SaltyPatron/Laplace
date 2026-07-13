@@ -213,12 +213,6 @@ internal static class ChessWitnessHydrator
             gm.Moves = movetext.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (gm.Moves.Length == 0) continue;
             gm.MoveCount = gm.Moves.Length;
-            gm.ClockObj = new Hash128?[gm.MoveCount];
-            gm.EvalObj = new Hash128?[gm.MoveCount];
-            gm.QualityObj = new Hash128?[gm.MoveCount];
-            gm.ClockTokens = new string?[gm.MoveCount];
-            gm.EvalTokens = new string?[gm.MoveCount];
-            gm.QualityTokens = new string?[gm.MoveCount];
             for (int ply = 0; ply < gm.MoveCount; ply++)
             {
                 var plyId = ChessVocabulary.PlyId(gameId, ply);
@@ -247,24 +241,24 @@ internal static class ChessWitnessHydrator
                     var obj = pr.IsDBNull(2) ? default : ReadHash(pr, 2);
                     if (obj == default) continue;
                     plyContentIds.Add(obj);
-                    if (type == RelHasClock) gm.ClockObj[gp.Ply] = obj;
-                    else if (type == RelHasEvalToken) gm.EvalObj[gp.Ply] = obj;
-                    else if (type == RelMoveQuality) gm.QualityObj[gp.Ply] = obj;
+                    var pa = gm.Ply(gp.Ply);
+                    if (type == RelHasClock) pa.ClockObj = obj;
+                    else if (type == RelHasEvalToken) pa.EvalObj = obj;
+                    else if (type == RelMoveQuality) pa.QualityObj = obj;
                 }
             }
 
             var plyText = await RenderTextBatchAsync(ds, plyContentIds, ct).ConfigureAwait(false);
             foreach (var gm in meta.Values)
             {
-                if (gm.MoveCount <= 0) continue;
-                for (int ply = 0; ply < gm.MoveCount; ply++)
+                foreach (var pa in gm.Plies.Values)
                 {
-                    if (gm.ClockObj[ply] is { } co && plyText.TryGetValue(co, out var ctok))
-                        gm.ClockTokens[ply] = ctok;
-                    if (gm.EvalObj[ply] is { } eo && plyText.TryGetValue(eo, out var etok))
-                        gm.EvalTokens[ply] = etok;
-                    if (gm.QualityObj[ply] is { } qo && plyText.TryGetValue(qo, out var qtok))
-                        gm.QualityTokens[ply] = qtok;
+                    if (pa.ClockObj is { } co && plyText.TryGetValue(co, out var ctok))
+                        { pa.ClockTok = ctok; gm.AnyClock = true; }
+                    if (pa.EvalObj is { } eo && plyText.TryGetValue(eo, out var etok))
+                        { pa.EvalTok = etok; gm.AnyEval = true; }
+                    if (pa.QualityObj is { } qo && plyText.TryGetValue(qo, out var qtok))
+                        { pa.QualityTok = qtok; gm.AnyQual = true; }
                 }
             }
         }
@@ -277,14 +271,12 @@ internal static class ChessWitnessHydrator
                 ? rs : null;
             string? startFen = gm.SetupObj != default && textById.TryGetValue(gm.SetupObj, out var fen)
                 ? fen : null;
+            gm.MaterializeTokens(out var clockTokens, out var evalTokens, out var qualityTokens);
             outList.Add(new ChessWitnessedGame(
                 gameId, gm.Moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
-                startFen,
-                gm.AnyClock ? gm.ClockTokens : null,
-                gm.AnyEval ? gm.EvalTokens : null,
-                gm.AnyQual ? gm.QualityTokens : null));
+                startFen, clockTokens, evalTokens, qualityTokens));
         }
         return outList;
     }
@@ -296,6 +288,10 @@ internal static class ChessWitnessHydrator
         return list.Count > 0 ? list[0] : null;
     }
 
+    // Per-game witnessed scaffold. Per-ply annotations live in <see cref="Plies"/> — a sparse map
+    // addressed BY PLY ORDINAL (a point carries its own facts), not a set of fixed-size parallel
+    // arrays. The old new Hash128?[512] took an IndexOutOfRange on a >512-ply game; a point-
+    // addressed map has no cap to overrun and only stores the plies that actually witnessed one.
     private sealed class GameMeta
     {
         public Hash128 MovetextObj;
@@ -305,17 +301,43 @@ internal static class ChessWitnessHydrator
         public Hash128 ResultObj;
         public string[]? Moves;
         public int MoveCount;
-        // Sized to MoveCount once the movetext is rendered (see TryHydrateChunkAsync) — NOT a
-        // fixed cap: a game with >512 plies overran the old new[512] with IndexOutOfRange.
-        public Hash128?[] ClockObj = System.Array.Empty<Hash128?>();
-        public Hash128?[] EvalObj = System.Array.Empty<Hash128?>();
-        public Hash128?[] QualityObj = System.Array.Empty<Hash128?>();
-        public string?[] ClockTokens = System.Array.Empty<string?>();
-        public string?[] EvalTokens = System.Array.Empty<string?>();
-        public string?[] QualityTokens = System.Array.Empty<string?>();
-        public bool AnyClock => ClockTokens.Any(t => t is not null);
-        public bool AnyEval => EvalTokens.Any(t => t is not null);
-        public bool AnyQual => QualityTokens.Any(t => t is not null);
+        public readonly Dictionary<int, PlyAnno> Plies = new();
+        public bool AnyClock;
+        public bool AnyEval;
+        public bool AnyQual;
+
+        // The annotation record for a ply, created on first witness. Ply keys land in
+        // [0, MoveCount) by construction, so materialization to a ply-indexed array cannot overrun.
+        public PlyAnno Ply(int ply)
+            => Plies.TryGetValue(ply, out var p) ? p : (Plies[ply] = new PlyAnno());
+
+        // Flatten the sparse annotations back into the analyzer's dense ply-indexed contract.
+        // A kind no ply witnessed returns null (the analyzer treats a null array as "absent").
+        public void MaterializeTokens(out string?[]? clock, out string?[]? eval, out string?[]? quality)
+        {
+            clock = AnyClock ? new string?[MoveCount] : null;
+            eval = AnyEval ? new string?[MoveCount] : null;
+            quality = AnyQual ? new string?[MoveCount] : null;
+            foreach (var (ply, pa) in Plies)
+            {
+                if ((uint)ply >= (uint)MoveCount) continue;
+                if (clock is not null) clock[ply] = pa.ClockTok;
+                if (eval is not null) eval[ply] = pa.EvalTok;
+                if (quality is not null) quality[ply] = pa.QualityTok;
+            }
+        }
+    }
+
+    // One ply's witnessed annotation slots. Obj ids captured in pass 1 (ply-attestation read),
+    // rendered to tokens in pass 2 (after the batch render). Absent kinds stay null.
+    private sealed class PlyAnno
+    {
+        public Hash128? ClockObj;
+        public Hash128? EvalObj;
+        public Hash128? QualityObj;
+        public string? ClockTok;
+        public string? EvalTok;
+        public string? QualityTok;
     }
 
     private static async Task<Dictionary<Hash128, string>> RenderTextBatchAsync(
