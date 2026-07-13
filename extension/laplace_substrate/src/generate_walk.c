@@ -544,10 +544,13 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 #define VFLAG_ATOM_SHIFT 31
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
-static const char *CONSTITUENTS_QUERY =
-    "SELECT c.child_id, c.run_length, c.flags FROM laplace.constituents($1) c ORDER BY c.ordinal";
+/* R1: one indexed bulk closure fetch; C assembles — zero per-node SPI. */
+static const char *CLOSURE_QUERY =
+    "SELECT parent_id, child_id, run_length, flags "
+    "FROM laplace.constituents_closure($1, $2) "
+    "ORDER BY parent_id, ordinal";
 
-static SPIPlanPtr constituents_plan = NULL;
+static SPIPlanPtr closure_plan = NULL;
 
 typedef struct RenderMemoEntry
 {
@@ -555,19 +558,34 @@ typedef struct RenderMemoEntry
     char *text;
 } RenderMemoEntry;
 
+typedef struct ClosureChild
+{
+    Datum child;
+    int32 run;
+    int64 flags;
+} ClosureChild;
+
+typedef struct ClosureParent
+{
+    char          key[16];
+    ClosureChild *kids;
+    int           n;
+    int           cap;
+} ClosureParent;
+
 static void
 ensure_render_plans(void)
 {
-    if (constituents_plan == NULL)
+    if (closure_plan == NULL)
     {
-        Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(CONSTITUENTS_QUERY, 1, argtypes);
+        Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
+        SPIPlanPtr plan = SPI_prepare(CLOSURE_QUERY, 2, argtypes);
         if (plan == NULL)
-            elog(ERROR, "render_text: SPI_prepare(constituents) failed: %s",
+            elog(ERROR, "render_text: SPI_prepare(constituents_closure) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "render_text: SPI_keepplan failed");
-        constituents_plan = plan;
+            elog(ERROR, "render_text: SPI_keepplan(constituents_closure) failed");
+        closure_plan = plan;
     }
 }
 
@@ -598,8 +616,6 @@ append_codepoint_utf8(StringInfo out, uint32 cp)
     appendBinaryStringInfo(out, (char *) buf, 4);
 }
 
-
-
 static bool
 append_codepoint_render(StringInfo out, Datum id)
 {
@@ -614,8 +630,97 @@ append_codepoint_render(StringInfo out, Datum id)
     return true;
 }
 
+static void
+closure_parent_push(ClosureParent *p, Datum child, int32 run, int64 flags)
+{
+    if (p->n >= p->cap)
+    {
+        int ncap = (p->cap == 0) ? 4 : p->cap * 2;
+        if (p->kids == NULL)
+            p->kids = (ClosureChild *) palloc(sizeof(ClosureChild) * ncap);
+        else
+            p->kids = (ClosureChild *) repalloc(p->kids, sizeof(ClosureChild) * ncap);
+        p->cap = ncap;
+    }
+    p->kids[p->n].child = child;
+    p->kids[p->n].run = (run < 1) ? 1 : run;
+    p->kids[p->n].flags = flags;
+    p->n++;
+}
+
+/*
+ * Bulk-fetch the constituent DAG for every root in one SPI round-trip.
+ * Returns an HTAB keyed by parent entity id (16-byte blob).
+ */
+static HTAB *
+fetch_constituents_closure(Datum *roots, int n_roots, int32 max_depth)
+{
+    HASHCTL ctl;
+    HTAB   *map;
+    Datum   args[2];
+    int     rc;
+    uint64  nrows;
+    ArrayType *root_arr;
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(ClosureParent);
+    map = hash_create("render closure", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
+
+    if (n_roots <= 0)
+        return map;
+
+    root_arr = construct_array(roots, n_roots, BYTEAOID, -1, false, TYPALIGN_INT);
+    args[0] = PointerGetDatum(root_arr);
+    args[1] = Int32GetDatum(max_depth);
+
+    rc = SPI_execute_plan(closure_plan, args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "render_text: constituents_closure failed: %s",
+             SPI_result_code_string(rc));
+
+    nrows = SPI_processed;
+    for (uint64 r = 0; r < nrows; r++)
+    {
+        HeapTuple tup = SPI_tuptable->vals[r];
+        TupleDesc td = SPI_tuptable->tupdesc;
+        bool isnull;
+        Datum parent_d;
+        Datum child_d;
+        bytea *parent_b;
+        char key[16];
+        bool found;
+        ClosureParent *pe;
+        int32 run;
+        int64 flags;
+
+        parent_d = SPI_getbinval(tup, td, 1, &isnull);
+        if (isnull)
+            continue;
+        parent_b = DatumGetByteaPP(parent_d);
+        if (VARSIZE_ANY_EXHDR(parent_b) != 16)
+            continue;
+        memcpy(key, VARDATA_ANY(parent_b), 16);
+
+        child_d = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
+        run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
+        flags = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+
+        pe = (ClosureParent *) hash_search(map, key, HASH_ENTER, &found);
+        if (!found)
+        {
+            pe->kids = NULL;
+            pe->n = 0;
+            pe->cap = 0;
+        }
+        closure_parent_push(pe, child_d, run, flags);
+    }
+    SPI_freetuptable(SPI_tuptable);
+    return map;
+}
+
 static const char *
-render_node(HTAB *memo, Datum id, int depth, int max_depth)
+render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
 {
     char key[16];
     bool found;
@@ -633,57 +738,33 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
 
     if (depth < max_depth)
     {
-        Datum args[1] = { id };
-        int rc = SPI_execute_plan(constituents_plan, args, NULL, true, 0);
-        uint64 nrows;
+        ClosureParent *pe = (ClosureParent *) hash_search(closure, key, HASH_FIND, &found);
 
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "render_text: constituents fetch failed: %s",
-                 SPI_result_code_string(rc));
-        nrows = SPI_processed;
-
-        if (nrows > 0)
+        if (found && pe->n > 0)
         {
-            typedef struct { Datum child; int32 run; int64 flags; } ChildRow;
-            ChildRow *rows = (ChildRow *) palloc(sizeof(ChildRow) * nrows);
             StringInfoData out;
             bool ok = true;
 
-            for (uint64 r = 0; r < nrows; r++)
-            {
-                HeapTuple tup = SPI_tuptable->vals[r];
-                TupleDesc td = SPI_tuptable->tupdesc;
-                bool isnull;
-                rows[r].child = copy_bytea_datum(SPI_getbinval(tup, td, 1, &isnull));
-                rows[r].run   = DatumGetInt32(SPI_getbinval(tup, td, 2, &isnull));
-                if (rows[r].run < 1) rows[r].run = 1;
-                rows[r].flags = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-            }
-            /* rows[] holds independent copies now; free the tuptable before
-             * recursing (render_node re-enters SPI_execute_plan). */
-            SPI_freetuptable(SPI_tuptable);
-
             initStringInfo(&out);
-            for (uint64 r = 0; r < nrows && ok; r++)
+            for (int r = 0; r < pe->n && ok; r++)
             {
-                if (rows[r].flags & VFLAG_HAS_ATOM)
+                if (pe->kids[r].flags & VFLAG_HAS_ATOM)
                 {
-                    uint32 cp = (uint32) ((rows[r].flags >> VFLAG_ATOM_SHIFT) & VFLAG_ATOM_MASK);
-                    for (int32 k = 0; k < rows[r].run; k++)
+                    uint32 cp = (uint32) ((pe->kids[r].flags >> VFLAG_ATOM_SHIFT) & VFLAG_ATOM_MASK);
+                    for (int32 k = 0; k < pe->kids[r].run; k++)
                         append_codepoint_utf8(&out, cp);
                 }
                 else
                 {
-                    const char *child_text = render_node(memo, rows[r].child,
+                    const char *child_text = render_node(closure, memo, pe->kids[r].child,
                                                          depth + 1, max_depth);
                     if (child_text != NULL)
-                        for (int32 k = 0; k < rows[r].run; k++)
+                        for (int32 k = 0; k < pe->kids[r].run; k++)
                             appendStringInfoString(&out, child_text);
-                    else if (!append_codepoint_render(&out, rows[r].child))
+                    else if (!append_codepoint_render(&out, pe->kids[r].child))
                         ok = false;
                 }
             }
-            pfree(rows);
 
             e = (RenderMemoEntry *) hash_search(memo, key, HASH_FIND, &found);
             Assert(found);
@@ -716,6 +797,7 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     int32   max_depth;
     HASHCTL ctl;
     HTAB   *memo;
+    HTAB   *closure;
     const char *rendered;
     MemoryContext caller_cxt = CurrentMemoryContext;
 
@@ -733,7 +815,8 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     ctl.entrysize = sizeof(RenderMemoEntry);
     memo = hash_create("render_text memo", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
 
-    rendered = render_node(memo, id, 0, max_depth);
+    closure = fetch_constituents_closure(&id, 1, max_depth);
+    rendered = render_node(closure, memo, id, 0, max_depth);
 
     if (rendered == NULL || rendered[0] == '\0')
     {
@@ -757,6 +840,7 @@ pg_laplace_render_text_fast(PG_FUNCTION_ARGS)
     int32   max_depth = 8;
     HASHCTL ctl;
     HTAB   *memo;
+    HTAB   *closure;
     const char *rendered;
     MemoryContext caller_cxt = CurrentMemoryContext;
 
@@ -775,7 +859,8 @@ pg_laplace_render_text_fast(PG_FUNCTION_ARGS)
     ctl.entrysize = sizeof(RenderMemoEntry);
     memo = hash_create("render_text_fast memo", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
 
-    rendered = render_node(memo, id, 0, max_depth);
+    closure = fetch_constituents_closure(&id, 1, max_depth);
+    rendered = render_node(closure, memo, id, 0, max_depth);
 
     if (rendered == NULL || rendered[0] == '\0')
     {
@@ -800,6 +885,11 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     Datum      *out;
     bool       *out_nulls;
     ArrayType  *result;
+    Datum      *roots;
+    int         n_roots = 0;
+    HTAB       *closure;
+    HASHCTL     mctl;
+    HTAB       *memo;
     MemoryContext caller_cxt = CurrentMemoryContext;
 
     if (PG_ARGISNULL(0))
@@ -816,6 +906,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
                       &elems, &nulls, &n);
     out = (Datum *) palloc0(sizeof(Datum) * n);
     out_nulls = (bool *) palloc0(sizeof(bool) * n);
+    roots = (Datum *) palloc(sizeof(Datum) * n);
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "render_text_batch: SPI_connect failed");
@@ -823,8 +914,19 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
 
     for (int i = 0; i < n; i++)
     {
-        HASHCTL ctl;
-        HTAB   *memo;
+        if (!nulls[i])
+            roots[n_roots++] = elems[i];
+    }
+
+    closure = fetch_constituents_closure(roots, n_roots, max_depth);
+
+    memset(&mctl, 0, sizeof(mctl));
+    mctl.keysize = 16;
+    mctl.entrysize = sizeof(RenderMemoEntry);
+    memo = hash_create("render_text_batch memo", 1024, &mctl, HASH_ELEM | HASH_BLOBS);
+
+    for (int i = 0; i < n; i++)
+    {
         const char *rendered;
 
         if (nulls[i])
@@ -832,23 +934,15 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
             out_nulls[i] = true;
             continue;
         }
-        memset(&ctl, 0, sizeof(ctl));
-        ctl.keysize = 16;
-        ctl.entrysize = sizeof(RenderMemoEntry);
-        memo = hash_create("render_text_batch memo", 256, &ctl, HASH_ELEM | HASH_BLOBS);
-        rendered = render_node(memo, elems[i], 0, max_depth);
+        rendered = render_node(closure, memo, elems[i], 0, max_depth);
         if (rendered == NULL || rendered[0] == '\0')
             out_nulls[i] = true;
         else
         {
-            
-
-
             MemoryContext old = MemoryContextSwitchTo(caller_cxt);
             out[i] = CStringGetTextDatum(rendered);
             MemoryContextSwitchTo(old);
         }
-        hash_destroy(memo);
     }
     SPI_finish();
 

@@ -1,0 +1,53 @@
+-- retrieve_grounded: case/variant fan-out → bubble_up frontier → definitions.
+-- Formal R0/R2 tool ISA entry; abstains with 0 rows when ungrounded.
+CREATE OR REPLACE FUNCTION retrieve_grounded(
+    p_term text,
+    p_domain_context bytea[] DEFAULT NULL,
+    p_k integer DEFAULT 5
+)
+RETURNS TABLE(
+    entity_id bytea,
+    surface text,
+    synset_id bytea,
+    definition text,
+    score numeric,
+    witnesses bigint
+)
+LANGUAGE sql STABLE PARALLEL SAFE
+SET search_path = @extschema@, public AS $$
+WITH term AS (
+    SELECT word_id(p_term) AS id
+),
+frontier AS (
+    SELECT b.sense_id,
+           b.synset_id,
+           b.score,
+           b.witnesses
+    FROM term t
+    CROSS JOIN LATERAL bubble_up(t.id, p_domain_context, p_k) b
+    WHERE t.id IS NOT NULL
+),
+glossed AS (
+    SELECT f.sense_id AS entity_id,
+           f.synset_id,
+           f.score,
+           f.witnesses,
+           (
+               SELECT render_text(g.object_id, 48)
+               FROM consensus g
+               WHERE g.subject_id = f.synset_id
+                 AND g.type_id = relation_type_id('HAS_DEFINITION')
+               ORDER BY eff_mu(g.rating, g.rd) DESC
+               LIMIT 1
+           ) AS definition
+    FROM frontier f
+)
+SELECT entity_id,
+       COALESCE(NULLIF(render_text(entity_id, 32), ''), p_term) AS surface,
+       synset_id,
+       definition,
+       score,
+       witnesses
+FROM glossed
+ORDER BY score DESC NULLS LAST
+$$;
