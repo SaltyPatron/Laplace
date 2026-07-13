@@ -1,0 +1,100 @@
+CREATE OR REPLACE FUNCTION resolve_name(
+    p_id bytea,
+    p_lang bytea DEFAULT NULL,
+    p_context bytea[] DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    -- The one referentially-correct name primitive. Three call sites (label,
+    -- render, realize) used to each resolve a name a different way and disagree:
+    -- label saw only HAS_NAME_ALIAS, render saw canonical->codepoint->ALIAS,
+    -- realize walked the synset lemma. None consulted HAS_NAME (the PRIMARY,
+    -- authoritative name), none took a domain context, and every one ended in a
+    -- context-blind `ORDER BY eff_mu DESC LIMIT 1` global-popularity argmax whose
+    -- final fallback fabricated hex styled as a label. This unifies all three:
+    --
+    --   * NAME edges consulted as families -- HAS_NAME (primary, preferred) and
+    --     HAS_NAME_ALIAS, unioned via relation_type_in_family() so members roll in
+    --     without editing this site. They are distinct family roots (there is no
+    --     single "name" root), so both are consulted.
+    --   * the synset-lemma path, walked via the HAS_SENSE family_root (IS_SENSE_OF
+    --     and IS_SYNONYM_OF roll up to HAS_SENSE) rather than one hardcoded edge --
+    --     the same rollup bubble_up() and the sense-selection walks already use.
+    --   * ABSTENTION: when nothing crosses a grounded threshold (an actual,
+    --     renderable name), return NULL. Never fabricate `<hex>...` as if it were a
+    --     label. label_or_hex() is the place that decides to show a raw id; a name
+    --     resolver's job is to say "no name" honestly.
+    --
+    -- With no domain context this reduces EXACTLY to the existing, tested
+    -- resolvers (_realize_has_name then _realize_synset_lemma), so the wrappers
+    -- that delegate here stay behaviour-identical wherever no HAS_NAME edge exists.
+    SELECT CASE
+        WHEN p_context IS NULL OR cardinality(p_context) = 0 THEN
+            COALESCE(_realize_has_name(p_id, p_lang),
+                     _realize_synset_lemma(p_id, p_lang))
+        ELSE (
+            -- Context-conditioned selection. Same lang-pref-then-eff_mu shape as
+            -- the null-context helpers, plus a domain boost for name candidates
+            -- whose surface entity co-occurs (as subject OR object of any
+            -- unrefuted edge) with the supplied context ids -- the set-based
+            -- co-occurrence scoring senses(word, context) already uses. Language
+            -- preference stays AHEAD of the boost so a domain hint never overrides
+            -- the caller's requested language; the boost only breaks ties the old
+            -- global argmax broke blindly by popularity.
+            WITH ctx AS (
+                SELECT id, sum(boost) AS boost FROM (
+                    SELECT c.object_id AS id, sum(eff_mu(c.rating, c.rd)) AS boost
+                    FROM v_consensus_unrefuted c
+                    WHERE c.subject_id = ANY (p_context)
+                    GROUP BY c.object_id
+                    UNION ALL
+                    SELECT c.subject_id AS id, sum(eff_mu(c.rating, c.rd)) AS boost
+                    FROM v_consensus_unrefuted c
+                    WHERE c.object_id = ANY (p_context)
+                    GROUP BY c.subject_id
+                ) t GROUP BY id
+            ),
+            cand AS (
+                -- HAS_NAME (primary) + HAS_NAME_ALIAS, as families.
+                SELECT render_text(nm.object_id, 24) AS surface,
+                       nm.object_id AS name_id,
+                       relation_type_in_family(nm.type_id, 'HAS_NAME') AS prim,
+                       (lang.object_id IS NOT NULL) AS lp,
+                       eff_mu(nm.rating, nm.rd) AS mu
+                FROM v_consensus_unrefuted nm
+                LEFT JOIN consensus lang ON lang.subject_id = nm.object_id
+                     AND lang.type_id = relation_type_id('HAS_LANGUAGE')
+                     AND lang.object_id = p_lang
+                WHERE nm.subject_id = p_id
+                  AND (relation_type_in_family(nm.type_id, 'HAS_NAME')
+                    OR relation_type_in_family(nm.type_id, 'HAS_NAME_ALIAS'))
+                UNION ALL
+                -- synset lemma: word --[HAS_SENSE family]--> sense
+                --                    --[IS_SENSE_OF -> HAS_SENSE]--> p_id
+                SELECT render_text(hs.subject_id, 24) AS surface,
+                       hs.subject_id AS name_id,
+                       false AS prim,
+                       (lang.object_id IS NOT NULL) AS lp,
+                       eff_mu(hs.rating, hs.rd) AS mu
+                FROM v_consensus_unrefuted io
+                JOIN consensus hs ON hs.object_id = io.subject_id
+                     AND relation_type_in_family(hs.type_id, 'HAS_SENSE')
+                LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
+                     AND lang.type_id = relation_type_id('HAS_LANGUAGE')
+                     AND lang.object_id = p_lang
+                WHERE io.object_id = p_id
+                  AND relation_type_in_family(io.type_id, 'HAS_SENSE')
+            )
+            SELECT c.surface
+            FROM cand c
+            LEFT JOIN ctx ON ctx.id = c.name_id
+            WHERE c.surface IS NOT NULL AND c.surface <> ''
+            ORDER BY c.lp DESC,
+                     (ctx.boost IS NOT NULL) DESC,
+                     c.prim DESC,
+                     COALESCE(ctx.boost, 0) DESC,
+                     c.mu DESC
+            LIMIT 1
+        )
+    END
+$$;

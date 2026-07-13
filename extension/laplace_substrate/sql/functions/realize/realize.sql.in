@@ -2,11 +2,17 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- resolve_name() is the single, referentially-correct name primitive: it
+    -- folds the former _realize_has_name (HAS_NAME primary + HAS_NAME_ALIAS) and
+    -- _realize_synset_lemma into one family-aware, abstaining resolver. It replaces
+    -- the two separate arms this function used to run (synset-lemma first, HAS_NAME
+    -- buried after translation); now the authoritative NAME wins ahead of a
+    -- rendered self or a translation guess. The remaining arms stay as realize's
+    -- own display fallbacks (raw render, translation, canonical id, gloss).
     SELECT COALESCE(
-        _realize_synset_lemma(p_id, p_lang),
+        resolve_name(p_id, p_lang),
         NULLIF(render_text(p_id, 24), ''),
         _realize_translation(p_id, p_lang),
-        _realize_has_name(p_id, p_lang),
         _realize_canonical(p_id),
         _realize_defines(p_id))
 $$;
