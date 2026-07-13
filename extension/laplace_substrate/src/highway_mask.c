@@ -177,6 +177,62 @@ pg_laplace_highway_mask_bits(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(construct_array(bits, n, INT4OID, 4, true, TYPALIGN_INT));
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_from_bits);
+
+/*
+ * (bits int4[]) -> bytea(32): the inverse of laplace_highway_mask_bits. Build a
+ * 256-bit mask by setting one bit per position, LSB-first within each byte
+ * (mask[b>>3] |= 1 << (b&7)) -- byte-identical to the prior plpgsql set_bit()
+ * loop, whose numbering PostgreSQL defines as 1 << (n % 8) at byte n / 8, and
+ * exactly the numbering laplace_highway_mask_bits decodes via ctz. Out-of-range
+ * (or NULL) positions are skipped. NULL input -> NULL; a mask with no bits set
+ * -> NULL (the plpgsql any_set contract), so an empty or all-skipped array
+ * yields NULL, never a zero mask. Called by highway_mask_refresh every fold
+ * epoch, so both the round trip mask_bits(mask_from_bits(x)) = sorted(x) and the
+ * emitted bytes must be preserved.
+ */
+Datum
+pg_laplace_highway_mask_from_bits(PG_FUNCTION_ARGS)
+{
+    ArrayType        *arr;
+    Datum            *elems;
+    bool             *nulls;
+    int               nelems;
+    laplace_mask256_t mask;
+    unsigned char    *mb = (unsigned char *) &mask;
+    bool              any_set = false;
+    bytea            *out;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+
+    arr = PG_GETARG_ARRAYTYPE_P(0);
+    deconstruct_array(arr, INT4OID, sizeof(int32), true, TYPALIGN_INT,
+                      &elems, &nulls, &nelems);
+
+    memset(&mask, 0, sizeof(mask));
+    for (int i = 0; i < nelems; i++)
+    {
+        int32 b;
+
+        if (nulls[i])
+            continue;
+        b = DatumGetInt32(elems[i]);
+        if (b < 0 || b >= 256)
+            continue;
+        mb[b >> 3] |= (unsigned char) (1u << (b & 7));
+        any_set = true;
+    }
+
+    if (!any_set)
+        PG_RETURN_NULL();
+
+    out = (bytea *) palloc(VARHDRSZ + HIGHWAY_MASK_BYTES);
+    SET_VARSIZE(out, VARHDRSZ + HIGHWAY_MASK_BYTES);
+    memcpy(VARDATA(out), &mask, HIGHWAY_MASK_BYTES);
+    PG_RETURN_BYTEA_P(out);
+}
+
 static void
 require_highway_table(const char *fn)
 {
