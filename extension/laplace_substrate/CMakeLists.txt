@@ -68,6 +68,7 @@ set(EXT_C_SOURCES
     src/descent_probe.c
     src/containers_of.c
     src/highway_mask.c
+    src/lexical_case.c
 )
 
 if(WIN32)

@@ -1,22 +1,12 @@
+-- Thin wrapper over the native word_case_variants (src/lexical_case.c). The old
+-- SQL body composed word_case_map_surface x3 (each a per-grapheme
+-- grapheme_case_target consensus subquery + render_text) -- the RBAR that
+-- lexical_peers -> senses/define/bubble_up amplified. The native function does
+-- the identical selection/render/mint/exist steps in a fixed handful of batched
+-- SPI round trips. Kept as a wrapper so lexical_peers and callers are unchanged.
 CREATE OR REPLACE FUNCTION word_case_variant_ids(p_word bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT COALESCE(array_agg(DISTINCT q.id ORDER BY q.id), ARRAY[p_word])
-    FROM (
-        SELECT p_word AS id
-        UNION
-        SELECT word_id(v.surface)
-        FROM (
-            SELECT word_case_map_surface(p_word, 'lower') AS surface
-            UNION ALL
-            SELECT word_case_map_surface(p_word, 'upper')
-            UNION ALL
-            SELECT word_case_map_surface(p_word, 'title')
-        ) v
-        WHERE v.surface IS NOT NULL
-          AND v.surface IS DISTINCT FROM render_text(p_word)
-    ) q
-    WHERE q.id IS NOT NULL
-      AND (q.id = p_word OR entity_exists(q.id))
+    SELECT word_case_variants(p_word)
 $$;

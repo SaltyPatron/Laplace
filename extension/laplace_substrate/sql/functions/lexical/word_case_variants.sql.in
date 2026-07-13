@@ -1,0 +1,13 @@
+-- Native, batched replacement for the word_case_variant_ids -> word_case_map_surface
+-- (x3) -> grapheme_case_target SQL fan-out, which turned one lexical lookup into
+-- O(3 * graphemes) non-inlinable consensus LIMIT-1 subqueries plus O(graphemes)
+-- render_text calls on the hot lexical_peers -> senses/define/bubble_up path.
+-- Output-identical by delegation: case-map selection stays in one batched
+-- DISTINCT ON ... ORDER BY eff_mu DESC over v_consensus_unrefuted, rendering
+-- stays laplace.render_text, minting stays laplace.word_id, the existence gate
+-- stays laplace.entity_exists; the C only walks the grapheme trajectory once and
+-- reproduces word_case_map_surface's string assembly. See src/lexical_case.c.
+CREATE OR REPLACE FUNCTION word_case_variants(p_word bytea)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_case_variants'
+    LANGUAGE C STABLE;
