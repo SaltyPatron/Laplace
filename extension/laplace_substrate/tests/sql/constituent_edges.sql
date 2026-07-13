@@ -4,9 +4,13 @@
 -- the same geometry the ingest spine writes -- so the decode path under test is driven
 -- exactly as production drives it. Every assertion returns a single boolean column `ok`.
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION laplace_geom;
-CREATE EXTENSION laplace_substrate;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 SET search_path TO laplace, public;
+-- Synthetic fixture: bypass the entities/physicalities FK triggers (type_id/entity_id would
+-- otherwise require real referenced rows) — same bypass the ingest apply uses for bulk writes.
+-- The closure under test reads the trajectory geometry directly, not the FK graph.
+SET session_replication_role = replica;
 -- Parents P and A each carry a canonical type=1 physicality. P = [A, B, C]; A = [X, Y].
 -- P also gets a SHADOW physicality with a higher id and a different trajectory -- the
 -- canonical (lowest-id) row must win in both the closure and the rebuild.
