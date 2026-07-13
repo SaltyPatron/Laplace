@@ -1,27 +1,14 @@
 -- Inverse of laplace_highway_mask_bits: build a 32-byte mask from bit positions.
--- Layout-safe: bit numbering is byte n/8, LSB-first within the byte — the same
--- contract highway_mask.c documents (memcpy identity with laplace_mask256_t) and
--- extracts via ctz. PostgreSQL's set_bit uses identical numbering, proven by the
--- round-trip regression laplace_highway_mask_bits(mask_from_bits(x)) = x.
--- Bit VALUES still come only from relation_highway_bit (the perfcache);
--- this function never assigns meaning to a position.
+-- Native C (pg_laplace_highway_mask_from_bits in highway_mask.c): bit numbering
+-- is byte b/8, LSB-first within the byte (mask[b>>3] |= 1 << (b&7)) — the same
+-- memcpy-identity contract highway_mask.c documents and extracts via ctz, and
+-- byte-identical to the prior plpgsql set_bit() loop. NULL input, or a mask that
+-- ends up with no bits set (empty/all-out-of-range array), returns NULL — the
+-- any_set contract highway_mask_refresh relies on every fold epoch. Round trip
+-- laplace_highway_mask_bits(mask_from_bits(x)) = sorted(x) is a regression.
+-- Bit VALUES still come only from relation_highway_bit (the perfcache); this
+-- function never assigns meaning to a position.
 CREATE OR REPLACE FUNCTION laplace_highway_mask_from_bits(p_bits int[])
     RETURNS bytea
-    LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-DECLARE
-    m bytea := decode(repeat('00', 32), 'hex');
-    b int;
-    any_set boolean := false;
-BEGIN
-    IF p_bits IS NULL THEN
-        RETURN NULL;
-    END IF;
-    FOREACH b IN ARRAY p_bits LOOP
-        IF b IS NOT NULL AND b >= 0 AND b < 256 THEN
-            m := set_bit(m, b, 1);
-            any_set := true;
-        END IF;
-    END LOOP;
-    RETURN CASE WHEN any_set THEN m ELSE NULL END;
-END $$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_from_bits'
+    LANGUAGE C IMMUTABLE PARALLEL SAFE;
