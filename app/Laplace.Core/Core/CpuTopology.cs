@@ -164,6 +164,8 @@ public static class CpuTopology
 
     {
 
+        if (PinDisabled) return;
+
         if (!IsHybrid) return;
 
         if (PerformanceCoreCpuIndices.Count == 0)
@@ -191,6 +193,8 @@ public static class CpuTopology
     public static bool PinCurrentThreadToPerformanceCores()
 
     {
+
+        if (PinDisabled) return false;
 
         var ids = Pools.PrimaryPCoreCpuSetIds;
 
@@ -401,6 +405,8 @@ public static class CpuTopology
 
     {
 
+        if (PinDisabled) return;
+
         if (cpuBound)
 
         {
@@ -479,15 +485,15 @@ public static class CpuTopology
 
             if (OperatingSystem.IsWindows() && TryDetectWindowsCpuSetPools(out var win))
 
-                return win;
+                return ApplyOverrides(win);
 
             if (OperatingSystem.IsWindows() && TryDetectWindowsGlpiexPools(out var glpi))
 
-                return glpi;
+                return ApplyOverrides(glpi);
 
             if (OperatingSystem.IsLinux() && TryDetectLinuxSysfsPools(out var lin))
 
-                return lin;
+                return ApplyOverrides(lin);
 
         }
 
@@ -507,8 +513,87 @@ public static class CpuTopology
 
         int logical = Environment.ProcessorCount;
 
-        return TopologyPools.Uniform(logical, "fallback-logical");
+        return ApplyOverrides(TopologyPools.Uniform(logical, "fallback-logical"));
 
+    }
+
+    // --- Operator overrides for a degraded / marginal CPU (env-driven, read once) ---------
+    // LAPLACE_EXCLUDE_LPS: comma list of primary logical-processor indices (the values shown
+    //   as p_primary_lps in the ingest_topology log, e.g. "6") to DROP from the compute pool.
+    //   Laplace then never pins work onto that core — a surgical alternative to a BIOS core
+    //   disable: every OTHER process still uses the core; only Laplace's sustained-AVX load
+    //   routes around it. Worker sizing falls automatically (fewer P-cores => fewer workers).
+    // LAPLACE_NO_PIN: 1/true/yes disables affinity pinning entirely, letting the OS scheduler
+    //   place freely across P+E (spreads load instead of concentrating it on the P-cores).
+    // Unset = current behavior, byte-for-byte.
+    internal static readonly bool PinDisabled =
+        (Environment.GetEnvironmentVariable("LAPLACE_NO_PIN")?.Trim().ToLowerInvariant()) is "1" or "true" or "yes";
+
+    private static readonly HashSet<int> ExcludedLps = ParseExcludedLps();
+
+    private static HashSet<int> ParseExcludedLps()
+    {
+        var set = new HashSet<int>();
+        var raw = Environment.GetEnvironmentVariable("LAPLACE_EXCLUDE_LPS");
+        if (string.IsNullOrWhiteSpace(raw)) return set;
+        foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (int.TryParse(part, out int lp)) set.Add(lp);
+        return set;
+    }
+
+    private static TopologyPools ApplyOverrides(TopologyPools p)
+    {
+        if (ExcludedLps.Count == 0) return p;
+
+        FilterPool(p.PrimaryPCoreGlobalIndices, p.PrimaryPCoreCpuSetIds, p.PrimaryPCoreAffinities,
+                   out var pIdx, out var pIds, out var pAff);
+        FilterPool(p.EfficientCoreGlobalIndices, p.EfficientCoreCpuSetIds, p.EfficientCoreAffinities,
+                   out var eIdx, out var eIds, out var eAff);
+
+        int newPhysP = Math.Max(1, pIdx.Length);
+        int ratio = p.PhysicalPCores > 0 ? Math.Max(1, p.PrimaryPLogicalCount / p.PhysicalPCores) : 1;
+        int newPLogical = Math.Max(newPhysP, pIdx.Length * ratio);
+
+        Console.Error.WriteLine(
+            "cpu_topology: LAPLACE_EXCLUDE_LPS dropped [{0}]; compute P-pool now [{1}] ({2} P-core(s))",
+            string.Join(",", ExcludedLps.OrderBy(x => x)),
+            string.Join(",", pIdx),
+            pIdx.Length);
+
+        return new TopologyPools(
+            isHybrid: p.IsHybrid,
+            physicalPCores: newPhysP,
+            physicalECores: eIdx.Length,
+            logicalCount: p.LogicalCount,
+            primaryPLogicalCount: newPLogical,
+            primaryPCoreGlobalIndices: pIdx,
+            primaryPCoreCpuSetIds: pIds,
+            primaryPCoreAffinities: pAff,
+            efficientCoreGlobalIndices: eIdx,
+            efficientCoreCpuSetIds: eIds,
+            efficientCoreAffinities: eAff,
+            source: p.Source + "+excl");
+    }
+
+    private static void FilterPool(
+        int[] idx, uint[] ids, ProcessorAffinity[] aff,
+        out int[] fIdx, out uint[] fIds, out ProcessorAffinity[] fAff)
+    {
+        bool haveIds = ids.Length == idx.Length;
+        bool haveAff = aff.Length == idx.Length;
+        var ki = new List<int>(idx.Length);
+        var kd = new List<uint>(idx.Length);
+        var ka = new List<ProcessorAffinity>(idx.Length);
+        for (int i = 0; i < idx.Length; i++)
+        {
+            if (ExcludedLps.Contains(idx[i])) continue;
+            ki.Add(idx[i]);
+            if (haveIds) kd.Add(ids[i]);
+            if (haveAff) ka.Add(aff[i]);
+        }
+        fIdx = ki.ToArray();
+        fIds = haveIds ? kd.ToArray() : Array.Empty<uint>();
+        fAff = haveAff ? ka.ToArray() : Array.Empty<ProcessorAffinity>();
     }
 
 
