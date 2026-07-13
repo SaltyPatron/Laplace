@@ -3,17 +3,18 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH subj(id) AS (
+    WITH reltypes AS MATERIALIZED (
+        SELECT id FROM entities WHERE type_id = entity_type_id('RelationType')
+    ), subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
     ), top AS (
         SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
             SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
             FROM v_consensus_unrefuted c
+            LEFT JOIN reltypes obj_rt ON obj_rt.id = c.object_id
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
-              AND EXISTS (
-                  SELECT 1 FROM entities et
-                  WHERE et.id = c.type_id AND et.type_id = entity_type_id('RelationType'))
+              AND c.type_id IN (SELECT id FROM reltypes)
               AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
               AND c.type_id NOT IN (
                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
@@ -25,9 +26,7 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
                 relation_type_id('HAS_EXAMPLE'), relation_type_id('EVOKES_FRAME'),
                 relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
                 relation_type_id('HAS_NAME_ALIAS'))
-              AND NOT EXISTS (
-                  SELECT 1 FROM entities et
-                  WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
+              AND obj_rt.id IS NULL
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
     )

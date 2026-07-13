@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
             WHERE objs.a IS NOT NULL
          )
     SELECT type_label(r.type_id),
-           COALESCE(rd.s, realize(r.object_id, (SELECT id FROM lang))),
+           COALESCE(rd.s, realize(r.object_id, l.id)),
            CASE WHEN refuted(r.rating, r.rd) THEN 'refuted'
                 WHEN eff_mu(r.rating, r.rd) > glicko2_neutral_mu() THEN 'confirmed'
                 WHEN r.volatility::numeric > glicko2_initial_volatility() * 1.5 THEN 'contested'
@@ -29,6 +29,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
            eff_mu_display(r.rating, r.rd),
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
+    CROSS JOIN lang l
     LEFT JOIN rendered rd ON rd.object_id = r.object_id
     ORDER BY edge_rank(r.type_id, eff_mu(r.rating, r.rd)) DESC
 $$;

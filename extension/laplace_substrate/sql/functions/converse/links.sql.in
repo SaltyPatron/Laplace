@@ -2,14 +2,16 @@ CREATE OR REPLACE FUNCTION links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
-           label(c.object_id) AS target,
-           (eff_mu(c.rating, c.rd))::float8 / 1e9 AS strength
-    FROM consensus c
-    WHERE c.subject_id = word_id(p_word)
-    
-    
-    
-    ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC,
+    WITH base AS (
+        SELECT c.type_id, c.object_id,
+               eff_mu(c.rating, c.rd) AS emu
+        FROM consensus c
+        WHERE c.subject_id = word_id(p_word)
+    )
+    SELECT COALESCE(NULLIF(relation_canonical(b.type_id), ''), label(b.type_id)) AS relation,
+           label(b.object_id) AS target,
+           (b.emu)::float8 / 1e9 AS strength
+    FROM base b
+    ORDER BY edge_rank(b.type_id, b.emu) DESC,
              strength DESC, relation
 $$;
