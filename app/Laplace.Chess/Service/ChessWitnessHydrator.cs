@@ -24,6 +24,20 @@ internal static class ChessWitnessHydrator
     private static readonly Hash128 RelHasEvalToken = RelationTypeRegistry.RelationTypeId("HAS_EVAL_TOKEN");
     private static readonly Hash128 RelMoveQuality = RelationTypeRegistry.RelationTypeId("MOVE_QUALITY");
 
+    // The ONLY relation types the hydrator consumes. Filtering by type in SQL lets the
+    // composite index attestations_relation_btree (subject_id, type_id, object_id) drive the
+    // probe and stops the wire/CPU cost of pulling every attestation on a game/ply — a ply
+    // also carries MOVE, PLAYED_BY, GAME_AT_PLY, HAS_SAN, … which the loops below discard.
+    private static readonly byte[][] GameRelationTypes =
+    [
+        RelHasMovetext.ToBytes(), RelHasWhite.ToBytes(), RelHasBlack.ToBytes(),
+        RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
+    ];
+    private static readonly byte[][] PlyRelationTypes =
+    [
+        RelHasClock.ToBytes(), RelHasEvalToken.ToBytes(), RelMoveQuality.ToBytes(),
+    ];
+
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
         reader is NpgsqlSubstrateReader npg ? npg.DataSource : null;
 
@@ -173,10 +187,12 @@ internal static class ChessWitnessHydrator
         await using (var cmd = ds.CreateCommand(@"
             SELECT a.subject_id, a.type_id, a.object_id
             FROM laplace.attestations a
-            WHERE a.subject_id = ANY($1::bytea[])"))
+            WHERE a.subject_id = ANY($1::bytea[])
+              AND a.type_id = ANY($2::bytea[])"))
         {
             cmd.Parameters.AddWithValue(gameBytes);
             cmd.Parameters[0].NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, GameRelationTypes);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await r.ReadAsync(ct).ConfigureAwait(false))
             {
@@ -227,10 +243,12 @@ internal static class ChessWitnessHydrator
             await using (var plyCmd = ds.CreateCommand(@"
                 SELECT a.subject_id, a.type_id, a.object_id
                 FROM laplace.attestations a
-                WHERE a.subject_id = ANY($1::bytea[])"))
+                WHERE a.subject_id = ANY($1::bytea[])
+                  AND a.type_id = ANY($2::bytea[])"))
             {
                 plyCmd.Parameters.AddWithValue(allPlyBytes.ToArray());
                 plyCmd.Parameters[0].NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                plyCmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, PlyRelationTypes);
                 await using var pr = await plyCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await pr.ReadAsync(ct).ConfigureAwait(false))
                 {
