@@ -29,8 +29,21 @@ BEGIN
         GROUP BY t.id, c.type_id
     ),
     bits AS (
+        -- A DYNAMIC relation (EDEP_nsubj, DEP_obj, FEAT_case, ... minted at ingest) has NO
+        -- highway bit of its own — bits are codegen-assigned to the static governed set only.
+        -- So it contributes its FAMILY ROOT's bit: SeedDynamic emits `<child> IS_A <root>`, and
+        -- the root (ENHANCED_DEPENDS_ON, DEPENDS_ON, HAS_FEATURE, ...) is static and has a bit.
+        -- Without this the entire UD dependency/feature layer is invisible to mask-gated walks.
         SELECT q.id, q.bit
-        FROM (SELECT tp.id, relation_highway_bit(tp.type_id) AS bit FROM tp) q
+        FROM (
+            SELECT tp.id,
+                   COALESCE(relation_highway_bit(tp.type_id),
+                            relation_highway_bit(fam.object_id)) AS bit
+            FROM tp
+            LEFT JOIN consensus fam
+              ON fam.subject_id = tp.type_id
+             AND fam.type_id = relation_type_id('IS_A')
+        ) q
         WHERE q.bit IS NOT NULL
     ),
     m AS (
