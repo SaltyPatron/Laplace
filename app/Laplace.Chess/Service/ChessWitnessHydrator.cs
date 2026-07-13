@@ -213,6 +213,12 @@ internal static class ChessWitnessHydrator
             gm.Moves = movetext.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (gm.Moves.Length == 0) continue;
             gm.MoveCount = gm.Moves.Length;
+            gm.ClockObj = new Hash128?[gm.MoveCount];
+            gm.EvalObj = new Hash128?[gm.MoveCount];
+            gm.QualityObj = new Hash128?[gm.MoveCount];
+            gm.ClockTokens = new string?[gm.MoveCount];
+            gm.EvalTokens = new string?[gm.MoveCount];
+            gm.QualityTokens = new string?[gm.MoveCount];
             for (int ply = 0; ply < gm.MoveCount; ply++)
             {
                 var plyId = ChessVocabulary.PlyId(gameId, ply);
@@ -299,12 +305,14 @@ internal static class ChessWitnessHydrator
         public Hash128 ResultObj;
         public string[]? Moves;
         public int MoveCount;
-        public readonly Hash128?[] ClockObj = new Hash128?[512];
-        public readonly Hash128?[] EvalObj = new Hash128?[512];
-        public readonly Hash128?[] QualityObj = new Hash128?[512];
-        public readonly string?[] ClockTokens = new string?[512];
-        public readonly string?[] EvalTokens = new string?[512];
-        public readonly string?[] QualityTokens = new string?[512];
+        // Sized to MoveCount once the movetext is rendered (see TryHydrateChunkAsync) — NOT a
+        // fixed cap: a game with >512 plies overran the old new[512] with IndexOutOfRange.
+        public Hash128?[] ClockObj = System.Array.Empty<Hash128?>();
+        public Hash128?[] EvalObj = System.Array.Empty<Hash128?>();
+        public Hash128?[] QualityObj = System.Array.Empty<Hash128?>();
+        public string?[] ClockTokens = System.Array.Empty<string?>();
+        public string?[] EvalTokens = System.Array.Empty<string?>();
+        public string?[] QualityTokens = System.Array.Empty<string?>();
         public bool AnyClock => ClockTokens.Any(t => t is not null);
         public bool AnyEval => EvalTokens.Any(t => t is not null);
         public bool AnyQual => QualityTokens.Any(t => t is not null);
