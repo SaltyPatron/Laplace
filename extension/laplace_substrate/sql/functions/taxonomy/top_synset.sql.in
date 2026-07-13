@@ -2,6 +2,7 @@ CREATE OR REPLACE FUNCTION top_synset(p_word bytea)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT sn.synset_id FROM senses(p_word) sn
-    ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1
+    SELECT b.synset_id
+    FROM bubble_up(p_word, NULL::bytea[], 1) b
+    LIMIT 1
 $$;

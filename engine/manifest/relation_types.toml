@@ -770,12 +770,15 @@ symmetry = "asymmetric"
 parent = null
 family_root = "IS_PIXEL_OF"
 
+# HAS_SENSE family (Part 5 / R2): sense-selection walks family_root, not an ad-hoc
+# UNION. IS_SENSE_OF is the synset-side / inverse sense edge; parent+family_root roll
+# up to HAS_SENSE so relation_type_in_family(type,'HAS_SENSE') covers both.
 [[relation]]
 canonical = "IS_SENSE_OF"
 rank = "equivalence"
 symmetry = "asymmetric"
-parent = null
-family_root = "IS_SENSE_OF"
+parent = "HAS_SENSE"
+family_root = "HAS_SENSE"
 
 [[relation]]
 canonical = "IS_SIMILAR_TO"
@@ -784,12 +787,15 @@ symmetry = "symmetric"
 parent = "RELATED_TO"
 family_root = "RELATED_TO"
 
+# WordNet synset co-membership is a sense-family edge for WSD (ohm→unit via
+# IS_SYNONYM_OF). Cross-lingual surface equivalence stays on IS_TRANSLATION_OF
+# under SEMANTIC_EQUIVALENCE — do not collapse the two.
 [[relation]]
 canonical = "IS_SYNONYM_OF"
 rank = "equivalence"
 symmetry = "symmetric"
-parent = "RELATED_TO"
-family_root = "SEMANTIC_EQUIVALENCE"
+parent = "HAS_SENSE"
+family_root = "HAS_SENSE"
 
 [[relation]]
 canonical = "IS_TRANSLATION_OF"
@@ -968,16 +974,12 @@ symmetry = "symmetric"
 parent = null
 family_root = "RELATED_TO"
 
-# SEMANTIC_EQUIVALENCE: the "these two surface forms denote the same meaning" family
-# root. Translation is cross-lingual synonymy; synonymy is monolingual translation —
-# one meaning, scattered today across IS_TRANSLATION_OF (OpenSubtitles/Tatoeba/
-# Wiktionary direct edges) and IS_SYNONYM_OF (WordNet synset co-membership). Rooting
-# them here makes "who asserts A and B are equivalent" ONE family query
-# (relation_in_family(type,'SEMANTIC_EQUIVALENCE')) instead of a per-relation union.
-# It is a READ-TIME grouping only — consensus stays keyed by the distinct relation-type
-# id, so the members are NOT folded into shared consensus nodes (same guarantee that
-# keeps SIMILAR_TO and IS_SIMILAR_TO apart below). parent stays RELATED_TO on the
-# members so they remain in the RELATED_TO family too (family_contains climbs parent).
+# SEMANTIC_EQUIVALENCE: cross-lingual / surface-form equivalence family root.
+# Members: IS_TRANSLATION_OF (OpenSubtitles/Tatoeba/Wiktionary). IS_SYNONYM_OF
+# moved to the HAS_SENSE family (WSD / bubble_up) — monolingual synset co-membership
+# is sense selection, not translation. READ-TIME grouping only; consensus stays keyed
+# by distinct relation-type ids. parent stays RELATED_TO so members remain reachable
+# via the RELATED_TO parent climb where applicable.
 [[relation]]
 canonical = "SEMANTIC_EQUIVALENCE"
 rank = "equivalence"
@@ -1441,6 +1443,78 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VERSION"
 
+# --- Part 1 + modalities campaign (M0) — witnessed ladders; NO ingest until KEYMASTER ---
+
+# Audio: sentence/content root ↔ recording entity (Tatoeba audio lane).
+[[relation]]
+canonical = "HAS_RECORDING"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_RECORDING"
+
+# Calculated audio analyzer outputs (versioned/evictable; not identity).
+[[relation]]
+canonical = "HAS_SPECTRAL_PEAK"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SPECTRAL_PEAK"
+
+[[relation]]
+canonical = "HAS_ONSET_SEGMENT"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ONSET_SEGMENT"
+
+# Image witnessed infra: region/patch containment (pixel atoms reuse IS_PIXEL_OF /
+# ADJACENT_TO_PIXEL; object/caption semantics reuse DEPICTS/CAPTIONS).
+[[relation]]
+canonical = "HAS_REGION"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_REGION"
+
+[[relation]]
+canonical = "HAS_PATCH"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_REGION"
+family_root = "HAS_REGION"
+
+# Video witnessed infra: frame membership + temporal succession (distinct from
+# text PRECEDES lexical glue — temporal media order is its own family).
+[[relation]]
+canonical = "HAS_FRAME"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_FRAME"
+
+[[relation]]
+canonical = "PRECEDES_IN_TIME"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "PRECEDES_IN_TIME"
+
+# Code AST witnessed structure (tree-sitter unpack → ordered child edges).
+[[relation]]
+canonical = "HAS_AST_CHILD"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_AST_CHILD"
+
+[[relation]]
+canonical = "HAS_AST_KIND"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_AST_KIND"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"
@@ -1475,6 +1549,16 @@ flip = true
 surface = "HAS_SENSE_OF"
 canonical = "IS_SENSE_OF"
 flip = false
+
+[[alias]]
+surface = "RECORDING_OF"
+canonical = "HAS_RECORDING"
+flip = true
+
+[[alias]]
+surface = "IS_FRAME_OF"
+canonical = "HAS_FRAME"
+flip = true
 
 [[alias]]
 surface = "HAS_UPOS"

@@ -13,6 +13,16 @@ set "LAPLACE_ENV_LOADED="
 set "OUT=D:\Data\Output"
 if not exist "%OUT%" mkdir "%OUT%"
 
+rem Durable session timeline: per-step START/OK/FAILED survives a torn-down console
+rem so a mid-run crash still tells you WHICH step died (and thus where to resume).
+set "SESSIONLOG=%OUT%\_session-server.log"
+> "%SESSIONLOG%" echo ===== Tony_Hart-Server session %DATE% %TIME% =====
+
+rem Suppress the WER modal crash dialog for this run so a fault returns its NTSTATUS
+rem to the tee (clean :fail + logged step) instead of hanging on a modal box.
+rem Restored at every exit.
+call :wer_off
+
 rem Optional override: Tony_Hart-Server.bat [rebuild-all modules...]
 rem Default: native + app (no local install / no IIS). Publish stages artifacts only.
 set "MODULES=%*"
@@ -51,12 +61,16 @@ call :tee seed-opensubtitles "seed-step.cmd opensubtitles" || goto :fail
 
 echo.
 echo ===== Tony_Hart-Server / HART-SERVER OK %DATE% %TIME% =====
+>> "%SESSIONLOG%" echo ===== SESSION OK %DATE% %TIME% =====
+call :wer_restore
 pause
 exit /b 0
 
 :fail
 echo.
 echo ===== Tony_Hart-Server FAILED at !LAST_STEP! - see %OUT%\!LAST_LOG!.log =====
+>> "%SESSIONLOG%" echo ===== SESSION FAILED at !LAST_STEP! =====
+call :wer_restore
 pause
 exit /b 1
 
@@ -66,14 +80,33 @@ set "LAST_LOG=%~1"
 set "LAST_STEP=%~2"
 echo ==== %~2 ====
 echo log: %OUT%\%~1.log
+>> "%SESSIONLOG%" echo [%TIME%] START %~2  (log: %~1.log)
 del /q "%OUT%\%~1.log" >nul 2>&1
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\win\tee-run.ps1" ^
   -LogPath "%OUT%\%~1.log" ^
   -WorkingDirectory "%CD%" ^
   -CommandLine "call scripts\win\%~2"
-if not "%ERRORLEVEL%"=="0" (
-  echo FAILED %~2 exit=%ERRORLEVEL% - %OUT%\%~1.log
+set "STEP_RC=!ERRORLEVEL!"
+if not "!STEP_RC!"=="0" (
+  echo FAILED %~2 exit=!STEP_RC! - %OUT%\%~1.log
+  >> "%SESSIONLOG%" echo [%TIME%] FAILED %~2 exit=!STEP_RC!
   exit /b 1
 )
 echo OK %~2
+>> "%SESSIONLOG%" echo [%TIME%] OK %~2
+exit /b 0
+
+:wer_off
+rem Save prior DontShowUI (if any) so we can restore the user's exact state.
+set "WER_PREV="
+for /f "tokens=3" %%v in ('reg query "HKCU\Software\Microsoft\Windows\Windows Error Reporting" /v DontShowUI 2^>nul ^| find "DontShowUI"') do set "WER_PREV=%%v"
+reg add "HKCU\Software\Microsoft\Windows\Windows Error Reporting" /v DontShowUI /t REG_DWORD /d 1 /f >nul 2>&1
+exit /b 0
+
+:wer_restore
+if defined WER_PREV (
+  reg add "HKCU\Software\Microsoft\Windows\Windows Error Reporting" /v DontShowUI /t REG_DWORD /d %WER_PREV% /f >nul 2>&1
+) else (
+  reg delete "HKCU\Software\Microsoft\Windows\Windows Error Reporting" /v DontShowUI /f >nul 2>&1
+)
 exit /b 0

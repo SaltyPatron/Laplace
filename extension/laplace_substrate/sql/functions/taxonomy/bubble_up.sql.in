@@ -1,0 +1,132 @@
+-- bubble_up: top-k sense frontier for the forward pass (R2).
+-- Ranks HAS_SENSE-family edges by base eff_mu × domain co-occurrence.
+-- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
+-- open set. Abstain = zero rows (queue empty), never fabricate.
+CREATE OR REPLACE FUNCTION bubble_up(
+    p_term bytea,
+    p_domain_context bytea[] DEFAULT NULL,
+    p_k integer DEFAULT 5
+)
+RETURNS TABLE(
+    sense_id bytea,
+    synset_id bytea,
+    via_relation text,
+    score numeric,
+    base_eff_mu numeric,
+    domain_hits bigint,
+    witnesses bigint
+)
+LANGUAGE sql STABLE PARALLEL SAFE
+SET search_path = @extschema@, public AS $$
+WITH peers AS (
+    SELECT unnest(lexical_peers(p_term)) AS id
+),
+family_out AS (
+    SELECT c.object_id AS target_id,
+           relation_canonical(c.type_id) AS via_relation,
+           eff_mu_display(c.rating, c.rd) AS base_eff_mu,
+           c.witness_count AS witnesses,
+           c.rating,
+           c.rd
+    FROM peers p
+    JOIN consensus c ON c.subject_id = p.id
+    WHERE relation_type_in_family(c.type_id, 'HAS_SENSE')
+),
+resolved AS (
+    /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
+    SELECT fo.target_id AS sense_id,
+           ss.object_id AS synset_id,
+           fo.via_relation,
+           fo.base_eff_mu,
+           (fo.witnesses + COALESCE(ss.witness_count, 0))::bigint AS witnesses,
+           fo.rating,
+           fo.rd
+    FROM family_out fo
+    LEFT JOIN consensus ss
+      ON ss.subject_id = fo.target_id
+     AND relation_type_in_family(ss.type_id, 'HAS_SENSE')
+     AND relation_canonical(ss.type_id) = 'IS_SENSE_OF'
+    WHERE fo.via_relation = 'HAS_SENSE'
+      AND ss.object_id IS NOT NULL
+
+    UNION ALL
+
+    /* lemma --IS_SYNONYM_OF--> synset (WordNet co-membership) */
+    SELECT fo.target_id AS sense_id,
+           fo.target_id AS synset_id,
+           fo.via_relation,
+           fo.base_eff_mu,
+           fo.witnesses,
+           fo.rating,
+           fo.rd
+    FROM family_out fo
+    WHERE fo.via_relation = 'IS_SYNONYM_OF'
+
+    UNION ALL
+
+    /* rare: lemma --IS_SENSE_OF--> synset */
+    SELECT fo.target_id AS sense_id,
+           fo.target_id AS synset_id,
+           fo.via_relation,
+           fo.base_eff_mu,
+           fo.witnesses,
+           fo.rating,
+           fo.rd
+    FROM family_out fo
+    WHERE fo.via_relation = 'IS_SENSE_OF'
+),
+domain AS (
+    SELECT DISTINCT d AS id
+    FROM unnest(COALESCE(p_domain_context, ARRAY[]::bytea[])) AS d
+    WHERE d IS NOT NULL
+),
+members AS (
+    SELECT r.synset_id,
+           m.object_id AS member_id
+    FROM resolved r
+    JOIN consensus m ON m.subject_id = r.synset_id
+    WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+    UNION
+    SELECT r.synset_id,
+           m.subject_id AS member_id
+    FROM resolved r
+    JOIN consensus m ON m.object_id = r.synset_id
+    WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+),
+domain_scores AS (
+    SELECT m.synset_id,
+           count(*)::bigint AS domain_hits
+    FROM members m
+    JOIN domain d ON true
+    JOIN consensus prec ON prec.type_id = relation_type_id('PRECEDES')
+     AND (
+            (prec.subject_id = m.member_id AND prec.object_id = d.id)
+         OR (prec.object_id = m.member_id AND prec.subject_id = d.id)
+     )
+    GROUP BY m.synset_id
+),
+ranked AS (
+    SELECT DISTINCT ON (r.synset_id)
+           r.sense_id,
+           r.synset_id,
+           r.via_relation,
+           r.base_eff_mu,
+           COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
+           r.witnesses,
+           (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
+           eff_mu(r.rating, r.rd) AS rank_key
+    FROM resolved r
+    LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
+    ORDER BY r.synset_id, eff_mu(r.rating, r.rd) DESC
+)
+SELECT sense_id,
+       synset_id,
+       via_relation,
+       score,
+       base_eff_mu,
+       domain_hits,
+       witnesses
+FROM ranked
+ORDER BY score DESC, rank_key DESC, witnesses DESC
+LIMIT GREATEST(COALESCE(p_k, 5), 1)
+$$;

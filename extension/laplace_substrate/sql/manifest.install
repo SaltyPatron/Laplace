@@ -93,6 +93,7 @@ functions/readback/register_canonical.sql.in
 functions/readback/codepoint_for_id.sql.in
 functions/readback/is_all_whitespace.sql.in
 functions/readback/constituents.sql.in
+functions/readback/constituents_closure.sql.in
 functions/readback/vertex_atom.sql.in
 functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
@@ -293,6 +294,8 @@ functions/consensus/usage_overlap.sql.in
 functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in
 functions/consensus/gaps.sql.in
+functions/taxonomy/bubble_up.sql.in
+functions/taxonomy/retrieve_grounded.sql.in
 functions/taxonomy/top_synset.sql.in
 functions/taxonomy/synset_gloss.sql.in
 functions/taxonomy/consensus_taxonomy_edges.sql.in

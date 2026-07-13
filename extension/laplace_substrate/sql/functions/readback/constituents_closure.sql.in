@@ -1,0 +1,39 @@
+-- Bulk constituent closure for native no-SPI render assembly (R1).
+-- One indexed/lateral expansion of the trajectory DAG; C assembles text.
+CREATE OR REPLACE FUNCTION constituents_closure(
+    p_roots bytea[],
+    p_max_depth integer DEFAULT 32
+)
+RETURNS TABLE(
+    parent_id bytea,
+    ordinal integer,
+    child_id bytea,
+    run_length integer,
+    flags bigint
+)
+LANGUAGE sql STABLE PARALLEL SAFE
+SET search_path = @extschema@, public AS $$
+WITH RECURSIVE frontier(entity_id, depth) AS (
+    SELECT r.id, 0
+    FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
+    WHERE r.id IS NOT NULL
+    UNION
+    SELECT c.child_id, f.depth + 1
+    FROM frontier f
+    CROSS JOIN LATERAL constituents(f.entity_id) c
+    WHERE f.depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+),
+nodes AS (
+    SELECT DISTINCT entity_id
+    FROM frontier
+    WHERE depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+)
+SELECT n.entity_id AS parent_id,
+       c.ordinal,
+       c.child_id,
+       c.run_length,
+       c.flags
+FROM nodes n
+CROSS JOIN LATERAL constituents(n.entity_id) c
+ORDER BY n.entity_id, c.ordinal
+$$;
