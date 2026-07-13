@@ -4,9 +4,12 @@ LANGUAGE sql
 STABLE
 SET search_path = @extschema@, public
 AS $$
+    -- `= ANY(compositional_type_ids())` (not the is_compositional_type() wrapper): the array
+    -- evaluates ONCE and entities_type_btree serves the membership probe, instead of a per-row
+    -- function call that recomputes 5 BLAKE3 hashes for every entity row (100M+).
     SELECT e.tier, count(*)::bigint
     FROM @extschema@.entities e
-    WHERE @extschema@.is_compositional_type(e.type_id)
+    WHERE e.type_id = ANY(@extschema@.compositional_type_ids())
     GROUP BY e.tier
     ORDER BY e.tier;
 $$;

@@ -2,7 +2,9 @@ CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
-SET search_path = @extschema@, public
+-- No SET search_path: the body is fully schema-qualified, and the clause would prevent this
+-- trivial `= ANY(...)` predicate from inlining into callers' WHERE clauses (it then runs as a
+-- real per-row function call instead of an index-probable array membership test).
 AS $$
     SELECT p_type_id = ANY(@extschema@.compositional_type_ids());
 $$;
