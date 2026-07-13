@@ -92,6 +92,7 @@ internal static class Program
                 "eval" => await EvalCommands.RunAsync(args[1..]),
                 "stats" => await IngestCommands.StatsAsync(),
                 "rebuild-phys-indexes" => await IngestCommands.RebuildPhysIndexesAsync(),
+                "drop-indexes" => await IngestCommands.DropCoreIndexesAsync(),
                 "recover-indexes" => await IngestCommands.RecoverCycledIndexesAsync(),
                 "cpu-topology" => CpuTopologyCommands.Run(args[1..]),
                 "svd-exact-bench" => BenchCommands.SvdExactBenchCmd(args[1..]),

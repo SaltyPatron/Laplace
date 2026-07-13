@@ -554,7 +554,9 @@ internal static class IngestCommands
         Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
         var log = ConsoleLoggerProvider.Factory().CreateLogger("index-cycle");
         var sw = Stopwatch.StartNew();
-        await NpgsqlIndexCycle.RecoverAsync(ds, log, CancellationToken.None);
+        // Force the rebuild even under LAPLACE_INDEX_CYCLE_DEFER: this verb IS the deliberate
+        // campaign-end rebuild the defer flag was holding for (RecoverAsync no-ops when deferred).
+        await NpgsqlIndexCycle.RebuildJournaledAsync(ds, log, CancellationToken.None);
 
         Console.WriteLine("refreshing planner statistics ...");
         await using (var conn = await ds.OpenConnectionAsync())
@@ -572,6 +574,32 @@ internal static class IngestCommands
             $"recovered {pending - remaining}/{pending} index(es) in {sw.Elapsed.TotalSeconds:F0}s"
             + (remaining > 0 ? $" — {remaining} still journaled (rerun)" : ""));
         return remaining == 0 ? 0 : 1;
+    }
+
+    // Up-front campaign drop of EVERY plain secondary on the core write tables, journaled in
+    // laplace.index_cycle_journal. Pair with LAPLACE_INDEX_CYCLE_DEFER=1 for the seed steps (so
+    // each step COPYs into index-free heaps and none auto-rebuilds) and ONE terminal
+    // `recover-indexes` to rebuild them all once — turning N per-step drop/rebuild cycles into one
+    // drop and one rebuild. Name read-critical indexes in LAPLACE_INDEX_CYCLE_KEEP to hold them up
+    // (e.g. attestations_relation_btree, which the interleaved chess-analyze hydrate reads).
+    public static async Task<int> DropCoreIndexesAsync()
+    {
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var log = ConsoleLoggerProvider.Factory().CreateLogger("index-cycle");
+        string[] tables = ["entities", "physicalities", "attestations", "consensus"];
+        Console.WriteLine($"campaign index-drop across {tables.Length} core table(s) — journaled for one rebuild ...");
+        var sw = Stopwatch.StartNew();
+        await NpgsqlIndexCycle.DropSecondariesAsync(ds, log, tables, CancellationToken.None);
+        sw.Stop();
+
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cnt = conn.CreateCommand();
+        cnt.CommandText = "SELECT count(*) FROM laplace.index_cycle_journal";
+        long journaled = (long)(await cnt.ExecuteScalarAsync() ?? 0L);
+        Console.WriteLine(
+            $"index-drop complete in {sw.Elapsed.TotalSeconds:F0}s — {journaled} secondary index(es) journaled "
+            + "(down until `recover-indexes`)");
+        return 0;
     }
 
     public static async Task<int> RebuildPhysIndexesAsync()
