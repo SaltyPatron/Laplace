@@ -141,7 +141,10 @@ public sealed partial class NpgsqlSubstrateWriter
         var probeAttIds = new List<Hash128>(attGroups.Count);
         probeAttIds.AddRange(attGroups.Keys);
 
-        int rt = 0;
+        // Per-phase round-trip counters — summed into the returned total AND logged as a
+        // breakdown, so the operator sees WHERE the round-trips go (lock / journal / probe /
+        // copy / merge) instead of one opaque number. Probe fans across connections → atomic.
+        int rtLock = 0, rtJournal = 0, rtProbe = 0, rtCopy = 0, rtMerge = 0;
         int eIns = 0, pIns = 0, aIns = 0;
         long aFold = 0, eSkip = 0, pSkip = 0;
 
@@ -158,7 +161,7 @@ public sealed partial class NpgsqlSubstrateWriter
             _log, ct);
         try
         {
-            rt++;
+            rtLock++;
 
             if (workingSetToken is Hash128 token)
             {
@@ -170,14 +173,14 @@ public sealed partial class NpgsqlSubstrateWriter
                 journal.Parameters.Add(new NpgsqlParameter
                 { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 int claimed = await journal.ExecuteNonQueryAsync(ct);
-                rt++;
+                rtJournal++;
                 if (claimed == 0)
                 {
                     await tx.RollbackAsync(CancellationToken.None);
                     _log.LogInformation(
                         "WORKING_SET_REPLAY token={Token} already journaled — skipping apply",
                         token);
-                    return (0, 0, 0, 0, 0, 0, rt, true);
+                    return (0, 0, 0, 0, 0, 0, rtLock + rtJournal, true);
                 }
             }
 
@@ -187,9 +190,9 @@ public sealed partial class NpgsqlSubstrateWriter
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
             var probeTasks = new[]
             {
-                ProbePresentParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, r => Interlocked.Add(ref rt, r), ct),
-                ProbePresentParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, r => Interlocked.Add(ref rt, r), ct),
-                ProbePresentParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, r => Interlocked.Add(ref rt, r), ct),
+                ProbePresentParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, r => Interlocked.Add(ref rtProbe, r), ct),
             };
             await Task.WhenAll(probeTasks);
             var presentEntities = probeTasks[0].Result;
@@ -274,21 +277,21 @@ public sealed partial class NpgsqlSubstrateWriter
                     await CopyKeptAsync(conn, "entities", IntentStageTable.Entities,
                         entBlobs, keptEnts, 0, keptEnts.Count, ct);
                     eIns = keptEnts.Count;
-                    rt++;
+                    rtCopy++;
                 }
                 if (keptPhys.Count > 0)
                 {
                     await CopyKeptAsync(conn, "physicalities", IntentStageTable.Physicalities,
                         physBlobs, keptPhys, 0, keptPhys.Count, ct);
                     pIns = keptPhys.Count;
-                    rt++;
+                    rtCopy++;
                 }
                 if (keptAtts.Count > 0)
                 {
                     await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
                         attBlobs, keptAtts, 0, keptAtts.Count, ct);
                     aIns = keptAtts.Count;
-                    rt++;
+                    rtCopy++;
                 }
             }
             else
@@ -335,13 +338,13 @@ public sealed partial class NpgsqlSubstrateWriter
                     ("consensus", (long)keptAtts.Count),
                 }, ct);
 
-                rt += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
+                rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
                     entBlobs, keptEnts, ct);
                 eIns = keptEnts.Count;
-                rt += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
                     physBlobs, keptPhys, ct);
                 pIns = keptPhys.Count;
-                rt += await CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
+                rtCopy += await CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
                     attBlobs, keptAtts, ct);
                 aIns = keptAtts.Count;
 
@@ -375,7 +378,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     merge.Parameters.Add(new NpgsqlParameter
                     { Value = mergeTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
                     aFold += await merge.ExecuteNonQueryAsync(ct);
-                    rt++;
+                    rtMerge++;
                 }
             }
 
@@ -388,6 +391,11 @@ public sealed partial class NpgsqlSubstrateWriter
             throw;
         }
 
+        int rt = rtLock + rtJournal + rtProbe + rtCopy + rtMerge;
+        _log.LogInformation(
+            "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Probe} probe + {Copy} copy + {Merge} merge "
+            + "({E:N0}e/{P:N0}p/{A:N0}a novel, {Fold:N0} merged)",
+            rt, rtLock, rtJournal, rtProbe, rtCopy, rtMerge, eIns, pIns, aIns, aFold);
         return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt, false);
     }
 

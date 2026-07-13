@@ -60,6 +60,33 @@ public sealed class NpgsqlIndexCycle
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Cycle only when staged rows are at least this fraction of the table's LIVE cardinality —
+    /// i.e. the apply is fresh-seed shaped. A cycle rebuilds the whole index over (live+staged)
+    /// rows; below this fraction the apply is an INCREMENT and dropping an index that already
+    /// covers `live` rows to rebuild it is pure loss — COPY's per-row maintenance of just the
+    /// staged rows is cheaper AND keeps the index online. Default 1.0 ("staged rivals or exceeds
+    /// cardinality", the class-note definition). Tune DOWN (LAPLACE_INDEX_CYCLE_MIN_FRACTION) for
+    /// GiST/GIN-heavy tables where per-row maintenance dominates and cycling wins at a smaller
+    /// fraction; 0 restores the old absolute-only behavior (always cycle at MinRowsToCycle).
+    /// </summary>
+    private static readonly double CycleMinLiveFraction =
+        double.TryParse(
+            Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE_MIN_FRACTION"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var frac) && frac >= 0
+            ? frac : 1.0;
+
+    /// <summary>
+    /// Cross-step campaign mode. When set, secondaries dropped by ANY step stay down for the
+    /// whole campaign: RecoverAsync does NOT auto-rebuild the journal at run start (the drops
+    /// are intentional, not a crash), and each step COPYs into index-free heaps. The terminal
+    /// `ingest index-rebuild` calls RebuildJournaledAsync ONCE at the end. This turns N per-step
+    /// drop/rebuild cycles into one drop and one rebuild across the whole seed.
+    /// </summary>
+    public static readonly bool Deferred =
+        (Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE_DEFER") ?? "") is "1" or "true" or "TRUE";
+
     public NpgsqlIndexCycle(NpgsqlDataSource ds, ILogger log)
     {
         _ds = ds;
@@ -77,7 +104,31 @@ public sealed class NpgsqlIndexCycle
         + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
         + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
 
+    /// <summary>
+    /// Auto-rebuild whatever a crashed prior run left journaled, BEFORE this run cycles.
+    /// In <see cref="Deferred"/> campaign mode this is a no-op: the journaled drops are
+    /// intentional (held down across steps) and the terminal `ingest index-rebuild` rebuilds
+    /// them once via <see cref="RebuildJournaledAsync"/>.
+    /// </summary>
     public static async Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
+    {
+        if (Deferred)
+        {
+            log.LogInformation(
+                "INDEX_CYCLE deferred (LAPLACE_INDEX_CYCLE_DEFER) — leaving journaled drops down; "
+                + "run `ingest index-rebuild` at campaign end to rebuild once");
+            return;
+        }
+        await RebuildJournaledAsync(ds, log, ct);
+    }
+
+    /// <summary>
+    /// Rebuild every index currently named in laplace.index_cycle_journal — one CREATE INDEX at
+    /// a time — and clear each journal row as its rebuild commits. This is the campaign-end
+    /// rebuild and the crash-recovery rebuild; it ignores <see cref="Deferred"/> (it IS the
+    /// deliberate rebuild the defer flag was waiting for).
+    /// </summary>
+    public static async Task RebuildJournaledAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
     {
         var pending = new List<(string Name, string Def)>();
         await using (var conn = await ds.OpenConnectionAsync(ct))
@@ -146,21 +197,21 @@ public sealed class NpgsqlIndexCycle
                 live = (long)(await est.ExecuteScalarAsync(ct) ?? 0L);
             }
 
-            var secondaries = new List<(string Name, string Def)>();
-            await using (var list = conn.CreateCommand())
+            // Ratio gate: cycle only when the staged volume is fresh-seed shaped (a large
+            // fraction of the live cardinality). On an increment onto a big table, rebuilding
+            // the whole (live+staged) index to add `staged` costs far more than letting COPY
+            // maintain the existing index per-staged-row — and it keeps the index online.
+            // live <= 0 (fresh / never-analyzed table) always cycles.
+            if (live > 0 && CycleMinLiveFraction > 0 && staged < (long)(live * CycleMinLiveFraction))
             {
-                list.CommandText =
-                    "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
-                    + "FROM pg_index i "
-                    + "JOIN pg_class c ON c.oid = i.indexrelid "
-                    + "WHERE i.indrelid = ($1)::regclass "
-                    + "  AND NOT i.indisprimary AND NOT i.indisunique AND NOT i.indisexclusion";
-                list.Parameters.AddWithValue($"laplace.{table}");
-                await using var rd = await list.ExecuteReaderAsync(ct);
-                while (await rd.ReadAsync(ct))
-                    secondaries.Add((rd.GetString(0), rd.GetString(1)));
+                _log.LogInformation(
+                    "INDEX_CYCLE {Table}: NOT cycling — {Staged:N0} staged is {Frac:P1} of {Live:N0} live "
+                    + "(< {Min:P0} threshold); incremental COPY maintenance beats a full rebuild",
+                    table, staged, (double)staged / live, live, CycleMinLiveFraction);
+                continue;
             }
 
+            var secondaries = await ListPlainSecondariesAsync(conn, table, ct);
             int droppedHere = 0;
             foreach (var (name, def) in secondaries)
             {
@@ -169,22 +220,7 @@ public sealed class NpgsqlIndexCycle
                     _log.LogInformation("INDEX_CYCLE {Table}: keeping {Index} (LAPLACE_INDEX_CYCLE_KEEP)", table, name);
                     continue;
                 }
-                await using (var journal = conn.CreateCommand())
-                {
-                    journal.CommandText =
-                        "INSERT INTO laplace.index_cycle_journal (index_name, table_name, index_def) "
-                        + "VALUES ($1, $2, $3) ON CONFLICT (index_name) DO NOTHING";
-                    journal.Parameters.AddWithValue(name);
-                    journal.Parameters.AddWithValue(table);
-                    journal.Parameters.AddWithValue(def);
-                    await journal.ExecuteNonQueryAsync(ct);
-                }
-                await using (var drop = conn.CreateCommand())
-                {
-                    drop.CommandTimeout = 0;
-                    drop.CommandText = $"DROP INDEX IF EXISTS laplace.\"{name}\"";
-                    await drop.ExecuteNonQueryAsync(ct);
-                }
+                await JournalAndDropAsync(conn, table, name, def, ct);
                 _dropped.Add((name, def));
                 droppedHere++;
             }
@@ -240,5 +276,78 @@ public sealed class NpgsqlIndexCycle
             "INDEX_CYCLE complete: {Count} index(es) rebuilt in {Ms:N0}ms across {Workers} connection(s)",
             _dropped.Count, sw.ElapsedMilliseconds, workers);
         _dropped.Clear();
+    }
+
+    /// <summary>
+    /// Campaign entry point: drop + journal EVERY plain secondary on the given tables up front,
+    /// regardless of staged volume. Paired with <see cref="Deferred"/> (so mid-campaign runs do
+    /// not auto-rebuild) and a terminal <see cref="RebuildJournaledAsync"/>, this is the
+    /// "drop once, ingest everything across N steps, rebuild once" load. Idempotent: an
+    /// already-dropped index simply does not appear in pg_index. Returns the count dropped.
+    /// </summary>
+    public static async Task<int> DropSecondariesAsync(
+        NpgsqlDataSource ds, ILogger log, IReadOnlyList<string> tables, CancellationToken ct)
+    {
+        int total = 0;
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        foreach (var table in tables)
+        {
+            var secondaries = await ListPlainSecondariesAsync(conn, table, ct);
+            int here = 0;
+            foreach (var (name, def) in secondaries)
+            {
+                if (KeepIndexes.Contains(name))
+                {
+                    log.LogInformation("INDEX_CYCLE {Table}: keeping {Index} (LAPLACE_INDEX_CYCLE_KEEP)", table, name);
+                    continue;
+                }
+                await JournalAndDropAsync(conn, table, name, def, ct);
+                here++;
+            }
+            if (here > 0)
+                log.LogInformation("INDEX_CYCLE {Table}: dropped {Count} secondary index(es) up front (campaign)", table, here);
+        }
+        total = tables.Count;
+        log.LogInformation("INDEX_CYCLE campaign drop across {Tables} table(s) — journaled for one rebuild at campaign end", total);
+        return total;
+    }
+
+    private static async Task<List<(string Name, string Def)>> ListPlainSecondariesAsync(
+        NpgsqlConnection conn, string table, CancellationToken ct)
+    {
+        var secondaries = new List<(string, string)>();
+        await using var list = conn.CreateCommand();
+        list.CommandText =
+            "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
+            + "FROM pg_index i "
+            + "JOIN pg_class c ON c.oid = i.indexrelid "
+            + "WHERE i.indrelid = ($1)::regclass "
+            + "  AND NOT i.indisprimary AND NOT i.indisunique AND NOT i.indisexclusion";
+        list.Parameters.AddWithValue($"laplace.{table}");
+        await using var rd = await list.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct))
+            secondaries.Add((rd.GetString(0), rd.GetString(1)));
+        return secondaries;
+    }
+
+    private static async Task JournalAndDropAsync(
+        NpgsqlConnection conn, string table, string name, string def, CancellationToken ct)
+    {
+        await using (var journal = conn.CreateCommand())
+        {
+            journal.CommandText =
+                "INSERT INTO laplace.index_cycle_journal (index_name, table_name, index_def) "
+                + "VALUES ($1, $2, $3) ON CONFLICT (index_name) DO NOTHING";
+            journal.Parameters.AddWithValue(name);
+            journal.Parameters.AddWithValue(table);
+            journal.Parameters.AddWithValue(def);
+            await journal.ExecuteNonQueryAsync(ct);
+        }
+        await using (var drop = conn.CreateCommand())
+        {
+            drop.CommandTimeout = 0;
+            drop.CommandText = $"DROP INDEX IF EXISTS laplace.\"{name}\"";
+            await drop.ExecuteNonQueryAsync(ct);
+        }
     }
 }
