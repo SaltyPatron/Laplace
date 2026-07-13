@@ -1,0 +1,16 @@
+-- entities_tier_btree (single-column btree on entities(tier)) is a STRICT leading
+-- prefix of entities_tier_type_btree (tier, type_id), which serves every tier-only
+-- query as well as tier+type_id lookups. The narrow index is provably redundant;
+-- drop it on upgrade. New installs never create it (removed from manifest.install).
+DO $do$
+BEGIN
+    -- Release extension membership first (no-op on a fresh install where the index
+    -- was never created / never a member); the guarded DROP then removes the object.
+    BEGIN
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX @extschema@.entities_tier_btree',
+                       'laplace_substrate');
+    EXCEPTION WHEN OTHERS THEN
+        NULL;  -- not a member (fresh install or already released) — nothing to detach
+    END;
+    EXECUTE 'DROP INDEX IF EXISTS @extschema@.entities_tier_btree';
+END $do$;
