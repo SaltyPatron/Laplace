@@ -1,0 +1,69 @@
+-- Full rebuild of laplace.constituent_edges from physicalities. This is the REGENERATE
+-- tool for the render-side constituent edge cache: it re-derives every edge from the
+-- witnessed trajectory geometry, so it is safe to run after a fresh seed, after a bulk
+-- ingest that bypassed edge population, or any time the table is suspected stale. Derived,
+-- not a reseed — it copies nothing new into the substrate, it only unpacks what
+-- physicalities.trajectory already encodes.
+--
+-- Correctness contract (byte-identity with constituents_closure): for each composed entity
+-- the closure decodes its CANONICAL type=1 physicality — DISTINCT ON (entity_id) ORDER BY
+-- entity_id, id, i.e. the lowest-id row — through laplace_trajectory_constituents. This
+-- rebuild selects the SAME row the SAME way and stores the SAME decode. One parent's points
+-- carry distinct ordinals (they are packed positions), so there is no intra-parent PK
+-- collision; entity_id ranges are disjoint across batches, so there is no cross-batch
+-- collision.
+--
+-- Batched by entity_id range with a COMMIT per batch (composed content can be tens of
+-- millions of parents; one tx would bloat and lock). TRUNCATE up front makes it a clean
+-- full rebuild and idempotent across re-runs. It is interruptible: committed batches
+-- persist, and a re-run TRUNCATEs and starts over. Because the live render path still reads
+-- constituents_closure (physicalities), a partially-populated table during a rebuild
+-- affects nothing until the (separately validated) cutover.
+--
+-- No SET clause on the procedure: a PL/pgSQL procedure carrying a SET clause is barred from
+-- transaction control (COMMIT), so references are schema-qualified instead. Invoke with:
+-- CALL @extschema@.constituent_edges_rebuild();
+CREATE OR REPLACE PROCEDURE constituent_edges_rebuild(p_batch int DEFAULT 200000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    last_ent bytea := decode(repeat('00', 16), 'hex');
+    ents bytea[];
+    n bigint;
+    total bigint := 0;
+    parents bigint := 0;
+BEGIN
+    TRUNCATE @extschema@.constituent_edges;
+    COMMIT;
+    LOOP
+        -- Next batch of distinct composed parents, in id order (physicalities_entity_btree).
+        SELECT array_agg(s.e ORDER BY s.e) INTO ents FROM (
+            SELECT DISTINCT p.entity_id AS e
+            FROM @extschema@.physicalities p
+            WHERE p.type = 1 AND p.trajectory IS NOT NULL AND p.entity_id > last_ent
+            ORDER BY p.entity_id
+            LIMIT p_batch) s;
+        EXIT WHEN ents IS NULL;
+
+        WITH picked AS (
+            -- One canonical physicality per parent — identical selection to the closure's
+            -- `picked` CTE (lowest id wins).
+            SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+            FROM @extschema@.physicalities p
+            WHERE p.type = 1 AND p.trajectory IS NOT NULL AND p.entity_id = ANY(ents)
+            ORDER BY p.entity_id, p.id
+        )
+        INSERT INTO @extschema@.constituent_edges (parent_id, ordinal, child_id, run_length, flags)
+        SELECT pk.entity_id, u.ordinal, u.entity_id, u.run_length, u.flags
+        FROM picked pk
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(pk.trajectory) AS u;
+
+        GET DIAGNOSTICS n = ROW_COUNT;
+        total := total + n;
+        parents := parents + cardinality(ents);
+        last_ent := ents[cardinality(ents)];
+        RAISE NOTICE 'constituent_edges_rebuild: % edges / % parents (through %)',
+            total, parents, encode(last_ent, 'hex');
+        COMMIT;
+    END LOOP;
+    RAISE NOTICE 'constituent_edges_rebuild done: % edges / % parents', total, parents;
+END $$;

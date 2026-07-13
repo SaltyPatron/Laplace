@@ -1,0 +1,52 @@
+-- Materialized constituent edges — the render-side closure join surface.
+--
+-- Why this table exists: render assembly needs the constituent DAG of a document
+-- (parent → ordered children). Today constituents_closure walks that DAG by probing
+-- physicalities per reached node and decoding its trajectory through the
+-- laplace_trajectory_constituents SRF — one index probe + one C SRF call per node,
+-- per render. This table pre-materializes exactly the SRF's decode so the closure
+-- becomes a pure indexed recursive join (parent_id → child_id) with no per-node probe
+-- and no SRF in the hot path.
+--
+-- Each row IS one decoded constituent point: for a parent entity, the child at a given
+-- ordinal, with the run_length and flags the trajectory carried. It is the row-for-row
+-- image of laplace_trajectory_constituents(physicalities.trajectory) for the parent's
+-- CANONICAL (lowest-id) type=1 physicality — the SAME row the closure's `picked` CTE
+-- selects (DISTINCT ON (entity_id) ORDER BY entity_id, id). That identity is the
+-- correctness contract: constituents_closure_edges reads this table and must return
+-- byte-identical output to constituents_closure given a correctly-populated table.
+--
+-- DERIVED / REBUILDABLE, not a reseed. Like an index, every row is a pure function of
+-- witnessed physicalities.trajectory geometry — constituent_edges_rebuild() regenerates
+-- it from scratch. It carries NO independent evidence and is never a source of truth;
+-- physicalities remains the source of truth.
+--
+-- Storage tradeoff: this trades disk for render latency. One row per (parent, ordinal)
+-- constituent point across all composed (type=1, trajectory-bearing) entities — the same
+-- constituent points the trajectory geometry already encodes, unpacked into a btree-shaped
+-- heap. In exchange the render closure drops the per-node physicalities probe and the
+-- per-node SRF invocation entirely, replacing them with an index range scan on the PK.
+-- Codepoints/leaves (no type=1 trajectory) contribute zero rows, so the table sizes with
+-- composed content, not with the whole entity set.
+CREATE TABLE IF NOT EXISTS constituent_edges (
+    parent_id  bytea   NOT NULL CHECK (octet_length(parent_id) = 16),
+    ordinal    integer NOT NULL,
+    child_id   bytea   NOT NULL CHECK (octet_length(child_id) = 16),
+    run_length integer NOT NULL,
+    flags      bigint  NOT NULL,
+    PRIMARY KEY (parent_id, ordinal)
+);
+
+-- The closure join keys on parent_id (recurse: this node's parent_id edges give the next
+-- frontier's child_ids). The PK's leading column IS parent_id, so the PK btree already
+-- serves the join as an index range scan — no separate parent_id index is needed. The
+-- ordinal tail-column additionally delivers each parent's children already in
+-- (parent_id, ordinal) order, which is exactly the render assembly order.
+
+-- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in).
+ALTER TABLE constituent_edges SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+
+-- Extension-owned data survives pg_dump/restore. Derived-but-dumped (as consensus is):
+-- a restore keeps a usable table immediately; constituent_edges_rebuild() re-derives it
+-- from physicalities whenever a full regenerate is wanted.
+SELECT pg_extension_config_dump('constituent_edges', '');
