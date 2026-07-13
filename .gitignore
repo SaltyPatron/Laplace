@@ -393,6 +393,7 @@ venv/
 /engine/core/src/generated/.attestation-law-stamp
 /engine/core/include/laplace/core/relation_law.h
 /engine/core/include/laplace/core/pos_law.h
+/engine/core/include/laplace/core/highway_manifest.h
 /extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
 /extension/laplace_substrate/sql/generated/seed_pos.sql.in
 
