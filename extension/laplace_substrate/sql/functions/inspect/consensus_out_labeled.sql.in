@@ -12,18 +12,24 @@ CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEF
         SELECT p_id
         UNION
         SELECT sn.synset_id FROM senses(p_id) sn
+    ),
+    ranked AS (
+        SELECT c.type_id, c.object_id, c.eff_mu, c.witness_count,
+               edge_rank(c.type_id, c.eff_mu_raw) AS rnk
+        FROM v_consensus_resolved c
+        WHERE c.subject_id IN (SELECT id FROM subj)
+          AND c.object_id IS NOT NULL
+        ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
+        LIMIT GREATEST(1, p_limit)
     )
-    SELECT c.type_id, c.object_id,
-           type_label(c.type_id),
+    SELECT r.type_id, r.object_id,
+           type_label(r.type_id),
            COALESCE(
-               NULLIF(_realize_synset_lemma(c.object_id, word_language(p_id)), ''),
-               NULLIF(render_text_fast(c.object_id, 8), ''),
-               left(encode(c.object_id, 'hex'), 16)),
-           c.eff_mu,
-           c.witness_count
-    FROM v_consensus_resolved c
-    WHERE c.subject_id IN (SELECT id FROM subj)
-      AND c.object_id IS NOT NULL
-    ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
-    LIMIT GREATEST(1, p_limit)
+               NULLIF(_realize_synset_lemma(r.object_id, word_language(p_id)), ''),
+               NULLIF(render_text_fast(r.object_id, 8), ''),
+               left(encode(r.object_id, 'hex'), 16)),
+           r.eff_mu,
+           r.witness_count
+    FROM ranked r
+    ORDER BY r.rnk DESC
 $$;
