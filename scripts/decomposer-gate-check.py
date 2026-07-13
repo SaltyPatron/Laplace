@@ -126,16 +126,34 @@ def check_source(
         rel = gate["relation"]
         minimum = int(gate["min"])
         try:
-            n = int(
-                psql(
-                    dbname,
-                    f"SELECT laplace.consensus_count(laplace.relation_type_id('{rel}'));",
-                    host=host,
-                    user=user,
+            if gate.get("family"):
+                # Family rollup. A governed root whose per-value children are minted at ingest
+                # (dynamic relations: EDEP_nsubj, DEP_obj, FEAT_case, ...) gets ZERO direct edges
+                # by design — every edge attests under a child. The children carry an
+                # `IS_A <root>` edge (RelationTypeRegistry.SeedDynamic), and both IS_A and the
+                # static root resolve through relation_type_id, so we count the whole family
+                # without needing to resolve dynamic child names (relation_type_id does not).
+                q = (
+                    "SELECT count(*) FROM laplace.consensus c "
+                    f"WHERE c.type_id = laplace.relation_type_id('{rel}') "
+                    "OR c.type_id IN ("
+                    "  SELECT subject_id FROM laplace.consensus "
+                    "  WHERE type_id = laplace.relation_type_id('IS_A') "
+                    f"    AND object_id = laplace.relation_type_id('{rel}'))"
                 )
-            )
+                n = int(psql(dbname, q, host=host, user=user))
+                detail = f"consensus={n:,} (min {minimum:,}) [family rollup via IS_A]"
+            else:
+                n = int(
+                    psql(
+                        dbname,
+                        f"SELECT laplace.consensus_count(laplace.relation_type_id('{rel}'));",
+                        host=host,
+                        user=user,
+                    )
+                )
+                detail = f"consensus={n:,} (min {minimum:,})"
             passed = n >= minimum
-            detail = f"consensus={n:,} (min {minimum:,})"
             if not passed and gate.get("fallback") == "source_evidence":
                 alt_rels = gate.get("fallback_relations") or [rel]
                 total = 0

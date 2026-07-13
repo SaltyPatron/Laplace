@@ -142,7 +142,7 @@
       "prerequisites": ["iso639"],
       "consensus_gates": [
         { "relation": "HAS_POS", "min": 10000 },
-        { "relation": "ENHANCED_DEPENDS_ON", "min": 1 }
+        { "relation": "ENHANCED_DEPENDS_ON", "min": 1, "family": true }
       ]
     },
     "wiktionary": {
