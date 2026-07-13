@@ -11,14 +11,13 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
         -- via the slower fallbacks below (or worse, as opaque hex).
         chr(@extschema@.codepoint_for_id(p_id)),
 
-        
-        
-        
-        render_text((SELECT c.object_id FROM @extschema@.consensus c
-                     WHERE c.subject_id = p_id
-                       AND c.type_id = @extschema@.relation_type_id('HAS_NAME_ALIAS')
-                     ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
-                     LIMIT 1)),
+        -- Name-edge resolution goes through the one shared primitive rather than a
+        -- private HAS_NAME_ALIAS-only argmax: resolve_name() consults HAS_NAME
+        -- (primary) + HAS_NAME_ALIAS + the synset-lemma path as families and
+        -- abstains (NULL) when there is no grounded name, letting the fallbacks
+        -- below run. It is reached only after the canonical-name and codepoint
+        -- fast paths above, so tier-0 glyph reconstruction is unchanged.
+        @extschema@.resolve_name(p_id),
         render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;

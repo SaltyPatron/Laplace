@@ -2,18 +2,20 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    -- A label is a NAME/surface, never a definition. Order: an explicit
-    -- HAS_NAME_ALIAS, else the entity's own rendered+cleaned surface, else a
-    -- stable hex id. The former HAS_DEFINITION fallback made every surface-less
-    -- entity (synsets, sense nodes) render as its gloss, which polluted every
-    -- consumer (concept_peers showed definition sentences as "synonym" peers).
+    -- A label is a NAME/surface, never a definition. Order: the entity's
+    -- resolved name, else its own rendered+cleaned surface, else a stable hex id.
+    -- The name lookup now goes through resolve_name() -- the single, family-aware
+    -- primitive that consults HAS_NAME (primary) + HAS_NAME_ALIAS + the
+    -- synset-lemma path and abstains rather than guessing -- instead of this
+    -- function's former HAS_NAME_ALIAS-only argmax, which ignored the primary
+    -- HAS_NAME edge entirely. (The former HAS_DEFINITION fallback made every
+    -- surface-less entity render as its gloss, which polluted every consumer;
+    -- that is gone. The trailing hex arm is retained for now so callers that
+    -- expect a non-null display string keep working -- full abstention here is a
+    -- follow-up once label_or_hex() owns the id-display decision and the goldens
+    -- are regenerated on a live DB.)
     SELECT COALESCE(
-        (SELECT render_text(c.object_id)
-         FROM consensus c
-         WHERE c.subject_id = p_id
-           AND c.type_id = relation_type_id('HAS_NAME_ALIAS')
-         ORDER BY eff_mu(c.rating, c.rd) DESC
-         LIMIT 1),
+        resolve_name(p_id),
         NULLIF(
             regexp_replace(
             regexp_replace(
