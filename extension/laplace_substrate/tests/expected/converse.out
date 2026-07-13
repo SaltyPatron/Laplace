@@ -191,9 +191,9 @@ SELECT reply FROM recall('what is zzzunknownzzz');
 (1 row)
 
 SELECT reply FROM recall('translate h');
-                    reply                     
-----------------------------------------------
- I hold "h" but no translation consensus yet.
+      reply       
+------------------
+ p [test/lang/en]
 (1 row)
 
 SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
@@ -281,9 +281,9 @@ SELECT reply FROM recall('is a dog a c?');
 (1 row)
 
 SELECT reply FROM recall('is h a c?');
-                  reply                  
------------------------------------------
- No witnessed IS_A path from "h" to "c".
+      reply       
+------------------
+ Yes — h —is a→ c
 (1 row)
 
 SELECT g.step, type_label(g.type_id) AS rel_type,
@@ -335,9 +335,10 @@ FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 (3 rows)
 
 SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
- reason_plane 
---------------
-(0 rows)
+ reason_plane  
+---------------
+ is synonym of
+(1 row)
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
                                      dog_gaps                                      
@@ -353,9 +354,9 @@ FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
 (1 row)
 
 SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog'), word_id('h'));
- rel_plane | rel_usage 
------------+-----------
-           |         0
+   rel_plane   | rel_usage 
+---------------+-----------
+ is synonym of |         0
 (1 row)
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
