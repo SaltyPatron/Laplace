@@ -30,7 +30,7 @@ public static class ChessAnalyze
         => DeriveFromWitnessed(b, WitnessedFromParsed(parsed));
 
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
-    internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed)
+    internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
     {
         var (gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens) = witnessed;
 
@@ -42,8 +42,6 @@ public static class ChessAnalyze
         var evals = evalTokens is not null
             ? evalTokens.Select(t => t is null ? 0 : PgnEvals.ParseToken(t)).ToArray()
             : null;
-
-        int engineDepth = 0;
 
         DeriveGame(b, gameId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth);

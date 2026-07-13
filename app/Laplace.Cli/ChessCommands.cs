@@ -3,6 +3,7 @@ using Laplace.Chess.Service;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -118,10 +119,10 @@ internal static class ChessCommands
 
     private static bool HasFlag(string[] a, string flag) => Array.IndexOf(a, flag) >= 0;
 
-    private static Task<int> ReviewAsync(string[] args)
+    private static async Task<int> ReviewAsync(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--"))
-            return Task.FromResult(Fail("usage: laplace chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]"));
+            return Fail("usage: laplace chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]");
         var path = args[0];
         int depth = ArgInt(args, "--depth", 4);
         int maxGames = ArgInt(args, "--max-games", 20);
@@ -132,8 +133,13 @@ internal static class ChessCommands
             var m = new ChessModality();
             var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review");
             int n = ChessReviewIngest.IngestPath(b, m, path, depth);
-            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth})");
-            return Task.FromResult(0);
+            await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+            var inner = new NpgsqlSubstrateWriter(ds);
+            await using var acc = new ConsensusAccumulatingWriter(inner, ds);
+            await ((ISubstrateWriter)acc).ApplyAsync(b.Build(), System.Threading.CancellationToken.None);
+            long materialized = await acc.MaterializeConsensusAsync();
+            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth}) — applied, {materialized:N0} consensus rows folded");
+            return 0;
         }
 
         var games = ChessGameReview.ReviewFile(path, depth, maxGames);
@@ -153,7 +159,7 @@ internal static class ChessCommands
             }
         }
         Console.WriteLine($"crazy wins: {crazy}/{games.Count} — won despite a blunder; deep re-search discriminates luck from eval blind-spot");
-        return Task.FromResult(0);
+        return 0;
     }
 
     private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : (name.Length > 16 ? name[..16] : name);

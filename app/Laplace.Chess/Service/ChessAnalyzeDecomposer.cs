@@ -11,6 +11,11 @@ namespace Laplace.Chess.Service;
 // Run: `laplace ingest chess-analyze`  (no path — substrate is the source of truth)
 public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecord>
 {
+    private readonly int _engineDepth;
+    /// <summary>engineDepth &gt; 0 runs the Laplace search per position for a calculated
+    /// eval/quality signal; 0 (default) records only witnessed structure (fast ingest).</summary>
+    public ChessAnalyzeDecomposer(int engineDepth = 0) => _engineDepth = engineDepth;
+
     public override Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
     public override string SourceName => "ChessAnalysis";
     public override int LayerOrder => 21;
@@ -46,7 +51,7 @@ public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecor
     }
 
     protected override void Compose(ChessAnalyzeRecord record, SubstrateChangeBuilder b)
-        => ChessAnalyze.DeriveFromWitnessed(b, record.Game);
+        => ChessAnalyze.DeriveFromWitnessed(b, record.Game, _engineDepth);
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {

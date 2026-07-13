@@ -48,7 +48,8 @@ internal static class IngestCommands
         bool RegisterOnly,
         bool Force = false,
         bool NoAnalyze = false,
-        bool Recursive = false);
+        bool Recursive = false,
+        int AnalyzeDepth = 0);
 
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
@@ -61,6 +62,7 @@ internal static class IngestCommands
         bool force = false;
         bool noAnalyze = false;
         bool recursive = false;
+        int analyzeDepth = 0;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -99,6 +101,12 @@ internal static class IngestCommands
                 recursive = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--depth" && i + 1 < rest.Count)
+            {
+                int.TryParse(rest[i + 1], out analyzeDepth);
+                rest.RemoveAt(i + 1);
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -110,7 +118,8 @@ internal static class IngestCommands
             registerOnly,
             force,
             noAnalyze,
-            recursive);
+            recursive,
+            analyzeDepth);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
