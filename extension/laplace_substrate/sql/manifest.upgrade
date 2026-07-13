@@ -4,9 +4,9 @@ schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
-indexes/entities_tier_btree.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
+indexes/drop_entities_tier_btree.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
@@ -54,6 +54,8 @@ indexes/consensus_subject_type_btree.sql.in
 indexes/consensus_type_subject_btree.sql.in
 indexes/consensus_eff_mu_btree.sql.in
 indexes/consensus_subject_eff_mu_btree.sql.in
+indexes/consensus_subject_type_eff_mu_btree.sql.in
+indexes/consensus_object_type_btree.sql.in
 schema/tables/consensus_id.sql.in
 functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
