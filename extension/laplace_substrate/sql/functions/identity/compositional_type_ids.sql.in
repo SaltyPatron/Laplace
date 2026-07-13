@@ -2,7 +2,9 @@ CREATE OR REPLACE FUNCTION compositional_type_ids()
 RETURNS bytea[]
 LANGUAGE sql
 IMMUTABLE
-SET search_path = @extschema@, public
+-- No SET search_path: every reference below is already schema-qualified (public.laplace_hash128_blake3),
+-- and the clause would block Postgres from INLINING/constant-folding this into callers' predicates —
+-- turning a compile-time-constant id set into 5 BLAKE3 hashes recomputed per entity row.
 AS $$
     SELECT ARRAY[
         public.laplace_hash128_blake3('Codepoint'::bytea),
