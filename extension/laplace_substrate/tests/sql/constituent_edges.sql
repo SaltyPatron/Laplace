@@ -1,0 +1,80 @@
+-- constituent_edges: the materialized edge table, its rebuild, and byte-identity of
+-- constituents_closure_edges vs constituents_closure. Synthetic composed content is built
+-- by packing constituent points with laplace_mantissa_pack into trajectory linestrings --
+-- the same geometry the ingest spine writes -- so the decode path under test is driven
+-- exactly as production drives it. Every assertion returns a single boolean column `ok`.
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+SET search_path TO laplace, public;
+-- Synthetic fixture: bypass the entities/physicalities FK triggers (type_id/entity_id would
+-- otherwise require real referenced rows) — same bypass the ingest apply uses for bulk writes.
+-- The closure under test reads the trajectory geometry directly, not the FK graph.
+SET session_replication_role = replica;
+-- Parents P and A each carry a canonical type=1 physicality. P = [A, B, C]; A = [X, Y].
+-- P also gets a SHADOW physicality with a higher id and a different trajectory -- the
+-- canonical (lowest-id) row must win in both the closure and the rebuild.
+INSERT INTO entities (id, tier, type_id) VALUES
+    (decode('a1000000000000000000000000000001','hex'), 2, decode('11111111111111111111111111111111','hex')),
+    (decode('a2000000000000000000000000000002','hex'), 2, decode('11111111111111111111111111111111','hex'));
+INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index, trajectory) VALUES
+    (decode('0f00000000000000000000000000000a','hex'), decode('a1000000000000000000000000000001','hex'), 1,
+     laplace_mantissa_pack(decode('a1000000000000000000000000000001','hex'), 0, 0, 0),
+     decode('00000000000000000000000000000000','hex'),
+     ST_MakeLine(ARRAY[laplace_mantissa_pack(decode('a2000000000000000000000000000002','hex'), 0, 1, 0),
+                       laplace_mantissa_pack(decode('b0000000000000000000000000000003','hex'), 1, 2, 5),
+                       laplace_mantissa_pack(decode('c0000000000000000000000000000004','hex'), 2, 1, 0)])),
+    (decode('ff00000000000000000000000000000b','hex'), decode('a1000000000000000000000000000001','hex'), 1,
+     laplace_mantissa_pack(decode('a1000000000000000000000000000001','hex'), 0, 0, 0),
+     decode('00000000000000000000000000000000','hex'),
+     ST_MakeLine(ARRAY[laplace_mantissa_pack(decode('b0000000000000000000000000000003','hex'), 0, 9, 9),
+                       laplace_mantissa_pack(decode('d0000000000000000000000000000005','hex'), 1, 9, 9)])),
+    (decode('0f00000000000000000000000000000c','hex'), decode('a2000000000000000000000000000002','hex'), 1,
+     laplace_mantissa_pack(decode('a2000000000000000000000000000002','hex'), 0, 0, 0),
+     decode('00000000000000000000000000000000','hex'),
+     ST_MakeLine(ARRAY[laplace_mantissa_pack(decode('d0000000000000000000000000000005','hex'), 0, 1, 7),
+                       laplace_mantissa_pack(decode('e0000000000000000000000000000006','hex'), 1, 3, 0)]));
+-- Ordered signature of a closure result: encodes every emitted row, in (parent_id, ordinal)
+-- order -- which both closures ORDER BY, and which the PK makes a total order. Equal
+-- signatures therefore mean byte-identical emitted sequences.
+CREATE FUNCTION pg_temp.sig_base(bytea[], int) RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT string_agg(encode(parent_id,'hex')||':'||ordinal||':'||encode(child_id,'hex')||':'||run_length||':'||flags,
+                      ',' ORDER BY parent_id, ordinal)
+    FROM constituents_closure($1, $2) $$;
+CREATE FUNCTION pg_temp.sig_edges(bytea[], int) RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT string_agg(encode(parent_id,'hex')||':'||ordinal||':'||encode(child_id,'hex')||':'||run_length||':'||flags,
+                      ',' ORDER BY parent_id, ordinal)
+    FROM constituents_closure_edges($1, $2) $$;
+-- Rebuild the edge cache from physicalities (suppress NOTICE progress for stable output).
+SET client_min_messages TO warning;
+CALL constituent_edges_rebuild();
+RESET client_min_messages;
+-- Canonical selection: P contributes 3 edges (not the shadow's 2), A contributes 2 -> 5.
+SELECT count(*) = 5 AS ok FROM constituent_edges
+WHERE parent_id IN (decode('a1000000000000000000000000000001','hex'), decode('a2000000000000000000000000000002','hex'));
+-- P's ordinal-1 child is B: the canonical trajectory was decoded, not the shadow's.
+SELECT child_id = decode('b0000000000000000000000000000003','hex') AS ok FROM constituent_edges
+WHERE parent_id = decode('a1000000000000000000000000000001','hex') AND ordinal = 1;
+-- Full-depth closure from P: byte-identical.
+SELECT pg_temp.sig_base(ARRAY[decode('a1000000000000000000000000000001','hex')], 32)
+       IS NOT DISTINCT FROM pg_temp.sig_edges(ARRAY[decode('a1000000000000000000000000000001','hex')], 32) AS ok;
+-- Depth-capped (max_depth=1): only P's direct edges, A not expanded. Identical.
+SELECT pg_temp.sig_base(ARRAY[decode('a1000000000000000000000000000001','hex')], 1)
+       IS NOT DISTINCT FROM pg_temp.sig_edges(ARRAY[decode('a1000000000000000000000000000001','hex')], 1) AS ok;
+-- Multiple roots (P and A together): identical.
+SELECT pg_temp.sig_base(ARRAY[decode('a1000000000000000000000000000001','hex'),decode('a2000000000000000000000000000002','hex')], 32)
+       IS NOT DISTINCT FROM pg_temp.sig_edges(ARRAY[decode('a1000000000000000000000000000001','hex'),decode('a2000000000000000000000000000002','hex')], 32) AS ok;
+-- Leaf root (a child with no type=1 physicality): both empty, identical.
+SELECT pg_temp.sig_base(ARRAY[decode('b0000000000000000000000000000003','hex')], 32)
+       IS NOT DISTINCT FROM pg_temp.sig_edges(ARRAY[decode('b0000000000000000000000000000003','hex')], 32) AS ok;
+-- Depth 0 edge case: both empty, identical.
+SELECT pg_temp.sig_base(ARRAY[decode('a1000000000000000000000000000001','hex')], 0)
+       IS NOT DISTINCT FROM pg_temp.sig_edges(ARRAY[decode('a1000000000000000000000000000001','hex')], 0) AS ok;
+-- NULL roots edge case: both empty, identical.
+SELECT pg_temp.sig_base(NULL, 32) IS NOT DISTINCT FROM pg_temp.sig_edges(NULL, 32) AS ok;
+-- Idempotent rebuild: a second rebuild yields the same 5 rows for P and A.
+SET client_min_messages TO warning;
+CALL constituent_edges_rebuild();
+RESET client_min_messages;
+SELECT count(*) = 5 AS ok FROM constituent_edges
+WHERE parent_id IN (decode('a1000000000000000000000000000001','hex'), decode('a2000000000000000000000000000002','hex'));

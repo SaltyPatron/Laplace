@@ -4,6 +4,7 @@ schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
+schema/tables/constituent_edges.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
 indexes/drop_entities_tier_btree.sql.in
@@ -95,6 +96,7 @@ functions/readback/codepoint_for_id.sql.in
 functions/readback/is_all_whitespace.sql.in
 functions/readback/constituents.sql.in
 functions/readback/constituents_closure.sql.in
+functions/readback/constituents_closure_edges.sql.in
 functions/readback/vertex_atom.sql.in
 functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
@@ -347,6 +349,7 @@ functions/highway/laplace_highway_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in
 functions/highway/highway_mask_refresh.sql.in
 functions/ops/highway_mask_rebuild.sql.in
+functions/ops/constituent_edges_rebuild.sql.in
 functions/highway/attestations_highway_bits_gin.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in

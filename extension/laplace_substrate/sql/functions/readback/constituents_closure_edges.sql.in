@@ -1,0 +1,62 @@
+-- Edge-table closure — the render-hot-path successor to constituents_closure.
+--
+-- Same signature, same return, same ordering as constituents_closure, but implemented as a
+-- pure recursive JOIN over the materialized laplace.constituent_edges table: NO per-node
+-- physicalities probe and NO laplace_trajectory_constituents SRF. The recursion follows
+-- parent_id → child_id through the PK btree; the final projection reads each reached node's
+-- edges straight off the table in (parent_id, ordinal) order.
+--
+-- Correctness — byte-identical to constituents_closure given a correctly-populated table.
+-- constituent_edges[parent_id] IS, by construction (constituent_edges_rebuild /
+-- ingest-time population), the row-for-row decode of the parent's CANONICAL type=1
+-- physicality trajectory — the exact rows constituents_closure obtains from its `reach`
+-- LATERAL and its `picked` CTE, which decode the SAME lowest-id physicality through the SAME
+-- SRF. Trajectory decode is the single source of truth for both paths. Therefore:
+--   * reach — node-recursion, UNION-deduped on (entity_id, depth) exactly as the original.
+--     Joining constituent_edges on parent_id yields the identical child set the original's
+--     SRF LATERAL yields, so the reachable node set is identical at every depth.
+--   * final — one row per (reached node, ordinal); reading constituent_edges for a node
+--     emits the identical edge rows the original's `picked CROSS JOIN LATERAL` emits, and a
+--     leaf (no type=1 trajectory → no table rows) emits nothing, matching the original.
+--   * order — ORDER BY parent_id, ordinal is identical (and the C render re-imposes it).
+-- The depth arithmetic (GREATEST(COALESCE(p_max_depth, 32), 0), reach at depth<cap, node at
+-- depth<cap) mirrors constituents_closure line for line, so the p_max_depth=0 and NULL cases
+-- coincide as well.
+--
+-- NOT YET CUT OVER. The C render (generate_walk.c CLOSURE_QUERY) still calls
+-- constituents_closure. Cutover is a separate, validated step: after a live diff proves this
+-- function's output byte-identical to constituents_closure over representative roots, point
+-- CLOSURE_QUERY at laplace.constituents_closure_edges.
+CREATE OR REPLACE FUNCTION constituents_closure_edges(
+    p_roots bytea[],
+    p_max_depth integer DEFAULT 32
+)
+RETURNS TABLE(
+    parent_id bytea,
+    ordinal integer,
+    child_id bytea,
+    run_length integer,
+    flags bigint
+)
+LANGUAGE sql STABLE PARALLEL SAFE
+SET search_path = @extschema@, public AS $$
+WITH RECURSIVE reach(entity_id, depth) AS (
+    SELECT r.id, 0
+    FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
+    WHERE r.id IS NOT NULL
+    UNION
+    SELECT ce.child_id, rc.depth + 1
+    FROM reach rc
+    JOIN constituent_edges ce ON ce.parent_id = rc.entity_id
+    WHERE rc.depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+),
+node AS (
+    SELECT DISTINCT entity_id
+    FROM reach
+    WHERE depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+)
+SELECT ce.parent_id, ce.ordinal, ce.child_id, ce.run_length, ce.flags
+FROM node n
+JOIN constituent_edges ce ON ce.parent_id = n.entity_id
+ORDER BY ce.parent_id, ce.ordinal
+$$;
