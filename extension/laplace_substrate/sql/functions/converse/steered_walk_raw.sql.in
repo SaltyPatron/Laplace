@@ -1,0 +1,14 @@
+-- The converse_walk WALK phase: steered trigram->bigram backoff over a
+-- weighted token stream, natively (steered_walk.c). Pure computation over the
+-- arguments — deterministic per rng seed, no catalog access.
+CREATE OR REPLACE FUNCTION steered_walk_raw(
+    p_stream   bytea[],
+    p_weights  int8[],
+    p_core_seq bytea[],
+    p_starts   bytea[],
+    p_steps    int,
+    p_minlen   int,
+    p_rng      int8)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_steered_walk'
+    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

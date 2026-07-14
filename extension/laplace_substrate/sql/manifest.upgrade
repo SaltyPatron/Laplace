@@ -183,6 +183,7 @@ functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
 functions/converse/witness_precedes_chain.sql.in
 functions/converse/converse.sql.in
+functions/converse/steered_walk_raw.sql.in
 functions/converse/converse_walk.sql.in
 functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
