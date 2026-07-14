@@ -29,6 +29,72 @@ rule: EXPLAIN before trusting an index / profile before optimizing).
   LOWER priority than serving-path work (it's a one-shot export, not per-query).
 - [OPEN] evidence_receipt 310ms (profiling next), M3, M4, M6, M7, M8, L1, L2, L3
 
+## LABELING-DISCIPLINE CENSUS (2026-07-14, operator's three questions)
+
+Three systemic patterns, quantified across the SQL surface. The salient_facts
+and structural fixes are single instances; this is the full population.
+
+### #1 — Rendering/labeling BEFORE the final output boundary
+122 render/label call sites total across the surface:
+  render_text 41 · realize 32 · render 24 · type_label 12 ·
+  _realize_synset_lemma 4 · walk_text 3 · label_or_hex 3 ·
+  realize_translation 2 · synset_gloss 1
+The violation is labeling a pool larger than the output, before ORDER/LIMIT.
+Confirmed instances and status:
+  - salient_facts — labeled 413 rows for 24 out. FIXED (34707af), 870→260ms.
+  - evidence_receipt — already rank-first (its own Issue 52); labels an 80-row
+    pool. The remaining 310ms is the `folded` string_agg(render(source_id))
+    over every (type,object,source) triple. OPEN — candidate: fold source
+    labels once per DISTINCT source_id, not per triple.
+  - converse.sql / chat.sql — 8 and 12 label sites; render inside the generator
+    loop. Partly addressed by H1 (converse_walk). converse()/chat() bodies OPEN.
+Hot files by label-site count: chat(12), converse(8), evidence_receipt(5),
+converse_walk(5 pre-H1), resolve_name(4), realize_path_with_dirs(4).
+
+### #2 — Working on LABELS instead of IDs (filter/sort/group on rendered text)
+Contained — the surface mostly ranks on ids/eff_mu, not text. Live instances:
+  - WHERE on rendered text: 1 — translate_to:35 (language reference matched by
+    rendered surface; already resolved once at the input boundary, acceptable).
+  - ORDER BY on realize(): 5 — the converse-family ORIENT step (converse:42,
+    chat:52/128, converse_walk:47) runs realize(candidate synset) per prompt
+    token to pick the richest concept, plus evidence_receipt:59 orders the
+    source_labels string_agg by rendered text. The ORIENT realize()-per-candidate
+    is the one worth fixing (bounded by prompt-token count, but on the hot path).
+  - GROUP BY on rendered text: 0 live (translate_to already fixed this — homograph
+    conflation was the documented bug; it now groups on (member,lang) ids).
+
+### #3 — Returning IDs/hashes instead of resolved words + missing fanout hops
+This is the largest surface and the 3D-UI question.
+  - 85 functions RETURN a bytea id column; 31 in serving categories
+    (recall/converse/consensus/taxonomy/link/inspect/realize/lexical).
+    Returning the id ALONGSIDE a label is correct (the UI needs the id to hop);
+    returning it INSTEAD of a label is the bug.
+  - 39 return columns literally named *_id bytea.
+  - 8 hex-hash fallbacks (a node stopping on an identifier). Audit:
+      * structural_neighbors_of:53 — render_fast→hex, NO synset hop. The 3D-UI
+        bug: synset/ILI hubs plotted as hashes. FIXED (8234427) → realize().
+      * structural_neighbors:42 — WHERE render_fast IS NOT NULL silently DROPPED
+        hubs from the 3D view. FIXED (8234427) → realize(), drop only unlabelable.
+      * consensus_out_labeled:30, evidence_receipt:96, label:37, render:22 —
+        CORRECT: synset-lemma/realize hop FIRST, hex only as genuine last resort.
+      * constituent_edges_rebuild:65 — a RAISE NOTICE log line, not output. OK.
+
+### Design answer — should a node stop on an ILI/synset id?
+No. `realize()` IS the canonical full-mesh resolver and the answer to all three:
+  resolve_name (HAS_NAME primary + HAS_NAME_ALIAS + synset-lemma sibling hop,
+  family-aware) → render_text → translation → canonical → gloss, and it ABSTAINS
+  (NULL) rather than emitting a hash.
+The correct pattern everywhere, now proven cheap by the rank-before-label work:
+  1. rank + LIMIT on IDs / eff_mu (never on rendered text);
+  2. resolve labels ONLY over the survivor pool, via realize() (the full mesh,
+     not bare render_text / render_text_fast);
+  3. hex only as a genuine last resort, and NEVER as a silent WHERE-drop.
+A synset/ILI node with sibling name/lemma/translation edges must surface the
+real word — stopping on the identifier when a one-hop resolves it is the bug.
+Remaining #3 sweep (OPEN): the other 30 serving functions that return bytea ids
+— audit each for "id WITH label" vs "id INSTEAD of label"; the ones feeding the
+UI (explore/converse/link families) are priority.
+
 ## SERVING-PATH LATENCY (hart-server real data, warm, 2026-07-14)
 
 Measured per the operator's frequency×cost×impact steer. This is the real
