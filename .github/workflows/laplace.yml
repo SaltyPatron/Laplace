@@ -93,7 +93,7 @@ jobs:
           exit "$fail"
 
       - name: Validate witness-manifest vs orchestration scripts
-        run: python scripts/validate-pipeline.py
+        run: python3 scripts/validate-pipeline.py
 
       - name: Regenerate attestation law + verify deterministic
         run: |
@@ -112,13 +112,13 @@ jobs:
             extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
             extension/laplace_substrate/sql/generated/seed_pos.sql.in
           )
-          python scripts/codegen-attestation-law.py
+          python3 scripts/codegen-attestation-law.py
           for f in "${outs[@]}"; do
             [ -f "$f" ] || { echo "::error file=$f::codegen did not produce a declared output"; exit 1; }
           done
           a=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
           rm -f "${outs[@]}" engine/core/src/generated/.attestation-law-stamp
-          python scripts/codegen-attestation-law.py
+          python3 scripts/codegen-attestation-law.py
           b=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
           [ "$a" = "$b" ] || { echo "::error::codegen NON-DETERMINISTIC ($a != $b) — same TOML, different output; breaks content-addressing"; exit 1; }
           echo "codegen deterministic across a clean regen: $a"
