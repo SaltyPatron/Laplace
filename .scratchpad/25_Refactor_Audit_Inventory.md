@@ -95,6 +95,77 @@ Remaining #3 sweep (OPEN): the other 30 serving functions that return bytea ids
 — audit each for "id WITH label" vs "id INSTEAD of label"; the ones feeding the
 UI (explore/converse/link families) are priority.
 
+## NATIVE-LIFT CENSUS — RBAR sites → shared SPI primitives (2026-07-14)
+
+Layer law (operator, restated): **SQL = librarian/mailman** (route intent, look
+up rows, hand id-arrays to the machinery, shape the output tuple — NEVER compute);
+**C/C++/SPI = machinery** (owns the loop, the memory, the traversal, the vector
+units); **C# = interaction** (talks to user/world, drives SQL, math via DllImport).
+Decision rule: **if a SQL or C# line PRODUCES a value rather than ROUTING one, it
+belongs in a native kernel.** The kernels are SHARED primitives the librarian calls
+by name — not one-off rewrites — as recall.c / generate_walk.c already are.
+
+Census signatures swept across all 27 families:
+  - plpgsql LOOP/WHILE/FOR: 14 files
+  - WITH RECURSIVE: 4 files
+  - per-row render/realize/label/rank in SELECT/WHERE/ORDER/GROUP: 257 sites / 107 files
+    (of which the EXPENSIVE label subset — render_text/render/realize/
+    _realize_synset_lemma/type_label — is ~113; eff_mu/edge_rank/word_language are
+    cheap arithmetic/single-lookup, vectorize inside the kernels, low per-row cost)
+
+### The shared primitive library (machine-room public API) — build order
+
+1. **`realize_batch(ids bytea[], lang bytea) → text[]`**  ★ HIGHEST LEVERAGE
+   Resolves N ids → N labels in ONE pass, full mesh (resolve_name: HAS_NAME +
+   synset-lemma sibling hop + alias → render → translation → canonical → gloss;
+   abstains, never hex). Absorbs ~113 per-row label sites across ~107 files.
+   Librarian pattern becomes: rank/LIMIT on ids → hand survivor id-array to
+   realize_batch → done. Kills the labeling RBAR everywhere at once AND answers
+   the "return words not hashes / don't stop on an ILI id" question structurally.
+   Composes with (and largely obsoletes the need to hand-tune) rank-before-label.
+
+2. **`rank_edges(subject_ids bytea[], types bytea[], k int) → TABLE(type_id,
+   object_id, rating, rd, eff_mu, witness_count) ordered`**
+   Native scan + eff_mu (rating−2·rd) + edge_rank + top-k partial sort. AVX on the
+   numeric. Absorbs the ranking cores of salient_facts, evidence_receipt,
+   consensus_out_labeled, related, top_relations, salient — the librarian passes
+   subject ids + type filter, gets the ranked pool back, then realize_batch labels it.
+
+3. **`taxonomy_closure(seed_ids bytea[], dir enum, depth int) → TABLE(node, hop, mu)`**
+   Native frontier-queue (the generate_walk.c/astar_path.c pattern). Absorbs the
+   4 recursive CTEs: laplace_ancestry, constituents_closure, constituents_closure_edges,
+   and the traversal half of bubble_up/hypernyms. Frontier queue in C beats both a
+   recursive CTE and a plpgsql loop (owns order + memory).
+
+4. **`resolve_path(x bytea, y bytea, depth int) → TABLE(chain_ids bytea[], types,
+   dirs, mu)`**
+   Native bidirectional typed path search. Absorbs relate_path's recursive CTE and
+   UNIFIES with astar_path.c (currently two path implementations — relate_path
+   recursive-CTE + astar_path_raw native; one-implementation-per-fact says merge).
+   Returns id-arrays; realize_batch renders the winner.
+
+5. **`witness_precedes_batch(ids bytea[], source bytea) → int`**
+   One native call deposits all consecutive-token PRECEDES bigrams. Absorbs
+   witness_precedes_chain's plpgsql `FOR i .. LOOP PERFORM laplace_witness` (N−1
+   single-row SPI deposits → one batched deposit). Write-path RBAR.
+
+### Exonerated — librarian doing its actual job (do NOT lift)
+The 14 plpgsql-loop files are almost all legitimate ORCHESTRATION: the fold family
+(consensus_fold_one_partition, consensus_fold_swap, create_*_staging,
+finish_consensus_fold[_steps], walk_fold_finalize, materialize_period_consensus,
+drop_period_staging) loops over PARTITIONS to DISPATCH to native
+consensus_fold_walks() — the librarian handing batches to the machine room, correct.
+Same for constituent_edges_rebuild / highway_mask_rebuild / drop_retired_content_lane
+(maintenance loops dispatching to native/DDL). These route work; they don't do it.
+
+### Sequenced plan
+realize_batch (1) first — biggest surface, unlocks the "words not hashes" fix and
+makes rank-before-label a non-issue. Then rank_edges (2) — collapses the serving
+ranking cores. Then taxonomy_closure (3) + resolve_path (4) kill the recursive CTEs
+and de-dup the path logic. witness_precedes_batch (5) is small, do alongside.
+Sourced ceiling (see doc tail): ~1–2 orders of magnitude on the hot serving fns;
+C-in-extension runs at built-in-operator parity, plpgsql RBAR is the worst case.
+
 ## SERVING-PATH LATENCY (hart-server real data, warm, 2026-07-14)
 
 Measured per the operator's frequency×cost×impact steer. This is the real
