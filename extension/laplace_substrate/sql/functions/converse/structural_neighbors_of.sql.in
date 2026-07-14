@@ -50,7 +50,14 @@ BEGIN
         ORDER BY geo
         LIMIT GREATEST(1, p_k))
     SELECT n.entity_id,
-           COALESCE(NULLIF(render_text_fast(n.entity_id, 8), ''), left(encode(n.entity_id, 'hex'), 16)),
+           -- Full-mesh resolution, not a bare surface render: a KNN neighbour is
+           -- often a synset / ILI / concept hub with an S³ coord but no direct
+           -- renderable surface, so render_text_fast() returned '' and the node
+           -- reached the 3D overlay as a hex hash. realize() hops the sibling
+           -- name/synset-lemma/translation arms to the real word first; hex stays
+           -- only as the genuine last resort so the node still plots. Bounded:
+           -- runs over <= p_k rows, after the KNN LIMIT.
+           COALESCE(NULLIF(realize(n.entity_id), ''), left(encode(n.entity_id, 'hex'), 16)),
            ST_X(n.coord), ST_Y(n.coord), ST_Z(n.coord), ST_M(n.coord),
            n.radius_origin,
            n.geo,

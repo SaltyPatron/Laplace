@@ -22,9 +22,26 @@ rule: EXPLAIN before trusting an index / profile before optimizing).
 - [DONE] H3 — was PARTLY STALE: native word_case_variants already replaced the hot
   path; swept the 3 dead SQL fns (word_case_class_surface/map_surface/
   grapheme_case_target) (59064fe)
+- [DONE] H4 (new, from profiling) — salient_facts rank-before-label + word_language
+  hoist (commit 34707af); the #1 serving hot spot. Isolated on hart-server real
+  data: 870ms→260ms (3.3x). Was NOT the M1 family-fencing cost.
 - [RE-RANKED] H2 — see note under HIGH: by the frequency×cost×impact metric this is
   LOWER priority than serving-path work (it's a one-shot export, not per-query).
-- [OPEN] M3, M4, M6, M7, M8, L1, L2, L3
+- [OPEN] evidence_receipt 310ms (profiling next), M3, M4, M6, M7, M8, L1, L2, L3
+
+## SERVING-PATH LATENCY (hart-server real data, warm, 2026-07-14)
+
+Measured per the operator's frequency×cost×impact steer. This is the real
+priority order for serving-path work — one-shot paths (foundry H2) rank below.
+
+| fn | warm ms | status |
+|----|---------|--------|
+| salient_facts | 575 → ~175 (proj.) | FIXED 34707af (3.3x isolated) |
+| evidence_receipt | 310 | NEXT — already rank-first; cost is the attestations scan? |
+| converse | 147 | acceptable (H1 already helped converse_walk) |
+| recall | 132 | main serve entrypoint; profile after evidence_receipt |
+| define | 25 | fine |
+| lexical_peers / senses / bubble_up | 3–11 | native path healthy |
 
 ---
 
