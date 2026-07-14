@@ -333,7 +333,8 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
                             long seq = Interlocked.Increment(ref rowSeq);
                             var record = new GrammarIngestRecord(
                                 lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
-                            parsed.Writer.WriteAsync(record, runCt).AsTask().GetAwaiter().GetResult();
+                            if (!parsed.Writer.TryWrite(record))
+                                parsed.Writer.WriteAsync(record, runCt).AsTask().GetAwaiter().GetResult();
                             continue;
                         }
                         if (!reader.WaitToReadAsync(runCt).AsTask().GetAwaiter().GetResult())
@@ -427,7 +428,8 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
                             long total = Interlocked.Increment(ref rowsTotal);
                             int idx = (int)Interlocked.Increment(ref rowIndex) - 1;
                             var record = new GrammarIngestRecord(lineUtf8, ast, idx, total);
-                            parsed.Writer.WriteAsync(record, ct).AsTask().GetAwaiter().GetResult();
+                            if (!parsed.Writer.TryWrite(record))
+                                parsed.Writer.WriteAsync(record, ct).AsTask().GetAwaiter().GetResult();
                             continue;
                         }
                         if (!reader.WaitToReadAsync(ct).AsTask().GetAwaiter().GetResult())

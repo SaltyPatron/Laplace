@@ -630,40 +630,50 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
 
 
 
+    // Run counts are almost always <= 2 (one run per score value; ushort splits
+    // only past 65,535 games), so the buffers live on the stack and this method
+    // allocates nothing but the packed payload.
+    private const int RunStackMax = 8;
+
     private static TestimonyWalkRow ConvertPartialToWalk(Acc acc)
     {
         long games = acc.Games, sum = acc.SumScoreFp1e9;
         long q = sum / games, rem = sum % games;
         if (rem < 0) { q--; rem += games; }
 
-        var objects = new List<Hash128>(2);
-        var scores = new List<long>(2);
-        var runs = new List<ushort>(2);
-        Hash128 obj = acc.Object ?? default;
-        AppendRuns(objects, scores, runs, obj, q, games - rem);
-        AppendRuns(objects, scores, runs, obj, q + 1, rem);
+        long loCount = games - rem, hiCount = rem;
+        int n = RunCount(loCount) + RunCount(hiCount);
+        Span<Hash128> objects = n <= RunStackMax ? stackalloc Hash128[RunStackMax] : new Hash128[n];
+        Span<long> scores = n <= RunStackMax ? stackalloc long[RunStackMax] : new long[n];
+        Span<ushort> runs = n <= RunStackMax ? stackalloc ushort[RunStackMax] : new ushort[n];
 
-        byte[] packed = TestimonyWalk.Pack(
-            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(objects),
-            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(scores),
-            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(runs));
+        Hash128 obj = acc.Object ?? default;
+        int w = FillRuns(objects, scores, runs, 0, obj, q, loCount);
+        w = FillRuns(objects, scores, runs, w, obj, q + 1, hiCount);
+
+        byte[] packed = TestimonyWalk.Pack(objects[..w], scores[..w], runs[..w]);
         return new TestimonyWalkRow(
             acc.Subject, acc.Type, null, acc.PhiFp1e9,
-            packed, objects.Count, games, acc.MaxTsUnixUs);
+            packed, w, games, acc.MaxTsUnixUs);
     }
 
-    private static void AppendRuns(
-        List<Hash128> objects, List<long> scores, List<ushort> runs,
-        Hash128 obj, long score, long count)
+    private static int RunCount(long count)
+        => count <= 0 ? 0 : (int)((count + ushort.MaxValue - 1) / ushort.MaxValue);
+
+    private static int FillRuns(
+        Span<Hash128> objects, Span<long> scores, Span<ushort> runs,
+        int w, Hash128 obj, long score, long count)
     {
         while (count > 0)
         {
             ushort run = count > ushort.MaxValue ? ushort.MaxValue : (ushort)count;
-            objects.Add(obj);
-            scores.Add(score);
-            runs.Add(run);
+            objects[w] = obj;
+            scores[w] = score;
+            runs[w] = run;
+            w++;
             count -= run;
         }
+        return w;
     }
 
     private const long PgEpochDeltaUs = 946_684_800_000_000L;

@@ -103,15 +103,29 @@ sharded striped-lock struct table, or push accumulation across the native bounda
 **Fix sketch:** span-based field slices over the chunk buffer feeding the composer
 without intermediate strings where the consumer allows; measure first.
 
-### M5. Sync-over-async in production code — 18 files, 32 sites
-`grep '\.Result\b|\.Wait\(\)|GetAwaiter\(\)\.GetResult\(\)'`
-- Production hits: `NpgsqlWorkingSetApply.cs` (3), `GrammarIngestAdapter.cs` (4),
-  `Chess/Modality/MatchRunner.cs` (3), `FoundryCommands.cs` (4),
-  `ChessEngineService.cs`, `AppComposition.cs`, `ChessLabRunners/Recorder`, etc.
-- Endpoints host runs under IIS — blocking threadpool threads there is starvation
-  risk, not style.
-**Fix sketch:** enumerate all 32, classify (CLI Main = harmless; request path or
-pipeline = fix), convert the latter to async.
+### M5. Sync-over-async — RESOLVED 2026-07-14: mostly benign by design
+Classified all 32 sites. Outcome:
+- FIXED: `GrammarIngestAdapter.cs:336,430` — added `TryWrite` fast path before the
+  blocking channel write on the pinned parse workers.
+- EXONERATED: `NpgsqlWorkingSetApply:198-200` + `FoundryCommands:581-584` read
+  `.Result` after `await Task.WhenAll` (completed); `CpuTopology:336,381` +
+  grammar workers are dedicated pinned threads (blocking = backpressure design);
+  `SemLinkIngestAdapter:152` is `.Result` inside ContinueWith; `OpenGameAsync`
+  returns `Task.CompletedTask`; ~10 hits are property names, not Task.Result.
+- TOLERATED: `AppComposition.cs:25` — once-ever DI singleton factory at startup.
+- ESCALATED → see M8 below: `MatchRunner.cs:196` blocks per ply, but the real cost
+  is the per-ply design it wraps.
+
+### M8. Chess live-learning: DB apply + FoldIncrementalAsync PER PLY behind one gate
+`app/Laplace.Chess/Service/ChessLiveGameHost.cs:73-107` (RecordPlyAsync),
+consumed per-ply from `MatchRunner.cs:193-197` inside `Parallel.For`.
+- Every ply of every parallel lab game: semaphore → SubstrateChange build → DB
+  apply → incremental fold, serialized process-wide by `_writeGate`, blocking a
+  threadpool thread each time. N-game concurrency degrades to 1-ply-at-a-time.
+- NOT mechanically fixable: batching plies changes learning-loop semantics (UCI
+  reads consensus mid-game). Needs an operator design decision — e.g. per-game
+  flush for lab matches (keep per-ply only for live lichess), or an async channel
+  consumer owning the writes.
 
 ### M6. CTE materialization is implicit almost everywhere
 - 73 files use CTEs; only 7 make an explicit MATERIALIZED / NOT MATERIALIZED
