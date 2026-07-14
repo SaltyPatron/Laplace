@@ -155,7 +155,6 @@ functions/lexical/senses_bootstrap.sql.in
 functions/lexical/senses_with_context_bootstrap.sql.in
 functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
-functions/lexical/examples_bootstrap.sql.in
 functions/converse/word_id.sql.in
 functions/converse/resolve_ref.sql.in
 functions/converse/word_segment.sql.in
