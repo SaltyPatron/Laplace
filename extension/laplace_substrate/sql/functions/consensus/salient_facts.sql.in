@@ -15,6 +15,10 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         SELECT c.subject_id AS id FROM consensus c
         WHERE c.type_id = relation_type_id('IS_A')
           AND c.object_id = relation_type_id('HAS_FEATURE')
+    ), lang AS (
+        -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
+        -- short-circuits and word_language() is never evaluated.
+        SELECT COALESCE(p_lang, word_language(p_word)) AS l
     ), subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
     ), top AS (
@@ -41,13 +45,27 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
               AND obj_rt.id IS NULL
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
-    )
-    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT type_label(t.type_id) AS type,
-               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
-               eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
+    ), ranked AS (
+        -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
+        -- shape ran realize() + type_label over EVERY row of `top` (dog: 413
+        -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
+        -- ~1.5ms/render x 413 dominated the call (~575ms warm on real data).
+        -- Ranking needs only the eff_mu already in `top`, so it runs first over
+        -- everything; labeling then runs over a small over-fetched pool
+        -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
+        -- filters below drop rows). Same eff_mu order, same result set.
+        SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
                eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t
+        ORDER BY eff_mu(t.rating, t.rd) DESC
+        LIMIT p_limit * 3 + 8
+    )
+    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
+        SELECT type_label(r.type_id) AS type,
+               realize(r.object_id, (SELECT l FROM lang)) AS fact,
+               eff_mu_display(r.rating, r.rd) AS eff_mu, r.witness_count AS witnesses,
+               r.sort_mu
+        FROM ranked r
     ) d
     WHERE d.fact IS NOT NULL AND d.fact <> ''
       AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'

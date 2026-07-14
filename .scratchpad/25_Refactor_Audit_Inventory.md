@@ -11,6 +11,21 @@ Severity: perf impact × law violation × blast radius. Each finding carries a f
 sketch. "EXPLAIN-gate" = confirm on live data before investing (per the engineering
 rule: EXPLAIN before trusting an index / profile before optimizing).
 
+## STATUS (updated 2026-07-14, branch claude/audit-refactor)
+
+- [DONE] M2 — ConvertPartialToWalk stackalloc (commit b19f08e)
+- [DONE] M5 — sync-over-async classified; GrammarIngestAdapter TryWrite (b19f08e);
+  real remainder escalated as M8 (below)
+- [DONE] M1 — salient_facts + evidence_receipt family fencing (8d2a59e)
+- [DONE] H1 — converse_walk WALK native (steered_walk.c), GATHER set-based (0f32643);
+  verified on hart-server: GATHER 789ms→231ms, outputs bit-identical
+- [DONE] H3 — was PARTLY STALE: native word_case_variants already replaced the hot
+  path; swept the 3 dead SQL fns (word_case_class_surface/map_surface/
+  grapheme_case_target) (59064fe)
+- [RE-RANKED] H2 — see note under HIGH: by the frequency×cost×impact metric this is
+  LOWER priority than serving-path work (it's a one-shot export, not per-query).
+- [OPEN] M3, M4, M6, M7, M8, L1, L2, L3
+
 ---
 
 ## HIGH
