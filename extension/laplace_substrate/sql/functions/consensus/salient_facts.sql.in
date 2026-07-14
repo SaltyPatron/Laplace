@@ -5,6 +5,16 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
     SET search_path = @extschema@, public AS $$
     WITH reltypes AS MATERIALIZED (
         SELECT id FROM entities WHERE type_id = entity_type_id('RelationType')
+    ), feat_dynamic AS MATERIALIZED (
+        -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
+        -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
+        -- Fenced ONCE here: relation_in_family() has a SET search_path clause, so
+        -- the planner can never inline it and its EXISTS probe would run per
+        -- candidate row. Same truth table: static family via the C check below,
+        -- dynamic membership via this set.
+        SELECT c.subject_id AS id FROM consensus c
+        WHERE c.type_id = relation_type_id('IS_A')
+          AND c.object_id = relation_type_id('HAS_FEATURE')
     ), subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
     ), top AS (
@@ -16,12 +26,8 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
               AND c.type_id IN (SELECT id FROM reltypes)
               AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
-              -- HAS_FEATURE via the dynamic-aware relation_in_family() (not the
-              -- static-only NOT IN below) so dynamic FEAT_* children minted at ingest
-              -- (FEAT_case, FEAT_number, ...) are suppressed alongside the static root.
-              -- Output-identical for static data: the static HAS_FEATURE family is the
-              -- root alone, which the static OR-branch still excludes.
-              AND NOT relation_in_family(c.type_id, 'HAS_FEATURE')
+              AND NOT relation_type_in_family(c.type_id, 'HAS_FEATURE')
+              AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
               AND c.type_id NOT IN (
                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                 relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),

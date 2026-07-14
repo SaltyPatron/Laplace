@@ -13,6 +13,14 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         SELECT p_id
         UNION
         SELECT sn.synset_id FROM senses(p_id) sn
+    ), feat_dynamic AS MATERIALIZED (
+        -- Dynamic HAS_FEATURE children fenced once; relation_in_family() never
+        -- inlines (SET search_path), so calling it per attestation row ran its
+        -- EXISTS probe per row. Same truth table: static family via the C check
+        -- below, dynamic membership via this set.
+        SELECT c.subject_id AS id FROM consensus c
+        WHERE c.type_id = relation_type_id('IS_A')
+          AND c.object_id = relation_type_id('HAS_FEATURE')
     ), filtered AS (
         SELECT a.type_id, a.object_id, a.source_id,
                sum(a.observation_count) AS obs
@@ -23,12 +31,8 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
               SELECT 1 FROM entities et
               WHERE et.id = a.type_id AND et.type_id = entity_type_id('RelationType'))
           AND NOT relation_type_in_family(a.type_id, 'HAS_POS')
-          -- HAS_FEATURE via the dynamic-aware relation_in_family() (not the static-only
-          -- NOT IN below) so dynamic FEAT_* children minted at ingest (FEAT_case,
-          -- FEAT_number, ...) are suppressed alongside the static root. Output-identical
-          -- for static data: the static HAS_FEATURE family is the root alone, which the
-          -- static OR-branch still excludes.
-          AND NOT relation_in_family(a.type_id, 'HAS_FEATURE')
+          AND NOT relation_type_in_family(a.type_id, 'HAS_FEATURE')
+          AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
           AND a.type_id NOT IN (
               relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
               relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
