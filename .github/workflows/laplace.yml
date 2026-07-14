@@ -56,7 +56,12 @@ jobs:
 
   policy:
     name: Policy — manifest, attestation, vocabulary
-    runs-on: ubuntu-latest
+    # Self-hosted (was ubuntu-latest): it was the ONLY GitHub-hosted job, and `build` needs it.
+    # When the account's hosted-minutes/spending-limit blocks hosted jobs, GitHub refuses to
+    # schedule the whole run (0 jobs, indefinitely pending) even though every other job is
+    # self-hosted. These checks are pure python/bash/git (validate-pipeline, regenerate+verify
+    # deterministic, banned-terms) — safe on the self-hosted runner, which already runs `deps`.
+    runs-on: [self-hosted, laplace]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
