@@ -1,0 +1,12 @@
+-- Retired: the SQL word-case surface chain
+--   word_case_class_surface(word) -> word_case_map_surface(word, map)
+--     -> grapheme_case_target(grapheme, map)
+-- is fully superseded by the native, batched word_case_variants (src/lexical_case.c),
+-- which is what word_case_variant_ids -> lexical_peers and every live caller now use.
+-- The old chain fanned one lexical lookup into O(3 * graphemes) non-inlinable
+-- consensus LIMIT-1 subqueries plus O(graphemes) render_text SPI calls (the RBAR on
+-- the hot senses/define/bubble_up path). All three were dead in the call graph after
+-- the native migration; dropped rather than left as slow, unreachable code.
+DROP FUNCTION IF EXISTS word_case_class_surface(bytea);
+DROP FUNCTION IF EXISTS word_case_map_surface(bytea, text);
+DROP FUNCTION IF EXISTS grapheme_case_target(bytea, text);

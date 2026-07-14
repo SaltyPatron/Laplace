@@ -1,6 +1,0 @@
-CREATE OR REPLACE FUNCTION word_case_class_surface(p_word bytea)
-    RETURNS text
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT word_case_map_surface(p_word, 'lower')
-$$;

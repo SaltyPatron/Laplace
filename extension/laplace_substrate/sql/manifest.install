@@ -210,11 +210,9 @@ functions/structural/consensus_export_relations.sql.in
 functions/structural/consensus_export_unary.sql.in
 functions/structural/consensus_export_relations_mu.sql.in
 functions/structural/model_recipes.sql.in
-functions/lexical/grapheme_case_target.sql.in
-functions/lexical/word_case_map_surface.sql.in
 functions/lexical/word_case_variants.sql.in
 functions/lexical/word_case_variant_ids.sql.in
-functions/lexical/word_case_class_surface.sql.in
+functions/lexical/drop_retired_case_surface.sql.in
 functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/lexical_peers.sql.in
