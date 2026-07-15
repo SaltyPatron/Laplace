@@ -22,7 +22,7 @@ public class ConsensusAccumulatingWriterTests
         var typeId = Hash128.OfCanonical("FoldingTestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
+          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id, tier) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
 
@@ -30,7 +30,7 @@ public class ConsensusAccumulatingWriterTests
         {
             await using var c = _pg.DataSource.CreateCommand(
                 "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-              + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
+              + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id, tier) DO NOTHING");
             c.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, id.ToBytes());
             c.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
             await c.ExecuteNonQueryAsync();

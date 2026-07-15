@@ -1,16 +1,47 @@
+-- consensus: the convergence table, LIST-partitioned along the HIGHWAY axis
+-- (type_id = the relation). Each triple has ONE fixed relation, so every
+-- cross-modal witness of (subject, type, object) still folds into one row in
+-- one partition — the merge invariant is untouched; partitioning only files
+-- each triple under its relation. Per-relation partitions are generated from
+-- the governed manifest (generated/seed_relation_partitions.sql.in, emitted by
+-- scripts/codegen-attestation-law.py); dynamic relations (EDEP_*/FEAT_*) land
+-- in the DEFAULT partition until the next codegen+reseed (the relation-addition
+-- law already owes that reseed). Small per-partition indexes stay LIVE during
+-- bulk loads — this retires the index drop/rebuild cycle.
+--
+-- PK includes the partition keys (PG rule for unique constraints on partitioned
+-- tables, including the HASH(subject_id) sub-partitions of hot relations); id
+-- stays unique by construction (id = blake3(subject‖type‖object)).
+--
+-- FKs to entities are dropped by design: a partitioned entities has no unique
+-- (id) to reference, and per-row FK validation on 100M-row COPYs was pure cost.
+-- Referential integrity is structural (content-addressed ids).
+--
+-- GREENFIELD: an existing non-partitioned DB cannot ALTER into this layout —
+-- db-reset + reseed is the upgrade path (IF NOT EXISTS leaves a legacy plain
+-- table untouched; the partition generator skips non-partitioned targets).
 CREATE TABLE IF NOT EXISTS consensus (
-    id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
-    subject_id        bytea       NOT NULL REFERENCES entities(id),
-    type_id           bytea       NOT NULL REFERENCES entities(id),
-    object_id         bytea                REFERENCES entities(id),
+    id                bytea       NOT NULL CHECK (octet_length(id) = 16),
+    subject_id        bytea       NOT NULL,
+    type_id           bytea       NOT NULL,
+    object_id         bytea,
     rating            bigint      NOT NULL,
     rd                bigint      NOT NULL CHECK (rd > 0),
     volatility        bigint      NOT NULL CHECK (volatility > 0),
     witness_count     bigint      NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
-    last_observed_at  timestamptz NOT NULL
-);
+    last_observed_at  timestamptz NOT NULL,
+    PRIMARY KEY (id, type_id, subject_id)
+) PARTITION BY LIST (type_id);
 
--- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in).
-ALTER TABLE consensus SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+DO $$
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relname = 'consensus') = 'p'
+       AND to_regclass(current_schema() || '.consensus_rdefault') IS NULL THEN
+        CREATE TABLE consensus_rdefault PARTITION OF consensus DEFAULT;
+        EXECUTE 'ALTER TABLE consensus_rdefault SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+    END IF;
+END $$;
+
 
 SELECT pg_extension_config_dump('consensus', '');

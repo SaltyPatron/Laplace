@@ -133,7 +133,7 @@ BEGIN
     
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (relation_type_id('COMPLETES_TO'), 0, entity_type_id('RelationType'), src)
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id, tier) DO NOTHING;
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES (consensus_id(w_end, relation_type_id('COMPLETES_TO'), w_target),

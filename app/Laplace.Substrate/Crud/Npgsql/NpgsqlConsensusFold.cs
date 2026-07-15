@@ -118,7 +118,7 @@ public sealed partial class ConsensusAccumulatingWriter
 
             var priors = _freshSource
                 ? new Dictionary<Hash128, (long Rating, long Rd, long Vol, long Witnesses)>()
-                : await ReadPriorsAsync(cids, ct);
+                : await ReadPriorsAsync(cids, accs, ct);
 
             // Fold math is pure native glicko-2 — stripe it across P-cores.
             var foldedStates = new Glicko2State[n];
@@ -157,6 +157,8 @@ public sealed partial class ConsensusAccumulatingWriter
 
             var novel = new List<int>(n);
             var updIds = new List<byte[]>();
+            var updTypes = new List<byte[]>();
+            var updSubjects = new List<byte[]>();
             var updRating = new List<long>();
             var updRd = new List<long>();
             var updVol = new List<long>();
@@ -167,6 +169,8 @@ public sealed partial class ConsensusAccumulatingWriter
                 if (hasPriorFlags[i])
                 {
                     updIds.Add(cids[i].ToBytes());
+                    updTypes.Add(accs[i].Type.ToBytes());
+                    updSubjects.Add(accs[i].Subject.ToBytes());
                     updRating.Add(foldedStates[i].RatingFp1e9);
                     updRd.Add(foldedStates[i].RdFp1e9);
                     updVol.Add(foldedStates[i].VolatilityFp1e9);
@@ -217,14 +221,17 @@ public sealed partial class ConsensusAccumulatingWriter
                 // thousands of bytea[]+bigint[] arrays AV'd postgres.exe
                 // (0xc0000005) mid-WordNet fold 2026-07-11 16:40:38 WER — the
                 // client saw "connection forcibly closed" / crash recovery.
+                // type_id/subject_id ride along so runtime pruning routes each
+                // UPDATE row to its single partition (see ReadPriorsAsync).
                 const string updSql =
                     "UPDATE laplace.consensus c SET "
                     + "  rating = d.rating, rd = d.rd, volatility = d.volatility, "
                     + "  witness_count = d.witness_count, last_observed_at = d.ts "
                     + "FROM (SELECT unnest($1::bytea[]) AS id, unnest($2::bigint[]) AS rating, "
                     + "             unnest($3::bigint[]) AS rd, unnest($4::bigint[]) AS volatility, "
-                    + "             unnest($5::bigint[]) AS witness_count, unnest($6::timestamptz[]) AS ts) d "
-                    + "WHERE c.id = d.id";
+                    + "             unnest($5::bigint[]) AS witness_count, unnest($6::timestamptz[]) AS ts, "
+                    + "             unnest($7::bytea[]) AS type_id, unnest($8::bytea[]) AS subject_id) d "
+                    + "WHERE c.id = d.id AND c.type_id = d.type_id AND c.subject_id = d.subject_id";
                 for (int off = 0; off < updIds.Count; off += FoldWriteChunkIds)
                 {
                     int m = Math.Min(FoldWriteChunkIds, updIds.Count - off);
@@ -244,6 +251,10 @@ public sealed partial class ConsensusAccumulatingWriter
                     { Value = updWitness.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                     upd.Parameters.Add(new NpgsqlParameter
                     { Value = updTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updTypes.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    upd.Parameters.Add(new NpgsqlParameter
+                    { Value = updSubjects.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     await upd.ExecuteNonQueryAsync(ct);
                 }
             }
@@ -295,7 +306,7 @@ public sealed partial class ConsensusAccumulatingWriter
     }
 
     private async Task<Dictionary<Hash128, (long Rating, long Rd, long Vol, long Witnesses)>>
-        ReadPriorsAsync(Hash128[] cids, CancellationToken ct)
+        ReadPriorsAsync(Hash128[] cids, Acc[] accs, CancellationToken ct)
     {
         var priors = new Dictionary<Hash128, (long, long, long, long)>();
         if (cids.Length == 0) return priors;
@@ -308,16 +319,35 @@ public sealed partial class ConsensusAccumulatingWriter
             int start = c * FoldProbeChunkIds;
             int m = Math.Min(FoldProbeChunkIds, cids.Length - start);
             var chunk = new byte[m][];
-            for (int i = 0; i < m; i++) chunk[i] = cids[start + i].ToBytes();
+            var types = new byte[m][];
+            var subjects = new byte[m][];
+            for (int i = 0; i < m; i++)
+            {
+                chunk[i] = cids[start + i].ToBytes();
+                types[i] = accs[start + i].Type.ToBytes();
+                subjects[i] = accs[start + i].Subject.ToBytes();
+            }
 
             await using var conn = await _ds.OpenConnectionAsync(token);
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 0;
+            // The probe carries the partition keys (type_id, subject_id) alongside
+            // the id: consensus is LIST(type_id) + HASH(subject_id)-partitioned, so
+            // a bare `id = ANY($1)` would probe every leaf's PK index per chunk.
+            // Joining on all three keys lets runtime pruning route each probe to
+            // its single leaf partition.
             cmd.CommandText =
-                "SELECT id, rating, rd, volatility, witness_count "
-                + "FROM laplace.consensus WHERE id = ANY($1)";
+                "SELECT c.id, c.rating, c.rd, c.volatility, c.witness_count "
+                + "FROM (SELECT unnest($1::bytea[]) AS id, unnest($2::bytea[]) AS type_id, "
+                + "             unnest($3::bytea[]) AS subject_id) k "
+                + "JOIN laplace.consensus c ON c.id = k.id AND c.type_id = k.type_id "
+                + "                        AND c.subject_id = k.subject_id";
             cmd.Parameters.Add(new NpgsqlParameter
             { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             var rows = new List<(Hash128, (long, long, long, long))>();
             await using var rd = await cmd.ExecuteReaderAsync(token);
             while (await rd.ReadAsync(token))

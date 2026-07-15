@@ -15,7 +15,7 @@ FROM test_fixtures
 WHERE id IN (
     SELECT id FROM test_fixtures LIMIT 4
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id, tier) DO NOTHING;
 
 SELECT encode(entities_exist_bitmap(ARRAY(
     SELECT id FROM test_fixtures WHERE id IN (

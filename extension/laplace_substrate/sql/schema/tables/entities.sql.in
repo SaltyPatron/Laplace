@@ -1,14 +1,52 @@
+-- entities: LIST-partitioned by compositional tier (the fixed vertical axis —
+-- a node's order in its modality's containment DAG; tier is a FLOOR, never in
+-- the hash). Static tier partitions 0..4 plus DEFAULT for higher/unknown
+-- orders; tier 2 (words/concepts — the dominant population) sub-partitions
+-- HASH(id) x8 so its indexes stay small and bulk loads parallelize.
+-- PK includes the partition keys; unique(id) holds by construction.
+-- GREENFIELD: db-reset + reseed is the upgrade path (see consensus.sql.in).
 CREATE TABLE IF NOT EXISTS entities (
-    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
+    id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
     type_id            bytea            NOT NULL,
     first_observed_by  bytea,
     created_at         timestamptz      NOT NULL DEFAULT now(),
-    highway_mask       bytea            CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
-);
+    highway_mask       bytea            CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
+    PRIMARY KEY (id, tier)
+) PARTITION BY LIST (tier);
 
--- Storage/statistics tuning (idempotent; applies on install and upgrade). At 100M+ rows the
--- default 10% autovacuum_analyze_scale_factor needs ~15M changes before autoanalyze fires, so
--- planner stats went stale during bulk ingest and mis-costed the descent/apply existence probes.
--- Fire autoanalyze at 2% or 100k changes, whichever comes first.
-ALTER TABLE entities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+DO $$
+DECLARE
+    t int;
+    -- Storage params are per-LEAF (PG forbids them on partitioned parents). At
+    -- 100M+ rows the default 10% autovacuum_analyze_scale_factor lagged badly;
+    -- fire autoanalyze at 2% or 100k changes per leaf, whichever comes first.
+    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relname = 'entities') <> 'p' THEN
+        RETURN;  -- legacy plain table: greenfield layout applies on fresh installs only
+    END IF;
+    IF to_regclass(current_schema() || '.entities_t0') IS NOT NULL THEN
+        RETURN;  -- partitions already exist
+    END IF;
+    FOR t IN 0..4 LOOP
+        IF t = 2 THEN
+            EXECUTE format('CREATE TABLE entities_t2 PARTITION OF entities'
+                           || ' FOR VALUES IN (2) PARTITION BY HASH (id)');
+            FOR i IN 0..7 LOOP
+                EXECUTE format('CREATE TABLE entities_t2_h%s PARTITION OF entities_t2'
+                               || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
+                EXECUTE format('ALTER TABLE entities_t2_h%s', i) || opts;
+            END LOOP;
+        ELSE
+            EXECUTE format('CREATE TABLE entities_t%s PARTITION OF entities'
+                           || ' FOR VALUES IN (%s)', t, t);
+            EXECUTE format('ALTER TABLE entities_t%s', t) || opts;
+        END IF;
+    END LOOP;
+    CREATE TABLE entities_tdefault PARTITION OF entities DEFAULT;
+    EXECUTE 'ALTER TABLE entities_tdefault' || opts;
+END $$;
+
+SELECT pg_extension_config_dump('entities', '');

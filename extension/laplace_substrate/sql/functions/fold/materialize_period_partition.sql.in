@@ -61,7 +61,7 @@ BEGIN
             LEFT JOIN consensus c ON c.id = m.cid
         ) f
         ORDER BY f.cid
-        ON CONFLICT (id) DO UPDATE SET
+        ON CONFLICT (id, type_id, subject_id) DO UPDATE SET
             rating           = EXCLUDED.rating,
             rd               = EXCLUDED.rd,
             volatility       = EXCLUDED.volatility,

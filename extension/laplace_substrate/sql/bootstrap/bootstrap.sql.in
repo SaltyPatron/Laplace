@@ -160,8 +160,9 @@ BEGIN
         2, now(), 1
     );
 
-    ALTER TABLE entities ADD CONSTRAINT entities_type_fk
-        FOREIGN KEY (type_id) REFERENCES entities(id);
-    ALTER TABLE entities ADD CONSTRAINT entities_first_observed_fk
-        FOREIGN KEY (first_observed_by) REFERENCES entities(id);
+    -- Self-referential FKs dropped with the partitioned schema: a partitioned
+    -- entities has no unique(id) to reference (PK is (id, tier)), and per-row
+    -- FK validation on bulk COPY was pure cost. Referential integrity is
+    -- structural — ids are content hashes minted by the same law that mints
+    -- the referenced rows.
 END $bootstrap$;
