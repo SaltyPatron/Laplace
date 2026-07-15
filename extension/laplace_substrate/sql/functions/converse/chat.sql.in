@@ -45,14 +45,19 @@ BEGIN
     ELSE
         -- richest content-band SYNSET over parse_ask's PHRASE (intent verb already
         -- split into ask_kind, so define/about/describe can't be picked; no stoplist).
-        SELECT x.syn INTO topic
-        FROM (SELECT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-              FROM prompt_state(COALESCE(phrase, p_prompt)) p WHERE p.id IS NOT NULL) x
-        WHERE x.syn IS NOT NULL
-        ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
-                 (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                    AND relation_highway_band(c.type_id) IN (1,2,4,7)) DESC,
-                 char_length(x.surface) DESC
+        -- Orient keys computed once per DISTINCT candidate (fenced projection);
+        -- repeated tokens collapse before realize/band-mass run.
+        SELECT y.syn INTO topic
+        FROM (
+            SELECT x.syn, x.surface,
+                   (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
+                   (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                      AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
+            FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
+                  FROM prompt_state(COALESCE(phrase, p_prompt)) p WHERE p.id IS NOT NULL) x
+            WHERE x.syn IS NOT NULL
+        ) y
+        ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
         LIMIT 1;
         IF topic IS NULL THEN topic := ctx; END IF;
     END IF;
@@ -121,13 +126,17 @@ BEGIN
             -- sea") the richest OTHER concept in the prompt.
             topic2 := top_synset(resolve_last_word(phrase2));
             IF topic2 IS NULL OR topic2 = topic THEN
-                SELECT x.syn INTO topic2
-                FROM (SELECT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-                      FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-                WHERE x.syn IS NOT NULL AND x.syn <> topic
-                ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
-                         (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                            AND relation_highway_band(c.type_id) IN (1,2,4,7)) DESC
+                SELECT y.syn INTO topic2
+                FROM (
+                    SELECT x.syn, x.surface,
+                           (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
+                           (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                              AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
+                    FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
+                          FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
+                    WHERE x.syn IS NOT NULL AND x.syn <> topic
+                ) y
+                ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC
                 LIMIT 1;
             END IF;
             IF topic2 IS NOT NULL THEN

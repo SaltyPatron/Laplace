@@ -1,12 +1,11 @@
+-- Thin wrapper: the directed 4-arg realize_path is the single implementation;
+-- forward-only rendering is the NULL-dirs case (p_dirs[i-1] = -1 is NULL for a
+-- NULL array, so every connector takes the forward arrow — identical output to
+-- the old copy-pasted 3-arg body).
 CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT string_agg(
-               CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
-                    ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
-                         || COALESCE(realize(p_path[i], p_lang), '?')
-               END, '' ORDER BY i)
-    FROM generate_subscripts(p_path, 1) AS i
+    SELECT realize_path(p_path, p_types, NULL::int[], p_lang)
 $$;

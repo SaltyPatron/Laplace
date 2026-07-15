@@ -172,8 +172,8 @@ functions/converse/resolve_phrase.sql.in
 functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
 functions/converse/first_placed_topic.sql.in
-functions/converse/realize_path.sql.in
 functions/converse/realize_path_with_dirs.sql.in
+functions/converse/realize_path.sql.in
 functions/converse/isa_path.sql.in
 functions/converse/epistemic_status.sql.in
 functions/converse/contrast.sql.in

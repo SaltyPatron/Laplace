@@ -31,20 +31,26 @@ BEGIN
     -- Guard against loose lexical resolution (e.g. "me" -> "Maine"): prefer tokens
     -- whose realized lemma equals the surface, so the topic is a word truly in the
     -- prompt resolved to ITS OWN synset (fall back to mass; keeps plurals).
-    SELECT x.syn INTO syn
+    -- Orient keys (realize + content-band mass) are computed ONCE per DISTINCT
+    -- candidate in a fenced projection: repeated prompt tokens collapse before the
+    -- expensive keys run, and the sort orders on plain columns.
+    SELECT y.syn INTO syn
     FROM (
-        SELECT top_synset(p.id) AS syn,
-               lower(render_text(p.id, 32)) AS surface
-        FROM prompt_state(p_prompt) p
-        WHERE p.id IS NOT NULL
-    ) x
-    WHERE x.syn IS NOT NULL
-    ORDER BY (lower(realize(x.syn, p_lang)) = x.surface
-              AND char_length(x.surface) >= 3) DESC NULLS LAST,
-             (SELECT count(*) FROM consensus c
-              WHERE c.subject_id = x.syn
-                AND relation_highway_band(c.type_id) IN (b_def, b_tax, b_part, b_assoc)) DESC,
-             char_length(x.surface) DESC
+        SELECT x.syn, x.surface,
+               (lower(realize(x.syn, p_lang)) = x.surface
+                AND char_length(x.surface) >= 3) AS exact_hit,
+               (SELECT count(*) FROM consensus c
+                WHERE c.subject_id = x.syn
+                  AND relation_highway_band(c.type_id) IN (b_def, b_tax, b_part, b_assoc)) AS band_mass
+        FROM (
+            SELECT DISTINCT top_synset(p.id) AS syn,
+                   lower(render_text(p.id, 32)) AS surface
+            FROM prompt_state(p_prompt) p
+            WHERE p.id IS NOT NULL
+        ) x
+        WHERE x.syn IS NOT NULL
+    ) y
+    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
     LIMIT 1;
 
     IF syn IS NULL THEN

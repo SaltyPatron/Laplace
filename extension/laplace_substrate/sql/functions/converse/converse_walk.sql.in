@@ -40,14 +40,20 @@ DECLARE
     out_ids bytea[];
 BEGIN
     -- ORIENT: keep BOTH the tier-2 word (for the tier fan-out) and its synset.
-    SELECT x.tok, x.syn INTO topic_word, syn
-    FROM (SELECT p.id AS tok, top_synset(p.id) AS syn, lower(render_text(p.id,32)) AS surface
-          FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-    WHERE x.syn IS NOT NULL
-    ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
-             (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                AND relation_highway_band(c.type_id) IN (b_def,b_tax,b_part,b_assoc)) DESC,
-             char_length(x.surface) DESC
+    -- Orient keys computed once per DISTINCT token (fenced projection); repeated
+    -- prompt tokens collapse before realize/band-mass run.
+    SELECT y.tok, y.syn INTO topic_word, syn
+    FROM (
+        SELECT x.tok, x.syn, x.surface,
+               (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
+               (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                  AND relation_highway_band(c.type_id) IN (b_def,b_tax,b_part,b_assoc)) AS band_mass
+        FROM (SELECT DISTINCT p.id AS tok, top_synset(p.id) AS syn,
+                     lower(render_text(p.id,32)) AS surface
+              FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
+        WHERE x.syn IS NOT NULL
+    ) y
+    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
     LIMIT 1;
     IF syn IS NULL THEN RETURN NULL; END IF;
 

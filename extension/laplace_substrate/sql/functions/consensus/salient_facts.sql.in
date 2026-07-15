@@ -8,10 +8,11 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
     ), feat_dynamic AS MATERIALIZED (
         -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
         -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
-        -- Fenced ONCE here: relation_in_family() has a SET search_path clause, so
-        -- the planner can never inline it and its EXISTS probe would run per
-        -- candidate row. Same truth table: static family via the C check below,
-        -- dynamic membership via this set.
+        -- Fenced ONCE here: the SQL wrapper relation_in_family() carries a SET
+        -- search_path clause, so the planner can never inline it and its EXISTS
+        -- probe would run per candidate row. (relation_type_in_family below is the
+        -- C IMMUTABLE static check — cheap per row, unaffected.) Same truth table:
+        -- static family via the C check, dynamic membership via this set.
         SELECT c.subject_id AS id FROM consensus c
         WHERE c.type_id = relation_type_id('IS_A')
           AND c.object_id = relation_type_id('HAS_FEATURE')

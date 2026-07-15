@@ -26,11 +26,27 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
         GROUP BY sm.member, sm.lang
     ),
     lang_match AS (
-        SELECT l.lang FROM (SELECT DISTINCT lang FROM agg) l, want w
+        -- No-filter call (name IS NULL): pass every candidate language through with
+        -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
+        -- single-WHERE shape could evaluate label()/render_text() even when no
+        -- language filter was supplied (the common call).
+        SELECT l.lang
+        FROM (SELECT DISTINCT lang FROM agg) l, want w
         WHERE w.name IS NULL
-           OR lower(label(l.lang)) = w.name
+        UNION ALL
+        -- Named filter: label rendered ONCE per candidate language as a fenced
+        -- projection (not re-evaluated inside a predicate); the definition-surface
+        -- fallback renders only for languages whose label missed. Accept set is
+        -- identical to the old matcher.
+        SELECT s.lang
+        FROM (
+            SELECT l.lang, lower(label(l.lang)) AS lbl
+            FROM (SELECT DISTINCT lang FROM agg) l, want w0
+            WHERE w0.name IS NOT NULL
+        ) s, want w
+        WHERE s.lbl = w.name
            OR EXISTS (SELECT 1 FROM consensus d
-                      WHERE d.subject_id = l.lang
+                      WHERE d.subject_id = s.lang
                         AND d.type_id = relation_type_id('HAS_DEFINITION')
                         AND lower(render_text(d.object_id, 32)) = w.name)
     )
