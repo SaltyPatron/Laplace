@@ -70,6 +70,7 @@ set(EXT_C_SOURCES
     src/highway_mask.c
     src/lexical_case.c
     src/steered_walk.c
+    src/realize_batch.c
 )
 
 if(WIN32)

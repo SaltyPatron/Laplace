@@ -288,6 +288,7 @@ functions/realize/realize_canonical.sql.in
 functions/realize/realize_defines.sql.in
 functions/realize/resolve_name.sql.in
 functions/realize/realize.sql.in
+functions/realize/realize_batch.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/related.sql.in
 functions/consensus/related_in.sql.in
