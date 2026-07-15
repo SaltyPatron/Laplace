@@ -486,7 +486,8 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IAsy
                 _sweptStale = true;
             }
             await using var create = _walkConn.CreateCommand();
-            create.CommandText = $"SELECT laplace.create_walk_staging({_partitions})";
+            create.CommandText = "SELECT laplace.create_walk_staging($1)";
+            create.Parameters.AddWithValue(_partitions);
             await create.ExecuteNonQueryAsync(ct);
             _walkStagingCreated = true;
             _anyEpochCreated = true;
