@@ -64,11 +64,21 @@ static void physicality_id_compute(hash128_t entity_id, int16_t physicality_type
 
 
 
+/* Tier is a FLOOR: a composition whose content equals its sole child's content
+ * IS that child -- same bytes, same blake3, ONE identity. This walks any chain
+ * of single-child, span-identical wrappers down to the lowest node that carries
+ * the content, INCLUDING the grapheme tier: a single-codepoint UAX29 cluster is
+ * a pass-through scaffold node in the in-memory tree (the tree format needs the
+ * uniform grapheme level because parents reference children as a contiguous
+ * index range), but it must never be EMITTED -- the tier-0 codepoint leaf is
+ * the stored identity, and word constituents reference it directly. The old
+ * `tier <= 1` stop minted a tier-1 entity row for every single-cp character
+ * (same id as the codepoint, wrong stored tier). */
 static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
         if (tier_tree_get_node(tree, idx, &node) != 0) break;
-        if (node.tier <= 1 || node.child_count != 1) break;
+        if (node.tier == 0 || node.child_count != 1) break;
         tier_node_view_t child;
         if (tier_tree_get_node(tree, node.first_child_idx, &child) != 0) break;
         if (child.text_range_off != node.text_range_off

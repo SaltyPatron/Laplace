@@ -188,6 +188,71 @@ TEST(GrammarDecomposer, DeeplyNestedInputDoesNotOverflowStack) {
     laplace_ast_free(ast);
 }
 
+/* Grapheme-floor law: single-codepoint clusters are pass-through scaffold
+   (their id IS the codepoint id); only multi-codepoint clusters may appear
+   as tier-1 entities in a compose result. */
+TEST(GrammarCompose, SingleCpClustersAreNotEmittedAtTier1) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    const char* src = "a\tb\tc\n";  /* every cluster is a single codepoint */
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
+
+    hash128_t source_id, type_meta;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("src"), 3, &source_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("meta"), 4, &type_meta);
+
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_compose(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), ast,
+        "tsv", source_id, type_meta, &result), 0);
+    ASSERT_NE(result, nullptr);
+
+    const size_t n = laplace_compose_entity_count(result);
+    for (size_t i = 0; i < n; ++i) {
+        laplace_compose_entity_t e;
+        ASSERT_EQ(laplace_compose_get_entity(result, i, &e), 0);
+        EXPECT_NE(e.tier, 1)
+            << "single-codepoint cluster minted a tier-1 entity (floor violation)";
+    }
+
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}
+
+TEST(GrammarCompose, MultiCpClusterIsEmittedAtTier1) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    /* q + U+0301 forms the only multi-codepoint cluster in the source. */
+    const char* src = "q\xCC\x81x\ty\n";
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
+
+    hash128_t source_id, type_meta;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("src"), 3, &source_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("meta"), 4, &type_meta);
+
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_compose(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), ast,
+        "tsv", source_id, type_meta, &result), 0);
+    ASSERT_NE(result, nullptr);
+
+    size_t tier1 = 0;
+    const size_t n = laplace_compose_entity_count(result);
+    for (size_t i = 0; i < n; ++i) {
+        laplace_compose_entity_t e;
+        ASSERT_EQ(laplace_compose_get_entity(result, i, &e), 0);
+        if (e.tier == 1) tier1++;
+    }
+    EXPECT_EQ(tier1, 1u) << "exactly the q+combining-acute cluster is tier-1 content";
+
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}
+
 TEST(GrammarCompose, PartiallyValidChildSpanDoesNotCrash) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
     ASSERT_NE(recipe, nullptr);

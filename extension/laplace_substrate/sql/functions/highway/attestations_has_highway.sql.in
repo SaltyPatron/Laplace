@@ -1,3 +1,0 @@
-CREATE INDEX IF NOT EXISTS attestations_has_highway
-    ON attestations (subject_id, type_id)
-    WHERE highway_mask IS NOT NULL;
