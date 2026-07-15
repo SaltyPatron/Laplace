@@ -1,0 +1,12 @@
+-- realize() for N ids in one call: 6 batched SPI round-trips regardless of N
+-- (5 candidate arms + ONE shared render_text_batch at depth 24), positionally
+-- aligned text[] out. Reproduces the scalar COALESCE ladder exactly
+-- (resolve_name's lang-only branch -> render -> translation -> canonical ->
+-- gloss) and ABSTAINS with NULL — never hex. See src/realize_batch.c for the
+-- parity notes. This is the shared labeling primitive the serving surface
+-- calls AFTER its rank/LIMIT step (the librarian hands the survivor id-array
+-- to the machine room).
+CREATE OR REPLACE FUNCTION realize_batch(p_ids bytea[], p_lang bytea DEFAULT NULL)
+    RETURNS text[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_realize_batch'
+    LANGUAGE C STABLE;

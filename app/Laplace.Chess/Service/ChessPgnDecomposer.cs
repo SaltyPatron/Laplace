@@ -143,10 +143,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
     // (ChessAnalyze), run later off this witnessed layer. See .scratchpad/08_Record_vs_Calculate.
     // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
     // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
+    //
+    // GAME GRAIN ONLY. Per-ply record tokens (SAN/clock/eval/comment/quality on a per-game
+    // PlyId subject) are deliberately NOT attested: a PlyId is unique to one game by
+    // construction, so every such row is a permanently single-witness consensus cell — dead
+    // weight in the Glicko fold (measured ~40M of 62M consensus rows). The verbatim PGN
+    // movetext witnessed below (HAS_MOVETEXT, one edge per game) carries every one of those
+    // tokens losslessly; readback re-parses it (ChessWitnessHydrator). Aggregating edges
+    // (deduped moves/positions carrying outcomes) remain the analyzer's job.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
-        var (gameText, moves, result, gameId) = parsed;
-        var walk = parsed.Walk;
+        var (gameText, _, result, gameId) = parsed;
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
@@ -157,8 +164,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
         RecordStartPosition(b, gameId, gameText, src);
         RecordOpeningHeaders(b, gameId, gameText, src);
-        RecordMovetext(b, gameId, moves, src);
-        RecordPlyAnnotations(b, gameId, gameText, walk, moves.Count, src);
+        RecordMovetext(b, gameId, gameText, src);
     }
 
     private static void RecordStartPosition(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
@@ -178,46 +184,32 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         if (opening.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
     }
 
-    private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<string> moves, Hash128 src)
+    // Witness the VERBATIM PGN movetext (clocks, evals, comments, NAGs, result token — the
+    // bytes the source asserted) as one content edge on the game. This is the lossless
+    // record: every per-ply token is reconstructible from it (MovetextTokens.Parse).
+    private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
     {
-        if (moves.Count == 0) return;
-        if (ContentEmitter.Emit(b, string.Join(' ', moves), src) is { } mtId)
+        string movetext = MovetextSection(gameText);
+        if (movetext.Length == 0) return;
+        if (ContentEmitter.Emit(b, movetext, src) is { } mtId)
             b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
     }
 
-    private static void RecordPlyAnnotations(
-        SubstrateChangeBuilder b, Hash128 gameId, string gameText,
-        PgnMovetext.PgnWalkResult walk, int moveCount, Hash128 src)
+    // The movetext section verbatim: everything after the header-tag block. Header lines start
+    // with '['; the first non-blank, non-header line begins the movetext, which then runs to the
+    // end of the game text (comment lines inside movetext are included even if they start oddly).
+    internal static string MovetextSection(string gameText)
     {
-        var clockTokens = PgnClocks.ClockTokens(gameText, moveCount);
-        var evalTokens = PgnEvals.EvalTokens(gameText, moveCount);
-        var mainline = walk.Mainline;
-        for (int ply = 0; ply < mainline.Count; ply++)
+        int i = 0, n = gameText.Length;
+        while (i < n)
         {
-            var pm = mainline[ply];
-            string? clk = clockTokens is not null && ply < clockTokens.Length ? clockTokens[ply] : null;
-            string? ev = evalTokens is not null && ply < evalTokens.Length ? evalTokens[ply] : null;
-            string? comment = string.IsNullOrWhiteSpace(pm.CommentText) ? null : pm.CommentText;
-            string? quality = MoveQuality.FromStream(pm);
-            if (clk is null && ev is null && comment is null && quality is null) continue;
-
-            var plyId = ChessVocabulary.PlyId(gameId, ply);
-            b.AddEntity(plyId, EntityTier.Word, ChessVocabulary.PlyType, src);
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_PLY", plyId, src, gameId, PgnWitnessWeight));
-            PlyMeta(b, plyId, "HAS_SAN", pm.San, src, gameId);
-            PlyMeta(b, plyId, "HAS_CLOCK", clk, src, gameId);
-            PlyMeta(b, plyId, "HAS_EVAL_TOKEN", ev, src, gameId);
-            PlyMeta(b, plyId, "MOVE_QUALITY", quality, src, gameId);
-            PlyMeta(b, plyId, "HAS_COMMENT", comment, src, gameId);
+            int j = gameText.IndexOf('\n', i);
+            int end = j < 0 ? n : j;
+            var line = gameText.AsSpan(i, end - i).Trim();
+            if (line.Length > 0 && line[0] != '[') break;
+            i = j < 0 ? n : j + 1;
         }
-    }
-
-    private static void PlyMeta(
-        SubstrateChangeBuilder b, Hash128 ply, string rel, string? value, Hash128 src, Hash128 ctx)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;
-        if (ContentEmitter.Emit(b, value, src) is { } vid)
-            b.AddAttestation(NativeAttestation.Categorical(ply, rel, vid, src, ctx, PgnWitnessWeight));
+        return gameText[i..].Trim();
     }
 
     private static async IAsyncEnumerable<string> StreamGamesAsync(

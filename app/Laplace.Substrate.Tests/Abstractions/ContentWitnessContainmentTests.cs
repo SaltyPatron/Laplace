@@ -64,11 +64,13 @@ public sealed class ContentWitnessContainmentTests
     }
 
     [Fact]
-    public void PresentLeafGrapheme_SkipsOnlyThatSubtree()
+    public void PresentWord_SkipsOnlyThatSubtree()
     {
-
-
-        byte[] bytes = Encoding.UTF8.GetBytes("dog");
+        // Grapheme-floor law: single-codepoint clusters are pass-through
+        // scaffold and are never emitted, so the smallest emission unit whose
+        // presence can shrink the batch is a WORD. Marking "dog" present must
+        // skip exactly its subtree while "cat" and the sentence still emit.
+        byte[] bytes = Encoding.UTF8.GetBytes("dog cat");
 
         using var full = IntentStage.New(256);
         Assert.True(full.TryAddContentWitness(bytes, Src, out _));
@@ -83,20 +85,20 @@ public sealed class ContentWitnessContainmentTests
         bool marked = false;
         for (uint i = 0; i < (uint)n; i++)
         {
-            if (tree.GetNode(i).Tier == 1)
+            if (tree.GetNode(i).Tier == 2)
             {
                 bm[(int)i >> 3] |= (byte)(1 << ((int)i & 7));
                 marked = true;
                 break;
             }
         }
-        Assert.True(marked, "expected at least one tier-1 grapheme node");
+        Assert.True(marked, "expected at least one tier-2 word node");
 
         using var partial = IntentStage.New(256);
         Assert.True(partial.EmitContentTree(tree, Src, bm, out _));
 
         Assert.True(partial.EntityCount < fullEntities,
             $"partial={partial.EntityCount} should be < full={fullEntities}");
-        Assert.True(partial.EntityCount > 0, "a present leaf must not blank the whole tree");
+        Assert.True(partial.EntityCount > 0, "a present word must not blank the whole tree");
     }
 }

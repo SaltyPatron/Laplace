@@ -3,17 +3,19 @@
 -- Sequence PROPOSES, meaning STEERS -- now with real semantic steering:
 --   ORIENT  -> the prompt's richest concept synset (as converse()).
 --   GATHER  -> ordered token trajectories of the concept's own attested sentence
---              (weight 100) plus its 1-hop neighbours' (weight 30) and 2-hop
---              taxonomy/parts (weight 8). Drawn from physicality trajectories =
+--              (weight 50, the seed) plus the tier-3 sentences that contain the
+--              topic word (weight 40). Drawn from physicality trajectories =
 --              precedes/follows/co-occurrence. Each token carries its source's
 --              topic weight, so the corpus knows what is central vs peripheral.
---   WALK    -> trigram->bigram backoff over the restricted stream, SEEDED from the
---              core concept's own sentence and STEERED by picking, among attested
---              successors, the one with the highest topic weight (RNG breaks ties).
---              This keeps the walk on the asked concept (kills grief->well-being
---              drift) while the anti-repeat guard forces novel recombination at
---              shared n-gram pivots. Ends at a sentence boundary once it has said
---              enough. Grounded only in attested token order; deterministic per seed.
+--              Set-based: render_text runs once per DISTINCT token id to drop
+--              whitespace constituents (the old loop rendered every occurrence
+--              of every token of every sentence).
+--   WALK    -> steered_walk_raw (steered_walk.c): trigram->bigram backoff over
+--              the restricted stream, SEEDED from the core concept's own
+--              sentence and STEERED by topic weight (RNG breaks ties), with the
+--              anti-repeat guard forcing novel recombination at shared n-gram
+--              pivots. Ends at a sentence boundary once it has said enough.
+--              Grounded only in attested token order; deterministic per seed.
 --   REALIZE -> render_text of the emitted token ids.
 CREATE OR REPLACE FUNCTION converse_walk(p_prompt text, p_steps int DEFAULT 40,
                                          p_seed bigint DEFAULT NULL)
@@ -29,115 +31,106 @@ DECLARE
     MINLEN int := 5;
     syn    bytea;
     topic_word bytea;   -- the tier-2 word whose usage lives in the tier above
-    stream bytea[] := ARRAY[]::bytea[];
-    w      bigint[] := ARRAY[]::bigint[];   -- per-token topic weight, aligned to stream
-    starts bytea[] := ARRAY[]::bytea[];     -- starts of CORE sentences (on-topic seed)
-    core_seq bytea[] := ARRAY[]::bytea[];   -- longest CORE gloss (deterministic seed)
+    stream bytea[];
+    w      bigint[];    -- per-token topic weight, aligned to stream
+    starts bytea[];     -- starts of CORE sentences (on-topic seed)
+    core_seq bytea[];   -- longest CORE gloss (deterministic seed)
     n      int;
     rng    bigint;
-    a bytea; b bytea; nxt bytea;
-    out_ids bytea[] := ARRAY[]::bytea[];
-    visited text[] := ARRAY[]::text[];
-    emitted int := 0;
-    g       record;
-    toks    bytea[];
+    out_ids bytea[];
 BEGIN
     -- ORIENT: keep BOTH the tier-2 word (for the tier fan-out) and its synset.
-    SELECT x.tok, x.syn INTO topic_word, syn
-    FROM (SELECT p.id AS tok, top_synset(p.id) AS syn, lower(render_text(p.id,32)) AS surface
-          FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-    WHERE x.syn IS NOT NULL
-    ORDER BY (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) DESC NULLS LAST,
-             (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                AND relation_highway_band(c.type_id) IN (b_def,b_tax,b_part,b_assoc)) DESC,
-             char_length(x.surface) DESC
+    -- Orient keys computed once per DISTINCT token (fenced projection); repeated
+    -- prompt tokens collapse before realize/band-mass run.
+    SELECT y.tok, y.syn INTO topic_word, syn
+    FROM (
+        SELECT x.tok, x.syn, x.surface,
+               (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
+               (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                  AND relation_highway_band(c.type_id) IN (b_def,b_tax,b_part,b_assoc)) AS band_mass
+        FROM (SELECT DISTINCT p.id AS tok, top_synset(p.id) AS syn,
+                     lower(render_text(p.id,32)) AS surface
+              FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
+        WHERE x.syn IS NOT NULL
+    ) y
+    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
     LIMIT 1;
     IF syn IS NULL THEN RETURN NULL; END IF;
 
-    -- GATHER: the concept's own gloss (tier-1 definition, weight 100, the seed) PLUS the
-    -- TIER FAN-OUT -- a word's usage lives in the tier above it, so pull the tier-3
-    -- sentences that contain the topic word as a constituent (dense real usage, weight 40)
-    -- via the constituents index. This is the corpus, not just the gloss.
-    FOR g IN
-        SELECT c.object_id AS gid, 50 AS wt, true AS is_core
-        FROM consensus c
-        WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
+    -- GATHER: the concept's own gloss (tier-1 definition, the seed) PLUS the
+    -- TIER FAN-OUT -- a word's usage lives in the tier above it, so pull the
+    -- tier-3 sentences that contain the topic word as a constituent (dense real
+    -- usage) via the constituents index. This is the corpus, not just the gloss.
+    -- Word-level tokens only: the inter-word whitespace constituents are
+    -- dropped, else (word,space) bigrams match every boundary and the walk
+    -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
+    WITH gids AS (
+        -- DISTINCT: a gloss reachable through two def-band relation types
+        -- contributes its token stream once, not twice.
+        SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
+            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core
+            FROM consensus c
+            WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
+            UNION ALL
+            SELECT co.entity_id, 40, false
+            FROM containers_of(topic_word, 1, 400) co
+            WHERE co.tier = 3
+            ORDER BY is_core DESC, gid
+            LIMIT 160
+        ) g
+    ),
+    toks AS (
+        SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
+        FROM gids g
+        CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
+             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+    ),
+    ws AS MATERIALIZED (
+        SELECT d.entity_id AS id,
+               COALESCE(render_text(d.entity_id, 64), ' ') ~ '^\s*$' AS is_ws
+        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
+    ),
+    kept AS MATERIALIZED (
+        SELECT q.* FROM (
+            SELECT t.gid, t.wt, t.is_core, t.entity_id,
+                   row_number() OVER (PARTITION BY t.gid ORDER BY t.ord) AS rn,
+                   count(*)    OVER (PARTITION BY t.gid) AS cnt
+            FROM toks t
+            JOIN ws ON ws.id = t.entity_id
+            WHERE NOT ws.is_ws
+        ) q
+        WHERE q.cnt >= 2
+    ),
+    seq AS MATERIALIZED (
+        -- Each sentence's tokens in order, then one SENT boundary (weight 0)
+        -- ordered past every real token of its sentence.
+        SELECT k.gid, k.is_core, k.wt, k.entity_id AS id, k.rn
+        FROM kept k
         UNION ALL
-        -- tier fan-out via the canonical helper (multi-hop, tier-aware): the tier-3
-        -- sentences that CONTAIN the topic word are its usage.
-        SELECT co.entity_id, 40, false
-        FROM containers_of(topic_word, 1, 400) co
-        WHERE co.tier = 3
-        ORDER BY is_core DESC, gid
-        LIMIT 160
-    LOOP
-        -- word-level tokens only: drop the inter-word whitespace constituents,
-        -- else (word,space) bigrams match every boundary and the walk jumps
-        -- (e.g. "a"+space -> "creek" from "...than a creek").
-        SELECT array_agg(u.entity_id ORDER BY u.ord) INTO toks
-        FROM trajectory_unpacked_points(g.gid) WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE COALESCE(render_text(u.entity_id, 64), ' ') !~ '^\s*$';
-        IF toks IS NOT NULL AND array_length(toks,1) >= 2 THEN
-            IF g.is_core THEN
-                starts := starts || toks[1];
-                IF array_length(toks,1) > COALESCE(array_length(core_seq,1),0) THEN
-                    core_seq := toks;   -- keep the longest core gloss for seeding
-                END IF;
-            END IF;
-            FOR k IN 1..array_length(toks,1) LOOP
-                stream := stream || toks[k];
-                w := w || g.wt;
-            END LOOP;
-            stream := stream || SENT;  w := w || 0;
-        END IF;
-    END LOOP;
+        SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
+        FROM kept k
+    )
+    SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
+           (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
+           (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+             WHERE k.is_core AND k.rn = 1),
+           (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
+             WHERE k.is_core AND k.gid = (
+                 SELECT k2.gid FROM kept k2 WHERE k2.is_core
+                 GROUP BY k2.gid ORDER BY max(k2.cnt) DESC, k2.gid LIMIT 1))
+    INTO stream, w, starts, core_seq;
 
     n := COALESCE(array_length(stream,1), 0);
-    IF n < 3 OR array_length(starts,1) IS NULL THEN RETURN NULL; END IF;
+    IF n < 3 OR starts IS NULL THEN RETURN NULL; END IF;
 
     rng := abs(COALESCE(p_seed, ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647;
 
-    -- SEED deterministically from the core definition's opening two tokens, so the
-    -- sentence starts strongly on-topic; the anti-repeat guard forces it to diverge.
-    IF array_length(core_seq,1) >= 2 THEN
-        a := core_seq[1];  b := core_seq[2];
-    ELSE
-        rng := ((rng * 1103515245 + 12345) % 2147483647);
-        a := starts[1 + (abs(rng) % array_length(starts,1))];
-        SELECT stream[i+1] INTO b FROM generate_subscripts(stream,1) i
-        WHERE stream[i] = a AND i < n AND stream[i+1] <> SENT
-        ORDER BY w[i+1] * (abs(rng + i*2654435761) % 100000) DESC LIMIT 1;
-    END IF;
-    IF b IS NULL THEN RETURN render_text(a,64); END IF;
-    out_ids := ARRAY[a,b];  emitted := 2;
-
-    -- WALK: steered trigram->bigram backoff; end at a clause once past MINLEN.
-    FOR step IN 1..p_steps LOOP
-        rng := ((rng * 1103515245 + 12345) % 2147483647);
-        -- trigram, steered by topic weight, excluding already-emitted trigrams
-        SELECT stream[i+2] INTO nxt
-        FROM generate_subscripts(stream,1) i
-        WHERE i <= n-2 AND stream[i] = a AND stream[i+1] = b
-          AND (encode(a,'hex')||encode(b,'hex')||encode(stream[i+2],'hex')) <> ALL(visited)
-        ORDER BY w[i+2] * (abs(rng + i*2654435761) % 100000) DESC LIMIT 1;
-        IF nxt IS NULL THEN
-            SELECT stream[i+1] INTO nxt
-            FROM generate_subscripts(stream,1) i
-            WHERE i <= n-1 AND stream[i] = b
-              AND (encode(b,'hex')||encode(stream[i+1],'hex')) <> ALL(visited)
-            ORDER BY w[i+1] * (abs(rng + i*2654435761) % 100000) DESC LIMIT 1;
-        END IF;
-        EXIT WHEN nxt IS NULL;
-        IF nxt = SENT THEN
-            EXIT WHEN emitted >= MINLEN;                 -- clean clause end
-            -- too short to stop: mark this boundary used and try another path
-            visited := visited || (encode(a,'hex')||encode(b,'hex')||encode(nxt,'hex'));
-            CONTINUE;
-        END IF;
-        visited := visited || (encode(a,'hex')||encode(b,'hex')||encode(nxt,'hex'));
-        out_ids := out_ids || nxt;  emitted := emitted + 1;
-        a := b; b := nxt;
-    END LOOP;
+    -- SEED + WALK run natively; single-token results fall out of a seed with no
+    -- attested successor (the old `IF b IS NULL` path).
+    out_ids := steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
+                                starts, p_steps, MINLEN, rng);
+    IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
+    IF array_length(out_ids,1) = 1 THEN RETURN render_text(out_ids[1], 64); END IF;
 
     -- REALIZE: join tokens, drop orphan gloss punctuation, normalize whitespace.
     RETURN btrim(regexp_replace(

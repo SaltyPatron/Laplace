@@ -39,7 +39,19 @@ BEGIN
     END IF;
 
     SET LOCAL session_replication_role = replica;
-    TRUNCATE consensus;
+    -- Truncate only NON-EMPTY leaves. `TRUNCATE consensus` on the partitioned
+    -- parent recreates every leaf's files (~140 leaves x 3 forks) even when
+    -- they hold nothing — on a fresh seed's terminal fold that is hundreds of
+    -- pointless file ops (each Defender-scanned on Windows). A legacy plain
+    -- consensus truncates as itself via the same pg_partition_tree call
+    -- (isleaf includes the root when it is a plain relation).
+    FOR rel IN
+        SELECT relid::regclass AS leaf
+        FROM pg_partition_tree(current_schema() || '.consensus')
+        WHERE isleaf AND pg_relation_size(relid) > 0
+    LOOP
+        EXECUTE format('TRUNCATE %s', rel.leaf);
+    END LOOP;
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     SELECT id, subject_id, type_id, object_id,

@@ -14,6 +14,7 @@
 #include "access/table.h"
 #include "access/tableam.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_inherits.h"
 #include "executor/spi.h"
 #include "executor/tuptable.h"
 #include "fmgr.h"
@@ -236,54 +237,96 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
 
         if (with_seeds)
         {
+            /* Seed priors from live consensus. The greenfield consensus is
+             * partitioned — a partitioned parent has NO heap, so scan its leaf
+             * relations (find_all_inheritors is recursive; intermediate 'p'
+             * rels are skipped). A legacy plain consensus scans as itself. */
             RangeVar   *rv = makeRangeVar(NULL, "consensus", -1);
-            Relation    rel = table_open(RangeVarGetRelid(rv, AccessShareLock, false),
-                                         NoLock);
-            TupleTableSlot *slot = table_slot_create(rel, NULL);
-            TableScanDesc scan = table_beginscan(rel, GetActiveSnapshot(), 0, NULL);
-            int a_subject = fold_attno(rel, "subject_id");
-            int a_type    = fold_attno(rel, "type_id");
-            int a_object  = fold_attno(rel, "object_id");
-            int a_rating  = fold_attno(rel, "rating");
-            int a_rd      = fold_attno(rel, "rd");
-            int a_vol     = fold_attno(rel, "volatility");
-            int a_wc      = fold_attno(rel, "witness_count");
-            int a_ts      = fold_attno(rel, "last_observed_at");
+            Oid         parent = RangeVarGetRelid(rv, AccessShareLock, false);
+            Relation    prel = table_open(parent, NoLock);
+            List       *oids = NIL;
+            ListCell   *lc;
+
+            if (prel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+            {
+                oids = find_all_inheritors(parent, AccessShareLock, NULL);
+                table_close(prel, NoLock);
+                prel = NULL;
+            }
 
             seeds = (SeedRow *) palloc(sizeof(SeedRow) * seeds_cap);
-            while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
+            lc = oids ? list_head(oids) : NULL;
+            for (;;)
             {
-                SeedRow s;
+                Relation rel;
 
-                slot_getallattrs(slot);
-                memset(&s, 0, sizeof(s));
-                fold_read_bytea16(slot->tts_values[a_subject - 1], s.ident);
-                if (fold_route_subject(s.ident, nparts) != partition)
-                    continue;
-                fold_read_bytea16(slot->tts_values[a_type - 1], s.ident + 16);
-                if (!slot->tts_isnull[a_object - 1])
+                if (oids != NIL)
                 {
-                    fold_read_bytea16(slot->tts_values[a_object - 1], s.ident + 32);
-                    s.has_object = 1;
+                    if (lc == NULL)
+                        break;
+                    rel = table_open(lfirst_oid(lc), NoLock);
+                    lc = lnext(oids, lc);
+                    if (rel->rd_rel->relkind != RELKIND_RELATION)
+                    {
+                        table_close(rel, NoLock);
+                        continue;
+                    }
                 }
-                s.rating        = DatumGetInt64(slot->tts_values[a_rating - 1]);
-                s.rd            = DatumGetInt64(slot->tts_values[a_rd - 1]);
-                s.volatility    = DatumGetInt64(slot->tts_values[a_vol - 1]);
-                s.witness_count = DatumGetInt64(slot->tts_values[a_wc - 1]);
-                s.last_ts       = (int64) DatumGetTimestampTz(slot->tts_values[a_ts - 1]);
+                else
+                    rel = prel;
 
-                if (n_seeds == seeds_cap)
                 {
-                    seeds_cap *= 2;
-                    seeds = (SeedRow *) repalloc(seeds, sizeof(SeedRow) * seeds_cap);
+                    TupleTableSlot *slot = table_slot_create(rel, NULL);
+                    TableScanDesc scan = table_beginscan(rel, GetActiveSnapshot(), 0, NULL);
+                    int a_subject = fold_attno(rel, "subject_id");
+                    int a_type    = fold_attno(rel, "type_id");
+                    int a_object  = fold_attno(rel, "object_id");
+                    int a_rating  = fold_attno(rel, "rating");
+                    int a_rd      = fold_attno(rel, "rd");
+                    int a_vol     = fold_attno(rel, "volatility");
+                    int a_wc      = fold_attno(rel, "witness_count");
+                    int a_ts      = fold_attno(rel, "last_observed_at");
+
+                    while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
+                    {
+                        SeedRow s;
+
+                        slot_getallattrs(slot);
+                        memset(&s, 0, sizeof(s));
+                        fold_read_bytea16(slot->tts_values[a_subject - 1], s.ident);
+                        if (fold_route_subject(s.ident, nparts) != partition)
+                            continue;
+                        fold_read_bytea16(slot->tts_values[a_type - 1], s.ident + 16);
+                        if (!slot->tts_isnull[a_object - 1])
+                        {
+                            fold_read_bytea16(slot->tts_values[a_object - 1], s.ident + 32);
+                            s.has_object = 1;
+                        }
+                        s.rating        = DatumGetInt64(slot->tts_values[a_rating - 1]);
+                        s.rd            = DatumGetInt64(slot->tts_values[a_rd - 1]);
+                        s.volatility    = DatumGetInt64(slot->tts_values[a_vol - 1]);
+                        s.witness_count = DatumGetInt64(slot->tts_values[a_wc - 1]);
+                        s.last_ts       = (int64) DatumGetTimestampTz(slot->tts_values[a_ts - 1]);
+
+                        if (n_seeds == seeds_cap)
+                        {
+                            seeds_cap *= 2;
+                            seeds = (SeedRow *) repalloc(seeds, sizeof(SeedRow) * seeds_cap);
+                        }
+                        seeds[n_seeds++] = s;
+                        if ((n_seeds & 0xFFFF) == 0)
+                            CHECK_FOR_INTERRUPTS();
+                    }
+                    table_endscan(scan);
+                    ExecDropSingleTupleTableSlot(slot);
+                    table_close(rel, NoLock);
                 }
-                seeds[n_seeds++] = s;
-                if ((n_seeds & 0xFFFF) == 0)
-                    CHECK_FOR_INTERRUPTS();
+
+                if (oids == NIL)
+                    break;
             }
-            table_endscan(scan);
-            ExecDropSingleTupleTableSlot(slot);
-            table_close(rel, NoLock);
+            if (oids != NIL)
+                list_free(oids);
 
             if (n_seeds > 1)
                 qsort(seeds, (size_t) n_seeds, sizeof(SeedRow), seed_row_cmp);

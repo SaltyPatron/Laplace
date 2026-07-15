@@ -26,8 +26,8 @@ CREATE OR REPLACE FUNCTION recall_interaction_response(p_topic bytea, p_limit in
             (relation_type_id('HAS_SUBEVENT'),     'involves'),
             (relation_type_id('OBSTRUCTED_BY'),    'is hindered by')
     ),
-    -- Best distinct object per relation type; edge_rank folds relation salience into
-    -- the eff_mu ordering so mandate-band relations outrank probationary ones.
+    -- edge_rank folds relation salience into the eff_mu ordering so mandate-band
+    -- relations outrank probationary ones.
     facts AS (
         SELECT k.phrase,
                c.object_id,
@@ -37,11 +37,20 @@ CREATE OR REPLACE FUNCTION recall_interaction_response(p_topic bytea, p_limit in
         FROM v_consensus_unrefuted c
         JOIN kinds k ON k.type_id = c.type_id
         WHERE c.subject_id = p_topic AND c.object_id IS NOT NULL
+    ),
+    -- Rank BEFORE rendering (Issue-52 pattern): the old shape ran render_text over
+    -- the topic's FULL commonsense fan-out and only then ORDER/LIMIT'd to p_limit.
+    -- Ranking needs only ids + rank/mu already in `facts`; render_text runs over
+    -- exactly the p_limit survivors. Output-identical (no post-render filtering).
+    ranked AS (
+        SELECT f.phrase, f.object_id, f.rank, f.mu, f.witnesses
+        FROM facts f
+        ORDER BY f.rank DESC, f.mu DESC
+        LIMIT p_limit
     )
-    SELECT label(p_topic) || ' — ' || f.phrase || ' ' || render_text(f.object_id, 96) AS reply,
-           f.mu AS eff_mu,
-           f.witnesses
-    FROM facts f
-    ORDER BY f.rank DESC, f.mu DESC
-    LIMIT p_limit
+    SELECT label(p_topic) || ' — ' || r.phrase || ' ' || render_text(r.object_id, 96) AS reply,
+           r.mu AS eff_mu,
+           r.witnesses
+    FROM ranked r
+    ORDER BY r.rank DESC, r.mu DESC
 $$;

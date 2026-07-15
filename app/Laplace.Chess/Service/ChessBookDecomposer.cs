@@ -222,7 +222,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false) : Compos
             ChessGraph.AppendMoveEdge(
                 b, m.StateKey(states[ply]), m.StateKey(states[ply + 1]),
                 result.ForMover(mover), games: 1, BookWitnessWeight,
-                sourceId: src, moverPlayerId: null);
+                sourceId: src);
         }
 
         if (!string.IsNullOrWhiteSpace(record.Context)

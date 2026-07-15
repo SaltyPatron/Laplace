@@ -33,25 +33,72 @@ public sealed class ChessRecorderTests
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
     }
 
+    // GAME GRAIN: one verbatim HAS_MOVETEXT edge carries the whole record. Per-ply record
+    // tokens (HAS_PLY/HAS_SAN/HAS_CLOCK/HAS_EVAL_TOKEN/HAS_COMMENT on per-game PlyId
+    // subjects) are never attested — a PlyId cannot recur across games, so each such row
+    // was a permanently single-witness consensus cell.
     [Fact]
-    public void RecordGame_RecordsGameMovetextAndPlyNodes()
+    public void RecordGame_RecordsVerbatimMovetext_AtGameGrain()
     {
         var change = Record(GameWithComment);
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.PlyType);
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PlyType);
 
-        var movetextId = ContentEmitter.RootId("e4 e5 Qh5 Nc6 Bc4 Nf6 Qxf7#");
+        var movetext = ChessPgnDecomposer.MovetextSection(GameWithComment);
+        Assert.Equal("1. e4 { sharp } e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0", movetext);
+        var movetextId = ContentEmitter.RootId(movetext);
         Assert.NotNull(movetextId);
-        Assert.Contains(change.Attestations, a => a.ObjectId == movetextId);
+        Assert.Contains(change.Attestations, a =>
+            a.ObjectId == movetextId && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
     }
 
     [Fact]
-    public void RecordGame_CapturesFreeTextComment()
+    public void RecordGame_EmitsNoPerPlyRecordTokens()
     {
         var change = Record(GameWithComment);
-        var commentId = ContentEmitter.RootId("sharp");
-        Assert.NotNull(commentId);
-        Assert.Contains(change.Attestations, a => a.ObjectId == commentId);
+        foreach (var rel in new[] { "HAS_PLY", "HAS_SAN", "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_COMMENT", "MOVE_QUALITY" })
+        {
+            var typeId = RelationTypeRegistry.RelationTypeId(rel);
+            Assert.DoesNotContain(change.Attestations, a => a.TypeId == typeId);
+        }
+    }
+
+    // Lossless law: the free-text comment survives inside the verbatim movetext content and
+    // the per-ply tokens are reconstructible from that one edge (readback re-parses it).
+    [Fact]
+    public void RecordGame_CommentAndPlyTokens_ReconstructibleFromMovetext()
+    {
+        var movetext = ChessPgnDecomposer.MovetextSection(GameWithComment);
+        Assert.Contains("{ sharp }", movetext);
+
+        var (moves, _, _, _) = ChessWitnessHydrator.ParseMovetext(movetext);
+        var parsed = ChessPgnDecomposer.TryParseGame(GameWithComment)!;
+        Assert.Equal(parsed.Moves, moves);
+    }
+
+    [Fact]
+    public void ParseMovetext_RecoversClockTokens_FromVerbatimMovetext()
+    {
+        const string pgn =
+            "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n[Result \"1-0\"]\n\n"
+            + "1. e4 { [%clk 0:03:00] } e5 { [%clk 0:03:00] } 2. Nf3 { [%clk 0:02:58] } 1-0\n";
+        var movetext = ChessPgnDecomposer.MovetextSection(pgn);
+        var (moves, clocks, _, _) = ChessWitnessHydrator.ParseMovetext(movetext);
+        Assert.Equal(new[] { "e4", "e5", "Nf3" }, moves);
+        Assert.NotNull(clocks);
+        Assert.Equal(PgnClocks.ClockTokens(pgn, 3), clocks);
+    }
+
+    // Legacy readback: movetext recorded before the verbatim change was SAN-joined; the
+    // parser must still yield the bare moves (no annotations) for those rows.
+    [Fact]
+    public void ParseMovetext_LegacySanJoined_YieldsBareMoves()
+    {
+        var (moves, clocks, evals, quality) = ChessWitnessHydrator.ParseMovetext("e4 e5 Qh5 Nc6");
+        Assert.Equal(new[] { "e4", "e5", "Qh5", "Nc6" }, moves);
+        Assert.Null(clocks);
+        Assert.Null(evals);
+        Assert.Null(quality);
     }
 
     [Fact]

@@ -1,16 +1,41 @@
+-- attestations: provenance rows, LIST-partitioned along the same HIGHWAY axis
+-- as consensus (type_id). The fold NEVER reads this table (all fold lanes read
+-- the in-RAM accumulator / staging + priors from consensus), so partitioning
+-- costs the fold nothing; a modality's bulk load writes only the partitions of
+-- the relations it emits, with indexes LIVE. Per-relation partitions come from
+-- generated/seed_relation_partitions.sql.in; dynamic relations land in DEFAULT.
+--
+-- The highway GIN/partial indexes are dropped: with edges partitioned per
+-- relation, the partition IS the bit — the entity-side highway_mask + the
+-- perfcache do the routing. The column itself stays for now because the native
+-- intent-stage tuple layout emits it (IntentStage.CopyColumnList); removing the
+-- 32B/row dead weight is a follow-up native change.
+--
+-- PK includes the partition keys; FKs dropped (see consensus.sql.in).
+-- GREENFIELD: db-reset + reseed is the upgrade path.
 CREATE TABLE IF NOT EXISTS attestations (
-    id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),
-    subject_id        bytea         NOT NULL REFERENCES entities(id),
-    type_id           bytea         NOT NULL REFERENCES entities(id),
-    object_id         bytea                  REFERENCES entities(id),
-    source_id         bytea         NOT NULL REFERENCES entities(id),
-    context_id        bytea                  REFERENCES entities(id),
+    id                bytea         NOT NULL CHECK (octet_length(id) = 16),
+    subject_id        bytea         NOT NULL,
+    type_id           bytea         NOT NULL,
+    object_id         bytea,
+    source_id         bytea         NOT NULL,
+    context_id        bytea,
     outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
     last_observed_at  timestamptz   NOT NULL,
     observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
-    highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32)
-);
+    highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
+    PRIMARY KEY (id, type_id, subject_id)
+) PARTITION BY LIST (type_id);
 
--- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in) — this
--- is the largest table (150M+ rows), where the default scale factor lags worst.
-ALTER TABLE attestations SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
+DO $$
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relname = 'attestations') = 'p'
+       AND to_regclass(current_schema() || '.attestations_rdefault') IS NULL THEN
+        CREATE TABLE attestations_rdefault PARTITION OF attestations DEFAULT;
+        EXECUTE 'ALTER TABLE attestations_rdefault SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+    END IF;
+END $$;
+
+
+SELECT pg_extension_config_dump('attestations', '');

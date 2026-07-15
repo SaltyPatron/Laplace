@@ -166,6 +166,31 @@ corpus_orphan_cap(void)
     return laplace_corpus_max_orphan_sentences;
 }
 
+/* Separator-classification plan, prepared once and kept across calls: the query
+ * runs once per SEP_CHUNK inside the loop below, and re-planning it per chunk
+ * (and per corpus rebuild) was pure replan overhead. */
+static SPIPlanPtr sep_classify_plan = NULL;
+
+static SPIPlanPtr
+ensure_sep_classify_plan(void)
+{
+    if (sep_classify_plan == NULL)
+    {
+        Oid        argtypes[1] = { BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare(
+            "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)",
+            1, argtypes);
+
+        if (plan == NULL)
+            elog(ERROR, "trajectory_stream: SPI_prepare(separator classify) failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "trajectory_stream: SPI_keepplan(separator classify) failed");
+        sep_classify_plan = plan;
+    }
+    return sep_classify_plan;
+}
+
 /*
  * Classify vocab entries [from, n_vocab) as separators via ONE chunked SPI call
  * per 2M entries (never per row). Persists into c->is_sep so incremental
@@ -175,7 +200,6 @@ static void
 corpus_classify_separators(GenCorpus *c, int32 from, MemoryContext scratch_parent)
 {
     const int32   SEP_CHUNK = 2 * 1024 * 1024;
-    Oid           argtypes[1] = { BYTEAARRAYOID };
     MemoryContext sep_cxt;
 
     if (c->n_vocab <= from)
@@ -207,9 +231,7 @@ corpus_classify_separators(GenCorpus *c, int32 from, MemoryContext scratch_paren
         args[0] = PointerGetDatum(arr);
         MemoryContextSwitchTo(old2);
 
-        rc = SPI_execute_with_args(
-            "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)",
-            1, argtypes, args, NULL, true, 0);
+        rc = SPI_execute_plan(ensure_sep_classify_plan(), args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "trajectory_stream: separator classification failed: %s",
                  SPI_result_code_string(rc));

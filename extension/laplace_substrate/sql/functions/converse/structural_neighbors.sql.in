@@ -34,12 +34,25 @@ BEGIN
         FROM dedup
         WHERE entity_id <> v_id
         ORDER BY geo
-        LIMIT p_k)
-    SELECT render_text_fast(t.entity_id, 8), t.geo,
-           CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
-                THEN public.laplace_frechet_4d(t.trajectory, v_traj) END
-    FROM nearest t
-    WHERE render_text_fast(t.entity_id, 8) IS NOT NULL
-    ORDER BY t.geo;
+        LIMIT p_k),
+    -- Resolve via the full mesh in ONE realize_batch over the <= p_k survivors
+    -- (was: scalar realize per neighbour). Hubs surface as their real word;
+    -- only truly unlabelable nodes drop (abstention, no hex here by design).
+    ordered AS (
+        SELECT t.*, row_number() OVER (ORDER BY t.geo) AS ord
+        FROM nearest t
+    ),
+    labels AS (
+        SELECT realize_batch(array_agg(o.entity_id ORDER BY o.ord)) AS l
+        FROM ordered o
+    )
+    SELECT r.lbl, r.geo, r.frechet FROM (
+        SELECT labels.l[o.ord] AS lbl, o.geo, o.ord,
+               CASE WHEN o.trajectory IS NOT NULL AND v_traj IS NOT NULL
+                    THEN public.laplace_frechet_4d(o.trajectory, v_traj) END AS frechet
+        FROM ordered o, labels
+    ) r
+    WHERE r.lbl IS NOT NULL AND r.lbl <> ''
+    ORDER BY r.ord;
 END;
 $sn$;

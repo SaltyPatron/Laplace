@@ -90,6 +90,6 @@ WHERE conrelid = 'entities'::regclass
   AND conname IN ('entities_type_fk', 'entities_first_observed_fk');
  deferred_fk_count 
 -------------------
-                 2
+                 0
 (1 row)
 

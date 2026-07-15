@@ -36,7 +36,18 @@ public sealed class NpgsqlIndexCycle
     private readonly ILogger _log;
     private readonly List<(string Name, string Def)> _dropped = new();
 
-    public static readonly bool Enabled = true;
+    /// <summary>
+    /// Master switch, DEFAULT OFF since the partitioned schema: every big table is
+    /// LIST/RANGE/HASH-partitioned (consensus/attestations by relation, entities by
+    /// tier, physicalities by hilbert band), so bulk loads maintain small
+    /// partition-local indexes in place — dropping and serially rebuilding global
+    /// indexes is no longer worth the downtime. Set LAPLACE_INDEX_CYCLE=1 to
+    /// re-enable the legacy drop→journal→rebuild cycle (e.g. against a legacy
+    /// non-partitioned DB). Journal RECOVERY stays active regardless, so remnants
+    /// of an old cycled run are still rebuilt at the next run start.
+    /// </summary>
+    public static readonly bool Enabled =
+        (Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE") ?? "") is "1" or "true" or "TRUE";
 
     /// <summary>Hard cap: one CREATE INDEX session at a time (see class note).</summary>
     private const int MaxConcurrentIndexBuilds = 1;
@@ -46,6 +57,7 @@ public sealed class NpgsqlIndexCycle
     /// an increment onto an already-large table — where per-row secondary
     /// maintenance (esp. the coord GiST) otherwise dominates.</summary>
     private const long MinRowsToCycle = 1_000_000;
+
 
     /// <summary>
     /// Indexes the cycle must NOT drop, comma-separated in LAPLACE_INDEX_CYCLE_KEEP.

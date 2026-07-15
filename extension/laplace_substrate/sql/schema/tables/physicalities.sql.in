@@ -1,6 +1,16 @@
+-- physicalities: RANGE-partitioned along the Hilbert space-filling curve — the
+-- spatial-grid axis. 64 fixed prefix bands on the leading byte of the stored
+-- 16-byte hilbert_index (4 first-byte values per band): each band is a
+-- contiguous region of S³, so every per-partition coord GiST gets tight,
+-- non-overlapping bounding boxes (fast R-tree, parallel sorted builds) and KNN
+-- prunes to the bands its query region spans. Deterministic DDL — no
+-- data-dependent bounds. PK leads with hilbert_index (the partition key);
+-- entity_id lookups use physicalities_entity_btree per band (cheap probes).
+-- FK to entities dropped (see consensus.sql.in).
+-- GREENFIELD: db-reset + reseed is the upgrade path.
 CREATE TABLE IF NOT EXISTS physicalities (
-    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
-    entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
+    entity_id          bytea            NOT NULL,
     type               smallint         NOT NULL,
     coord              geometry(PointZM)    NOT NULL,
     hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
@@ -11,24 +21,47 @@ CREATE TABLE IF NOT EXISTS physicalities (
     n_constituents     integer          NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
     alignment_residual double precision,
     source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
-    observed_at        timestamptz      NOT NULL DEFAULT now()
-    
-    
-    
-    
-    
-    
-);
+    observed_at        timestamptz      NOT NULL DEFAULT now(),
+    PRIMARY KEY (hilbert_index, id)
+) PARTITION BY RANGE (hilbert_index);
 
--- Skip the expensive PostGIS ND-stats on the geometry columns. The ingest pipeline reaches these
--- via the GiST index (KNN), never via column histograms, so dropping per-column stats costs the
--- planner nothing here while making ANALYZE/autoanalyze on this table ~160x cheaper (measured on
--- 88M rows: 137s -> 0.87s) — which is what lets autoanalyze run at all instead of timing out of
--- its budget and leaving stats permanently stale.
+DO $$
+DECLARE
+    b int;
+    lo text;
+    hi text;
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relname = 'physicalities') <> 'p' THEN
+        RETURN;  -- legacy plain table
+    END IF;
+    IF to_regclass(current_schema() || '.physicalities_b00') IS NOT NULL THEN
+        RETURN;  -- bands already exist
+    END IF;
+    FOR b IN 0..63 LOOP
+        lo := CASE WHEN b = 0  THEN 'MINVALUE'
+                   ELSE format('%L', decode(lpad(to_hex(b * 4), 2, '0'), 'hex')) END;
+        hi := CASE WHEN b = 63 THEN 'MAXVALUE'
+                   ELSE format('%L', decode(lpad(to_hex((b + 1) * 4), 2, '0'), 'hex')) END;
+        EXECUTE format('CREATE TABLE physicalities_b%s PARTITION OF physicalities'
+                       || ' FOR VALUES FROM (%s) TO (%s)',
+                       lpad(to_hex(b * 4), 2, '0'), lo, hi);
+        -- Per-LEAF tuning (PG forbids storage params on partitioned parents):
+        -- skip the expensive PostGIS ND-stats on the geometry columns (the
+        -- pipeline reaches them via the GiST KNN, never via histograms — the
+        -- measured 160x ANALYZE win), and fire autoanalyze at 2% / 100k changes.
+        EXECUTE format('ALTER TABLE physicalities_b%s ALTER COLUMN coord SET STATISTICS 0,'
+                       || ' ALTER COLUMN trajectory SET STATISTICS 0',
+                       lpad(to_hex(b * 4), 2, '0'));
+        EXECUTE format('ALTER TABLE physicalities_b%s SET (autovacuum_analyze_scale_factor'
+                       || ' = 0.02, autovacuum_analyze_threshold = 100000)',
+                       lpad(to_hex(b * 4), 2, '0'));
+    END LOOP;
+END $$;
+
+-- Parent-level column stats target (applies when ANALYZE samples the hierarchy
+-- into parent stats; per-leaf targets are set at leaf creation above).
 ALTER TABLE physicalities ALTER COLUMN coord      SET STATISTICS 0;
 ALTER TABLE physicalities ALTER COLUMN trajectory SET STATISTICS 0;
-
--- Fire autoanalyze at 2% / 100k changes instead of the 10% default (see entities.sql.in).
-ALTER TABLE physicalities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000);
 
 SELECT pg_extension_config_dump('physicalities', '');

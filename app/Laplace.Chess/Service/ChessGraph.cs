@@ -14,11 +14,17 @@ public static class ChessGraph
         _ => 0L,
     };
 
+    // AGGREGATING lane only: deduped substructure/position outcome deposits + the MOVE edge.
+    // Game-specific record edges (GAME_AT: subject unique per game; GAME_AT_PLY / PLAYED_BY:
+    // one near-unique row per ply) were deliberately removed — they can never corroborate
+    // across games, so each was a permanently single-witness consensus cell. The game's
+    // verbatim HAS_MOVETEXT plus replay reconstructs all of them; contextId keeps per-game
+    // provenance on the evidence rows.
     public static void AppendMoveEdge(
     SubstrateChangeBuilder b, string fromKey, string toKey, PlyOutcome outcome,
     long games, double witnessWeight,
-    Hash128? sourceId = null, Hash128? moverPlayerId = null, long moveChoiceGames = 0,
-    Hash128? contextId = null, int ply = -1)
+    Hash128? sourceId = null, long moveChoiceGames = 0,
+    Hash128? contextId = null)
     {
         var src = sourceId ?? ChessVocabulary.SourceId;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
@@ -43,19 +49,6 @@ public static class ChessGraph
             games: moveChoiceGames,
             sumScoreFp1e9: moveSum,
             witnessWeight: witnessWeight));
-
-        if (moverPlayerId is { } mover)
-            b.AddAttestation(NativeAttestation.Categorical(
-                from.Position.Id, "PLAYED_BY", mover, src, contextId, witnessWeight));
-
-        if (contextId is { } gameId)
-        {
-            b.AddAttestation(NativeAttestation.Categorical(
-                gameId, "GAME_AT", from.Position.Id, src, contextId: null, witnessWeight));
-            if (ply >= 0 && ContentEmitter.Emit(b, ply.ToString(), src) is { } plyId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    from.Position.Id, "GAME_AT_PLY", plyId, src, gameId, witnessWeight));
-        }
     }
 
     public static void AppendEval(

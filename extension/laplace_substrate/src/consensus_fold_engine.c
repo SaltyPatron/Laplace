@@ -42,6 +42,7 @@
 #include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_inherits.h"
 #include "executor/spi.h"
 #include "executor/tuptable.h"
 #include "fmgr.h"
@@ -289,11 +290,8 @@ fold_scan_staging(FoldBuild *b, const char *relname, int32 epoch)
 }
 
 static void
-fold_scan_seeds(FoldBuild *b, int32 partition, int32 nparts)
+fold_scan_seed_rel(FoldBuild *b, Relation rel, int32 partition, int32 nparts)
 {
-    RangeVar   *rv = makeRangeVar(NULL, "consensus", -1);
-    Relation    rel = table_open(RangeVarGetRelid(rv, AccessShareLock, false),
-                                 NoLock);
     TupleTableSlot *slot = table_slot_create(rel, NULL);
     TableScanDesc scan = table_beginscan(rel, GetActiveSnapshot(), 0, NULL);
     int         a_subject = fold_attno(rel, "subject_id");
@@ -339,7 +337,42 @@ fold_scan_seeds(FoldBuild *b, int32 partition, int32 nparts)
 
     table_endscan(scan);
     ExecDropSingleTupleTableSlot(slot);
-    table_close(rel, NoLock);
+}
+
+/* Seed priors from live consensus. The greenfield consensus is LIST/HASH-
+ * partitioned — a partitioned parent has NO heap, so table_beginscan on it is
+ * fatal. Iterate its leaf relations instead (find_all_inheritors is recursive:
+ * hot relations' HASH sub-leaves are included; intermediate 'p' rels skipped).
+ * A legacy plain consensus scans as itself. */
+static void
+fold_scan_seeds(FoldBuild *b, int32 partition, int32 nparts)
+{
+    RangeVar   *rv = makeRangeVar(NULL, "consensus", -1);
+    Oid         parent = RangeVarGetRelid(rv, AccessShareLock, false);
+    Relation    prel = table_open(parent, NoLock);
+
+    if (prel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+    {
+        List     *oids = find_all_inheritors(parent, AccessShareLock, NULL);
+        ListCell *lc;
+
+        table_close(prel, NoLock);
+        foreach(lc, oids)
+        {
+            Oid      oid = lfirst_oid(lc);
+            Relation leaf = table_open(oid, NoLock);
+
+            if (leaf->rd_rel->relkind == RELKIND_RELATION)
+                fold_scan_seed_rel(b, leaf, partition, nparts);
+            table_close(leaf, NoLock);
+        }
+        list_free(oids);
+    }
+    else
+    {
+        fold_scan_seed_rel(b, prel, partition, nparts);
+        table_close(prel, NoLock);
+    }
 }
 
 

@@ -94,7 +94,7 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false) : ComposeDec
 
             ChessGraph.AppendMoveEdge(
                 b, m.StateKey(state), m.StateKey(next), PlyOutcome.Draw, games, OpeningWitnessWeight,
-                sourceId: ChessVocabulary.OpeningsSourceId, moverPlayerId: null);
+                sourceId: ChessVocabulary.OpeningsSourceId);
             state = next;
             any = true;
         }

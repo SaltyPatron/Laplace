@@ -45,7 +45,7 @@ BEGIN
             FROM merged mm
         ) m
         ORDER BY m.cid
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (id, type_id, subject_id) DO NOTHING
     $f$, p_table);
     GET DIAGNOSTICS n_materialized = ROW_COUNT;
 

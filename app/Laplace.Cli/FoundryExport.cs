@@ -964,7 +964,10 @@ internal static class FoundryExport
         if (corpusMax > 0)
         {
             await using var setCmd = conn.CreateCommand();
-            setCmd.CommandText = $"SET laplace_substrate.corpus_max_rows = {corpusMax}";
+            // set_config instead of interpolated SET: parameterizable (SET is not),
+            // so the statement text stays stable for server-side plan reuse.
+            setCmd.CommandText = "SELECT set_config('laplace_substrate.corpus_max_rows', $1, false)";
+            setCmd.Parameters.AddWithValue(corpusMax.ToString());
             await setCmd.ExecuteNonQueryAsync();
         }
         try

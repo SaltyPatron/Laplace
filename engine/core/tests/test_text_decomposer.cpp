@@ -243,3 +243,59 @@ TEST(LaplaceContentRootId, RejectsEmptyAndNull) {
     EXPECT_EQ(-1, laplace_content_root_id(nullptr, 1, &id));
     EXPECT_EQ(-1, laplace_content_root_id((const uint8_t*)"x", 1, nullptr));
 }
+
+/* Grapheme-floor law (tier is a FLOOR): a single-codepoint UAX29 cluster IS
+   its codepoint -- same content bytes, same blake3 id -- so the emission layer
+   must never mint a separate tier-1 row for it. The in-memory tree still
+   carries a uniform grapheme level (the format needs contiguous child ranges);
+   the law binds what gets EMITTED, not the scaffold. */
+
+TEST(LaplaceGraphemeFloorLaw, SingleCpClustersEmitNoTier1Rows) {
+    /* "dog": three single-codepoint clusters (pass-through) + one word.
+       Only the word row is emitted; the characters ARE the seeded tier-0
+       codepoints and are referenced by id from the word's trajectory. */
+    intent_stage_t* stage = intent_stage_new(64);
+    ASSERT_NE(nullptr, stage);
+    hash128_t source;
+    hash128_blake3((const uint8_t*)"test/floor-law", 14, &source);
+    hash128_t root;
+    ASSERT_EQ(0, content_witness_batch_add(
+        stage, (const uint8_t*)"dog", 3, &source, &root));
+    EXPECT_EQ(1u, intent_stage_entity_count(stage));
+    EXPECT_EQ(1u, intent_stage_physicality_count(stage));
+    intent_stage_free(stage);
+}
+
+TEST(LaplaceGraphemeFloorLaw, MultiCpClusterStillMintsTier1) {
+    /* "q" + U+0301 + "x" (no NFC composition exists for q-acute): one
+       2-codepoint cluster (a REAL tier-1 composition) + one pass-through
+       "x" + the word. Exactly the grapheme and the word are emitted. */
+    const uint8_t s[] = {0x71, 0xCC, 0x81, 0x78};
+    intent_stage_t* stage = intent_stage_new(64);
+    ASSERT_NE(nullptr, stage);
+    hash128_t source;
+    hash128_blake3((const uint8_t*)"test/floor-law", 14, &source);
+    hash128_t root;
+    ASSERT_EQ(0, content_witness_batch_add(stage, s, sizeof(s), &source, &root));
+    EXPECT_EQ(2u, intent_stage_entity_count(stage));
+    EXPECT_EQ(2u, intent_stage_physicality_count(stage));
+    intent_stage_free(stage);
+}
+
+TEST(LaplaceGraphemeFloorLaw, SingleCharContentEmitsNothingAndIsTheCodepoint) {
+    /* "a" collapses to the tier-0 codepoint at every tier ("Fine" as a
+       one-word reply IS the sentence IS the word -- one id): no new rows,
+       and the returned root id is the codepoint's id. */
+    intent_stage_t* stage = intent_stage_new(64);
+    ASSERT_NE(nullptr, stage);
+    hash128_t source;
+    hash128_blake3((const uint8_t*)"test/floor-law", 14, &source);
+    hash128_t root;
+    ASSERT_EQ(0, content_witness_batch_add(
+        stage, (const uint8_t*)"a", 1, &source, &root));
+    EXPECT_EQ(0u, intent_stage_entity_count(stage));
+    EXPECT_EQ(0u, intent_stage_physicality_count(stage));
+    hash128_t expect = t0_id('a');
+    EXPECT_TRUE(hash128_equals(&root, &expect));
+    intent_stage_free(stage);
+}

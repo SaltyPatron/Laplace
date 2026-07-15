@@ -150,7 +150,11 @@ public sealed class IngestBatchPipelineTests
     [Fact]
     public async Task Tier01Completion_FlatProbeMarksPresentWhenTrunksAbsent()
     {
-        var records = new[] { ContentRecord("dog") };
+        // q+combining-acute survives NFC (no precomposed form), so this word still
+        // carries a tier-1 grapheme row the present-probe can prune. Plain ASCII
+        // ("dog") no longer can: the grapheme floor collapses single-codepoint
+        // clusters, making the word the smallest emission unit.
+        var records = new[] { ContentRecord("q́x") };
         var reader = new Tier01PresentReader();
 
         var changes = new List<SubstrateChange>();

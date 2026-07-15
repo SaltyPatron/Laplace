@@ -102,7 +102,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         {
             var moverOutcome = adjudicated ? PlyOutcome.Draw : e.MoverOutcome;
             ChessGraph.AppendMoveEdge(b, e.SubjectKey, e.ObjectKey, moverOutcome, games, _witnessWeight,
-                sourceId: ChessVocabulary.SourceId, moverPlayerId: ChessVocabulary.LaplacePlayerId);
+                sourceId: ChessVocabulary.SourceId);
         }
 
         var change = await b.BuildAsync(ct);

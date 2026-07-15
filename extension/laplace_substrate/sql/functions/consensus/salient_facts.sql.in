@@ -5,6 +5,21 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
     SET search_path = @extschema@, public AS $$
     WITH reltypes AS MATERIALIZED (
         SELECT id FROM entities WHERE type_id = entity_type_id('RelationType')
+    ), feat_dynamic AS MATERIALIZED (
+        -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
+        -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
+        -- Fenced ONCE here: the SQL wrapper relation_in_family() carries a SET
+        -- search_path clause, so the planner can never inline it and its EXISTS
+        -- probe would run per candidate row. (relation_type_in_family below is the
+        -- C IMMUTABLE static check — cheap per row, unaffected.) Same truth table:
+        -- static family via the C check, dynamic membership via this set.
+        SELECT c.subject_id AS id FROM consensus c
+        WHERE c.type_id = relation_type_id('IS_A')
+          AND c.object_id = relation_type_id('HAS_FEATURE')
+    ), lang AS (
+        -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
+        -- short-circuits and word_language() is never evaluated.
+        SELECT COALESCE(p_lang, word_language(p_word)) AS l
     ), subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
     ), top AS (
@@ -16,12 +31,8 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
               AND c.type_id IN (SELECT id FROM reltypes)
               AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
-              -- HAS_FEATURE via the dynamic-aware relation_in_family() (not the
-              -- static-only NOT IN below) so dynamic FEAT_* children minted at ingest
-              -- (FEAT_case, FEAT_number, ...) are suppressed alongside the static root.
-              -- Output-identical for static data: the static HAS_FEATURE family is the
-              -- root alone, which the static OR-branch still excludes.
-              AND NOT relation_in_family(c.type_id, 'HAS_FEATURE')
+              AND NOT relation_type_in_family(c.type_id, 'HAS_FEATURE')
+              AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
               AND c.type_id NOT IN (
                 relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                 relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
@@ -35,13 +46,36 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
               AND obj_rt.id IS NULL
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
-    )
-    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT type_label(t.type_id) AS type,
-               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
-               eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
+    ), ranked AS (
+        -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
+        -- shape ran realize() + type_label over EVERY row of `top` (dog: 413
+        -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
+        -- ~1.5ms/render x 413 dominated the call (~575ms warm on real data).
+        -- Ranking needs only the eff_mu already in `top`, so it runs first over
+        -- everything; labeling then runs over a small over-fetched pool
+        -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
+        -- filters below drop rows). Same eff_mu order, same result set.
+        SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
                eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t
+        ORDER BY eff_mu(t.rating, t.rd) DESC
+        LIMIT p_limit * 3 + 8
+    )
+    , ordered AS (
+        SELECT r.*, row_number() OVER (ORDER BY r.sort_mu DESC) AS ord
+        FROM ranked r
+    ), labels AS (
+        -- ONE realize_batch over the ranked pool (was: scalar realize per row).
+        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+                             (SELECT l FROM lang)) AS l
+        FROM ordered o
+    )
+    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
+        SELECT type_label(o.type_id) AS type,
+               labels.l[o.ord] AS fact,
+               eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
+               o.sort_mu
+        FROM ordered o, labels
     ) d
     WHERE d.fact IS NOT NULL AND d.fact <> ''
       AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'

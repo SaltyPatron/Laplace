@@ -181,6 +181,12 @@ static int emit_grapheme_floor_entities(
     for (size_t g = 0; g < g_count; ++g) {
         tier_node_view_t gv;
         if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+        /* Grapheme-floor law: a single-codepoint cluster IS its codepoint
+         * (same bytes, same id -- hash_composer copies the sole child's id).
+         * It is scaffold only; emitting it would mint a wrong-tier (tier 1)
+         * row for a tier-0 identity. Only multi-codepoint clusters (combining
+         * stacks, ZWJ sequences, Hangul, emoji) are real tier-1 content. */
+        if (gv.child_count == 1) continue;
         if (compose_id_push(emitted_entity, emitted_entity_n, emitted_entity_cap, gv.id) != 1)
             continue;
         if (push_entity(r, gv.id, 1, grapheme_type) != 0) return -3;
@@ -607,6 +613,10 @@ static int emit_grapheme_floor_phys(laplace_compose_result_t* r,
     for (size_t g = 0; g < g_count; ++g) {
         tier_node_view_t gv;
         if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+        /* Grapheme-floor law: single-codepoint clusters are pass-through
+         * scaffold -- their identity is the tier-0 codepoint, whose
+         * physicality is seeded by the tier-0 seed, not minted here. */
+        if (gv.child_count == 1) continue;
         uint64_t gf = laplace_vertex_flags(1, 0, 0);
         hash128_t gid = gv.id;
         if (push_phys(r, gv.id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0) return -3;
@@ -797,6 +807,9 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         for (size_t g = 0; g < g_count; ++g) {
             tier_node_view_t gv;
             if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+            /* Grapheme-floor law: single-codepoint clusters are pass-through
+             * scaffold (id == codepoint id); never emit them at tier 1. */
+            if (gv.child_count == 1) continue;
             if (push_entity(r, gv.id, 1, grapheme_type) != 0) { rc = -3; goto fail; }
             if (materialize_phys) {
                 uint64_t gf = laplace_vertex_flags(1, 0, 0);

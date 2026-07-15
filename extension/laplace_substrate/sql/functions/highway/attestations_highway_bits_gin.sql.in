@@ -1,8 +1,0 @@
--- Indexed bit-overlap access to attestation highway masks:
---   WHERE @extschema@.laplace_highway_mask_bits(highway_mask)
---         && @extschema@.laplace_highway_mask_bits(@extschema@.laplace_highway_band_mask(n))
--- GIN posting lists compress duplicate keys, so 1-2 bits/row across millions of
--- rows costs a pending-list append per write — not a hash overflow-chain walk.
-CREATE INDEX IF NOT EXISTS attestations_highway_bits_gin
-    ON attestations USING gin (@extschema@.laplace_highway_mask_bits(highway_mask))
-    WHERE highway_mask IS NOT NULL;

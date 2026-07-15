@@ -114,13 +114,18 @@ public sealed class TierTree : SafeHandle
         }
     }
 
+    // Tier is a FLOOR: a single-child, span-identical wrapper IS its child (same
+    // bytes, same id). This collapses through the grapheme tier too -- a
+    // single-codepoint UAX29 cluster is in-memory scaffold only; the tier-0
+    // codepoint leaf is the stored identity. Mirrors collapse_idx() in
+    // engine/core/src/content_witness_batch.c -- keep the two in lockstep.
     public uint CollapseIndex(uint idx)
     {
         ThrowIfDisposed();
         for (; ; )
         {
             var node = GetNode(idx);
-            if (node.Tier <= 1 || node.ChildCount != 1) break;
+            if (node.Tier == 0 || node.ChildCount != 1) break;
             var child = GetNode(node.FirstChildIdx);
             if (child.TextRangeOff != node.TextRangeOff || child.TextRangeLen != node.TextRangeLen)
                 break;

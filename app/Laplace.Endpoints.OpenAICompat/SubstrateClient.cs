@@ -767,6 +767,15 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         var builder = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
         if (builder.CommandTimeout <= 0 || builder.CommandTimeout > DefaultCommandTimeoutSeconds)
             builder.CommandTimeout = DefaultCommandTimeoutSeconds;
+        // Server-side plan reuse for the API serving path. Every inline query here is a
+        // pure read replayed across requests on pooled connections; without auto-prepare
+        // Postgres re-parses + re-plans each one on every execution. Npgsql transparently
+        // prepares a statement after AutoPrepareMinUsages hits on a physical connection and
+        // caches up to MaxAutoPrepare plans (LRU). Safe here because this path issues no
+        // dynamic DDL (the staging/DDL churn that would invalidate cached plans lives in the
+        // ingest/fold DataSource, which deliberately does NOT enable auto-prepare).
+        builder.MaxAutoPrepare = 50;
+        builder.AutoPrepareMinUsages = 2;
         return builder.ConnectionString;
     }
 

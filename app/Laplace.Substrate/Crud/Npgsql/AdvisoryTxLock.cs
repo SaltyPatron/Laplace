@@ -43,7 +43,10 @@ internal static class AdvisoryTxLock
                 {
                     take.Transaction = tx;
                     take.CommandTimeout = 0;
-                    take.CommandText = $"SELECT pg_advisory_xact_lock(hashtextextended('{lockName}', 0))";
+                    // Parameterized: one statement text for every lock name, so the
+                    // auto-prepare cache holds a single plan instead of one per name.
+                    take.CommandText = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
+                    take.Parameters.AddWithValue(lockName);
                     await take.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
                 await using (var clear = conn.CreateCommand())

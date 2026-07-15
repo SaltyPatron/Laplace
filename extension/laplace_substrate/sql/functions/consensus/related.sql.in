@@ -14,10 +14,21 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFA
               AND c.object_id IS NOT NULL
             ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit
         ) cc
+    ), ranked AS (
+        -- rank + LIMIT on ids BEFORE labeling (was: scalar realize per row over
+        -- the num_senses x p_limit pool, labeling more rows than returned).
+        SELECT t.object_id, t.rating, t.rd, t.witness_count,
+               row_number() OVER (ORDER BY eff_mu(t.rating, t.rd) DESC) AS ord
+        FROM top t
+        ORDER BY eff_mu(t.rating, t.rd) DESC
+        LIMIT p_limit
+    ), labels AS (
+        -- ONE realize_batch over exactly the returned rows, position-aligned.
+        SELECT realize_batch(array_agg(r.object_id ORDER BY r.ord),
+                             COALESCE(p_lang, word_language(p_word))) AS l
+        FROM ranked r
     )
-    SELECT realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
-           eff_mu_display(t.rating, t.rd), t.witness_count
-    FROM top t
-    ORDER BY eff_mu(t.rating, t.rd) DESC
-    LIMIT p_limit
+    SELECT labels.l[r.ord], eff_mu_display(r.rating, r.rd), r.witness_count
+    FROM ranked r, labels
+    ORDER BY r.ord
 $$;

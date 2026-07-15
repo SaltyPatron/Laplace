@@ -15,6 +15,32 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "spi_common.h"
+
+/* Step-edge lookup plan, prepared once and kept: the query runs once per path
+ * step inside the realization loop — re-planning it per step was pure overhead. */
+static SPIPlanPtr step_edge_plan = NULL;
+
+static SPIPlanPtr
+ensure_step_edge_plan(void)
+{
+    if (step_edge_plan == NULL)
+    {
+        Oid        argtypes[2] = { BYTEAOID, BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(
+            "SELECT type_id, "
+            "       CASE WHEN subject_id = $1 THEN 1 ELSE -1 END AS dir "
+            "FROM laplace.consensus_step_edge($1, $2)",
+            2, argtypes);
+
+        if (plan == NULL)
+            elog(ERROR, "cascade: SPI_prepare(step edge) failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "cascade: SPI_keepplan(step edge) failed");
+        step_edge_plan = plan;
+    }
+    return step_edge_plan;
+}
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_cascade);
@@ -147,13 +173,9 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
         for (int s = 1; s < n_steps; s++)
         {
-            Oid   eargs[2] = { BYTEAOID, BYTEAOID };
             Datum eargv[2] = { steps[s - 1], steps[s] };
-            int   erc = SPI_execute_with_args(
-                "SELECT type_id, "
-                "       CASE WHEN subject_id = $1 THEN 1 ELSE -1 END AS dir "
-                "FROM laplace.consensus_step_edge($1, $2)",
-                2, eargs, eargv, NULL, true, 1);
+            int   erc = SPI_execute_plan(ensure_step_edge_plan(), eargv,
+                                         NULL, true, 1);
             if (erc == SPI_OK_SELECT && SPI_processed > 0)
             {
                 HeapTuple tup = SPI_tuptable->vals[0];
