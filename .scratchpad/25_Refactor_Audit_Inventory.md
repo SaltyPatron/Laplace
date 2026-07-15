@@ -357,3 +357,16 @@ per flush) — small n, but it's on the descent path.
 4. `IngestDescentFlush`/`IngestExistenceGate` descent path — line-by-line for
    allocation churn (only skimmed).
 5. H1 fix design doc: steered-walk native API shape (stream+weights in, ids out).
+
+## BASELINE: 2026-07-14 seed timings (pre-partitioning, pre-B9 — the THEN numbers)
+From D:\Data\Output logs (old schema, old recorder):
+- seed-foundation (10 sources): 12:26:15 -> 12:36:11 = 9m56s
+- atomic2020: ingest 114.3s + fold 76.2s (1.25M relations, 16.4k rel/s)
+- OMW: ingest 831.2s (3.44M inputs, 8.1M attestations), 7.69M consensus materialized
+- documents: ingest 310.1s + **INDEX_CYCLE rebuild 210.7s (16 indexes)** — the cycle
+  the partitioned schema retires
+- chess (magnus/books small steps): seconds; the 35M-row explosion came from the
+  large games.pgn steps (B9 eliminates at source)
+- consensus end state: 61.9M rows (2/3 chess record tokens), attestations 77M
+Compare after reseed: same steps, expect no INDEX_CYCLE lines, consensus ~22-27M,
+fold rates equal-or-better with partition pruning.
