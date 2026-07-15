@@ -113,8 +113,9 @@ public static class ChessVocabulary
     public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
     => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
 
-    // Deterministic per-ply anchor id — reconstructable by the analyzer from (game, ply) alone,
-    // so witnessed ply annotations attach without a reverse content lookup.
+    // Deterministic per-ply anchor id. LEGACY: the recorder no longer attests per-ply rows
+    // (a PlyId is unique to one game, so every such consensus cell was permanently
+    // single-witness); kept only to address rows already seeded under the old contract.
     public static Hash128 PlyId(Hash128 gameId, int ply)
     => Hash128.OfCanonical($"chess/ply/{gameId}/{ply}");
 

@@ -81,19 +81,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         try
         {
             session.Moves.Add(moveToken);
-            session.Plies.Add(new RecordedPly(fromKey, toKey, session.MoverSide(ply), moverPlayerId));
+            session.Plies.Add(new RecordedPly(fromKey, toKey, session.MoverSide(ply)));
 
             var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
             EnsureGameEntity(b, gameId, session);
-            WitnessMovetext(b, gameId, session.Moves);
-            WitnessPlyToken(b, gameId, ply, moveToken);
 
             ChessGraph.AppendMoveEdge(
                 b, fromKey, toKey, PlyOutcome.Draw, games: 1, WitnessWeight,
                 sourceId: ChessVocabulary.SourceId,
-                moverPlayerId: moverPlayerId ?? ChessVocabulary.LaplacePlayerId,
-                contextId: gameId,
-                ply: ply);
+                contextId: gameId);
 
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
@@ -116,21 +112,23 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         try
         {
             var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
+            // Game grain: ONE verbatim movetext edge for the whole game, witnessed at
+            // completion (not a growing per-ply prefix — that minted N single-witness
+            // HAS_MOVETEXT rows per game), plus the result.
+            WitnessMovetext(b, gameId, session.Moves);
             WitnessResult(b, gameId, result);
 
             bool hasWin = session.Plies.Any(p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
             bool checkmate = !adjudicated && hasWin;
             long games = checkmate ? CheckmateGames : 1;
 
-            foreach (var (ply, rp) in session.Plies.Index())
+            foreach (var rp in session.Plies)
             {
                 var moverOutcome = adjudicated ? PlyOutcome.Draw : result.ForMover(rp.MoverSide);
                 ChessGraph.AppendMoveEdge(
                     b, rp.FromKey, rp.ToKey, moverOutcome, games, WitnessWeight,
                     sourceId: ChessVocabulary.SourceId,
-                    moverPlayerId: rp.MoverPlayerId ?? ChessVocabulary.LaplacePlayerId,
-                    contextId: gameId,
-                    ply: ply + 1);
+                    contextId: gameId);
             }
 
             var change = await b.BuildAsync(ct);
@@ -263,15 +261,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, ChessVocabulary.SourceId, null, WitnessWeight));
     }
 
-    private static void WitnessPlyToken(SubstrateChangeBuilder b, Hash128 gameId, int ply, string moveToken)
-    {
-        var plyId = ChessVocabulary.PlyId(gameId, ply - 1);
-        b.AddEntity(plyId, EntityTier.Word, ChessVocabulary.PlyType, ChessVocabulary.SourceId);
-        b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_PLY", plyId, ChessVocabulary.SourceId, gameId, WitnessWeight));
-        if (ContentEmitter.Emit(b, moveToken, ChessVocabulary.SourceId) is { } tokId)
-            b.AddAttestation(NativeAttestation.Categorical(plyId, "HAS_SAN", tokId, ChessVocabulary.SourceId, gameId, WitnessWeight));
-    }
-
     private static void WitnessResult(SubstrateChangeBuilder b, Hash128 gameId, GameOutcome result)
     {
         string token = result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1";
@@ -307,7 +296,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         public int MoverSide(int ply) => (ply - 1) % 2;
     }
 
-    private readonly record struct RecordedPly(string FromKey, string ToKey, int MoverSide, Hash128? MoverPlayerId);
+    private readonly record struct RecordedPly(string FromKey, string ToKey, int MoverSide);
 }
 
 public sealed class PlaySession(Hash128 gameId, string learnContext, bool recordToSubstrate)

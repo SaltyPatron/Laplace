@@ -164,9 +164,7 @@ public static class ChessAnalyze
             ChessGraph.AppendMoveEdge(
                 b, fromKey, m.StateKey(next), result.ForMover(mover), games, MoveWeight,
                 sourceId: src,
-                moverPlayerId: mover == 0 ? whitePlayer : blackPlayer,
-                contextId: gameId,
-                ply: ply + 1);
+                contextId: gameId);
 
             foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
                 ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", tag, MoveWeight, src);

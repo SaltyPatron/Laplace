@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
@@ -11,7 +12,9 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// Reads the witnessed chess layer from Postgres and streams games missing the current
-/// analysis-version marker. Batch hydration + render_text_batch — no PGN files.
+/// analysis-version marker. Batch hydration + render_text_batch — no PGN files. Per-ply
+/// tokens (SAN/clock/eval/quality) are re-parsed from each game's verbatim HAS_MOVETEXT
+/// content, the single lossless per-game record.
 /// </summary>
 internal static class ChessWitnessHydrator
 {
@@ -20,9 +23,6 @@ internal static class ChessWitnessHydrator
     private static readonly Hash128 RelHasWhite = RelationTypeRegistry.RelationTypeId("HAS_WHITE");
     private static readonly Hash128 RelHasBlack = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
     private static readonly Hash128 RelHasSetup = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
-    private static readonly Hash128 RelHasClock = RelationTypeRegistry.RelationTypeId("HAS_CLOCK");
-    private static readonly Hash128 RelHasEvalToken = RelationTypeRegistry.RelationTypeId("HAS_EVAL_TOKEN");
-    private static readonly Hash128 RelMoveQuality = RelationTypeRegistry.RelationTypeId("MOVE_QUALITY");
 
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
         reader is NpgsqlSubstrateReader npg ? npg.DataSource : null;
@@ -203,82 +203,69 @@ internal static class ChessWitnessHydrator
 
         var textById = await RenderTextBatchAsync(ds, contentIds, ct).ConfigureAwait(false);
 
-        var plyIdToGamePly = new Dictionary<Hash128, (Hash128 Game, int Ply)>();
-        var allPlyBytes = new List<byte[]>();
-        foreach (var (gameId, gm) in meta)
-        {
-            if (gm.MovetextObj == default) continue;
-            if (!textById.TryGetValue(gm.MovetextObj, out var movetext)
-                || string.IsNullOrWhiteSpace(movetext)) continue;
-            gm.Moves = movetext.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (gm.Moves.Length == 0) continue;
-            gm.MoveCount = gm.Moves.Length;
-            for (int ply = 0; ply < gm.MoveCount; ply++)
-            {
-                var plyId = ChessVocabulary.PlyId(gameId, ply);
-                plyIdToGamePly[plyId] = (gameId, ply);
-                allPlyBytes.Add(plyId.ToBytes());
-            }
-        }
-
-        if (allPlyBytes.Count > 0)
-        {
-            var plyContentIds = new List<Hash128>();
-            await using (var plyCmd = ds.CreateCommand(@"
-                SELECT a.subject_id, a.type_id, a.object_id
-                FROM laplace.attestations a
-                WHERE a.subject_id = ANY($1::bytea[])"))
-            {
-                plyCmd.Parameters.AddWithValue(allPlyBytes.ToArray());
-                plyCmd.Parameters[0].NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                await using var pr = await plyCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                while (await pr.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    var plyId = ReadHash(pr, 0);
-                    if (!plyIdToGamePly.TryGetValue(plyId, out var gp)) continue;
-                    if (!meta.TryGetValue(gp.Game, out var gm) || gm.MoveCount <= 0) continue;
-                    var type = ReadHash(pr, 1);
-                    var obj = pr.IsDBNull(2) ? default : ReadHash(pr, 2);
-                    if (obj == default) continue;
-                    plyContentIds.Add(obj);
-                    var pa = gm.Ply(gp.Ply);
-                    if (type == RelHasClock) pa.ClockObj = obj;
-                    else if (type == RelHasEvalToken) pa.EvalObj = obj;
-                    else if (type == RelMoveQuality) pa.QualityObj = obj;
-                }
-            }
-
-            var plyText = await RenderTextBatchAsync(ds, plyContentIds, ct).ConfigureAwait(false);
-            foreach (var gm in meta.Values)
-            {
-                foreach (var pa in gm.Plies.Values)
-                {
-                    if (pa.ClockObj is { } co && plyText.TryGetValue(co, out var ctok))
-                        { pa.ClockTok = ctok; gm.AnyClock = true; }
-                    if (pa.EvalObj is { } eo && plyText.TryGetValue(eo, out var etok))
-                        { pa.EvalTok = etok; gm.AnyEval = true; }
-                    if (pa.QualityObj is { } qo && plyText.TryGetValue(qo, out var qtok))
-                        { pa.QualityTok = qtok; gm.AnyQual = true; }
-                }
-            }
-        }
-
         var outList = new List<ChessWitnessedGame>(gameIds.Count);
         foreach (var gameId in gameIds)
         {
-            if (!meta.TryGetValue(gameId, out var gm) || gm.Moves is null || gm.Moves.Length == 0) continue;
+            if (!meta.TryGetValue(gameId, out var gm) || gm.MovetextObj == default) continue;
+            if (!textById.TryGetValue(gm.MovetextObj, out var movetext)
+                || string.IsNullOrWhiteSpace(movetext)) continue;
+
+            // The verbatim movetext IS the per-ply record: moves, clocks, evals, comments and
+            // quality annotations are re-parsed from the one witnessed content edge (the
+            // lossless law) — no per-ply attestations exist to query.
+            var (moves, clockTokens, evalTokens, qualityTokens) = ParseMovetext(movetext);
+            if (moves.Length == 0) continue;
+
             string? resultStr = gm.ResultObj != default && textById.TryGetValue(gm.ResultObj, out var rs)
                 ? rs : null;
             string? startFen = gm.SetupObj != default && textById.TryGetValue(gm.SetupObj, out var fen)
                 ? fen : null;
-            gm.MaterializeTokens(out var clockTokens, out var evalTokens, out var qualityTokens);
             outList.Add(new ChessWitnessedGame(
-                gameId, gm.Moves, ParseResult(resultStr),
+                gameId, moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
                 startFen, clockTokens, evalTokens, qualityTokens));
         }
         return outList;
+    }
+
+    // Recover the analyzer's witnessed inputs from a game's verbatim movetext. Falls back to a
+    // whitespace split for legacy SAN-joined movetext (recorded before the verbatim change) or
+    // unparseable content — bare moves, no annotations.
+    internal static (string[] Moves, string?[]? ClockTokens, string?[]? EvalTokens, string?[]? QualityTokens)
+        ParseMovetext(string movetext)
+    {
+        PgnMovetext.PgnWalkResult? walk = null;
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(movetext);
+            using var ast = GrammarDecomposer.Parse(bytes, "pgn");
+            walk = PgnMovetext.Walk(ast, bytes);
+        }
+        catch (Exception)
+        {
+            // fall through to the legacy split
+        }
+
+        if (walk is null || walk.Mainline.Count == 0)
+        {
+            var legacy = movetext.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return (legacy, null, null, null);
+        }
+
+        var moves = new string[walk.Mainline.Count];
+        var quality = new string?[moves.Length];
+        bool anyQuality = false;
+        for (int i = 0; i < moves.Length; i++)
+        {
+            moves[i] = walk.Mainline[i].San;
+            quality[i] = MoveQuality.FromStream(walk.Mainline[i]);
+            anyQuality |= quality[i] is not null;
+        }
+        return (moves,
+                PgnClocks.ClockTokens(movetext, moves.Length),
+                PgnEvals.EvalTokens(movetext, moves.Length),
+                anyQuality ? quality : null);
     }
 
     internal static async Task<ChessWitnessedGame?> TryHydrateAsync(
@@ -288,10 +275,8 @@ internal static class ChessWitnessHydrator
         return list.Count > 0 ? list[0] : null;
     }
 
-    // Per-game witnessed scaffold. Per-ply annotations live in <see cref="Plies"/> — a sparse map
-    // addressed BY PLY ORDINAL (a point carries its own facts), not a set of fixed-size parallel
-    // arrays. The old new Hash128?[512] took an IndexOutOfRange on a >512-ply game; a point-
-    // addressed map has no cap to overrun and only stores the plies that actually witnessed one.
+    // Per-game witnessed scaffold: game-level attestation objects only. Per-ply annotations are
+    // NOT read from attestations — they are re-parsed from the verbatim movetext (ParseMovetext).
     private sealed class GameMeta
     {
         public Hash128 MovetextObj;
@@ -299,45 +284,6 @@ internal static class ChessWitnessHydrator
         public Hash128 Black;
         public Hash128 SetupObj;
         public Hash128 ResultObj;
-        public string[]? Moves;
-        public int MoveCount;
-        public readonly Dictionary<int, PlyAnno> Plies = new();
-        public bool AnyClock;
-        public bool AnyEval;
-        public bool AnyQual;
-
-        // The annotation record for a ply, created on first witness. Ply keys land in
-        // [0, MoveCount) by construction, so materialization to a ply-indexed array cannot overrun.
-        public PlyAnno Ply(int ply)
-            => Plies.TryGetValue(ply, out var p) ? p : (Plies[ply] = new PlyAnno());
-
-        // Flatten the sparse annotations back into the analyzer's dense ply-indexed contract.
-        // A kind no ply witnessed returns null (the analyzer treats a null array as "absent").
-        public void MaterializeTokens(out string?[]? clock, out string?[]? eval, out string?[]? quality)
-        {
-            clock = AnyClock ? new string?[MoveCount] : null;
-            eval = AnyEval ? new string?[MoveCount] : null;
-            quality = AnyQual ? new string?[MoveCount] : null;
-            foreach (var (ply, pa) in Plies)
-            {
-                if ((uint)ply >= (uint)MoveCount) continue;
-                if (clock is not null) clock[ply] = pa.ClockTok;
-                if (eval is not null) eval[ply] = pa.EvalTok;
-                if (quality is not null) quality[ply] = pa.QualityTok;
-            }
-        }
-    }
-
-    // One ply's witnessed annotation slots. Obj ids captured in pass 1 (ply-attestation read),
-    // rendered to tokens in pass 2 (after the batch render). Absent kinds stay null.
-    private sealed class PlyAnno
-    {
-        public Hash128? ClockObj;
-        public Hash128? EvalObj;
-        public Hash128? QualityObj;
-        public string? ClockTok;
-        public string? EvalTok;
-        public string? QualityTok;
     }
 
     private static async Task<Dictionary<Hash128, string>> RenderTextBatchAsync(
