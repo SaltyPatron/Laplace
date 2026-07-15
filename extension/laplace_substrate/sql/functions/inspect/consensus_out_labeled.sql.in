@@ -22,14 +22,24 @@ CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEF
         ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
         LIMIT GREATEST(1, p_limit)
     )
-    SELECT r.type_id, r.object_id,
-           type_label(r.type_id),
-           COALESCE(
-               NULLIF(_realize_synset_lemma(r.object_id, word_language(p_id)), ''),
-               NULLIF(render_text_fast(r.object_id, 8), ''),
-               left(encode(r.object_id, 'hex'), 16)),
-           r.eff_mu,
-           r.witness_count
-    FROM ranked r
-    ORDER BY r.rnk DESC
+    , ordered AS (
+        SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC) AS ord
+        FROM ranked r
+    ), labels AS (
+        -- Full-mesh labels via ONE realize_batch (was: a shorter hand-rolled
+        -- synset-lemma -> render_fast -> HEX ladder per row). Gains the
+        -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
+        -- last resort so every edge still shows. Approved behavior change.
+        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+                             word_language(p_id)) AS l
+        FROM ordered o
+    )
+    SELECT o.type_id, o.object_id,
+           type_label(o.type_id),
+           COALESCE(NULLIF(labels.l[o.ord], ''),
+                    left(encode(o.object_id, 'hex'), 16)),
+           o.eff_mu,
+           o.witness_count
+    FROM ordered o, labels
+    ORDER BY o.ord
 $$;

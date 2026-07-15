@@ -34,20 +34,25 @@ BEGIN
         FROM dedup
         WHERE entity_id <> v_id
         ORDER BY geo
-        LIMIT p_k)
-    -- Resolve via the full mesh (realize), computed ONCE per neighbour, not the
-    -- bare render_text_fast run twice (SELECT + WHERE). The old WHERE dropped
-    -- every synset / ILI / concept hub — nodes with a coord but no direct surface
-    -- — from the 3D view entirely; realize() hops name/synset-lemma/translation
-    -- so hubs surface as their real word and only truly unlabelable nodes drop.
-    -- Bounded: <= p_k rows, after the KNN LIMIT.
-    SELECT r.lbl, r.geo, r.frechet FROM (
-        SELECT realize(t.entity_id) AS lbl, t.geo,
-               CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
-                    THEN public.laplace_frechet_4d(t.trajectory, v_traj) END AS frechet
+        LIMIT p_k),
+    -- Resolve via the full mesh in ONE realize_batch over the <= p_k survivors
+    -- (was: scalar realize per neighbour). Hubs surface as their real word;
+    -- only truly unlabelable nodes drop (abstention, no hex here by design).
+    ordered AS (
+        SELECT t.*, row_number() OVER (ORDER BY t.geo) AS ord
         FROM nearest t
+    ),
+    labels AS (
+        SELECT realize_batch(array_agg(o.entity_id ORDER BY o.ord)) AS l
+        FROM ordered o
+    )
+    SELECT r.lbl, r.geo, r.frechet FROM (
+        SELECT labels.l[o.ord] AS lbl, o.geo, o.ord,
+               CASE WHEN o.trajectory IS NOT NULL AND v_traj IS NOT NULL
+                    THEN public.laplace_frechet_4d(o.trajectory, v_traj) END AS frechet
+        FROM ordered o, labels
     ) r
     WHERE r.lbl IS NOT NULL AND r.lbl <> ''
-    ORDER BY r.geo;
+    ORDER BY r.ord;
 END;
 $sn$;

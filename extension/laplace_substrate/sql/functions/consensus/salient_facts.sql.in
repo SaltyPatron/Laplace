@@ -61,12 +61,21 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         ORDER BY eff_mu(t.rating, t.rd) DESC
         LIMIT p_limit * 3 + 8
     )
-    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT type_label(r.type_id) AS type,
-               realize(r.object_id, (SELECT l FROM lang)) AS fact,
-               eff_mu_display(r.rating, r.rd) AS eff_mu, r.witness_count AS witnesses,
-               r.sort_mu
+    , ordered AS (
+        SELECT r.*, row_number() OVER (ORDER BY r.sort_mu DESC) AS ord
         FROM ranked r
+    ), labels AS (
+        -- ONE realize_batch over the ranked pool (was: scalar realize per row).
+        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+                             (SELECT l FROM lang)) AS l
+        FROM ordered o
+    )
+    SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
+        SELECT type_label(o.type_id) AS type,
+               labels.l[o.ord] AS fact,
+               eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
+               o.sort_mu
+        FROM ordered o, labels
     ) d
     WHERE d.fact IS NOT NULL AND d.fact <> ''
       AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'

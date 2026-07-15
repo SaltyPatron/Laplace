@@ -86,15 +86,26 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         ORDER BY edge_rank(fo.type_id, COALESCE(cm.mu_raw, 0)) DESC,
                  fo.witness_count DESC
         LIMIT GREATEST(1, p_limit) * 3 + 8
-    ), labeled AS (
-        SELECT rk.type_id, rk.object_id, rk.witness_count, rk.source_labels,
-               rk.mu_raw, rk.eff_mu_disp,
-               type_label(rk.type_id) AS rel,
-               COALESCE(
-                   NULLIF(_realize_synset_lemma(rk.object_id, word_language(p_id)), ''),
-                   NULLIF(render_text(rk.object_id, 12), ''),
-                   left(encode(rk.object_id, 'hex'), 16)) AS obj
+    ), ordered AS (
+        SELECT rk.*, row_number() OVER (
+                   ORDER BY edge_rank(rk.type_id, rk.mu_raw) DESC,
+                            rk.witness_count DESC) AS ord
         FROM ranked rk
+    ), labels AS (
+        -- Full-mesh labels via ONE realize_batch (was: a shorter hand-rolled
+        -- synset-lemma -> render -> HEX ladder per row). Gains the
+        -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
+        -- last resort so every claim still shows. Approved behavior change.
+        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+                             word_language(p_id)) AS l
+        FROM ordered o
+    ), labeled AS (
+        SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,
+               o.mu_raw, o.eff_mu_disp,
+               type_label(o.type_id) AS rel,
+               COALESCE(NULLIF(labels.l[o.ord], ''),
+                        left(encode(o.object_id, 'hex'), 16)) AS obj
+        FROM ordered o, labels
     )
     SELECT lb.type_id, lb.object_id, lb.rel, lb.obj,
            lb.eff_mu_disp,

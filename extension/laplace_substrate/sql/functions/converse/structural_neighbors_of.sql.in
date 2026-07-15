@@ -48,22 +48,27 @@ BEGIN
         FROM dedup
         WHERE entity_id <> p_id
         ORDER BY geo
-        LIMIT GREATEST(1, p_k))
-    SELECT n.entity_id,
-           -- Full-mesh resolution, not a bare surface render: a KNN neighbour is
-           -- often a synset / ILI / concept hub with an S³ coord but no direct
-           -- renderable surface, so render_text_fast() returned '' and the node
-           -- reached the 3D overlay as a hex hash. realize() hops the sibling
-           -- name/synset-lemma/translation arms to the real word first; hex stays
-           -- only as the genuine last resort so the node still plots. Bounded:
-           -- runs over <= p_k rows, after the KNN LIMIT.
-           COALESCE(NULLIF(realize(n.entity_id), ''), left(encode(n.entity_id, 'hex'), 16)),
-           ST_X(n.coord), ST_Y(n.coord), ST_Z(n.coord), ST_M(n.coord),
-           n.radius_origin,
-           n.geo,
-           CASE WHEN n.trajectory IS NOT NULL AND v_traj IS NOT NULL
-                THEN public.laplace_frechet_4d(n.trajectory, v_traj) END
-    FROM nearest n
-    ORDER BY n.geo;
+        LIMIT GREATEST(1, p_k)),
+    ordered AS (
+        SELECT n.*, row_number() OVER (ORDER BY n.geo) AS ord
+        FROM nearest n
+    ),
+    labels AS (
+        -- Full-mesh resolution via ONE realize_batch over the <= p_k survivors
+        -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
+        -- the name/synset-lemma/translation arms to the real word; hex stays
+        -- only as the genuine last resort so the node still plots.
+        SELECT realize_batch(array_agg(o.entity_id ORDER BY o.ord)) AS l
+        FROM ordered o
+    )
+    SELECT o.entity_id,
+           COALESCE(NULLIF(labels.l[o.ord], ''), left(encode(o.entity_id, 'hex'), 16)),
+           ST_X(o.coord), ST_Y(o.coord), ST_Z(o.coord), ST_M(o.coord),
+           o.radius_origin,
+           o.geo,
+           CASE WHEN o.trajectory IS NOT NULL AND v_traj IS NOT NULL
+                THEN public.laplace_frechet_4d(o.trajectory, v_traj) END
+    FROM ordered o, labels
+    ORDER BY o.ord;
 END;
 $sn$;
