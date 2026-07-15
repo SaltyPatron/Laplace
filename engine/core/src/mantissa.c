@@ -115,6 +115,65 @@ int laplace_testimony_unpack_vertex(const double vertex[4],
     return 0;
 }
 
+int laplace_factor_pack_values(const float* values, size_t n,
+                               double* out, size_t* out_vertices) {
+    size_t v, nv;
+    if (!values || !out || !out_vertices || n == 0)
+        return -1;
+    nv = (n + (LAPLACE_FACTOR_VALUES_PER_VERTEX - 1)) / LAPLACE_FACTOR_VALUES_PER_VERTEX;
+    for (v = 0; v < nv; v++) {
+        uint32_t f[LAPLACE_FACTOR_VALUES_PER_VERTEX] = {0, 0, 0, 0, 0, 0};
+        const size_t base = v * LAPLACE_FACTOR_VALUES_PER_VERTEX;
+        const size_t rem  = n - base;
+        const uint8_t cnt = (uint8_t)(rem < LAPLACE_FACTOR_VALUES_PER_VERTEX
+                                          ? rem : LAPLACE_FACTOR_VALUES_PER_VERTEX);
+        uint8_t j;
+        mantissa_payload_t p;
+        for (j = 0; j < cnt; j++)
+            memcpy(&f[j], &values[base + j], sizeof(uint32_t));
+        p.entity_id.lo = (uint64_t)f[0] | ((uint64_t)f[1] << 32);
+        p.entity_id.hi = (uint64_t)f[2] | ((uint64_t)f[3] << 32);
+        p.ordinal      = (uint16_t)(f[4] & 0xFFFFu);
+        p.run_length   = (uint16_t)(f[4] >> 16);
+        p.flags        = LAPLACE_VFLAG_FACTOR
+                       | ((uint64_t)f[5] << LAPLACE_VFLAG_F5_SHIFT)
+                       | ((uint64_t)cnt << LAPLACE_VFLAG_FCOUNT_SHIFT);
+        mantissa_pack(out + v * 4, &p);
+    }
+    *out_vertices = nv;
+    return 0;
+}
+
+int laplace_factor_unpack_vertex(const double vertex[4],
+                                 float out_values[6], uint8_t* out_count) {
+    mantissa_payload_t p;
+    uint32_t f[LAPLACE_FACTOR_VALUES_PER_VERTEX];
+    uint8_t cnt, j;
+    if (!out_values)
+        return -1;
+    mantissa_unpack(vertex, &p);
+    if ((p.flags & (LAPLACE_VFLAG_TESTIMONY | LAPLACE_VFLAG_HAS_ATOM)) != 0)
+        return -1;
+    if (!(p.flags & LAPLACE_VFLAG_FACTOR))
+        return -1;
+    cnt = (uint8_t)((p.flags >> LAPLACE_VFLAG_FCOUNT_SHIFT) & LAPLACE_VFLAG_FCOUNT_MASK);
+    if (cnt == 0 || cnt > LAPLACE_FACTOR_VALUES_PER_VERTEX)
+        return -2;
+    f[0] = (uint32_t)(p.entity_id.lo & 0xFFFFFFFFULL);
+    f[1] = (uint32_t)(p.entity_id.lo >> 32);
+    f[2] = (uint32_t)(p.entity_id.hi & 0xFFFFFFFFULL);
+    f[3] = (uint32_t)(p.entity_id.hi >> 32);
+    f[4] = (uint32_t)p.ordinal | ((uint32_t)p.run_length << 16);
+    f[5] = (uint32_t)((p.flags >> LAPLACE_VFLAG_F5_SHIFT) & LAPLACE_VFLAG_F5_MASK);
+    for (j = 0; j < LAPLACE_FACTOR_VALUES_PER_VERTEX; j++)
+        out_values[j] = 0.0f;
+    for (j = 0; j < cnt; j++)
+        memcpy(&out_values[j], &f[j], sizeof(float));
+    if (out_count)
+        *out_count = cnt;
+    return 0;
+}
+
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out) {
     const uint64_t slot_x = laplace_fp_to_slot(vertex[0]);
     const uint64_t slot_y = laplace_fp_to_slot(vertex[1]);

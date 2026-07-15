@@ -71,6 +71,30 @@ public static class ModelCheckpoint
         return ids;
     }
 
+    // A head's rows in a row-major [attn, d] projection tensor are a CONTIGUOUS
+    // byte range, so per-head slice ids follow the identical content law:
+    // Blake3 over the literal bytes. Byte-identical slices collide across
+    // checkpoints — a merge, never entity resolution. Slices reuse the
+    // Model_Tensor type: a slice IS a tensor.
+    public static Hash128[] HeadSliceIds(SafetensorsContainerParser.TensorReference t, int heads)
+    {
+        long total = t.AbsoluteDataEnd - t.AbsoluteDataStart;
+        if (heads <= 0 || total <= 0 || total % heads != 0)
+            throw new InvalidDataException(
+                $"tensor '{t.Name}' byte range {total} does not split into {heads} head slices");
+        long sliceLen = total / heads;
+        if (sliceLen > MaxTensorBytes)
+            throw new InvalidDataException($"head slice of '{t.Name}' exceeds addressable range");
+
+        var ids = new Hash128[heads];
+        using var mmf = MemoryMappedFile.CreateFromFile(
+            t.FilePath, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
+        using var view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+        for (int h = 0; h < heads; h++)
+            ids[h] = HashRange(view, t.AbsoluteDataStart + (long)h * sliceLen, sliceLen);
+        return ids;
+    }
+
     // Deposit the checkpoint's identity and structure. Insert-if-absent everywhere,
     // so re-ingesting the same checkpoint re-witnesses identical rows (0 novel).
     // Returns the checkpoint root id for the caller to hang the model root off.

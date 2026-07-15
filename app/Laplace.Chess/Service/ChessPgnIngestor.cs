@@ -41,7 +41,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
         var inner = new NpgsqlSubstrateWriter(ds);
         var writer = new ConsensusAccumulatingWriter(
-            inner, ds, foldWorkers: 1, freshSource: false, persistEvidence: true, stageAsWalks: false);
+            inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
 
         var names = new HashSet<string>();
@@ -80,7 +80,6 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 novel += n; applied += a;
             }
 
-            await _writer.FoldIncrementalAsync(ct);
             log?.Invoke($"ingested {applied}/{parsed} games from {Path.GetFileName(pgnPath)}"
                         + (parsed > novel ? $" ({parsed - novel} already present)" : ""));
             return new Result(parsed, novel, applied);

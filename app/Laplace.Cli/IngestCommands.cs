@@ -123,10 +123,7 @@ internal static class IngestCommands
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
-    {
-        if (cli?.SkipEvidence == true) return false;
-        return ConsensusAccumulatingWriter.ResolvePersistEvidence();
-    }
+        => cli?.SkipEvidence != true;
 
     public static async Task<int> IngestAsync(string[] args)
     {
@@ -245,9 +242,7 @@ internal static class IngestCommands
 
         bool persistEvidenceResolved = ResolvePersistEvidence(cli);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-            freshSource: false,
             persistEvidence: persistEvidenceResolved,
-            stageAsWalks: !persistEvidenceResolved,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
@@ -302,15 +297,9 @@ internal static class IngestCommands
             await RegisterDynamicCanonicalsAsync(ds, dec);
 
             Console.WriteLine(
-                $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
-                + $"across {accumulator.FoldWorkers} partition(s) ...");
-            var matSw = Stopwatch.StartNew();
-            var materialized = await accumulator.MaterializeConsensusAsync();
-            matSw.Stop();
-            Console.WriteLine(
-                $"consensus: {materialized:N0} relations materialized from "
-                + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
-                + $"(accumulated at ingest; evidence = provenance-only)");
+                $"consensus: {accumulator.CellsFolded:N0} cells folded inline at apply from "
+                + $"{accumulator.ObservationsAccumulated:N0} observations "
+                + $"(nothing deferred; evidence = provenance-only)");
         }
         finally
         {
@@ -474,9 +463,7 @@ internal static class IngestCommands
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
-            freshSource: false,
             persistEvidence: persistEvidence,
-            stageAsWalks: !persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
@@ -507,12 +494,8 @@ internal static class IngestCommands
 
 
         await RegisterDynamicCanonicalsAsync(ds, dec);
-        Console.WriteLine(
-            $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
-            + $"across {accumulator.FoldWorkers} partition(s) ...");
-        var materialized = await accumulator.MaterializeConsensusAsync();
-        Console.WriteLine($"consensus: {materialized:N0} relations materialized "
-                        + $"(accumulated at ingest; evidence = provenance-only)");
+        Console.WriteLine($"consensus: {accumulator.CellsFolded:N0} cells folded inline at apply "
+                        + $"from {accumulator.ObservationsAccumulated:N0} observations (nothing deferred)");
 
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)

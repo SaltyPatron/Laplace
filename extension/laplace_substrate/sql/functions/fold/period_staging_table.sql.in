@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION period_staging_table(p_epoch integer, p_partition integer)
-    RETURNS text LANGUAGE sql IMMUTABLE
-    SET search_path = @extschema@, public AS $$
-    SELECT format('consensus_period_staging_e%s_%s', lpad(p_epoch::text, 4, '0'), p_partition);
-$$;

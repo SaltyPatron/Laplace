@@ -51,7 +51,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         var ds = new NpgsqlDataSourceBuilder(conn).Build();
         var inner = new NpgsqlSubstrateWriter(ds);
         var writer = new ConsensusAccumulatingWriter(
-            inner, ds, foldWorkers: 1, freshSource: false, persistEvidence: true, stageAsWalks: false);
+            inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
         var host = new SubstrateTurnHost(ds, writer, reader, witnessWeight, defaultLearnContext);
         var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
@@ -93,7 +93,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
-            await _writer.FoldIncrementalAsync(ct);
             InvalidateLearnedPst();
         }
         finally
@@ -133,7 +132,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
-            await _writer.FoldIncrementalAsync(ct);
             InvalidateLearnedPst();
             GamesCompleted++;
         }

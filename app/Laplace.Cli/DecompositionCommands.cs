@@ -58,10 +58,7 @@ internal static class DecompositionCommands
         swR.Stop();
         Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
 
-        var swC = Stopwatch.StartNew();
-        long materialized = await accumulator.MaterializeConsensusAsync();
-        swC.Stop();
-        Console.WriteLine($"consensus: {materialized,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches in {swC.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"consensus: {accumulator.CellsFolded,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches (folded inline at apply)");
 
         var swX = Stopwatch.StartNew();
         byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);

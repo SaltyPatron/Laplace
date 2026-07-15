@@ -26,6 +26,18 @@ public sealed class ArchitectureProfile
 
     public required IReadOnlyList<PathSpec> Paths { get; init; }
 
+    // Probe-input roles (campaign doc 26, BERT defects b/c): the layer-0 input
+    // for a single-token probe is LN(E[t] + P[0] + S[0]; gamma, beta) for
+    // BERT-family — additive embedding terms plus a TRUE LayerNorm, computed
+    // per token at scrape time, never folded into weight columns. Null on
+    // families whose probe input is the raw embedding row.
+    public string? PositionEmbeddings { get; init; }
+    public string? TokenTypeEmbeddings { get; init; }
+    public string? EmbeddingNormWeight { get; init; }
+    public string? EmbeddingNormBias { get; init; }
+    // Norm epsilon; config-key override (CON-CFG gate, doc 27) still owed.
+    public double NormEps { get; init; } = 1e-6;
+
 
 
 
@@ -168,6 +180,11 @@ public sealed class ArchitectureProfile
         HasGate = false,
         HasBiases = true,
         RmsNorm = false,
+        PositionEmbeddings = "embeddings.position_embeddings.weight",
+        TokenTypeEmbeddings = "embeddings.token_type_embeddings.weight",
+        EmbeddingNormWeight = "embeddings.LayerNorm.weight",
+        EmbeddingNormBias = "embeddings.LayerNorm.bias",
+        NormEps = 1e-12,
         EmbedTokens = "embeddings.word_embeddings.weight",
         LmHead = null,
         FinalNorm = "embeddings.LayerNorm.weight",

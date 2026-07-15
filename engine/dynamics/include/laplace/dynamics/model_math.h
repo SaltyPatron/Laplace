@@ -14,6 +14,16 @@ extern "C" {
 int center_columns_d(double* m, size_t n, size_t d);
 int center_columns_f(float* m, size_t n, size_t d);
 
+/* True per-row LayerNorm in place: x = (x-mean)/sqrt(var+eps)*gamma + beta.
+ * beta may be NULL (gain-only). Data-dependent per row — never foldable into
+ * weight columns. */
+int layer_norm_rows_d(double* m, size_t n, size_t d,
+                      const float* gamma, const float* beta, double eps);
+
+/* Broadcast add of a float row-vector to every row of m, in place
+ * (projection biases; additive embedding terms). */
+int add_row_vector_d(double* m, size_t n, size_t d, const float* v);
+
 /* out[i] = sqrt(a[i]^2 + b[i]^2). */
 int hypot_rows_d(const double* a, const double* b, size_t n, double* out);
 

@@ -323,7 +323,6 @@ internal static class QueryCommands
                 + $"@ trust {SourceTrust.Response} — content-addressed, citable, self-extending]");
         }
 
-        await acc.MaterializeConsensusAsync();
         return 0;
     }
 

@@ -107,7 +107,6 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);
-        await _writer.FoldIncrementalAsync(ct);
     }
 
     Task ITurnLearner.RecordPlyAsync(

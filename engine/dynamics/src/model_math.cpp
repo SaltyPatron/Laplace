@@ -63,6 +63,49 @@ static void column_means(const T* m, size_t n, size_t d, std::vector<double>& me
 
 }
 
+// True LayerNorm per row, in place: x = (x - mean(x)) / sqrt(var(x)+eps) * g + b.
+// The BERT-family probe input is LN(E[t]+P+S; gamma, beta) — the mean/variance
+// are data-dependent per token, so this can never be folded into weight columns
+// (campaign doc 26, BERT defect b). beta may be null (gain-only norms).
+extern "C"
+int layer_norm_rows_d(double* m, size_t n, size_t d,
+                      const float* gamma, const float* beta, double eps)
+{
+    if (!m || !gamma || n == 0 || d == 0) return -1;
+    rows_parallel(n, 256, [&](size_t i) {
+        double* row = m + i * d;
+        double mean = 0.0;
+        for (size_t j = 0; j < d; ++j) mean += row[j];
+        mean /= (double)d;
+        double var = 0.0;
+        for (size_t j = 0; j < d; ++j) {
+            const double c = row[j] - mean;
+            var += c * c;
+        }
+        var /= (double)d;
+        const double inv = 1.0 / std::sqrt(var + eps);
+        for (size_t j = 0; j < d; ++j) {
+            double v = (row[j] - mean) * inv * (double)gamma[j];
+            row[j] = beta ? v + (double)beta[j] : v;
+        }
+    });
+    return 0;
+}
+
+// Broadcast row-vector add, in place: every row of m gains v. Serves both the
+// projection bias (q = x·Wq^T + b_q) and the additive embedding terms
+// (position/segment rows) of the probe input.
+extern "C"
+int add_row_vector_d(double* m, size_t n, size_t d, const float* v)
+{
+    if (!m || !v || n == 0 || d == 0) return -1;
+    rows_parallel(n, 256, [&](size_t i) {
+        double* row = m + i * d;
+        for (size_t j = 0; j < d; ++j) row[j] += (double)v[j];
+    });
+    return 0;
+}
+
 extern "C"
 int center_columns_d(double* m, size_t n, size_t d)
 {

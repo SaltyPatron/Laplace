@@ -93,6 +93,11 @@ public sealed class ModelTokenEdgeETL
     private bool RunSimilarity => _mode is "all" or "similarity" or "shallow";
     private bool RunContinues => _mode is "all" or "continues" or "shallow";
     private bool RunLayers => _mode is "all" or "structure";
+    // "factors" (campaign doc 26 item A): deposit the WITNESS — per-head factor
+    // trajectories (entity -> firefly), native-dim, FACTOR vertices. No pair
+    // tiles, no pair attestations: pair evidence is virtual (derivable from the
+    // trajectories under the versioned derivation law; receipts at walk grain).
+    private bool RunFactors => _mode == "factors";
 
 
 
@@ -171,6 +176,13 @@ public sealed class ModelTokenEdgeETL
 
 
 
+        if (RunFactors)
+        {
+            await foreach (var change in EmitFactorTrajectories(Af, n, d, commitEpoch, refMap, reader, options, ct))
+                yield return change;
+            yield break;
+        }
+
         if (RunSimilarity)
             await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, reader, options, ct))
                 yield return change;
@@ -238,6 +250,184 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in chan.Reader.ReadAllAsync(ct))
             yield return change;
         await completion;
+    }
+
+    private readonly record struct FactorDeposit(Hash128 Slice, double[] Xyzm, int Tokens, int Hd);
+
+    // Item A deposit: per (projection tensor, head) — one Projection physicality
+    // on the head's byte-range SLICE entity (same content law as tensors; slices
+    // ARE tensors), trajectory = token-ordered FACTOR vertices, fixed runs of
+    // ceil(hd/6) vertices per token so addressing is pure arithmetic
+    // (vertex = tokenOrdinal * ceil(hd/6)). Probe input fixes BERT defects a-c:
+    // x_t = LayerNorm(E[t] + P[0] + S[0]; gamma, beta), projection biases applied.
+    private async IAsyncEnumerable<SubstrateChange> EmitFactorTrajectories(
+        float[] Af, int n, int d, int commitEpoch,
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        ISubstrateReader? reader, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var cfg = _manifest.Config;
+        var profile = ArchitectureProfile.For(cfg.ModelType);
+        int H = cfg.NumHeads, Hkv = cfg.NumKvHeads, hd = cfg.HeadDim;
+        if (H <= 0 || hd <= 0)
+        { _log.LogWarning("phase=factors: no head geometry (H={H}, hd={Hd}); skipping", H, hd); yield break; }
+        int attn = H * hd, kvDim = Hkv * hd;
+
+        var X = new double[(long)n * d];
+        unsafe
+        {
+            fixed (float* pa = Af) fixed (double* px = X)
+                DynInterop.F32ToF64(pa, (nuint)((long)n * d), px);
+        }
+        AddRowZero(X, n, d, refMap, profile.PositionEmbeddings);
+        AddRowZero(X, n, d, refMap, profile.TokenTypeEmbeddings);
+        if (profile.EmbeddingNormWeight is not null)
+        {
+            var gamma = WeightTensorETL.LoadTensorF32(refMap, profile.EmbeddingNormWeight, d);
+            var beta = TryLoadVector(refMap, profile.EmbeddingNormBias, d);
+            int rc;
+            unsafe
+            {
+                fixed (double* px = X) fixed (float* pg = gamma) fixed (float* pb = beta)
+                    rc = DynInterop.LayerNormRowsD(px, (nuint)n, (nuint)d, pg,
+                        beta is null ? null : pb, profile.NormEps);
+            }
+            if (rc != 0)
+            { _log.LogWarning("phase=factors: layer_norm_rows_d rc={Rc}; aborting", rc); yield break; }
+        }
+
+        int vPerTok = (hd + (int)FactorWalk.ValuesPerVertex - 1) / FactorWalk.ValuesPerVertex;
+        long depositsTotal = 0;
+        for (int L = 0; L < _manifest.LayerCount; L++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var qRole = _manifest.Single(L, TensorRoleKind.AttnQ);
+            var kRole = _manifest.Single(L, TensorRoleKind.AttnK);
+            if (qRole is null || kRole is null) continue;
+
+            var deposits = new List<FactorDeposit>(H + Hkv);
+            BuildHeadDeposits(deposits, X, n, d, refMap, qRole.Name, attn, H, hd, profile, vPerTok, L, "q");
+            BuildHeadDeposits(deposits, X, n, d, refMap, kRole.Name, kvDim, Hkv, hd, profile, vPerTok, L, "k");
+            if (deposits.Count == 0) continue;
+            depositsTotal += deposits.Count;
+
+            await foreach (var batch in IngestComposePipeline.RunAsync(
+                               EnumerateDepositsAsync(deposits, ct),
+                               (dep, b) =>
+                               {
+                                   b.AddEntity(dep.Slice, EntityTier.Word,
+                                       ModelCheckpoint.TensorTypeId, firstObservedBy: _source);
+                                   b.AddPhysicality(new PhysicalityRow(
+                                       Id: PhysicalityId.Compute(dep.Slice, PhysicalityType.Projection),
+                                       EntityId: dep.Slice, SourceId: _source,
+                                       Type: PhysicalityType.Projection,
+                                       CoordX: dep.Xyzm[0], CoordY: dep.Xyzm[1],
+                                       CoordZ: dep.Xyzm[2], CoordM: dep.Xyzm[3],
+                                       HilbertIndex: default,
+                                       TrajectoryXyzm: dep.Xyzm, NConstituents: dep.Tokens,
+                                       AlignmentResidual: null, SourceDim: dep.Hd,
+                                       ObservedAtUnixUs: IngestClock.NowUnixUs()));
+                               },
+                               _source, $"model/factors/L{L}", 1,
+                               reader, options, ct, commitEpoch, _rowsPerChange))
+                yield return batch;
+        }
+        _log.LogInformation("phase=factors: {Dep:N0} head-slice factor trajectories deposited "
+            + "({Tok:N0} tokens x {V} vertices/token)", depositsTotal, n, vPerTok);
+    }
+
+    private void BuildHeadDeposits(
+        List<FactorDeposit> deposits, double[] X, int n, int d,
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        string weightName, int outDim, int heads, int hd,
+        ArchitectureProfile profile, int vPerTok, int L, string tag)
+    {
+        float[] W;
+        try { W = WeightTensorETL.LoadTensorF32(refMap, weightName, (long)outDim * d); }
+        catch (Exception ex)
+        { _log.LogWarning("phase=factors L{L}.{Tag}: load failed: {Msg}", L, tag, ex.Message); return; }
+
+        var P = new double[(long)n * outDim];
+        int rc;
+        unsafe
+        {
+            fixed (double* px = X) fixed (float* pw = W) fixed (double* pp = P)
+                rc = DynInterop.ProjectEmbeddingD(px, (nuint)n, (nuint)d, pw, (nuint)outDim, pp);
+        }
+        if (rc != 0)
+        { _log.LogWarning("phase=factors L{L}.{Tag}: projection rc={Rc}; skipping", L, tag, rc); return; }
+
+        if (profile.HasBiases)
+        {
+            var bias = TryLoadVector(refMap, ArchitectureProfile.BiasOf(weightName), outDim);
+            if (bias is not null)
+                unsafe
+                {
+                    fixed (double* pp = P) fixed (float* pb = bias)
+                        DynInterop.AddRowVectorD(pp, (nuint)n, (nuint)outDim, pb);
+                }
+        }
+
+        Hash128[] slices;
+        try { slices = ModelCheckpoint.HeadSliceIds(refMap[weightName], heads); }
+        catch (Exception ex)
+        { _log.LogWarning("phase=factors L{L}.{Tag}: slice ids failed: {Msg}", L, tag, ex.Message); return; }
+
+        var head = new double[(long)n * hd];
+        for (int h = 0; h < heads; h++)
+        {
+            SliceHead(P, head, n, outDim, h, hd);
+            deposits.Add(new FactorDeposit(slices[h], PackFactorTrajectory(head, n, hd, vPerTok), n, hd));
+        }
+    }
+
+    private static double[] PackFactorTrajectory(double[] M, int n, int hd, int vPerTok)
+    {
+        var xyzm = new double[(long)n * vPerTok * 4];
+        var vals = new float[hd];
+        for (int t = 0; t < n; t++)
+        {
+            for (int j = 0; j < hd; j++) vals[j] = (float)M[(long)t * hd + j];
+            byte[] packed = FactorWalk.Pack(vals);
+            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, double>(packed)
+                .CopyTo(xyzm.AsSpan(t * vPerTok * 4, vPerTok * 4));
+        }
+        return xyzm;
+    }
+
+    private void AddRowZero(double[] X, int n, int d,
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string? name)
+    {
+        if (name is null) return;
+        if (!refMap.TryGetValue(name, out var t)) return;
+        long rows = (t.AbsoluteDataEnd - t.AbsoluteDataStart) / 4 / d;
+        var full = WeightTensorETL.LoadTensorF32(refMap, name, rows * d);
+        var row0 = new float[d];
+        Array.Copy(full, 0, row0, 0, d);
+        unsafe
+        {
+            fixed (double* px = X) fixed (float* pv = row0)
+                DynInterop.AddRowVectorD(px, (nuint)n, (nuint)d, pv);
+        }
+    }
+
+    private static float[]? TryLoadVector(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string? name, int dim)
+    {
+        if (name is null || !refMap.ContainsKey(name)) return null;
+        try { return WeightTensorETL.LoadTensorF32(refMap, name, dim); }
+        catch (Exception) { return null; }
+    }
+
+    private static async IAsyncEnumerable<FactorDeposit> EnumerateDepositsAsync(
+        List<FactorDeposit> deposits, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var dep in deposits)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return dep;
+        }
+        await Task.CompletedTask;
     }
 
     private async IAsyncEnumerable<SubstrateChange> EmitSimilarityPlane(

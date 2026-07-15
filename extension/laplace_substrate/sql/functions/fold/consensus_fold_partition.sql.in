@@ -1,6 +1,0 @@
-CREATE OR REPLACE FUNCTION consensus_fold_partition(
-        p_tables text[], p_epochs int[],
-        p_partition integer, p_nparts integer, p_seed boolean)
-    RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_partition'
-    LANGUAGE C VOLATILE;

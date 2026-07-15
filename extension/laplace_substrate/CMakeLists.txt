@@ -49,8 +49,6 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/consensus_fold_step.c
-    src/consensus_fold_engine.c
-    src/consensus_fold_walks.c
     src/generate_walk.c
     src/trajectory_corpus.c
     src/trajectory_generate.c

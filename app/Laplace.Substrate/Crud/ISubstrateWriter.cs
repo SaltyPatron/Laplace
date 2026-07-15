@@ -26,12 +26,6 @@ public interface ISubstrateWriter
         return new ApplyResult(ea, ei, pa, pi, aa, ai, rt, wall, allShort, es, ps);
     }
 
-
-
-
-
-
-
     Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
@@ -53,10 +47,6 @@ public interface ISubstrateWriter
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
-
-
-
-
 
     Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)

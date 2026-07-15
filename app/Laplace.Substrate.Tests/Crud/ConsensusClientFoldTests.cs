@@ -5,14 +5,13 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// The client-side period fold must be numerically indistinguishable from
-/// the retired server fold. Both sides call the same native glicko-2
-/// library, so parity is checked the strongest way available: fold through
-/// the client lane, then recompute every edge with the SERVER's own
-/// laplace_glicko2_accumulate_games() SQL binding (what
-/// materialize_period_partition called per row) and demand exact int64
-/// equality on rating/rd/volatility, plus witness accumulation and
-/// last_observed_at semantics across a second period folding against priors.
+/// The inline fold (consensus_upsert at apply time) must be numerically exact
+/// against the native glicko-2 scalar it dispatches to. Parity is checked the
+/// strongest way available: apply a batch through the writer, then recompute
+/// every edge with laplace_glicko2_accumulate_games() directly and demand
+/// exact int64 equality on rating/rd/volatility, plus witness accumulation and
+/// last_observed_at semantics across a second batch folding against priors
+/// (the rating period IS the batch).
 /// </summary>
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]
@@ -85,7 +84,6 @@ public class ConsensusClientFoldTests
                 .AddAttestation(Att("s2", "o1", 1, 0L, phi, ts1))
                 .Build();
             await writer.ApplyAsync(change);
-            await writer.MaterializeConsensusAsync();
         }
 
         // Every edge exact-equal to the server's own per-row math from neutral seeds.
@@ -106,7 +104,7 @@ public class ConsensusClientFoldTests
             Assert.Equal(games, stored.Witnesses);
         }
 
-        // Second period folds against the stored priors.
+        // Second batch folds against the stored priors.
         var cid11 = ConsensusKeys.EdgeId(H("s1"), H("rel"), H("o1"));
         var prior = await StoredAsync(cid11);
         await using (var writer2 = new ConsensusAccumulatingWriter(inner, _pg.DataSource))
@@ -115,7 +113,6 @@ public class ConsensusClientFoldTests
                 .AddAttestation(Att("s1", "o1", 4, 750_000_000L, phi, ts2))
                 .Build();
             await writer2.ApplyAsync(change2);
-            await writer2.MaterializeConsensusAsync();
         }
 
         var stored2 = await StoredAsync(cid11);
@@ -126,7 +123,7 @@ public class ConsensusClientFoldTests
         Assert.Equal(expect2.Vol, stored2.Vol);
         Assert.Equal(prior.Witnesses + 4, stored2.Witnesses);
 
-        // last_observed_at = the period's max ts (overwrite semantics, µs exact).
+        // last_observed_at = GREATEST(prior, batch max ts) — µs exact.
         var expectedTs = new DateTime(
             (ts2 - IntentStage.PgEpochUnixUs) * 10
             + new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks, DateTimeKind.Utc);

@@ -138,8 +138,8 @@ public static class FeedbackContent
     }
 
     /// <summary>
-    /// Deposit through the standard spine and fold immediately, so the very
-    /// next walk reads the updated consensus (doc 15 invariant I4).
+    /// Deposit through the standard spine — the fold is inline at apply, so the
+    /// very next walk reads the updated consensus (doc 15 invariant I4).
     /// </summary>
     public static async Task<DepositResult> ApplyAsync(
         NpgsqlDataSource ds, SubstrateChange change, CancellationToken ct = default)
@@ -147,7 +147,6 @@ public static class FeedbackContent
         var inner = new NpgsqlSubstrateWriter(ds);
         await using var acc = new ConsensusAccumulatingWriter(inner, ds);
         var result = await ((ISubstrateWriter)acc).ApplyAsync(change, ct).ConfigureAwait(false);
-        long materialized = await acc.MaterializeConsensusAsync(ct).ConfigureAwait(false);
-        return new DepositResult(result.AttestationsInserted, materialized);
+        return new DepositResult(result.AttestationsInserted, acc.CellsFolded);
     }
 }

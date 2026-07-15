@@ -31,6 +31,14 @@ public static unsafe partial class NativeInterop
     internal static partial int LaplaceTestimonyPackWalk(
         Hash128* objectIds, long* scoresFp1e9, ushort* games, nuint n, double* out4n);
 
+    [LibraryImport(Library, EntryPoint = "laplace_factor_pack_values")]
+    internal static partial int LaplaceFactorPackValues(
+        float* values, nuint n, double* out4, nuint* outVertices);
+
+    [LibraryImport(Library, EntryPoint = "laplace_factor_unpack_vertex")]
+    internal static partial int LaplaceFactorUnpackVertex(
+        double* vertex, float* outValues6, byte* outCount);
+
     [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
     internal static partial long LaplaceScoreFp(double v, double m);
 

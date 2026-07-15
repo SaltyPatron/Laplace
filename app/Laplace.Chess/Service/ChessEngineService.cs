@@ -89,7 +89,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var ds = new NpgsqlDataSourceBuilder(_connString).Build();
             var inner = new NpgsqlSubstrateWriter(ds);
             var writer = new ConsensusAccumulatingWriter(
-                inner, ds, foldWorkers: 1, freshSource: false, persistEvidence: true, stageAsWalks: false);
+                inner, ds, persistEvidence: true);
             var reader = new NpgsqlSubstrateReader(ds);
             var host = new SubstrateTurnHost(ds, writer, reader, _witnessWeight);
             var modality = new ChessModality();

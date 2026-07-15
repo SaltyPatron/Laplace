@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION consensus_fold_walks(
-        p_partition integer, p_nparts integer, p_seed boolean)
-    RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_walks'
-    LANGUAGE C VOLATILE;

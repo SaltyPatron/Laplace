@@ -96,8 +96,7 @@ public class ConsensusAccumulatingWriterTests
 
         await using var accumulator = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await accumulator.ApplyManyAsync(new[] { Change(src, "acc-fold", rows) });
-        var materialized = await accumulator.MaterializeConsensusAsync();
-        Assert.Equal(4, materialized);
+        Assert.Equal(4L, accumulator.CellsFolded);
 
         const long Neutral = 1_500_000_000_000L;
         var confirmed = await ConsensusRowAsync(s1, relType, o1);
@@ -131,7 +130,6 @@ public class ConsensusAccumulatingWriterTests
                 Obs(H(230), subj, relType, obj, src, 900_000_000),
                 Obs(H(231), subj, relType, null, src, 100_000_000)) });
         Assert.Equal(2, r.AttestationsInserted);
-        await accumulator.MaterializeConsensusAsync();
 
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT outcome, observation_count FROM laplace.attestations "
@@ -157,7 +155,7 @@ public class ConsensusAccumulatingWriterTests
         await accumulator.ApplyAsync(Change(src, "layer-complete/4",
             Obs(H(330), src, relType, src, src, 1_000_000_000)));
 
-        Assert.Equal(0, accumulator.RelationCount);
+        Assert.Equal(0L, accumulator.CellsFolded);
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.attestations WHERE type_id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, relType.ToBytes());
@@ -184,7 +182,6 @@ public class ConsensusAccumulatingWriterTests
         await using var p1 = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await p1.ApplyAsync(Change(src, "acc-p1",
             Obs(H(530), subj, relType, obj, src, 900_000_000, games: 2)));
-        await p1.MaterializeConsensusAsync();
         var after1 = await ConsensusRowAsync(subj, relType, obj);
         Assert.NotNull(after1);
         Assert.Equal(2L, after1!.Value.wc);
@@ -193,7 +190,6 @@ public class ConsensusAccumulatingWriterTests
         await using var p2 = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await p2.ApplyAsync(Change(src, "acc-p2",
             Obs(H(531), subj, relType, obj, src, 900_000_000, games: 3)));
-        await p2.MaterializeConsensusAsync();
         var after2 = await ConsensusRowAsync(subj, relType, obj);
         Assert.NotNull(after2);
         Assert.Equal(5L, after2!.Value.wc);
@@ -216,11 +212,9 @@ public class ConsensusAccumulatingWriterTests
 
         await using var ax = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await ax.ApplyManyAsync(new[] { Change(src, "acc-det/x", Rows(relTypeX, 3000)) });
-        await ax.MaterializeConsensusAsync();
 
         await using var ay = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await ay.ApplyManyAsync(new[] { Change(src, "acc-det/y", Rows(relTypeY, 3100)) });
-        await ay.MaterializeConsensusAsync();
 
         var x = await ConsensusRowAsync(subj, relTypeX, obj);
         var y = await ConsensusRowAsync(subj, relTypeY, obj);

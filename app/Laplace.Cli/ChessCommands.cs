@@ -137,8 +137,7 @@ internal static class ChessCommands
             var inner = new NpgsqlSubstrateWriter(ds);
             await using var acc = new ConsensusAccumulatingWriter(inner, ds);
             await ((ISubstrateWriter)acc).ApplyAsync(b.Build(), System.Threading.CancellationToken.None);
-            long materialized = await acc.MaterializeConsensusAsync();
-            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth}) — applied, {materialized:N0} consensus rows folded");
+            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth}) — applied, {acc.CellsFolded:N0} consensus rows folded");
             return 0;
         }
 

@@ -144,7 +144,9 @@ public static class IngestBatchPipeline
 {
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
 
-    /// <summary>Consensus fold trigger + ingest file-progress marker (see IngestRunner.TrackIntent).</summary>
+    /// <summary>Ingest file-progress marker (see IngestRunner.TrackIntent). The fold is inline
+    /// per batch (ConsensusAccumulatingWriter → consensus_upsert) — this marker carries no fold
+    /// semantics; the writer skips it as an empty change.</summary>
     public static SubstrateChange BuildPeriodBoundary(Hash128 sourceId, string fileLabel)
     {
         string stem = fileLabel.Contains('/', StringComparison.Ordinal)

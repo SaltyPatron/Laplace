@@ -29,7 +29,20 @@ typedef struct {
 
 #define LAPLACE_VFLAG_TESTIMONY     (1ULL << 6)
 #define LAPLACE_VFLAG_SCORE_SHIFT   7u
-#define LAPLACE_VFLAG_SCORE_MASK    0xFFFFFFFFFULL   
+#define LAPLACE_VFLAG_SCORE_MASK    0xFFFFFFFFFULL
+
+// FACTOR vertex class: raw float32 payload channel for per-circuit factor
+// matrices (doc 26 item A). Discriminated by bit 7 with bits 0 and 6 clear —
+// mutually exclusive with the atom and testimony classes, whose score/atom
+// fields overlap these bit ranges only when their own class bit is set.
+// Payload per vertex: 6 float32 = entity_id.lo (f0|f1), entity_id.hi (f2|f3),
+// ordinal|run_length (f4), flags bits 8-39 (f5); bits 40-42 = valid count 1-6.
+#define LAPLACE_VFLAG_FACTOR        (1ULL << 7)
+#define LAPLACE_VFLAG_F5_SHIFT      8u
+#define LAPLACE_VFLAG_F5_MASK       0xFFFFFFFFULL
+#define LAPLACE_VFLAG_FCOUNT_SHIFT  40u
+#define LAPLACE_VFLAG_FCOUNT_MASK   0x7ULL
+#define LAPLACE_FACTOR_VALUES_PER_VERTEX 6u
 
 static inline uint64_t laplace_vertex_flags(uint8_t tier, int has_atom, uint32_t atom) {
     uint64_t f = ((uint64_t)(tier & LAPLACE_VFLAG_TIER_MASK)) << LAPLACE_VFLAG_TIER_SHIFT;
@@ -70,6 +83,16 @@ int laplace_testimony_unpack_vertex(const double vertex[4],
                                     int64_t*   score_fp1e9,
                                     uint16_t*  games,
                                     uint16_t*  ordinal);
+
+
+
+int laplace_factor_pack_values(const float* values, size_t n,
+                               double* out, size_t* out_vertices);
+
+
+
+int laplace_factor_unpack_vertex(const double vertex[4],
+                                 float out_values[6], uint8_t* out_count);
 
 #ifdef __cplusplus
 }

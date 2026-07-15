@@ -1,0 +1,70 @@
+-- The inline consensus fold: one batch's client-deduped cell deltas fold into
+-- live consensus in ONE ordered MERGE — no deferred fold phase, no staging, no
+-- accumulator epoch, no advisory-lock wall. The Glicko fold runs server-side in
+-- the native scalar (laplace_glicko2_accumulate_games) INSIDE the row's own
+-- lock window: matched rows fold against their current state, fresh rows fold
+-- against the initial priors (computed in the source projection). The rating
+-- period IS the batch (ratified 2026-07-15): a period is a set of
+-- contemporaneous observations, which a batch is.
+--
+-- Contract with the caller (ConsensusAccumulatingWriter):
+--   * arrays are parallel and CLIENT-DEDUPED per call — one row per
+--     (subject, type, object) cell; a duplicate makes MERGE error loudly
+--     ("cannot affect row a second time"), which is contract enforcement;
+--   * phi is uniform per cell per call (the writer's merge invariant);
+--   * rows arrive sorted by (type, subject, id) — partition-key order — so
+--     row locks are acquired in one global order (no deadlocks between writers).
+CREATE OR REPLACE FUNCTION consensus_upsert(
+    p_subjects bytea[],
+    p_types    bytea[],
+    p_objects  bytea[],
+    p_phis     bigint[],
+    p_games    bigint[],
+    p_sums     bigint[],
+    p_ts       timestamptz[])
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    affected bigint;
+BEGIN
+    MERGE INTO consensus c
+    USING (
+        SELECT consensus_id(u.s, u.t, u.o) AS id,
+               u.s, u.t, u.o, u.phi, u.games, u.sum, u.ts,
+               -- fresh-insert state precomputed once per row (native scalar):
+               laplace_glicko2_accumulate_games(
+                   glicko2_neutral_mu(), glicko2_initial_rd(),
+                   glicko2_initial_volatility(),
+                   glicko2_neutral_mu(), u.phi, u.games, u.sum,
+                   glicko2_tau()) AS fresh
+        FROM unnest(p_subjects, p_types, p_objects, p_phis, p_games, p_sums, p_ts)
+             AS u(s, t, o, phi, games, sum, ts)
+        ORDER BY u.t, u.s, consensus_id(u.s, u.t, u.o)
+    ) d
+    ON c.id = d.id AND c.type_id = d.t AND c.subject_id = d.s
+    WHEN MATCHED THEN UPDATE SET
+        rating = (SELECT (laplace_glicko2_accumulate_games(
+                      c.rating, c.rd, c.volatility,
+                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
+                      glicko2_tau())).rating),
+        rd = (SELECT (laplace_glicko2_accumulate_games(
+                      c.rating, c.rd, c.volatility,
+                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
+                      glicko2_tau())).rd),
+        volatility = (SELECT (laplace_glicko2_accumulate_games(
+                      c.rating, c.rd, c.volatility,
+                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
+                      glicko2_tau())).volatility),
+        witness_count    = c.witness_count + d.games,
+        last_observed_at = GREATEST(c.last_observed_at, d.ts)
+    WHEN NOT MATCHED THEN INSERT
+        (id, subject_id, type_id, object_id,
+         rating, rd, volatility, witness_count, last_observed_at)
+        VALUES (d.id, d.s, d.t, d.o,
+                (d.fresh).rating, (d.fresh).rd, (d.fresh).volatility,
+                d.games, d.ts);
+
+    GET DIAGNOSTICS affected = ROW_COUNT;
+    RETURN affected;
+END $$;
