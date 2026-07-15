@@ -1,0 +1,58 @@
+-- Deposit highway-mask bits for the (entity, relation-type) pairs an epoch's
+-- edges actually touched — the fold KNOWS every pair in RAM, so the mask is
+-- populated at deposit time with ZERO consensus re-reads. This replaces the
+-- per-epoch highway_mask_refresh recompute, whose object-side join probed every
+-- consensus leaf per touched entity (measured: 75s of a 118s fold).
+-- OR-accumulate is correct at ingest: edges are only ever ADDED, so bits only
+-- ever turn on; idempotent and chunk-order-free. On a greenfield seed this
+-- deposit IS the population — highway_mask_refresh/rebuild are legacy repair
+-- verbs for pre-deposit databases and retire once no such DB exists.
+CREATE OR REPLACE FUNCTION highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    updated bigint;
+BEGIN
+    IF NOT laplace_highway_ready() THEN
+        RAISE WARNING 'highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)';
+        RETURN 0;
+    END IF;
+
+    WITH pairs AS (
+        SELECT DISTINCT u.eid, u.tid
+        FROM unnest(p_entity_ids, p_type_ids) AS u(eid, tid)
+    ),
+    types AS (SELECT DISTINCT p.tid FROM pairs p),
+    tbits AS (
+        -- A DYNAMIC relation (EDEP_nsubj, FEAT_case, ...) has no bit of its own;
+        -- it contributes its FAMILY ROOT's bit via its IS_A edge (SeedDynamic).
+        -- Bounded: one probe per DISTINCT type this epoch (dozens), not per entity.
+        SELECT t.tid,
+               COALESCE(relation_highway_bit(t.tid),
+                        relation_highway_bit(fam.object_id)) AS bit
+        FROM types t
+        LEFT JOIN consensus fam
+          ON fam.subject_id = t.tid
+         AND fam.type_id = relation_type_id('IS_A')
+    ),
+    m AS (
+        SELECT p.eid, array_agg(DISTINCT tb.bit) AS bits
+        FROM pairs p
+        JOIN tbits tb ON tb.tid = p.tid
+        WHERE tb.bit IS NOT NULL
+        GROUP BY p.eid
+    ),
+    upd AS (
+        UPDATE entities e
+        SET highway_mask = laplace_highway_mask_from_bits(
+                COALESCE(laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || m.bits)
+        FROM m
+        WHERE e.id = m.eid
+          AND (e.highway_mask IS NULL
+               OR NOT (laplace_highway_mask_bits(e.highway_mask) @> m.bits))
+        RETURNING 1
+    )
+    SELECT count(*) INTO updated FROM upd;
+    RETURN updated;
+END $$;

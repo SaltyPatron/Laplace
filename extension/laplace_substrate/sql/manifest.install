@@ -10,6 +10,7 @@ indexes/entities_tier_type_btree.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
+indexes/physicalities_id_btree.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_radius_btree.sql.in
@@ -349,6 +350,7 @@ functions/highway/laplace_highway_mask_bits.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in
 functions/highway/highway_mask_refresh.sql.in
+functions/highway/highway_mask_deposit.sql.in
 functions/ops/highway_mask_rebuild.sql.in
 functions/ops/constituent_edges_rebuild.sql.in
 functions/highway/entities_highway_bits_gin.sql.in

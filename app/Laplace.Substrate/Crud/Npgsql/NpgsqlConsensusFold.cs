@@ -259,39 +259,49 @@ public sealed partial class ConsensusAccumulatingWriter
                 }
             }
 
-            // Highway relation-membership masks (doc 14 P2): refresh entities.highway_mask
-            // for every entity this period's edges touched. The fold is the one generic
-            // chokepoint every decomposer's edges pass through, and the mask derives from
-            // CONSENSUS participation, so it refreshes here — on the fold tx, after the
-            // rows it derives from land. Chunked like the prior-refresh UPDATE (huge
-            // unnest arrays AV'd postgres mid-WordNet 2026-07-11).
+            // Highway relation-membership masks: DEPOSITED from what this fold already
+            // holds — every (entity, relation-type) pair its edges touched — via
+            // highway_mask_deposit (OR-accumulate, add-only at ingest, chunk-order-free).
+            // No consensus re-reads: the old per-epoch refresh re-derived masks from
+            // consensus participation and its object-side join probed every leaf per
+            // touched entity (75s of a 118s fold on the partitioned layout). On a
+            // greenfield seed this deposit IS the population; the refresh/rebuild
+            // repair verbs are legacy for pre-deposit databases only.
             {
                 var maskSw = System.Diagnostics.Stopwatch.StartNew();
-                var touched = new HashSet<Hash128>(n * 2);
+                var pairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(n * 2);
                 for (int i = 0; i < n; i++)
                 {
-                    touched.Add(accs[i].Subject);
-                    if (accs[i].Object is { } obj) touched.Add(obj);
+                    pairs.Add((accs[i].Subject, accs[i].Type));
+                    if (accs[i].Object is { } obj) pairs.Add((obj, accs[i].Type));
                 }
-                var touchedIds = new byte[touched.Count][];
+                var pairEnts = new byte[pairs.Count][];
+                var pairTypes = new byte[pairs.Count][];
                 int ti = 0;
-                foreach (var id in touched) touchedIds[ti++] = id.ToBytes();
-                long masksWritten = 0;
-                for (int off = 0; off < touchedIds.Length; off += FoldWriteChunkIds)
+                foreach (var (ent, typ) in pairs)
                 {
-                    int m = Math.Min(FoldWriteChunkIds, touchedIds.Length - off);
+                    pairEnts[ti] = ent.ToBytes();
+                    pairTypes[ti] = typ.ToBytes();
+                    ti++;
+                }
+                long masksWritten = 0;
+                for (int off = 0; off < pairEnts.Length; off += FoldWriteChunkIds)
+                {
+                    int m = Math.Min(FoldWriteChunkIds, pairEnts.Length - off);
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
                     mask.CommandTimeout = 0;
-                    mask.CommandText = "SELECT laplace.highway_mask_refresh($1)";
+                    mask.CommandText = "SELECT laplace.highway_mask_deposit($1, $2)";
                     mask.Parameters.Add(new NpgsqlParameter
-                    { Value = touchedIds[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    { Value = pairEnts[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    mask.Parameters.Add(new NpgsqlParameter
+                    { Value = pairTypes[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     masksWritten += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                 }
                 maskSw.Stop();
                 _log.LogInformation(
-                    "consensus fold highway masks: {Written:N0} of {Touched:N0} touched entities refreshed in {Ms:N0}ms",
-                    masksWritten, touchedIds.Length, maskSw.ElapsedMilliseconds);
+                    "consensus fold highway masks: {Written:N0} deposited from {Pairs:N0} touched (entity,type) pairs in {Ms:N0}ms",
+                    masksWritten, pairEnts.Length, maskSw.ElapsedMilliseconds);
             }
 
             await tx.CommitAsync(ct);

@@ -1,0 +1,6 @@
+-- id-only lookups (the WS_APPLY existence probes, physicality dedup) lost their
+-- index when the PK became (hilbert_index, id) — hilbert leads, so an id probe
+-- can't use the PK prefix and fell to scanning all 64 band indexes, growing with
+-- table size (measured: CILI verify 81s vs unicode 2.8s). Per-leaf btree on (id)
+-- restores O(log) probes.
+CREATE INDEX IF NOT EXISTS physicalities_id_btree ON physicalities USING btree (id);
