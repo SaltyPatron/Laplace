@@ -80,6 +80,7 @@ internal static class IngestDispatchTable
             ["code"] = cli => IngestCommands.IngestCodeAsync(cli),
             ["repo"] = cli => IngestCommands.IngestRepoAsync(cli),
             ["tabular"] = cli => IngestCommands.IngestTabularAsync(cli),
+            ["parquet"] = cli => IngestCommands.IngestParquetAsync(cli),
             ["tiny-codes"] = cli => IngestCommands.IngestViaRunnerAsync(
                 CliRuntime.Decomposers.Resolve("tiny-codes"), IngestDataPaths.Resolve("tiny-codes", cli.Path),
                 skipLayerCheck: true, cli),
