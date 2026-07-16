@@ -14,6 +14,7 @@ DECLARE
         'HAS_POS',
         'HAS_SENSE',
         'HAS_SYNSET_KEY',
+        'IS_A',
         'IS_SENSE_OF',
         'IS_SYNONYM_OF',
         'MOVE',

@@ -45,26 +45,19 @@ BEGIN
     SELECT count(*) INTO n_prov FROM attestations WHERE type_id = rel_type;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
 
-    PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0
-        (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-    VALUES
-        (subj, rel_type, o_conf,  phi_trust, 1, s_conf,     now()),
-        (subj, rel_type, o_ref,   phi_trust, 1, s_ref,      now()),
-        (subj, rel_type, o_draw,  phi_trust, 1, s_draw,     now()),
-        (subj, rel_type, o_trust, phi_trust, 1, s_conf,     now()),
-        (subj, rel_type, o_crank, phi_crank, 1, s_conf,     now()),
-        (subj, rel_type, o_games, phi_trust, 8, s_conf * 8, now()),
-        (subj, rel_type, o_one,   phi_trust, 1, s_conf,     now());
-    PERFORM materialize_period_consensus();
-
-    SELECT rating INTO mu_conf  FROM consensus WHERE object_id = o_conf;
-    SELECT rating INTO mu_ref   FROM consensus WHERE object_id = o_ref;
-    SELECT rating INTO mu_draw  FROM consensus WHERE object_id = o_draw;
-    SELECT rating INTO mu_trust FROM consensus WHERE object_id = o_trust;
-    SELECT rating INTO mu_crank FROM consensus WHERE object_id = o_crank;
-    SELECT rating INTO mu_many  FROM consensus WHERE object_id = o_games;
-    SELECT rating INTO mu_one   FROM consensus WHERE object_id = o_one;
+    -- The period-staging apparatus is gone by design (consensus accumulates at
+    -- ingest; no batch backfill lane exists to call). Fold the same partials
+    -- through consensus_fold — the SQL surface of the same C math the writer
+    -- spine uses: consensus_fold(is_seed, rating, rd, volatility, phi, games,
+    -- sum_score, tau). Trust enters as the opponent RD (phi); no seed row =
+    -- fold starts from the neutral prior, exactly as a fresh consensus cell.
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_conf;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_ref,      NULL)).rating INTO mu_ref;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_draw,     NULL)).rating INTO mu_draw;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_trust;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_crank, 1, s_conf,     NULL)).rating INTO mu_crank;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 8, s_conf * 8, NULL)).rating INTO mu_many;
+    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_one;
 
     RAISE NOTICE 'confirm μ=% refute μ=% draw μ=% (neutral=%)', mu_conf, mu_ref, mu_draw, neutral;
     RAISE NOTICE 'trusted μ=% crank μ=% | 8-games μ=% 1-game μ=%', mu_trust, mu_crank, mu_many, mu_one;
