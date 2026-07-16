@@ -45,12 +45,20 @@ int laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candi
  * general-purpose existence check. */
 int laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count);
 
-/* Used by attestations_exist_bitmap(ids bytea[]) -- same positive-
- * confirmation-only semantics against `attestations` instead of `entities`.
- * No perfcache fast path (attestation ids are never codepoint ids by
- * construction). Serves the working-set write protocol's in-transaction
- * re-probe of claimed-novel attestation ids. */
-int laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
+/* Used by attestations_exist_bitmap(ids, type_ids, subject_ids) -- same
+ * positive-confirmation-only semantics against `attestations`. No perfcache
+ * fast path (attestation ids are never codepoint ids by construction).
+ * KEYED: attestations are partitioned LIST(type_id) -> HASH(subject_id) and
+ * `id` is not a partition key, so an id-only probe cannot prune -- every id
+ * paid one index descent per leaf (~145x read amplification; measured
+ * 2026-07-16 growing 1.2s -> 165s as the substrate filled). The caller
+ * computed each id FROM (subject, type, object, source, context), so it
+ * always holds the partition keys -- passing them restores one pruned
+ * descent per id. Arrays are parallel and length-checked by the SQL entry
+ * point. */
+int laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
+                                              ArrayType *subject_ids_array,
+                                              uint8_t *bm, int candidate_count);
 
 /* Used by physicalities_exist_bitmap(ids bytea[]) -- positive-confirmation
  * presence against `physicalities` by the row's OWN id. A physicality may

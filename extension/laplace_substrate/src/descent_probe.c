@@ -167,15 +167,129 @@ laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candid
                                true);
 }
 
+/*
+ * Keyed batch-presence: same positive-confirmation semantics as
+ * batch_presence_core, but the caller supplies the target table's PARTITION
+ * KEYS in arrays parallel to the ids, and the ordinals SQL receives all
+ * three. No perfcache path (attestation ids are never codepoint ids). The
+ * remap subsets all three arrays TOGETHER so ordinals still line up when a
+ * malformed id is skipped.
+ */
+static int
+batch_presence_core_keyed(ArrayType *ids_array, ArrayType *keys1_array,
+                          ArrayType *keys2_array, uint8_t *bm,
+                          int candidate_count, const char *ordinals_sql)
+{
+    Datum      *elems, *k1_elems, *k2_elems;
+    bool       *nulls, *k1_nulls, *k2_nulls;
+    int         nelems, k1_n, k2_n;
+    int        *remap;
+    Datum      *probe_elems, *probe_k1, *probe_k2;
+    int         probe_n = 0;
+    int         i;
+    Oid         argtypes[3];
+    Datum       args[3];
+    ArrayType  *probe_array, *k1_array, *k2_array;
+    uint8_t    *sub_bm;
+    int         spi_rc;
+
+    if (candidate_count <= 0)
+        return SPI_OK_SELECT;
+
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &elems, &nulls, &nelems);
+    deconstruct_array(keys1_array, BYTEAOID, -1, false, 'i', &k1_elems, &k1_nulls, &k1_n);
+    deconstruct_array(keys2_array, BYTEAOID, -1, false, 'i', &k2_elems, &k2_nulls, &k2_n);
+    if (nelems != candidate_count || k1_n != candidate_count || k2_n != candidate_count)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("batch_presence_core_keyed: array length mismatch")));
+    }
+
+    remap = (int *) palloc(sizeof(int) * candidate_count);
+    probe_elems = (Datum *) palloc(sizeof(Datum) * candidate_count);
+    probe_k1 = (Datum *) palloc(sizeof(Datum) * candidate_count);
+    probe_k2 = (Datum *) palloc(sizeof(Datum) * candidate_count);
+
+    for (i = 0; i < candidate_count; i++)
+    {
+        bytea *b;
+
+        if (nulls[i] || k1_nulls[i] || k2_nulls[i])
+            continue;
+        b = DatumGetByteaPP(elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != 16)
+            continue;
+        remap[probe_n] = i;
+        probe_elems[probe_n] = elems[i];
+        probe_k1[probe_n] = k1_elems[i];
+        probe_k2[probe_n] = k2_elems[i];
+        probe_n++;
+    }
+
+    if (probe_n == 0)
+    {
+        spi_rc = SPI_OK_SELECT;
+        goto done;
+    }
+
+    probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
+    k1_array = construct_array(probe_k1, probe_n, BYTEAOID, -1, false, 'i');
+    k2_array = construct_array(probe_k2, probe_n, BYTEAOID, -1, false, 'i');
+    sub_bm = (uint8_t *) palloc0((probe_n + 7) / 8);
+    argtypes[0] = BYTEAARRAYOID;
+    argtypes[1] = BYTEAARRAYOID;
+    argtypes[2] = BYTEAARRAYOID;
+    args[0] = PointerGetDatum(probe_array);
+    args[1] = PointerGetDatum(k1_array);
+    args[2] = PointerGetDatum(k2_array);
+
+    spi_rc = spi_mark_present_ordinals(
+        ordinals_sql,
+        3, argtypes, args, sub_bm, probe_n);
+
+    if (spi_rc == SPI_OK_SELECT)
+    {
+        for (i = 0; i < probe_n; i++)
+        {
+            if ((sub_bm[i >> 3] & (1u << (i & 7u))) != 0)
+                bitmap_set(bm, remap[i]);
+        }
+    }
+
+    pfree(sub_bm);
+    pfree(probe_array);
+    pfree(k1_array);
+    pfree(k2_array);
+
+done:
+    pfree(remap);
+    pfree(probe_elems);
+    pfree(probe_k1);
+    pfree(probe_k2);
+    pfree(elems);
+    pfree(nulls);
+    pfree(k1_elems);
+    pfree(k1_nulls);
+    pfree(k2_elems);
+    pfree(k2_nulls);
+    return spi_rc;
+}
+
 int
-laplace_attestations_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
+                                          ArrayType *subject_ids_array,
+                                          uint8_t *bm, int candidate_count)
 {
     /* Attestation ids derive from (subject,type,object,source,context) --
      * never codepoint ids -- so the perfcache fast path is off by
-     * construction, not merely expected-not-to-match. */
-    return batch_presence_core(ids_array, bm, candidate_count,
-                               "SELECT idx FROM laplace.attestations_present_ordinals($1)",
-                               false);
+     * construction, not merely expected-not-to-match. The type/subject keys
+     * let the ordinals probe prune LIST(type_id) at plan time and the
+     * HASH(subject_id) leaves per row -- one descent per id, not one per
+     * leaf. */
+    return batch_presence_core_keyed(ids_array, type_ids_array, subject_ids_array,
+                                     bm, candidate_count,
+                                     "SELECT idx FROM laplace.attestations_present_ordinals($1, $2, $3)");
 }
 
 int

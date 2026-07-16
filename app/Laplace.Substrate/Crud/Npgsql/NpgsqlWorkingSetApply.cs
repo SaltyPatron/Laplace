@@ -124,6 +124,11 @@ public sealed partial class NpgsqlSubstrateWriter
         // Attestation duplicate collapse, exactly apply_batch's semantics:
         // representative = latest-ts staged row, observation counts sum.
         var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games)>(atts.Ids.Count);
+        // The keyed attestation probe needs the partition keys parallel to
+        // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
+        var probeAttIds = new List<Hash128>(atts.Ids.Count);
+        var probeAttTypes = new List<Hash128>(atts.Ids.Count);
+        var probeAttSubjects = new List<Hash128>(atts.Ids.Count);
         for (int i = 0; i < atts.Ids.Count; i++)
         {
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
@@ -136,10 +141,11 @@ public sealed partial class NpgsqlSubstrateWriter
             else
             {
                 attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i]);
+                probeAttIds.Add(atts.Ids[i]);
+                probeAttTypes.Add(atts.TypeIds[i]);
+                probeAttSubjects.Add(atts.SubjectIds[i]);
             }
         }
-        var probeAttIds = new List<Hash128>(attGroups.Count);
-        probeAttIds.AddRange(attGroups.Keys);
 
         // Per-phase round-trip counters — summed into the returned total AND logged as a
         // breakdown, so the operator sees WHERE the round-trips go (lock / journal / probe /
@@ -192,7 +198,7 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 ProbePresentParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, r => Interlocked.Add(ref rtProbe, r), ct),
                 ProbePresentParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentKeyedParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, probeAttTypes, probeAttSubjects, r => Interlocked.Add(ref rtProbe, r), ct),
             };
             await Task.WhenAll(probeTasks);
             var presentEntities = probeTasks[0].Result;
@@ -443,6 +449,80 @@ public sealed partial class NpgsqlSubstrateWriter
             cmd.CommandText = $"SELECT {function}($1)";
             cmd.Parameters.Add(new NpgsqlParameter
             { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
+
+            var hits = new List<Hash128>();
+            long bits = (long)bm.Length * 8;
+            for (int i = 0; i < n; i++)
+                if (i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0)
+                    hits.Add(ids[start + i]);
+            perChunk[c] = hits;
+        }
+
+        if (chunkCount == 1)
+        {
+            await ProbeChunkAsync(0, ct);
+        }
+        else
+        {
+            int workers = Math.Min(chunkCount, Math.Min(ApplyParallelism, 8));
+            int next = -1;
+            await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
+            {
+                for (int c = Interlocked.Increment(ref next); c < chunkCount;
+                     c = Interlocked.Increment(ref next))
+                    await ProbeChunkAsync(c, token);
+            }, ct);
+        }
+
+        foreach (var hits in perChunk)
+            if (hits is not null)
+                foreach (var id in hits) present.Add(id);
+        addRoundTrips(chunkCount);
+        return present;
+    }
+
+    /// <summary>Keyed variant of the presence probe: passes the target
+    /// table's partition keys parallel to the ids so the server-side probe
+    /// can prune (attestations: LIST(type_id) -> HASH(subject_id); an
+    /// id-only probe pays one index descent per leaf — ~145x).</summary>
+    private async Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
+        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
+        IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
+    {
+        var present = new HashSet<Hash128>();
+        if (ids.Count == 0) return present;
+        if (typeIds.Count != ids.Count || subjectIds.Count != ids.Count)
+            throw new InvalidOperationException(
+                $"keyed probe arrays misaligned: {ids.Count} ids / {typeIds.Count} types / {subjectIds.Count} subjects");
+
+        int chunkCount = (ids.Count + ProbeChunkIds - 1) / ProbeChunkIds;
+        var perChunk = new List<Hash128>[chunkCount];
+
+        async Task ProbeChunkAsync(int c, CancellationToken token)
+        {
+            int start = c * ProbeChunkIds;
+            int n = Math.Min(ProbeChunkIds, ids.Count - start);
+            var chunkIds = new byte[n][];
+            var chunkTypes = new byte[n][];
+            var chunkSubjects = new byte[n][];
+            for (int i = 0; i < n; i++)
+            {
+                chunkIds[i] = ids[start + i].ToBytes();
+                chunkTypes[i] = typeIds[start + i].ToBytes();
+                chunkSubjects[i] = subjectIds[start + i].ToBytes();
+            }
+
+            await using var conn = await _ds.OpenConnectionAsync(token);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 0;
+            cmd.CommandText = $"SELECT {function}($1, $2, $3)";
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = chunkIds, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = chunkTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.Add(new NpgsqlParameter
+            { Value = chunkSubjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
 
             var hits = new List<Hash128>();
