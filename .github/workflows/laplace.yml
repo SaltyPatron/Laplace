@@ -37,6 +37,10 @@ on:
         description: "force serial ctest/regress (LAPLACE_TEST_SERIAL=1)"
         type: boolean
         default: false
+      force_all:
+        description: "ignore content-fingerprint stamps — run every phase/test even when its inputs are unchanged"
+        type: boolean
+        default: false
 
 concurrency:
   group: laplace-${{ github.ref }}
@@ -53,6 +57,9 @@ env:
   LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/opt/laplace/pgsql-18' }}
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
+  # Change-aware skipping (scripts/lib/fp.sh): phases/tests whose input content
+  # is unchanged since their last SUCCESS no-op. force_all bypasses every gate.
+  LAPLACE_FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.force_all && '1' || '' }}
 
 jobs:
 
@@ -86,6 +93,8 @@ jobs:
             .github/actions/setup-laplace-env/action.yml \
             scripts/pipeline.sh \
             scripts/test-parallel.sh \
+            scripts/lib/fp.sh \
+            scripts/affected-app.py \
             scripts/setup-host.sh \
             scripts/bootstrap-laplace-runner.sh \
             scripts/ingest-source.sh \
@@ -289,10 +298,9 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Stop API for the deploy window
-        run: sudo systemctl stop laplace-api || true
-
       - name: Install
+        # pipeline.sh install owns the API stop/start around the install window
+        # — a fingerprint-skipped install never bounces the service at all.
         run: bash scripts/pipeline.sh install
 
   db-ops:
@@ -326,7 +334,7 @@ jobs:
       - name: Clear stale regress output (diffs below must be from THIS run)
         run: rm -rf build/extension/*/tests/regress_output
 
-      - name: pg_regress || dotnet test (parallel)
+      - name: pg_regress || dotnet test (parallel, change-aware)
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
@@ -334,31 +342,11 @@ jobs:
           bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
             -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
           test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
-          export LAPLACE_PERFCACHE_BIN="$bin"
-          echo "LAPLACE_PERFCACHE_BIN=$bin"
+          # regress ∥ dotnet-affected (engine gtests already ran in unit-test)
           if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
-            bash scripts/test-parallel.sh --serial --regress
-            ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-                --filter 'Tier!=perf & Tier!=db' )
+            bash scripts/test-parallel.sh --serial --integration
           else
-            # regress ∥ dotnet (engine gtests already ran in unit-test)
-            reg_log=$(mktemp); app_log=$(mktemp)
-            set +e
-            bash scripts/test-parallel.sh --regress >"$reg_log" 2>&1 &
-            reg_pid=$!
-            ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-                --filter 'Tier!=perf & Tier!=db' ) >"$app_log" 2>&1 &
-            app_pid=$!
-            wait $reg_pid; reg_rc=$?
-            wait $app_pid; app_rc=$?
-            set -e
-            echo "---- regress ----"; cat "$reg_log"
-            echo "---- dotnet ----"; cat "$app_log"
-            rm -f "$reg_log" "$app_log"
-            if [ "$reg_rc" -ne 0 ] || [ "$app_rc" -ne 0 ]; then
-              echo "::error::integration failed (regress_rc=$reg_rc app_rc=$app_rc)"
-              exit 1
-            fi
+            bash scripts/test-parallel.sh --integration
           fi
 
       - name: Show regress diffs on failure

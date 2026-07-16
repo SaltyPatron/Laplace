@@ -261,6 +261,14 @@ Two toolchains, not interchangeable:
 | CI build/deploy/publish | `scripts/pipeline.sh` (invoked by `laplace.yml`; `publish` = chess + secrets + API/SPA/uci) |
 | Convenience aliases | `Justfile` → `setup-host` / `publish` / `build-deps`; may drift — trust the scripts |
 
+Linux build/install/test are **change-aware**: content fingerprints
+(`scripts/lib/fp.sh`, stamps in `build/.stamps/`, success-only) skip
+cmake/install/ctest/regress when the engine/extension domain is unchanged, and
+`scripts/affected-app.py` restricts dotnet build/test to the affected
+ProjectReference closure (dotnet tests salted with native+migrations state).
+Bypass: `pipeline.sh --force-all` / `LAPLACE_FORCE_ALL=1` (CI dispatch input
+`force_all`); `pipeline.sh clean` wipes the stamps.
+
 - **Never invoke `scripts/win/*.cmd` through PowerShell** (confirmed pwsh .cmd-launch
   regression). Use Bash: `cmd //c "scripts\\win\\seed-step.cmd wordnet"`.
 - Script logs land in `D:\Data\Output\<script>.log`. `scripts/win/env.cmd` is the
