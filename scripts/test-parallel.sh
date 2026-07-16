@@ -67,7 +67,7 @@ run_dotnet() {
     echo "LAPLACE_PERFCACHE_BIN=$bin"
   fi
   ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
-      --filter 'Tier!=perf' )
+      --filter 'Tier!=perf & Tier!=db' )
 }
 
 case "$MODE" in

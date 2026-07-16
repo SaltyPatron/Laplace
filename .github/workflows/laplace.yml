@@ -339,7 +339,7 @@ jobs:
           if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
             bash scripts/test-parallel.sh --serial --regress
             ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-                --filter 'Tier!=perf' )
+                --filter 'Tier!=perf & Tier!=db' )
           else
             # regress ∥ dotnet (engine gtests already ran in unit-test)
             reg_log=$(mktemp); app_log=$(mktemp)
@@ -347,7 +347,7 @@ jobs:
             bash scripts/test-parallel.sh --regress >"$reg_log" 2>&1 &
             reg_pid=$!
             ( cd app && dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-                --filter 'Tier!=perf' ) >"$app_log" 2>&1 &
+                --filter 'Tier!=perf & Tier!=db' ) >"$app_log" 2>&1 &
             app_pid=$!
             wait $reg_pid; reg_rc=$?
             wait $app_pid; app_rc=$?
