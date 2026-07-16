@@ -7,3 +7,41 @@ CREATE OR REPLACE FUNCTION attestations_exist_bitmap(
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_attestations_exist_bitmap'
     LANGUAGE C STABLE;
+
+-- Back-compat overload for pre-keyed binaries. A GitHub workflow RE-RUN
+-- re-executes its original commit SHA, so a re-run of any seed workflow
+-- from before the keyed probe builds old client code that calls the 1-arg
+-- form — which the keyed migration dropped, turning version skew into
+-- 42883 crashes mid-ingest (observed 2026-07-16, ChessOpenings bootstrap).
+-- This shim answers the old contract CORRECTLY through the un-pruned
+-- id-only path: slow (one descent per leaf per id, the very cost the keyed
+-- probe removes) but never wrong — presence bits only, LSB-first within
+-- each byte, identical layout to the native bitmap. New code never calls
+-- this; delete only when no pre-keyed binary can reach this database.
+CREATE OR REPLACE FUNCTION attestations_exist_bitmap(ids bytea[])
+    RETURNS bytea
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    n  int := coalesce(array_length(ids, 1), 0);
+    bm bytea;
+BEGIN
+    IF n = 0 THEN
+        RETURN ''::bytea;
+    END IF;
+    WITH hits AS (
+        SELECT (u.ord - 1)::int AS idx
+        FROM unnest(ids) WITH ORDINALITY u(id, ord)
+        JOIN attestations t ON t.id = u.id
+    ),
+    bytes AS (
+        SELECT idx / 8 AS b, bit_or(1 << (idx % 8))::int AS v
+        FROM hits
+        GROUP BY 1
+    )
+    SELECT string_agg(set_byte('\x00'::bytea, 0, coalesce(bytes.v, 0)), ''::bytea ORDER BY g.b)
+    INTO bm
+    FROM generate_series(0, (n + 7) / 8 - 1) g(b)
+    LEFT JOIN bytes ON bytes.b = g.b;
+    RETURN bm;
+END $$;
