@@ -63,6 +63,54 @@ static void column_means(const T* m, size_t n, size_t d, std::vector<double>& me
 
 }
 
+// Per-token FFN write vectors: out_i = W_down · act(W_up·x_i [⊙ or on gate·x_i]).
+// act: 0 = SiLU on (gate·x)⊙(up·x) (gated families), 1 = erf-GELU on up·x
+// (BERT-family, ungated). Row-blocked so the n×I intermediate never
+// materializes; TBB-parallel over blocks.
+extern "C"
+int ffn_write_vectors_d(const double* x, size_t n, size_t d,
+                        const float* up, const float* up_bias,
+                        const float* gate, size_t interm,
+                        const float* down, size_t d_out,
+                        int act, double* out)
+{
+    if (!x || !up || !down || !out || n == 0 || d == 0 || interm == 0 || d_out == 0)
+        return -1;
+    if (act == 0 && !gate) return -1;
+    const size_t block = 64;
+    const size_t nblocks = (n + block - 1) / block;
+    rows_parallel(nblocks, 1, [&](size_t bk) {
+        std::vector<double> a(block * interm);
+        const size_t r0 = bk * block;
+        const size_t r1 = std::min(n, r0 + block);
+        for (size_t i = r0; i < r1; ++i) {
+            const double* xi = x + i * d;
+            double* ai = a.data() + (i - r0) * interm;
+            for (size_t k = 0; k < interm; ++k) {
+                const float* uk = up + k * d;
+                double s = up_bias ? (double)up_bias[k] : 0.0;
+                for (size_t j = 0; j < d; ++j) s += xi[j] * (double)uk[j];
+                if (act == 1) {
+                    ai[k] = 0.5 * s * (1.0 + std::erf(s * 0.7071067811865476));
+                } else {
+                    const float* gk = gate + k * d;
+                    double g = 0.0;
+                    for (size_t j = 0; j < d; ++j) g += xi[j] * (double)gk[j];
+                    ai[k] = (g / (1.0 + std::exp(-g))) * s;
+                }
+            }
+            double* oi = out + i * d_out;
+            for (size_t m = 0; m < d_out; ++m) {
+                const float* dm = down + m * interm;
+                double s = 0.0;
+                for (size_t k = 0; k < interm; ++k) s += ai[k] * (double)dm[k];
+                oi[m] = s;
+            }
+        }
+    });
+    return 0;
+}
+
 // True LayerNorm per row, in place: x = (x - mean(x)) / sqrt(var(x)+eps) * g + b.
 // The BERT-family probe input is LN(E[t]+P+S; gamma, beta) — the mean/variance
 // are data-dependent per token, so this can never be folded into weight columns

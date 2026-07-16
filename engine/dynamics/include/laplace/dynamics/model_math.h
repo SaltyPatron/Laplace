@@ -14,6 +14,17 @@ extern "C" {
 int center_columns_d(double* m, size_t n, size_t d);
 int center_columns_f(float* m, size_t n, size_t d);
 
+/* Per-token FFN write vectors out[n x d_out]: act=0 SiLU-gated, act=1 erf-GELU
+ * ungated (gate may be NULL for act=1). up_bias (nullable, [interm]) applies
+ * pre-activation — it is nonlinear-relevant; the token-independent down-bias
+ * is deliberately NOT modeled (constant offset, carries no token signal).
+ * Row-blocked, TBB-parallel. */
+int ffn_write_vectors_d(const double* x, size_t n, size_t d,
+                        const float* up, const float* up_bias,
+                        const float* gate, size_t interm,
+                        const float* down, size_t d_out,
+                        int act, double* out);
+
 /* True per-row LayerNorm in place: x = (x-mean)/sqrt(var+eps)*gamma + beta.
  * beta may be NULL (gain-only). Data-dependent per row — never foldable into
  * weight columns. */

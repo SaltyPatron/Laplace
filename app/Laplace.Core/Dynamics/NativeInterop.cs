@@ -58,6 +58,11 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "center_columns_f")]
     public static unsafe partial int CenterColumnsF(float* m, nuint n, nuint d);
 
+    [LibraryImport(Library, EntryPoint = "ffn_write_vectors_d")]
+    public static unsafe partial int FfnWriteVectorsD(
+        double* x, nuint n, nuint d, float* up, float* upBias, float* gate, nuint interm,
+        float* down, nuint dOut, int act, double* outp);
+
     [LibraryImport(Library, EntryPoint = "layer_norm_rows_d")]
     public static unsafe partial int LayerNormRowsD(
         double* m, nuint n, nuint d, float* gamma, float* beta, double eps);

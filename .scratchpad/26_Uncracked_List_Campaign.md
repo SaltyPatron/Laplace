@@ -55,6 +55,44 @@ Design (doc 19 facts):
   (ProjectEmbedding/SliceHead — the projections already computed today and thrown
   away). Planes: ATTENDS q/k factors; OV write vectors; MLP down-projected write
   vectors; CONTINUES_TO/SIMILAR_TO factor rows.
+GATE TAXONOMY (operator, 2026-07-15: "AI models conventionally won't deliver
+exact/perfect responses — tests have to test real metrics"):
+- Tier 1 INVARIANTS (exactness): bit-level transcription gates. Prove OUR
+  plumbing, not model quality. Cheap, deterministic, regression-class. A model
+  is never "exact" — but our COPY of it must be.
+- Tier 2 BEHAVIORAL FIDELITY (the real replication metrics): agreement with
+  the RUNNING model on real inputs, tolerance-banded, never bit-exact by
+  design: attention-distribution agreement (KL/top-k overlap per circuit on
+  real sentences), next-token ranking overlap, layer-by-layer composition
+  decay (T4 class). Reference = llama.cpp/foundry runner, never Python.
+- Tier 3 KNOWLEDGE/TASK (does it KNOW): Argentina gate, ham-exam objective
+  accuracy, decoder-ring enrichment vs curated web, jitter conviction rate.
+  These are the product metrics; Tiers 1-2 exist so Tier 3 failures are
+  attributable (bad transcription vs bad composition vs model didn't know).
+
+STATUS 2026-07-15 evening — ITEM A GATE 1 PASSED FOR REAL: MiniLM ingested
+through the pipeline (cli.cmd, factors mode, 144 head-slice factor
+trajectories, 27,852 dedup tokens/slice, 19.2s) and read back by SQL:
+16,000 factor values BIT-EXACT, 2,000 pair scores 1.66e-8 CS-scaled (36x
+under f32 floor 6.7e-7). ModelGateFactorReadbackTests. Fix chain that got
+there: consensus_upsert missing (stale configure glob → build-extensions
+--reconfigure + upgrade file staged as laplace_substrate--OLD--NEW.sql);
+stale r2r CLI tree (stamp-guarded — rebuild-all does NOT refresh it; force
+republish via dotnet publish -p:PublishReadyToRun=true); analysis-marker
+poisoning from stale-binary run (AnalyzerVersion bumped 1→2, designed
+eviction; inert v1 marker row left in DB, operator may delete).
+Still open in A: bias/LN/position defects fixed for factors path ONLY at
+attention q/k; OV + MLP + CONTINUES factor deposits; arena vertex;
+EmitBilinearPairs deletion. Then Tier 2 gates.
+DEFECT (found by operator question 2026-07-15): deposited factor trajectories
+are ANONYMOUSLY ORDERED — EmitFactorTrajectories skipped the specced per-token
+testimony header vertices, so token identity lives only in the ETL dedup
+convention (re-derivable solely by re-running the tokenizer parse outside the
+DB). The substrate is exact but not self-describing: SQL alone cannot answer
+"king's q-vector in L3.H5". Fix = the original spec: testimony header vertex
+(token id + salience-norm score) opening each token's run — restores in-DB
+identity AND the CS pruning bound in one stroke. Owed before item B.
+
 Gate (order: MiniLM FIRST, then TinyLlama — operator directive 2026-07-15):
 1. CORRECTNESS: scrape via cli.cmd ingest model; native readback test
    reconstructs q_h(A)·k_h(B) from deposited trajectories to f32 exactness vs
@@ -73,7 +111,82 @@ Gate (order: MiniLM FIRST, then TinyLlama — operator directive 2026-07-15):
    pack+stage overlapping compute, few-large-rows COPY shape. Scalar Neumaier
    qk kernels = gate reference only, never the bulk path.
 
+WHILE-HOT LAW (operator, 2026-07-15 night): the factors pass holds the model's
+entire testimony hot in RAM (~4 GB, perfect layout) and currently only dumps
+it to PG. Everything below is near-free DURING that pass and expensive after:
+(1) APPEARS_IN salience occurrences — the norms are already computed;
+(2) decoder-ring top-pairs per circuit — CS-pruned scan on hot q/k →
+    HeadClassifier ENCODES;
+(3) per-circuit 4D lens coords + hilbert — SVD while hot; TODAY the deposit
+    writes HilbertIndex: default and coord = first vertex, i.e. EMPTY
+    observation-geometry columns on every factor physicality;
+(4) circuit spectra (effective rank) as recipe scalars;
+(5) salience-outlier jitter candidates;
+(6) THE FACTOR PERFCACHE BLOB (doc 19 candidate b) — write the mmap blob in
+    the same pass; PG stays system-of-record, the blob is item B's read path
+    (pointer arithmetic vs 58 MB varlena SPI fetches).
+Item A2 = fold these into the factors pass as one single-pass analyzer stack.
+
+RECORDER-FIRST DEFECT (operator question 2026-07-16, "how do we have missing
+token information?"): on this DB generation the model's WITNESSED phases
+(vocab token entities, TOKEN_MAPS_TO, merges, checkpoint structure) NEVER ran
+— every ingest used analyzer planes modes, which skip witnessed phases BY
+DESIGN on the assumption the recorder ran once first. Factor-trajectory
+headers reference token entity ids that were never deposited as entities;
+words minted by other sources render fine, model-only subwords are naked
+(render blank, zero web edges). Content law makes this self-healing — header
+ids collide into place the moment vocab deposits — but the sequencing hole is
+real: ModelDecomposer must ENFORCE recorder-first (the runner already tracks
+layer_complete=False for the source — refuse or auto-run the witnessed layer
+when absent instead of silently analyzing over a missing foundation).
+Immediate remedy: one structure/recorder ingest of MiniLM (~2 min).
+
 --------------------------------------------------------------------------------
+B/D CONTRACT (operator, 2026-07-15 night — "SQL offloads the heavy lifting to
+C; walk the information like a transformer would; indexed lookups, not brute
+force"). The existing walk engine IS the template (generate_walk.c batched
+beam, recall.c routing, astar_path.c): SQL is one doorway call, C owns ALL
+recursion/looping/batching. NEVER SQL-recursive (WITH RECURSIVE = per-step
+round trips, the anti-pattern).
+
+Entry points (extension SQL → one SPI dispatch each → native loop):
+  model_pair_score(model, circuit, tokA, tokB [,offset])     -> score + receipt
+  model_row_topk(model, circuit, tok, k)                     -> ranked partners
+  model_forward(model, prompt_text, k)                       -> ranked next
+      tokens + provenance (eff_mu, witnesses, circuits routed through)
+model_forward internals (all in C): tokenize via t0 perfcache; frontier =
+sparse token mixture over PROMPT positions (S×S attention per circuit, never
+V×V); per-layer loop over circuit directory; RoPE rotation from recipe
+scalars; MLP write-vector mixing; unembed = the ONLY V-wide op, one GEMV over
+completion factors, CS-pruned by stored norms; partial top-k select. Deposits
+what it walked through the OODA lane (item C) — evaluation IS ingestion.
+
+Index substrate = THE FACTOR PERFCACHE BLOB (while-hot law item 6, doc 19
+candidate b): header directory (plane,layer,head)->offset; per-circuit
+token-id->ordinal hash probe (highway_table's 1024-slot pattern); raw f32
+factor arrays + norms + arena. mmap'd, prewarmed, CRC'd; PG varlena rows stay
+system-of-record + rebuild source. Every step is a lookup: token = hash probe,
+circuit = offset, factors = pointer + ordinal*stride. Compute exists only
+where the model computes (dots, softmax, GEMV) — sized by PROMPT length, not
+vocab.
+
+B v1 POST-MORTEM (2026-07-16, two machine crashes — binding corrections):
+v1 model_factor.c is GATE INSTRUMENT ONLY, banned as a query surface. Its
+sins, each now law: (a) ST_AsBinary detoasts+recopies whole 6-58MB
+trajectories to read ~28 doubles — v1.5 = sliced vertex access (ST_PointN
+arithmetic addressing / raw datum TOAST slice; verify or SET STORAGE EXTERNAL
+on physicalities.trajectory) and the catalog's OWN per-vertex idiom
+(vertex_atom/vertex_tier/trajectory_point_count) — catalog-first ALWAYS;
+(b) token->ordinal linear header scan — deposit an indexed ordinal map at
+ingest instead; (c) SRFs without ROWS estimates let the planner hash 18M-row
+partitioned consensus at work_mem 190MB x 4 workers = the crash (operator
+fixed: ROWS 20/ROWS 1 in model_factor.sql.in — needs rebuild+upgrade to
+take effect); (d) exploration sessions REQUIRE the guard prolog
+(statement_timeout 30s, work_mem 32MB, no parallel gather) + MATERIALIZED
+fences + LIMIT on any consensus join; (e) session-temp CREATE FUNCTION
+blocks extension upgrades — permanent-first, no exceptions. End state
+unchanged: the factor perfcache blob makes ALL of this pointer arithmetic.
+
 B. NATIVE SPI SCORER (§6 step 3)                                          [OPEN]
 --------------------------------------------------------------------------------
 Extension fn family: model_pair_score(circuit, tokenA, tokenB [, offset]),

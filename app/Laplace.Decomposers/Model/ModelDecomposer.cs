@@ -73,7 +73,15 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     // double-fold consensus) and deposits it as its final change. Bump the
     // version to evict + re-derive without touching the witnessed layer.
     public static readonly Hash128 AnalysisMarkerTypeId = EntityTypeRegistry.Id("Model_AnalysisMarker");
-    internal const int AnalyzerVersion = 1;
+    // v2: v1 marker on hart-desktop was deposited by a stale CLI tree that ran
+    // planes mode 'factors' before the factors branch existed (derived nothing).
+    // v3: factor-trajectory layout v2 (FactorTrajectory law — arena vertex +
+    // per-token testimony headers + all planes q/k/ov/mlp/emb); v2 rows were
+    // q/k-only anonymous layout, superseded and evictable.
+    // v4: slice -> circuit-coordinate APPEARS_IN anatomy links added to the
+    // factors pass (SQL navigation); trajectories unchanged (insert-if-absent
+    // skips them on re-run — only the anatomy attestations are novel).
+    internal const int AnalyzerVersion = 4;
 
     // Ledger §6 step 1 — the checkpoint as CONTENT — lives in ModelCheckpoint
     // (Blake3 of literal tensor byte ranges → Merkle root, CONTAINS/PRECEDES),

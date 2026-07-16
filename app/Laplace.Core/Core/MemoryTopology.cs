@@ -74,10 +74,19 @@ public static class MemoryTopology
     public static long EffectiveCacheSizeBytes => Clamp(TotalPhysicalBytes * 65 / 100, 512L << 20, 96L << 30);
 
     /// <summary>maintenance_work_mem ≈ RAM/32 (index builds/vacuum), capped.</summary>
-    public static long MaintenanceWorkMemBytes => Clamp(TotalPhysicalBytes / 32, 256L << 20, 4L << 30);
+    // Index builds plateau near 1GB; autovacuum workers inherit this when
+    // autovacuum_work_mem = -1, so an oversized value multiplies by worker
+    // count (2026-07-15 incident arithmetic, doc 28).
+    public static long MaintenanceWorkMemBytes => Clamp(TotalPhysicalBytes / 48, 256L << 20, 1L << 30);
 
     /// <summary>work_mem ≈ RAM/256 per sort/hash node, capped modestly.</summary>
-    public static long WorkMemBytes => Clamp(TotalPhysicalBytes / 256, 32L << 20, 512L << 20);
+    // work_mem is PER SORT/HASH NODE PER CONNECTION — it must be sized against
+    // the connection budget (max_connections × concurrent nodes), never as a
+    // flat RAM fraction. RAM/256 gave 190MB on a 48GB box; one misplanned
+    // partitioned hash join starved the machine to a cold power boot
+    // (2026-07-15, doc 28). RAM/1536 → 32MB at 48GB: worst case
+    // 60 conns × 2 nodes × 32MB ≈ 3.8GB.
+    public static long WorkMemBytes => Clamp(TotalPhysicalBytes / 1536, 16L << 20, 64L << 20);
 
     /// <summary>wal_buffers ≈ RAM/512, PostgreSQL's own auto-cap is 16 MiB..1 GiB.</summary>
     public static long WalBuffersBytes => Clamp(TotalPhysicalBytes / 512, 16L << 20, 1L << 30);

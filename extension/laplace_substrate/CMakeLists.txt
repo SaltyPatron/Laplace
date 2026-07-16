@@ -66,6 +66,7 @@ set(EXT_C_SOURCES
     src/descent_probe.c
     src/containers_of.c
     src/highway_mask.c
+    src/model_factor.c
     src/lexical_case.c
     src/steered_walk.c
     src/realize_batch.c

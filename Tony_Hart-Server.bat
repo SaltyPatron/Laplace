@@ -1,13 +1,17 @@
 @echo off
-rem Tony_Hart-Server — local build + seed against host target HART-SERVER (remote PG).
+rem Tony_Hart-Server — local build + remote migrate/seed against host target HART-SERVER.
 rem Naming: Tony_Hart-<Target>  (_ joins operator prefix; - joins host target).
-rem No local install-extensions / db-reset / deploy-api — those belong on HART-SERVER.
-rem Extensions must already be live on the remote. Logs: D:\Data\Output\<step>.log
+rem No local install-extensions / db-reset / deploy-api — those live on HART-SERVER (CI).
+rem The remote extension must be current (CI deploy); migrate-db gates on the schema
+rem generation and stops before seeding into a stale one. Logs: D:\Data\Output\<step>.log
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
+rem HART-SERVER cluster: superuser is laplace_admin (initdb --username=laplace_admin);
+rem there is NO postgres role on that host. Trust auth on 192.168.1.0/24.
 set "LAPLACE_PGHOST=hart-server"
-rem Force env.cmd to rebuild LAPLACE_DB from the host above.
+set "LAPLACE_PGUSER=laplace_admin"
+rem Force env.cmd to rebuild LAPLACE_DB from the host/user above.
 set "LAPLACE_DB="
 set "LAPLACE_ENV_LOADED="
 set "OUT=D:\Data\Output"
@@ -24,40 +28,77 @@ rem Restored at every exit.
 call :wer_off
 
 rem Optional override: Tony_Hart-Server.bat [rebuild-all modules...]
-rem Default: native + app (no local install / no IIS). Publish stages artifacts only.
+rem Default: native + app (decomposers/CLI/native DLLs; no local install / no IIS).
 set "MODULES=%*"
 if not defined MODULES set "MODULES=native app"
 
 echo ===== Tony_Hart-Server / HART-SERVER started %DATE% %TIME% =====
-echo target:    HART-SERVER  PGHOST=%LAPLACE_PGHOST%  (remote — seeds only)
+echo target:    HART-SERVER  PGHOST=%LAPLACE_PGHOST%  PGUSER=%LAPLACE_PGUSER%  (remote — migrate + seeds)
 echo modules:   %MODULES%
 echo logs:      %OUT%\
 echo.
 
-call :tee build-cutechess "build-cutechess.cmd" || goto :fail
+rem ---- Phase 0: preflight (remote up, extension available, runner idle) ----
+call :tee gate-remote "gate-remote.cmd" || goto :fail
+
+rem ---- Phase 1: local build (client side of the wire: decomposers, CLI, native math) ----
 call :tee rebuild-all "rebuild-all.cmd %MODULES%" || goto :fail
-call :tee build-engine-asan "build-engine-asan.cmd" || goto :fail
-rem Stage endpoint/UCI/web locally — do NOT deploy-api (IIS is HART-DESKTOP / host-local).
-call :tee publish "publish.cmd" || goto :fail
+rem call :tee build-cutechess "build-cutechess.cmd" || goto :fail
+rem call :tee build-engine-asan "build-engine-asan.cmd" || goto :fail
+rem Stage endpoint/UCI/web locally only if wanted — never deploy-api from this box.
+rem call :tee publish "publish.cmd" || goto :fail
 
-echo ==== skip install-extensions / deploy-api / db-reset (not for HART-SERVER from this box) ====
+rem ---- Phase 2: remote DB — create/migrate + schema-generation gate ----
+call :tee migrate-db "migrate-db.cmd" || goto :fail
 
-call :tee seed-foundation "seed-foundation.cmd" || goto :fail
+rem ---- Phase 3: floor ----
+call :tee seed-unicode "seed-step.cmd unicode" || goto :fail
+call :tee seed-iso639 "seed-step.cmd iso639" || goto :fail
+
+rem ---- Phase 4: document ----
 call :tee seed-documents "seed-step.cmd document \"D:\Data\Ingest\test-data\text\"" || goto :fail
-call :tee seed-openings "seed-step.cmd openings \"D:\Data\Ingest\Games\Chess\openings\"" || goto :fail
-rem ---- personal chess.com PGNs (unrem one/more; chess.com export max=1000) ----
-rem call :tee seed-chess-anthony "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
-rem call :tee seed-chess-games "seed-step.cmd chess \"C:\Users\ahart\Downloads\games.pgn\"" || goto :fail
-rem call :tee seed-chess-games1 "seed-step.cmd chess \"C:\Users\ahart\Downloads\games(1).pgn\"" || goto :fail
-call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
+
+rem ---- Phase 5: knowledge (canonical ladder order) ----
+call :tee seed-cili "seed-step.cmd cili" || goto :fail
+call :tee seed-wordnet "seed-step.cmd wordnet" || goto :fail
 call :tee seed-omw "seed-step.cmd omw" || goto :fail
+call :tee seed-verbnet "seed-step.cmd verbnet" || goto :fail
+call :tee seed-propbank "seed-step.cmd propbank" || goto :fail
+call :tee seed-framenet "seed-step.cmd framenet" || goto :fail
+call :tee seed-mapnet "seed-step.cmd mapnet" || goto :fail
+call :tee seed-wordframenet "seed-step.cmd wordframenet" || goto :fail
+call :tee seed-semlink "seed-step.cmd semlink" || goto :fail
 call :tee seed-conceptnet "seed-step.cmd conceptnet" || goto :fail
+call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
 call :tee seed-ud "seed-step.cmd ud" || goto :fail
+call :tee seed-wiktionary "seed-step.cmd wiktionary" || goto :fail
+
+rem ---- Phase 6: chess ----
+call :tee seed-openings "seed-step.cmd openings \"D:\Data\Ingest\Games\Chess\openings\"" || goto :fail
+call :tee seed-chess-books "seed-step.cmd chess-books \"D:\Data\Ingest\test-data\text\"" || goto :fail
+call :tee seed-chess-anthony "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
+call :tee seed-chess-games "seed-step.cmd chess \"C:\Users\ahart\Downloads\games.pgn\"" || goto :fail
+call :tee seed-chess-games1 "seed-step.cmd chess \"C:\Users\ahart\Downloads\games(1).pgn\"" || goto :fail
+rem call :tee seed-chess-hikaru "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Hikaru_chesscom.pgn\"" || goto :fail
+rem call :tee seed-chess-fabiano "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\FabianoCaruana_chesscom.pgn\"" || goto :fail
 call :tee seed-chesscom "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\"" || goto :fail
 call :tee seed-chess-otb "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Lumbras\otb\"" || goto :fail
-call :tee seed-wiktionary "seed-step.cmd wiktionary" || goto :fail
+
+rem ---- Phase 7: usage ----
 call :tee seed-tatoeba "seed-step.cmd tatoeba" || goto :fail
 call :tee seed-opensubtitles "seed-step.cmd opensubtitles" || goto :fail
+
+rem ---- Phase 8: code (stage script owns path resolution: stack-v2, repos, tiny-codes) ----
+call :tee seed-code "seed-stage.cmd code" || goto :fail
+
+rem ---- Phase 9: models — OFF until the model-lane extension SQL lands + CI deploys it;
+rem the remote extension has no model factor surface yet, so these would fail server-side.
+rem call :tee seed-model-tinyllama "seed-step.cmd model-tinyllama" || goto :fail
+rem call :tee seed-model-phi "seed-step.cmd model-phi" || goto :fail
+rem call :tee seed-model-qwen "seed-step.cmd model-qwen" || goto :fail
+
+rem ---- Phase 10: audit ----
+call :tee audit-substrate "audit-substrate.cmd" || goto :fail
 
 echo.
 echo ===== Tony_Hart-Server / HART-SERVER OK %DATE% %TIME% =====

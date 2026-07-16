@@ -95,6 +95,53 @@ public static class ModelCheckpoint
         return ids;
     }
 
+    // A head's COLUMNS in a row-major [rows, cols] tensor (the O projection:
+    // head h owns columns h*hd..(h+1)*hd of every row) are strided, not
+    // contiguous — so the content id is Blake3 over the gathered column bytes,
+    // row-major within the slice. Deterministic, literal-content, collides
+    // across checkpoints exactly like contiguous slices. f32 tensors only.
+    public static Hash128[] ColumnSliceIds(
+        SafetensorsContainerParser.TensorReference t, int rows, int cols, int heads)
+    {
+        long total = t.AbsoluteDataEnd - t.AbsoluteDataStart;
+        if (heads <= 0 || cols % heads != 0 || total != (long)rows * cols * 4)
+            throw new InvalidDataException(
+                $"tensor '{t.Name}' [{rows}x{cols}] f32 does not match byte range {total} / {heads} heads");
+        int hd = cols / heads;
+
+        var ids = new Hash128[heads];
+        var gathered = new byte[(long)rows * hd * 4];
+        using var mmf = MemoryMappedFile.CreateFromFile(
+            t.FilePath, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
+        using var view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+        unsafe
+        {
+            byte* basePtr = null;
+            view.SafeMemoryMappedViewHandle.AcquirePointer(ref basePtr);
+            try
+            {
+                byte* data = basePtr + t.AbsoluteDataStart;
+                for (int h = 0; h < heads; h++)
+                {
+                    fixed (byte* pg = gathered)
+                    {
+                        for (int r = 0; r < rows; r++)
+                            Buffer.MemoryCopy(
+                                data + ((long)r * cols + (long)h * hd) * 4,
+                                pg + (long)r * hd * 4,
+                                hd * 4, hd * 4);
+                    }
+                    ids[h] = Hash128.Blake3(gathered);
+                }
+            }
+            finally
+            {
+                view.SafeMemoryMappedViewHandle.ReleasePointer();
+            }
+        }
+        return ids;
+    }
+
     // Deposit the checkpoint's identity and structure. Insert-if-absent everywhere,
     // so re-ingesting the same checkpoint re-witnesses identical rows (0 novel).
     // Returns the checkpoint root id for the caller to hang the model root off.

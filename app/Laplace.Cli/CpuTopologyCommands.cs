@@ -92,7 +92,11 @@ internal static class CpuTopologyCommands
         long workMb = MemoryTopology.WorkMemBytes >> 20;
         long walMb = MemoryTopology.WalBuffersBytes >> 20;
         int pcores = CpuTopology.PerformanceCoreCount;
-        int gather = CpuTopology.ParallelMaintenanceWorkers;
+        int maint = CpuTopology.ParallelMaintenanceWorkers;
+        // Gather parallelism is a per-QUERY burst multiplier on work_mem and
+        // CPU; index builds keep full maintenance parallelism, but scans get
+        // half (2026-07-15 incident, doc 28).
+        int gather = Math.Max(2, pcores / 4);
         int workers = CpuTopology.LogicalProcessorCount;
         var w = Console.Out;
 
@@ -105,7 +109,7 @@ internal static class CpuTopologyCommands
         w.WriteLine($"ALTER SYSTEM SET max_worker_processes = {workers};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers = {pcores};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers_per_gather = {gather};");
-        w.WriteLine($"ALTER SYSTEM SET max_parallel_maintenance_workers = {gather};");
+        w.WriteLine($"ALTER SYSTEM SET max_parallel_maintenance_workers = {maint};");
         w.WriteLine($"ALTER SYSTEM SET io_workers = {gather};");
 
         // Workload POLICY — deliberate, machine-independent (durability/checkpoint/IO shape).
@@ -115,7 +119,13 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET checkpoint_completion_target = 0.9;");
         w.WriteLine("ALTER SYSTEM SET max_wal_size = '32GB';");
         w.WriteLine("ALTER SYSTEM SET min_wal_size = '4GB';");
-        w.WriteLine("ALTER SYSTEM SET max_connections = 200;");
+        // Every Windows backend is a full process plus a per-connection
+        // perfcache map; connections are budgeted, not free. Memory ceiling
+        // arithmetic and the 2026-07-15 incident live in doc 28.
+        w.WriteLine("ALTER SYSTEM SET max_connections = 60;");
+        w.WriteLine("ALTER SYSTEM SET hash_mem_multiplier = 1.0;");
+        w.WriteLine("ALTER SYSTEM SET temp_buffers = '32MB';");
+        w.WriteLine("ALTER SYSTEM SET autovacuum_work_mem = '256MB';");
         w.WriteLine("ALTER SYSTEM SET effective_io_concurrency = 256;");
         w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 256;");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");
