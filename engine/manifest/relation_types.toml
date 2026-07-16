@@ -691,6 +691,11 @@ rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
 family_root = "IS_A"
+# The taxonomy backbone is the hottest relation in the substrate — every
+# hypernym walk and typing cascade reads it. Without this flag its consensus
+# cells pile into the DEFAULT partition (consensus_upsert regress pins the
+# routing).
+hot = true
 
 [[relation]]
 # Entity typing (e.g. synset -> WordNet_Synset). De-conflated from IS_A so typing edges never
