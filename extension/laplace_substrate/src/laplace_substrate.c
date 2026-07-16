@@ -348,11 +348,83 @@ pg_laplace_tier_batch_existence_probe(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestations_exist_bitmap);
 
+/*
+ * attestations_exist_bitmap(ids, type_ids, subject_ids) -- KEYED probe.
+ * Attestations are partitioned LIST(type_id) -> HASH(subject_id); id alone
+ * cannot prune, so the caller (which computed every id FROM these keys)
+ * passes them alongside. Three parallel bytea[] arrays, validated for
+ * shape/nulls/length parity here so descent_probe.c can assume alignment.
+ */
 Datum
 pg_laplace_attestations_exist_bitmap(PG_FUNCTION_ARGS)
 {
-    return presence_bitmap_datum(fcinfo, "attestations_exist_bitmap",
-                                  laplace_attestations_present_bitmap);
+    const char *label = "attestations_exist_bitmap";
+    ArrayType  *arrays[3];
+    int         counts[3];
+    int         a;
+    int         candidate_count;
+    int         bitmap_bytes;
+    bytea      *result;
+    uint8      *bm;
+
+    for (a = 0; a < 3; a++)
+    {
+        if (PG_ARGISNULL(a))
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: argument %d must not be NULL", label, a + 1)));
+        arrays[a] = PG_GETARG_ARRAYTYPE_P(a);
+        if (ARR_NDIM(arrays[a]) > 1)
+            ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: argument %d must be 1-dimensional", label, a + 1)));
+        if (ARR_ELEMTYPE(arrays[a]) != BYTEAOID)
+            ereport(ERROR,
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                 errmsg("%s: argument %d element type must be bytea", label, a + 1)));
+        if (ARR_HASNULL(arrays[a]))
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: argument %d must not contain NULL", label, a + 1)));
+        counts[a] = ARR_NDIM(arrays[a]) == 0
+                    ? 0
+                    : ArrayGetNItems(ARR_NDIM(arrays[a]), ARR_DIMS(arrays[a]));
+    }
+    if (counts[1] != counts[0] || counts[2] != counts[0])
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("%s: ids/type_ids/subject_ids must be the same length (%d/%d/%d)",
+                    label, counts[0], counts[1], counts[2])));
+
+    candidate_count = counts[0];
+    bitmap_bytes = (candidate_count + 7) / 8;
+
+    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
+    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
+    if (bitmap_bytes > 0)
+        memset(VARDATA(result), 0, bitmap_bytes);
+    bm = (uint8*) VARDATA(result);
+
+    if (candidate_count == 0)
+        PG_RETURN_BYTEA_P(result);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("%s: SPI_connect failed", label)));
+
+    {
+        int rc = laplace_attestations_present_bitmap_keyed(
+            arrays[0], arrays[1], arrays[2], bm, candidate_count);
+
+        SPI_finish();
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: bulk probe failed (rc=%d)", label, rc)));
+    }
+
+    PG_RETURN_BYTEA_P(result);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_entities_stored_bitmap);

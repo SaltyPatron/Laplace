@@ -6,5 +6,12 @@ CREATE OR REPLACE FUNCTION table_present_ordinals(p_table text, p_ids bytea[])
     UNION ALL
     SELECT o.idx FROM physicalities_present_ordinals(p_ids) o WHERE p_table = 'physicalities'
     UNION ALL
-    SELECT o.idx FROM attestations_present_ordinals(p_ids) o WHERE p_table = 'attestations'
+    -- Diagnostic id-only path: cannot prune the attestation partitions (id is
+    -- not a partition key). The ingest hot path uses the keyed
+    -- attestations_present_ordinals(ids, type_ids, subject_ids) instead; this
+    -- arm exists for ad-hoc "does this attestation id exist" inspection only.
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
+    INNER JOIN attestations t ON t.id = u.id
+    WHERE p_table = 'attestations'
 $$;

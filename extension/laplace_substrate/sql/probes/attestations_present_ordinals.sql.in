@@ -1,8 +1,32 @@
-CREATE OR REPLACE FUNCTION attestations_present_ordinals(p_ids bytea[])
+-- Keyed presence probe. Attestations are partitioned LIST(type_id) ->
+-- HASH(subject_id); `id` is NOT a partition key, so the old id-only join
+-- could never prune -- every probed id paid one index descent per leaf
+-- (~145x read amplification; measured 2026-07-16: 4.2M ids in 1.2s against
+-- empty leaves -> 165s at WordNet scale, growing with substrate size).
+-- The caller computed each attestation id FROM (subject, type, object,
+-- source, context), so it always holds the partition keys: binding the type
+-- to a plpgsql variable prunes the LIST parent at plan time, and the
+-- subject equality prunes the HASH leaves per row -- one descent per id.
+-- The per-type re-unnest is bounded by the probe chunk size (<=131,072 ids
+-- per call), unlike the fold's whole-delta arrays.
+DROP FUNCTION IF EXISTS attestations_present_ordinals(bytea[]);
+CREATE OR REPLACE FUNCTION attestations_present_ordinals(
+    p_ids bytea[], p_type_ids bytea[], p_subject_ids bytea[])
     RETURNS TABLE(idx int)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE plpgsql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT (u.ord - 1)::int
-    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
-    INNER JOIN attestations t ON t.id = u.id
-$$;
+DECLARE
+    v_type bytea;
+BEGIN
+    FOR v_type IN SELECT DISTINCT t FROM unnest(p_type_ids) AS t LOOP
+        RETURN QUERY
+        SELECT (u.ord - 1)::int
+        FROM unnest(p_ids, p_type_ids, p_subject_ids)
+             WITH ORDINALITY u(id, t, s, ord)
+        JOIN attestations a
+          ON a.type_id = v_type          -- variable -> planner partition prune
+         AND a.subject_id = u.s          -- runtime HASH-leaf prune per row
+         AND a.id = u.id
+        WHERE u.t = v_type;
+    END LOOP;
+END $$;

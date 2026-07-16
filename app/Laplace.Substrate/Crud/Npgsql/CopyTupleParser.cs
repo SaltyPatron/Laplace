@@ -42,6 +42,10 @@ internal static class CopyTupleParser
     internal sealed class AttestationRows
     {
         public readonly List<Hash128> Ids = new();
+        /// <summary>Partition keys (LIST(type_id) -> HASH(subject_id)) — the
+        /// keyed presence probe needs them because id alone cannot prune.</summary>
+        public readonly List<Hash128> SubjectIds = new();
+        public readonly List<Hash128> TypeIds = new();
         /// <summary>last_observed_at as stored on the wire (µs since PG epoch 2000-01-01).</summary>
         public readonly List<long> TimestampsPgUs = new();
         public readonly List<long> Counts = new();
@@ -116,7 +120,7 @@ internal static class CopyTupleParser
             while (off < len)
             {
                 long rowStart = off;
-                Hash128 id = default;
+                Hash128 id = default, subjectId = default, typeId = default;
                 long ts = 0, games = 0;
                 long countValOff = -1;
                 WalkRow(p, len, ref off, AttestationFields, "attestations", (field, valOff, valLen) =>
@@ -124,6 +128,8 @@ internal static class CopyTupleParser
                     switch (field)
                     {
                         case 0: id = ReadHash(p, valOff, valLen, "attestations.id"); break;
+                        case 1: subjectId = ReadHash(p, valOff, valLen, "attestations.subject_id"); break;
+                        case 2: typeId = ReadHash(p, valOff, valLen, "attestations.type_id"); break;
                         case 7: ts = ReadInt64(p, valOff, valLen, "attestations.last_observed_at"); break;
                         case 8:
                             games = ReadInt64(p, valOff, valLen, "attestations.observation_count");
@@ -134,6 +140,8 @@ internal static class CopyTupleParser
                 if (countValOff < 0)
                     throw new InvalidOperationException("attestations row missing observation_count");
                 result.Ids.Add(id);
+                result.SubjectIds.Add(subjectId);
+                result.TypeIds.Add(typeId);
                 result.TimestampsPgUs.Add(ts);
                 result.Counts.Add(games);
                 result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));
