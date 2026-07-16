@@ -215,6 +215,7 @@ phase_build() {
   [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
+    -DLAPLACE_REQUIRE_MKL=ON \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
