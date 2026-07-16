@@ -359,14 +359,33 @@ phase_tune_laplace() {
     echo "tune-laplace: substrate tables absent -- skipping (run after migrate)."
     return 0
   fi
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
-    -c "ALTER TABLE laplace.physicalities ALTER COLUMN coord SET STATISTICS 0" \
-    -c "ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STATISTICS 0" \
-    -c "ALTER TABLE laplace.entities      SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
-    -c "ALTER TABLE laplace.physicalities SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
-    -c "ALTER TABLE laplace.attestations  SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)" \
-    -c "ALTER TABLE laplace.consensus     SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)"
-  echo "tune-laplace: applied per-table stat + autoanalyze tuning."
+  # The substrate tables are partitioned: storage parameters are illegal on a
+  # partitioned parent, and autoanalyze reads LEAF-level settings — so both
+  # tunings walk pg_partition_tree and hit every leaf. Idempotent; re-running
+  # after new partitions appear tunes them too. (pg_partition_tree on a plain
+  # table returns the table itself, so this stays correct either way.)
+  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 <<'SQL'
+ALTER TABLE laplace.physicalities ALTER COLUMN coord SET STATISTICS 0;
+ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STATISTICS 0;
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT roots.t AS root, relid AS rel
+    FROM (VALUES ('laplace.entities'::regclass), ('laplace.physicalities'),
+                 ('laplace.attestations'), ('laplace.consensus')) roots(t),
+         LATERAL pg_partition_tree(roots.t)
+    WHERE isleaf
+  LOOP
+    EXECUTE format('ALTER TABLE %s SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)', r.rel);
+    IF r.root = 'laplace.physicalities'::regclass THEN
+      EXECUTE format('ALTER TABLE %s ALTER COLUMN coord SET STATISTICS 0', r.rel);
+      EXECUTE format('ALTER TABLE %s ALTER COLUMN trajectory SET STATISTICS 0', r.rel);
+    END IF;
+  END LOOP;
+END $$;
+SQL
+  echo "tune-laplace: applied stat + autoanalyze tuning across all leaf partitions."
 }
 
 phase_perfcache_guc() {
