@@ -42,6 +42,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private const int UpsertChunkCells = 65_536;
 
+    // Fold fan-out width: per-type segments are row-disjoint under the
+    // LIST(type_id) partitioning, so they ride parallel connections exactly
+    // like the 12-way COPY apply above them. One connection per segment.
+    private static readonly int FoldConnections = Math.Clamp(Environment.ProcessorCount, 1, 12);
+
+    // Run-scoped mask-pair dedup: masks only ACCRETE, so a pair deposited once
+    // this run never needs resending — without this, every flush re-verifies
+    // every earlier flush's pairs server-side (~6 leaf probes per pair) for
+    // zero writes. Mutated only under _upsertGate. Cleared at the cap as a
+    // memory valve: clearing costs re-verification, never correctness.
+    private readonly HashSet<(Hash128 Ent, Hash128 Typ)> _depositedMaskPairs = new();
+    private const int DepositedMaskPairsCap = 8_388_608;
+
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         bool? persistEvidence = null,
@@ -220,13 +233,37 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _upsertGate.WaitAsync(ct);
         try
         {
-            await using var conn = await _ds.OpenConnectionAsync(ct);
-            await using var tx = await conn.BeginTransactionAsync(ct);
-            try
+            // Never resend a pair this run already deposited: the server-side
+            // no-op still costs ~6 tier-leaf probes per pair for zero writes.
+            maskPairs.ExceptWith(_depositedMaskPairs);
+
+            // Fixed-size chunks over the sorted cells, folded on PARALLEL
+            // connections — the same width the COPY apply uses — instead of
+            // serializing 80% of ingest wall time onto one core. Chunking (not
+            // per-type segmentation) is the correct fan-out axis: a skewed
+            // source (unicode: 1.6M cells, essentially ONE type) degenerates a
+            // type split back to a single serial stream. Safety does not come
+            // from partition boundaries at all: cells are CLIENT-DEDUPED, so
+            // no two chunks can touch the same consensus row — row locks are
+            // disjoint by construction, inserts are unique by construction,
+            // and consensus_upsert's internal per-type loop still gives every
+            // call runtime-pruned, type-major-ordered writes. Each chunk
+            // commits its own transaction: a mid-delta failure aborts the run
+            // either way (same retry class as the prior whole-delta tx).
+            var segments = new List<(int Off, int Len)>();
+            for (int s = 0; s < cells.Length; s += UpsertChunkCells)
+                segments.Add((s, Math.Min(UpsertChunkCells, cells.Length - s)));
+
+            await Parallel.ForEachAsync(segments,
+                new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
+                async (seg, token) =>
             {
-                for (int off = 0; off < cells.Length; off += UpsertChunkCells)
+                await using var conn = await _ds.OpenConnectionAsync(token);
+                await using var tx = await conn.BeginTransactionAsync(token);
+                long segFolded = 0;
+                for (int off = seg.Off; off < seg.Off + seg.Len; off += UpsertChunkCells)
                 {
-                    int m = Math.Min(UpsertChunkCells, cells.Length - off);
+                    int m = Math.Min(UpsertChunkCells, seg.Off + seg.Len - off);
                     var subjects = new byte[m][];
                     var types = new byte[m][];
                     var objects = new byte[m][];
@@ -256,37 +293,64 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     up.Parameters.Add(new NpgsqlParameter { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                     up.Parameters.Add(new NpgsqlParameter { Value = sums, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                     up.Parameters.Add(new NpgsqlParameter { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    folded += (long)(await up.ExecuteScalarAsync(ct) ?? 0L);
+                    segFolded += (long)(await up.ExecuteScalarAsync(token) ?? 0L);
                 }
+                await tx.CommitAsync(token);
+                Interlocked.Add(ref folded, segFolded);
+            });
 
-                var pairEnts = new byte[maskPairs.Count][];
-                var pairTypes = new byte[maskPairs.Count][];
-                int pi = 0;
-                foreach (var (ent, typ) in maskPairs)
-                {
-                    pairEnts[pi] = ent.ToBytes();
-                    pairTypes[pi] = typ.ToBytes();
-                    pi++;
-                }
-                for (int off = 0; off < pairEnts.Length; off += UpsertChunkCells)
-                {
-                    int m = Math.Min(UpsertChunkCells, pairEnts.Length - off);
-                    await using var mask = conn.CreateCommand();
-                    mask.Transaction = tx;
-                    mask.CommandTimeout = 0;
-                    mask.CommandText = "SELECT laplace.highway_mask_deposit($1, $2)";
-                    mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes[off..(off + m)], NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    masks += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
-                }
-
-                await tx.CommitAsync(ct);
-            }
-            catch
+            // Mask deposits fan out BUCKETED BY ENTITY: one entity accretes
+            // bits from many types, so the split axis must keep all of an
+            // entity's pairs in ONE bucket — buckets then touch disjoint
+            // entities rows and parallel deposit transactions cannot contend
+            // or deadlock on a shared row. (A count-based split would put the
+            // same entity row under two transactions.)
+            if (maskPairs.Count > 0)
             {
-                try { await tx.RollbackAsync(CancellationToken.None); }
-                catch { }
-                throw;
+                int buckets = Math.Min(FoldConnections, 1 + maskPairs.Count / UpsertChunkCells);
+                var bucketed = new List<(Hash128 Ent, Hash128 Typ)>[buckets];
+                for (int b = 0; b < buckets; b++)
+                    bucketed[b] = new List<(Hash128 Ent, Hash128 Typ)>(maskPairs.Count / buckets + 16);
+                foreach (var p in maskPairs)
+                    bucketed[(int)((uint)p.Ent.GetHashCode() % (uint)buckets)].Add(p);
+
+                long maskTotal = 0;
+                await Parallel.ForEachAsync(bucketed,
+                    new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
+                    async (bucket, token) =>
+                {
+                    if (bucket.Count == 0) return;
+                    await using var conn = await _ds.OpenConnectionAsync(token);
+                    await using var tx = await conn.BeginTransactionAsync(token);
+                    long dep = 0;
+                    for (int off = 0; off < bucket.Count; off += UpsertChunkCells)
+                    {
+                        int m = Math.Min(UpsertChunkCells, bucket.Count - off);
+                        var pairEnts = new byte[m][];
+                        var pairTypes = new byte[m][];
+                        for (int i = 0; i < m; i++)
+                        {
+                            pairEnts[i] = bucket[off + i].Ent.ToBytes();
+                            pairTypes[i] = bucket[off + i].Typ.ToBytes();
+                        }
+                        await using var mask = conn.CreateCommand();
+                        mask.Transaction = tx;
+                        mask.CommandTimeout = 0;
+                        mask.CommandText = "SELECT laplace.highway_mask_deposit($1, $2)";
+                        mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                        mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                        dep += (long)(await mask.ExecuteScalarAsync(token) ?? 0L);
+                    }
+                    await tx.CommitAsync(token);
+                    Interlocked.Add(ref maskTotal, dep);
+                });
+                masks += maskTotal;
+
+                // Mark AFTER all buckets commit — pairs from any failed run
+                // stay resendable; resends are no-ops server-side.
+                if (_depositedMaskPairs.Count + maskPairs.Count > DepositedMaskPairsCap)
+                    _depositedMaskPairs.Clear();
+                _depositedMaskPairs.UnionWith(maskPairs);
             }
         }
         finally
