@@ -31,6 +31,24 @@ public static class SharedParquetRecordStream
             yield return f;
     }
 
+    /// <summary>
+    /// Exact row count from parquet metadata — row-group headers only, no
+    /// column data decoded. Feeds IngestInventory so single-container corpora
+    /// report real progress instead of input_units=0 (blind "0/N intents").
+    /// </summary>
+    public static async Task<long> CountRowsAsync(string path, CancellationToken ct = default)
+    {
+        await using var fs = File.OpenRead(path);
+        await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
+        long total = 0;
+        for (int rg = 0; rg < reader.RowGroupCount; rg++)
+        {
+            using var rgr = reader.OpenRowGroupReader(rg);
+            total += rgr.RowCount;
+        }
+        return total;
+    }
+
     public static async IAsyncEnumerable<(string? Content, string? Language, string? Path)> ReadStackRowsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {

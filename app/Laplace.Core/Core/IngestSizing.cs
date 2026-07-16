@@ -247,8 +247,15 @@ public static class IngestSizing
             256,
             32_768);
 
+    // Presence probes are ROUND-TRIP dominated (~10ms fixed cost each, id
+    // arrays are 16 bytes/id); the old [128, 2048] clamp turned big-source
+    // descent into thousands of serial 512-id round trips — the tiny-codes /
+    // Wiktionary "no progress, never finishes" signature (measured
+    // 2026-07-16: continuous 10-12ms probe stream, zero writes). The WS-apply
+    // probe already runs 131,072-id chunks through the same functions; match
+    // its scale. 32k ids = 512KB parameter — noise.
     public static int ResolveProbeChunk(int recordBatchSize, int fileWorkers = 1) =>
-        Math.Clamp(recordBatchSize / Math.Max(1, Math.Min(fileWorkers, 4)), 128, 2048);
+        Math.Clamp(recordBatchSize * 16, 2048, 32_768);
 
     public static int ResolveMaxIntentsPerCommit(
         int recordBatch, int commitRowBudget, int? commitRowsOverride = null)
