@@ -35,13 +35,16 @@ public class SqlConsolidationTests
             + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
         Assert.Equal('f', Assert.IsType<char>(kind));
 
-        // The body — not merely the name — installed: the ordered MERGE with the
-        // server-side native fold is what makes the inline fold correct.
+        // The body — not merely the name — installed: the identity-routed fold
+        // (per relation type -> runtime partition pruning -> bulk UPDATE existing
+        // + bulk INSERT novel) with the server-side native fold. This replaced
+        // the old un-prunable MERGE that fanned out across all 145 leaves.
         var src = (string)(await ScalarAsync(
             "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
             + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'"))!;
-        Assert.Contains("MERGE INTO consensus", src);
-        Assert.Contains("laplace_glicko2_accumulate_games", src);
+        Assert.DoesNotContain("MERGE INTO", src);              // routed, not MERGE
+        Assert.Contains("FOR v_type", src);                    // per-type routing loop
+        Assert.Contains("laplace_glicko2_accumulate_games", src); // native fold
     }
 
     // (Per-table stat/autovacuum tuning is NOT extension SQL — it moved to the db-scoped
