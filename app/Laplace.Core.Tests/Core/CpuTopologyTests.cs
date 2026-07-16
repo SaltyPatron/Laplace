@@ -230,7 +230,13 @@ public class CpuTopologyTests
 
         Assert.True(snap.LogicalProcessorCount >= 1);
 
-        Assert.Equal(Environment.ProcessorCount, snap.LogicalProcessorCount);
+        // Detect() reports the machine's REAL topology (hybrid-aware, via sysfs).
+        // On a hybrid CPU under a cgroup/affinity cap it legitimately exceeds the
+        // process-visible Environment.ProcessorCount — e.g. a 12-core quota on a
+        // 32-thread hybrid box (14900KS: 8 P + 16 E) gives Detect()=32 but
+        // ProcessorCount=12. So do NOT assert equality with the process count (a
+        // false invariant across machines); assert usable + internally consistent.
+        Assert.True(snap.LogicalProcessorCount >= snap.PerformanceCoreCount);
 
     }
 
