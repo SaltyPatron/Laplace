@@ -1,19 +1,29 @@
--- The inline consensus fold: one batch's client-deduped cell deltas fold into
--- live consensus in ONE ordered MERGE — no deferred fold phase, no staging, no
--- accumulator epoch, no advisory-lock wall. The Glicko fold runs server-side in
--- the native scalar (laplace_glicko2_accumulate_games) INSIDE the row's own
--- lock window: matched rows fold against their current state, fresh rows fold
--- against the initial priors (computed in the source projection). The rating
--- period IS the batch (ratified 2026-07-15): a period is a set of
--- contemporaneous observations, which a batch is.
+-- The inline consensus fold — identity-routed, dedup-first, no conflict tax.
+--
+-- Consensus is content: dedup it the way ingest dedups entities. Instead of a
+-- MERGE (which fans out across ALL 145 consensus leaves because the partition
+-- key is a runtime join value — measured 2026-07-16, the CILI 7-minute peg), we
+-- split the batch by what it IS, per relation type:
+--   * EXISTING cells  -> bulk UPDATE, re-fold against current state.
+--   * NOVEL cells      -> bulk INSERT; INSERT tuple-routes to the one owning
+--                         leaf (prunes), and they are provably novel, so there
+--                         is NO conflict to arbitrate.
+-- The loop binds one relation type at a time to a plpgsql variable, so the
+-- planner RUNTIME-PRUNES both statements to that type's <=8 HASH(subject) leaves
+-- — small partitions, partition-local index maintenance, parallelizable per
+-- type. This is the partition breakout's write path finished properly; MERGE and
+-- index-drop hacks were bandaids over the un-routed write.
+--
+-- The Glicko fold runs server-side in the native scalar
+-- (laplace_glicko2_accumulate_games) — computed ONCE per row into a record
+-- (no 3x rating/rd/volatility re-eval). The rating period IS the batch: a period
+-- is a set of contemporaneous observations, which a batch is.
 --
 -- Contract with the caller (ConsensusAccumulatingWriter):
 --   * arrays are parallel and CLIENT-DEDUPED per call — one row per
---     (subject, type, object) cell; a duplicate makes MERGE error loudly
---     ("cannot affect row a second time"), which is contract enforcement;
+--     (subject, type, object) cell;
 --   * phi is uniform per cell per call (the writer's merge invariant);
---   * rows arrive sorted by (type, subject, id) — partition-key order — so
---     row locks are acquired in one global order (no deadlocks between writers).
+--   * rows arrive sorted by (type, subject, id) — partition-key order.
 CREATE OR REPLACE FUNCTION consensus_upsert(
     p_subjects bytea[],
     p_types    bytea[],
@@ -26,45 +36,87 @@ CREATE OR REPLACE FUNCTION consensus_upsert(
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
-    affected bigint;
+    affected bigint := 0;
+    v_rc     bigint;
+    v_type   bytea;
 BEGIN
-    MERGE INTO consensus c
-    USING (
-        SELECT consensus_id(u.s, u.t, u.o) AS id,
-               u.s, u.t, u.o, u.phi, u.games, u.sum, u.ts,
-               -- fresh-insert state precomputed once per row (native scalar):
-               laplace_glicko2_accumulate_games(
-                   glicko2_neutral_mu(), glicko2_initial_rd(),
-                   glicko2_initial_volatility(),
-                   glicko2_neutral_mu(), u.phi, u.games, u.sum,
-                   glicko2_tau()) AS fresh
-        FROM unnest(p_subjects, p_types, p_objects, p_phis, p_games, p_sums, p_ts)
-             AS u(s, t, o, phi, games, sum, ts)
-        ORDER BY u.t, u.s, consensus_id(u.s, u.t, u.o)
-    ) d
-    ON c.id = d.id AND c.type_id = d.t AND c.subject_id = d.s
-    WHEN MATCHED THEN UPDATE SET
-        rating = (SELECT (laplace_glicko2_accumulate_games(
-                      c.rating, c.rd, c.volatility,
-                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
-                      glicko2_tau())).rating),
-        rd = (SELECT (laplace_glicko2_accumulate_games(
-                      c.rating, c.rd, c.volatility,
-                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
-                      glicko2_tau())).rd),
-        volatility = (SELECT (laplace_glicko2_accumulate_games(
-                      c.rating, c.rd, c.volatility,
-                      glicko2_neutral_mu(), d.phi, d.games, d.sum,
-                      glicko2_tau())).volatility),
-        witness_count    = c.witness_count + d.games,
-        last_observed_at = GREATEST(c.last_observed_at, d.ts)
-    WHEN NOT MATCHED THEN INSERT
-        (id, subject_id, type_id, object_id,
-         rating, rd, volatility, witness_count, last_observed_at)
-        VALUES (d.id, d.s, d.t, d.o,
-                (d.fresh).rating, (d.fresh).rd, (d.fresh).volatility,
-                d.games, d.ts);
+    -- Contract enforcement (parity with the old MERGE's "cannot affect row a
+    -- second time"): the caller MUST client-dedup to one row per cell. A
+    -- duplicate would non-deterministically mis-fold in the routed UPDATE/INSERT
+    -- (unlike MERGE it would not self-error), so detect it and fail loudly.
+    IF EXISTS (
+        SELECT 1
+        FROM unnest(p_subjects, p_types, p_objects) AS u(s, t, o)
+        GROUP BY u.s, u.t, u.o
+        HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION
+            'consensus_upsert: duplicate cell in one call (client-dedup contract violated)'
+            USING ERRCODE = 'cardinality_violation';
+    END IF;
 
-    GET DIAGNOSTICS affected = ROW_COUNT;
+    -- One iteration per relation type present in the batch. Binding v_type to a
+    -- plpgsql variable (not a runtime join key) lets the planner prune the
+    -- LIST(type_id) parent to this type's partition and, for hot relations, its
+    -- 8 HASH(subject_id) leaves — the routed, prunable write.
+    FOR v_type IN SELECT DISTINCT t FROM unnest(p_types) AS t LOOP
+
+        -- EXISTING cells of this type: re-fold against their current state.
+        -- Full delta access (phi/games/sum) via the join; ONE native fold call
+        -- per row, record-valued.
+        UPDATE consensus c SET
+            (rating, rd, volatility) = (
+                SELECT r.rating, r.rd, r.volatility
+                FROM laplace_glicko2_accumulate_games(
+                        c.rating, c.rd, c.volatility, glicko2_neutral_mu(),
+                        b.phi, b.games, b.sum, glicko2_tau()) AS r),
+            witness_count    = c.witness_count + b.games,
+            last_observed_at = GREATEST(c.last_observed_at, b.ts)
+        FROM (
+            SELECT consensus_id(u.s, v_type, u.o) AS id,
+                   u.s, u.o, u.phi, u.games, u.sum, u.ts
+            FROM unnest(p_subjects, p_types, p_objects,
+                        p_phis, p_games, p_sums, p_ts)
+                 AS u(s, t, o, phi, games, sum, ts)
+            WHERE u.t = v_type
+        ) b
+        WHERE c.type_id = v_type            -- variable -> runtime partition prune
+          AND c.subject_id = b.s
+          AND c.id = b.id;
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        affected := affected + v_rc;
+
+        -- NOVEL cells of this type: fresh fold from the initial priors, bulk
+        -- INSERT. INSERT tuple-routes to the owning leaf; NOT EXISTS (also
+        -- runtime-pruned via v_type) proves novelty — no ON CONFLICT.
+        INSERT INTO consensus
+            (id, subject_id, type_id, object_id,
+             rating, rd, volatility, witness_count, last_observed_at)
+        SELECT b.id, b.s, v_type, b.o,
+               (b.fresh).rating, (b.fresh).rd, (b.fresh).volatility,
+               b.games, b.ts
+        FROM (
+            SELECT consensus_id(u.s, v_type, u.o) AS id,
+                   u.s, u.o, u.phi, u.games, u.sum, u.ts,
+                   laplace_glicko2_accumulate_games(
+                       glicko2_neutral_mu(), glicko2_initial_rd(),
+                       glicko2_initial_volatility(),
+                       glicko2_neutral_mu(), u.phi, u.games, u.sum,
+                       glicko2_tau()) AS fresh
+            FROM unnest(p_subjects, p_types, p_objects,
+                        p_phis, p_games, p_sums, p_ts)
+                 AS u(s, t, o, phi, games, sum, ts)
+            WHERE u.t = v_type
+        ) b
+        WHERE NOT EXISTS (
+            SELECT 1 FROM consensus c
+            WHERE c.type_id = v_type        -- variable -> runtime partition prune
+              AND c.subject_id = b.s
+              AND c.id = b.id);
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        affected := affected + v_rc;
+
+    END LOOP;
+
     RETURN affected;
 END $$;
