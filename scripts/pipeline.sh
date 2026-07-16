@@ -6,6 +6,13 @@
 #
 # Usage: pipeline.sh <phase> [<phase> ...] [options]
 #
+# Change-aware: build/install/test are gated on content fingerprints
+# (scripts/lib/fp.sh, stamps under build/.stamps/) — a phase whose input domain
+# is unchanged since its last SUCCESS no-ops in seconds. dotnet build/test runs
+# only the affected ProjectReference closure (scripts/affected-app.py). Stamps
+# advance on success only, so failed/cancelled runs never cause a skip.
+# Bypass: --force-all / LAPLACE_FORCE_ALL=1; `clean` wipes the stamps.
+#
 # Phases (in canonical order):
 #   clean           rm -rf build/
 #   codegen         attestation-law codegen (stamp-skipped unless --force-codegen)
@@ -32,11 +39,18 @@
 #   --clean-first     cmake --build --clean-first (rebuild objects, keep configure)
 #   --force-rebuild   wipe build/ then build (same as: clean build)
 #   --serial-tests    set LAPLACE_TEST_SERIAL=1 for the test phase
+#   --force-all       ignore all content-fingerprint stamps (LAPLACE_FORCE_ALL=1)
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# Content-fingerprint gates (build/.stamps): build/install/test phases no-op
+# when their input domain hasn't changed. LAPLACE_FORCE_ALL=1 (or --force-all)
+# bypasses every gate; `pipeline.sh clean` wipes the stamps with build/.
+# shellcheck source=scripts/lib/fp.sh
+source "$ROOT/scripts/lib/fp.sh"
 
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
@@ -92,6 +106,7 @@ Options:
   --clean-first     cmake --build --clean-first (rebuild objects, keep configure)
   --force-rebuild   wipe build/ then build (same as: clean build)
   --serial-tests    set LAPLACE_TEST_SERIAL=1 for the test phase
+  --force-all       ignore all content-fingerprint stamps (LAPLACE_FORCE_ALL=1)
 EOF
   exit 2
 }
@@ -209,23 +224,30 @@ phase_build() {
     echo "===== PHASE — CODEGEN [skipped] ====="
   fi
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
-  local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-  local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
-  local build_flags=()
-  [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
-  cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-    -DLAPLACE_REQUIRE_MKL=ON \
-    -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
-    -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
-    -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
-    -DLAPLACE_INSTALL_STAGED=ON \
-    -DLAPLACE_UCD_PATH="$ucd" \
-    -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
-    -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
-    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
-  LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build build "${build_flags[@]}"
+  local native_fp
+  native_fp=$(fp_native)
+  if [[ "$CLEAN_FIRST" -eq 0 && -d "$ROOT/build" ]] && fp_check build-native "$native_fp"; then
+    echo "engine up-to-date — cmake configure/build skipped (fp ${native_fp:0:12})"
+  else
+    local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+    local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
+    local build_flags=()
+    [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
+      -DLAPLACE_REQUIRE_MKL=ON \
+      -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
+      -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+      -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
+      -DLAPLACE_INSTALL_STAGED=ON \
+      -DLAPLACE_UCD_PATH="$ucd" \
+      -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
+      -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
+      -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
+    LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+      cmake --build build "${build_flags[@]}"
+    fp_record build-native "$native_fp"
+  fi
   # Perfcache targets are ALL — existence check only (parity with rebuild-all.cmd).
   local t0 hw
   t0=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
@@ -237,7 +259,46 @@ phase_build() {
   echo "T0 perfcache ready: $t0"
   echo "highway perfcache ready: $hw"
   echo "===== PHASE — BUILD APP ====="
-  ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+  phase_build_app
+}
+
+phase_build_app() {
+  # Affected-only dotnet build: the planner walks the ProjectReference graph
+  # with per-project Merkle fingerprints, so building the printed roots builds
+  # every affected project. Empty plan = nothing changed. Any planner failure
+  # falls back to the full solution — never trade correctness for speed.
+  local plan_out plan_rc=0
+  plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build) || plan_rc=$?
+  if [[ "$plan_rc" -ne 0 ]]; then
+    echo "::warning::affected-app plan failed (rc=$plan_rc) — full solution build"
+    ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+    return 0
+  fi
+  if [[ -z "$plan_out" ]]; then
+    # Stamps can outlive artifacts (e.g. a manual bin/ wipe): trust them only
+    # while at least one Release output tree exists.
+    if compgen -G "$ROOT/app/*/bin/Release" >/dev/null; then
+      echo "app up-to-date — dotnet build skipped (fingerprints unchanged)"
+      return 0
+    fi
+    echo "app stamps present but no Release artifacts — full solution build"
+    ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
+    return 0
+  fi
+  local -a roots=()
+  mapfile -t roots <<<"$plan_out"
+  if (( ${#roots[@]} > 4 )); then
+    echo "app: ${#roots[@]} affected roots — building full solution"
+    ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+  else
+    local r
+    for r in "${roots[@]}"; do
+      echo "app: dotnet build $r"
+      ( cd "$ROOT/app" && dotnet build "$r" -c Release )
+    done
+  fi
+  "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
 }
 
 phase_test() {
@@ -250,6 +311,20 @@ phase_test() {
 phase_install() {
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
+  local native_fp
+  native_fp=$(fp_native)
+  if fp_check install-native "$native_fp" \
+     && [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]]; then
+    echo "install up-to-date — skipped (engine/extension unchanged since last install; no API stop, no PG bounce)"
+    return 0
+  fi
+  # Stop the API for the install window (previously the CI deploy job's step —
+  # owning it here means a skipped install never bounces the service at all).
+  local api_was_active=0
+  if systemctl is-active --quiet laplace-api 2>/dev/null; then
+    api_was_active=1
+    sudo -n systemctl stop laplace-api 2>/dev/null || true
+  fi
   umask 0002
   cmake --install build
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
@@ -264,6 +339,10 @@ phase_install() {
   if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
      || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
     restart_postgres "install: refresh preloaded extension .so"
+  fi
+  fp_record install-native "$native_fp"
+  if [[ "$api_was_active" -eq 1 ]]; then
+    sudo -n systemctl start laplace-api 2>/dev/null || true
   fi
 }
 
@@ -565,6 +644,7 @@ while [[ $# -gt 0 ]]; do
     --clean-first)    CLEAN_FIRST=1; shift ;;
     --force-rebuild)  FORCE_REBUILD=1; shift ;;
     --serial-tests)   SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
+    --force-all)      export LAPLACE_FORCE_ALL=1; shift ;;
     -h|--help) usage ;;
     clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
