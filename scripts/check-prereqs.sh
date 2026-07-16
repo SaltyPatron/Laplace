@@ -94,8 +94,8 @@ echo
 echo "=== PostgreSQL ==="
 check_command "pg_config"      "pg_config" "--version"
 check_command "psql"           "psql"      "--version"
-check_path    "PG 18 server-dev headers" "/usr/include/postgresql/18/server"
-check_path    "PGXS makefile"  "/usr/lib/postgresql/18/lib/pgxs/src/makefiles/pgxs.mk"
+check_path    "PG 18 server-dev headers" "/opt/laplace/pgsql-18/include/server"
+check_path    "PGXS makefile"  "/opt/laplace/pgsql-18/lib/pgxs/src/makefiles/pgxs.mk"
 echo
 
 echo "=== PostGIS ==="

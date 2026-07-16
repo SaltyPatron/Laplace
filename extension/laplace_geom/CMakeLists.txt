@@ -236,9 +236,8 @@ target_link_libraries(${EXT_NAME} PRIVATE
     ${LAPLACE_LIBGEOS}
     ${LAPLACE_LIBPROJ}
 )
-target_link_options(${EXT_NAME} PRIVATE
-    "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
-)
+# No -Wl,-rpath build dirs: literal linker rpaths survive install and leak
+# the build tree into the deployed .so (see laplace_substrate/CMakeLists.txt).
 
 endif()
 

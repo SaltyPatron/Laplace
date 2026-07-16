@@ -101,11 +101,12 @@ else()
     target_include_directories(${EXT_NAME} SYSTEM PRIVATE
         ${LAPLACE_PG_INCLUDEDIR_SERVER}
     )
+    # In-tree deps resolve via CMake's automatic build-tree RPATH; never add
+    # -Wl,-rpath build dirs here — literal linker rpaths survive `cmake
+    # --install` untouched, so the installed .so keeps resolving
+    # liblaplace_dynamics out of the CI workspace build tree (a stub no-MKL
+    # rebuild there crash-looped the production postmaster, 2026-07-16).
     target_link_libraries(${EXT_NAME} PRIVATE laplace_core laplace_dynamics)
-    target_link_options(${EXT_NAME} PRIVATE
-        "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
-        "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_dynamics>"
-    )
 endif()
 
 configure_file(

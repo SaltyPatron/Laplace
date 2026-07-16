@@ -39,7 +39,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}"
+LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
 # Peer auth over the runner-owned unix socket (laplace_admin). Bare psql without
 # these defaults looks for OS-user role "ahart" / a missing system socket.
@@ -215,6 +215,7 @@ phase_build() {
   [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
+    -DLAPLACE_REQUIRE_MKL=ON \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \

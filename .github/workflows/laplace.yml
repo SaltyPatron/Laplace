@@ -48,7 +48,9 @@ permissions:
 env:
   LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
-  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
+  # Build against the SAME from-source postgres the postmaster runs — never
+  # the apt-packaged headers (packaged PG is being removed from the host).
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/opt/laplace/pgsql-18' }}
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
 
@@ -191,7 +193,7 @@ jobs:
         run: |
           [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
           command -v python3 >/dev/null || { echo "::error::python3 missing"; exit 1; }
-          command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
+          "$LAPLACE_PG_PREFIX/bin/pg_config" --version >/dev/null || { echo "::error::pg_config not found at $LAPLACE_PG_PREFIX"; exit 1; }
           command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
           command -v bash >/dev/null || { echo "::error::bash not found"; exit 1; }
           RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")

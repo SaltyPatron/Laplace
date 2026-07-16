@@ -17,7 +17,7 @@ fi
 declare -A vars=(
     [LAPLACE_EXTERNAL]="/opt/laplace/external"
     [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
-    [LAPLACE_PG_PREFIX]="/usr/lib/postgresql/18"
+    [LAPLACE_PG_PREFIX]="/opt/laplace/pgsql-18"
 )
 
 for name in "${!vars[@]}"; do

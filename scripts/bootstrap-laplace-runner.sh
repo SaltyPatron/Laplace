@@ -9,7 +9,13 @@ RUNNER_HOME_LEGACY="/var/lib/laplace-runner"
 RUNNER_DIR="$RUNNER_HOME/actions-runner"
 PG_VERSION="18"
 LAPLACE_PG_PREFIX="/opt/laplace/pgsql-18"
-LAPLACE_PG_DATA="$LAPLACE_PG_PREFIX/data"
+# Cluster data lives on its own NVMe volume (vg-data/postgres mounted at
+# /opt/laplace/pgdata), NOT inside the install prefix on the RAID0 pair:
+# isolates DB/WAL I/O and capacity from substrate blobs — a bulk-ingest WAL
+# spike can no longer fill the volume the substrate lives on (2026-07-15
+# Tatoeba seed filled pg_wal and recovery itself ENOSPC-crash-looped).
+LAPLACE_PG_MOUNT="/opt/laplace/pgdata"
+LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
@@ -455,6 +461,13 @@ bootstrap_laplace_pg_cluster() {
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_CONF_DIR"
 
+    if ! mountpoint -q "$LAPLACE_PG_MOUNT"; then
+        yellow "  $LAPLACE_PG_MOUNT is not a mounted volume — refusing to place the"
+        yellow "  cluster on the parent filesystem. Mount vg-data/postgres there"
+        yellow "  (fstab) and rerun. Expected: a dedicated LV so bulk-ingest WAL"
+        yellow "  can never fill the substrate volume."
+        return 1
+    fi
     if [ ! -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
         if [ -d "$LAPLACE_PG_DATA" ] && [ -n "$(ls -A "$LAPLACE_PG_DATA" 2>/dev/null)" ]; then
             yellow "  $LAPLACE_PG_DATA exists + non-empty but no PG_VERSION — bailing rather than wipe"
@@ -548,7 +561,7 @@ EOF
     local unit_file="/etc/systemd/system/$LAPLACE_PG_SERVICE"
     cat > "$unit_file" <<EOF
 [Unit]
-Description=Laplace substrate PostgreSQL cluster (/opt/laplace/pgsql-18)
+Description=Laplace substrate PostgreSQL cluster ($LAPLACE_PG_PREFIX, data on $LAPLACE_PG_MOUNT)
 Documentation=https://github.com/SaltyPatron/Laplace
 After=network.target
 ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION

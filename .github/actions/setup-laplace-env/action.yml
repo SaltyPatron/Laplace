@@ -8,16 +8,19 @@ description: >
 runs:
   using: composite
   steps:
-    - name: Export workspace env (+ oneAPI fallback for pre-.env runners)
+    - name: Export workspace env (oneAPI always re-sourced fresh)
       shell: bash
       run: |
-        if [ -z "${MKLROOT:-}" ]; then
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
-        fi
+        # Always source setvars: the runner daemon .env snapshots versioned
+        # oneAPI roots (MKLROOT=/opt/intel/oneapi/mkl/<ver>) at bootstrap
+        # time, and an apt upgrade + autoremove deletes that version out from
+        # under every subsequent run (2026.0 -> 2026.1, 2026-07-16). Fresh
+        # setvars resolves the currently-installed toolchain each run.
+        set +u
+        source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+        set -u
+        printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+        echo "PATH=$PATH" >> "$GITHUB_ENV"
         echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
