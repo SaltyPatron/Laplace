@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSource, FullScope>
+public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = TinyCodesSource.SourceId;
     public static readonly Hash128 TrustClass = TinyCodesSource.TrustClass;
@@ -83,8 +83,35 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSour
         }
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
+    /// <summary>
+    /// Exact inventory from parquet metadata (row-group headers, no data
+    /// decode). Without this the runner logs input_units=0 and a 118MB shard
+    /// ingests blind — "intents=0/N pct=0.0" with no denominator for hours.
+    /// </summary>
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var files = SharedParquetRecordStream
+            .EnumerateParquet(context.EcosystemPath, SearchOption.TopDirectoryOnly).ToList();
+        if (files.Count == 0) return null;
+
+        var specs = new List<IngestFileSpec>(files.Count);
+        long total = 0;
+        foreach (var f in files)
+        {
+            long n = await SharedParquetRecordStream.CountRowsAsync(f, ct);
+            specs.Add(new IngestFileSpec(Path.GetFileName(f), f, n));
+            total += n;
+        }
+        if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
+        return new IngestInventory("rows", total, specs);
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
+        return inv?.TotalInputUnits;
+    }
 
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
