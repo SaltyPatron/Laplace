@@ -13,3 +13,13 @@ CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe'
     LANGUAGE C STABLE;
+
+-- KEYED overload (additive — no version skew break): the descent is
+-- tier-by-tier BY CONSTRUCTION, so the caller always knows the tier of
+-- every candidate in a round. Pruning LIST(tier) turns each probe from
+-- one index descent per leaf into one per id. Perfcache codepoint fast
+-- path stays ON (identical semantics to the 1-arg form).
+CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[], tiers smallint[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe_keyed'
+    LANGUAGE C STABLE;

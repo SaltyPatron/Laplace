@@ -91,11 +91,11 @@ call :tee seed-opensubtitles "seed-step.cmd opensubtitles" || goto :fail
 rem ---- Phase 8: code (stage script owns path resolution: stack-v2, repos, tiny-codes) ----
 call :tee seed-code "seed-stage.cmd code" || goto :fail
 
-rem ---- Phase 9: models — OFF until the model-lane extension SQL lands + CI deploys it;
-rem the remote extension has no model factor surface yet, so these would fail server-side.
-rem call :tee seed-model-tinyllama "seed-step.cmd model-tinyllama" || goto :fail
-rem call :tee seed-model-phi "seed-step.cmd model-phi" || goto :fail
-rem call :tee seed-model-qwen "seed-step.cmd model-qwen" || goto :fail
+rem ---- Phase 9: models (model-lane SQL landed with the stage commit; deployed to
+rem hart-server by CI run #325 — model_* functions verified present on the remote) ----
+call :tee seed-model-tinyllama "seed-step.cmd model-tinyllama" || goto :fail
+call :tee seed-model-phi "seed-step.cmd model-phi" || goto :fail
+call :tee seed-model-qwen "seed-step.cmd model-qwen" || goto :fail
 
 rem ---- Phase 10: audit ----
 call :tee audit-substrate "audit-substrate.cmd" || goto :fail

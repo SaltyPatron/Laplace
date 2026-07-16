@@ -319,3 +319,239 @@ laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_
                                "SELECT idx FROM laplace.entities_present_ordinals($1)",
                                false);
 }
+
+/*
+ * Tier-keyed batch presence: ids plus a parallel int2[] of tiers. The
+ * per-tier ordinals overload prunes LIST(tier) at plan time; entities' t2
+ * HASH(id) leaves prune per row via the id equality. Joint remap keeps the
+ * three-way alignment when a malformed id is skipped. `use_perfcache`
+ * retains the tier-0 codepoint fast path where the caller's semantics are
+ * resolvability (descent), and stays off for stored-row semantics.
+ */
+static int
+batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
+                           uint8_t *bm, int candidate_count,
+                           const char *ordinals_sql, bool use_perfcache)
+{
+    Datum      *elems, *t_elems;
+    bool       *nulls, *t_nulls;
+    int         nelems, t_n;
+    int        *remap;
+    Datum      *probe_elems, *probe_tiers;
+    int         probe_n = 0;
+    int         i;
+    Oid         argtypes[2];
+    Datum       args[2];
+    ArrayType  *probe_array, *tiers_sub;
+    uint8_t    *sub_bm;
+    int         spi_rc;
+
+    if (candidate_count <= 0)
+        return SPI_OK_SELECT;
+
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &elems, &nulls, &nelems);
+    deconstruct_array(tiers_array, INT2OID, 2, true, 's', &t_elems, &t_nulls, &t_n);
+    if (nelems != candidate_count || t_n != candidate_count)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("batch_presence_core_tiered: array length mismatch")));
+    }
+
+    remap = (int *) palloc(sizeof(int) * candidate_count);
+    probe_elems = (Datum *) palloc(sizeof(Datum) * candidate_count);
+    probe_tiers = (Datum *) palloc(sizeof(Datum) * candidate_count);
+
+    for (i = 0; i < candidate_count; i++)
+    {
+        bytea       *b;
+        const uint8_t *id;
+
+        if (nulls[i] || t_nulls[i])
+            continue;
+        b = DatumGetByteaPP(elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != 16)
+            continue;
+        id = (const uint8_t *) VARDATA_ANY(b);
+
+        if (use_perfcache && laplace_perfcache_ready())
+        {
+            uint32_t cp;
+
+            if (laplace_perfcache_codepoint_for_id(id, &cp))
+            {
+                bitmap_set(bm, i);
+                continue;
+            }
+        }
+        remap[probe_n] = i;
+        probe_elems[probe_n] = elems[i];
+        probe_tiers[probe_n] = t_elems[i];
+        probe_n++;
+    }
+
+    if (probe_n == 0)
+    {
+        spi_rc = SPI_OK_SELECT;
+        goto done;
+    }
+
+    probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
+    tiers_sub = construct_array(probe_tiers, probe_n, INT2OID, 2, true, 's');
+    sub_bm = (uint8_t *) palloc0((probe_n + 7) / 8);
+    argtypes[0] = BYTEAARRAYOID;
+    argtypes[1] = INT2ARRAYOID;
+    args[0] = PointerGetDatum(probe_array);
+    args[1] = PointerGetDatum(tiers_sub);
+
+    spi_rc = spi_mark_present_ordinals(
+        ordinals_sql,
+        2, argtypes, args, sub_bm, probe_n);
+
+    if (spi_rc == SPI_OK_SELECT)
+    {
+        for (i = 0; i < probe_n; i++)
+        {
+            if ((sub_bm[i >> 3] & (1u << (i & 7u))) != 0)
+                bitmap_set(bm, remap[i]);
+        }
+    }
+
+    pfree(sub_bm);
+    pfree(probe_array);
+    pfree(tiers_sub);
+
+done:
+    pfree(remap);
+    pfree(probe_elems);
+    pfree(probe_tiers);
+    pfree(elems);
+    pfree(nulls);
+    pfree(t_elems);
+    pfree(t_nulls);
+    return spi_rc;
+}
+
+/*
+ * Pair-keyed batch presence: ids plus one parallel bytea[] key column
+ * (physicalities: hilbert_index, the RANGE partition key). No perfcache
+ * (physicality ids are never codepoint ids).
+ */
+static int
+batch_presence_core_pair(ArrayType *ids_array, ArrayType *keys_array,
+                         uint8_t *bm, int candidate_count,
+                         const char *ordinals_sql)
+{
+    Datum      *elems, *k_elems;
+    bool       *nulls, *k_nulls;
+    int         nelems, k_n;
+    int        *remap;
+    Datum      *probe_elems, *probe_keys;
+    int         probe_n = 0;
+    int         i;
+    Oid         argtypes[2];
+    Datum       args[2];
+    ArrayType  *probe_array, *keys_sub;
+    uint8_t    *sub_bm;
+    int         spi_rc;
+
+    if (candidate_count <= 0)
+        return SPI_OK_SELECT;
+
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &elems, &nulls, &nelems);
+    deconstruct_array(keys_array, BYTEAOID, -1, false, 'i', &k_elems, &k_nulls, &k_n);
+    if (nelems != candidate_count || k_n != candidate_count)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("batch_presence_core_pair: array length mismatch")));
+    }
+
+    remap = (int *) palloc(sizeof(int) * candidate_count);
+    probe_elems = (Datum *) palloc(sizeof(Datum) * candidate_count);
+    probe_keys = (Datum *) palloc(sizeof(Datum) * candidate_count);
+
+    for (i = 0; i < candidate_count; i++)
+    {
+        bytea *b;
+
+        if (nulls[i] || k_nulls[i])
+            continue;
+        b = DatumGetByteaPP(elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != 16)
+            continue;
+        remap[probe_n] = i;
+        probe_elems[probe_n] = elems[i];
+        probe_keys[probe_n] = k_elems[i];
+        probe_n++;
+    }
+
+    if (probe_n == 0)
+    {
+        spi_rc = SPI_OK_SELECT;
+        goto done;
+    }
+
+    probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
+    keys_sub = construct_array(probe_keys, probe_n, BYTEAOID, -1, false, 'i');
+    sub_bm = (uint8_t *) palloc0((probe_n + 7) / 8);
+    argtypes[0] = BYTEAARRAYOID;
+    argtypes[1] = BYTEAARRAYOID;
+    args[0] = PointerGetDatum(probe_array);
+    args[1] = PointerGetDatum(keys_sub);
+
+    spi_rc = spi_mark_present_ordinals(
+        ordinals_sql,
+        2, argtypes, args, sub_bm, probe_n);
+
+    if (spi_rc == SPI_OK_SELECT)
+    {
+        for (i = 0; i < probe_n; i++)
+        {
+            if ((sub_bm[i >> 3] & (1u << (i & 7u))) != 0)
+                bitmap_set(bm, remap[i]);
+        }
+    }
+
+    pfree(sub_bm);
+    pfree(probe_array);
+    pfree(keys_sub);
+
+done:
+    pfree(remap);
+    pfree(probe_elems);
+    pfree(probe_keys);
+    pfree(elems);
+    pfree(nulls);
+    pfree(k_elems);
+    pfree(k_nulls);
+    return spi_rc;
+}
+
+int
+laplace_entities_stored_bitmap_keyed(ArrayType *ids_array, ArrayType *tiers_array,
+                                     uint8_t *bm, int candidate_count)
+{
+    /* Stored-row semantics: perfcache OFF (see 1-arg comment). */
+    return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
+                                      "SELECT idx FROM laplace.entities_present_ordinals($1, $2)",
+                                      false);
+}
+
+int
+laplace_tier_batch_existence_probe_keyed(ArrayType *ids_array, ArrayType *tiers_array,
+                                         uint8_t *bm, int candidate_count)
+{
+    /* Descent resolvability semantics: perfcache ON (identical to 1-arg). */
+    return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
+                                      "SELECT idx FROM laplace.entities_present_ordinals($1, $2)",
+                                      true);
+}
+
+int
+laplace_physicalities_present_bitmap_keyed(ArrayType *ids_array, ArrayType *hilberts_array,
+                                           uint8_t *bm, int candidate_count)
+{
+    return batch_presence_core_pair(ids_array, hilberts_array, bm, candidate_count,
+                                    "SELECT idx FROM laplace.physicalities_present_ordinals($1, $2)");
+}

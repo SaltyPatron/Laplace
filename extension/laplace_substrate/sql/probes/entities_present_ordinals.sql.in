@@ -6,3 +6,28 @@ CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[])
     FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
     INNER JOIN entities e ON e.id = u.id
 $$;
+
+-- KEYED overload: entities are partitioned LIST(tier) (t2 further HASH(id)),
+-- and the hot ingest callers always know each id's tier — the write lane
+-- stages it, the descent walks tier-by-tier. Binding the tier to a plpgsql
+-- variable prunes the LIST parent at plan time; the id equality prunes t2's
+-- HASH(id) leaves per row. One descent per id instead of one per leaf.
+-- The 1-arg form above stays for callers that genuinely don't know the tier
+-- (ad-hoc resolvability checks, table_present_ordinals).
+CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
+    RETURNS TABLE(idx int)
+    LANGUAGE plpgsql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    v_tier smallint;
+BEGIN
+    FOR v_tier IN SELECT DISTINCT t FROM unnest(p_tiers) AS t LOOP
+        RETURN QUERY
+        SELECT (u.ord - 1)::int
+        FROM unnest(p_ids, p_tiers) WITH ORDINALITY u(id, t, ord)
+        JOIN entities e
+          ON e.tier = v_tier               -- variable -> planner partition prune
+         AND e.id = u.id                   -- HASH(id) leaf prune per row (t2)
+        WHERE u.t = v_tier;
+    END LOOP;
+END $$;

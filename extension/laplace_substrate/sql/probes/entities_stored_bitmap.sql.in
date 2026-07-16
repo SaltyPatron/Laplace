@@ -2,3 +2,13 @@ CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap'
     LANGUAGE C STABLE;
+
+-- KEYED overload (additive — old binaries keep the 1-arg form, no version
+-- skew break): the write lane knows every staged entity's tier, so the
+-- probe prunes LIST(tier) instead of descending every leaf per id.
+-- Perfcache fast path stays OFF: stored-row semantics (see 1-arg comment
+-- chain in descent_probe.c).
+CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[], tiers smallint[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap_keyed'
+    LANGUAGE C STABLE;

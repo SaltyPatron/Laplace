@@ -2,3 +2,11 @@ CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
     LANGUAGE C STABLE;
+
+-- KEYED overload (additive — no version skew break): the write lane stages
+-- every physicality's hilbert key (RANGE partition key), so the probe
+-- prunes per row instead of descending every leaf per id.
+CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[], hilberts bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap_keyed'
+    LANGUAGE C STABLE;

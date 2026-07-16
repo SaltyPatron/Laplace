@@ -6,3 +6,19 @@ CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[])
     FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
     INNER JOIN physicalities t ON t.id = u.id
 $$;
+
+-- KEYED overload: physicalities are partitioned RANGE(hilbert_index), and
+-- the write lane stages every row's hilbert key (it is the parallel-COPY
+-- sort key already). Equality on hilbert_index gives per-row runtime RANGE
+-- pruning; id equality closes the match. One descent per id instead of one
+-- per leaf. The 1-arg form stays for callers without the key.
+CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[], p_hilberts bytea[])
+    RETURNS TABLE(idx int)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids, p_hilberts) WITH ORDINALITY u(id, h, ord)
+    JOIN physicalities p
+      ON p.hilbert_index = u.h             -- runtime RANGE prune per row
+     AND p.id = u.id
+$$;
