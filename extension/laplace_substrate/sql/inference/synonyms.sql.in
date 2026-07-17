@@ -18,7 +18,11 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
         WHERE sm.lang = (SELECT id FROM src_lang)
         GROUP BY sm.member
     )
-    SELECT r.txt AS synonym, a.mu::numeric, a.witnesses
+    -- eff_mu is emitted DESCALED via the canonical law function (a.mu is already
+    -- a raw ×1e9 eff_mu from synset_members; rd=0 => round(mu/1e9, 3)). Ordering
+    -- above still runs on the raw mu, so ranking is unchanged. (Was the lone
+    -- recall_*_response outlier leaking the raw fixed-point value.)
+    SELECT r.txt AS synonym, eff_mu_display(a.mu, 0) AS eff_mu, a.witnesses
     FROM (
         SELECT member, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, member

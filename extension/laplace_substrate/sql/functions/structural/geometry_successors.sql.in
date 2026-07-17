@@ -1,0 +1,14 @@
+-- The geometry-native continuation operator: for a content point, the next
+-- CONTENT constituent in every trajectory that contains it, aggregated by
+-- frequency. Reads the ordered sequence straight from the content-addressed
+-- geometry (containers_of's single-key-GIN reverse index + the perfcache
+-- separator classifier) -- no PRECEDES attestation, no gen_corpus flat corpus.
+-- Native because the walk (find the point, skip separators, take the successor,
+-- aggregate) is pointer/loop work SQL cannot do at scale; see geometry_successors.c.
+CREATE OR REPLACE FUNCTION geometry_successors(
+        p_point  bytea,
+        p_limit  int DEFAULT 20,
+        p_window int DEFAULT 8)
+    RETURNS TABLE(successor_id bytea, seen bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors'
+    LANGUAGE C STABLE;
