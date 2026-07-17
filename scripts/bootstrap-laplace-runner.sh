@@ -686,9 +686,19 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
         CREATE ROLE laplace_readonly WITH LOGIN;
     END IF;
+    -- 'postgres' convenience superuser (password 'postgres') for LAN clients
+    -- that default to postgres:postgres. The custom cluster initdb's as
+    -- laplace_admin, so this role does not exist otherwise — its absence is the
+    -- "role postgres does not exist" LAN-connect failure. Kept in the managed
+    -- block so a redeploy re-ensures it.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
+        CREATE ROLE postgres WITH LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD 'postgres';
+    ELSE
+        ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';
+    END IF;
 END $$;
 PG_EOF
-    green "✓ Roles present (laplace_admin = SUPERUSER; substrate operator role per AWS/GCP RDS pattern)"
+    green "✓ Roles present (laplace_admin = SUPERUSER; postgres = LAN convenience superuser; substrate operator role per AWS/GCP RDS pattern)"
 }
 
 bootstrap_pg_legacy_cleanup() {
