@@ -240,7 +240,14 @@ public sealed class TextEntityBuilder
             var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
             physicalities = ps;
-            attestations = BuildDistributionalAttestations(tree, sourceId, witnessWeight);
+            // Pillar 3a: text emits its content DAG (entities + physicalities/trajectory) ONLY.
+            // Sequence lives in the trajectory geometry; containment is containers_of + the
+            // point-match; PRECEDES is a MODEL relation (token couplings from Q/K/V/O/gate/up/
+            // down/norms), NOT text word-adjacency. Jamming word->word PRECEDES + CONTAINS onto
+            // text was the error that produced millions of redundant attestations (the re-witness
+            // grind) and duplicated what the geometry already holds losslessly. Deleted.
+            _ = witnessWeight;
+            attestations = ImmutableArray<AttestationRow>.Empty;
             return true;
         }
         catch (InvalidOperationException)
