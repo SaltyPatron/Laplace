@@ -71,8 +71,9 @@ public sealed class DocumentIngestPipelineTests
         Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present documents");
         Assert.Equal(0, reader.LegacyContentDescentCalls);
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline));
-        Assert.True(AttestationCount(changes) > 0,
-            "document handler must still emit distributional attestations on present trees");
+        // Pillar-3a: the re-witness grind is gone — documents emit ZERO distributional
+        // attestations, on present trees or otherwise (sequence = trajectory geometry).
+        Assert.Equal(0, AttestationCount(changes));
     }
 
     [Fact]

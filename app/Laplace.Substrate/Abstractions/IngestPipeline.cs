@@ -317,7 +317,14 @@ public static class IngestBatchPipeline
         int fileWorkers = 0,
         CancellationToken ct = default)
     {
-        int workers = fileWorkers > 0 ? fileWorkers : Math.Max(1, IngestTopology.Current.FileWorkers);
+        // Parallel per-file is OPT-IN (fileWorkers > 1) and ONLY valid for sources whose files
+        // are INDEPENDENT. Multi-file sources with cross-file state + ordering must stay
+        // sequential: e.g. Tatoeba maps numeric-id -> content-root in a sentence epoch that MUST
+        // complete before the links epoch reads that map to emit IS_TRANSLATION_OF; running the
+        // files concurrently reads the map before it is filled and the edges vanish. A
+        // maxTotalUnits cap also needs the exact cross-file stop point, which only the sequential
+        // path guarantees. Default (fileWorkers == 0) is therefore sequential.
+        int workers = maxTotalUnits > 0 ? 1 : Math.Max(1, fileWorkers);
         return workers <= 1
             ? RunMultiFileSequentialAsync(stream, handlerFactory, configFactory, maxTotalUnits, ct)
             : RunMultiFileParallelAsync(stream, handlerFactory, configFactory, maxTotalUnits, workers, ct);

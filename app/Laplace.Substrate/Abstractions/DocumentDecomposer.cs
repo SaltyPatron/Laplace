@@ -14,6 +14,10 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
+    // Each document is its own content DAG with no cross-file state or ordering, so the file
+    // pool may ingest N documents concurrently (see DecomposerMultiFile.FilesAreIndependent).
+    protected override bool FilesAreIndependent => true;
+
     protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(
         string ecosystemPath, DecomposerOptions options) =>
         new DocumentMultiFileStream(ecosystemPath);
