@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -298,12 +299,36 @@ public static class IngestBatchPipeline
         }
     }
 
-    public static async IAsyncEnumerable<SubstrateChange> RunMultiFileAsync<TRecord>(
-    IMultiFileRecordStream<TRecord> stream,
-    Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
-    Func<string, IngestBatchConfig> configFactory,
-    long maxTotalUnits = 0,
-    [EnumeratorCancellation] CancellationToken ct = default)
+    /// <summary>
+    /// Drives a multi-file source. Each file is an INDEPENDENT ingest — its own content DAG,
+    /// its own per-file handler/config, its own working-set + commit — never batched together with
+    /// another file. With <paramref name="fileWorkers"/> &gt; 1 (default: the topology's file-worker
+    /// count), up to N files compose CONCURRENTLY across a bounded worker pool: read → segment →
+    /// emit runs in parallel (each builder owns its intent stage; the native compose is lock-free;
+    /// probe reads use pooled connections), while their yielded changes merge into one stream that
+    /// the caller's single apply consumer drains serially. Backpressure comes from the bounded
+    /// channels. One serial file at a time was the "files=0/201, 10 idle cores" bottleneck.
+    /// </summary>
+    public static IAsyncEnumerable<SubstrateChange> RunMultiFileAsync<TRecord>(
+        IMultiFileRecordStream<TRecord> stream,
+        Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
+        Func<string, IngestBatchConfig> configFactory,
+        long maxTotalUnits = 0,
+        int fileWorkers = 0,
+        CancellationToken ct = default)
+    {
+        int workers = fileWorkers > 0 ? fileWorkers : Math.Max(1, IngestTopology.Current.FileWorkers);
+        return workers <= 1
+            ? RunMultiFileSequentialAsync(stream, handlerFactory, configFactory, maxTotalUnits, ct)
+            : RunMultiFileParallelAsync(stream, handlerFactory, configFactory, maxTotalUnits, workers, ct);
+    }
+
+    private static async IAsyncEnumerable<SubstrateChange> RunMultiFileSequentialAsync<TRecord>(
+        IMultiFileRecordStream<TRecord> stream,
+        Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
+        Func<string, IngestBatchConfig> configFactory,
+        long maxTotalUnits,
+        [EnumeratorCancellation] CancellationToken ct)
     {
         long unitsConsumed = 0;
         await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
@@ -355,6 +380,92 @@ public static class IngestBatchPipeline
             if (hitCap || streamEnded)
                 yield break;
         }
+    }
+
+    private static async IAsyncEnumerable<SubstrateChange> RunMultiFileParallelAsync<TRecord>(
+        IMultiFileRecordStream<TRecord> stream,
+        Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
+        Func<string, IngestBatchConfig> configFactory,
+        long maxTotalUnits,
+        int workers,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        // A file = a maximal run of records sharing FileLabel. The dispatcher groups the stream
+        // into per-file record lists; N workers each ingest one file end-to-end; changes merge.
+        var files = Channel.CreateBounded<(string Label, List<TRecord> Records)>(
+            new BoundedChannelOptions(workers * 2)
+            { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false });
+        var outCh = Channel.CreateBounded<SubstrateChange>(
+            new BoundedChannelOptions(workers * 4)
+            { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = true });
+
+        long unitsConsumed = 0;
+
+        var dispatcher = Task.Run(async () =>
+        {
+            await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
+            string? cur = null;
+            List<TRecord>? buf = null;
+            while (await e.MoveNextAsync())
+            {
+                var (label, rec) = e.Current;
+                if (cur is null) { cur = label; buf = new List<TRecord>(); }
+                else if (!string.Equals(label, cur, StringComparison.Ordinal))
+                {
+                    await files.Writer.WriteAsync((cur, buf!), ct);
+                    cur = label; buf = new List<TRecord>();
+                }
+                buf!.Add(rec);
+            }
+            if (buf is { Count: > 0 }) await files.Writer.WriteAsync((cur!, buf), ct);
+            files.Writer.Complete();
+        }, ct);
+
+        var workerTasks = new Task[workers];
+        for (int w = 0; w < workers; w++)
+        {
+            workerTasks[w] = Task.Run(async () =>
+            {
+                await foreach (var (label, records) in files.Reader.ReadAllAsync(ct))
+                {
+                    if (maxTotalUnits > 0 && Interlocked.Read(ref unitsConsumed) >= maxTotalUnits)
+                        continue;
+                    var handler = handlerFactory(label);
+                    var config = configFactory(label);
+                    long cap = maxTotalUnits > 0 ? maxTotalUnits - Interlocked.Read(ref unitsConsumed) : 0;
+                    var runConfig = cap > 0 ? config.WithMaxInputUnits(cap) : config;
+
+                    await foreach (var change in RunAsync(
+                        new AsyncEnumerableRecordStream<TRecord>(ListRecordsAsync(records, ct)),
+                        handler, runConfig, ct))
+                    {
+                        Interlocked.Add(ref unitsConsumed, change.Metadata.InputUnitsConsumed);
+                        await outCh.Writer.WriteAsync(change, ct);
+                    }
+                    await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, label), ct);
+                }
+            }, ct);
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try { await Task.WhenAll(workerTasks); await dispatcher; outCh.Writer.Complete(); }
+            catch (Exception ex) { outCh.Writer.Complete(ex); }
+        }, ct);
+
+        await foreach (var change in outCh.Reader.ReadAllAsync(ct))
+            yield return change;
+    }
+
+    private static async IAsyncEnumerable<TRecord> ListRecordsAsync<TRecord>(
+        List<TRecord> items, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var it in items)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return it;
+        }
+        await Task.CompletedTask;
     }
 
     private static void ResetBatchScope<TRecord>(IIngestRecordHandler<TRecord> handler)

@@ -50,27 +50,16 @@ public readonly record struct FileMetadata(
 public static class FileEntity
 {
     /// <summary>
-    /// Reserved tier slot for a file/source, above document (7). Tier is a FLOOR and is NEVER
-    /// mixed into the hash (<c>hash128_merkle</c> ignores it), so this value classifies but does
-    /// not affect the file-entity identity — that is a pure function of its two DAG roots.
+    /// The file-entity <c>source_id</c> IS the file's content-DAG root — its trunk node. Nothing
+    /// else: <c>same content = same file = same source</c>, by construction. Re-ingesting the same
+    /// file resolves to the same root and no-ops; the same content living in another file is the
+    /// SAME content node (that collision IS the mesh). The file's name/size/mtime/EXIF is a
+    /// metadata DAG hung off this trunk and <b>fetched</b> when provenance is queried — it is NEVER
+    /// hashed into the identity, because baking it in would fork the source per-name and destroy
+    /// the collision that makes corroboration and dedup free.
     /// </summary>
-    public const byte FileTier = 8;
-
-    /// <summary>
-    /// The file-entity <c>source_id</c> = <c>merkle(content_root, metadata_root)</c>.
-    /// Deterministic: same content + same metadata ⇒ same source (re-ingest no-ops); same content
-    /// + different metadata ⇒ shared content nodes but distinct file-witnesses (corroboration).
-    /// </summary>
-    public static Hash128 SourceId(ReadOnlySpan<byte> contentUtf8, in FileMetadata meta)
-    {
-        Hash128 contentRoot = TextDecomposer.ContentRootId(contentUtf8)
+    public static Hash128 SourceId(ReadOnlySpan<byte> contentUtf8) =>
+        TextDecomposer.ContentRootId(contentUtf8)
             ?? throw new InvalidOperationException(
                 "FileEntity.SourceId: content has no root (empty file)");
-        Hash128 metadataRoot = TextDecomposer.ContentRootId(meta.CanonicalUtf8())
-            ?? throw new InvalidOperationException(
-                "FileEntity.SourceId: metadata has no root");
-
-        Span<Hash128> roots = [contentRoot, metadataRoot];
-        return Hash128.Merkle(FileTier, roots);
-    }
 }

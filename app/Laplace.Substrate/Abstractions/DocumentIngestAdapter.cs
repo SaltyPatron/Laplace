@@ -25,14 +25,13 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
                 : Path.GetRelativePath(_root, file).Replace('\\', '/');
             string label = $"document/{rel}";
 
-            // Pillar 0: source_id IS the file-entity — this file's content DAG composed with its
-            // metadata DAG (FileEntity.SourceId) — not the decomposer's static "UserPrompt" label.
-            // Re-ingesting the same file collides on this hash and no-ops; the same content in a
-            // different file is a distinct witness (corroboration).
-            var meta = FileMetadata.FromPath(file, rel);
-            Hash128 fileSource = FileEntity.SourceId(bytes, in meta);
-
-            yield return (label, new ContentIngestRecord(bytes, SourceId: fileSource));
+            // The stream is READ-ONLY and fast — no per-file hashing here. source_id IS the file's
+            // content-DAG root (its trunk node), and the compose ALREADY produces that root when it
+            // builds the tree. Computing it here too (FileEntity.SourceId → a full ContentRootId
+            // segmentation per file) ran serially ahead of the parallel compose and segmented every
+            // file twice — the Webster-1913-sized single-thread gate. The compose's root is the
+            // trunk-node source; the name/metadata is a metadata DAG fetched off it, not hashed in.
+            yield return (label, new ContentIngestRecord(bytes));
             await Task.Yield();
         }
     }

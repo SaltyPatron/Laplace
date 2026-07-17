@@ -38,17 +38,18 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
         {
             _canonical = canonical;
             _sourceId = sourceId;
+            // The heavy content-tier-tree build happens HERE, at construction — and
+            // CreateDeferredUnit is invoked on the pinned parallel workers inside
+            // IngestDescentFlush.ComposeBatchAsync. content_tree_build is lock-free, per-call,
+            // and reads the perfcache read-only, so the decompose fans out across cores. Building
+            // it lazily (below) instead ran every file one-at-a-time in the sequential
+            // FinalizePendingAsync loop — the single-core "compose" bottleneck.
+            _tree = ContentTierSpine.BuildTree(canonical);
         }
 
-        public TierTree? TreeForBatchProbe
-        {
-            get
-            {
-                if (_tree is null)
-                    _tree = ContentTierSpine.BuildTree(_canonical);
-                return _tree;
-            }
-        }
+        // Fallback only: the tree is normally already built by the constructor on a compose
+        // worker. This keeps the probe correct if a unit is ever created off that path.
+        public TierTree? TreeForBatchProbe => _tree ??= ContentTierSpine.BuildTree(_canonical);
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             _tree is null
