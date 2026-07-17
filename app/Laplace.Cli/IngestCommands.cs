@@ -130,7 +130,7 @@ internal static class IngestCommands
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
-                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
+                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | parquet | tiny-codes | stack | safetensors | image | audio | document\n"
                         + "  --langs: language scope for this run\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations");
 
@@ -380,6 +380,14 @@ internal static class IngestCommands
         if (path is null)
             return Fail("usage: laplace ingest tabular <file-or-directory>");
         return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli);
+    }
+
+    internal static async Task<int> IngestParquetAsync(IngestCliArgs cli)
+    {
+        var path = ResolveRequiredIngestPath(cli.Path);
+        if (path is null)
+            return Fail("usage: laplace ingest parquet <file-or-directory>");
+        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli);
     }
 
     private static IngestRunOptions BuildIngestOptions(

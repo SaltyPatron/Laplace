@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using Parquet;
 using Parquet.Schema;
@@ -10,6 +11,102 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class SharedParquetRecordStream
 {
+    /// <summary>One witnessed cell of a generic parquet row: the column name and its
+    /// native CLR value (string/long/double/bool/DateTime/… or null).</summary>
+    public readonly record struct GenericCell(string Column, object? Value);
+
+    /// <summary>
+    /// Generic flat-schema row reader — the container-strip primitive for the generic
+    /// <c>ParquetDecomposer</c>. Streams every row as one <see cref="GenericCell"/> per
+    /// top-level data field, values in their native CLR type. Makes no schema
+    /// assumptions beyond a flat (non-nested) column layout, so ANY tabular parquet
+    /// file/dataset can be witnessed column-by-column without bespoke plumbing.
+    /// </summary>
+    public static async IAsyncEnumerable<IReadOnlyList<GenericCell>> ReadGenericRowsAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var fs = File.OpenRead(path);
+        await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
+
+        DataField[] fields = reader.Schema.GetDataFields();
+        if (fields.Length == 0) yield break;
+
+        for (int rg = 0; rg < reader.RowGroupCount; rg++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var rgr = reader.OpenRowGroupReader(rg);
+            int count = (int)rgr.RowCount;
+
+            var columns = new Array[fields.Length];
+            for (int c = 0; c < fields.Length; c++)
+                columns[c] = await ReadColumnAsync(rgr, fields[c], count, ct);
+
+            for (int i = 0; i < count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var cells = new GenericCell[fields.Length];
+                for (int c = 0; c < fields.Length; c++)
+                {
+                    Array col = columns[c];
+                    object? value = i < col.Length ? col.GetValue(i) : null;
+                    cells[c] = new GenericCell(fields[c].Name, value);
+                }
+                yield return cells;
+            }
+        }
+    }
+
+    // Parquet.Net 6 exposes no public DataColumn/ReadColumn — reads go through the
+    // typed ReadAsync&lt;T&gt;(field, Memory&lt;T&gt;, …) overloads. This resolves the right
+    // overload from the field's nullability-aware CLR type once and reads a whole
+    // column into a boxed Array, so the generic reader stays type-agnostic.
+    private static readonly MethodInfo[] ReadAsyncOverloads = typeof(ParquetRowGroupReader)
+        .GetMethods()
+        .Where(m => m.Name == nameof(ParquetRowGroupReader.ReadAsync)
+            && m.GetParameters() is { Length: 4 } p
+            && p[1].ParameterType.IsGenericType
+            && p[1].ParameterType.GetGenericTypeDefinition() == typeof(Memory<>))
+        .ToArray();
+
+    private static async ValueTask<Array> ReadColumnAsync(
+        ParquetRowGroupReader rgr, DataField field, int count, CancellationToken ct)
+    {
+        Type elem = field.ClrNullableIfHasNullsType;
+        Array data = Array.CreateInstance(elem, count);
+        Type memType = typeof(Memory<>).MakeGenericType(elem);
+        object mem = memType.GetConstructor([elem.MakeArrayType()])!.Invoke([data]);
+
+        Type? underlying = Nullable.GetUnderlyingType(elem);
+        MethodInfo? chosen = null;
+        foreach (var m in ReadAsyncOverloads)
+        {
+            MethodInfo mi = m;
+            if (m.IsGenericMethodDefinition)
+            {
+                Type inner = m.GetParameters()[1].ParameterType.GetGenericArguments()[0];
+                bool paramNullable = inner.IsGenericType
+                    && inner.GetGenericTypeDefinition() == typeof(Nullable<>);
+                if (underlying is not null)
+                {
+                    if (!paramNullable) continue;
+                    mi = m.MakeGenericMethod(underlying);
+                }
+                else
+                {
+                    if (paramNullable || !elem.IsValueType) continue;
+                    mi = m.MakeGenericMethod(elem);
+                }
+            }
+            if (mi.GetParameters()[1].ParameterType == memType) { chosen = mi; break; }
+        }
+        if (chosen is null)
+            throw new NotSupportedException(
+                $"No ParquetRowGroupReader.ReadAsync overload for column '{field.Name}' of type {elem}.");
+
+        await (ValueTask)chosen.Invoke(rgr, [field, mem, null, ct])!;
+        return data;
+    }
+
     public static DataField? FindField(DataField[] fields, string name)
     {
         foreach (var f in fields)

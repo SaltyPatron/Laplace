@@ -51,6 +51,7 @@ public static class SeedIngestComposition
         services.AddTransient<CodeDecomposer>();
         services.AddTransient<RepoDecomposer>();
         services.AddTransient<TabularDecomposer>();
+        services.AddTransient<ParquetDecomposer>();
         services.AddTransient<TinyCodesDecomposer>();
         services.AddTransient<StackDecomposer>();
         services.AddTransient<DocumentDecomposer>();
@@ -103,6 +104,7 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         "code" => _sp.GetRequiredService<CodeDecomposer>(),
         "repo" => _sp.GetRequiredService<RepoDecomposer>(),
         "tabular" => _sp.GetRequiredService<TabularDecomposer>(),
+        "parquet" => _sp.GetRequiredService<ParquetDecomposer>(),
         "tiny-codes" => _sp.GetRequiredService<TinyCodesDecomposer>(),
         "stack" => _sp.GetRequiredService<StackDecomposer>(),
         "document" => _sp.GetRequiredService<DocumentDecomposer>(),
