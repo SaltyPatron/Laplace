@@ -72,14 +72,62 @@ public static class EtlInventory
         CancellationToken ct = default)
     {
         if (!File.Exists(path)) return 0;
+        // Predicate callers need the decoded line; only they pay a string per line.
+        if (includeLine is null) return CountNonEmptyLines(path, ct);
         long n = 0;
         await foreach (var line in File.ReadLinesAsync(path, ct))
         {
             ct.ThrowIfCancellationRequested();
             if (line.Length == 0) continue;
-            if (includeLine is not null && !includeLine(line)) continue;
+            if (!includeLine(line)) continue;
             n++;
         }
+        return n;
+    }
+
+    // Byte-level count of non-empty lines — identical to ReadLines + (Length > 0) without a
+    // string per line. Terminators: \n, \r\n, lone \r; an unterminated final line counts;
+    // a leading UTF-8 BOM is skipped (StreamReader strips it from the first line).
+    private static long CountNonEmptyLines(string path, CancellationToken ct)
+    {
+        long n = 0;
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 20, useAsync: false);
+        var buf = new byte[1 << 20];
+        bool hasContent = false, prevCr = false, first = true;
+        int read;
+        while ((read = fs.Read(buf, 0, buf.Length)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            int i = 0;
+            if (first)
+            {
+                first = false;
+                if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) i = 3;
+            }
+            for (; i < read; i++)
+            {
+                byte c = buf[i];
+                if (c == (byte)'\r')
+                {
+                    if (hasContent) n++;
+                    hasContent = false;
+                    prevCr = true;
+                }
+                else if (c == (byte)'\n')
+                {
+                    if (!prevCr && hasContent) n++;
+                    hasContent = false;
+                    prevCr = false;
+                }
+                else
+                {
+                    hasContent = true;
+                    prevCr = false;
+                }
+            }
+        }
+        if (hasContent) n++;
         return n;
     }
 
@@ -100,22 +148,66 @@ public static class EtlInventory
         return n;
     }
 
+    // Byte-level equivalent of the former ReadLines pass: a sentence is open once a line
+    // starts with a digit and contains a tab, and closes at a blank line. Valid CoNLL-U
+    // token ids start with ASCII digits, so the byte-range digit test matches char.IsDigit.
     public static long CountConlluSentences(string path)
     {
         if (!File.Exists(path)) return 0;
         long n = 0;
         bool inSentence = false;
-        foreach (var line in File.ReadLines(path))
+        bool lineHasContent = false, sawTab = false, prevCr = false, first = true;
+        byte firstByte = 0;
+
+        void EndLine()
         {
-            if (line.Length == 0)
+            if (!lineHasContent)
             {
                 if (inSentence) { n++; inSentence = false; }
-                continue;
             }
-            if (line[0] == '#') continue;
-            if (char.IsDigit(line[0]) && line.Contains('\t', StringComparison.Ordinal))
+            else if (firstByte >= (byte)'0' && firstByte <= (byte)'9' && sawTab)
+            {
                 inSentence = true;
+            }
+            lineHasContent = false;
+            sawTab = false;
+            firstByte = 0;
         }
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 20, useAsync: false);
+        var buf = new byte[1 << 20];
+        int read;
+        while ((read = fs.Read(buf, 0, buf.Length)) > 0)
+        {
+            int i = 0;
+            if (first)
+            {
+                first = false;
+                if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) i = 3;
+            }
+            for (; i < read; i++)
+            {
+                byte c = buf[i];
+                if (c == (byte)'\r')
+                {
+                    EndLine();
+                    prevCr = true;
+                }
+                else if (c == (byte)'\n')
+                {
+                    if (prevCr) prevCr = false;
+                    else EndLine();
+                }
+                else
+                {
+                    if (!lineHasContent) { lineHasContent = true; firstByte = c; }
+                    if (c == (byte)'\t') sawTab = true;
+                    prevCr = false;
+                }
+            }
+        }
+        if (lineHasContent) EndLine();
         if (inSentence) n++;
         return n;
     }

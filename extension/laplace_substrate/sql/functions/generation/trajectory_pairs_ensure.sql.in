@@ -8,6 +8,11 @@ DECLARE
     m        trajectory_pairs_meta%ROWTYPE;
     n        bigint;
 BEGIN
+    -- Corpus fingerprint. Rides physicalities_traj_probe (partial btree on
+    -- observed_at WHERE type = 1 AND trajectory IS NOT NULL): index-only over
+    -- just the trajectory rows, never a heap pass over physicalities. count(*)
+    -- stays in the fingerprint because per-source evict can delete trajectories
+    -- without moving max(observed_at).
     SELECT count(*)::bigint,
            COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::bigint, 0)
       INTO cur_rows, cur_us
@@ -17,19 +22,42 @@ BEGIN
     SELECT * INTO m FROM trajectory_pairs_meta WHERE only_row;
     IF FOUND AND m.probe_rows = cur_rows AND m.probe_max_us = cur_us
        AND m.max_gap >= p_max_gap THEN
-        RETURN (SELECT count(*) FROM trajectory_pairs);   
+        -- Skip path: return the recorded build size. The old
+        -- `RETURN (SELECT count(*) FROM trajectory_pairs)` re-counted a
+        -- potentially multi-million-row table on EVERY guarded call.
+        -- pair_rows IS NULL only for a meta row written before the column
+        -- existed (upgrade): count once, cache in meta.
+        IF m.pair_rows IS NULL THEN
+            UPDATE trajectory_pairs_meta
+               SET pair_rows = (SELECT count(*) FROM trajectory_pairs)
+             WHERE only_row
+            RETURNING pair_rows INTO m.pair_rows;
+        END IF;
+        RETURN m.pair_rows;
     END IF;
 
+    -- Full rebuild, DELIBERATELY (waste audit .scratchpad/31, 2026-07-17): an
+    -- incremental arm is not provably expressible. cooccurrence_scan (native,
+    -- trajectory_generate.c) walks corpus_ensure()'s cached whole-corpus token
+    -- stream and takes only (max_gap[, vocab]) -- it cannot be scoped to
+    -- trajectories observed after a watermark (the vocab filter restricts
+    -- TOKENS, not trajectories), and re-implementing per-trajectory pair
+    -- extraction in SQL would duplicate the native stream decoding (one
+    -- implementation per fact). subject_total is also corpus-global per
+    -- (subject_id, gap), so even a correct new-pair delta would need that
+    -- scoped scan first. Correctness beats the optimization; the fingerprint
+    -- guard above confines rebuilds to actual corpus changes.
     TRUNCATE trajectory_pairs;
     INSERT INTO trajectory_pairs (subject_id, object_id, gap, cnt, subject_total)
     SELECT subject_id, object_id, gap, cnt, subject_total
     FROM trajectory_cooccurrence_by_stride(p_max_gap);
     GET DIAGNOSTICS n = ROW_COUNT;
 
-    INSERT INTO trajectory_pairs_meta (only_row, probe_rows, probe_max_us, max_gap, built_at)
-    VALUES (true, cur_rows, cur_us, p_max_gap, now())
+    INSERT INTO trajectory_pairs_meta (only_row, probe_rows, probe_max_us, max_gap, pair_rows, built_at)
+    VALUES (true, cur_rows, cur_us, p_max_gap, n, now())
     ON CONFLICT (only_row) DO UPDATE
         SET probe_rows = excluded.probe_rows, probe_max_us = excluded.probe_max_us,
-            max_gap = excluded.max_gap, built_at = excluded.built_at;
+            max_gap = excluded.max_gap, pair_rows = excluded.pair_rows,
+            built_at = excluded.built_at;
     RETURN n;
 END $$;

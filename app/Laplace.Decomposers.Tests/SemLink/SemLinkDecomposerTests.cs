@@ -9,7 +9,10 @@ namespace Laplace.Decomposers.SemLink.Tests;
 
 public sealed class SemLinkDecomposerTests
 {
-    static SemLinkDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    static SemLinkDecomposerTests()
+    {
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 

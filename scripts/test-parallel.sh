@@ -100,8 +100,11 @@ run_dotnet() {
     echo "LAPLACE_PERFCACHE_BIN=$bin"
   fi
 
+  # dotnet tests read the INSTALLED perfcache blob/extension and the migrated
+  # DB, so a reinstall must re-prove the app layer even with no source diff —
+  # fold the install stamp into the salt exactly as run_ctest_regress keys.
   local salt plan_out plan_rc=0
-  salt=$(fp_runtime)
+  salt="$(fp_runtime):$(cat "$FP_STAMP_DIR/install-native" 2>/dev/null || echo uninstalled)"
   plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns test --salt "$salt") || plan_rc=$?
   if [[ "$plan_rc" -ne 0 ]]; then
     echo "::warning::affected-app plan failed (rc=$plan_rc) — full solution test"

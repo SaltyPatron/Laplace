@@ -1,9 +1,11 @@
 -- 2026-07-09: `edges` must be MATERIALIZED. Inlined, the planner pushes the
--- `rk IS NOT NULL` filter into the consensus scan and evaluates
--- relation_rank_resolved (~27µs/call) on all 124M rows — 255-368s measured,
--- in either function language. Fenced, rank runs once per vocab-joined row
--- (369k) and the vocab probe takes the indexed nestloop: ~20s measured
--- (edges fetch 12s + rank calls ~10s).
+-- rank filter into the consensus scan and evaluates relation_rank_resolved
+-- (~27µs/call) on all 124M rows — 255-368s measured, in either function
+-- language. Fenced, the vocab probe takes the indexed nestloop.
+-- 2026-07-17: rank per DISTINCT type_id (≤189 governed types) instead of per
+-- edge row (~369k calls ≈ 10s measured), same rk CTE as
+-- consensus_layer_plane/consensus_type_plane. edges is referenced twice below
+-- (rk's DISTINCT scan and summed's join) — the fence stays load-bearing.
 DROP FUNCTION IF EXISTS consensus_adjacency(bytea[], int);
 CREATE OR REPLACE FUNCTION consensus_adjacency(
         p_vocab bytea[], p_degree_cap int DEFAULT 64)
@@ -15,11 +17,17 @@ BEGIN
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count,
-                    relation_rank_resolved(c.type_id) AS rk
+                    c.type_id
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id
              WHERE c.object_id IS NOT NULL
+         ),
+         rk AS (
+             SELECT d.type_id, r.rank
+             FROM (SELECT DISTINCT type_id FROM edges) d
+             CROSS JOIN LATERAL relation_rank_resolved(d.type_id) AS r(rank)
+             WHERE r.rank IS NOT NULL
          ),
          -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
          -- witness-saturated. Positivity is NOT clamped here — the basis union
@@ -27,12 +35,12 @@ BEGIN
          -- plane keeps refutation as negative weight.
          summed AS (
              SELECT e.subject_id, e.object_id,
-                    sum(e.rk
+                    sum(rk.rank
                         * (eff_mu(e.rating, e.rd) - glicko2_neutral_mu())::float8 / 1e9
                         * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
                         * foundry_witness_sat(e.witness_count)) AS w
              FROM edges e
-             WHERE e.rk IS NOT NULL
+             JOIN rk ON rk.type_id = e.type_id
              GROUP BY e.subject_id, e.object_id
          ),
          capped AS (

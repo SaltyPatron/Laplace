@@ -13,7 +13,7 @@ public sealed class ConceptNetDecomposerTests
 {
     static ConceptNetDecomposerTests()
     {
-        CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
         LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 

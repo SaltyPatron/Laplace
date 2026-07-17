@@ -5,6 +5,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/hsearch.h"
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
 #include "nodes/execnodes.h"
@@ -186,12 +187,9 @@ Datum
 pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
 {
     glicko2_state_t         st;
-    glicko2_observation_t*  obs;
     int64_t                 games;
     int64_t                 sum_score;
     int64_t                 opp_rating, opp_rd, tau;
-    int64_t                 q, rem;
-    int64_t                 i;
     TupleDesc               tupdesc;
     Datum                   values[3];
     bool                    nulls[3] = { false, false, false };
@@ -226,21 +224,11 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
                     "that cannot accept type record")));
     BlessTupleDesc(tupdesc);
 
-    obs = (glicko2_observation_t*)
-        palloc(sizeof(glicko2_observation_t) * (Size) games);
-    q   = sum_score / games;
-    rem = sum_score - q * (games - 1);
-    for (i = 0; i < games - 1; i++) {
-        obs[i].opponent_rating = opp_rating;
-        obs[i].opponent_rd     = opp_rd;
-        obs[i].score           = q;
-    }
-    obs[games - 1].opponent_rating = opp_rating;
-    obs[games - 1].opponent_rd     = opp_rd;
-    obs[games - 1].score           = rem;
-
-    glicko2_update_period(&st, obs, (size_t) games, tau, 0);
-    pfree(obs);
+    /* Closed-form uniform fold: bit-identical to materializing `games`
+     * observations of (opp_rating, opp_rd) with the same q/rem score split
+     * and running glicko2_update_period, without the O(games) buffer. */
+    glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
+                                games, sum_score, tau, 0);
 
     values[0] = Int64GetDatum(st.rating);
     values[1] = Int64GetDatum(st.rd);
@@ -837,18 +825,58 @@ pg_relation_rank(PG_FUNCTION_ARGS)
 
 
 
+/* Per-backend memo for the SPI fallback below: without it, a type_id that
+ * misses the static table (dynamic DEP_/FEAT_ family members whose family
+ * root isn't registered, or a genuinely unranked type) re-walks up to 8
+ * unprepared IS_A probes on EVERY ranked-read row that touches it. The
+ * resolution is a function of the relation manifest + IS_A consensus, both
+ * effectively static for a backend's lifetime (matching perfcache
+ * semantics); not-found is memoized too — the unresolvable type is exactly
+ * the per-row pathological case. */
+typedef struct RankMemoEntry
+{
+    hash128_t key;
+    double    rank;
+    bool      has_rank;
+} RankMemoEntry;
+
+static HTAB *rank_resolve_memo = NULL;
+
 PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
 
 Datum
 pg_relation_rank_resolved(PG_FUNCTION_ARGS)
 {
     bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t cur_id  = datum_to_hash128(PointerGetDatum(type_ba));
+    hash128_t orig_id = datum_to_hash128(PointerGetDatum(type_ba));
+    hash128_t cur_id  = orig_id;
     const laplace_relation_def_t* def = NULL;
+    RankMemoEntry *memo;
+    bool      memo_found;
 
-    
+
     if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
         PG_RETURN_FLOAT8(def->rank);
+
+    if (rank_resolve_memo == NULL)
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize   = sizeof(hash128_t);
+        ctl.entrysize = sizeof(RankMemoEntry);
+        ctl.hcxt      = TopMemoryContext;
+        rank_resolve_memo = hash_create("relation_rank_resolved memo", 64,
+                                        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
+                                         HASH_FIND, &memo_found);
+    if (memo_found)
+    {
+        if (memo->has_rank)
+            PG_RETURN_FLOAT8(memo->rank);
+        PG_RETURN_NULL();
+    }
 
     if (SPI_connect() != SPI_OK_CONNECT)
         PG_RETURN_NULL();
@@ -888,6 +916,12 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     }
 
     SPI_finish();
+
+    memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
+                                         HASH_ENTER, &memo_found);
+    memo->rank     = out_rank;
+    memo->has_rank = found;
+
     if (found)
         PG_RETURN_FLOAT8(out_rank);
     PG_RETURN_NULL();

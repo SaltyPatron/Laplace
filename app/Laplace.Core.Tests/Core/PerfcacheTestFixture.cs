@@ -13,10 +13,15 @@ public sealed class PerfcacheTestFixture : IDisposable
             ?? throw new InvalidOperationException(
                 "T0 perf-cache blob not found. Build it (`just build`, or the engine " +
                 "target `laplace_t0_perfcache`).");
-        CodepointPerfcache.Load(BlobPath);
+        if (!CodepointPerfcache.IsLoaded)
+            CodepointPerfcache.Load(BlobPath);
     }
 
-    public void Dispose() => CodepointPerfcache.Unload();
+    // The T0 perfcache is process-global native state shared by every test
+    // collection in this assembly; unloading here would unmap it under
+    // concurrently running collections (this assembly does not disable xunit
+    // parallelization). Fixtures must never CodepointPerfcache.Unload().
+    public void Dispose() { }
 
     private static string? LocateBlob()
     {

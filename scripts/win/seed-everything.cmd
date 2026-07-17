@@ -38,10 +38,6 @@ call "%~dp0db-reset.cmd" --recycle >> "%LOG%" 2>&1
 rem NTSTATUS crash codes are negative, so `if errorlevel 1` misses them
 if not "%ERRORLEVEL%"=="0" goto fail
 
-echo ===== BUILD ===== >> "%LOG%"
-dotnet build "%LAPLACE_ROOT%\app\Laplace.slnx" -c Release >> "%LOG%" 2>&1
-if not "%ERRORLEVEL%"=="0" goto fail
-
 echo ===== SEED LADDER (all stages, one step at a time) ===== >> "%LOG%"
 call "%~dp0seed-ladder.cmd" >> "%LOG%" 2>&1
 set "RC=%ERRORLEVEL%"

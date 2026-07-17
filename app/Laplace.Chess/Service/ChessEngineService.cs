@@ -180,11 +180,24 @@ public sealed class ChessEngineService : IAsyncDisposable
         return (_lpMg, _lpEg);
     }
 
+    // Pool of Search instances: reuses the 32 MB transposition-table
+    // allocation across requests. Configuration (bias/PST) is reapplied at
+    // every rent, so a stale pooled instance can never serve old tables; an
+    // instance leaked by an exception between rent and return is simply GC'd.
+    private readonly System.Collections.Concurrent.ConcurrentBag<Search> _searchPool = new();
+
     private Search BuildEngine(bool substrate, int ttBits = 20)
     {
         var (mg, eg) = LearnedPstBlend();
+        if (_searchPool.TryTake(out var pooled) && pooled.TtBits == ttBits)
+        {
+            pooled.Reconfigure(substrate ? FoldBias() : null, mg, eg);
+            return pooled;
+        }
         return new Search(EvalTerm.All, substrate ? FoldBias() : null, ttBits, mg, eg);
     }
+
+    private void ReturnEngine(Search search) => _searchPool.Add(search);
 
     public async Task<ChessPositionEval> EvalPositionAsync(
         string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
@@ -199,6 +212,7 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        ReturnEngine(search);
         int score = state.Board.WhiteToMove ? result.Score : -result.Score;
         return new ChessPositionEval(score, result.Depth, result.Nodes, substrate, false, "ongoing");
     }
@@ -215,11 +229,15 @@ public sealed class ChessEngineService : IAsyncDisposable
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
+        {
+            ReturnEngine(search);
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
+        }
 
         var next = _modality.Apply(state, mv);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         var pv = search.ExtractPv(state.Board);
+        ReturnEngine(search);
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
 
@@ -378,7 +396,10 @@ public sealed class ChessEngineService : IAsyncDisposable
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
+        {
+            ReturnEngine(search);
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
+        }
 
         string fromKey = _modality.StateKey(state);
         var next = _modality.Apply(state, mv);

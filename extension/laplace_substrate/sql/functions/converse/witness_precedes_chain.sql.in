@@ -4,6 +4,16 @@
 -- generated text's own edges fold into the SAME consensus the next walk reads
 -- (evaluation IS ingestion). Self-signals are outranked by design (Response/UserPrompt
 -- trust classes), so self-witnessing cannot outshout curated sources.
+--
+-- ONE batched fold through the ingest spine (consensus_upsert) instead of the old
+-- per-bigram laplace_witness loop (2 statements per pair, per chat turn). Repeated
+-- bigrams in one chain aggregate into ONE (games, sum) cell -- the rating period IS
+-- the chain, exactly how the writer spine folds duplicates (its client-dedup
+-- contract); arrays arrive sorted (type, subject, id) per that contract. Same cells,
+-- same outcomes (score 1e9 per game -- a win, as the loop scored), same witness
+-- counts. One deliberate spine alignment: laplace_witness seeded a NOVEL cell at
+-- neutral WITHOUT folding its first game (the first outcome was dropped);
+-- consensus_upsert's novel arm folds every game -- no signal is discarded.
 CREATE OR REPLACE FUNCTION witness_precedes_chain(p_text text, p_source bytea)
     RETURNS int
     LANGUAGE plpgsql VOLATILE
@@ -12,15 +22,38 @@ DECLARE
     r_prec bytea := relation_type_id('PRECEDES');
     ids    bytea[];
     n      int;
-    c      int := 0;
+    subs   bytea[];
+    objs   bytea[];
+    games  bigint[];
+    sums   bigint[];
 BEGIN
     SELECT array_agg(id ORDER BY ord) INTO ids
     FROM prompt_state(p_text) WHERE id IS NOT NULL;
-    n := COALESCE(array_length(ids,1), 0);
-    FOR i IN 1 .. GREATEST(n-1, 0) LOOP
-        PERFORM laplace_witness(ids[i], r_prec, ids[i+1], p_source, 1000000000);
-        c := c + 1;
-    END LOOP;
-    RETURN c;
+    n := COALESCE(array_length(ids, 1), 0);
+    IF n < 2 THEN RETURN 0; END IF;
+
+    SELECT array_agg(d.s               ORDER BY d.s, d.cid),
+           array_agg(d.o               ORDER BY d.s, d.cid),
+           array_agg(d.g               ORDER BY d.s, d.cid),
+           array_agg(d.g * 1000000000  ORDER BY d.s, d.cid)
+      INTO subs, objs, games, sums
+    FROM (
+        SELECT p.s, p.o, count(*)::bigint AS g,
+               consensus_id(p.s, r_prec, p.o) AS cid
+        FROM (SELECT ids[i] AS s, ids[i + 1] AS o
+              FROM generate_series(1, n - 1) i) p
+        GROUP BY p.s, p.o
+    ) d;
+
+    PERFORM consensus_upsert(
+        subs,
+        array_fill(r_prec, ARRAY[cardinality(subs)]),
+        objs,
+        array_fill(glicko2_initial_rd(), ARRAY[cardinality(subs)]),
+        games,
+        sums,
+        array_fill(now(), ARRAY[cardinality(subs)]));
+
+    RETURN n - 1;
 END;
 $$;

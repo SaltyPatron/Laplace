@@ -30,4 +30,10 @@ public readonly record struct GrammarComposeContext(
     GrammarAst Ast,
     Hash128 RootId,
     GrammarRowComposer? Composer,
-    int RootNodeIndex);
+    int RootNodeIndex = GrammarComposeContext.UnresolvedRootNode)
+{
+    // Sentinel: root object node not yet resolved. JsonGrammarHelper resolves
+    // on demand, so non-JSON rows (TSV lanes) never pay the AST scan that an
+    // eager FindRootObjectNode costs — it can never match there.
+    public const int UnresolvedRootNode = -2;
+}

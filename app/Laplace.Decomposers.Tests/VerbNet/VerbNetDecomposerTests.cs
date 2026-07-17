@@ -8,7 +8,10 @@ namespace Laplace.Decomposers.VerbNet.Tests;
 
 public sealed class VerbNetDecomposerTests
 {
-    static VerbNetDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    static VerbNetDecomposerTests()
+    {
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 

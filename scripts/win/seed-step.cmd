@@ -294,7 +294,7 @@ echo   seed-step.cmd --rebuild wordnet
 echo   seed-step.cmd document "%INGEST%\test-data\text"
 echo   seed-step.cmd repo "%REPOS%\Laplace"
 echo.
-echo CLI is built only when missing or --rebuild is passed ^(seed-ladder builds once^).
+echo CLI is published ReadyToRun only when missing or --rebuild is passed.
 exit /b 2
 
 :unknown_step

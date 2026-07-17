@@ -35,9 +35,15 @@ public static class VocabularyNames
         ConcurrentDictionary<string, byte>? names, string? langInput)
     {
         if (names is null || string.IsNullOrWhiteSpace(langInput)) return;
-        string? iso3 = LanguageReference.ResolveCode(langInput);
-        if (iso3 is not null)
-            Track(names, LanguageIso639_3(iso3));
+        TrackResolvedLanguage(names, LanguageReference.ResolveCode(langInput));
+    }
+
+    /// <summary>Overload for callers that already resolved the code (no second resolve).</summary>
+    public static void TrackResolvedLanguage(
+        ConcurrentDictionary<string, byte>? names, string? iso3)
+    {
+        if (names is null || iso3 is null) return;
+        Track(names, LanguageIso639_3(iso3));
     }
 
     public static void TrackProbationaryPos(
@@ -45,8 +51,16 @@ public static class VocabularyNames
     {
         if (names is null) return;
         NativeAttestation.ResolvePos(tag, tagset, out bool probationary);
-        if (probationary)
-            Track(names, ProbationaryPos(tagset, tag));
+        TrackProbationaryPos(names, tag, tagset, probationary);
+    }
+
+    /// <summary>Overload for callers that already resolved the tag (no second native resolve).</summary>
+    public static void TrackProbationaryPos(
+        ConcurrentDictionary<string, byte>? names, string tag, PosReference.PosTagset tagset,
+        bool probationary)
+    {
+        if (names is null || !probationary) return;
+        Track(names, ProbationaryPos(tagset, tag));
     }
 
 }

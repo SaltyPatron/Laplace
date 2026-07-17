@@ -156,7 +156,8 @@ internal static class IngestCommands
 
         long start = 0;
         long max = 0;
-        CodepointPerfcache.Load(ResolveBlob());
+        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
         Console.Error.WriteLine($"omw-probe: scanning {wns} start_row={start} max_rows={(max > 0 ? max.ToString() : "all")}");
@@ -186,7 +187,8 @@ internal static class IngestCommands
             return Fail($"invalid safetensor snapshot: {snapshotCheck.Error}\n"
                         + $"path: {modelDir}");
 
-        CodepointPerfcache.Load(ResolveBlob());
+        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
 
@@ -450,7 +452,8 @@ internal static class IngestCommands
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {
-        CodepointPerfcache.Load(ResolveBlob());
+        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
         LanguageReference.EnsureLoaded();

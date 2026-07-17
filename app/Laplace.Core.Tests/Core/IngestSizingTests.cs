@@ -12,7 +12,10 @@ public sealed class IngestSizingTests
     {
         var plan = IngestSizing.Resolve(8, 6, 8, workingSetBudgetBytes: TestBudgetBytes);
         Assert.Equal(2048, plan.RecordBatchSize);
-        Assert.Equal(512, plan.ProbeChunkSize);
+        // batch*16 clamped to [2048, 32768] — the big-source probe-chunk law
+        // (fee9e1f): presence probes are round-trip dominated, match the
+        // WS-apply probe scale instead of thousands of serial 512-id trips.
+        Assert.Equal(32_768, plan.ProbeChunkSize);
         Assert.Equal(32_768, plan.CommitRows);
         Assert.Equal(2, plan.MaxIntentsPerCommit);
         Assert.Equal(38, plan.DecomposeChannelCapacity);

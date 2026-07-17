@@ -87,10 +87,36 @@ hash128_eq(const hash128_t *a, const hash128_t *b)
 static inline Datum
 eff_mu_display_numeric(int64 rating, int64 rd)
 {
-    
+
 
     int64 eff = laplace_effective_mu_fp(rating, rd);
     Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
+    Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
+    Datum d = DirectFunctionCall2(numeric_div, n, b);
+
+    return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
+}
+
+/* The display-rounded eff_mu as int64 fixed point: eff rounded to 3 display
+ * decimals = the nearest multiple of 1e6 fp units, half away from zero —
+ * exactly what eff_mu_display_numeric emits, kept in native int64 so hot
+ * paths can accumulate/compare without numeric Datums. */
+static inline int64
+eff_mu_display_fp(int64 rating, int64 rd)
+{
+    int64 eff  = laplace_effective_mu_fp(rating, rd);
+    int64 half = INT64CONST(500000);
+
+    return (eff >= 0 ? eff + half : eff - half)
+           / INT64CONST(1000000) * INT64CONST(1000000);
+}
+
+/* Convert an int64 fp value (multiple of 1e6 from eff_mu_display_fp sums)
+ * to the same 3-dscale numeric eff_mu_display_numeric-derived sums had. */
+static inline Datum
+fp_display_numeric(int64 fp)
+{
+    Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(fp));
     Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
     Datum d = DirectFunctionCall2(numeric_div, n, b);
 

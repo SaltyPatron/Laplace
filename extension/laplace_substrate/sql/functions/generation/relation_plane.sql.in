@@ -57,8 +57,17 @@ BEGIN
         RETURN;
     END IF;
 
+    -- next/gap: read the maintained trajectory_pairs table instead of re-running
+    -- the whole-corpus stride scan and discarding every gap but g (the old
+    -- `FROM trajectory_cooccurrence_by_stride(g) WHERE gap = g` computed gaps
+    -- 1..g and kept 1/g of the pairs, every call). Row parity: trajectory_pairs
+    -- stores exactly trajectory_cooccurrence_by_stride's output, and its
+    -- subject_total partitions by (subject_id, gap), so gap = g rows are
+    -- identical whether the table was built with max_gap = g or larger; the
+    -- ensure guard rebuilds only when the trajectory corpus fingerprint moved.
+    PERFORM trajectory_pairs_ensure(g);
     RETURN QUERY
     SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-    FROM trajectory_cooccurrence_by_stride(g) t WHERE t.gap = g;
+    FROM trajectory_pairs t WHERE t.gap = g;
 END;
 $$;

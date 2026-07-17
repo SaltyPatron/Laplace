@@ -71,6 +71,10 @@ installs_present() {
   [ -e "$PREFIX/proj/lib" ] || [ -e "$PREFIX/proj/lib64" ] || return 1
   [ -e "$PREFIX/geos/lib" ] || [ -e "$PREFIX/geos/lib64" ] || return 1
   [ -e "$PREFIX/gdal/lib" ] || [ -e "$PREFIX/gdal/lib64" ] || return 1
+  # CI's "Verify installed dep artifacts" (laplace.yml deps job) also requires
+  # these two — a stamp-skip here with either missing fails four steps later.
+  [ -e "$PREFIX/pgsql-18/lib/postgis-3.so" ] || return 1
+  [ -e "$PREFIX/tree-sitter/lib/libtree-sitter.a" ] || return 1
   return 0
 }
 

@@ -171,12 +171,25 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await CompleteGameAsync(gameId, outcome, adjudicated, ct);
     }
 
+    private SubstructureFoldBias? _foldBias;
+
     public Search BuildSearch(bool substrate, int ttBits = 20, int maxDepth = 8)
     {
-        IRootBias? bias = substrate ? new SubstructureFoldBias(_ds) : null;
+        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds)) : null;
         var (mg, eg) = LearnedPstBlend();
         if (!substrate) { mg = null; eg = null; }
         return new Search(EvalTerm.All, bias, ttBits, mg, eg);
+    }
+
+    /// Re-applies the current bias + learned-PST blend to an existing Search
+    /// so per-ply PST refreshes reuse the instance (and its 32 MB
+    /// transposition table) instead of allocating a new one every ply.
+    public void RefreshSearch(Search search, bool substrate)
+    {
+        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds)) : null;
+        var (mg, eg) = LearnedPstBlend();
+        if (!substrate) { mg = null; eg = null; }
+        search.Reconfigure(bias, mg, eg);
     }
 
     private (int[][]? Mg, int[][]? Eg) LearnedPstBlend()

@@ -65,7 +65,7 @@ public static class PosReference
                 b.AddAttestation(NativeAttestation.Categorical(
                     posId, "HAS_NAME_ALIAS", nameId, sourceId, null, sourceTrust));
         }
-        VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset);
+        VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
         b.AddAttestation(NativeAttestation.Categorical(
             subject, "HAS_POS", posId, sourceId, contextId, sourceTrust,
             observationCount: observationCount));

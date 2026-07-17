@@ -28,23 +28,33 @@ public static class ChessGraph
     {
         var src = sourceId ?? ChessVocabulary.SourceId;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, src);
+        var to = EmitNodes(b, toKey, nowUs, src);
+        AppendMoveEdge(b, from, to, outcome, games, witnessWeight, src, moveChoiceGames, contextId);
+    }
+
+    // Already-staged overload: the per-ply analyzer loop stages each distinct position once
+    // (ChessAnalyze) and hands the composed nodes to every Append* call for that ply.
+    internal static void AppendMoveEdge(
+    SubstrateChangeBuilder b, ChessComposed from, ChessComposed to, PlyOutcome outcome,
+    long games, double witnessWeight,
+    Hash128 sourceId, long moveChoiceGames = 0,
+    Hash128? contextId = null)
+    {
         if (games < 1) games = 1;
         if (moveChoiceGames < 1) moveChoiceGames = games;
         long sum = checked(ScoreFp1e9(outcome) * games);
 
-        var from = EmitNodes(b, fromKey, nowUs, src);
-        var to = EmitNodes(b, toKey, nowUs, src);
-
         foreach (var s in from.Substructures)
-            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, src, contextId));
-        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, src, contextId));
+            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, sourceId, contextId));
+        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
 
         long moveSum = checked(ScoreFp1e9(outcome) * moveChoiceGames);
         b.AddAttestation(NativeAttestation.Aggregated(
             subject: from.Position.Id,
             typeId: ChessVocabulary.MoveType,
             obj: to.Position.Id,
-            sourceId: src,
+            sourceId: sourceId,
             contextId: contextId,
             games: moveChoiceGames,
             sumScoreFp1e9: moveSum,
@@ -56,9 +66,16 @@ public static class ChessGraph
     Hash128 sourceId, Hash128? contextId = null)
     {
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var from = EmitNodes(b, fromKey, nowUs, sourceId);
+        AppendEval(b, from, cpSideToMove, games, witnessWeight, sourceId, contextId);
+    }
+
+    internal static void AppendEval(
+    SubstrateChangeBuilder b, ChessComposed from, int cpSideToMove, long games, double witnessWeight,
+    Hash128 sourceId, Hash128? contextId = null)
+    {
         if (games < 1) games = 1;
         long sum = PgnEvals.EvalSumFp1e9(cpSideToMove, games);
-        var from = EmitNodes(b, fromKey, nowUs, sourceId);
         foreach (var s in from.Substructures)
             b.AddAttestation(EvalRow(s.Id, games, sum, witnessWeight, sourceId, contextId));
         b.AddAttestation(EvalRow(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
@@ -76,6 +93,16 @@ public static class ChessGraph
             observationCount: games));
     }
 
+    internal static void AppendMoveQuality(
+    SubstrateChangeBuilder b, Hash128 positionId, string qualityToken, long games, double witnessWeight,
+    Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, qualityToken, sourceId) is not { } qid) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            positionId, "MOVE_QUALITY", qid, sourceId, contextId, witnessWeight,
+            observationCount: games));
+    }
+
     public static void AppendClock(
     SubstrateChangeBuilder b, string fromKey, string canonicalClock, double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
@@ -85,6 +112,15 @@ public static class ChessGraph
         var from = EmitNodes(b, fromKey, nowUs, sourceId);
         b.AddAttestation(NativeAttestation.Categorical(
             from.Position.Id, "HAS_CLOCK", cid, sourceId, contextId, witnessWeight));
+    }
+
+    internal static void AppendClock(
+    SubstrateChangeBuilder b, Hash128 positionId, string canonicalClock, double witnessWeight,
+    Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, canonicalClock, sourceId) is not { } cid) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            positionId, "HAS_CLOCK", cid, sourceId, contextId, witnessWeight));
     }
 
     public static void AppendEvalToken(
@@ -98,6 +134,15 @@ public static class ChessGraph
             from.Position.Id, "HAS_EVAL_TOKEN", tid, sourceId, contextId, witnessWeight));
     }
 
+    internal static void AppendEvalToken(
+    SubstrateChangeBuilder b, Hash128 positionId, string evalToken, double witnessWeight,
+    Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, evalToken, sourceId) is not { } tid) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            positionId, "HAS_EVAL_TOKEN", tid, sourceId, contextId, witnessWeight));
+    }
+
     public static void AppendThinkClass(
     SubstrateChangeBuilder b, string fromKey, string thinkClass, double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
@@ -107,6 +152,15 @@ public static class ChessGraph
         var from = EmitNodes(b, fromKey, nowUs, sourceId);
         b.AddAttestation(NativeAttestation.Categorical(
             from.Position.Id, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
+    }
+
+    internal static void AppendThinkClass(
+    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, double witnessWeight,
+    Hash128 sourceId, Hash128? contextId = null)
+    {
+        if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            positionId, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
     }
 
     public static void AppendGameMeta(
@@ -126,6 +180,17 @@ public static class ChessGraph
     {
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         return EmitNodes(b, surface, nowUs, src).Position.Id;
+    }
+
+    /// <summary>
+    /// Compose + stage a position's nodes once and return the composed nodes, so a caller
+    /// attesting several facts onto the same position per ply (ChessAnalyze) stages each
+    /// distinct position a single time instead of re-staging it in every Append* helper.
+    /// </summary>
+    internal static ChessComposed EmitComposed(SubstrateChangeBuilder b, string surface, Hash128 src)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        return EmitNodes(b, surface, nowUs, src);
     }
 
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)

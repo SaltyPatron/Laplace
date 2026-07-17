@@ -120,7 +120,8 @@ seed-t0: build-perfcache build-app
 db-fresh: build-perfcache build-app
     set -euo pipefail
     rm -f "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/lib/postgresql/*/laplace_substrate.so \
-          "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate*
+          "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate* \
+          build/.stamps/install-native
     umask 0002
     cmake --install build/extension/laplace_substrate >/dev/null
     cd app

@@ -407,7 +407,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         for (int i = 0; i < _ast.NodeCount; i++)
         {
             var nd = _ast.GetNode(i);
-            if (_ast.NodeTypeName(nd.NodeTypeId) == "field")
+            if (_ast.NodeTypeIs(nd.NodeTypeId, "field"u8))
                 list.Add((nd.StartByte, nd.EndByte));
         }
         return list;

@@ -96,19 +96,33 @@ jobs:
       - name: Re-ingest must be a no-op on the evidence count
         run: |
           P(){ psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
-          before=$(P "SELECT count(*) FROM laplace.attestations;")
-          echo "attestations before re-ingest: ${before}"
+          # Scope the proof to THIS source's evidence — the indexed
+          # evidence_count(p_source => source_id(..)) ensure-foundation.sh
+          # gates on — instead of two full count(*) sweeps over attestations.
+          # Sources without a decomposer-gates.json entry (code lane) keep the
+          # unscoped count; the source key -> decomposer source name mapping
+          # lives only in that manifest.
+          src_name=$(python3 -c "import json; e=json.load(open('scripts/decomposer-gates.json'))['sources'].get('${{ inputs.source }}'); print(e['decomposer'] if e else '')")
+          if [ -n "$src_name" ]; then
+            count_sql="SELECT laplace.evidence_count(p_source => laplace.source_id('$src_name'));"
+            scope="evidence for source $src_name"
+          else
+            count_sql="SELECT count(*) FROM laplace.attestations;"
+            scope="attestations (unscoped — '${{ inputs.source }}' not in decomposer-gates.json)"
+          fi
+          before=$(P "$count_sql")
+          echo "$scope before re-ingest: ${before}"
           langs="${{ inputs.langs }}"; [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
           if [ -n "${{ inputs.path }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
           else
             scripts/ingest-source.sh "${{ inputs.source }}"
           fi
-          after=$(P "SELECT count(*) FROM laplace.attestations;")
-          echo "attestations after  re-ingest: ${after}"
+          after=$(P "$count_sql")
+          echo "$scope after  re-ingest: ${after}"
           [ "${before}" = "${after}" ] || {
-            echo "::error::idempotency broken — attestations grew ${before} → ${after} on re-ingest (double-count)"; exit 1; }
-          echo "::notice::idempotent — ${after} attestations unchanged on re-ingest"
+            echo "::error::idempotency broken — ${scope} grew ${before} → ${after} on re-ingest (double-count)"; exit 1; }
+          echo "::notice::idempotent — ${scope} unchanged at ${after} on re-ingest"
 
   gate:
     name: "gate — ${{ inputs.source }} consensus checks"

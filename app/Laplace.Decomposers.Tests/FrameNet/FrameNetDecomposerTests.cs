@@ -11,7 +11,7 @@ public sealed class FrameNetDecomposerTests
 {
     static FrameNetDecomposerTests()
     {
-        CodepointPerfcache.Load(ResolvePerfcacheBlob());
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
     }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();

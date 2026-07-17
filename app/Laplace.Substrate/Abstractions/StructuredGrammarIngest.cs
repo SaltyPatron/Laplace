@@ -320,8 +320,7 @@ public static class StructuredGrammarIngest
                 .SetCommitEpoch(0)
                 .EnableDeferredContent(containmentReader);
             witness.WalkRow(
-                new GrammarComposeContext(utf8, ast, rootId, null,
-                    JsonGrammarHelper.FindRootObjectNode(ast)),
+                new GrammarComposeContext(utf8, ast, rootId, null),
                 new RowContext(0, 1), b);
             containmentReader.MarkProven([rootId]);
             return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
@@ -346,8 +345,7 @@ public static class StructuredGrammarIngest
         foreach (var a in atts) builder.AddAttestation(a);
 
         witness.WalkRow(
-            new GrammarComposeContext(utf8, ast, root, composer,
-                JsonGrammarHelper.FindRootObjectNode(ast)),
+            new GrammarComposeContext(utf8, ast, root, composer),
             new RowContext(0, 1), builder);
         return await builder.SetInputUnitsConsumed(1).BuildAsync(ct);
     }

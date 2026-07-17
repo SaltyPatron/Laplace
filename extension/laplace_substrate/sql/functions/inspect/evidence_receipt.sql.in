@@ -50,15 +50,22 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
               a.type_id = relation_type_id('IS_SYNONYM_OF')
               AND a.object_id IN (SELECT id FROM subj))
         GROUP BY a.type_id, a.object_id, a.source_id
+    ), src_labels AS MATERIALIZED (
+        -- Label each DISTINCT source ONCE (sources number in the dozens), fenced
+        -- so render() cannot be pushed back down to run per (type, object, source)
+        -- group (~3,129 renders for one entity before this map existed). The
+        -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
+        -- the old inline expression, so output is byte-identical.
+        SELECT s.source_id,
+               regexp_replace(render(s.source_id),
+                   '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
+        FROM (SELECT DISTINCT f.source_id FROM filtered f) s
     ), folded AS (
         SELECT f.type_id, f.object_id,
                sum(f.obs) AS witness_count,
-               string_agg(
-                   DISTINCT regexp_replace(render(f.source_id),
-                       '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1'),
-                   ', ' ORDER BY regexp_replace(render(f.source_id),
-                       '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1')) AS source_labels
+               string_agg(DISTINCT sl.label, ', ' ORDER BY sl.label) AS source_labels
         FROM filtered f
+        JOIN src_labels sl ON sl.source_id = f.source_id
         GROUP BY f.type_id, f.object_id
     ), ranked AS (
         -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim

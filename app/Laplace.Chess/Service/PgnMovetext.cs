@@ -129,7 +129,7 @@ internal static class PgnMovetext
         while (p != GrammarAst.Root)
         {
             var pn = ast.GetNode((int)p);
-            if (ast.NodeTypeName(pn.NodeTypeId) == "variation") return true;
+            if (ast.NodeTypeIs(pn.NodeTypeId, "variation"u8)) return true;
             p = pn.Parent;
         }
         return false;

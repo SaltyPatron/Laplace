@@ -52,8 +52,10 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         if (text.IsEmpty) return;
 
         Hash128 extId = SourceEntityIdConventions.TatoebaSentence(id);
-        Hash128 langId = LanguageReference.Resolve(lang);
-        VocabularyNames.TrackLanguage(TatoebaDecomposer.LanguageNames, lang);
+        // Resolve the language code once; id + readback tracking both reuse it.
+        string? iso3 = LanguageReference.ResolveCode(lang);
+        Hash128 langId = LanguageReference.IdForResolvedCode(iso3);
+        VocabularyNames.TrackResolvedLanguage(TatoebaDecomposer.LanguageNames, iso3);
         b.AddEntity(new EntityRow(extId, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
 

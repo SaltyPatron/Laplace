@@ -51,9 +51,9 @@ public sealed class Search
     }
 
     private readonly EvalTerm _terms;
-    private readonly IRootBias? _rootBias;
-    private readonly int[][]? _mgPst;
-    private readonly int[][]? _egPst;
+    private IRootBias? _rootBias;
+    private int[][]? _mgPst;
+    private int[][]? _egPst;
     private Dictionary<string, int>? _rootBonusByUci;
 
     // Root bonuses are added AFTER the child search, so sibling comparisons are only sound if
@@ -73,8 +73,23 @@ public sealed class Search
         _mgPst = mgPst;
         _egPst = egPst;
         int bits = Math.Clamp(ttBits, 10, 24);
+        TtBits = bits;
         _tt = new TtEntry[1 << bits];
         _ttMask = (1UL << bits) - 1;
+    }
+
+    public int TtBits { get; }
+
+    /// Swap the bias/PST configuration on an existing instance so callers can
+    /// reuse the transposition table allocation (32 MB at the default 2^20
+    /// entries) instead of building a fresh Search per request/ply. Think()
+    /// already resets all per-search state (TT, killers, root bonuses) on
+    /// entry, so a reconfigured instance is behavior-identical to a new one.
+    public void Reconfigure(IRootBias? rootBias, int[][]? mgPst, int[][]? egPst)
+    {
+        _rootBias = rootBias;
+        _mgPst = mgPst;
+        _egPst = egPst;
     }
 
     public Result Think(Board board, Limits limits, CancellationToken ct = default)
@@ -218,8 +233,19 @@ public sealed class Search
         var moves = MoveGen.Legal(b);
         if (moves.Count == 0) return inCheck ? -(Mate - ply) : 0;
 
-        var considered = inCheck ? moves : moves.Where(m => IsCaptureOrPromo(b, m)).ToList();
-        if (!inCheck && considered.Count == 0) return alpha;
+        // In-place, order-preserving compaction — Quiesce runs at every
+        // horizon node, and the old Where().ToList() allocated a closure, an
+        // iterator, and a list per node (millions per move at the node cap).
+        var considered = moves;
+        if (!inCheck)
+        {
+            int w = 0;
+            for (int i = 0; i < moves.Count; i++)
+                if (IsCaptureOrPromo(b, moves[i]))
+                    moves[w++] = moves[i];
+            moves.RemoveRange(w, moves.Count - w);
+            if (moves.Count == 0) return alpha;
+        }
 
         OrderCaptures(b, considered);
         foreach (var m in considered)

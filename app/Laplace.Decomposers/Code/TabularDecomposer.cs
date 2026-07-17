@@ -28,6 +28,7 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
         _targetColumn = targetColumn;
         _positiveValue = positiveValue;
         _ = numBins;
+        OutcomeId = Hash128.OfCanonical($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
     }
 
     public override int LayerOrder => 2;
@@ -37,9 +38,9 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
-    private Hash128 OutcomeId => Hash128.OfCanonical($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
+    private Hash128 OutcomeId { get; }
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");
-    private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"tabular/value/{col}={tok}/v1");
+    private static readonly Hash128 PredictsTypeId = RelationTypeRegistry.RelationTypeId("PREDICTS");
 
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
@@ -81,7 +82,6 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
     protected override void Compose(RowRecord rec, SubstrateChangeBuilder b)
     {
         double witnessWeight = RelationTypeRank.Associative * TC.StructuredCorpus;
-        var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
         long score = rec.Positive ? checked(2 * Glicko2.FpScale) : 0;
 
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
@@ -91,30 +91,32 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
             string tok = raw.Trim();
             if (tok.Length == 0) continue;
 
-            EnsureColumn(b, col);
+            var columnId = ColumnId(col);
+            EnsureColumn(b, col, columnId);
 
-            var valueId = ValueId(col, tok);
+            string valueCanonical = $"tabular/value/{col}={tok}/v1";
+            var valueId = Hash128.OfCanonical(valueCanonical);
             b.AddEntity(new EntityRow(valueId, EntityTier.Word, ValueTypeId, Source));
-            _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
+            _canonicalNames.Add(valueCanonical);
             b.AddAttestation(NativeAttestation.Aggregated(
-                valueId, predicts, OutcomeId, Source, contextId: ColumnId(col),
+                valueId, PredictsTypeId, OutcomeId, Source, contextId: columnId,
                 games: 1, sumScoreFp1e9: score, witnessWeight: witnessWeight));
             b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_VALUE_IN", ColumnId(col), Source, TC.StructuredCorpus));
+                valueId, "IS_VALUE_IN", columnId, Source, TC.StructuredCorpus));
             if (ContentEmitter.Emit(b, tok, Source) is { } bareId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     valueId, "IS_INSTANCE_OF", bareId, Source, TC.StructuredCorpus));
         }
     }
 
-    private void EnsureColumn(SubstrateChangeBuilder b, string col)
+    private void EnsureColumn(SubstrateChangeBuilder b, string col, Hash128 columnId)
     {
         if (!_stagedColumns.Add(col)) return;
-        b.AddEntity(new EntityRow(ColumnId(col), EntityTier.Word, ColumnTypeId, Source));
+        b.AddEntity(new EntityRow(columnId, EntityTier.Word, ColumnTypeId, Source));
         _canonicalNames.Add($"tabular/column/{col}/v1");
         if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
             b.AddAttestation(NativeAttestation.Categorical(
-                ColumnId(col), "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
+                columnId, "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

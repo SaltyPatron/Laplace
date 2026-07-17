@@ -67,6 +67,73 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
     // Emission happens in the unit's DrainInto (it owns both trees + the edge); nothing to add here.
     public void WalkWitness(RelationTripleRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
 
+    /// <summary>
+    /// Existence-gate short-circuit: both phrases are proven present, so neither tier tree
+    /// needs recomposing — but the record's testimony (edge + POS/synset/language facts)
+    /// must still be emitted, exactly as DrainInto would have.
+    /// </summary>
+    internal void WitnessPresentPair(
+        in RelationTripleRecord record, Hash128 subjectRoot, Hash128 objectRoot,
+        SubstrateChangeBuilder builder) =>
+        EmitTripleFacts(builder, in record, subjectRoot, objectRoot, _sourceId, _sourceTrust);
+
+    // The record's full attested payload given both content roots — shared verbatim by the
+    // deferred unit's DrainInto (composed roots) and the existence-gate short-circuit
+    // (roots resolved without compose).
+    private static void EmitTripleFacts(
+        SubstrateChangeBuilder builder, in RelationTripleRecord record,
+        Hash128 subjectRoot, Hash128 objectRoot, Hash128 sourceId, double sourceTrust)
+    {
+        if (subjectRoot != default && objectRoot != default)
+        {
+            Hash128? ctx = record.ContextId;
+            if (record.ContextAnchorKey is { Length: > 0 } ctxKey
+                && record.ContextCategoryTypeId is { } ctxType && ctxType != default)
+            {
+                ctx = CategoryAnchor.Emit(builder, ctxKey, ctxType, sourceId, sourceTrust) ?? ctx;
+            }
+            builder.AddAttestation(NativeAttestation.Categorical(
+                subjectRoot, record.RelationType, objectRoot, sourceId, sourceTrust,
+                magnitude: record.Magnitude, arenaScale: 1.0, contextId: ctx));
+        }
+
+        // Fold source-encoded POS onto the unified POS hub (n/v/a/r/s → canonical via the
+        // WordNet tagset). POS entities are foundation-seeded, so this is FK-safe.
+        if (subjectRoot != default && record.SubjectPos is { } sp)
+            PosReference.Attest(builder, subjectRoot, sp.ToString(),
+                PosReference.PosTagset.WordNet, sourceId, null, sourceTrust);
+        if (objectRoot != default && record.ObjectPos is { } op)
+            PosReference.Attest(builder, objectRoot, op.ToString(),
+                PosReference.PosTagset.WordNet, sourceId, null, sourceTrust);
+
+        EmitSynsetMembership(builder, subjectRoot, record.SubjectSynsetId, sourceId, sourceTrust);
+        EmitSynsetMembership(builder, objectRoot, record.ObjectSynsetId, sourceId, sourceTrust);
+
+        if (subjectRoot != default && record.SubjectLangId is { } sl && sl != default)
+        {
+            builder.AddEntity(new EntityRow(
+                sl, EntityTier.Word, EntityTypeRegistry.Language, sourceId));
+            builder.AddAttestation(NativeAttestation.Categorical(
+                subjectRoot, "HAS_LANGUAGE", sl, sourceId, sourceTrust));
+        }
+        if (objectRoot != default && record.ObjectLangId is { } ol && ol != default)
+        {
+            builder.AddEntity(new EntityRow(
+                ol, EntityTier.Word, EntityTypeRegistry.Language, sourceId));
+            builder.AddAttestation(NativeAttestation.Categorical(
+                objectRoot, "HAS_LANGUAGE", ol, sourceId, sourceTrust));
+        }
+    }
+
+    private static void EmitSynsetMembership(
+        SubstrateChangeBuilder builder, Hash128 nodeRoot, Hash128? synId,
+        Hash128 sourceId, double sourceTrust)
+    {
+        if (nodeRoot == default || synId is not { } syn || syn == default) return;
+        builder.AddAttestation(NativeAttestation.Categorical(
+            nodeRoot, "CORRESPONDS_TO", syn, sourceId, sourceTrust));
+    }
+
     private sealed class TripleDeferredUnit : IMultiTreeIngestDeferredUnit
     {
         private readonly RelationTripleRecord _record;
@@ -130,54 +197,9 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             Hash128 subjectRoot = EmitTree(builder, _subjectTree, perTreeBitmaps.Length > 0 ? perTreeBitmaps[0] : null);
             Hash128 objectRoot = EmitTree(builder, _objectTree, perTreeBitmaps.Length > 1 ? perTreeBitmaps[1] : null);
 
-            if (subjectRoot != default && objectRoot != default)
-            {
-                Hash128? ctx = _record.ContextId;
-                if (_record.ContextAnchorKey is { Length: > 0 } ctxKey
-                    && _record.ContextCategoryTypeId is { } ctxType && ctxType != default)
-                {
-                    ctx = CategoryAnchor.Emit(builder, ctxKey, ctxType, _sourceId, _sourceTrust) ?? ctx;
-                }
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    subjectRoot, _record.RelationType, objectRoot, _sourceId, _sourceTrust,
-                    magnitude: _record.Magnitude, arenaScale: 1.0, contextId: ctx));
-            }
-
-            // Fold source-encoded POS onto the unified POS hub (n/v/a/r/s → canonical via the
-            // WordNet tagset). POS entities are foundation-seeded, so this is FK-safe.
-            if (subjectRoot != default && _record.SubjectPos is { } sp)
-                PosReference.Attest(builder, subjectRoot, sp.ToString(),
-                    PosReference.PosTagset.WordNet, _sourceId, null, _sourceTrust);
-            if (objectRoot != default && _record.ObjectPos is { } op)
-                PosReference.Attest(builder, objectRoot, op.ToString(),
-                    PosReference.PosTagset.WordNet, _sourceId, null, _sourceTrust);
-
-            EmitSynsetMembership(builder, subjectRoot, _record.SubjectSynsetId);
-            EmitSynsetMembership(builder, objectRoot, _record.ObjectSynsetId);
-
-            if (subjectRoot != default && _record.SubjectLangId is { } sl && sl != default)
-            {
-                builder.AddEntity(new EntityRow(
-                    sl, EntityTier.Word, EntityTypeRegistry.Language, _sourceId));
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    subjectRoot, "HAS_LANGUAGE", sl, _sourceId, _sourceTrust));
-            }
-            if (objectRoot != default && _record.ObjectLangId is { } ol && ol != default)
-            {
-                builder.AddEntity(new EntityRow(
-                    ol, EntityTier.Word, EntityTypeRegistry.Language, _sourceId));
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    objectRoot, "HAS_LANGUAGE", ol, _sourceId, _sourceTrust));
-            }
+            EmitTripleFacts(builder, in _record, subjectRoot, objectRoot, _sourceId, _sourceTrust);
 
             return subjectRoot;
-        }
-
-        private void EmitSynsetMembership(SubstrateChangeBuilder builder, Hash128 nodeRoot, Hash128? synId)
-        {
-            if (nodeRoot == default || synId is not { } syn || syn == default) return;
-            builder.AddAttestation(NativeAttestation.Categorical(
-                nodeRoot, "CORRESPONDS_TO", syn, _sourceId, _sourceTrust));
         }
 
         private Hash128 EmitTree(SubstrateChangeBuilder builder, TierTree? tree, byte[]? bitmap)

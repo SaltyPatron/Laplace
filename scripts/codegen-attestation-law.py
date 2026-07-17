@@ -410,6 +410,15 @@ int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_ty
         bucket_size <<= 1
     bucket_mask = bucket_size - 1
 
+    # Surface bucket covers aliases + canonicals (resolve_surface's lookup
+    # domain); canonical bucket covers canonical names only (relation_type_id's
+    # domain — aliases must NOT match there, they blake3-fall-through).
+    surface_count = len(alias_entries) + rel_count
+    surface_bucket_size = 1
+    while surface_bucket_size < surface_count * 4:
+        surface_bucket_size <<= 1
+    surface_bucket_mask = surface_bucket_size - 1
+
     impl = f"""
 const laplace_relation_def_t* laplace_relation_table = k_relations;
 const size_t laplace_relation_table_count = {len(canon_names)};
@@ -438,6 +447,66 @@ static hash128_t k_relation_type_id_cache[{len(canon_names)}];
 #define LAPLACE_REL_BUCKET_MASK {bucket_mask}u
 static int16_t k_relation_bucket[LAPLACE_REL_BUCKET_SIZE];
 
+/* String-keyed buckets for the surface->idx and canonical->idx lookups.
+ * These were linear scans of the 23-alias + {len(canon_names)}-canonical tables run once
+ * per attestation built through the categorical builders — hundreds of
+ * millions of strcmps per seed recomputing a constant. FNV-1a over the
+ * surface with linear probing, built under the same init guard as the id
+ * bucket. Two tables because the domains differ: resolve_surface matches
+ * aliases first then canonicals; relation_type_id must match canonicals
+ * ONLY (an alias string falls through to the blake3 path there). */
+typedef struct {{
+    const char* surface;
+    int16_t     idx;
+    uint8_t     flip;
+}} rel_surface_slot_t;
+
+#define LAPLACE_REL_SURFACE_BUCKET_SIZE {surface_bucket_size}u
+#define LAPLACE_REL_SURFACE_BUCKET_MASK {surface_bucket_mask}u
+static rel_surface_slot_t k_relation_surface_bucket[LAPLACE_REL_SURFACE_BUCKET_SIZE];
+static rel_surface_slot_t k_relation_canonical_bucket[LAPLACE_REL_BUCKET_SIZE];
+
+static uint64_t rel_surface_hash(const char* s) {{
+    uint64_t h = 1469598103934665603ull;
+    for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {{
+        h ^= (uint64_t)*p;
+        h *= 1099511628211ull;
+    }}
+    return h;
+}}
+
+static void rel_slot_insert(rel_surface_slot_t* tab, size_t mask,
+                            const char* surface, int16_t idx, uint8_t flip,
+                            int keep_existing) {{
+    size_t b = (size_t)(rel_surface_hash(surface) & mask);
+    for (;;) {{
+        if (tab[b].surface == NULL) {{
+            tab[b].surface = surface;
+            tab[b].idx = idx;
+            tab[b].flip = flip;
+            return;
+        }}
+        if (keep_existing && strcmp(tab[b].surface, surface) == 0)
+            return; /* alias inserted first keeps priority */
+        b = (b + 1) & mask;
+    }}
+}}
+
+static int rel_slot_lookup(const rel_surface_slot_t* tab, size_t mask,
+                           const char* surface, int16_t* out_idx, uint8_t* out_flip) {{
+    size_t b = (size_t)(rel_surface_hash(surface) & mask);
+    for (size_t probes = 0; probes <= mask; ++probes) {{
+        if (tab[b].surface == NULL) return -1;
+        if (strcmp(tab[b].surface, surface) == 0) {{
+            *out_idx = tab[b].idx;
+            if (out_flip) *out_flip = tab[b].flip;
+            return 0;
+        }}
+        b = (b + 1) & mask;
+    }}
+    return -1;
+}}
+
 #ifdef _WIN32
 #include <windows.h>
 static volatile LONG g_relation_ids_state = 0;
@@ -462,6 +531,22 @@ static void relation_ids_ensure(void) {{
             while (k_relation_bucket[b] >= 0) b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
             k_relation_bucket[b] = (int16_t)i;
         }}
+        for (size_t b = 0; b < LAPLACE_REL_SURFACE_BUCKET_SIZE; ++b)
+            k_relation_surface_bucket[b].surface = NULL;
+        for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b)
+            k_relation_canonical_bucket[b].surface = NULL;
+        /* aliases first: resolve_surface gives alias hits priority */
+        for (size_t i = 0; i < laplace_relation_alias_table_count; ++i)
+            rel_slot_insert(k_relation_surface_bucket, LAPLACE_REL_SURFACE_BUCKET_MASK,
+                            laplace_relation_alias_table[i].surface,
+                            laplace_relation_alias_table[i].canon_idx,
+                            laplace_relation_alias_table[i].flip, 0);
+        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
+            rel_slot_insert(k_relation_surface_bucket, LAPLACE_REL_SURFACE_BUCKET_MASK,
+                            laplace_relation_table[i].canonical, (int16_t)i, 0, 1);
+            rel_slot_insert(k_relation_canonical_bucket, LAPLACE_REL_BUCKET_MASK,
+                            laplace_relation_table[i].canonical, (int16_t)i, 0, 0);
+        }}
         ids_mark_ready();
     }} else {{
         while (!ids_ready()) {{ }}
@@ -477,23 +562,14 @@ static int table_entry_type_id(size_t idx, hash128_t* out_type_id) {{
 
 int laplace_relation_type_id(const char* canonical_name, hash128_t* out_type_id) {{
     if (!canonical_name || !out_type_id) return -1;
-    for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
-        if (cmp_str(laplace_relation_table[i].canonical, canonical_name) == 0) {{
-            return table_entry_type_id(i, out_type_id);
-        }}
+    relation_ids_ensure();
+    {{
+        int16_t idx = -1;
+        if (rel_slot_lookup(k_relation_canonical_bucket, LAPLACE_REL_BUCKET_MASK,
+                            canonical_name, &idx, NULL) == 0)
+            return table_entry_type_id((size_t)idx, out_type_id);
     }}
     return type_id_from_canonical(canonical_name, out_type_id) == 0 ? 1 : -1;
-}}
-
-static int alias_lookup(const char* surface, int16_t* out_idx, uint8_t* out_flip) {{
-    for (size_t i = 0; i < laplace_relation_alias_table_count; ++i) {{
-        if (cmp_str(laplace_relation_alias_table[i].surface, surface) == 0) {{
-            *out_idx = laplace_relation_alias_table[i].canon_idx;
-            *out_flip = laplace_relation_alias_table[i].flip;
-            return 0;
-        }}
-    }}
-    return -1;
 }}
 
 int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id,
@@ -502,14 +578,9 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
     if (!surface || !out_type_id) return -1;
     uint8_t flip = 0;
     int16_t idx = -1;
-    if (alias_lookup(surface, &idx, &flip) != 0) {{
-        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
-            if (cmp_str(laplace_relation_table[i].canonical, surface) == 0) {{
-                idx = (int16_t)i;
-                break;
-            }}
-        }}
-    }}
+    relation_ids_ensure();
+    rel_slot_lookup(k_relation_surface_bucket, LAPLACE_REL_SURFACE_BUCKET_MASK,
+                    surface, &idx, &flip);
     if (idx < 0) {{
         int rc = laplace_relation_type_id(surface, out_type_id);
         if (rc < 0) return rc;
