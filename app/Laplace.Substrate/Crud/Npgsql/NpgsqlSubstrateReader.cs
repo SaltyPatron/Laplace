@@ -199,12 +199,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// already does its own perfcache fast-path internally
     /// (batch_presence_core() in descent_probe.c), and every bit in the
     /// result is a real, positive confirmation for exactly the ids passed
-    /// in. The caller (TierTreeDescent.ProbeBatchEmitBitmapsAsync) is
-    /// responsible for filtering which ids to check each round and for
-    /// only calling MarkProven with the subset this round's bitmap actually
-    /// confirmed present.
+    /// in. The round's tier rides along as the parallel key array so the
+    /// probe prunes entities' LIST(tier) partitions to one index descent
+    /// per id instead of one per leaf. The caller
+    /// (TierTreeDescent.ProbeBatchEmitBitmapsAsync) is responsible for
+    /// filtering which ids to check each round and for only calling
+    /// MarkProven with the subset this round's bitmap actually confirmed
+    /// present.
     /// </summary>
-    public async Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+    public async Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
     {
         if (ids is null) throw new ArgumentNullException(nameof(ids));
         int n = ids.Count;
@@ -212,10 +215,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
         var byteaArray = new byte[n][];
         for (int i = 0; i < n; i++) byteaArray[i] = ids[i].ToBytes();
+        var tiers = new short[n];
+        Array.Fill(tiers, tier);
 
-        await using var cmd = _ds.CreateCommand("SELECT laplace.tier_batch_existence_probe($1)");
+        await using var cmd = _ds.CreateCommand("SELECT laplace.tier_batch_existence_probe($1, $2)");
         var p = cmd.Parameters.AddWithValue(byteaArray);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        var pt = cmd.Parameters.AddWithValue(tiers);
+        pt.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint;
         var result = await cmd.ExecuteScalarAsync(ct);
         return result switch
         {

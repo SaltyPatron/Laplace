@@ -436,6 +436,131 @@ pg_laplace_entities_stored_bitmap(PG_FUNCTION_ARGS)
                                   laplace_entities_stored_bitmap);
 }
 
+/*
+ * Shared validation + SPI-wrapped invocation for the single-key batch-
+ * presence primitives (entities_stored_bitmap(ids, tiers),
+ * tier_batch_existence_probe(ids, tiers),
+ * physicalities_exist_bitmap(ids, hilberts)). Same positive-confirmation
+ * semantics as presence_bitmap_datum; the second argument carries the
+ * target table's partition key parallel to the ids so the ordinals probe
+ * prunes to one index descent per id instead of one per leaf
+ * (entities: LIST(tier); physicalities: RANGE(hilbert_index)).
+ */
+static Datum
+presence_bitmap_datum_keyed(FunctionCallInfo fcinfo, const char* label,
+                             Oid key_elem_oid, const char* key_desc,
+                             int (*probe)(ArrayType*, ArrayType*, uint8_t*, int))
+{
+    ArrayType*  ids_array;
+    ArrayType*  keys_array;
+    int         candidate_count;
+    int         key_count;
+    int         bitmap_bytes;
+    bytea*      result;
+    uint8*      bm;
+
+    if (PG_ARGISNULL(0))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("%s: ids array must not be NULL", label)));
+    if (PG_ARGISNULL(1))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("%s: %s array must not be NULL", label, key_desc)));
+
+    ids_array = PG_GETARG_ARRAYTYPE_P(0);
+    keys_array = PG_GETARG_ARRAYTYPE_P(1);
+
+    if (ARR_NDIM(ids_array) > 1 || ARR_NDIM(keys_array) > 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("%s: ids and %s arrays must be 1-dimensional", label, key_desc)));
+
+    if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("%s: ids array element type must be bytea", label)));
+    if (ARR_ELEMTYPE(keys_array) != key_elem_oid)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("%s: %s array element type mismatch", label, key_desc)));
+
+    if (ARR_HASNULL(ids_array) || ARR_HASNULL(keys_array))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("%s: ids and %s arrays must not contain NULL", label, key_desc)));
+
+    candidate_count = ARR_NDIM(ids_array) == 0
+                      ? 0
+                      : ArrayGetNItems(ARR_NDIM(ids_array), ARR_DIMS(ids_array));
+    key_count = ARR_NDIM(keys_array) == 0
+                ? 0
+                : ArrayGetNItems(ARR_NDIM(keys_array), ARR_DIMS(keys_array));
+    if (key_count != candidate_count)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("%s: ids and %s must be the same length (%d/%d)",
+                    label, key_desc, candidate_count, key_count)));
+
+    bitmap_bytes = (candidate_count + 7) / 8;
+
+    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
+    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
+    if (bitmap_bytes > 0)
+        memset(VARDATA(result), 0, bitmap_bytes);
+    bm = (uint8*) VARDATA(result);
+
+    if (candidate_count == 0)
+        PG_RETURN_BYTEA_P(result);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("%s: SPI_connect failed", label)));
+
+    {
+        int rc = probe(ids_array, keys_array, bm, candidate_count);
+
+        SPI_finish();
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: bulk probe failed (rc=%d)", label, rc)));
+    }
+
+    PG_RETURN_BYTEA_P(result);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_entities_stored_bitmap_keyed);
+
+Datum
+pg_laplace_entities_stored_bitmap_keyed(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum_keyed(fcinfo, "entities_stored_bitmap",
+                                        INT2OID, "tiers",
+                                        laplace_entities_stored_bitmap_keyed);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_tier_batch_existence_probe_keyed);
+
+Datum
+pg_laplace_tier_batch_existence_probe_keyed(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum_keyed(fcinfo, "tier_batch_existence_probe",
+                                        INT2OID, "tiers",
+                                        laplace_tier_batch_existence_probe_keyed);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap_keyed);
+
+Datum
+pg_laplace_physicalities_exist_bitmap_keyed(PG_FUNCTION_ARGS)
+{
+    return presence_bitmap_datum_keyed(fcinfo, "physicalities_exist_bitmap",
+                                        BYTEAOID, "hilberts",
+                                        laplace_physicalities_present_bitmap_keyed);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap);
 
 Datum

@@ -20,16 +20,19 @@ public interface ISubstrateReader
     /// <summary>
     /// One round of the tier-by-tier, trunk-to-leaf batch existence probe
     /// (see TierTreeDescent.ProbeBatchEmitBitmapsAsync). The caller passes
-    /// exactly the candidate ids for one tier, already filtered to exclude
-    /// descendants of nodes a previous (higher-tier) round confirmed
-    /// present. A bit in the returned bitmap is set iff that id was
-    /// positively confirmed present -- this must NEVER default to "present"
-    /// for unresolved candidates; presence is only ever asserted from a
-    /// real query result. Default implementation delegates to
-    /// <see cref="EntitiesExistBitmapAsync"/>, which has the same safe
+    /// exactly the candidate ids for one tier -- <paramref name="tier"/> is
+    /// that round's tier, shared by every candidate because the descent is
+    /// tier-by-tier by construction; the backing store uses it to prune its
+    /// LIST(tier) partitions to one index descent per id -- already
+    /// filtered to exclude descendants of nodes a previous (higher-tier)
+    /// round confirmed present. A bit in the returned bitmap is set iff
+    /// that id was positively confirmed present -- this must NEVER default
+    /// to "present" for unresolved candidates; presence is only ever
+    /// asserted from a real query result. Default implementation delegates
+    /// to <see cref="EntitiesExistBitmapAsync"/>, which has the same safe
     /// semantics.
     /// </summary>
-    Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+    Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
         => EntitiesExistBitmapAsync(ids, ct);
 
     /// <summary>

@@ -112,14 +112,27 @@ public sealed partial class NpgsqlSubstrateWriter
         // (projections and building blocks land after identity content).
         var entityIdSet = new HashSet<Hash128>(ents.Ids.Count);
         var probeEntityIds = new List<Hash128>(ents.Ids.Count);
-        foreach (var id in ents.Ids)
-            if (entityIdSet.Add(id)) probeEntityIds.Add(id);
+        // Partition keys parallel to the probed ids (entities: LIST(tier);
+        // physicalities: RANGE(hilbert_index)) — id alone cannot prune, so
+        // an id-only probe pays one index descent per leaf.
+        var probeEntityTiers = new List<short>(ents.Ids.Count);
+        for (int i = 0; i < ents.Ids.Count; i++)
+            if (entityIdSet.Add(ents.Ids[i]))
+            {
+                probeEntityIds.Add(ents.Ids[i]);
+                probeEntityTiers.Add(ents.Tiers[i]);
+            }
         int distinctStagedEntities = probeEntityIds.Count;
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
-        foreach (var id in phys.Ids)
-            if (physIdSet.Add(id)) probePhysIds.Add(id);
+        var probePhysHilberts = new List<Hash128>(phys.Ids.Count);
+        for (int i = 0; i < phys.Ids.Count; i++)
+            if (physIdSet.Add(phys.Ids[i]))
+            {
+                probePhysIds.Add(phys.Ids[i]);
+                probePhysHilberts.Add(phys.HilbertKeys[i]);
+            }
 
         // Attestation duplicate collapse, exactly apply_batch's semantics:
         // representative = latest-ts staged row, observation counts sum.
@@ -196,8 +209,8 @@ public sealed partial class NpgsqlSubstrateWriter
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
             var probeTasks = new[]
             {
-                ProbePresentParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, probeEntityTiers, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentPairKeyedParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, probePhysHilberts, r => Interlocked.Add(ref rtProbe, r), ct),
                 ProbePresentKeyedParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, probeAttTypes, probeAttSubjects, r => Interlocked.Add(ref rtProbe, r), ct),
             };
             await Task.WhenAll(probeTasks);
@@ -427,8 +440,18 @@ public sealed partial class NpgsqlSubstrateWriter
         return blobs;
     }
 
-    private async Task<HashSet<Hash128>> ProbePresentParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, Action<int> addRoundTrips, CancellationToken ct)
+    /// <summary>
+    /// Shared chunked, connection-parallel presence probe. Sends the ids in
+    /// ProbeChunkIds-sized chunks as $1 (bytea[]), lets
+    /// <paramref name="bindKeys"/> add the target table's partition-key
+    /// arrays for the same [start, start+n) window, and decodes the returned
+    /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
+    /// triple-keyed) rides this one implementation.
+    /// </summary>
+    private async Task<HashSet<Hash128>> ProbePresentCoreAsync(
+        string commandText, IReadOnlyList<Hash128> ids,
+        Action<NpgsqlParameterCollection, int, int> bindKeys,
+        Action<int> addRoundTrips, CancellationToken ct)
     {
         var present = new HashSet<Hash128>();
         if (ids.Count == 0) return present;
@@ -446,9 +469,10 @@ public sealed partial class NpgsqlSubstrateWriter
             await using var conn = await _ds.OpenConnectionAsync(token);
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 0;
-            cmd.CommandText = $"SELECT {function}($1)";
+            cmd.CommandText = commandText;
             cmd.Parameters.Add(new NpgsqlParameter
             { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            bindKeys(cmd.Parameters, start, n);
             var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
 
             var hits = new List<Hash128>();
@@ -482,78 +506,72 @@ public sealed partial class NpgsqlSubstrateWriter
         return present;
     }
 
-    /// <summary>Keyed variant of the presence probe: passes the target
-    /// table's partition keys parallel to the ids so the server-side probe
-    /// can prune (attestations: LIST(type_id) -> HASH(subject_id); an
-    /// id-only probe pays one index descent per leaf — ~145x).</summary>
-    private async Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
+    /// <summary>Tier-keyed presence probe (entities: LIST(tier), t2 further
+    /// HASH(id)). The write lane stages every entity's tier, so the probe
+    /// prunes to one index descent per id instead of one per leaf.</summary>
+    private Task<HashSet<Hash128>> ProbePresentTieredParallelAsync(
+        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<short> tiers,
+        Action<int> addRoundTrips, CancellationToken ct)
+    {
+        if (tiers.Count != ids.Count)
+            throw new InvalidOperationException(
+                $"keyed probe arrays misaligned: {ids.Count} ids / {tiers.Count} tiers");
+        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
+            (parameters, start, n) =>
+            {
+                var chunk = new short[n];
+                for (int i = 0; i < n; i++) chunk[i] = tiers[start + i];
+                parameters.Add(new NpgsqlParameter
+                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            }, addRoundTrips, ct);
+    }
+
+    /// <summary>Pair-keyed presence probe (physicalities:
+    /// RANGE(hilbert_index)). The write lane stages every row's hilbert key
+    /// (it is the parallel-COPY sort key already), so the probe prunes
+    /// per row instead of descending every leaf per id.</summary>
+    private Task<HashSet<Hash128>> ProbePresentPairKeyedParallelAsync(
+        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> keys,
+        Action<int> addRoundTrips, CancellationToken ct)
+    {
+        if (keys.Count != ids.Count)
+            throw new InvalidOperationException(
+                $"keyed probe arrays misaligned: {ids.Count} ids / {keys.Count} keys");
+        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
+            (parameters, start, n) =>
+            {
+                var chunk = new byte[n][];
+                for (int i = 0; i < n; i++) chunk[i] = keys[start + i].ToBytes();
+                parameters.Add(new NpgsqlParameter
+                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            }, addRoundTrips, ct);
+    }
+
+    /// <summary>Triple-keyed presence probe (attestations: LIST(type_id) ->
+    /// HASH(subject_id); an id-only probe pays one index descent per leaf —
+    /// ~145x).</summary>
+    private Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
         string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
         IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
     {
-        var present = new HashSet<Hash128>();
-        if (ids.Count == 0) return present;
         if (typeIds.Count != ids.Count || subjectIds.Count != ids.Count)
             throw new InvalidOperationException(
                 $"keyed probe arrays misaligned: {ids.Count} ids / {typeIds.Count} types / {subjectIds.Count} subjects");
-
-        int chunkCount = (ids.Count + ProbeChunkIds - 1) / ProbeChunkIds;
-        var perChunk = new List<Hash128>[chunkCount];
-
-        async Task ProbeChunkAsync(int c, CancellationToken token)
-        {
-            int start = c * ProbeChunkIds;
-            int n = Math.Min(ProbeChunkIds, ids.Count - start);
-            var chunkIds = new byte[n][];
-            var chunkTypes = new byte[n][];
-            var chunkSubjects = new byte[n][];
-            for (int i = 0; i < n; i++)
+        return ProbePresentCoreAsync($"SELECT {function}($1, $2, $3)", ids,
+            (parameters, start, n) =>
             {
-                chunkIds[i] = ids[start + i].ToBytes();
-                chunkTypes[i] = typeIds[start + i].ToBytes();
-                chunkSubjects[i] = subjectIds[start + i].ToBytes();
-            }
-
-            await using var conn = await _ds.OpenConnectionAsync(token);
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;
-            cmd.CommandText = $"SELECT {function}($1, $2, $3)";
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = chunkIds, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = chunkTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = chunkSubjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
-
-            var hits = new List<Hash128>();
-            long bits = (long)bm.Length * 8;
-            for (int i = 0; i < n; i++)
-                if (i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0)
-                    hits.Add(ids[start + i]);
-            perChunk[c] = hits;
-        }
-
-        if (chunkCount == 1)
-        {
-            await ProbeChunkAsync(0, ct);
-        }
-        else
-        {
-            int workers = Math.Min(chunkCount, Math.Min(ApplyParallelism, 8));
-            int next = -1;
-            await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
-            {
-                for (int c = Interlocked.Increment(ref next); c < chunkCount;
-                     c = Interlocked.Increment(ref next))
-                    await ProbeChunkAsync(c, token);
-            }, ct);
-        }
-
-        foreach (var hits in perChunk)
-            if (hits is not null)
-                foreach (var id in hits) present.Add(id);
-        addRoundTrips(chunkCount);
-        return present;
+                var chunkTypes = new byte[n][];
+                var chunkSubjects = new byte[n][];
+                for (int i = 0; i < n; i++)
+                {
+                    chunkTypes[i] = typeIds[start + i].ToBytes();
+                    chunkSubjects[i] = subjectIds[start + i].ToBytes();
+                }
+                parameters.Add(new NpgsqlParameter
+                { Value = chunkTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                parameters.Add(new NpgsqlParameter
+                { Value = chunkSubjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            }, addRoundTrips, ct);
     }
 
     /// <summary>SortKey partitions parallel COPY groups into disjoint index
