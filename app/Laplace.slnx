@@ -8,6 +8,7 @@
   <Project Path="Laplace.Chess/Laplace.Chess.csproj" />
   <Project Path="Laplace.Chess.Tests/Laplace.Chess.Tests.csproj" />
   <Project Path="Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" />
+  <Project Path="Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" />
   <Project Path="Laplace.Migrations/Laplace.Migrations.csproj" />

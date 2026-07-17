@@ -6,5 +6,5 @@ DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
 [[ -f "$DLL" ]] || DLL="$ROOT/app/Laplace.Cli/bin/Debug/net10.0/Laplace.Cli.dll"
 [[ -f "$DLL" ]] || { echo "laplace: CLI not built — run: dotnet build $ROOT/app/Laplace.Cli" >&2; exit 1; }
 
-export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev}"
+export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace}"
 exec dotnet "$DLL" "$@"

@@ -20,9 +20,8 @@ internal static class TestDb
         {
             var name = Environment.GetEnvironmentVariable("LAPLACE_TEST_DB");
             if (string.IsNullOrWhiteSpace(name)) return null;
-            // Refuse production / canonical substrate names — these tests write consensus rows.
-            if (string.Equals(name, "laplace", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(name, "laplace-dev", StringComparison.OrdinalIgnoreCase))
+            // Refuse the canonical substrate name — these tests write consensus rows.
+            if (string.Equals(name, "laplace", StringComparison.OrdinalIgnoreCase))
                 return null;
             return LaplaceInstall.PostgresConnectionString(name.Trim());
         }

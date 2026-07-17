@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       database:
-        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        description: "target DB (one database: laplace)"
         type: choice
-        options: [laplace, laplace-dev]
+        options: [laplace]
         default: laplace
       force:
         description: "re-ingest every rung even if its layer is already complete"
