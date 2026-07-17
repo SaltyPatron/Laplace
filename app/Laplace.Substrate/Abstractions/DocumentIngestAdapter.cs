@@ -20,10 +20,17 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
             byte[]? bytes = await ReadFileBytesAsync(file, ct);
             if (bytes is null || bytes.Length == 0) continue;
 
-            string label = File.Exists(_root)
-                ? $"document/{Path.GetFileName(file)}"
-                : $"document/{Path.GetRelativePath(_root, file).Replace('\\', '/')}";
+            string rel = File.Exists(_root)
+                ? Path.GetFileName(file)
+                : Path.GetRelativePath(_root, file).Replace('\\', '/');
+            string label = $"document/{rel}";
 
+            // The stream is READ-ONLY and fast — no per-file hashing here. source_id IS the file's
+            // content-DAG root (its trunk node), and the compose ALREADY produces that root when it
+            // builds the tree. Computing it here too (FileEntity.SourceId → a full ContentRootId
+            // segmentation per file) ran serially ahead of the parallel compose and segmented every
+            // file twice — the Webster-1913-sized single-thread gate. The compose's root is the
+            // trunk-node source; the name/metadata is a metadata DAG fetched off it, not hashed in.
             yield return (label, new ContentIngestRecord(bytes));
             await Task.Yield();
         }
@@ -68,11 +75,11 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
-        using var tree = ContentTierSpine.BuildTree(record.CanonicalUtf8);
-        if (tree is null) return;
-        foreach (var att in TextEntityBuilder.BuildDistributionalAttestations(
-                     tree, UserPromptContent.Source, UserPromptContent.WitnessWeight))
-            builder.AddAttestation(att);
+        // Pillar 3a: a document emits its content DAG (entities + physicalities/trajectory) via
+        // the deferred unit ONLY. No distributional attestations: sequence is the trajectory
+        // geometry, containment is containers_of + the point-match, and PRECEDES is a MODEL
+        // relation (token couplings from Q/K/V/O/gate/up/down), not text word-adjacency. This
+        // call emitted the ~3.7M redundant document attestations behind the re-witness grind.
     }
 }
 

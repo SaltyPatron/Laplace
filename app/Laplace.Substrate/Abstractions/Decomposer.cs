@@ -266,7 +266,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
                            CreateHandlerForFile,
                            label => ConfigForFile(label, context.Reader, options),
                            maxTotalUnits: options.MaxInputUnits,
-                           ct))
+                           ct: ct))
             yield return change;
     }
 

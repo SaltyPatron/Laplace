@@ -65,6 +65,7 @@ set(EXT_C_SOURCES
     src/content_resolve.c
     src/descent_probe.c
     src/containers_of.c
+    src/geometry_successors.c
     src/highway_mask.c
     src/model_factor.c
     src/lexical_case.c

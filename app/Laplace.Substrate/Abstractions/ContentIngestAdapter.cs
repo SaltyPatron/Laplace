@@ -3,7 +3,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-public readonly record struct ContentIngestRecord(byte[] CanonicalUtf8, int Sequence = 0);
+// Pillar 0: SourceId is the per-file FILE-ENTITY provenance (content DAG ⊕ metadata DAG, see
+// FileEntity) when the producing stream computed it; default(Hash128) means "fall back to the
+// decomposer's static config source" for streams not yet converted to per-file provenance.
+public readonly record struct ContentIngestRecord(byte[] CanonicalUtf8, int Sequence = 0, Hash128 SourceId = default);
 
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
@@ -17,7 +20,8 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
         ValueTask.FromResult(false);
 
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
-        new ContentDeferredUnit(record.CanonicalUtf8, _sourceId);
+        new ContentDeferredUnit(record.CanonicalUtf8,
+            record.SourceId.Equals(default(Hash128)) ? _sourceId : record.SourceId);
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
@@ -34,17 +38,18 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
         {
             _canonical = canonical;
             _sourceId = sourceId;
+            // The heavy content-tier-tree build happens HERE, at construction — and
+            // CreateDeferredUnit is invoked on the pinned parallel workers inside
+            // IngestDescentFlush.ComposeBatchAsync. content_tree_build is lock-free, per-call,
+            // and reads the perfcache read-only, so the decompose fans out across cores. Building
+            // it lazily (below) instead ran every file one-at-a-time in the sequential
+            // FinalizePendingAsync loop — the single-core "compose" bottleneck.
+            _tree = ContentTierSpine.BuildTree(canonical);
         }
 
-        public TierTree? TreeForBatchProbe
-        {
-            get
-            {
-                if (_tree is null)
-                    _tree = ContentTierSpine.BuildTree(_canonical);
-                return _tree;
-            }
-        }
+        // Fallback only: the tree is normally already built by the constructor on a compose
+        // worker. This keeps the probe correct if a unit is ever created off that path.
+        public TierTree? TreeForBatchProbe => _tree ??= ContentTierSpine.BuildTree(_canonical);
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             _tree is null
