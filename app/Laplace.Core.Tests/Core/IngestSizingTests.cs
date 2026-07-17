@@ -12,7 +12,9 @@ public sealed class IngestSizingTests
     {
         var plan = IngestSizing.Resolve(8, 6, 8, workingSetBudgetBytes: TestBudgetBytes);
         Assert.Equal(2048, plan.RecordBatchSize);
-        Assert.Equal(512, plan.ProbeChunkSize);
+        // Probe chunks match the WS-apply probe's scale (round-trip dominated;
+        // see ResolveProbeChunk): batch 2048 × 16 clamps to the 32k ceiling.
+        Assert.Equal(32_768, plan.ProbeChunkSize);
         Assert.Equal(32_768, plan.CommitRows);
         Assert.Equal(2, plan.MaxIntentsPerCommit);
         Assert.Equal(38, plan.DecomposeChannelCapacity);
