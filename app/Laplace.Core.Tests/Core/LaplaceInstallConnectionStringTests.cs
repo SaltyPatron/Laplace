@@ -6,9 +6,10 @@ namespace Laplace.Engine.Core.Tests;
 /// <summary>
 /// LAPLACE_DB precedence law: an explicit Database= inside LAPLACE_DB is
 /// authoritative for default callers; an explicit caller argument overrides it;
-/// the two-DB sandbox resolution applies only when neither names a database.
+/// PGDATABASE-or-default resolution applies only when neither names a database.
 /// This knob was once fake on Linux — the deployed API's Database=laplace was
-/// silently stomped to laplace-dev — and these tests keep it real.
+/// silently stomped by the (since-retired) dev-sandbox default — and these
+/// tests keep it real.
 /// </summary>
 public sealed class LaplaceInstallConnectionStringTests : IDisposable
 {
@@ -56,6 +57,15 @@ public sealed class LaplaceInstallConnectionStringTests : IDisposable
         Environment.SetEnvironmentVariable("LAPLACE_DB",
             "Host=/var/run/postgresql;Username=laplace_admin");
         Environment.SetEnvironmentVariable("PGDATABASE", "laplace");
+        Assert.Equal("laplace", DatabaseOf(LaplaceInstall.PostgresConnectionString()));
+    }
+
+    [Fact]
+    public void EnvWithoutDatabase_NoPgDatabase_DefaultsToLaplace()
+    {
+        Environment.SetEnvironmentVariable("LAPLACE_DB",
+            "Host=/var/run/postgresql;Username=laplace_admin");
+        Environment.SetEnvironmentVariable("PGDATABASE", null);
         Assert.Equal("laplace", DatabaseOf(LaplaceInstall.PostgresConnectionString()));
     }
 

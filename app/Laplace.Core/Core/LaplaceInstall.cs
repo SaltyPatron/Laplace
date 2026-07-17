@@ -68,10 +68,9 @@ public static class LaplaceInstall
         {
             // Precedence: an explicit caller argument (tests, Migrations --database)
             // overrides the env; otherwise an explicit Database= inside LAPLACE_DB is
-            // AUTHORITATIVE. The old code re-resolved the default through the two-DB
-            // law even when LAPLACE_DB named a database, silently stomping the
-            // deployed service's Database=laplace with the laplace-dev sandbox —
-            // the config knob said one thing and the code did another.
+            // AUTHORITATIVE. The old code re-resolved the default even when LAPLACE_DB
+            // named a database, silently stomping the deployed service's
+            // Database=laplace — the config knob said one thing and the code did another.
             if (database != "laplace")
                 s = WithDatabase(fromEnv.Trim(),
                     OperatingSystem.IsWindows() ? database : ResolveLinuxDatabaseName(database));
@@ -362,8 +361,9 @@ public static class LaplaceInstall
     }
 
     /// <summary>
-    /// Linux two-DB law: PGDATABASE when set (CI/ingest targets laplace), else local
-    /// sandbox laplace-dev; any other explicit name is used as-is.
+    /// One database: laplace. PGDATABASE may override the default (CI/ingest);
+    /// any other explicit name is used as-is. (The former laplace-dev sandbox
+    /// was retired 2026-07-17 — dev and pipeline share the one laplace DB.)
     /// </summary>
     private static string ResolveLinuxDatabaseName(string database)
     {
@@ -374,6 +374,6 @@ public static class LaplaceInstall
         if (!string.IsNullOrWhiteSpace(fromEnv))
             return fromEnv;
 
-        return "laplace-dev";
+        return "laplace";
     }
 }

@@ -4,7 +4,7 @@ set -o pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 T_START=$SECONDS
 
-DB="${LAPLACE_E2E_DB:-laplace-dev}"
+DB="${LAPLACE_E2E_DB:-laplace}"
 export PGDATABASE="$DB"
 export LAPLACE_DB="Host=/var/run/postgresql;Username=laplace_admin;Database=$DB;Search Path=laplace,public"
 export LAPLACE_SKIP_MORPH="${LAPLACE_SKIP_MORPH:-1}"

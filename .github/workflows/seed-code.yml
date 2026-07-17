@@ -22,9 +22,9 @@ on:
         type: string
         default: ""
       database:
-        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        description: "target DB (one database: laplace)"
         type: choice
-        options: [laplace, laplace-dev]
+        options: [laplace]
         default: laplace
       run_idempotency:
         description: "re-ingest and prove no double-count"

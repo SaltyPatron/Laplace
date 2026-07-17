@@ -1,3 +1,7 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "laplace": {
+      "command": "scripts/laplace-mcp"
+    }
+  }
 }

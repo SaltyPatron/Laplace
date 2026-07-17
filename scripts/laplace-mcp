@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Laplace substrate MCP server (stdio). Registered in .mcp.json; stdout is
+# protocol frames only, so all launcher diagnostics go to stderr.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+DLL="$ROOT/app/Laplace.Endpoints.Mcp/bin/Release/net10.0/Laplace.Endpoints.Mcp.dll"
+[[ -f "$DLL" ]] || DLL="$ROOT/app/Laplace.Endpoints.Mcp/bin/Debug/net10.0/Laplace.Endpoints.Mcp.dll"
+[[ -f "$DLL" ]] || { echo "laplace-mcp: not built — run: dotnet build $ROOT/app/Laplace.Endpoints.Mcp" >&2; exit 1; }
+
+exec dotnet "$DLL" "$@"

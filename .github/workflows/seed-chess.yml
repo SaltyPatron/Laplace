@@ -21,9 +21,9 @@ on:
         type: string
         required: true
       database:
-        description: "target DB (two-DB law: laplace = canonical, laplace-dev = experiments)"
+        description: "target DB (one database: laplace)"
         type: choice
-        options: [laplace, laplace-dev]
+        options: [laplace]
         default: laplace
 
 permissions:
