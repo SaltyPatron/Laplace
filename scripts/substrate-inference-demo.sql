@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION pg_temp.surface(p_id bytea) RETURNS text LANGUAGE sql
        LATERAL ST_DumpPoints(p.trajectory) g,
        LATERAL public.laplace_mantissa_unpack(g.geom) u
   JOIN cp_map m ON m.id = (u).entity_id
-  WHERE p.entity_id = p_id AND p.kind = 1 $$;
+  WHERE p.entity_id = p_id AND p.type = 1 $$;
 
 \if :{?subj}
 \else
@@ -58,7 +58,7 @@ SELECT :'subj' AS subject_cli_hex, pg_temp.surface(pg_temp.cli_id(:'subj')) AS r
 \echo '== B. RANKED-μ: top EMBEDS channels of the subject (sorted index scan) =='
 SELECT left(encode(object_id,'hex'),16) AS channel, round((rating/1e9)::numeric,3) AS mu, witness_count
 FROM laplace.consensus
-WHERE subject_id = pg_temp.cli_id(:'subj') AND kind_id = pg_temp.kind('EMBEDS')
+WHERE subject_id = pg_temp.cli_id(:'subj') AND type_id = pg_temp.kind('EMBEDS')
 ORDER BY rating DESC LIMIT 5;
 
 \echo '== C. QUERY-TIME BILINEAR READ: subject --EMBEDS--> ch --OUTPUT_PROJECTS--> tokens =='
@@ -66,12 +66,12 @@ ORDER BY rating DESC LIMIT 5;
 WITH emb AS (
   SELECT object_id AS ch, (rating/1e9 - 1500.0) AS m
   FROM laplace.consensus
-  WHERE subject_id = pg_temp.cli_id(:'subj') AND kind_id = pg_temp.kind('EMBEDS')
+  WHERE subject_id = pg_temp.cli_id(:'subj') AND type_id = pg_temp.kind('EMBEDS')
 ),
 comp AS (
   SELECT o.object_id AS tok, sum(e.m * (o.rating/1e9 - 1500.0)) AS score
   FROM emb e
-  JOIN laplace.consensus o ON o.subject_id = e.ch AND o.kind_id = pg_temp.kind('OUTPUT_PROJECTS')
+  JOIN laplace.consensus o ON o.subject_id = e.ch AND o.type_id = pg_temp.kind('OUTPUT_PROJECTS')
   GROUP BY o.object_id
 )
 SELECT rank() OVER (ORDER BY score DESC) AS rnk,

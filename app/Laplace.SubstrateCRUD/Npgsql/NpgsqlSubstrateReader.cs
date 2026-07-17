@@ -27,7 +27,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         // Marker kind id resolved by the substrate's own canonical_id — the
         // app layer never hand-builds a blake3/convert_to expression.
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.evidence_count(p_kind => laplace.canonical_id($1)) > 0");
+            "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1)) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
             $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
         try
@@ -47,7 +47,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.evidence_count(p_kind => laplace.canonical_id($1), p_source => $2) > 0");
+            "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1), p_source => $2) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
             $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());

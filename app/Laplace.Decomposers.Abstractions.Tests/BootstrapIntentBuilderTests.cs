@@ -56,7 +56,7 @@ public class BootstrapIntentBuilderTests
         // The bootstrap also seeds the canonical-kind taxonomy (is_a-on-kinds);
         // among those, exactly one trust-class attestation, and it's correct.
         var a = Assert.Single(change.Attestations,
-            x => x.KindId == BootstrapIntentBuilder.HasTrustClassKindId);
+            x => x.TypeId == BootstrapIntentBuilder.HasTrustClassKindId);
         Assert.Equal(SourceId, a.SubjectId);
         Assert.Equal(TrustClassId, a.ObjectId);
         Assert.Equal(SourceId, a.SourceId);

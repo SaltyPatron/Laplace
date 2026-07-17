@@ -196,7 +196,7 @@ public static unsafe partial class NativeInterop
     internal static partial int IntentStageAddPhysicality(
         IntPtr stage,
         Hash128* id, Hash128* entityId, Hash128* sourceId,
-        short kind,
+        short type,
         double* coord, Hilbert128* hilbertIndex,
         double* trajectoryXyzm, uint trajectoryNVertices,
         int nConstituents,
@@ -210,7 +210,7 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "intent_stage_add_attestation")]
     internal static partial int IntentStageAddAttestation(
         IntPtr stage,
-        Hash128* id, Hash128* subjectId, Hash128* kindId,
+        Hash128* id, Hash128* subjectId, Hash128* typeId,
         Hash128* objectId, Hash128* sourceId, Hash128* contextId,
         short outcome,
         long lastObservedAtUnixUs, long observationCount);

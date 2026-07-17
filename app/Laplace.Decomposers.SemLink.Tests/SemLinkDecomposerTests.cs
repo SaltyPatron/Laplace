@@ -42,9 +42,9 @@ public sealed class SemLinkDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
         var canonical = new HashSet<Hash128>(KindRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.KindId, canonical));
+        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
         // SemLink is pure alignment — every emitted attestation is CORRESPONDS_TO.
-        Assert.All(atts, a => Assert.Equal(KindRegistry.KindId("CORRESPONDS_TO"), a.KindId));
+        Assert.All(atts, a => Assert.Equal(KindRegistry.KindId("CORRESPONDS_TO"), a.TypeId));
         Assert.NotEmpty(atts);
     }
 
@@ -125,7 +125,7 @@ public sealed class SemLinkDecomposerTests
         Assert.Contains(boot.Entities, e => e.Id == KindRegistry.KindId("CORRESPONDS_TO"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == SemLinkDecomposer.Source
-            && a.KindId == BootstrapIntentBuilder.HasTrustClassKindId
+            && a.TypeId == BootstrapIntentBuilder.HasTrustClassKindId
             && a.ObjectId == SemLinkDecomposer.TrustClass);
     }
 

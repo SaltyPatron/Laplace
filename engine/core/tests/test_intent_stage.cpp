@@ -214,7 +214,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
 
     ASSERT_EQ(0, intent_stage_add_physicality(
         s, &id, &eid, &sid,
-        /*kind*/ 1,
+        /*type*/ 1,
         coord, &hb,
         traj, /*n_vertices*/ 2,
         /*n_constituents*/ 2,
@@ -241,7 +241,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     /* source_id */
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x03, *p++);
-    /* kind=1 int2 */
+    /* type=1 int2 */
     EXPECT_EQ(2u, read_be32(p)); p += 4;
     EXPECT_EQ(1, (int16_t)read_be16(p)); p += 2;
     /* coord — PointZM EWKB, 37 bytes */
@@ -372,7 +372,7 @@ TEST(LaplaceCoreIntentStage, AddAttestationNullObjectAndContext) {
     p += 2;            /* field_count */
     p += 4 + 16;       /* id */
     p += 4 + 16;       /* subject */
-    p += 4 + 16;       /* kind */
+    p += 4 + 16;       /* type */
     /* object_id == NULL: length = -1 */
     EXPECT_EQ((uint32_t)-1, read_be32(p)); p += 4;
     /* source_id */

@@ -2,7 +2,7 @@
  *
  * `attestations` is the per-witness EVIDENCE layer — PROVENANCE only (who
  * witnessed, outcome class, games, time; never a value). The CONSENSUS is ONE
- * row per (subject, kind, object) — SOURCE AND CONTEXT OUT of identity —
+ * row per (subject, type, object) — SOURCE AND CONTEXT OUT of identity —
  * carrying the Glicko-2 state accumulated over ALL witnesses via the
  * laplace_glicko2_accumulate aggregate. Inference reads this directly (a
  * single indexed lookup), never by re-aggregating evidence per query.
@@ -13,16 +13,16 @@
  * materialize_period_consensus, prior = the current row). There is NO
  * evidence-replay fold — evidence carries no values to replay, by design. */
 
-/* Uniqueness = the content-addressed id ALONE: id IS BLAKE3(subject ‖ kind ‖
+/* Uniqueness = the content-addressed id ALONE: id IS BLAKE3(subject ‖ type ‖
  * object|zero16) (consensus_id() below) — identity is content, the PK is the
- * law. A second UNIQUE over (subject, kind, object) restated the same
+ * law. A second UNIQUE over (subject, type, object) restated the same
  * invariant at ~144 B/row (same correction as attestations, 2026-06-04); at
  * model scale (~153M relations per 1B-param model) it was ~20 GB of duplicate
  * structure maintained on every period-fold upsert, and was removed. */
 CREATE TABLE consensus (
     id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea       NOT NULL REFERENCES entities(id),
-    kind_id           bytea       NOT NULL REFERENCES entities(id),
+    type_id           bytea       NOT NULL REFERENCES entities(id),
     object_id         bytea                REFERENCES entities(id),
     rating            bigint      NOT NULL,
     rd                bigint      NOT NULL CHECK (rd > 0),
@@ -32,15 +32,15 @@ CREATE TABLE consensus (
 );
 
 COMMENT ON TABLE consensus IS
-    'Materialized cross-witness Glicko-2 consensus: ONE row per (subject, kind, object) — source AND context (model layer/head) dropped from identity (both are witnesses, never identity). Accumulated over EVERY witnessing source+layer+head from the attestations EVIDENCE layer via laplace_glicko2_accumulate; witness_count = how many witnessed it. This is what inference reads; per-witness provenance (layer/head) lives in attestations.context_id.';
+    'Materialized cross-witness Glicko-2 consensus: ONE row per (subject, type, object) — source AND context (model layer/head) dropped from identity (both are witnesses, never identity). Accumulated over EVERY witnessing source+layer+head from the attestations EVIDENCE layer via laplace_glicko2_accumulate; witness_count = how many witnessed it. This is what inference reads; per-witness provenance (layer/head) lives in attestations.context_id.';
 
 SELECT pg_extension_config_dump('consensus', '');
 
-/* subject-only scans are served by subject_kind_btree's leading column — a
+/* subject-only scans are served by subject_type_btree's leading column — a
  * separate (subject_id) index was a pure prefix duplicate and was removed. */
 CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
-CREATE INDEX consensus_kind_btree         ON consensus (kind_id);
-CREATE INDEX consensus_subject_kind_btree ON consensus (subject_id, kind_id);
+CREATE INDEX consensus_type_btree         ON consensus (type_id);
+CREATE INDEX consensus_subject_type_btree ON consensus (subject_id, type_id);
 
 /* Ranked-μ reads order by SIGNED effective μ (rating − 2·rd) — never naked rating
  * (20260603230000). The index expression must match that ORDER BY exactly (bigint
@@ -53,20 +53,20 @@ CREATE INDEX consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE 
 /* Per-subject ranked reads — completions, consensus_out, the generate_tree /
  * generate_greedy laterals — are "one indexed scan per node" only if subject
  * equality and the signed-μ order live in ONE index. Equality alone via
- * subject_kind_btree left a per-node sort of the subject's whole fan-out
+ * subject_type_btree left a per-node sort of the subject's whole fan-out
  * (measured: generate_tree depth-3 beam-4 = 6.4 s; completions(40) = 31 ms).
- * subject_kind_btree stays — kind-scoped equality reads are its job. */
+ * subject_type_btree stays — type-scoped equality reads are its job. */
 CREATE INDEX consensus_subject_eff_mu_btree ON consensus (subject_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
 
-/* consensus id = BLAKE3-128 of (subject ‖ kind ‖ (object|zero16)).
+/* consensus id = BLAKE3-128 of (subject ‖ type ‖ (object|zero16)).
  * SOURCE + CONTEXT OUT — both are witnesses (source = which model, context = which layer/head),
  * never identity. NULL object folds to 16 zero bytes. ONE consensus row per relation identity,
  * regardless of which source/layer/head observed it. */
 CREATE OR REPLACE FUNCTION consensus_id(
-    p_subject bytea, p_kind bytea, p_object bytea)
+    p_subject bytea, p_type bytea, p_object bytea)
     RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
     SET search_path = @extschema@, public AS $$
     SELECT public.laplace_hash128_blake3(
-        p_subject || p_kind
+        p_subject || p_type
         || COALESCE(p_object, '\x00000000000000000000000000000000'::bytea))
 $$;

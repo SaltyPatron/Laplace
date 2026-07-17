@@ -130,7 +130,7 @@ public sealed class FrameNetDecomposer : IDecomposer
 
         // Every kind name this source Attests. Rank/trust live in KindRegistry — AddKind(name)
         // only. Canonical names (registry resolves the source aliases INHERITS_FROM / SUBFRAME_OF
-        // to their arenas; seeding the canonical entity is what satisfies the kind_id FK floor).
+        // to their arenas; seeding the canonical entity is what satisfies the type_id FK floor).
         boot.AddKind("EVOKES_FRAME");
         boot.AddKind("HAS_FRAME_ELEMENT");
         boot.AddKind("HAS_DEFINITION");

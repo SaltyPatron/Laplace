@@ -2,28 +2,28 @@
  * Relatedness/inference is a sorted index scan over consensus effective μ (μ - 2·rd). These
  * are the queries the substrate ships with; call them directly instead of hand-writing SQL. */
 
-/* Top consensus relations by effective μ, ranked. Optional kind filter (e.g. COMPLETES_TO).
+/* Top consensus relations by effective μ, ranked. Optional type filter (e.g. COMPLETES_TO).
  * This IS ranked-μ inference: a single index scan over consensus_eff_mu_btree. */
-CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_kind bytea DEFAULT NULL)
-    RETURNS TABLE(subject_id bytea, kind_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
+CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
+    RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    SELECT c.subject_id, c.kind_id, c.object_id,
+    SELECT c.subject_id, c.type_id, c.object_id,
            eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
-    WHERE c.object_id IS NOT NULL AND (p_kind IS NULL OR c.kind_id = p_kind)
+    WHERE c.object_id IS NOT NULL AND (p_type IS NULL OR c.type_id = p_type)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION top_relations(integer, bytea) IS
-    'Top consensus relations by effective μ (μ - 2·rd), optional kind filter. Ranked-μ inference as a sorted index scan.';
+    'Top consensus relations by effective μ (μ - 2·rd), optional type filter. Ranked-μ inference as a sorted index scan.';
 
 /* The completions of a subject (n-gram / entity), ranked by consensus effective μ —
  * "[subject] ⇒ {objects} ORDER BY μ". The generation/lookup primitive (reads consensus,
  * not evidence — no per-query re-aggregation). */
 CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 40)
-    RETURNS TABLE(object_id bytea, kind_id bytea, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    SELECT c.object_id, c.kind_id, eff_mu_display(c.rating, c.rd), c.witness_count
+    SELECT c.object_id, c.type_id, eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_subject AND c.object_id IS NOT NULL
     ORDER BY eff_mu(c.rating, c.rd) DESC
@@ -38,10 +38,10 @@ COMMENT ON FUNCTION completions(bytea, integer) IS
  * NOT the per-witness evidence. The raw rating/rd/volatility are returned (×1e9) so callers
  * render μ/rd/σ directly. */
 CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
-    RETURNS TABLE(kind_id bytea, object_id bytea, rating bigint, rd bigint,
+    RETURNS TABLE(type_id bytea, object_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    SELECT c.kind_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
+    SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_id
     ORDER BY eff_mu(c.rating, c.rd) DESC
@@ -51,10 +51,10 @@ COMMENT ON FUNCTION consensus_out(bytea, integer) IS
     'Outgoing CONSENSUS neighborhood: accumulated Glicko-2 (rating/rd/volatility ×1e9) + witness_count per (this→object) relation, ranked by effective μ. Source/context out of identity.';
 
 CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
-    RETURNS TABLE(subject_id bytea, kind_id bytea, rating bigint, rd bigint,
+    RETURNS TABLE(subject_id bytea, type_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    SELECT c.subject_id, c.kind_id, c.rating, c.rd, c.volatility, c.witness_count
+    SELECT c.subject_id, c.type_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.object_id = p_id
     ORDER BY eff_mu(c.rating, c.rd) DESC
@@ -75,10 +75,10 @@ COMMENT ON FUNCTION consensus_in(bytea, integer) IS
  * executed. */
 CREATE OR REPLACE FUNCTION generate_tree(
     p_prompt bytea,                 -- prompt entity (token / n-gram id)
-    p_kind   bytea  DEFAULT NULL,   -- arena to walk (e.g. COMPLETES_TO); NULL = all arenas
+    p_type   bytea  DEFAULT NULL,   -- arena to walk (e.g. COMPLETES_TO); NULL = all arenas
     p_depth  int    DEFAULT 4,      -- tree depth (response length in steps)
     p_beam   int    DEFAULT 5)      -- branches per node (ranked-μ beam)
-    RETURNS TABLE(depth int, path bytea[], kinds bytea[], entity_id bytea,
+    RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_generate_tree'
     LANGUAGE C STABLE;
@@ -88,12 +88,12 @@ COMMENT ON FUNCTION generate_tree(bytea, bytea, int, int) IS
 /* Greedy decode: the single highest-μ branch — "the response the model would
  * most likely produce" — as one path. */
 CREATE OR REPLACE FUNCTION generate_greedy(
-    p_prompt bytea, p_kind bytea DEFAULT NULL, p_depth int DEFAULT 8)
-    RETURNS TABLE(step int, kind_id bytea, entity_id bytea, eff_mu numeric)
+    p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
+    RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)
     AS 'MODULE_PATHNAME', 'pg_laplace_generate_greedy'
     LANGUAGE C STABLE;
 COMMENT ON FUNCTION generate_greedy(bytea, bytea, int) IS
-    'Greedy decode over consensus in C (SPI): follow the single highest effective-μ completion from the prompt entity for p_depth steps (refuted edges pruned per §11), emitting the edge kind taken at each step — the model''s most-likely response path, produced without running the model.';
+    'Greedy decode over consensus in C (SPI): follow the single highest effective-μ completion from the prompt entity for p_depth steps (refuted edges pruned per §11), emitting the edge type taken at each step — the model''s most-likely response path, produced without running the model.';
 
 /* Consensus / dedup health: evidence vs consensus row counts + witness fan-in. dedup_ratio =
  * evidence/consensus (how much the per-witness evidence collapsed — the "~params - dupes"). */

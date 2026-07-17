@@ -69,9 +69,9 @@ jobs:
         run: |
           # Substrate operating surface only — no hand-built hash expressions.
           P(){ psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
-          us=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('USES_SCRIPT'));")
-          mm=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('MEMBER_OF_MACROLANGUAGE'));")
-          latin=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('USES_SCRIPT'), p_object => laplace.canonical_id('unicode/script/Latin/v1'));")
+          us=$(P "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('USES_SCRIPT'));")
+          mm=$(P "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('MEMBER_OF_MACROLANGUAGE'));")
+          latin=$(P "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('USES_SCRIPT'), p_object => laplace.canonical_id('unicode/script/Latin/v1'));")
           echo "USES_SCRIPT=$us  MEMBER_OF_MACROLANGUAGE=$mm  languages→Latin=$latin"
           [ "${us:-0}" -gt 0 ]      || { echo "::error::no USES_SCRIPT edges — language↔script graph missing"; exit 1; }
           [ "${mm:-0}" -gt 0 ]      || { echo "::error::no MEMBER_OF_MACROLANGUAGE edges — macrolanguage graph missing"; exit 1; }

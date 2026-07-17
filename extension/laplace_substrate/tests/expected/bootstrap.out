@@ -92,7 +92,7 @@ WHERE id IN (
 SELECT EXISTS(
     SELECT 1 FROM attestations
     WHERE subject_id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
-      AND kind_id    = laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea)
+      AND type_id    = laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea)
       AND object_id  = laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea)
       AND source_id  = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_trust_class_set;

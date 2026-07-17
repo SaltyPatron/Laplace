@@ -86,7 +86,7 @@ int intent_stage_add_entity(
 
 /* Add one physicalities row.
  *   id, entity_id, source_id     — 16-byte hash128
- *   kind                         — 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION
+ *   type                         — 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION
  *   coord                        — x,y,z,m doubles for POINTZM
  *   hilbert_index                — 16 raw bytes
  *   trajectory_xyzm              — nullable; trajectory_n_vertices*4 doubles
@@ -101,7 +101,7 @@ int intent_stage_add_physicality(
     const hash128_t*    id,
     const hash128_t*    entity_id,
     const hash128_t*    source_id,
-    int16_t             kind,
+    int16_t             type,
     const double        coord[4],
     const hilbert128_t* hilbert_index,
     const double*       trajectory_xyzm,
@@ -114,7 +114,7 @@ int intent_stage_add_physicality(
     int64_t             observed_at_unix_us);
 
 /* Add one attestations (EVIDENCE) row — PROVENANCE, never values.
- *   id, subject_id, kind_id, source_id — 16-byte hash128 (NOT NULL)
+ *   id, subject_id, type_id, source_id — 16-byte hash128 (NOT NULL)
  *   object_id, context_id              — nullable; pass NULL to emit SQL NULL
  *   outcome      — the dissent record as a CLASS, never a magnitude:
  *                  0 = refute, 1 = draw, 2 = confirm
@@ -129,7 +129,7 @@ int intent_stage_add_attestation(
     intent_stage_t*  stage,
     const hash128_t* id,
     const hash128_t* subject_id,
-    const hash128_t* kind_id,
+    const hash128_t* type_id,
     const hash128_t* object_id,
     const hash128_t* source_id,
     const hash128_t* context_id,

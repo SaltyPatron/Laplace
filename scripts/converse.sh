@@ -33,7 +33,7 @@ trap 'rm -f "$TMP"' EXIT
     cat <<'SHIMS'
 \set QUIET on
 SET check_function_bodies = off;
-CREATE OR REPLACE FUNCTION pg_temp.kind_id(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION pg_temp.relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
     SELECT laplace.canonical_id('substrate/kind/' || p_name || '/v1')
 $$;
@@ -52,8 +52,8 @@ $$;
 -- generate_greedy in its kind-emitting, refuted-pruning shape (the installed
 -- extension may still carry the old signature).
 CREATE OR REPLACE FUNCTION pg_temp.generate_greedy(
-    p_prompt bytea, p_kind bytea DEFAULT NULL, p_depth int DEFAULT 8)
-    RETURNS TABLE(step int, kind_id bytea, entity_id bytea, eff_mu numeric)
+    p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
+    RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)
     LANGUAGE plpgsql STABLE AS $$
 DECLARE
     cur  bytea := p_prompt;
@@ -61,17 +61,17 @@ DECLARE
     seen bytea[] := ARRAY[p_prompt];
 BEGIN
     FOR i IN 1..p_depth LOOP
-        SELECT c.object_id, c.kind_id AS step_kind, pg_temp.eff_mu_display(c.rating, c.rd) AS mu
+        SELECT c.object_id, c.type_id AS step_type, pg_temp.eff_mu_display(c.rating, c.rd) AS mu
         INTO nxt
         FROM laplace.consensus c
         WHERE c.subject_id = cur AND c.object_id IS NOT NULL
-          AND (p_kind IS NULL OR c.kind_id = p_kind)
+          AND (p_type IS NULL OR c.type_id = p_type)
           AND NOT pg_temp.refuted(c.rating, c.rd)
           AND NOT (c.object_id = ANY (seen))
         ORDER BY pg_temp.eff_mu(c.rating, c.rd) DESC
         LIMIT 1;
         EXIT WHEN nxt IS NULL OR nxt.object_id IS NULL;
-        step := i; kind_id := nxt.step_kind; entity_id := nxt.object_id; eff_mu := nxt.mu;
+        step := i; type_id := nxt.step_type; entity_id := nxt.object_id; eff_mu := nxt.mu;
         RETURN NEXT;
         seen := seen || nxt.object_id;
         cur  := nxt.object_id;
@@ -90,7 +90,7 @@ SHIMS
             -e 's/^CREATE UNLOGGED TABLE converse_turns/CREATE TEMP TABLE converse_turns/' \
             -e 's/SET search_path = @extschema@, public/SET search_path = pg_temp, laplace, public/' \
       | grep -v '^COMMENT ON' | grep -v "^    '" | grep -v '^SELECT pg_extension_config_dump' \
-      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|prompt_state|expansion|kind_label|realize_path|realize|related_in|related|describe|isa_path|route_prompt|resolve_topic|respond|converse|generate_greedy|generate_tree|refuted|kind_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
+      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|prompt_state|expansion|type_label|realize_path|realize|related_in|related|describe|isa_path|route_prompt|resolve_topic|respond|converse|generate_greedy|generate_tree|refuted|relation_type_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
 
     # Convenience alias — ask() IS the loop (session = this psql connection,
     # turns in the TEMP table, anaphora works: "what about its synonyms?").

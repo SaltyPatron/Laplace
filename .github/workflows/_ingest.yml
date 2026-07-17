@@ -7,7 +7,7 @@ name: _ingest (reusable)
 #   - per-source workflows are dispatchable alone AND composable by
 #     orchestrators (seed-ladder.yml) — one box per source in the UI;
 #   - gates are "KIND MIN" lines checked against the INSTALLED substrate
-#     surface (laplace.consensus_count/kind_id — never inline SQL);
+#     surface (laplace.consensus_count/relation_type_id — never inline SQL);
 #   - worker knobs live HERE, once (measured 2026-06-05: 2+2+4 on the 6-core
 #     runner; 4+4 oversubscribes and runs slower — re-tune only with a profile).
 
@@ -67,7 +67,7 @@ jobs:
           GATE_SPEC: ${{ inputs.gate }}
         run: |
           gate() {
-            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.kind_id('$1'));")
+            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.relation_type_id('$1'));")
             echo "gate $1: consensus=$n (min $2)"
             [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
           }

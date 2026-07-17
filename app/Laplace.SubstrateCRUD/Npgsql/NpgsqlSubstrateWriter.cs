@@ -171,7 +171,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         // 3. Attestation identity dedup — ONE query for the cache-filtered
         //    attestation ids. Attestation ids are content-addressed BLAKE3 of
-        //    (subject,kind,object,source,context); the same observation
+        //    (subject,type,object,source,context); the same observation
         //    re-emitted is the same id and must not collide. Glicko-2 matchup
         //    updates on re-observation are a separate, later concern.
         var attToCheck = CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
@@ -219,7 +219,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (!seenPhys.Add(p.Id)) continue;          // in DB or already staged this batch
                 coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
                 stage.AddPhysicality(
-                    p.Id, p.EntityId, p.SourceId, (short)p.Kind,
+                    p.Id, p.EntityId, p.SourceId, (short)p.Type,
                     coord, p.HilbertIndex,
                     p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
                                               : p.TrajectoryXyzm.AsSpan(),
@@ -234,12 +234,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (_provenAtt.Contains(a.Id)) continue;    // proven earlier this run
                 if (!seenAtt.Add(a.Id)) continue;           // in DB or already staged this batch
                 stage.AddAttestation(
-                    a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
+                    a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
                     (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
                 stagedAttIds.Add(a.Id);
                 Reference(a.SubjectId);
-                Reference(a.KindId);
+                Reference(a.TypeId);
                 Reference(a.SourceId);
                 if (a.ObjectId  is Hash128 aObj) Reference(aObj);
                 if (a.ContextId is Hash128 aCtx) Reference(aCtx);

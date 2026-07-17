@@ -53,7 +53,7 @@ COMMENT ON TABLE geometry_placement_evidence IS
 COMMENT ON COLUMN geometry_placement_evidence.id IS
     'Content-addressed BLAKE3-128 of canonical (entity_id, projection_kind, source_id, layer, head, expert, coord) bytes. Stable across re-observation; idempotent upsert.';
 COMMENT ON COLUMN geometry_placement_evidence.projection_kind IS
-    'Which placement view: mirrors physicalities.kind (1=CONTENT, 3=PROJECTION input-direction, 4=PROJECTION_OUTPUT lm_head, ...). Part of identity — distinct projection views consense separately.';
+    'Which placement view: mirrors physicalities.type (1=CONTENT, 3=PROJECTION input-direction, 4=PROJECTION_OUTPUT lm_head, ...). Part of identity — distinct projection views consense separately.';
 COMMENT ON COLUMN geometry_placement_evidence.layer IS
     'Provenance: model layer that produced this placement (NULL for non-model / single-view sources). GROUP-BY column for interpretability — NEVER identity.';
 COMMENT ON COLUMN geometry_placement_evidence.head IS

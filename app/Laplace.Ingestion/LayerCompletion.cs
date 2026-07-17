@@ -21,7 +21,7 @@ public static class LayerCompletion
 
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {
-        // kind_id FK: every attestation kind must exist as an entity row first
+        // type_id FK: every attestation type must exist as an entity row first
         // (same rule as BootstrapIntentBuilder.AddKind / 10_bootstrap.sql.in).
         var kindId = KindId(decomposer.LayerOrder);
         return new SubstrateChangeBuilder(

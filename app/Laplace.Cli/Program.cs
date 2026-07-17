@@ -313,7 +313,7 @@ internal static class Program
                        CASE WHEN p.trajectory IS NOT NULL THEN encode(ST_AsEWKB(p.trajectory),'hex') END
                 FROM laplace.physicalities p
                 JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id
-                WHERE p.kind = 1 AND p.coord IS NOT NULL
+                WHERE p.type = 1 AND p.coord IS NOT NULL
                 LIMIT 1";
             res.Parameters.AddWithValue("w", word);
             await using var r = await res.ExecuteReaderAsync();
@@ -427,11 +427,11 @@ internal static class Program
         field AS (
             SELECT id FROM topic
             UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
             UNION SELECT c.subject_id FROM laplace.consensus c JOIN topic t ON c.object_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
             UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('IS_SYNONYM_OF')),
+                  WHERE c.type_id=laplace.relation_type_id('IS_SYNONYM_OF')),
         seed AS (SELECT array_agg(id ORDER BY ord) ctx FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
         walk AS (
             SELECT s.ctx AS ctx, NULL::bytea oid, NULL::numeric mu, 0 AS step FROM seed s WHERE s.ctx IS NOT NULL
@@ -443,12 +443,12 @@ internal static class Program
                            sum(laplace.eff_mu(c.rating,c.rd))/1e9
                              * (CASE WHEN @boost>0 AND c.object_id IN (SELECT id FROM field) THEN 1+@boost ELSE 1 END) AS sc
                     FROM laplace.consensus c
-                    WHERE c.kind_id = laplace.kind_id('PRECEDES')
+                    WHERE c.type_id = laplace.relation_type_id('PRECEDES')
                       AND c.subject_id = ANY (w.ctx[GREATEST(1,array_length(w.ctx,1)-@window+1):array_length(w.ctx,1)])
                       AND c.object_id IS NOT NULL AND NOT laplace.refuted(c.rating,c.rd)
                       AND c.object_id <> ALL (w.ctx) AND c.object_id NOT IN (SELECT id FROM stops)
                       AND EXISTS (SELECT 1 FROM laplace.consensus h
-                                  WHERE h.subject_id=c.object_id AND h.kind_id=laplace.kind_id('HAS_POS'))
+                                  WHERE h.subject_id=c.object_id AND h.type_id=laplace.relation_type_id('HAS_POS'))
                     GROUP BY c.object_id ORDER BY sc DESC LIMIT @topk
                 ) cand
                 ORDER BY CASE WHEN @temp<=0 THEN sc
@@ -591,7 +591,7 @@ internal static class Program
         // Glome facet — laplace.entity_physicalities(id)
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT p.kind, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
+            cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
                             + "FROM laplace.entity_physicalities(@id) p";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
@@ -610,7 +610,7 @@ internal static class Program
         // (accumulated Glicko-2 across all witnesses; source/context out of identity).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.kind_id), laplace.render(c.object_id), "
+            cmd.CommandText = "SELECT laplace.render(c.type_id), laplace.render(c.object_id), "
                             + "c.rating, c.rd, c.volatility, c.witness_count "
                             + "FROM laplace.consensus_out(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -630,7 +630,7 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.kind_id), "
+            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.type_id), "
                             + "c.rating, c.rd, c.volatility, c.witness_count "
                             + "FROM laplace.consensus_in(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -652,7 +652,7 @@ internal static class Program
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.kind_id), laplace.render(a.object_id), "
+            cmd.CommandText = "SELECT laplace.render(a.type_id), laplace.render(a.object_id), "
                             + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
                             + "FROM laplace.attestations_out(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -672,7 +672,7 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.kind_id), "
+            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.type_id), "
                             + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
                             + "FROM laplace.attestations_in(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -756,7 +756,7 @@ internal static class Program
             // guard uses (evidence_count over the completion-marker kind).
             await using var chkCmd = chkConn.CreateCommand();
             chkCmd.CommandText =
-                "SELECT laplace.evidence_count(p_kind => $2, p_source => $1) > 0";
+                "SELECT laplace.evidence_count(p_type => $2, p_source => $1) > 0";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.KindId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
@@ -1509,7 +1509,7 @@ internal static class Program
                                        p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
                                 FROM laplace.entity_facets(laplace.canonical_id('A')) f
                                 CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
-                                WHERE p.kind = 1
+                                WHERE p.type = 1
                                   AND p.source_id = laplace.source_id('UnicodeDecomposer')";
             await using var rdr = await cmd.ExecuteReaderAsync();
             if (await rdr.ReadAsync())
@@ -1527,12 +1527,12 @@ internal static class Program
 
         // Multi-model: count the model relation kinds GLOBALLY (across every model
         // source) via the substrate's evidence accounting — kind names resolve
-        // through laplace.kind_id (the one canonicalization rule), so no hash
+        // through laplace.type_id (the one canonicalization rule), so no hash
         // constants and no inline SQL here.
         async Task<long> KindCount(string kindName)
         {
             await using var c = conn.CreateCommand();
-            c.CommandText = "SELECT laplace.evidence_count(p_kind => laplace.kind_id($1))";
+            c.CommandText = "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))";
             c.Parameters.AddWithValue(kindName);
             return (long)(await c.ExecuteScalarAsync())!;
         }

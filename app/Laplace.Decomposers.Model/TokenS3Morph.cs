@@ -244,7 +244,7 @@ public sealed class TokenS3Morph
                     Id:                physId,
                     EntityId:          entityId,
                     SourceId:          _sourceId,
-                    Kind:              PhysicalityKind.Projection,
+                    Type:              PhysicalityKind.Projection,
                     CoordX:            px[i], CoordY: pyv[i], CoordZ: pz[i], CoordM: pm[i],
                     HilbertIndex:      hb,
                     TrajectoryXyzm:    null,

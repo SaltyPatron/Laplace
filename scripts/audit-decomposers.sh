@@ -50,7 +50,7 @@ layer_done() {
   local n="$1"
   "${PSQL[@]}" -t -A -c "
     SELECT laplace.evidence_count(
-      p_kind => laplace.canonical_id('substrate/kind/HasLayerCompleted/${n}/v1')) > 0;
+      p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/${n}/v1')) > 0;
   " | tr -d '[:space:]'
 }
 
@@ -142,7 +142,7 @@ for src in "${LADDER[@]}"; do
   run_just "ingest $src" just ingest "$src" || AUDIT_FAIL=1
 done
 
-# Regression gate: the seed/lexical decomposers MUST emit CONTENT physicalities (kind=1),
+# Regression gate: the seed/lexical decomposers MUST emit CONTENT physicalities (type=1),
 # not just attestations. The pre-fix WordNet emitted ZERO content (only string-keyed
 # entities + attestations); the fix routes lemmas/glosses/examples through ContentEmitter.
 # Count CONTENT physicalities attributed to the WordNet source specifically — 0 before, many

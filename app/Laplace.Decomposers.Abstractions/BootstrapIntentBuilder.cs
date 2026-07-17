@@ -109,7 +109,7 @@ public sealed class BootstrapIntentBuilder
     {
         _inner.AddAttestation(AttestationFactory.CreateCategorical(
             subject:    _sourceId,
-            kindId:     HasTrustClassKindId,
+            typeId:     HasTrustClassKindId,
             obj:        _trustClassId,
             sourceId:   _sourceId,        // self-attested
             contextId:  null,
@@ -120,7 +120,7 @@ public sealed class BootstrapIntentBuilder
     /// <summary>Finalize the bootstrap intent. Also seeds the canonical-kind
     /// arena taxonomy (<see cref="KindRegistry.SeedCanonical"/>) so registry-routed
     /// attestations from any decomposer reference canonical kinds that already
-    /// exist (the kind_id FK floor) — idempotent across decomposers.</summary>
+    /// exist (the type_id FK floor) — idempotent across decomposers.</summary>
     public SubstrateChange Build()
     {
         AddTrustClassAttestation();

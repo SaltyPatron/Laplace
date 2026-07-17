@@ -107,19 +107,19 @@ public sealed class FrameNetDecomposerTests
         // Every kind id on every attestation is a canonical-registry kind id (registry-routed,
         // never a raw row / hand-built "substrate/kind/..." hash).
         var canonical = new HashSet<Hash128>(KindRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.KindId, canonical));
+        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
         // The load-bearing arenas are present.
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("EVOKES_FRAME"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_FRAME_ELEMENT"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_DEFINITION"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_POS"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_EXAMPLE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("FRAME_USES"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("EVOKES_FRAME"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_FRAME_ELEMENT"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_DEFINITION"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_POS"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_EXAMPLE"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("FRAME_USES"));
 
         // Inherits from resolves to IS_A; Subframe of resolves to HAS_SUBEVENT (aliases).
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("IS_A"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_SUBEVENT"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("IS_A"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_SUBEVENT"));
     }
 
     [Fact]
@@ -132,14 +132,14 @@ public sealed class FrameNetDecomposerTests
         var frameId = Hash128.OfCanonical("framenet/frame/Giving");
         Assert.NotNull(giveId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("EVOKES_FRAME")
+            a.TypeId == KindRegistry.KindId("EVOKES_FRAME")
             && a.SubjectId == giveId!.Value
             && a.ObjectId == frameId);
 
         // HAS_FRAME_ELEMENT carries the coreness classifier as context_id (Core for Donor).
         var coreCtx = Hash128.OfCanonical("framenet/coreness/Core");
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("HAS_FRAME_ELEMENT") && a.ContextId == coreCtx);
+            a.TypeId == KindRegistry.KindId("HAS_FRAME_ELEMENT") && a.ContextId == coreCtx);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class FrameNetDecomposerTests
         // HAS_TRUST_CLASS: source → AcademicCurated.
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == FrameNetDecomposer.Source
-            && a.KindId == BootstrapIntentBuilder.HasTrustClassKindId
+            && a.TypeId == BootstrapIntentBuilder.HasTrustClassKindId
             && a.ObjectId == FrameNetDecomposer.TrustClass);
 
         // The coreness classifier entities are seeded in the second intent.

@@ -57,7 +57,7 @@ public class IntentStageTests
         var h = Hash128.Zero;
         var hb = new Hilbert128();
         s.AddPhysicality(
-            h, h, h, kind: 1,
+            h, h, h, type: 1,
             coord: stackalloc double[] { 0, 0, 0, 0 },
             hilbertIndex: hb,
             trajectoryXyzm: ReadOnlySpan<double>.Empty,

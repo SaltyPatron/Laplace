@@ -127,7 +127,7 @@ internal static class ConsensusReExport
     /// is the mold's per-role scale.
     /// </summary>
     internal static async Task<TableArena> ReadTableArenaAsync(
-        NpgsqlDataSource ds, Hash128 kindId, int rows, int cols, bool rowsAreOut,
+        NpgsqlDataSource ds, Hash128 typeId, int rows, int cols, bool rowsAreOut,
         Func<Hash128, IReadOnlyList<int>?> inIndex,
         Func<Hash128, IReadOnlyList<int>?> outIndex,
         double m)
@@ -140,9 +140,9 @@ internal static class ConsensusReExport
         cmd.CommandText =
             """
             SELECT subject_id, object_id, rating, witness_count FROM laplace.consensus
-            WHERE kind_id = $1 AND object_id IS NOT NULL
+            WHERE type_id = $1 AND object_id IS NOT NULL
             """;
-        cmd.Parameters.AddWithValue(kindId.ToBytes());
+        cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {
@@ -169,7 +169,7 @@ internal static class ConsensusReExport
     /// object NULL; subject = the channel). Fallback 1.0 for unwitnessed
     /// channels (runtime scaling is the recipe's, never invented).</summary>
     internal static async Task<float[]> ReadNormVectorAsync(
-        NpgsqlDataSource ds, Hash128 kindId, int dModel,
+        NpgsqlDataSource ds, Hash128 typeId, int dModel,
         Func<Hash128, IReadOnlyList<int>?> channelIndex, double m)
     {
         var vec = new float[dModel];
@@ -180,9 +180,9 @@ internal static class ConsensusReExport
         cmd.CommandText =
             """
             SELECT subject_id, rating, witness_count FROM laplace.consensus
-            WHERE kind_id = $1 AND object_id IS NULL
+            WHERE type_id = $1 AND object_id IS NULL
             """;
-        cmd.Parameters.AddWithValue(kindId.ToBytes());
+        cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {

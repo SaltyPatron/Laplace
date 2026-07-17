@@ -86,10 +86,10 @@ public sealed class OpenSubtitlesDecomposerTests
                 foreach (var e in change.Entities) entities.Add(e.Id);
                 foreach (var a in change.Attestations)
                 {
-                    if (a.KindId == translationKind) translationEdges++;
-                    else if (a.KindId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
+                    if (a.TypeId == translationKind) translationEdges++;
+                    else if (a.TypeId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
                     // Every attestation is routed through the registry (a known canonical kind).
-                    Assert.True(a.KindId == translationKind || a.KindId == languageKind,
+                    Assert.True(a.TypeId == translationKind || a.TypeId == languageKind,
                         "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE kinds are emitted");
                 }
             }

@@ -127,7 +127,7 @@ public class NpgsqlSubstrateWriterTests
             .AddEntity(subjId, 0, typeId)
             .AddPhysicality(new PhysicalityRow(
                 Id: H(4002), EntityId: subjId, SourceId: src,
-                Kind: PhysicalityKind.Content,
+                Type: PhysicalityKind.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
                 HilbertIndex: Hilbert128.Encode(stackalloc double[] { 0.1, 0.2, 0.3, 0.4 }),
                 TrajectoryXyzm: null,
@@ -136,7 +136,7 @@ public class NpgsqlSubstrateWriterTests
                 SourceDim: null,
                 ObservedAtUnixUs: IntentStage.PgEpochUnixUs))
             .AddAttestation(new AttestationRow(
-                Id: H(4003), SubjectId: subjId, KindId: kindId,
+                Id: H(4003), SubjectId: subjId, TypeId: kindId,
                 ObjectId: null, SourceId: src, ContextId: null,
                 Outcome: AttestationOutcome.Confirm,
                 LastObservedAtUnixUs: IntentStage.PgEpochUnixUs,

@@ -2,17 +2,17 @@
  *
  * Index strategy split by storage class:
  * - LOOKUP indexes: PK btree on id, FK btrees on entity_id/source_id/subject_id/
- *   kind_id/object_id/context_id (custom laplace_btree_hash128_ops opclass per
+ *   type_id/object_id/context_id (custom laplace_btree_hash128_ops opclass per
  * lands later as Story 1.14 / 2.15; stock bytea btree until then).
- * - METADATA indexes: btree on tier/type_id/kind/observed_at-class columns.
+ * - METADATA indexes: btree on tier/type_id/type/observed_at-class columns.
  * - CONTENT indexes: GIST on physicalities.coord (gist_geometry_ops_nd;
  *   laplace_gist_s3_ops lands later);
  *   structural opclass on physicalities.trajectory (laplace_sp_trajectory_ops
  *  ; lands as Story 2.16 -- stock gist_geometry_ops_nd is
  *   useless on mantissa-packed trajectories since all collapse to the same
  *   bounding box).
- * - ATTESTATION (evidence) indexes: btree on (subject_id, kind_id, object_id)
- *   for the per-period consensus fold's GROUP BY; composite btree on (subject_id, kind_id)
+ * - ATTESTATION (evidence) indexes: btree on (subject_id, type_id, object_id)
+ *   for the per-period consensus fold's GROUP BY; composite btree on (subject_id, type_id)
  *   for cascade frontier expansion. Ranked-μ scans live on consensus, not here.
  * - TEMPORAL indexes: BRIN on created_at / observed_at / last_observed_at. */
 
@@ -24,11 +24,11 @@ CREATE INDEX entities_tier_type_btree      ON entities USING btree (tier, type_i
 CREATE INDEX entities_first_observed_btree ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
 CREATE INDEX entities_created_at_brin      ON entities USING brin  (created_at);
 
-/* --- physicalities (per-source per-kind 4D views) --- */
+/* --- physicalities (per-source per-type 4D views) --- */
 
 CREATE INDEX physicalities_entity_btree    ON physicalities USING btree (entity_id);
 CREATE INDEX physicalities_source_btree    ON physicalities USING btree (source_id);
-CREATE INDEX physicalities_kind_btree      ON physicalities USING btree (kind);
+CREATE INDEX physicalities_type_btree      ON physicalities USING btree (type);
 CREATE INDEX physicalities_coord_gist      ON physicalities USING gist  (coord gist_geometry_ops_nd);
 CREATE INDEX physicalities_hilbert_btree   ON physicalities USING btree (hilbert_index);
 CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_origin);
@@ -40,24 +40,24 @@ CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observe
  * Evidence is the LARGEST table (one row per witness observation — a model
  * load is ~params rows), so every index here is paid per ingested cell.
  * The set below is the MINIMAL audit/interpretability surface, measured:
- *   relation_btree (s,k,o)  — evidence-of-a-relation lookups; its leading
+ *   relation_btree (s,t,o)  — evidence-of-a-relation lookups; its leading
  *                             columns also serve subject-only and
- *                             subject+kind scans (prefix indexes on
- *                             (subject) and (subject,kind) were pure
+ *                             subject+type scans (prefix indexes on
+ *                             (subject) and (subject,type) were pure
  *                             duplicates and were removed).
- *   kind/object/source/context — arena scans, reverse lookups, per-source
+ *   type/object/source/context — arena scans, reverse lookups, per-source
  *                             eviction (DELETE … WHERE source_id), and the
  *                             interpretability GROUP BY context_id.
  * Uniqueness is enforced ONCE, by the content-addressed PK: id IS
- * BLAKE3(subject,kind,object,source,context) — identity is content (the
+ * BLAKE3(subject,type,object,source,context) — identity is content (the
  * one law). A second UNIQUE over the same 5-tuple measured 144 B/row of
  * pure duplication and was removed with it.
  * Evidence is NOT ranked by μ — that is the consensus layer
  * (consensus_eff_mu_btree). */
 
-CREATE INDEX attestations_kind_btree          ON attestations USING btree (kind_id);
+CREATE INDEX attestations_type_btree          ON attestations USING btree (type_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX attestations_source_btree        ON attestations USING btree (source_id);
 CREATE INDEX attestations_context_btree       ON attestations USING btree (context_id) WHERE context_id IS NOT NULL;
-CREATE INDEX attestations_relation_btree      ON attestations USING btree (subject_id, kind_id, object_id);
+CREATE INDEX attestations_relation_btree      ON attestations USING btree (subject_id, type_id, object_id);
 CREATE INDEX attestations_last_observed_brin  ON attestations USING brin  (last_observed_at);

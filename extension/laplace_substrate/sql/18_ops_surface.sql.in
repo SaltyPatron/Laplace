@@ -6,13 +6,24 @@
  * functions are the audit/verify surface the CI gates and scripts call
  * instead of hand-written inline SQL. */
 
-/* Kind name → kind entity id. THE one place the kind family rule lives. */
-CREATE FUNCTION kind_id(p_name text) RETURNS bytea
+/* Relation-type name → type entity id. THE one place the relation-type family
+ * rule lives. The canonical content-address string ('substrate/kind/<NAME>/v1')
+ * is IDENTITY and is NEVER renamed — only the SQL surface name is unified. */
+CREATE FUNCTION relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.canonical_id('substrate/kind/' || p_name || '/v1')
 $$;
+COMMENT ON FUNCTION relation_type_id(text) IS
+    'Relation-type NAME → type entity id via the one canonicalization rule substrate/kind/<NAME>/v1 (content-address string unchanged — identity). Callers never hand-build the canonical string.';
+
+/* Deprecated one-cycle compat alias for relation_type_id — kept so any
+ * not-yet-migrated caller keeps resolving. Remove next cycle. */
+CREATE FUNCTION kind_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT @extschema@.relation_type_id(p_name)
+$$;
 COMMENT ON FUNCTION kind_id(text) IS
-    'Kind NAME → kind entity id via the one canonicalization rule substrate/kind/<NAME>/v1. Callers never hand-build the canonical string.';
+    'DEPRECATED (one-cycle compat): thin alias for relation_type_id(text). The relation/attestation type surface is unified on "type"; use relation_type_id. Scheduled for removal next cycle.';
 
 /* Source (decomposer) name → source entity id. */
 CREATE FUNCTION source_id(p_name text) RETURNS bytea
@@ -22,43 +33,43 @@ $$;
 COMMENT ON FUNCTION source_id(text) IS
     'Source NAME → source entity id via the rule substrate/source/<Name>/v1.';
 
-/* EVIDENCE accounting: attestation rows by kind / source / object (all optional). */
+/* EVIDENCE accounting: attestation rows by type / source / object (all optional). */
 CREATE FUNCTION evidence_count(
-    p_kind bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
+    p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT count(*)
     FROM attestations a
-    WHERE (p_kind   IS NULL OR a.kind_id   = p_kind)
+    WHERE (p_type   IS NULL OR a.type_id   = p_type)
       AND (p_source IS NULL OR a.source_id = p_source)
       AND (p_object IS NULL OR a.object_id = p_object)
 $$;
 COMMENT ON FUNCTION evidence_count(bytea, bytea, bytea) IS
-    'Count EVIDENCE (attestation) rows, optionally filtered by kind/source/object id (compose with kind_id/source_id/canonical_id). The verify-gate primitive.';
+    'Count EVIDENCE (attestation) rows, optionally filtered by type/source/object id (compose with relation_type_id/source_id/canonical_id). The verify-gate primitive.';
 
-/* CONSENSUS accounting: relation rows by kind (optional). */
-CREATE FUNCTION consensus_count(p_kind bytea DEFAULT NULL)
+/* CONSENSUS accounting: relation rows by type (optional). */
+CREATE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT count(*) FROM consensus c
-    WHERE (p_kind IS NULL OR c.kind_id = p_kind)
+    WHERE (p_type IS NULL OR c.type_id = p_type)
 $$;
 COMMENT ON FUNCTION consensus_count(bytea) IS
-    'Count CONSENSUS relations, optionally by kind id (compose with kind_id). The substance inference reads — the CI kind gates call this.';
+    'Count CONSENSUS relations, optionally by type id (compose with relation_type_id). The substance inference reads — the CI type gates call this.';
 
-/* CONTENT accounting: Content physicalities (kind=1) by source (optional). */
+/* CONTENT accounting: Content physicalities (type=1) by source (optional). */
 CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT count(*) FROM physicalities p
-    WHERE p.kind = 1
+    WHERE p.type = 1
       AND (p_source IS NULL OR p.source_id = p_source)
 $$;
 COMMENT ON FUNCTION content_count(bytea) IS
-    'Count CONTENT physicalities (kind=1), optionally by source id — "did this decomposer land content, not just attestations".';
+    'Count CONTENT physicalities (type=1), optionally by source id — "did this decomposer land content, not just attestations".';
 
 /* Cross-source convergence: entities witnessed by more than one source. */
 CREATE FUNCTION multi_source_entity_count()
@@ -85,7 +96,7 @@ CREATE FUNCTION substrate_counts()
     UNION ALL
     SELECT 'physicalities',            count(*) FROM physicalities
     UNION ALL
-    SELECT 'physicalities/content',    count(*) FROM physicalities WHERE kind = 1
+    SELECT 'physicalities/content',    count(*) FROM physicalities WHERE type = 1
     UNION ALL
     SELECT 'attestations (evidence)',  count(*) FROM attestations
     UNION ALL
@@ -101,18 +112,18 @@ COMMENT ON FUNCTION substrate_counts() IS
 
 /* Every arena present, with its consensus mass — THE arena inventory. */
 CREATE FUNCTION arena_counts()
-    RETURNS TABLE(kind text, kind_id bytea, relations bigint, witnesses bigint,
+    RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,
                   top_eff_mu numeric)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT render(c.kind_id), c.kind_id, count(*), sum(c.witness_count),
+    SELECT render(c.type_id), c.type_id, count(*), sum(c.witness_count),
            max(eff_mu_display(c.rating, c.rd))
     FROM consensus c
-    GROUP BY c.kind_id
+    GROUP BY c.type_id
     ORDER BY count(*) DESC
 $$;
 COMMENT ON FUNCTION arena_counts() IS
-    'Arena inventory: every kind with consensus relations, witness mass, and its top effective μ. The per-kind ingest gate reads this.';
+    'Arena inventory: every type with consensus relations, witness mass, and its top effective μ. The per-type ingest gate reads this.';
 
 /* Every witnessing source, with its evidence + content footprint. */
 CREATE FUNCTION source_counts()
@@ -121,7 +132,7 @@ CREATE FUNCTION source_counts()
     SET search_path = @extschema@, public AS $$
     SELECT render(s.sid), s.sid,
            (SELECT count(*) FROM attestations a WHERE a.source_id = s.sid),
-           (SELECT count(*) FROM physicalities p WHERE p.source_id = s.sid AND p.kind = 1)
+           (SELECT count(*) FROM physicalities p WHERE p.source_id = s.sid AND p.type = 1)
     FROM (SELECT DISTINCT a.source_id AS sid FROM attestations a) s
     ORDER BY 3 DESC
 $$;
@@ -164,7 +175,7 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH refs AS (
-        SELECT c.kind_id AS id, 'kind' AS role FROM consensus c
+        SELECT c.type_id AS id, 'type' AS role FROM consensus c
         UNION ALL
         SELECT c.object_id, 'object' FROM consensus c WHERE c.object_id IS NOT NULL
         UNION ALL
@@ -179,7 +190,7 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     WHERE NOT EXISTS (SELECT 1 FROM canonical_names n WHERE n.id = a.id)
       AND NOT EXISTS (SELECT 1 FROM codepoint_render cr WHERE cr.id = a.id)
       AND NOT EXISTS (SELECT 1 FROM physicalities p
-                      WHERE p.entity_id = a.id AND p.kind = 1 AND p.trajectory IS NOT NULL)
+                      WHERE p.entity_id = a.id AND p.type = 1 AND p.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
     LIMIT p_limit
 $$;

@@ -228,13 +228,13 @@ BEGIN
      * the consensus match at ingest, never a tier entity and never persisted.)
      *
      * Attestation ids are computed via the laplace_hash128_merkle wrapper
-     * over (subject_id, kind_id, object_id, source_id, context_id) so the
+     * over (subject_id, type_id, object_id, source_id, context_id) so the
      * id IS the content. */
 
     /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate —
      * a categorical confirm (outcome = 2). */
     INSERT INTO attestations (
-        id, subject_id, kind_id, object_id, source_id, context_id,
+        id, subject_id, type_id, object_id, source_id, context_id,
         outcome, last_observed_at, observation_count
     ) VALUES (
         public.laplace_hash128_merkle(0::smallint, ARRAY[

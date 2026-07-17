@@ -60,7 +60,7 @@ public sealed record PhysicalityRow(
     Hash128         Id,
     Hash128         EntityId,
     Hash128         SourceId,
-    PhysicalityKind Kind,
+    PhysicalityKind Type,
     double          CoordX,
     double          CoordY,
     double          CoordZ,
@@ -92,7 +92,7 @@ public enum AttestationOutcome : short
 /// precision the consensus accumulation consumes AT INGEST. They are NEVER
 /// persisted (a stored per-witness score is invertible to the weight —
 /// recording raw weights). The persisted columns are exactly: id, subject,
-/// kind, object, source, context, outcome, last_observed_at,
+/// type, object, source, context, outcome, last_observed_at,
 /// observation_count. The accumulated rating/rd/volatility live on the
 /// consensus table — NOT here. No tiers, no trust classes in evidence.
 /// </para>
@@ -100,7 +100,7 @@ public enum AttestationOutcome : short
 public sealed record AttestationRow(
     Hash128            Id,
     Hash128            SubjectId,
-    Hash128            KindId,
+    Hash128            TypeId,
     Hash128?           ObjectId,
     Hash128            SourceId,
     Hash128?           ContextId,

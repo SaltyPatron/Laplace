@@ -74,13 +74,13 @@ echo "$pass2_out" | grep -qi "already ingested" \
 # ATTENDS / OV_RELATES / COMPLETES_TO are the query-time bilinear reads
 # composed across these arenas — never ingest-written, never gated here.
 log "evidence/consensus gates"
-# Substrate operating surface only — kind names resolve in-DB (kind_id),
+# Substrate operating surface only — type names resolve in-DB (relation_type_id),
 # counts come from evidence_count; no hand-built hash, no hex round-trip.
 check_kind_evidence() {
   local kind="$1" min="$2"
   local count
   count=$(psql -d laplace -U laplace_admin -tAc \
-    "SELECT laplace.evidence_count(p_kind => laplace.kind_id('$kind'))")
+    "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('$kind'))")
   [ "${count:-0}" -ge "$min" ] || die "kind $kind has $count evidence rows (need >= $min) — ingest broken"
   log "  $kind: $count evidence rows OK"
 }

@@ -49,7 +49,7 @@ BEGIN
 
     -- EVIDENCE = PROVENANCE: who witnessed, outcome CLASS, games — no values.
     INSERT INTO attestations
-        (id, subject_id, kind_id, object_id, source_id, context_id,
+        (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count)
     VALUES
         (laplace_hash128_blake3('a/confirm'), subj, kind, o_conf,  src, NULL, 2, now(), 1),
@@ -60,14 +60,14 @@ BEGIN
         (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, 2, now(), 8),
         (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, 2, now(), 1);
 
-    SELECT count(*) INTO n_prov FROM attestations WHERE kind_id = kind;
+    SELECT count(*) INTO n_prov FROM attestations WHERE type_id = kind;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
 
     -- THE fold: the testimony (score, φ) is consumed via the period staging —
     -- (n games, Σ score) partials per relation — then ONE set-based upsert.
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0
-        (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+        (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
     VALUES
         (subj, kind, o_conf,  phi_trust, 1, s_conf,     now()),
         (subj, kind, o_ref,   phi_trust, 1, s_ref,      now()),

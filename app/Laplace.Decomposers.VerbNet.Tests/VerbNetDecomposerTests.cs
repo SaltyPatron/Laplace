@@ -73,14 +73,14 @@ public sealed class VerbNetDecomposerTests
 
         // Every kind id is a canonical-registry kind id (registry-routed, never a raw row).
         var canonical = new HashSet<Hash128>(KindRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.KindId, canonical));
+        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
         // The load-bearing arenas are present.
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("IS_A"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_THEMATIC_ROLE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_VERB_FRAME"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_EXAMPLE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("CORRESPONDS_TO"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("IS_A"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_THEMATIC_ROLE"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_VERB_FRAME"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("HAS_EXAMPLE"));
+        Assert.Contains(atts, a => a.TypeId == KindRegistry.KindId("CORRESPONDS_TO"));
     }
 
     [Fact]
@@ -95,14 +95,14 @@ public sealed class VerbNetDecomposerTests
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1"), classId);
         Assert.NotNull(lendId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("IS_A")
+            a.TypeId == KindRegistry.KindId("IS_A")
             && a.SubjectId == lendId!.Value && a.ObjectId == classId);
 
         // subclass give-13.1-1 (bare 13.1-1) —IS_A→ give-13.1 (bare 13.1).
         var subId = VerbNetDecomposer.ClassId("give-13.1-1");
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), subId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("IS_A")
+            a.TypeId == KindRegistry.KindId("IS_A")
             && a.SubjectId == subId && a.ObjectId == classId);
     }
 
@@ -119,7 +119,7 @@ public sealed class VerbNetDecomposerTests
         Assert.Equal(senseId, VerbNetDecomposer.SenseId("lend%2:40:00::"));
         Assert.NotNull(lendId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("CORRESPONDS_TO")
+            a.TypeId == KindRegistry.KindId("CORRESPONDS_TO")
             && (a.SubjectId == lendId!.Value || a.ObjectId == lendId!.Value)
             && (a.SubjectId == senseId || a.ObjectId == senseId));
     }
@@ -160,7 +160,7 @@ public sealed class VerbNetDecomposerTests
         Assert.Contains(boot.Entities, e => e.Id == KindRegistry.KindId("HAS_THEMATIC_ROLE"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == VerbNetDecomposer.Source
-            && a.KindId == BootstrapIntentBuilder.HasTrustClassKindId
+            && a.TypeId == BootstrapIntentBuilder.HasTrustClassKindId
             && a.ObjectId == VerbNetDecomposer.TrustClass);
     }
 
