@@ -5,6 +5,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/hsearch.h"
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
 #include "nodes/execnodes.h"
@@ -699,18 +700,58 @@ pg_relation_rank(PG_FUNCTION_ARGS)
 
 
 
+/* Per-backend memo for the SPI fallback below: without it, a type_id that
+ * misses the static table (dynamic DEP_/FEAT_ family members whose family
+ * root isn't registered, or a genuinely unranked type) re-walks up to 8
+ * unprepared IS_A probes on EVERY ranked-read row that touches it. The
+ * resolution is a function of the relation manifest + IS_A consensus, both
+ * effectively static for a backend's lifetime (matching perfcache
+ * semantics); not-found is memoized too — the unresolvable type is exactly
+ * the per-row pathological case. */
+typedef struct RankMemoEntry
+{
+    hash128_t key;
+    double    rank;
+    bool      has_rank;
+} RankMemoEntry;
+
+static HTAB *rank_resolve_memo = NULL;
+
 PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
 
 Datum
 pg_relation_rank_resolved(PG_FUNCTION_ARGS)
 {
     bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t cur_id  = datum_to_hash128(PointerGetDatum(type_ba));
+    hash128_t orig_id = datum_to_hash128(PointerGetDatum(type_ba));
+    hash128_t cur_id  = orig_id;
     const laplace_relation_def_t* def = NULL;
+    RankMemoEntry *memo;
+    bool      memo_found;
 
-    
+
     if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
         PG_RETURN_FLOAT8(def->rank);
+
+    if (rank_resolve_memo == NULL)
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize   = sizeof(hash128_t);
+        ctl.entrysize = sizeof(RankMemoEntry);
+        ctl.hcxt      = TopMemoryContext;
+        rank_resolve_memo = hash_create("relation_rank_resolved memo", 64,
+                                        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
+                                         HASH_FIND, &memo_found);
+    if (memo_found)
+    {
+        if (memo->has_rank)
+            PG_RETURN_FLOAT8(memo->rank);
+        PG_RETURN_NULL();
+    }
 
     if (SPI_connect() != SPI_OK_CONNECT)
         PG_RETURN_NULL();
@@ -750,6 +791,12 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     }
 
     SPI_finish();
+
+    memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
+                                         HASH_ENTER, &memo_found);
+    memo->rank     = out_rank;
+    memo->has_rank = found;
+
     if (found)
         PG_RETURN_FLOAT8(out_rank);
     PG_RETURN_NULL();

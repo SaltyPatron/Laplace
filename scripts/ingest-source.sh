@@ -22,7 +22,24 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
 
-build_cli() { ( cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q -clp:NoSummary >/dev/null ); }
+# Content-fingerprint gate for the CLI build (scripts/lib/fp.sh, stamp cli-build):
+# ensure-foundation's 10-rung ladder invokes this script once per rung, which was
+# up to 10 identical `dotnet build`s per foundation run. Skip only when app/
+# content is unchanged since the last SUCCESSFUL build AND the DLL actually
+# exists — stamps attest sources, artifacts must be checked too.
+# shellcheck source=scripts/lib/fp.sh
+source "$ROOT/scripts/lib/fp.sh"
+
+build_cli() {
+    local fp
+    fp=$(fp_compute app)
+    if fp_check cli-build "$fp" && [[ -f "$DLL" ]]; then
+        echo ">>> CLI build skipped — app/ unchanged since last successful build (fp ${fp:0:12})"
+        return 0
+    fi
+    ( cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q -clp:NoSummary >/dev/null )
+    fp_record cli-build "$fp"
+}
 ingest()    { ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ); }
 
 case "$source" in

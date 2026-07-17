@@ -233,8 +233,19 @@ public sealed class Search
         var moves = MoveGen.Legal(b);
         if (moves.Count == 0) return inCheck ? -(Mate - ply) : 0;
 
-        var considered = inCheck ? moves : moves.Where(m => IsCaptureOrPromo(b, m)).ToList();
-        if (!inCheck && considered.Count == 0) return alpha;
+        // In-place, order-preserving compaction — Quiesce runs at every
+        // horizon node, and the old Where().ToList() allocated a closure, an
+        // iterator, and a list per node (millions per move at the node cap).
+        var considered = moves;
+        if (!inCheck)
+        {
+            int w = 0;
+            for (int i = 0; i < moves.Count; i++)
+                if (IsCaptureOrPromo(b, moves[i]))
+                    moves[w++] = moves[i];
+            moves.RemoveRange(w, moves.Count - w);
+            if (moves.Count == 0) return alpha;
+        }
 
         OrderCaptures(b, considered);
         foreach (var m in considered)

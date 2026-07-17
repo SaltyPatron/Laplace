@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
@@ -7,6 +8,11 @@ public static class LanguageReference
     private static Dictionary<string, string>? _canon;
     private static long _resolveMisses;
     private static readonly object _gate = new();
+
+    // code → entity id memo: bounded by the canonical ISO 639-3 code set, so per-row
+    // resolution never re-builds the "language:<code>" canonical string + hash.
+    private static readonly ConcurrentDictionary<string, Hash128> IdByCode =
+        new(StringComparer.Ordinal);
 
     public static bool IsLoaded => Volatile.Read(ref _canon) != null;
     public static long ResolveMisses => Interlocked.Read(ref _resolveMisses);
@@ -39,11 +45,16 @@ public static class LanguageReference
         return null;
     }
 
-    public static Hash128 Resolve(string? input)
+    public static Hash128 Resolve(string? input) => IdForResolvedCode(ResolveCode(input));
+
+    /// <summary>
+    /// Entity id for an already-resolved canonical code (null = unresolved input → "und",
+    /// counted as a miss). Lets callers that also need the code resolve it exactly once.
+    /// </summary>
+    public static Hash128 IdForResolvedCode(string? code)
     {
-        string? code = ResolveCode(input);
         if (code is null) { Interlocked.Increment(ref _resolveMisses); code = "und"; }
-        return LanguageEntityId.FromIso639_3(code);
+        return IdByCode.GetOrAdd(code, static c => LanguageEntityId.FromIso639_3(c));
     }
 
     private static Dictionary<string, string> Build(string dir)

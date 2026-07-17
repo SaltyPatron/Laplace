@@ -134,7 +134,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
         var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
-        return new ChessGameRecord(gameText, moves, result, gameId) { Walk = walk };
+        return new ChessGameRecord(gameText, moves, result, gameId)
+        {
+            Walk = walk,
+            WhiteName = whiteName,
+            BlackName = blackName,
+            Date = date,
+        };
     }
 
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
@@ -157,11 +163,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
-        var (whiteName, blackName) = ParseNames(gameText);
+        // TryParseGame already scanned these header tags; only re-scan for records built elsewhere.
+        var (whiteName, blackName) = parsed.WhiteName is { } wn
+            ? (wn, parsed.BlackName!)
+            : ParseNames(gameText);
+        string date = parsed.Date ?? PgnGames.TagStr(gameText, "Date");
         var whitePlayer = EmitPlayer(b, whiteName, src);
         var blackPlayer = EmitPlayer(b, blackName, src);
 
-        EmitGame(b, gameId, gameText, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
+        EmitGame(b, gameId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
         RecordStartPosition(b, gameId, gameText, src);
         RecordOpeningHeaders(b, gameId, gameText, src);
         RecordMovetext(b, gameId, gameText, src);
@@ -269,7 +279,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
     private const double PgnWitnessWeight = 0.7;
 
     private static void EmitGame(
-        SubstrateChangeBuilder b, Hash128 gameId, string gameText, GameOutcome result,
+        SubstrateChangeBuilder b, Hash128 gameId, string gameText, string date, GameOutcome result,
         Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo, Hash128 src)
     {
         b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
@@ -278,7 +288,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));
 
         Meta(b, gameId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src);
-        Meta(b, gameId, "ON_DATE", PgnGames.TagStr(gameText, "Date"), src);
+        Meta(b, gameId, "ON_DATE", date, src);
         Meta(b, gameId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src);
         Meta(b, gameId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src);
         Meta(b, gameId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src);
@@ -339,11 +349,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
         {
             try
             {
-                using var r = new StreamReader(f);
-                string? line;
-                while ((line = r.ReadLine()) is not null)
-                    if (line.StartsWith("[Event ", StringComparison.Ordinal)) games++;
+                games += CountEventHeaderLines(f, ct);
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
@@ -351,6 +359,44 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
             }
         }
         return Task.FromResult<long?>(games == 0 ? null : games);
+    }
+
+    // Byte-level count of lines starting with "[Event " — same result as ReadLine +
+    // StartsWith without a string allocation per line. Line starts follow '\n' or '\r'
+    // (an '\r' of a CRLF ends the line; the '\n' then opens a line that can't match '[').
+    // A leading UTF-8 BOM is skipped for StreamReader parity.
+    private static long CountEventHeaderLines(string path, CancellationToken ct)
+    {
+        ReadOnlySpan<byte> prefix = "[Event "u8;
+        long games = 0;
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 20, useAsync: false);
+        var buf = new byte[1 << 20];
+        int matched = 0;   // prefix bytes matched on the current line; -1 = line can't match
+        bool first = true;
+        int read;
+        while ((read = fs.Read(buf, 0, buf.Length)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            int i = 0;
+            if (first)
+            {
+                first = false;
+                if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) i = 3;
+            }
+            for (; i < read; i++)
+            {
+                byte c = buf[i];
+                if (c == (byte)'\n' || c == (byte)'\r') { matched = 0; continue; }
+                if (matched < 0) continue;
+                if (c == prefix[matched])
+                {
+                    if (++matched == prefix.Length) { games++; matched = -1; }
+                }
+                else matched = -1;
+            }
+        }
+        return games;
     }
 
     private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
@@ -375,5 +421,12 @@ public sealed record ChessGameRecord(
     : ITrunkRootRecord
 {
     internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
+
+    // Header tags TryParseGame already scanned, threaded through so RecordGame does not
+    // re-scan the full game text. Null when the record was built without a header pass.
+    internal string? WhiteName { get; init; }
+    internal string? BlackName { get; init; }
+    internal string? Date { get; init; }
+
     public Hash128 TrunkRootId => GameId;
 }

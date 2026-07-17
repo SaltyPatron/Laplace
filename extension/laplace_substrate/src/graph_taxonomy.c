@@ -103,22 +103,6 @@ spi_top_synset(Datum word)
         SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
 }
 
-static Datum
-spi_gloss_for(Datum synset)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { synset };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.synset_gloss($1)",
-        1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
 static bool
 in_ancestor_chain(TaxNode *nodes, int cur, const hash128_t *target)
 {
@@ -329,30 +313,87 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
         n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, 2, nodes, TAX_WALK_CAP);
     }
 
-    for (int i = 0; i < n_nodes; i++)
+    /* Batch the label + gloss resolution: the per-node spi_realize +
+     * spi_gloss_for pair was 2 unprepared parse/plan/execute round trips per
+     * emitted node (up to TAX_WALK_CAP=2048). realize_batch resolves every id
+     * in 6 fixed round trips; the gloss set-query is one more. */
     {
-        Datum values[3];
-        bool  nulls[3] = { false, false, false };
-        Datum hypernym;
-        Datum gloss;
+        int    n_emit = 0;
+        int   *emit_idx = (int *) palloc(sizeof(int) * (n_nodes > 0 ? n_nodes : 1));
+        Datum *emit_ids = (Datum *) palloc(sizeof(Datum) * (n_nodes > 0 ? n_nodes : 1));
+        Datum *labels = NULL;
+        bool  *label_nulls = NULL;
+        Datum *glosses = NULL;
+        bool  *gloss_nulls = NULL;
+        int    n_labels = 0, n_glosses = 0;
 
-        if (nodes[i].depth == 0)
-            continue;
+        for (int i = 0; i < n_nodes; i++)
+        {
+            if (nodes[i].depth == 0)
+                continue;
+            emit_idx[n_emit] = i;
+            emit_ids[n_emit] = hash128_to_datum(&nodes[i].id);
+            n_emit++;
+        }
 
-        hypernym = spi_realize(hash128_to_datum(&nodes[i].id), lang);
-        gloss = spi_gloss_for(hash128_to_datum(&nodes[i].id));
+        if (n_emit > 0)
+        {
+            ArrayType *ids_arr = construct_array(emit_ids, n_emit, BYTEAOID,
+                                                 -1, false, TYPALIGN_INT);
+            Oid   rtypes[2] = { BYTEAARRAYOID, BYTEAOID };
+            Datum rargs[2] = { PointerGetDatum(ids_arr), lang };
+            char  rnulls[3] = "  ";
+            int   rc2;
+            bool  isnull;
 
-        values[0] = Int32GetDatum(nodes[i].depth);
-        if (hypernym == (Datum) 0)
-            nulls[1] = true;
-        else
-            values[1] = hypernym;
-        if (gloss == (Datum) 0)
-            nulls[2] = true;
-        else
-            values[2] = gloss;
+            if (lang == (Datum) 0)
+                rnulls[1] = 'n';
+            rc2 = SPI_execute_with_args(
+                "SELECT laplace.realize_batch($1, $2)",
+                2, rtypes, rargs, rnulls, true, 1);
+            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
+                                      -1, false, TYPALIGN_INT,
+                                      &labels, &label_nulls, &n_labels);
+            }
 
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+            rc2 = SPI_execute_with_args(
+                "SELECT array_agg(laplace.synset_gloss(u.id) ORDER BY u.ord) "
+                "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
+                1, rtypes, rargs, NULL, true, 1);
+            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
+                                      -1, false, TYPALIGN_INT,
+                                      &glosses, &gloss_nulls, &n_glosses);
+            }
+        }
+
+        for (int e = 0; e < n_emit; e++)
+        {
+            Datum values[3];
+            bool  nulls[3] = { false, false, false };
+            int   i = emit_idx[e];
+
+            values[0] = Int32GetDatum(nodes[i].depth);
+            if (labels != NULL && e < n_labels && !label_nulls[e])
+                values[1] = labels[e];
+            else
+                nulls[1] = true;
+            if (glosses != NULL && e < n_glosses && !gloss_nulls[e])
+                values[2] = glosses[e];
+            else
+                nulls[2] = true;
+
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        }
     }
 
     laplace_spi_finish(spi_top);

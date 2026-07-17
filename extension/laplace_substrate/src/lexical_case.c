@@ -233,24 +233,24 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		PG_RETURN_ARRAYTYPE_P(result);
 	}
 
-	/* --- 2. Resolve the three case-map relation type ids. --- */
+	/* --- 2. Resolve the three case-map relation type ids natively (they are
+	 * manifest constants; the previous SQL round trip re-resolved them per
+	 * call — rel_type_id is the zero-SPI path define_fast already uses). --- */
 	{
-		rc = SPI_execute(
-			"SELECT laplace.relation_type_id('HAS_LOWERCASE_MAPPING'), "
-			"       laplace.relation_type_id('HAS_UPPERCASE_MAPPING'), "
-			"       laplace.relation_type_id('HAS_TITLECASE_MAPPING')",
-			true, 1);
-		if (rc != SPI_OK_SELECT || SPI_processed != 1)
-			elog(ERROR, "word_case_variants: relation_type_id resolution failed");
+		static const char *cm_names[CM_SLOTS] = {
+			"HAS_LOWERCASE_MAPPING",
+			"HAS_UPPERCASE_MAPPING",
+			"HAS_TITLECASE_MAPPING",
+		};
+
 		for (int s = 0; s < CM_SLOTS; s++)
 		{
-			bool  isnull;
-			Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc,
-									s + 1, &isnull);
+			hash128_t id = rel_type_id(cm_names[s]);
+			Datum     d  = hash128_to_datum(&id);
 
-			if (isnull || !datum_key16(d, type_key[s]))
+			if (!datum_key16(d, type_key[s]))
 				elog(ERROR, "word_case_variants: null case-map relation type id");
-			type_datum[s] = copy_bytea_datum(d);
+			type_datum[s] = d;
 		}
 	}
 

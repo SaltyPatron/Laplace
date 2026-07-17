@@ -232,39 +232,98 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         pfree(subjbuf);
     }
 
-    for (int i = 0; i < n_rows && emitted < lim; i++)
+    /* Batch label resolution for the emitted window: the per-row
+     * spi_realize + spi_type_label pair was 2 unprepared round trips per
+     * emitted row (up to lim=80). realize_batch resolves the facts in 6
+     * fixed round trips; type labels come back in one set query. */
     {
-        Datum values[4];
-        bool  nulls[4] = { false, false, false, false };
-        Datum fact, type_lbl;
-        const char *holder;
+        int    n_emit = n_rows < lim ? n_rows : lim;
+        Datum *facts = NULL, *type_lbls = NULL;
+        bool  *fact_nulls = NULL, *type_lbl_nulls = NULL;
+        int    n_facts = 0, n_type_lbls = 0;
 
-        if (rows[i].from_x && rows[i].from_y)
-            holder = "both";
-        else if (rows[i].from_x)
-            holder = "x-only";
-        else
-            holder = "y-only";
+        if (n_emit > 0)
+        {
+            Datum *obj_ids  = (Datum *) palloc(sizeof(Datum) * n_emit);
+            Datum *type_ids = (Datum *) palloc(sizeof(Datum) * n_emit);
+            ArrayType *obj_arr, *type_arr;
+            Oid   rtypes[2] = { BYTEAARRAYOID, BYTEAOID };
+            Datum rargs[2];
+            char  rnulls[3] = "  ";
+            bool  isnull;
+            int   rc2;
 
-        fact = spi_realize(hash128_to_datum(&rows[i].object_id), lang);
-        type_lbl = spi_type_label(hash128_to_datum(&rows[i].type_id));
+            for (int i = 0; i < n_emit; i++)
+            {
+                obj_ids[i]  = hash128_to_datum(&rows[i].object_id);
+                type_ids[i] = hash128_to_datum(&rows[i].type_id);
+            }
+            obj_arr  = construct_array(obj_ids, n_emit, BYTEAOID, -1, false, TYPALIGN_INT);
+            type_arr = construct_array(type_ids, n_emit, BYTEAOID, -1, false, TYPALIGN_INT);
 
-        values[0] = CStringGetTextDatum(holder);
-        if (type_lbl == (Datum) 0)
-            nulls[1] = true;
-        else
-            values[1] = type_lbl;
-        if (fact == (Datum) 0)
-            nulls[2] = true;
-        else
-            values[2] = fact;
-        if (rows[i].mu == (Datum) 0)
-            nulls[3] = true;
-        else
-            values[3] = rows[i].mu;
+            rargs[0] = PointerGetDatum(obj_arr);
+            rargs[1] = lang;
+            if (lang == (Datum) 0)
+                rnulls[1] = 'n';
+            rc2 = SPI_execute_with_args(
+                "SELECT laplace.realize_batch($1, $2)",
+                2, rtypes, rargs, rnulls, true, 1);
+            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
+                                      -1, false, TYPALIGN_INT,
+                                      &facts, &fact_nulls, &n_facts);
+            }
 
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-        emitted++;
+            rargs[0] = PointerGetDatum(type_arr);
+            rc2 = SPI_execute_with_args(
+                "SELECT array_agg(laplace.type_label(u.id) ORDER BY u.ord) "
+                "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
+                1, rtypes, rargs, NULL, true, 1);
+            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
+                                          SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
+                                      -1, false, TYPALIGN_INT,
+                                      &type_lbls, &type_lbl_nulls, &n_type_lbls);
+            }
+        }
+
+        for (int i = 0; i < n_emit; i++)
+        {
+            Datum values[4];
+            bool  nulls[4] = { false, false, false, false };
+            const char *holder;
+
+            if (rows[i].from_x && rows[i].from_y)
+                holder = "both";
+            else if (rows[i].from_x)
+                holder = "x-only";
+            else
+                holder = "y-only";
+
+            values[0] = CStringGetTextDatum(holder);
+            if (type_lbls != NULL && i < n_type_lbls && !type_lbl_nulls[i])
+                values[1] = type_lbls[i];
+            else
+                nulls[1] = true;
+            if (facts != NULL && i < n_facts && !fact_nulls[i])
+                values[2] = facts[i];
+            else
+                nulls[2] = true;
+            if (rows[i].mu == (Datum) 0)
+                nulls[3] = true;
+            else
+                values[3] = rows[i].mu;
+
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+            emitted++;
+        }
     }
 
     laplace_spi_finish(spi_top);

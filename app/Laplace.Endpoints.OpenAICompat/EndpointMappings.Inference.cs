@@ -278,10 +278,26 @@ internal static class InferenceEndpoints
 
             bool includeMeaning = !payload.Model.Contains("form", StringComparison.OrdinalIgnoreCase);
 
+            // Resolve the batch with bounded fan-out instead of one serial
+            // round trip per input — an OpenAI-style batch array's latency
+            // scaled linearly with its size. Order is preserved; the pooled
+            // NpgsqlDataSource absorbs the concurrency.
+            var results = new EmbeddingResult[inputs.Count];
+            const int maxParallel = 8;
+            for (int start = 0; start < inputs.Count; start += maxParallel)
+            {
+                int end = Math.Min(start + maxParallel, inputs.Count);
+                var tasks = new Task<EmbeddingResult>[end - start];
+                for (int i = start; i < end; i++)
+                    tasks[i - start] = substrate.EmbeddingAsync(inputs[i], includeMeaning, meaningLimit: 10, ct);
+                for (int i = start; i < end; i++)
+                    results[i] = await tasks[i - start];
+            }
+
             var data = new List<EmbeddingData>(inputs.Count);
             for (int i = 0; i < inputs.Count; i++)
             {
-                var result = await substrate.EmbeddingAsync(inputs[i], includeMeaning, meaningLimit: 10, ct);
+                var result = results[i];
                 var vector = result.Form is { } f
                     ? new double[] { f.X, f.Y, f.Z, f.M, f.Radius }
                     : Array.Empty<double>();

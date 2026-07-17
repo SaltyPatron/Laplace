@@ -49,21 +49,35 @@ internal sealed class StrictWebhookFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
+        {
+            // Webhook-path tests never touch the substrate: without these the
+            // factory booted the production composition — a real
+            // NpgsqlDataSource plus CatalogPrewarmService firing the explore
+            // catalog load against whatever DB the runner .env points at.
+            services.RemoveAll<ISubstrateClient>();
+            services.AddSingleton<ISubstrateClient, UnreachableSubstrateClient>();
+            services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
                 TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
                 o.SkipSignatureVerification = false;
-            }));
+            });
+        });
 }
 
 internal sealed class UnconfiguredWebhookFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ISubstrateClient>();
+            services.AddSingleton<ISubstrateClient, UnreachableSubstrateClient>();
+            services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
                 TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = null;
-            }));
+            });
+        });
 }

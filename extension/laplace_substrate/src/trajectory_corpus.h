@@ -26,8 +26,9 @@ typedef struct GenCorpus
     int32   *stream;        
     int32    stream_len;
     int64    stream_cap;    /* allocated int32 slots in stream/sep_after */
-    int32   *suffix;        
+    int32   *suffix;
     int32    n_suffix;
+    int32    suffix_upto;   /* stream_len the sorted suffix array covers */
     char   (*ids)[16];      
     int32    n_vocab;
     int32    vocab_cap;

@@ -82,37 +82,51 @@ ensure_pinned() {
     return 0
 }
 
-total=0; synced=0; nooped=0; failed=0
+# Checked-out HEAD sha of a normal (non-bare, dir-.git) clone WITHOUT spawning
+# git — the ~310-entry all-noop sweep must not fork per entry. Prints nothing
+# when it cannot resolve (missing entry, bare layout, gitfile, unusual ref);
+# callers fall back to `git rev-parse HEAD` for exactly those cases.
+checkout_head() {
+    local gitdir="$1/.git" head ref sha line
+    [ -d "$gitdir" ] || return 0
+    IFS= read -r head <"$gitdir/HEAD" 2>/dev/null || return 0
+    if [ "${head#ref: }" = "$head" ]; then
+        # detached HEAD: the line is the sha itself
+        printf '%s' "$head"
+        return 0
+    fi
+    ref="${head#ref: }"
+    if [ -f "$gitdir/$ref" ]; then
+        IFS= read -r sha <"$gitdir/$ref" 2>/dev/null || return 0
+        # loose ref may itself be symbolic in exotic setups — only trust a sha
+        case "$sha" in *[!0-9a-f]*|"") return 0 ;; esac
+        printf '%s' "$sha"
+        return 0
+    fi
+    if [ -f "$gitdir/packed-refs" ]; then
+        while IFS= read -r line; do
+            case "$line" in '#'*|'^'*) continue ;; esac
+            if [ "${line#* }" = "$ref" ]; then
+                printf '%s' "${line%% *}"
+                return 0
+            fi
+        done <"$gitdir/packed-refs"
+    fi
+    return 0
+}
 
+# Non-.git content presence, matching the old `ls | grep -v '^\.git$'` check
+# (plain ls skips dotfiles; so does an unset-dotglob glob) — again no fork.
+entry_nonempty() {
+    local g=("$1"/*)
+    [ -e "${g[0]}" ]
+}
+
+# Parse .gitmodules once into parallel arrays.
+SM_PATHS=(); SM_URLS=()
 while IFS=$'\t' read -r sm_path sm_url; do
     [ -n "$sm_path" ] && [ -n "$sm_url" ] || continue
-    total=$((total + 1))
-
-    pinned=$(git ls-tree HEAD "$sm_path" 2>/dev/null | awk '{print $3}')
-    if [ -z "$pinned" ]; then
-        err "$sm_path: no gitlink at HEAD — submodule declared in .gitmodules but missing from tree"
-        failed=$((failed + 1))
-        continue
-    fi
-
-    entry="$CACHE/${sm_path#external/}"
-    before_head=$(git -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
-
-    if ensure_pinned "$sm_path" "$sm_url" "$pinned"; then
-        after_head=$(git -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
-        if [ "$before_head" = "$pinned" ] && [ "$after_head" = "$pinned" ]; then
-            nooped=$((nooped + 1))
-        else
-            synced=$((synced + 1))
-            log "  synced: $sm_path → $pinned"
-        fi
-    else
-        failed=$((failed + 1))
-    fi
-
-    if [ $((total % 50)) -eq 0 ]; then
-        printf "  [%d] synced=%d nooped=%d failed=%d\n" "$total" "$synced" "$nooped" "$failed"
-    fi
+    SM_PATHS+=("$sm_path"); SM_URLS+=("$sm_url")
 done < <(
     awk '
         /^\[submodule/ { in_sm=1; path=""; url=""; next }
@@ -121,6 +135,71 @@ done < <(
         in_sm && path != "" && url != "" { printf "%s\t%s\n", path, url; in_sm=0 }
     ' .gitmodules
 )
+
+# ONE `git ls-tree -r` over the tracked prefixes replaces the per-entry
+# `git ls-tree HEAD <path>` (~310 forks). -z: no path quoting; gitlinks are
+# mode 160000 and -r does not descend into them.
+declare -A PINS=()
+declare -A _seen_prefix=()
+PREFIXES=()
+for sm_path in "${SM_PATHS[@]}"; do
+    p="${sm_path%%/*}"
+    if [ -z "${_seen_prefix[$p]:-}" ]; then
+        _seen_prefix[$p]=1
+        PREFIXES+=("$p")
+    fi
+done
+if [ "${#PREFIXES[@]}" -gt 0 ]; then
+    while IFS= read -r -d '' rec; do
+        meta="${rec%%$'\t'*}"
+        path="${rec#*$'\t'}"
+        [ "${meta%% *}" = "160000" ] || continue
+        PINS["$path"]="${meta##* }"
+    done < <(git ls-tree -r -z HEAD -- "${PREFIXES[@]}")
+fi
+
+total=0; synced=0; nooped=0; failed=0
+
+for i in "${!SM_PATHS[@]}"; do
+    sm_path="${SM_PATHS[$i]}"; sm_url="${SM_URLS[$i]}"
+    total=$((total + 1))
+
+    pinned="${PINS[$sm_path]:-}"
+    if [ -z "$pinned" ]; then
+        err "$sm_path: no gitlink at HEAD — submodule declared in .gitmodules but missing from tree"
+        failed=$((failed + 1))
+        continue
+    fi
+
+    entry="$CACHE/${sm_path#external/}"
+    before_head=$(checkout_head "$entry")
+
+    # Fast noop path: checkout already at the pin, non-empty, and clean. The
+    # dirty check (`diff --quiet HEAD`) is the one remaining per-entry git
+    # fork — dropping it would silently stop resetting dirtied cache entries.
+    if [ -n "$before_head" ] && [ "$before_head" = "$pinned" ] \
+        && entry_nonempty "$entry" \
+        && git -C "$entry" diff --quiet HEAD 2>/dev/null; then
+        nooped=$((nooped + 1))
+    else
+        [ -n "$before_head" ] || before_head=$(git -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
+        if ensure_pinned "$sm_path" "$sm_url" "$pinned"; then
+            after_head=$(git -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
+            if [ "$before_head" = "$pinned" ] && [ "$after_head" = "$pinned" ]; then
+                nooped=$((nooped + 1))
+            else
+                synced=$((synced + 1))
+                log "  synced: $sm_path → $pinned"
+            fi
+        else
+            failed=$((failed + 1))
+        fi
+    fi
+
+    if [ $((total % 50)) -eq 0 ]; then
+        printf "  [%d] synced=%d nooped=%d failed=%d\n" "$total" "$synced" "$nooped" "$failed"
+    fi
+done
 
 printf 'sync-external: total=%d synced=%d nooped=%d failed=%d cache=%s\n' \
        "$total" "$synced" "$nooped" "$failed" "$CACHE"

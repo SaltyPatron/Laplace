@@ -11,7 +11,8 @@ public sealed class UnicodeDecomposerTests
 {
     static UnicodeDecomposerTests()
     {
-        CodepointPerfcache.Load(ResolvePerfcacheBlob());
+        // Process-global native state: only the first test class pays the mmap+CRC load.
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
     }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();

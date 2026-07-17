@@ -276,12 +276,24 @@ phase_build_app() {
   fi
   if [[ -z "$plan_out" ]]; then
     # Stamps can outlive artifacts (e.g. a manual bin/ wipe): trust them only
-    # while at least one Release output tree exists.
-    if compgen -G "$ROOT/app/*/bin/Release" >/dev/null; then
-      echo "app up-to-date — dotnet build skipped (fingerprints unchanged)"
+    # while EVERY solution project has a Release output tree — one surviving
+    # bin/Release must not vouch for the others (stale-artifact class).
+    local slnx proj rel missing=""
+    slnx=$(<"$ROOT/app/Laplace.slnx")
+    for proj in "$ROOT"/app/*/*.csproj; do
+      [[ -e "$proj" ]] || continue
+      rel="${proj#"$ROOT/app/"}"
+      [[ "$slnx" == *"\"$rel\""* ]] || continue   # not part of the solution build
+      if [[ ! -d "${proj%/*}/bin/Release" ]]; then
+        missing="$rel"
+        break
+      fi
+    done
+    if [[ -z "$missing" ]]; then
+      echo "app up-to-date — dotnet build skipped (fingerprints unchanged, all Release trees present)"
       return 0
     fi
-    echo "app stamps present but no Release artifacts — full solution build"
+    echo "app stamps present but $missing lacks bin/Release — full solution build"
     ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
     "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
     return 0

@@ -307,15 +307,30 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
     }
 }
 
+static void respond_routed(const char *prompt, Datum context, bool ctx_null,
+                           RouteResult *routep, Datum topic, ReplyBuf *buf);
+
 static void
 respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
 {
     RouteResult route;
     Datum       topic;
-    int         n;
 
     route_prompt_impl(prompt, &route);
     topic = spi_resolve_topic(route.phrase, context, ctx_null);
+    respond_routed(prompt, context, ctx_null, &route, topic, buf);
+}
+
+/* The routed body of respond_impl: takes an already-computed route + topic
+ * so recall_session (which needs both for session_record_prompt) doesn't
+ * re-run the ~30-pattern prompt router and the SQL topic resolution a
+ * second time per turn. Owns route: frees it on every path. */
+static void
+respond_routed(const char *prompt, Datum context, bool ctx_null,
+               RouteResult *routep, Datum topic, ReplyBuf *buf)
+{
+    RouteResult route = *routep;
+    int         n;
 
     if (topic == (Datum) 0)
     {
@@ -675,6 +690,9 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
     if (has_context)
     {
         Datum *ids = (Datum *) palloc(sizeof(Datum) * cands.n);
+        int   *chain_next;
+        HTAB  *cand_idx;
+        HASHCTL ctl;
         ArrayType *cand_arr;
         Oid   types[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
         Datum args[2];
@@ -684,27 +702,65 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
         args[0] = PointerGetDatum(cand_arr);
         args[1] = PointerGetDatum(p_context_arr);
 
-        rc = SPI_execute_with_args(
-            "SELECT c.object_id, sum(laplace.eff_mu(c.rating, c.rd)) "
-            "FROM laplace.v_consensus_unrefuted c "
-            "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) "
-            "GROUP BY c.object_id",
-            2, types, args, NULL, true, 0);
-        if (rc == SPI_OK_SELECT)
+        /* Hash-index the candidates by definition id: the old per-row linear
+         * scan was O(results × candidates) bytea compares. Duplicate ids are
+         * chained (built back-to-front so chains run in ascending index
+         * order) because the linear scan credited EVERY matching candidate,
+         * not just the first. */
         {
-            for (uint64 r = 0; r < SPI_processed; r++)
+            typedef struct DefineCandIdxEntry
             {
-                HeapTuple tup = SPI_tuptable->vals[r];
-                TupleDesc td  = SPI_tuptable->tupdesc;
-                bool n0, n1;
-                Datum obj = SPI_getbinval(tup, td, 1, &n0);
-                Datum sum = SPI_getbinval(tup, td, 2, &n1);
+                hash128_t key;
+                int       head;
+            } DefineCandIdxEntry;
 
-                if (n1) continue;
-                for (int i = 0; i < cands.n; i++)
-                    if (bytea_eq(cands.rows[i].definition_id, obj))
-                        cands.rows[i].score_fp += DatumGetInt64(sum);
+            memset(&ctl, 0, sizeof(ctl));
+            ctl.keysize   = sizeof(hash128_t);
+            ctl.entrysize = sizeof(DefineCandIdxEntry);
+            cand_idx = hash_create("define_fast cand idx", cands.n > 16 ? cands.n : 16,
+                                   &ctl, HASH_ELEM | HASH_BLOBS);
+            chain_next = (int *) palloc(sizeof(int) * cands.n);
+            for (int i = cands.n - 1; i >= 0; i--)
+            {
+                hash128_t key = datum_to_hash128(cands.rows[i].definition_id);
+                bool      found;
+                DefineCandIdxEntry *e = (DefineCandIdxEntry *)
+                    hash_search(cand_idx, &key, HASH_ENTER, &found);
+
+                chain_next[i] = found ? e->head : -1;
+                e->head = i;
             }
+
+            rc = SPI_execute_with_args(
+                "SELECT c.object_id, sum(laplace.eff_mu(c.rating, c.rd)) "
+                "FROM laplace.v_consensus_unrefuted c "
+                "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) "
+                "GROUP BY c.object_id",
+                2, types, args, NULL, true, 0);
+            if (rc == SPI_OK_SELECT)
+            {
+                for (uint64 r = 0; r < SPI_processed; r++)
+                {
+                    HeapTuple tup = SPI_tuptable->vals[r];
+                    TupleDesc td  = SPI_tuptable->tupdesc;
+                    bool n0, n1;
+                    Datum obj = SPI_getbinval(tup, td, 1, &n0);
+                    Datum sum = SPI_getbinval(tup, td, 2, &n1);
+                    hash128_t key;
+                    bool      found;
+                    DefineCandIdxEntry *e;
+
+                    if (n1) continue;
+                    key = datum_to_hash128(obj);
+                    e = (DefineCandIdxEntry *)
+                        hash_search(cand_idx, &key, HASH_FIND, &found);
+                    if (!found) continue;
+                    for (int i = e->head; i >= 0; i = chain_next[i])
+                        cands.rows[i].score_fp += DatumGetInt64(sum);
+                }
+            }
+            hash_destroy(cand_idx);
+            pfree(chain_next);
         }
         pfree(ids);
     }
@@ -1262,20 +1318,22 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
 
             route_prompt_impl(prompt, &route);
             topic = spi_resolve_topic(route.phrase, context, ctx_null);
-            route_free(&route);
 
             iargs[0] = session;
             iargs[1] = CStringGetTextDatum(prompt);
             iargs[2] = topic;
-            
+
 
 
             SPI_execute_with_args(
                 "SELECT laplace.session_record_prompt($1, $2, $3)",
                 3, itypes, iargs, topic == (Datum) 0 ? "  n" : NULL, false, 0);
-        }
 
-        respond_impl(prompt, context, ctx_null, &buf);
+            /* Reuse the route + topic just computed for session_record_prompt
+             * instead of re-routing and re-resolving inside respond_impl —
+             * respond_routed takes ownership of route. */
+            respond_routed(prompt, context, ctx_null, &route, topic, &buf);
+        }
         laplace_spi_finish(spi_top);
 
         InitMaterializedSRF(fcinfo, 0);

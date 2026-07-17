@@ -8,7 +8,10 @@ namespace Laplace.Decomposers.PropBank.Tests;
 
 public sealed class PropBankDecomposerTests
 {
-    static PropBankDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    static PropBankDecomposerTests()
+    {
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 

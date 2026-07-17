@@ -128,7 +128,12 @@ jobs:
             [ -f "$f" ] || { echo "::error file=$f::codegen did not produce a declared output"; exit 1; }
           done
           a=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
-          rm -f "${outs[@]}" engine/core/src/generated/.attestation-law-stamp
+          # Wipe only the OUTPUTS, never the codegen stamp: the python codegen
+          # doesn't read the stamp, the stamp keys on manifest/script mtimes
+          # (untouched here), and the regen below restores byte-identical
+          # outputs — deleting the stamp on this shared self-hosted workspace
+          # forced the build job's phase_codegen to re-run on every push.
+          rm -f "${outs[@]}"
           python3 scripts/codegen-attestation-law.py
           b=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
           [ "$a" = "$b" ] || { echo "::error::codegen NON-DETERMINISTIC ($a != $b) — same TOML, different output; breaks content-addressing"; exit 1; }

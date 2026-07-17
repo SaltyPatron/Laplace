@@ -6,6 +6,8 @@ internal static class SemLinkTestPerfcache
 {
     internal static void Load()
     {
+        // Process-global native state: skip the mmap+CRC re-load when another class loaded it.
+        if (CodepointPerfcache.IsLoaded) return;
         try
         {
             CodepointPerfcache.Load(LaplaceInstall.ResolveT0Perfcache());

@@ -5,5 +5,12 @@ CREATE TABLE IF NOT EXISTS trajectory_pairs_meta (
     probe_rows   bigint  NOT NULL,
     probe_max_us bigint  NOT NULL,
     max_gap      int     NOT NULL,
+    -- Row count of the last build: lets trajectory_pairs_ensure's skip path
+    -- return without count(*)-ing the (potentially multi-million-row) pairs
+    -- table on every call. NULL = meta row predates this column (upgrade);
+    -- ensure counts once and caches.
+    pair_rows    bigint,
     built_at     timestamptz NOT NULL DEFAULT now()
 );
+-- Upgrade path: CREATE TABLE IF NOT EXISTS is a no-op on an existing cluster.
+ALTER TABLE trajectory_pairs_meta ADD COLUMN IF NOT EXISTS pair_rows bigint;

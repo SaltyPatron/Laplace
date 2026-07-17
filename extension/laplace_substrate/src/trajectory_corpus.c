@@ -422,11 +422,13 @@ corpus_load_and_fold(GenCorpus *c, TimestampTz since, MemoryContext walk_cxt)
         }
     }
 
-    /* any append invalidates the suffix array; rebuilt lazily on demand */
-    if (c->suffix != NULL)
-        pfree(c->suffix);
-    c->suffix = NULL;
-    c->n_suffix = 0;
+    /* The suffix array is NOT discarded on append: every append leaves the
+     * stream sentinel-terminated, so an existing suffix's comparison walk
+     * always terminates at a real in-stream sentinel before reaching the old
+     * end — appended tokens can never reorder already-sorted suffixes.
+     * corpus_ensure_suffix() sorts only the new positions and merges
+     * (O(m log m + n) instead of a full O(n log n) re-qsort per converse
+     * deposit). suffix_upto records how far the sorted array covers. */
 }
 
 static void
@@ -504,16 +506,70 @@ corpus_refresh(GenCorpus *c, int64 probe_rows, int64 probe_max_us)
 void
 corpus_ensure_suffix(GenCorpus *c)
 {
-    if (c->suffix != NULL)
+    if (c->suffix != NULL && c->suffix_upto == c->stream_len)
         return;
-    c->suffix = (int32 *) MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) Max(c->stream_len, 1));
-    c->n_suffix = 0;
-    for (int32 i = 0; i < c->stream_len; i++)
-        if (c->stream[i] != GEN_SENTINEL)
-            c->suffix[c->n_suffix++] = i;
+
     cmp_stream = c->stream;
     cmp_len    = c->stream_len;
-    qsort(c->suffix, c->n_suffix, sizeof(int32), suffix_cmp);
+
+    if (c->suffix == NULL)
+    {
+        c->suffix = (int32 *) MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) Max(c->stream_len, 1));
+        c->n_suffix = 0;
+        for (int32 i = 0; i < c->stream_len; i++)
+            if (c->stream[i] != GEN_SENTINEL)
+                c->suffix[c->n_suffix++] = i;
+        qsort(c->suffix, c->n_suffix, sizeof(int32), suffix_cmp);
+    }
+    else
+    {
+        /* Incremental: old suffix order is append-stable (see the append-side
+         * comment), so sort only positions added since suffix_upto and merge
+         * the two sorted runs. */
+        int32 start = c->suffix_upto;
+        int32 m = 0;
+
+        for (int32 i = start; i < c->stream_len; i++)
+            if (c->stream[i] != GEN_SENTINEL)
+                m++;
+
+        if (m > 0)
+        {
+            int32 *fresh = (int32 *)
+                MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) m);
+            int32 *merged = (int32 *)
+                MemoryContextAllocHuge(c->cxt,
+                                       sizeof(int32) * ((Size) c->n_suffix + (Size) m));
+            int32  mi = 0;
+
+            for (int32 i = start; i < c->stream_len; i++)
+                if (c->stream[i] != GEN_SENTINEL)
+                    fresh[mi++] = i;
+            qsort(fresh, m, sizeof(int32), suffix_cmp);
+
+            {
+                int32 i = 0, j = 0, k = 0;
+
+                while (i < c->n_suffix && j < m)
+                {
+                    if (suffix_cmp(&c->suffix[i], &fresh[j]) <= 0)
+                        merged[k++] = c->suffix[i++];
+                    else
+                        merged[k++] = fresh[j++];
+                }
+                while (i < c->n_suffix)
+                    merged[k++] = c->suffix[i++];
+                while (j < m)
+                    merged[k++] = fresh[j++];
+            }
+
+            pfree(c->suffix);
+            pfree(fresh);
+            c->suffix = merged;
+            c->n_suffix += m;
+        }
+    }
+    c->suffix_upto = c->stream_len;
 }
 
 GenCorpus *

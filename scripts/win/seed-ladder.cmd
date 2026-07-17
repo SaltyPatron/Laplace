@@ -13,8 +13,6 @@ cd /d "%LAPLACE_ROOT%\app"
 
 if /i "%LAPLACE_LADDER_START%"=="proof" (
   echo ==== ladder start: proof path - floor + knowledge cluster assumed present ====
-  echo ==== ladder: build CLI once ====
-  dotnet build "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo || exit /b 1
   goto stage_proof
 )
 
@@ -31,9 +29,6 @@ if "%LAPLACE_LADDER_DRY%"=="1" (
   )
   goto ladder_done
 )
-
-echo ==== ladder: build CLI once ====
-dotnet build "%LAPLACE_ROOT%\app\Laplace.Cli\Laplace.Cli.csproj" -c Release -v q --nologo || exit /b 1
 
 call "%~dp0seed-stage.cmd" floor || exit /b 1
 call "%~dp0seed-stage.cmd" document || exit /b 1

@@ -23,6 +23,15 @@ internal static class IngestExistenceGate
     {
         if (records.Count == 0) return [];
 
+        // Relation triples carry TWO content roots (subject + object); the single-root
+        // machinery below cannot gate them, so they get a dedicated both-roots pass.
+        if (records is List<RelationTripleRecord> triples && handler is RelationTripleHandler tripleHandler)
+        {
+            var sc = await RemovePresentTriplesAsync(
+                triples, tripleHandler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
+            return ((TRecord Record, long Units)[])(object)sc;
+        }
+
         var shortcircuited = new List<(TRecord, long)>();
         var roots = new List<(int Index, Hash128 RootId)>();
         var rootIndex = new int[records.Count];
@@ -80,6 +89,110 @@ internal static class IngestExistenceGate
             if (rootIndex[i] == -2) continue;
             novel.Add(records[i]);
         }
+        records.Clear();
+        records.AddRange(novel);
+        return shortcircuited.ToArray();
+    }
+
+    // Two-root existence gate for relation triples: a record short-circuits (skips BOTH
+    // tier-tree composes in CreateDeferredUnit) only when subject AND object phrases are
+    // proven present; its testimony — the edge plus POS/synset/language facts — is still
+    // emitted for every short-circuited record (testimony is per-record, never deduped).
+    // Root ids come from the same native ContentRootId the ContentIngestRecord branch
+    // trusts; identity is exact, so a resolved root equals the composed tree's root.
+    private static async Task<(RelationTripleRecord Record, long Units)[]> RemovePresentTriplesAsync(
+        List<RelationTripleRecord> records,
+        RelationTripleHandler handler,
+        ISubstrateReader reader,
+        SubstrateChangeBuilder builder,
+        ISet<Hash128>? probedAbsent,
+        CancellationToken ct)
+    {
+        IIngestRecordHandler<RelationTripleRecord> h = handler;
+        var shortcircuited = new List<(RelationTripleRecord, long)>();
+        var roots = new (Hash128 Subject, Hash128 Object)[records.Count];
+        var removed = new bool[records.Count];
+
+        // Distinct unproven roots probed once per batch (phrases repeat heavily in triples).
+        var probeIds = new List<Hash128>();
+        var probeSlot = new Dictionary<Hash128, int>();
+        var candidates = new List<(int Index, int SubjectSlot, int ObjectSlot)>();
+
+        int Slot(Hash128 root)
+        {
+            if (!probeSlot.TryGetValue(root, out int s))
+            {
+                s = probeIds.Count;
+                probeIds.Add(root);
+                probeSlot[root] = s;
+            }
+            return s;
+        }
+
+        for (int i = 0; i < records.Count; i++)
+        {
+            var r = records[i];
+            if (r.SubjectCanonical is not { Length: > 0 } subj
+                || r.ObjectCanonical is not { Length: > 0 } obj) continue;
+            Hash128 sRoot, oRoot;
+            try
+            {
+                if (TextDecomposer.ContentRootId(subj) is not { } s0
+                    || TextDecomposer.ContentRootId(obj) is not { } o0) continue;
+                (sRoot, oRoot) = (s0, o0);
+            }
+            // Malformed phrase: fall through to the deferred-unit path, whose TryBuild
+            // logs and skips it exactly as before this gate existed.
+            catch (InvalidOperationException) { continue; }
+            roots[i] = (sRoot, oRoot);
+
+            bool sProven = reader.IsProvenPresent(sRoot);
+            bool oProven = reader.IsProvenPresent(oRoot);
+            if (sProven && oProven)
+            {
+                handler.WitnessPresentPair(in r, sRoot, oRoot, builder);
+                shortcircuited.Add((r, h.UnitsPerRecord(r)));
+                removed[i] = true;
+                continue;
+            }
+
+            // A root already probed absent within this working set cannot have appeared
+            // since our own unwritten working set began — compose normally, no re-probe.
+            if (probedAbsent is not null
+                && ((!sProven && probedAbsent.Contains(sRoot))
+                    || (!oProven && probedAbsent.Contains(oRoot))))
+                continue;
+
+            candidates.Add((i, sProven ? -1 : Slot(sRoot), oProven ? -1 : Slot(oRoot)));
+        }
+
+        if (probeIds.Count > 0)
+        {
+            byte[] bm = await reader.EntitiesExistBitmapAsync(probeIds, ct).ConfigureAwait(false);
+            long bits = (long)bm.Length * 8;
+            bool Present(int slot) => slot < bits && (bm[slot >> 3] & (1 << (slot & 7))) != 0;
+
+            var proven = new List<Hash128>();
+            for (int s = 0; s < probeIds.Count; s++)
+            {
+                if (Present(s)) proven.Add(probeIds[s]);
+                else probedAbsent?.Add(probeIds[s]);
+            }
+            if (proven.Count > 0) reader.MarkProven(proven);
+
+            foreach (var (i, sSlot, oSlot) in candidates)
+            {
+                if ((sSlot >= 0 && !Present(sSlot)) || (oSlot >= 0 && !Present(oSlot))) continue;
+                var r = records[i];
+                handler.WitnessPresentPair(in r, roots[i].Subject, roots[i].Object, builder);
+                shortcircuited.Add((r, h.UnitsPerRecord(r)));
+                removed[i] = true;
+            }
+        }
+
+        var novel = new List<RelationTripleRecord>(records.Count);
+        for (int i = 0; i < records.Count; i++)
+            if (!removed[i]) novel.Add(records[i]);
         records.Clear();
         records.AddRange(novel);
         return shortcircuited.ToArray();

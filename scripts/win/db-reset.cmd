@@ -14,18 +14,21 @@ echo ==== DROP + recreate laplace ====
 "%PGBIN%\createdb.exe" -h localhost -U postgres laplace || exit /b 1
 
 echo ==== deploy extension SQL + DLLs ====
-call "%~dp0install-extensions.cmd" || exit /b 1
+rem --recycle is additive inside install-extensions (it only appends a backend
+rem terminate after deploy + GUC wiring), so one call does the recycle work --
+rem the previous second full install-extensions run for RECYCLE==1 duplicated
+rem the entire deploy for one pg_terminate_backend's worth of work.
+if "%RECYCLE%"=="1" (
+  call "%~dp0install-extensions.cmd" --recycle || exit /b 1
+) else (
+  call "%~dp0install-extensions.cmd" || exit /b 1
+)
 
 echo ==== install extensions ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS postgis;" -c "CREATE EXTENSION IF NOT EXISTS laplace_geom;" -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate;" || exit /b 1
 
 echo ==== post-create identity health ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1
-
-if "%RECYCLE%"=="1" (
-  echo ==== recycle backends (fresh DLL load on next connection) ====
-  call "%~dp0install-extensions.cmd" --recycle || exit /b 1
-)
 
 echo ==== DB-RESET COMPLETE ====
 exit /b 0

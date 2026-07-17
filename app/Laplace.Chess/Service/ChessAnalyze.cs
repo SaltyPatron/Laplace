@@ -142,27 +142,32 @@ public static class ChessAnalyze
         var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
         var state = initial;
+        // Each distinct position is composed + staged ONCE per ply (the builder dedups by id,
+        // so re-staging in every Append* helper was pure waste). This ply's `to` nodes carry
+        // forward as the next ply's `from`, so its StateKey/compose is never redone either.
+        ChessComposed? carried = null;
         for (int ply = 0; ply < sans.Count; ply++)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), sans[ply]);
             if (mv is null) return;
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
-            string fromKey = m.StateKey(state);
+            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
+            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
 
             // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
             // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
             if (engine is not null)
             {
                 int ourCp = engine.Think(state.Board, new Search.Limits(MaxDepth: engineDepth)).Score;
-                ChessGraph.AppendEval(b, fromKey, ourCp, games: 1, witnessWeight: 0.9, src, gameId);
+                ChessGraph.AppendEval(b, from, ourCp, games: 1, witnessWeight: 0.9, src, gameId);
             }
 
             long games = 1;
             if (mate && winner == mover) games += 1;
 
             ChessGraph.AppendMoveEdge(
-                b, fromKey, m.StateKey(next), result.ForMover(mover), games, MoveWeight,
+                b, from, to, result.ForMover(mover), games, MoveWeight,
                 sourceId: src,
                 contextId: gameId);
 
@@ -172,29 +177,30 @@ public static class ChessAnalyze
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
             {
-                ChessGraph.AppendClock(b, fromKey, clk, MetaWeight, src, gameId);
+                ChessGraph.AppendClock(b, from.Position.Id, clk, MetaWeight, src, gameId);
                 if (clocks.Length > 0)
                 {
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-                    ChessGraph.AppendThinkClass(b, fromKey, ChessCanonical.ThinkClass(tf), MetaWeight, src, gameId);
+                    ChessGraph.AppendThinkClass(b, from.Position.Id, ChessCanonical.ThinkClass(tf), MetaWeight, src, gameId);
                 }
             }
 
             string? evTok = Tok(evalTokens, ply);
             if (evTok is not null)
-                ChessGraph.AppendEvalToken(b, fromKey, evTok, MetaWeight, ChessVocabulary.EvalPgnSourceId, gameId);
+                ChessGraph.AppendEvalToken(b, from.Position.Id, evTok, MetaWeight, ChessVocabulary.EvalPgnSourceId, gameId);
 
             if (evals is not null && ply < evals.Length)
             {
                 int cp = mover == 0 ? evals[ply] : -evals[ply];
-                ChessGraph.AppendEval(b, fromKey, cp, EvalGames, EvalWeight, ChessVocabulary.EvalPgnSourceId, gameId);
+                ChessGraph.AppendEval(b, from, cp, EvalGames, EvalWeight, ChessVocabulary.EvalPgnSourceId, gameId);
             }
 
             string? q = Tok(qualityTokens, ply);
             if (q is not null)
-                ChessGraph.AppendMoveQuality(b, fromKey, q, 1, MoveWeight * 0.5, src, gameId);
+                ChessGraph.AppendMoveQuality(b, from.Position.Id, q, 1, MoveWeight * 0.5, src, gameId);
 
             state = next;
+            carried = to;
         }
     }
 

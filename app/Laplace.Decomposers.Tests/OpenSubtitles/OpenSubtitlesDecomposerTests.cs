@@ -12,7 +12,7 @@ public sealed class OpenSubtitlesDecomposerTests
 {
     static OpenSubtitlesDecomposerTests()
     {
-        CodepointPerfcache.Load(ResolvePerfcacheBlob());
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
         LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 

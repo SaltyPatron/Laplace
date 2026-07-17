@@ -62,7 +62,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
 
 
-        CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
         IntentStage.ResetContentBank();
 
         var writer = new NpgsqlSubstrateWriter(_ds);

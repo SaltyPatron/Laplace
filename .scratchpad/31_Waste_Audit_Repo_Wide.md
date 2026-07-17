@@ -1,5 +1,18 @@
 # 31 — Repo-wide waste/repetition audit (2026-07-17)
 
+> **Status (2026-07-17, PR #337):** Tier 1 — all nine implemented. Tier 2 —
+> implemented except: chat band-mass → highway_mask (ranking-semantics product
+> decision, deliberately left), trajectory_pairs_ensure incremental fold
+> (native scan can't be scoped per-trajectory; probe + skip path cheapened
+> instead), Search.Order comparator (tie order is search-tree-affecting),
+> recall.c saved-plan conversion (per-call, not per-row; deferred), Windows
+> test-all gating / setup-host reorder / Windows deps fingerprint (deferred as
+> a Windows-side pass). Tier 3 items remain open by design. Found along the
+> way: LichessBot PV-from-empty-TT bug (fixed), laplace_witness novel-cell
+> first-game drop (fixed via spine), stale IngestSizingTests pin (fixed),
+> Justfile parse failure at HEAD (open), build-system-deps safe.directory
+> UNKNOWN-fingerprint bug (open).
+
 Five parallel auditors, one per layer: ingest spine + decomposers, native engine +
 extension C, SQL surface, scripts/CI, app/serve + tests. Every finding cites
 file:line and was read from actual source. Design-mandated behaviors (no

@@ -18,16 +18,30 @@ static void hash_canonical(const char* s, hash128_t* out) {
     hash128_blake3((const uint8_t*)s, strlen(s), out);
 }
 
+/* Five constant BLAKE3 digests, computed once per thread — this was a fresh
+ * BLAKE3 per emitted node across whole-corpus ingests. Thread-local avoids
+ * cross-platform atomics (compose workers call this concurrently); the
+ * digests are deterministic, so per-thread recompute is harmless. */
+#ifdef _WIN32
+#define LAPLACE_TIER_TLS __declspec(thread)
+#else
+#define LAPLACE_TIER_TLS __thread
+#endif
+
 static hash128_t tier_type_id(uint8_t tier) {
-    hash128_t id;
-    switch (tier) {
-        case 0: hash_canonical("Codepoint", &id); break;
-        case 1: hash_canonical("Grapheme", &id); break;
-        case 2: hash_canonical("Word", &id); break;
-        case 3: hash_canonical("Sentence", &id); break;
-        default: hash_canonical("Document", &id); break;
+    static LAPLACE_TIER_TLS hash128_t cache[5];
+    static LAPLACE_TIER_TLS int ready = 0;
+    int slot = tier <= 3 ? tier : 4;
+
+    if (!ready) {
+        hash_canonical("Codepoint", &cache[0]);
+        hash_canonical("Grapheme", &cache[1]);
+        hash_canonical("Word", &cache[2]);
+        hash_canonical("Sentence", &cache[3]);
+        hash_canonical("Document", &cache[4]);
+        ready = 1;
     }
-    return id;
+    return cache[slot];
 }
 
 static int codepoint_resolver(uint32_t atom, void* ctx,

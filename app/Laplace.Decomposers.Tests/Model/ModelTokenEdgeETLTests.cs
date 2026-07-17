@@ -12,7 +12,10 @@ public class ModelTokenEdgeETLTests
 {
     // ModelCoordinates.ScalarId resolves through the text content law (perfcache-backed
     // decomposition), same as every other content id in the substrate.
-    static ModelTokenEdgeETLTests() => CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+    static ModelTokenEdgeETLTests()
+    {
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+    }
 
     private static readonly Hash128 Source = Hash128.OfCanonical("substrate/test/model-edges/source");
 

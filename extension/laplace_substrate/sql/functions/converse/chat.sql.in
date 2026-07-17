@@ -18,6 +18,7 @@ DECLARE
     b_part int := 4; b_tax int := 2; b_assoc int := 7;
     ask   text; phrase text; phrase2 text; tname text;
     ctx   bytea; topic bytea; topic2 bytea;
+    cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
     xl    text;
     more  bool := p_prompt ~* '\m(more|else|another|continue|elaborate)\M';
     depth int;
@@ -46,8 +47,14 @@ BEGIN
         -- richest content-band SYNSET over parse_ask's PHRASE (intent verb already
         -- split into ask_kind, so define/about/describe can't be picked; no stoplist).
         -- Orient keys computed once per DISTINCT candidate (fenced projection);
-        -- repeated tokens collapse before realize/band-mass run.
-        SELECT y.syn INTO topic
+        -- repeated tokens collapse before realize/band-mass run. The WHOLE ranked
+        -- candidate list is kept (cands): the segmentation + per-candidate band-mass
+        -- aggregate runs ONCE per turn -- topic2 below reuses it instead of
+        -- re-segmenting and re-aggregating the same input.
+        SELECT array_agg(y.syn ORDER BY y.exact_hit DESC NULLS LAST,
+                                        y.band_mass DESC,
+                                        char_length(y.surface) DESC)
+          INTO cands
         FROM (
             SELECT x.syn, x.surface,
                    (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
@@ -56,13 +63,17 @@ BEGIN
             FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
                   FROM prompt_state(COALESCE(phrase, p_prompt)) p WHERE p.id IS NOT NULL) x
             WHERE x.syn IS NOT NULL
-        ) y
-        ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
-        LIMIT 1;
+        ) y;
+        topic := cands[1];
         IF topic IS NULL THEN topic := ctx; END IF;
     END IF;
     IF topic IS NULL THEN
-        out := converse(p_prompt);              -- nothing to resolve: free-form
+        -- nothing to resolve: free-form. When the orientation above already ran
+        -- over the FULL prompt (phrase IS NULL) and produced no candidate,
+        -- converse(p_prompt) would re-segment and re-orient the identical input
+        -- only to reach the same NULL -- skip the re-run. A phrase-restricted
+        -- miss still gets the full-prompt attempt.
+        out := CASE WHEN phrase IS NOT NULL THEN converse(p_prompt) END;
     ELSE
         resolved := topic;  xl := realize(topic, p_lang);
 
@@ -118,7 +129,9 @@ BEGIN
               INTO s FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=5;
             IF s IS NOT NULL THEN out := btrim(COALESCE(out,'')||' '||initcap(xl)||' is caused by '||s||'.'); END IF;
             IF out IS NULL OR out='' THEN
-                out := 'I hold no witnessed causes for '||xl||' yet; '||converse(xl); END IF;
+                -- topic already resolved: describe IT (converse(xl) re-segmented
+                -- the label and re-oriented from scratch just to land back here).
+                out := 'I hold no witnessed causes for '||xl||' yet; '||converse_about(topic); END IF;
 
         ELSIF ask = 'reason' OR p_prompt ~* '(relat|connect|between|compar|\mvs\M)' THEN
             -- TWO concepts -> existing relation-summary composer. Second concept =
@@ -126,24 +139,42 @@ BEGIN
             -- sea") the richest OTHER concept in the prompt.
             topic2 := top_synset(resolve_last_word(phrase2));
             IF topic2 IS NULL OR topic2 = topic THEN
-                SELECT y.syn INTO topic2
-                FROM (
-                    SELECT x.syn, x.surface,
-                           (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
-                           (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                              AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
-                    FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-                          FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-                    WHERE x.syn IS NOT NULL AND x.syn <> topic
-                ) y
-                ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC
-                LIMIT 1;
+                IF phrase IS NULL AND cands IS NOT NULL THEN
+                    -- Orientation over p_prompt already ran for topic1 (phrase IS
+                    -- NULL means identical input): topic2 = first ranked candidate
+                    -- that is not topic1. Reuses the computed segmentation +
+                    -- band-mass ranking instead of running both again. (The old
+                    -- re-run ordered only on (exact_hit, band_mass) -- ties beyond
+                    -- that were planner-order nondeterministic; the reused ranking
+                    -- carries topic1's deterministic surface-length tiebreak.)
+                    SELECT u.syn INTO topic2
+                    FROM unnest(cands) WITH ORDINALITY u(syn, ord)
+                    WHERE u.syn <> topic
+                    ORDER BY u.ord
+                    LIMIT 1;
+                ELSE
+                    -- phrase-restricted topic1 (or session-carried topic with no
+                    -- orientation run): the OTHER concept must be sought over the
+                    -- FULL prompt -- different input, not a redundant re-run.
+                    SELECT y.syn INTO topic2
+                    FROM (
+                        SELECT x.syn, x.surface,
+                               (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
+                               (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
+                                  AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
+                        FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
+                              FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
+                        WHERE x.syn IS NOT NULL AND x.syn <> topic
+                    ) y
+                    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC
+                    LIMIT 1;
+                END IF;
             END IF;
             IF topic2 IS NOT NULL THEN
                 SELECT string_agg(reply, ' ') INTO out
                   FROM recall_relation_summary_response(topic, topic2);
             END IF;
-            IF out IS NULL OR out = '' THEN out := converse(xl); END IF;
+            IF out IS NULL OR out = '' THEN out := converse_about(topic); END IF;
 
         ELSIF ask IN ('related','related_in') AND tname IS NOT NULL THEN
             SELECT string_agg(reply, ' ') INTO out FROM recall_related_response(topic, tname);
@@ -162,10 +193,18 @@ BEGIN
 
         ELSE
             -- what_is / describe / walk / fallback: free-form fused walk (my value-add).
-            out := converse(COALESCE(xl, p_prompt));
+            -- Topic in hand -> converse_about directly (converse(xl) re-oriented from
+            -- the LABEL text, re-running segmentation + band-mass to re-derive the
+            -- synset we already resolved). No label to speak with -> the full prompt
+            -- still gets converse()'s own orientation.
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic)
+                        ELSE converse(p_prompt) END;
         END IF;
 
-        IF out IS NULL OR out = '' THEN out := converse(COALESCE(xl, p_prompt)); END IF;
+        IF out IS NULL OR out = '' THEN
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic)
+                        ELSE converse(p_prompt) END;
+        END IF;
     END IF;
 
     -- RECORD + OODA CLOSE.
