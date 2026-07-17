@@ -96,7 +96,7 @@ usage() {
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
 Phases: clean codegen build install migrate sync-extension tune-pg tune-laplace
-        perfcache-guc api-env publish foundation test
+        perfcache-guc api-env publish publish-stamp foundation test
 
 Options:
   --fresh-db        nuke DB before migrate
@@ -536,7 +536,18 @@ phase_api_env() {
 
 phase_chess_lab() {
   echo "===== PHASE — CHESS LAB (stockfish / Qt / cutechess / path env) ====="
+  # Change-aware: the cutechess pin and this bootstrap are the only inputs, and
+  # the cmake configure (Qt feature checks) dominates the cost. Skip only when
+  # the fingerprint matches AND the installed binary actually exists — stamps
+  # attest sources, never artifacts (the stale-.so lesson).
+  local fp bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
+  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh)
+  if fp_check chess-lab "$fp" && [[ -x "$bin" ]]; then
+    echo "chess-lab unchanged (pin + bootstrap fingerprint) and $bin present — skipping"
+    return 0
+  fi
   bash "$ROOT/scripts/bootstrap-chess-lab.sh"
+  fp_record chess-lab "$fp"
 }
 
 # Materialize /opt/laplace/secrets from the job environment.
@@ -605,15 +616,39 @@ phase_runtime_secrets() {
   fi
 }
 
+# The publish input domain: everything deploy.sh reads. app/ covers both
+# dotnet publish closures, web/ the SPA (openapi.json is generated FROM app/
+# content, so app/ subsumes it), deploy/ the script + unit + nginx material.
+fp_publish() {
+  fp_compute app web deploy
+}
+
 phase_publish() {
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
   phase_runtime_secrets
+
+  # Change-aware: skip the SPA build + dotnet publishes + rsync when the
+  # publish domain is unchanged AND the deployed tree is intact. The stamp is
+  # NOT written here — success for publish means "deployed, restarted, ready",
+  # and the restart+readiness gate lives in the workflow, which records it via
+  # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
+  # never went ready therefore re-deploys on the next run.
+  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  fp=$(fp_publish)
+  if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -d "$app_dir/wwwroot" ]]; then
+    echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
+    mkdir -p "$ROOT/build"
+    printf 'skipped' >"$ROOT/build/.publish-action"
+    return 0
+  fi
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-}" == "1" ]] && deploy_args+=(--force-npm)
   [[ "${LAPLACE_PUBLISH_SERIAL:-}" == "1" ]] && deploy_args+=(--serial)
   bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+  mkdir -p "$ROOT/build"
+  printf 'deployed' >"$ROOT/build/.publish-action"
 
   # Drift tripwire: publish restarts the unit but cannot reinstall it (rootless
   # runner, no sudo — by design). A stale unit ran the API without loading
@@ -624,6 +659,13 @@ phase_publish() {
     echo "::warning title=laplace-api unit drift::installed unit differs from deploy/linux/laplace-api.service — run: sudo bash scripts/setup-host.sh"
     diff "$installed_unit" "$repo_unit" || true
   fi
+}
+
+phase_publish_stamp() {
+  # Record the publish stamp — call ONLY after the restart + readiness gate
+  # passed (the workflow does). Success-only stamping, end to end.
+  fp_record publish "$(fp_publish)"
+  echo "publish stamp recorded"
 }
 
 phase_foundation() {
@@ -646,7 +688,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests)   SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all)      export LAPLACE_FORCE_ALL=1; shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
+    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|publish-stamp|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -667,6 +709,7 @@ for phase in "${PHASES[@]}"; do
     perfcache-guc)  phase_perfcache_guc ;;
     api-env)        phase_api_env ;;
     publish)        phase_publish ;;
+    publish-stamp)  phase_publish_stamp ;;
     foundation)     phase_foundation ;;
     test)           phase_test ;;
   esac

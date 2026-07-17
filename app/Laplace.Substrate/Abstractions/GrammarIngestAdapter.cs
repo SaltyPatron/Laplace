@@ -54,8 +54,7 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
         GrammarIngestRecord record, Hash128 rootId, SubstrateChangeBuilder builder)
     {
         _witness.WalkRow(
-            new GrammarComposeContext(record.LineUtf8, record.Ast, rootId, null,
-                JsonGrammarHelper.FindRootObjectNode(record.Ast)),
+            new GrammarComposeContext(record.LineUtf8, record.Ast, rootId, null),
             new RowContext(record.RowIndex, record.RowsTotal, _contextId), builder);
     }
 
@@ -66,8 +65,7 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
     {
         GrammarRowComposer? composer = unit is GrammarIngestHandler.GrammarDeferredUnit gd ? gd.Composer : null;
         _witness.WalkRow(
-            new GrammarComposeContext(record.LineUtf8, record.Ast, root, composer,
-                JsonGrammarHelper.FindRootObjectNode(record.Ast)),
+            new GrammarComposeContext(record.LineUtf8, record.Ast, root, composer),
             new RowContext(record.RowIndex, record.RowsTotal, _contextId), builder);
     }
 

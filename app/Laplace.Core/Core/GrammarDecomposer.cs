@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
@@ -69,11 +70,33 @@ public sealed unsafe class GrammarAst : IDisposable
         return node;
     }
 
+    // ts_language_symbol_name returns pointers into the grammar's static
+    // symbol-name table (process-lifetime), so the same (language, type_id)
+    // always yields the same pointer - cache by pointer to marshal each
+    // distinct name once per process instead of per AST node.
+    private static readonly ConcurrentDictionary<IntPtr, string> TypeNameCache = new();
+
     public string? NodeTypeName(uint nodeTypeId)
     {
         ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);
         var p = NativeInterop.AstTypeName(_ast, nodeTypeId);
-        return p == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(p);
+        if (p == IntPtr.Zero) return null;
+        return TypeNameCache.TryGetValue(p, out var cached)
+            ? cached
+            : TypeNameCache.GetOrAdd(p, static q => Marshal.PtrToStringUTF8(q)!);
+    }
+
+    /// Zero-allocation type check: compares the native symbol name bytes
+    /// against a UTF-8 literal (e.g. NodeTypeIs(id, "object"u8)).
+    public bool NodeTypeIs(uint nodeTypeId, ReadOnlySpan<byte> utf8Name)
+    {
+        ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);
+        var p = NativeInterop.AstTypeName(_ast, nodeTypeId);
+        if (p == IntPtr.Zero) return false;
+        byte* s = (byte*)p;
+        for (int i = 0; i < utf8Name.Length; i++)
+            if (s[i] != utf8Name[i]) return false;
+        return s[utf8Name.Length] == 0;
     }
 
     public void Dispose()

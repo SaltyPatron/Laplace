@@ -92,9 +92,9 @@ public sealed class UdSentenceEmitContext
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
                 Hash128 valId = HighwayNodeEmitter.Emit(b, $"{fName}={fVal}", FeatureTypeId,
                     sourceId, SourceTrust.AcademicCurated, seenEntBatch);
-                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), sourceId,
-                    seenEntBatch, seenAttBatch, canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);
+                RelationTypeRegistry.SeedDynamic(b, featRel, sourceId,
+                    seenEntBatch, seenAttBatch, canonicalNames);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     form, featRel.Id, valId, sourceId, null, featRel.Rank * SourceTrust.AcademicCurated));
             }
@@ -180,13 +180,20 @@ public sealed class UdSentenceEmitContext
 
     internal static void CollectCanonicals(UdSentence s, List<byte[]> sink)
     {
+        // Seen-set keyed by content hash: each candidate is hashed exactly
+        // once (the old scan re-hashed every collected entry per candidate —
+        // O(T²) BLAKE3 invocations per sentence).
+        var seen = new HashSet<Hash128>();
+        foreach (var existing in sink)
+            seen.Add(Hash128.Blake3(existing));
+
         if (s.TextUtf8 is { Length: > 0 })
-            AddUnique(s.TextUtf8, sink);
+            AddUnique(s.TextUtf8, sink, seen);
         foreach (var tok in s.Tokens)
         {
-            AddUnique(tok.FormUtf8, sink);
+            AddUnique(tok.FormUtf8, sink, seen);
             if (!tok.FormLemmaSame)
-                AddUnique(tok.LemmaUtf8, sink);
+                AddUnique(tok.LemmaUtf8, sink, seen);
             if (tok.Misc.Length > 0 && tok.Misc != "_")
             {
                 foreach (var kv in tok.Misc.Split('|', StringSplitOptions.RemoveEmptyEntries))
@@ -198,22 +205,18 @@ public sealed class UdSentenceEmitContext
                     if (val.Length == 0) continue;
                     if (key.Equals("Gloss", StringComparison.OrdinalIgnoreCase)
                         || key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
-                        AddUnique(System.Text.Encoding.UTF8.GetBytes(val), sink);
+                        AddUnique(System.Text.Encoding.UTF8.GetBytes(val), sink, seen);
                 }
             }
         }
         foreach (var mwt in s.Mwts)
-            AddUnique(mwt.FormUtf8, sink);
+            AddUnique(mwt.FormUtf8, sink, seen);
     }
 
-    private static void AddUnique(byte[] bytes, List<byte[]> sink)
+    private static void AddUnique(byte[] bytes, List<byte[]> sink, HashSet<Hash128> seen)
     {
         if (bytes.Length == 0) return;
-        var key = Hash128.Blake3(bytes);
-        foreach (var existing in sink)
-        {
-            if (Hash128.Blake3(existing) == key) return;
-        }
-        sink.Add(bytes);
+        if (seen.Add(Hash128.Blake3(bytes)))
+            sink.Add(bytes);
     }
 }

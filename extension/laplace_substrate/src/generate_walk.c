@@ -197,9 +197,34 @@ typedef struct WalkNode
     Datum   entity;
     Datum   rel_type;
     Datum   eff_mu;
-    Datum   path_mu;
+    int64   path_mu_fp;     /* sum of display-rounded eff_mu, int64 fp */
     int64   witnesses;
 } WalkNode;
+
+/* Final ordering key: depth ascending, path_mu descending, creation order
+ * ascending — the same total order the previous per-comparison numeric_cmp
+ * insertion sort produced (insertion sort was stable, so creation index is
+ * the exact tie-break), at O(n log n) native compares instead of O(n²)
+ * numeric function calls. */
+typedef struct WalkOrderKey
+{
+    int     depth;
+    int64   path_mu_fp;
+    int     idx;
+} WalkOrderKey;
+
+static int
+walk_order_cmp(const void *a, const void *b)
+{
+    const WalkOrderKey *x = (const WalkOrderKey *) a;
+    const WalkOrderKey *y = (const WalkOrderKey *) b;
+
+    if (x->depth != y->depth)
+        return (x->depth > y->depth) - (x->depth < y->depth);
+    if (x->path_mu_fp != y->path_mu_fp)
+        return (x->path_mu_fp < y->path_mu_fp) - (x->path_mu_fp > y->path_mu_fp);
+    return (x->idx > y->idx) - (x->idx < y->idx);
+}
 
 static ArrayType *
 branch_array(WalkNode *nodes, int idx, bool types)
@@ -227,7 +252,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     int32   max_depth, beam;
     WalkNode *nodes;
     int     n_nodes = 0, cap;
-    int    *order;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_branches: prompt entity must not be NULL")));
@@ -255,7 +279,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     nodes[0].entity    = copy_bytea_datum(PointerGetDatum(prompt));
     nodes[0].rel_type      = (Datum) 0;
     nodes[0].eff_mu    = (Datum) 0;
-    nodes[0].path_mu   = DirectFunctionCall1(int8_numeric, Int64GetDatum(0));
+    nodes[0].path_mu_fp = 0;
     nodes[0].witnesses = 0;
     n_nodes = 1;
 
@@ -391,8 +415,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     nodes[n_nodes].entity    = cands[k].object;
                     nodes[n_nodes].rel_type  = cands[k].rel_type;
                     nodes[n_nodes].eff_mu    = mu;
-                    nodes[n_nodes].path_mu   = DirectFunctionCall2(numeric_add,
-                                                                   nodes[f].path_mu, mu);
+                    nodes[n_nodes].path_mu_fp = nodes[f].path_mu_fp +
+                        eff_mu_display_fp(cands[k].rating, cands[k].rd);
                     nodes[n_nodes].witnesses = cands[k].witnesses;
                     n_nodes++;
 
@@ -407,41 +431,34 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
         }
     }
 
-    order = (int *) palloc(sizeof(int) * n_nodes);
-    for (int i = 0; i < n_nodes; i++) order[i] = i;
-    for (int i = 2; i < n_nodes; i++)
     {
-        int j = i, v = order[i];
-        while (j > 1)
+        WalkOrderKey *keys = (WalkOrderKey *) palloc(sizeof(WalkOrderKey) * n_nodes);
+
+        for (int i = 0; i < n_nodes; i++)
         {
-            int u = order[j - 1];
-            if (nodes[u].depth < nodes[v].depth) break;
-            if (nodes[u].depth == nodes[v].depth)
-            {
-                int32 cmp = DatumGetInt32(DirectFunctionCall2(
-                    numeric_cmp, nodes[u].path_mu, nodes[v].path_mu));
-                if (cmp >= 0) break;
-            }
-            order[j] = u;
-            j--;
+            keys[i].depth       = nodes[i].depth;
+            keys[i].path_mu_fp  = nodes[i].path_mu_fp;
+            keys[i].idx         = i;
         }
-        order[j] = v;
-    }
+        qsort(keys, n_nodes, sizeof(WalkOrderKey), walk_order_cmp);
 
-    for (int oi = 1; oi < n_nodes; oi++)
-    {
-        int    i = order[oi];
-        Datum  values[7];
-        bool   rnulls[7] = { false, false, false, false, false, false, false };
+        /* keys[0] is the root (unique depth 0) — skipped, as before. */
+        for (int oi = 1; oi < n_nodes; oi++)
+        {
+            int    i = keys[oi].idx;
+            Datum  values[7];
+            bool   rnulls[7] = { false, false, false, false, false, false, false };
 
-        values[0] = Int32GetDatum(nodes[i].depth);
-        values[1] = PointerGetDatum(branch_array(nodes, i, false));
-        values[2] = PointerGetDatum(branch_array(nodes, i, true));
-        values[3] = nodes[i].entity;
-        values[4] = nodes[i].eff_mu;
-        values[5] = nodes[i].path_mu;
-        values[6] = Int64GetDatum(nodes[i].witnesses);
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, rnulls);
+            values[0] = Int32GetDatum(nodes[i].depth);
+            values[1] = PointerGetDatum(branch_array(nodes, i, false));
+            values[2] = PointerGetDatum(branch_array(nodes, i, true));
+            values[3] = nodes[i].entity;
+            values[4] = nodes[i].eff_mu;
+            values[5] = fp_display_numeric(nodes[i].path_mu_fp);
+            values[6] = Int64GetDatum(nodes[i].witnesses);
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, rnulls);
+        }
+        pfree(keys);
     }
 
     SPI_finish();

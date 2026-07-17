@@ -216,7 +216,8 @@ public sealed class LichessBot : IAsyncDisposable
                         Hash128? moverId = PlayerIdForSide(mover, weAreWhite);
                         await _host.RecordPlyAsync(
                             substrateGameId, ply, fromKey, toKey, uciMoves[i], moverId, ct);
-                        search = _host.BuildSearch(_substrate, maxDepth: _maxDepth);
+                        if (search is null) search = _host.BuildSearch(_substrate, maxDepth: _maxDepth);
+                        else _host.RefreshSearch(search, _substrate);
                     }
 
                     trackedPlies++;
@@ -258,11 +259,14 @@ public sealed class LichessBot : IAsyncDisposable
                         ChessVocabulary.LaplacePlayerId, ct);
                     trackState = after;
                     trackedPlies = ply;
-                    search = _host.BuildSearch(_substrate, maxDepth: _maxDepth);
+                    // PV must come from the search that produced the move —
+                    // the old rebuild-here minted a fresh Search whose empty
+                    // transposition table yielded no PV for the commentary.
+                    var pv = search!.ExtractPv(boardNow);
+                    _host.RefreshSearch(search, _substrate);
 
                     try
                     {
-                        var pv = search!.ExtractPv(boardNow);
                         var motifs = ChessMotifs.DetectAtPly(boardNow, mv, after.Board).ToList();
                         int whiteCp = boardNow.WhiteToMove ? result.Score : -result.Score;
                         string comment = await ChessMoveCommentary.BuildAsync(

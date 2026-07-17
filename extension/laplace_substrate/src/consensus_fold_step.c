@@ -92,7 +92,6 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     {
-        glicko2_observation_t* obs;
         int64_t sum_score = PG_GETARG_INT64(7);
         int64_t phi       = PG_GETARG_INT64(5);
         int64_t tau       = PG_ARGISNULL(8) ? LAPLACE_GLICKO2_DEFAULT_TAU
@@ -117,13 +116,8 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
             state->any = true;
         }
 
-        
 
-
-        obs = (glicko2_observation_t*)
-            palloc(sizeof(glicko2_observation_t) * (Size) games);
-        consensus_fold_apply_partial(&state->st, phi, games, sum_score, tau, obs);
-        pfree(obs);
+        consensus_fold_apply_partial(&state->st, phi, games, sum_score, tau);
 
         state->witness_count += games;
     }

@@ -186,12 +186,9 @@ Datum
 pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
 {
     glicko2_state_t         st;
-    glicko2_observation_t*  obs;
     int64_t                 games;
     int64_t                 sum_score;
     int64_t                 opp_rating, opp_rd, tau;
-    int64_t                 q, rem;
-    int64_t                 i;
     TupleDesc               tupdesc;
     Datum                   values[3];
     bool                    nulls[3] = { false, false, false };
@@ -226,21 +223,11 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
                     "that cannot accept type record")));
     BlessTupleDesc(tupdesc);
 
-    obs = (glicko2_observation_t*)
-        palloc(sizeof(glicko2_observation_t) * (Size) games);
-    q   = sum_score / games;
-    rem = sum_score - q * (games - 1);
-    for (i = 0; i < games - 1; i++) {
-        obs[i].opponent_rating = opp_rating;
-        obs[i].opponent_rd     = opp_rd;
-        obs[i].score           = q;
-    }
-    obs[games - 1].opponent_rating = opp_rating;
-    obs[games - 1].opponent_rd     = opp_rd;
-    obs[games - 1].score           = rem;
-
-    glicko2_update_period(&st, obs, (size_t) games, tau, 0);
-    pfree(obs);
+    /* Closed-form uniform fold: bit-identical to materializing `games`
+     * observations of (opp_rating, opp_rd) with the same q/rem score split
+     * and running glicko2_update_period, without the O(games) buffer. */
+    glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
+                                games, sum_score, tau, 0);
 
     values[0] = Int64GetDatum(st.rating);
     values[1] = Int64GetDatum(st.rd);

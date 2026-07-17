@@ -403,12 +403,24 @@ jobs:
         # the service can reach the substrate AND the T0 perfcache is loaded
         # in PG — exactly the states whose absence previously sailed through
         # this gate and surfaced four jobs later as a smoke 503.
+        #
+        # Change-aware: when pipeline.sh publish skipped the deploy (publish
+        # domain unchanged) and the service is already active, don't bounce a
+        # live service that runs the same bits — still prove readiness. The
+        # publish stamp is recorded ONLY here, after readiness passes, so
+        # "published" means deployed AND restarted AND ready.
         run: |
-          sudo systemctl restart laplace-api
+          action=$(cat build/.publish-action 2>/dev/null || echo deployed)
+          if [[ "$action" == "skipped" ]] && systemctl is-active --quiet laplace-api; then
+            echo "publish skipped (domain unchanged) — service active; verifying readiness without restart"
+          else
+            sudo systemctl restart laplace-api
+          fi
           for i in $(seq 1 30); do
             sleep 2
             if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
               echo "laplace-api ready"
+              bash scripts/pipeline.sh publish-stamp
               exit 0
             fi
           done

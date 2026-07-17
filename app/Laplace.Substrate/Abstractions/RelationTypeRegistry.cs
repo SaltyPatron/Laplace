@@ -12,6 +12,15 @@ public static class RelationTypeRegistry
     public readonly record struct RelationTypeResolution(
         Hash128 Id, double Rank, Symmetry Symmetry, bool Flip, Hash128? ParentId, string Canonical);
 
+    // Resolution is a pure function of the input string over small, bounded
+    // vocabularies (governed surfaces, ~50 UD deprels, feature names), but the
+    // native resolve is a P/Invoke plus 3-4 string allocations — and hot
+    // emitters call it per token edge. Memoize per distinct key.
+    private static readonly ConcurrentDictionary<string, RelationTypeResolution> SurfaceCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, RelationTypeResolution> DeprelCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, RelationTypeResolution> EnhancedDeprelCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, RelationTypeResolution> FeatureCache = new(StringComparer.Ordinal);
+
     public static Hash128 RelationTypeId(string canonicalName)
     {
         ArgumentException.ThrowIfNullOrEmpty(canonicalName);
@@ -26,6 +35,11 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution Resolve(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
+        return SurfaceCache.GetOrAdd(name, static n => ResolveUncached(n));
+    }
+
+    private static RelationTypeResolution ResolveUncached(string name)
+    {
         unsafe
         {
             Hash128 typeId, parentId;
@@ -46,6 +60,11 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveDeprel(string deprel)
     {
         ArgumentException.ThrowIfNullOrEmpty(deprel);
+        return DeprelCache.GetOrAdd(deprel, static d => ResolveDeprelUncached(d));
+    }
+
+    private static RelationTypeResolution ResolveDeprelUncached(string deprel)
+    {
         unsafe
         {
             Hash128 typeId, parentId;
@@ -98,6 +117,11 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveEnhancedDeprel(string deprel)
     {
         ArgumentException.ThrowIfNullOrEmpty(deprel);
+        return EnhancedDeprelCache.GetOrAdd(deprel, static d => ResolveEnhancedDeprelUncached(d));
+    }
+
+    private static RelationTypeResolution ResolveEnhancedDeprelUncached(string deprel)
+    {
         unsafe
         {
             Hash128 typeId, parentId;
@@ -134,6 +158,11 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveFeature(string featureName)
     {
         ArgumentException.ThrowIfNullOrEmpty(featureName);
+        return FeatureCache.GetOrAdd(featureName, static f => ResolveFeatureUncached(f));
+    }
+
+    private static RelationTypeResolution ResolveFeatureUncached(string featureName)
+    {
         unsafe
         {
             Hash128 typeId, parentId;
