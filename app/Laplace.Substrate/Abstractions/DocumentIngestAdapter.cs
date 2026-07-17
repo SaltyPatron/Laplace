@@ -20,11 +20,19 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
             byte[]? bytes = await ReadFileBytesAsync(file, ct);
             if (bytes is null || bytes.Length == 0) continue;
 
-            string label = File.Exists(_root)
-                ? $"document/{Path.GetFileName(file)}"
-                : $"document/{Path.GetRelativePath(_root, file).Replace('\\', '/')}";
+            string rel = File.Exists(_root)
+                ? Path.GetFileName(file)
+                : Path.GetRelativePath(_root, file).Replace('\\', '/');
+            string label = $"document/{rel}";
 
-            yield return (label, new ContentIngestRecord(bytes));
+            // Pillar 0: source_id IS the file-entity — this file's content DAG composed with its
+            // metadata DAG (FileEntity.SourceId) — not the decomposer's static "UserPrompt" label.
+            // Re-ingesting the same file collides on this hash and no-ops; the same content in a
+            // different file is a distinct witness (corroboration).
+            var meta = FileMetadata.FromPath(file, rel);
+            Hash128 fileSource = FileEntity.SourceId(bytes, in meta);
+
+            yield return (label, new ContentIngestRecord(bytes, SourceId: fileSource));
             await Task.Yield();
         }
     }
