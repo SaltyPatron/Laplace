@@ -48,7 +48,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$cOut=$ctestLog; $cErr=$ctestLog+'.err'; $rOut=$regressLog; $rErr=$regressLog+'.err';" ^
   "$c=Start-Process -FilePath 'ctest' -ArgumentList $ctestArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $cOut -RedirectStandardError $cErr;" ^
   "$r=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (Join-Path $scripts 'regress.cmd')) -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $rOut -RedirectStandardError $rErr;" ^
-  "Wait-Process -Id $c.Id,$r.Id;" ^
+  "$null=$c.Handle; $null=$r.Handle; Wait-Process -Id $c.Id,$r.Id;" ^
   "Write-Host '---- ctest ----'; Get-Content $cOut,$cErr -ErrorAction SilentlyContinue;" ^
   "Write-Host '---- regress ----'; Get-Content $rOut,$rErr -ErrorAction SilentlyContinue;" ^
   "if ($c.ExitCode -ne 0 -or $r.ExitCode -ne 0) { exit 1 }; exit 0" >> "%LOG%" 2>&1
