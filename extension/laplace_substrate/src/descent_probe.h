@@ -75,3 +75,20 @@ int laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int 
  * gets written, and tier-0 rows only exist because the unicode seed writes
  * them through this very lane. */
 int laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
+
+/* KEYED variants: entities are partitioned LIST(tier) (t2 further HASH(id)),
+ * physicalities RANGE(hilbert_index), and id alone cannot prune either --
+ * an id-only probe pays one index descent per leaf. The hot callers always
+ * hold the partition key (the write lane stages it; the descent is
+ * tier-by-tier by construction), so they pass it in an array parallel to
+ * the ids and the ordinals probe prunes to one descent per id. Presence
+ * semantics are identical to the unkeyed forms above, per caller:
+ * entities_stored_bitmap keeps perfcache OFF (stored-row semantics),
+ * tier_batch_existence_probe keeps it ON (resolvability semantics), and
+ * physicalities never had it (their ids are never codepoint ids). */
+int laplace_entities_stored_bitmap_keyed(ArrayType *ids_array, ArrayType *tiers_array,
+                                         uint8_t *bm, int candidate_count);
+int laplace_tier_batch_existence_probe_keyed(ArrayType *ids_array, ArrayType *tiers_array,
+                                             uint8_t *bm, int candidate_count);
+int laplace_physicalities_present_bitmap_keyed(ArrayType *ids_array, ArrayType *hilberts_array,
+                                               uint8_t *bm, int candidate_count);

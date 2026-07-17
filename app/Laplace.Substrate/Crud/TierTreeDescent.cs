@@ -381,7 +381,7 @@ public static class TierTreeDescent
             }
             if (ids.Count == 0) continue;
 
-            byte[] bm = await reader.TierBatchExistenceProbeAsync(ids, ct).ConfigureAwait(false);
+            byte[] bm = await reader.TierBatchExistenceProbeAsync(ids, (short)tier, ct).ConfigureAwait(false);
             long bits = (long)bm.Length * 8;
 
             var confirmedPresent = new List<Hash128>();

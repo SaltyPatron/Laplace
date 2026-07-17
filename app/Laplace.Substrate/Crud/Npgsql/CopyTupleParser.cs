@@ -25,6 +25,9 @@ internal static class CopyTupleParser
     internal sealed class EntityRows
     {
         public readonly List<Hash128> Ids = new();
+        /// <summary>Partition key (LIST(tier), t2 further HASH(id)) — the
+        /// keyed presence probe needs it because id alone cannot prune.</summary>
+        public readonly List<short> Tiers = new();
         public readonly List<StagedRowRef> Rows = new();
     }
 
@@ -70,11 +73,14 @@ internal static class CopyTupleParser
             {
                 long rowStart = off;
                 Hash128 id = default;
+                short tier = 0;
                 WalkRow(p, len, ref off, EntityFields, "entities", (field, valOff, valLen) =>
                 {
                     if (field == 0) id = ReadHash(p, valOff, valLen, "entities.id");
+                    else if (field == 1) tier = ReadInt16(p, valOff, valLen, "entities.tier");
                 });
                 result.Ids.Add(id);
+                result.Tiers.Add(tier);
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
         }
@@ -188,6 +194,13 @@ internal static class CopyTupleParser
         if (valLen != 8)
             throw new InvalidOperationException($"{what}: expected 8-byte value, got {valLen}");
         return BinaryPrimitives.ReadInt64BigEndian(new ReadOnlySpan<byte>(p + valOff, 8));
+    }
+
+    private static unsafe short ReadInt16(byte* p, long valOff, int valLen, string what)
+    {
+        if (valLen != 2)
+            throw new InvalidOperationException($"{what}: expected 2-byte value, got {valLen}");
+        return BinaryPrimitives.ReadInt16BigEndian(new ReadOnlySpan<byte>(p + valOff, 2));
     }
 
     private static InvalidOperationException Corrupt(string table, long off, string why) =>
