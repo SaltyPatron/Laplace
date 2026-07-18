@@ -7,52 +7,63 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : GrammarIngestDecomposer<WiktionarySource, FullScope>, IIngestInventoryProvider
+/// <summary>
+/// Kaikki/wiktextract JSONL decomposer. The 10GB corpus is STRUCTURED DATA, so it
+/// rides a native streaming data path — one <see cref="System.Text.Json.Utf8JsonReader"/>
+/// pass per line (<see cref="WiktionaryEntry.Parse"/>) into the shared compose lane —
+/// NOT the per-line tree-sitter grammar spine (that spine is for source code and cost
+/// millions of managed↔native AST crossings per row). Emitted attestations are
+/// identical to the former witness; only the parse changed. The grammar-witness
+/// adapter (<see cref="WiktionaryGrammarWitness"/>) still exists for the spine
+/// conformance suite and routes through the same <see cref="WiktionaryEmit"/>.
+/// </summary>
+public sealed class WiktionaryDecomposer
+    : ComposeDecomposer<WiktionaryEntry, WiktionarySource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = WiktionarySource.SourceId;
     public static readonly Hash128 TrustClass = WiktionarySource.TrustClass;
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCuratedUserInput;
-    protected override string ModalityId => "json";
-    protected override double WitnessWeight => 0.7;
+
+    // Wiktionary entries explode into many content trees (word, glosses, examples,
+    // relations, forms, etymology) per record — size the working set like WordNet's
+    // multi-emit line, not a single flat compose.
+    public override int EstimatedComposeUnitsPerRecord => 6;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => VocabularyNames;
 
-    protected override IGrammarWitness CreateWitness(DecomposerOptions options) =>
-        new WiktionaryGrammarWitness(options);
+    protected override void Compose(WiktionaryEntry record, SubstrateChangeBuilder builder) =>
+        WiktionaryEmit.Emit(record, builder);
 
-    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractRecordsAsync(
+    protected override async IAsyncEnumerable<WiktionaryEntry> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string? file = ResolveInput(ecosystemPath, options.Languages);
         if (file is null) yield break;
 
-        var source = EtlManifest.Get("wiktionary");
-        bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, options.Languages);
-        Func<ReadOnlySpan<byte>, bool>? acceptRow = preFilter && options.Languages is { IsActive: true } langs
-            ? line => WiktionaryJsonFilter.MatchesLanguageFilter(line, langs)
-            : null;
+        LanguageFilter? langs = options.Languages;
+        bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, langs);
 
-        var sized = IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary, null);
-        int workers = sized.ComposeWorkers;
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(file, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            var span = lineMem.Span;
+            if (span.IsEmpty) continue;
 
-        if (workers > 1)
-        {
-            var parallel = new ParallelGrammarFileRecordStream(
-                file, source.Modality.GrammarId, acceptRow, source.Modality.RecordFraming, workers, ct);
-            await foreach (var record in parallel.RecordsAsync(ct))
-                yield return record;
-        }
-        else
-        {
-            var stream = GrammarFileRecordStream.ForSource(file, source, acceptRow);
-            await foreach (var record in stream.RecordsAsync(ct))
-                yield return record;
+            // Byte-level language pre-filter for the multilingual raw corpus — drop
+            // non-matching rows before parse (English-only corpus needs no pre-filter).
+            if (preFilter && langs is { IsActive: true } active
+                && !WiktionaryJsonFilter.MatchesLanguageFilter(span, active))
+                continue;
+
+            var entry = WiktionaryEntry.Parse(span, options);
+            if (entry is not null)
+                yield return entry;
         }
     }
 
