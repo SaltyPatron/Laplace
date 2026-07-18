@@ -47,7 +47,7 @@
       "layer": 2,
       "prerequisites": ["iso639"],
       "consensus_gates": [],
-      "skip_layer_complete": true
+      "content_only": true
     },
     "wordnet": {
       "decomposer": "WordNetDecomposer",
