@@ -206,6 +206,28 @@ spi_word_language(Datum word)
     return copy_bytea_datum(d);
 }
 
+/*
+ * doc 14 P5 / doc 15 3Ca: the SQL-level tunable both the Foundry export
+ * path's Glicko-complete weight (consensus_adjacency.sql.in) and the native
+ * walk/A* engines' laplace_walk_edge_weight() share -- fetched once per
+ * top-level call, never per-candidate, so all three never drift apart.
+ */
+static inline double
+spi_fetch_rd_kappa(void)
+{
+    int   rc;
+    bool  isnull;
+    Datum d;
+
+    rc = SPI_execute("SELECT laplace.foundry_rd_kappa()", true, 1);
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        elog(ERROR, "laplace_substrate: could not resolve foundry_rd_kappa()");
+    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull)
+        elog(ERROR, "laplace_substrate: foundry_rd_kappa() returned NULL");
+    return DatumGetFloat8(d);
+}
+
 static inline Datum
 spi_render_text(Datum id)
 {

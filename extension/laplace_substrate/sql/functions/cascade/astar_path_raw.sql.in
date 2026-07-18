@@ -1,9 +1,11 @@
+DROP FUNCTION IF EXISTS astar_path_raw(bytea, bytea[], bytea[], int, bool);
 CREATE OR REPLACE FUNCTION astar_path_raw(
-    p_start     bytea,
-    p_goals     bytea[],
-    p_types     bytea[],
-    p_max_depth int  DEFAULT 7,
-    p_directed  bool DEFAULT false)
+    p_start        bytea,
+    p_goals        bytea[],
+    p_types        bytea[],
+    p_max_depth    int  DEFAULT 7,
+    p_directed     bool DEFAULT false,
+    p_use_geometry bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
     AS 'MODULE_PATHNAME', 'pg_laplace_astar_path'
     LANGUAGE C STABLE;

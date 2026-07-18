@@ -1,6 +1,8 @@
+DROP FUNCTION IF EXISTS astar_path(bytea, bytea[], int, bytea[], bool);
 CREATE OR REPLACE FUNCTION astar_path(
     p_start bytea, p_goals bytea[], p_max_depth int DEFAULT 7,
-    p_types bytea[] DEFAULT NULL, p_directed bool DEFAULT false)
+    p_types bytea[] DEFAULT NULL, p_directed bool DEFAULT false,
+    p_use_geometry bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
@@ -11,5 +13,5 @@ CREATE OR REPLACE FUNCTION astar_path(
             relation_type_id('HAS_SUBSTANCE'), relation_type_id('DERIVATIONALLY_RELATED'),
             relation_type_id('PERTAINS_TO'), relation_type_id('ALSO_SEE'), relation_type_id('IS_ANTONYM_OF'),
             relation_type_id('HAS_ATTRIBUTE'), relation_type_id('IN_VERB_GROUP_WITH')]),
-        p_max_depth, p_directed)
+        p_max_depth, p_directed, p_use_geometry)
 $$;

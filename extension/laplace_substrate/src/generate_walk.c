@@ -13,6 +13,9 @@
 
 #include "laplace/core/relation_law.h"
 #include "laplace/core/glicko2.h"
+#include "laplace/core/highway_table.h"
+#include "laplace/core/math4d.h"
+#include "laplace/core/mantissa.h"
 
 #include "spi_common.h"
 #include "spi_nested.h"
@@ -22,6 +25,9 @@ PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
 PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
 #define GENERATE_NODE_BUDGET 1000000
+/* Local constant -- avoids relying on M_PI (not portably defined under MSVC
+ * without _USE_MATH_DEFINES, and this file doesn't otherwise need <math.h>). */
+#define WALK_PI 3.14159265358979323846
 
 static const char *EDGE_QUERY =
     "SELECT object_id, type_id, rating, rd, witness_count "
@@ -78,11 +84,27 @@ ensure_edge_plan(void)
  * touch. Left unbounded per subject; see .scratchpad/02_Identified_Issues.txt
  * Issue 28 update for the measurement.
  */
+/*
+ * 3Cb/3Cc: highway_mask (native bit-gate, gated in C against p_intent_mask)
+ * and subject/object point coordinates (S3 angular beam term) ride the same
+ * per-level batch query -- no extra round trip. Coordinates are fetched via
+ * ST_X/Y/Z/M (liblwgeom isn't linked, same constraint as recall.c's
+ * word_shape_peers_fast_impl) with LEFT JOINs so a coord-less entity (no
+ * point physicality yet) degrades to "no geometry bonus", never an error.
+ * tableoid on each side gives the physicalities partition (RANGE-partitioned
+ * by hilbert_index, 64 bands) for a free, correct-by-construction "same
+ * hilbert band" locality signal -- comparing two OIDs, no distance math.
+ */
 static const char *WALK_BATCH_QUERY =
-    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count "
+    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
+    "       eo.highway_mask, "
+    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.tableoid, "
+    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.tableoid "
     "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
     "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
     "JOIN laplace.entities eo ON eo.id = c.object_id "
+    "LEFT JOIN laplace.physicalities ps ON ps.entity_id = f.subject_id AND ps.type = 1 "
+    "LEFT JOIN laplace.physicalities po ON po.entity_id = c.object_id AND po.type = 1 "
     "WHERE c.object_id IS NOT NULL "
     "  AND ($2::bytea IS NULL OR c.type_id = $2)";
 
@@ -128,12 +150,14 @@ ensure_relationtype_type_id(void)
 }
 
 /*
- * Same ranking key as consensus_walk_edges' ORDER BY (relation_rank_resolved
- * * eff_mu), computed natively instead of via a SQL function call per row.
- * eff_mu here is the SAME simple `rating - 2*rd` used by consensus_walk_edges
- * (13_mu_law.sql.in's eff_mu()) -- deliberately NOT laplace_effective_mu_fp
- * (a different, display-oriented formula used elsewhere in this file).
- * relation_rank_resolved's fast path (the static relation table lookup,
+ * relation_rank(type) is the same static-table lookup consensus_walk_edges'
+ * relation_rank_resolved uses, computed natively instead of via a SQL
+ * function call per row. As of doc 15 Phase 3Ca, the walk's per-edge score is
+ * relation_rank(type) * laplace_walk_edge_weight(rating, rd, witnesses,
+ * kappa) -- the Glicko-complete signed weight (glicko2.h), the SAME formula
+ * doc 14 P5 already ratified for the Foundry export path
+ * (consensus_adjacency.sql.in), not the bare `rating - 2*rd` this file used
+ * before. relation_rank_resolved's fast path (the static relation table lookup,
  * which covers the ~153 canonical types plus family-collapsed dynamic
  * DEP_ and FEAT_ types) is called directly, zero SQL/FunctionCall overhead.
  * Its rare SPI-fallback path (a genuinely unknown type_id, not expected in
@@ -160,6 +184,13 @@ typedef struct RawEdge
     int64  rating;
     int64  rd;
     int64  witnesses;
+    Datum  highway_mask;   /* bytea(32), may be (Datum) 0 if NULL (not yet backfilled) */
+    bool   subj_coord_ok;
+    double subj_xyzm[4];
+    Oid    subj_partoid;   /* InvalidOid if no point physicality */
+    bool   obj_coord_ok;
+    double obj_xyzm[4];
+    Oid    obj_partoid;
 } RawEdge;
 
 static int
@@ -186,6 +217,156 @@ ranked_edge_cmp_score_desc(const void *a, const void *b)
     double sa = ((const RankedEdge *) a)->score;
     double sb = ((const RankedEdge *) b)->score;
     return (sa < sb) - (sa > sb);
+}
+
+/*
+ * 3Cb gating: p_intent_mask is an opaque caller-supplied bytea(32) -- the
+ * intent->band decision itself lives at the SQL call site (doc 22 Phase B's
+ * frame-evocation intent_band(prompt) isn't built yet, so
+ * recall_walk_response.sql.in resolves a band from route.intent via
+ * highway_band_mask(band) as a stopgap and passes the resulting mask in
+ * here). Swapping in real intent_band(prompt) later is a SQL-only change --
+ * this native gate has no intent vocabulary baked into it.
+ *
+ * laplace_mask256_t <-> bytea(32), matching pg_laplace_highway_mask_from_bits'
+ * own layout assumption (highway_mask.c) -- direct memcpy, no byte-swap. */
+static bool
+mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
+{
+    bytea *b;
+    laplace_mask256_t cand, overlap;
+
+    if (highway_mask_bytea == (Datum) 0)
+        return true; /* unknown mask: never gate on absence of information */
+    b = DatumGetByteaPP(highway_mask_bytea);
+    if (VARSIZE_ANY_EXHDR(b) != (int) sizeof(laplace_mask256_t))
+        return true; /* malformed/legacy row: fail open, don't silently drop candidates */
+    memcpy(&cand, VARDATA_ANY(b), sizeof(laplace_mask256_t));
+    overlap = highway_table_mask_and(cand, *intent_mask);
+    return highway_table_mask_any(&overlap) != 0;
+}
+
+/*
+ * 3Cc trajectory-ordinal continuity: mirrors containers_of.c's exact idiom
+ * (SPI_prepare/SPI_keepplan once, ensure_*_plan() pattern) rather than doing
+ * raw float math on physicalities.trajectory -- those vertices are
+ * intentionally mantissa-packed hash/ordinal/run_length payloads (see
+ * mantissa.h), packed specifically so structural lookups like this stay
+ * GIN-index-backed. Finds ONE trajectory containing both the walk's current
+ * subject and a candidate object (single LIMIT 1, not the unbounded
+ * ST_DumpPoints-over-every-match scan containers_of.c's own comment warns
+ * against for large arrays), dumps its points, and mantissa_unpacks each
+ * vertex looking for the two target ordinals. Applied only to the
+ * post-score-sort shortlist (top beam*3), not every raw candidate -- bounds
+ * SPI round-trips to O(beam) per frontier node per level, not O(fan-out).
+ */
+/*
+ * Single-key containment ONLY (proven ~2ms/GIN-index-backed regardless of
+ * table size, per containers_of.c's own measurement) -- the object entity
+ * alone selects the candidate trajectory. Whether that trajectory also
+ * contains the subject is checked in C during the vertex-decode loop below,
+ * NOT pushed into a second SQL key. A two-key `@> ARRAY[$1,$2]` probe was
+ * tried here first and hit exactly the anti-pattern containers_of.c's header
+ * comment warns about (planner abandons the GIN index for a full/bitmap
+ * scan on a multi-key bound array) -- caught live via a 24s regress test
+ * that should have run in milliseconds.
+ */
+static const char *ORDINAL_CONTINUITY_QUERY =
+    "WITH t AS ( "
+    "  SELECT p.trajectory FROM laplace.physicalities p "
+    "  WHERE p.type = 1 "
+    "    AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
+    "  LIMIT 1 "
+    ") "
+    "SELECT ST_X(dp.geom), ST_Y(dp.geom), ST_Z(dp.geom), ST_M(dp.geom) "
+    "FROM t, ST_DumpPoints(t.trajectory) dp "
+    "ORDER BY (dp.path)[1]";
+
+static SPIPlanPtr ordinal_continuity_plan = NULL;
+
+static void
+ensure_ordinal_continuity_plan(void)
+{
+    if (ordinal_continuity_plan == NULL)
+    {
+        Oid argtypes[1] = { BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(ORDINAL_CONTINUITY_QUERY, 1, argtypes);
+
+        if (plan == NULL)
+            elog(ERROR, "walk_branches: SPI_prepare(ordinal continuity) failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_branches: SPI_keepplan(ordinal continuity) failed");
+        ordinal_continuity_plan = plan;
+    }
+}
+
+/*
+ * Returns a [0,1] continuity bonus: 1/(1+|ordinal_delta|) when both
+ * subject_entity and object_entity are found as vertices of the SAME
+ * trajectory selected by the object's own (fast, single-key) containment
+ * probe; 0.0 otherwise (no such trajectory, that trajectory doesn't also
+ * carry the subject, or coordinate/mantissa data didn't decode -- never an
+ * error, this is an additive bonus only). Trades a little recall (a
+ * DIFFERENT trajectory might contain both when the object's first match
+ * doesn't) for guaranteed single-key-probe performance.
+ */
+static double
+ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
+{
+    Datum  args[1];
+    int    rc;
+    bool   have_subj = false, have_obj = false;
+    uint16_t subj_ord = 0, obj_ord = 0;
+    hash128_t subj_h, obj_h;
+
+    ensure_ordinal_continuity_plan();
+    subj_h = datum_to_hash128(subject_entity);
+    obj_h  = datum_to_hash128(object_entity);
+
+    args[0] = object_entity;
+    rc = SPI_execute_plan(ordinal_continuity_plan, args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        return 0.0;
+
+    for (uint64 r = 0; r < SPI_processed; r++)
+    {
+        HeapTuple tup = SPI_tuptable->vals[r];
+        TupleDesc td  = SPI_tuptable->tupdesc;
+        bool isnull[4];
+        double vertex[4];
+        mantissa_payload_t payload;
+
+        vertex[0] = DatumGetFloat8(SPI_getbinval(tup, td, 1, &isnull[0]));
+        vertex[1] = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull[1]));
+        vertex[2] = DatumGetFloat8(SPI_getbinval(tup, td, 3, &isnull[2]));
+        vertex[3] = DatumGetFloat8(SPI_getbinval(tup, td, 4, &isnull[3]));
+        if (isnull[0] || isnull[1] || isnull[2] || isnull[3])
+            continue;
+
+        mantissa_unpack(vertex, &payload);
+        if (!have_obj && hash128_eq(&payload.entity_id, &obj_h))
+        {
+            obj_ord = payload.ordinal;
+            have_obj = true;
+        }
+        if (!have_subj && hash128_eq(&payload.entity_id, &subj_h))
+        {
+            subj_ord = payload.ordinal;
+            have_subj = true;
+        }
+        if (have_obj && have_subj)
+            break;
+    }
+    /* SPI_tuptable freed automatically at the enclosing SPI_finish/next
+     * SPI_execute_plan call -- this function borrows no pointers past return. */
+    if (!have_obj || !have_subj)
+        return 0.0;
+    {
+        int delta = (int) obj_ord - (int) subj_ord;
+        if (delta < 0) delta = -delta;
+        return 1.0 / (1.0 + (double) delta);
+    }
 }
 
 
@@ -252,6 +433,12 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     int32   max_depth, beam;
     WalkNode *nodes;
     int     n_nodes = 0, cap;
+    double  kappa;
+    bool    have_intent_mask = false;
+    laplace_mask256_t intent_mask;
+    Datum  *topic_bias = NULL;
+    int     n_topic_bias = 0;
+    bool    ordinal_continuity_enabled;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_branches: prompt entity must not be NULL")));
@@ -263,6 +450,34 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     beam      = PG_ARGISNULL(3) ? 5 : PG_GETARG_INT32(3);
     if (max_depth < 0 || beam < 0)
         ereport(ERROR, (errmsg("walk_branches: depth and beam must be >= 0")));
+    if (PG_NARGS() > 4 && !PG_ARGISNULL(4))
+    {
+        bytea *mb = PG_GETARG_BYTEA_PP(4);
+        if (VARSIZE_ANY_EXHDR(mb) != (int) sizeof(laplace_mask256_t))
+            ereport(ERROR, (errmsg("walk_branches: p_intent_mask must be exactly 32 bytes")));
+        memcpy(&intent_mask, VARDATA_ANY(mb), sizeof(laplace_mask256_t));
+        have_intent_mask = true;
+    }
+    if (PG_NARGS() > 5 && !PG_ARGISNULL(5))
+    {
+        ArrayType *bias_arr = PG_GETARG_ARRAYTYPE_P(5);
+        bool      *bias_nulls;
+        deconstruct_array(bias_arr, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &topic_bias, &bias_nulls, &n_topic_bias);
+    }
+    /*
+     * Opt-in, default false: ordinal_continuity_bonus's containment probe
+     * has no hilbert-band restriction, so physicalities (RANGE-partitioned
+     * 64 ways) pays a 64-partition Append scan on every miss -- measured
+     * 42ms/call live via EXPLAIN ANALYZE, and misses are the COMMON case
+     * (most walked entities aren't a trajectory constituent of anything).
+     * At beam*3 calls/frontier-node across an unfiltered deep walk this was
+     * caught turning a sub-second regress test into 24s. Needs a
+     * hilbert-band-scoped search before it's cheap enough to default on --
+     * tracked as follow-up, not shipped silently slow. recall_walk_response
+     * (the live-served path) does not opt in.
+     */
+    ordinal_continuity_enabled = (PG_NARGS() > 6 && !PG_ARGISNULL(6)) ? PG_GETARG_BOOL(6) : false;
 
     InitMaterializedSRF(fcinfo, 0);
 
@@ -270,6 +485,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
         elog(ERROR, "walk_branches: SPI_connect failed");
     ensure_walk_batch_plan();
     ensure_relationtype_type_id();
+    kappa = spi_fetch_rd_kappa();
 
     cap = 256;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
@@ -342,7 +558,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
             {
                 HeapTuple tup = SPI_tuptable->vals[r];
                 TupleDesc td  = SPI_tuptable->tupdesc;
-                bool isnull;
+                bool isnull, cnull;
+                Datum hm;
 
                 raw[r].idx         = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
                 raw[r].object      = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
@@ -351,6 +568,25 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 raw[r].rating      = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
                 raw[r].rd          = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
                 raw[r].witnesses   = DatumGetInt64(SPI_getbinval(tup, td, 7, &isnull));
+
+                hm = SPI_getbinval(tup, td, 8, &isnull);
+                raw[r].highway_mask = isnull ? (Datum) 0 : copy_bytea_datum(hm);
+
+                raw[r].subj_xyzm[0] = DatumGetFloat8(SPI_getbinval(tup, td, 9,  &isnull));
+                raw[r].subj_xyzm[1] = DatumGetFloat8(SPI_getbinval(tup, td, 10, &cnull)); isnull |= cnull;
+                raw[r].subj_xyzm[2] = DatumGetFloat8(SPI_getbinval(tup, td, 11, &cnull)); isnull |= cnull;
+                raw[r].subj_xyzm[3] = DatumGetFloat8(SPI_getbinval(tup, td, 12, &cnull)); isnull |= cnull;
+                raw[r].subj_coord_ok = !isnull;
+                raw[r].subj_partoid = DatumGetObjectId(SPI_getbinval(tup, td, 13, &isnull));
+                if (isnull) raw[r].subj_partoid = InvalidOid;
+
+                raw[r].obj_xyzm[0] = DatumGetFloat8(SPI_getbinval(tup, td, 14, &isnull));
+                raw[r].obj_xyzm[1] = DatumGetFloat8(SPI_getbinval(tup, td, 15, &cnull)); isnull |= cnull;
+                raw[r].obj_xyzm[2] = DatumGetFloat8(SPI_getbinval(tup, td, 16, &cnull)); isnull |= cnull;
+                raw[r].obj_xyzm[3] = DatumGetFloat8(SPI_getbinval(tup, td, 17, &cnull)); isnull |= cnull;
+                raw[r].obj_coord_ok = !isnull;
+                raw[r].obj_partoid = DatumGetObjectId(SPI_getbinval(tup, td, 18, &isnull));
+                if (isnull) raw[r].obj_partoid = InvalidOid;
             }
             qsort(raw, n_raw, sizeof(RawEdge), raw_edge_cmp_idx);
 
@@ -371,33 +607,111 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     hash128_t rel_type_id;
                     hash128_t obj_id;
                     bool      found2;
+                    double    base, bonus;
 
-                    if (raw[j].rating + 2 * raw[j].rd < LAPLACE_GLICKO2_NEUTRAL_MU_FP)
-                        continue; /* refuted */
+                    /*
+                     * 3Ca: refutation is no longer a hard drop -- signed
+                     * scoring (below) naturally pushes refuted edges (eff_mu
+                     * below neutral) to a negative score, so they qsort last
+                     * but still appear in output (doc 15 I2: confirming a
+                     * response = confirming the edges it walked; refuting
+                     * must be equally visible, not silently absent).
+                     */
                     if (hash128_eq(&obj_type_id, &g_relationtype_type_id))
                         continue; /* object is itself a RelationType meta-entity */
                     obj_id = datum_to_hash128(raw[j].object);
                     hash_search(seen, &obj_id, HASH_FIND, &found2);
                     if (found2)
                         continue; /* already placed elsewhere in this walk */
+                    /* 3Cb: hard-gate on the caller's intent mask, if given. */
+                    if (have_intent_mask && !mask_overlaps(raw[j].highway_mask, &intent_mask))
+                        continue;
 
                     rel_type_id = datum_to_hash128(raw[j].rel_type);
+                    base = walk_relation_rank(rel_type_id) *
+                           laplace_walk_edge_weight(raw[j].rating, raw[j].rd,
+                                                    raw[j].witnesses, kappa);
+
+                    /*
+                     * 3Cc additive geometry bonuses. Constants below are
+                     * initial, empirically-untuned nudges scaled small
+                     * relative to typical |base| (Rule #5 caveat: profile
+                     * before optimizing/retuning against live data) -- they
+                     * break ties and add coherence, they don't override
+                     * epistemic weight.
+                     */
+                    bonus = 0.0;
+                    if (raw[j].subj_coord_ok && raw[j].obj_coord_ok)
+                    {
+                        double dist = math4d_angular_distance(raw[j].subj_xyzm, raw[j].obj_xyzm);
+                        bonus += 2.0 * (1.0 - dist / WALK_PI); /* dist in [0,pi] on S3 */
+                    }
+                    if (OidIsValid(raw[j].subj_partoid) && OidIsValid(raw[j].obj_partoid) &&
+                        raw[j].subj_partoid == raw[j].obj_partoid)
+                        bonus += 1.0; /* same hilbert-index partition band */
+
+                    /* 3Cd: session/topic frontier bias. */
+                    if (topic_bias != NULL)
+                    {
+                        for (int t = 0; t < n_topic_bias; t++)
+                        {
+                            if (bytea_eq(raw[j].object, topic_bias[t]))
+                            {
+                                bonus += 3.0;
+                                break;
+                            }
+                        }
+                    }
+
                     cands[n_cands].object    = raw[j].object;
                     cands[n_cands].rel_type  = raw[j].rel_type;
                     cands[n_cands].rating    = raw[j].rating;
                     cands[n_cands].rd        = raw[j].rd;
                     cands[n_cands].witnesses = raw[j].witnesses;
-                    cands[n_cands].score     = walk_relation_rank(rel_type_id) *
-                                                (double) (raw[j].rating - 2 * raw[j].rd);
+                    cands[n_cands].score     = base + bonus;
                     n_cands++;
                 }
                 qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
+
+                /*
+                 * 3Cc trajectory-ordinal continuity: bounded to the
+                 * post-sort shortlist (beam*3, not every candidate) --
+                 * O(beam) cached-plan SPI calls per frontier node, matching
+                 * containers_of.c's accepted per-element-probe cost, not the
+                 * full fan-out (see ordinal_continuity_bonus's comment for
+                 * why an unbounded per-candidate probe would repeat the
+                 * exact large-array-containment landmine containers_of.c's
+                 * own header comment documents).
+                 */
+                if (ordinal_continuity_enabled)
+                {
+                    int shortlist_n = n_cands < beam * 3 ? n_cands : beam * 3;
+                    for (int s = 0; s < shortlist_n; s++)
+                        cands[s].score += ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
+                    qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
+                }
 
                 for (int k = 0; k < n_cands && k < beam; k++)
                 {
                     Datum mu;
                     hash128_t obj_id = datum_to_hash128(cands[k].object);
                     bool found3;
+
+                    /*
+                     * Scoring is signed (3Ca) so refutation is visible in
+                     * ranking rather than silently dropped from
+                     * consideration -- but a net-negative candidate must
+                     * still never become a WALKED node, even when it's the
+                     * only option at this step (caught live in regress,
+                     * converse.sql's deliberate "syn_bad" refuted-edge
+                     * fixture: a beam with nothing else available must dead-
+                     * end, not walk into the refuted claim by default).
+                     * cands[] is sorted score-descending, so the first
+                     * non-positive score means every remaining candidate is
+                     * also non-positive -- stop placing, don't just skip.
+                     */
+                    if (cands[k].score <= 0.0)
+                        break;
 
                     if (n_nodes >= GENERATE_NODE_BUDGET)
                         ereport(ERROR, (errmsg(

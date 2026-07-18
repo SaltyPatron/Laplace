@@ -71,6 +71,29 @@ int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd);
 
 int64_t glicko2_effective_mu(const glicko2_state_t* st);
 
+/* Fixed-point scale shared by rating/rd/eff_mu (matches LAPLACE_FP_ONE in
+ * glicko2.c and the int64 LAPLACE_GLICKO2_FP_SCALE in attestation_engine.h --
+ * same value, distinct name/type on purpose: that one is int64_t, this one is
+ * double, and the two headers can be included together (attestation_engine.c
+ * does), so a shared name would silently macro-redefine across type. */
+#define LAPLACE_GLICKO2_FP_SCALE_D 1000000000.0
+
+/*
+ * The Glicko-complete signed edge weight -- doc 14 P5, ratified and live on
+ * the Foundry export path as consensus_adjacency.sql.in's per-edge term:
+ *   (eff_mu(rating,rd) - neutral)/1e9 * exp(-kappa * rd/1e9) * witness_sat(wc)
+ * witness_sat(wc) = wc/(wc+4.0) (Michaelis-Menten, half-max at 4 witnesses --
+ * see mu/foundry_witness_sat.sql.in for the documented rationale). `kappa` is
+ * the SQL-level tunable foundry_rd_kappa() (mu/foundry_rd_kappa.sql.in,
+ * currently 1.0) -- callers fetch it once (not per-candidate) and pass it in,
+ * so the walk and the Foundry export share one tunable, never drift apart.
+ * Rule #1 (one implementation per fact): this is the ONLY native copy of this
+ * formula; both generate_walk.c's beam scorer and astar_path.c's edge_cost
+ * call it.
+ */
+double laplace_walk_edge_weight(int64_t rating, int64_t rd, int64_t witness_count,
+                                double kappa);
+
 int64_t laplace_fp_mul(int64_t a, int64_t b);
 int64_t laplace_fp_div(int64_t a, int64_t b);
 int64_t laplace_fp_sqrt(int64_t x);

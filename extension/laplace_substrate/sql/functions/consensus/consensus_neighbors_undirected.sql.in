@@ -1,18 +1,19 @@
+DROP FUNCTION IF EXISTS consensus_neighbors_undirected(bytea, bytea[], int);
 CREATE OR REPLACE FUNCTION consensus_neighbors_undirected(
     p_subject bytea,
     p_types   bytea[],
     p_limit   int)
-    RETURNS TABLE(nbr bytea, rating bigint, rd bigint)
+    RETURNS TABLE(nbr bytea, rating bigint, rd bigint, witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT nbr, rating, rd FROM (
-        SELECT c.object_id AS nbr, c.rating, c.rd
+    SELECT nbr, rating, rd, witness_count FROM (
+        SELECT c.object_id AS nbr, c.rating, c.rd, c.witness_count
         FROM v_consensus_unrefuted c
         WHERE c.subject_id = p_subject
           AND c.object_id IS NOT NULL
           AND c.type_id = ANY (p_types)
         UNION ALL
-        SELECT c.subject_id AS nbr, c.rating, c.rd
+        SELECT c.subject_id AS nbr, c.rating, c.rd, c.witness_count
         FROM v_consensus_unrefuted c
         WHERE c.object_id = p_subject
           AND c.type_id = ANY (p_types)

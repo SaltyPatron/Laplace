@@ -33,7 +33,7 @@ std::vector<uint64_t> run(Graph& g, uint64_t start, std::vector<uint64_t> goals,
     std::vector<hash128_t> gr;
     for (auto x : goals) gr.push_back(H(x));
     astar_query_t* q =
-        astar_open(&s, gr.data(), gr.size(), max_depth, 1, expand, &g);
+        astar_open(&s, gr.data(), gr.size(), max_depth, 1, expand, &g, nullptr, nullptr);
     std::vector<uint64_t> path;
     if (q == nullptr) return path;
     astar_step_t step;
@@ -54,6 +54,35 @@ TEST(LaplaceCoreAstar, PicksLeastCostPath) {
     EXPECT_EQ(p[0], 1u);
     EXPECT_EQ(p[1], 2u);
     EXPECT_EQ(p[2], 4u);
+}
+
+double const_heuristic(void* ctx, const hash128_t* node,
+                       const hash128_t* goal_region, size_t goal_count) {
+    (void) ctx;
+    for (size_t i = 0; i < goal_count; ++i)
+        if (node->lo == goal_region[i].lo) return 0.0;
+    /* Admissible for this fixture: every edge costs >= 1.0, so any non-goal
+     * node is at least 0.5 away -- never overestimates. */
+    return 0.5;
+}
+
+TEST(LaplaceCoreAstar, HeuristicPreservesLeastCostPath) {
+    Graph g;
+    g.adj[1] = {{H(2), 1.0}, {H(3), 3.0}};
+    g.adj[2] = {{H(4), 1.0}};
+    g.adj[3] = {{H(4), 1.0}};
+    hash128_t s = H(1), goal = H(4);
+    astar_query_t* q =
+        astar_open(&s, &goal, 1, 16, 1, expand, &g, const_heuristic, nullptr);
+    ASSERT_NE(q, nullptr);
+    std::vector<uint64_t> path;
+    astar_step_t step;
+    while (astar_next(q, &step)) path.push_back(step.entity.lo);
+    astar_close(q);
+    ASSERT_EQ(path.size(), 3u);
+    EXPECT_EQ(path[0], 1u);
+    EXPECT_EQ(path[1], 2u);
+    EXPECT_EQ(path[2], 4u);
 }
 
 TEST(LaplaceCoreAstar, MultiHopBeatsExpensiveDirect) {
@@ -99,7 +128,7 @@ TEST(LaplaceCoreAstar, RespectsMaxDepth) {
 TEST(LaplaceCoreAstar, RejectsBadArgs) {
     Graph g;
     hash128_t s = H(1), goal = H(2);
-    EXPECT_EQ(astar_open(nullptr, &goal, 1, 8, 1, expand, &g), nullptr);
-    EXPECT_EQ(astar_open(&s, &goal, 0, 8, 1, expand, &g), nullptr);
-    EXPECT_EQ(astar_open(&s, &goal, 1, 8, 1, nullptr, &g), nullptr);
+    EXPECT_EQ(astar_open(nullptr, &goal, 1, 8, 1, expand, &g, nullptr, nullptr), nullptr);
+    EXPECT_EQ(astar_open(&s, &goal, 0, 8, 1, expand, &g, nullptr, nullptr), nullptr);
+    EXPECT_EQ(astar_open(&s, &goal, 1, 8, 1, nullptr, &g, nullptr, nullptr), nullptr);
 }
