@@ -78,9 +78,21 @@ wrong point in the sequence is a violation even if the algorithm itself is corre
        bulk read of touched edge ids).
     5. ONE trunk->tier descent across the whole working set -- O(tiers) round trips per
        ingest, each a bulk set-membership probe, present nodes pruning their subtrees.
-    6. The descent output is the filtered write list. Writes are pure bulk COPY of
-       known-novel rows in tier order. No anti-join. No ON CONFLICT. No server-side
-       re-verification. The server receives records; it does not re-derive novelty.
+    6. The descent output is the write list. Writes are bulk raw-binary COPY of the
+       client-deduped rows into per-session TEMP staging, then ONE set-based
+       INSERT .. SELECT .. ON CONFLICT per table adjudicates presence AT INSERT TIME:
+       DO NOTHING for content (entities/physicalities), DO UPDATE for attestations
+       (present rows merge observation counts — dropping counts drops testimony).
+       The client owns DEDUP (one row per id per statement — DO UPDATE faults on
+       intra-statement duplicates); the server owns PRESENCE (the PK arbiter is
+       always live). No standalone apply-side existence probe — the bitmap probes
+       (*_stored_bitmap / *_exist_bitmap) remain compose-side (Layer A) only.
+       [AMENDED 2026-07-18 — deliberate, measured reversal of the former "No
+       anti-join. No ON CONFLICT. No server-side re-verification." clause: the
+       apply-side probe re-verified ~12M mostly-novel ids per apply at cache-cold
+       random I/O, measured 37-53 MINUTES per apply at Wiktionary scale. The DB is
+       the lookup structure; adjudication rides the same PK descent the write pays
+       anyway, fused with the insert.]
     STATUS RE-BASELINE (2026-07-05, verified against source — the 2026-07-02 violations
     list preserved in git history is now HISTORICAL): all five phases of the write-protocol
     plan LANDED. Working-set mode is the adapter default (one builder per record stream,
