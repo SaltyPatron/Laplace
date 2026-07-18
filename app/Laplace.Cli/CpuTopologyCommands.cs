@@ -123,6 +123,16 @@ internal static class CpuTopologyCommands
         // perfcache map; connections are budgeted, not free. Memory ceiling
         // arithmetic and the 2026-07-15 incident live in doc 28.
         w.WriteLine("ALTER SYSTEM SET max_connections = 60;");
+        // The two-axis partitioned substrate holds ~220 leaves (13 entity +
+        // 64 physicality + ~145 attestation) plus their indexes/toast: one
+        // CREATE EXTENSION or one COPY-to-parent transaction locks hundreds
+        // of objects, and parallel test fixtures / apply lanes run several
+        // such transactions at once. The PG default (64) exhausts the shared
+        // lock table (53200 out of shared memory) — observed 2026-07-16,
+        // parallel dotnet test fixtures. 1024 × max_connections ≈ 61k shared
+        // slots, well inside PG's design envelope (proc.h sizes fast-path
+        // groups up to max_locks_per_transaction = 16k).
+        w.WriteLine("ALTER SYSTEM SET max_locks_per_transaction = 1024;");
         w.WriteLine("ALTER SYSTEM SET hash_mem_multiplier = 1.0;");
         w.WriteLine("ALTER SYSTEM SET temp_buffers = '32MB';");
         w.WriteLine("ALTER SYSTEM SET autovacuum_work_mem = '256MB';");
