@@ -1,0 +1,151 @@
+-- converse_facts(syn, lang): the walk-driven fact set behind converse_about() --
+-- one row per attested fact family, each carrying its provenance (eff_mu,
+-- witnesses) and, for walk-built rows, the literal path/types so a caller can
+-- drill to the exact consensus edges that produced the sentence.
+--
+-- Fact families, by salience band (the governed language-agnostic ladder):
+--   definition  band 1 top edge                      "X is <gloss>."
+--   taxonomy    MULTI-HOP native beam walk up the    "X is a kind of A, which is
+--               topic's strongest taxonomic relation  a kind of B."
+--   parts       band 4 ranked listing                "X has parts such as a, b."
+--   kin         band 7 ranked listing                "X is related to a and b."
+--   web         strongest unfiltered chain           "X -IS_A-> A -HAS_PART-> b"
+--
+-- The taxonomy row is the beam engine (walk_branches: Glicko-complete signed
+-- weight, partition-pruned by a CONCRETE relation type) -- the topic's own
+-- strongest band-2 edge picks that type, so no relation name is hardcoded and
+-- the partition-pruning law from recall_walk_response.sql.in holds. The web row
+-- uses walk_strongest, the correct engine for the type-unfiltered case. The
+-- listing rows are 1-hop by nature (a parts inventory IS its ranked edges);
+-- LIMIT here is a query limit, not a truncation of what the source asserts.
+-- eff_mu for a chain = the weakest edge on it (a chain is only as certain as
+-- its loosest strand).
+CREATE OR REPLACE FUNCTION converse_facts(p_syn bytea, p_lang bytea DEFAULT NULL)
+    RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
+                  path bytea[], types bytea[])
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    b_def  int := 1;   -- definitional band (gloss)
+    b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
+    b_part int := 4;   -- partitive band (parts)
+    b_assoc int := 7;  -- associative band (related)
+    lbl      text;
+    tax_type bytea;
+BEGIN
+    IF p_syn IS NULL THEN
+        RETURN;
+    END IF;
+
+    lbl := COALESCE(realize(p_syn, p_lang), label(p_syn));
+
+    -- definition: highest eff_mu edge in the definitional band.
+    RETURN QUERY
+    SELECT 'definition'::text,
+           initcap(lbl) || ' is ' || render_text(c.object_id, 96) || '.',
+           eff_mu_display(c.rating, c.rd),
+           c.witness_count::bigint,
+           ARRAY[c.subject_id, c.object_id],
+           ARRAY[c.type_id]
+    FROM consensus c
+    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_def
+    ORDER BY (c.rating - 2*c.rd) DESC
+    LIMIT 1;
+
+    -- taxonomy: multi-hop beam walk up the topic's strongest taxonomic relation.
+    SELECT c.type_id INTO tax_type
+    FROM consensus c
+    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_tax
+    ORDER BY (c.rating - 2*c.rd) DESC
+    LIMIT 1;
+    IF tax_type IS NOT NULL THEN
+        RETURN QUERY
+        WITH branches AS (
+            SELECT * FROM walk_branches(p_syn, tax_type, 4, 3)
+        ),
+        winner AS (
+            SELECT * FROM branches w
+            ORDER BY (w.path_mu / GREATEST(w.depth, 1)::numeric) DESC, w.depth DESC
+            LIMIT 1
+        ),
+        steps AS (
+            SELECT i, w.path[i + 1] AS entity_id
+            FROM winner w, generate_series(1, w.depth) AS i
+        )
+        SELECT 'taxonomy'::text,
+               initcap(lbl)
+                 || string_agg(CASE WHEN s.i = 1 THEN ' is a kind of '
+                                    ELSE ', which is a kind of ' END
+                               || COALESCE(realize(s.entity_id, p_lang), label(s.entity_id)),
+                               '' ORDER BY s.i)
+                 || '.',
+               min(b.eff_mu),
+               (SELECT w.witnesses FROM winner w),
+               (SELECT w.path  FROM winner w),
+               (SELECT w.types FROM winner w)
+        FROM steps s
+        JOIN branches b ON b.entity_id = s.entity_id AND b.depth = s.i
+        HAVING count(*) > 0;
+    END IF;
+
+    -- parts: partitive-band ranked listing (1-hop by nature).
+    RETURN QUERY
+    SELECT 'parts'::text,
+           initcap(lbl) || ' has parts such as '
+             || string_agg(x.lbl, ', ' ORDER BY x.mu DESC) || '.',
+           min(x.mu_disp),
+           sum(x.wc)::bigint,
+           NULL::bytea[], NULL::bytea[]
+    FROM (
+        SELECT realize(c.object_id, p_lang) AS lbl,
+               (c.rating - 2*c.rd) AS mu,
+               eff_mu_display(c.rating, c.rd) AS mu_disp,
+               c.witness_count AS wc
+        FROM consensus c
+        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_part
+        ORDER BY (c.rating - 2*c.rd) DESC
+        LIMIT 6
+    ) x
+    WHERE x.lbl IS NOT NULL
+    HAVING count(*) > 0;
+
+    -- kin: associative-band ranked listing; the band also carries mesh/structural
+    -- edges -- keep only real content concepts (skip bare ILI ids "09411430-n"
+    -- and lexfile names "noun.object").
+    RETURN QUERY
+    SELECT 'kin'::text,
+           initcap(lbl) || ' is related to '
+             || string_agg(x.lbl, ' and ' ORDER BY x.mu DESC) || '.',
+           min(x.mu_disp),
+           sum(x.wc)::bigint,
+           NULL::bytea[], NULL::bytea[]
+    FROM (
+        SELECT realize(c.object_id, p_lang) AS lbl,
+               (c.rating - 2*c.rd) AS mu,
+               eff_mu_display(c.rating, c.rd) AS mu_disp,
+               c.witness_count AS wc
+        FROM consensus c
+        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_assoc
+        ORDER BY (c.rating - 2*c.rd) DESC
+        LIMIT 8
+    ) x
+    WHERE x.lbl IS NOT NULL
+      AND x.lbl !~ '^[0-9]{6,}-[nvasr]$'
+      AND x.lbl !~ '^(noun|verb|adj|adv|adjs)\.'
+      AND x.lbl !~ ' '
+    HAVING count(*) > 0;
+
+    -- web: the strongest chain across ALL relations -- the explicit
+    -- pull-one-strand answer, rendered with its relation arrows.
+    RETURN QUERY
+    SELECT 'web'::text,
+           lbl || string_agg(' -' || COALESCE(type_label(g.type_id), '?') || '-> '
+                             || COALESCE(realize(g.entity_id, p_lang), label(g.entity_id)),
+                             '' ORDER BY g.step),
+           min(g.eff_mu),
+           NULL::bigint,
+           NULL::bytea[], NULL::bytea[]
+    FROM walk_strongest(p_syn, NULL, 5) g
+    HAVING count(*) > 0;
+END;
+$$;

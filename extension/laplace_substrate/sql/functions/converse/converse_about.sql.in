@@ -1,101 +1,39 @@
--- converse_about(syn, lang): the REALIZE half of converse() -- weave the fused-walk
--- narrative for an ALREADY-RESOLVED topic synset. Internal seam so callers that have
--- already oriented (chat() resolves its topic once per turn) do not pay converse()'s
--- prompt re-segmentation + band-mass re-orientation just to describe a synset they
--- hold in hand. converse() itself is now orient + converse_about.
+-- converse_about(syn, lang): the REALIZE half of converse() -- weave prose for an
+-- ALREADY-RESOLVED topic synset. Internal seam so callers that have already
+-- oriented (chat() resolves its topic once per turn) do not pay converse()'s
+-- prompt re-segmentation + band-mass re-orientation just to describe a synset
+-- they hold in hand.
+--
+-- The facts come from converse_facts() -- the walk-driven fact engine (native
+-- beam walk for the taxonomy chain, ranked consensus for the listings), each
+-- row carrying provenance (eff_mu, witnesses, path). This wrapper is prose-only:
+-- callers that want the provenance columns query converse_facts directly. The
+-- 'web' arrow-chain row is a drill-down surface, not prose -- excluded here.
 CREATE OR REPLACE FUNCTION converse_about(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE plpgsql STABLE
     SET search_path = @extschema@, public AS $$
 DECLARE
-    b_def  int := 1;   -- definitional band (gloss)
-    b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
-    b_part int := 4;   -- partitive band (parts)
-    b_assoc int := 7;  -- associative band (related)
-    label  text;
-    gloss  text;
-    parent bytea;
-    parent_lbl text;
-    parent_gloss text;
-    parts  text;
-    kin    text;
-    out    text := '';
+    prose text;
+    lbl   text;
 BEGIN
     IF p_syn IS NULL THEN
         RETURN NULL;
     END IF;
 
-    label := realize(p_syn, p_lang);
+    SELECT string_agg(f.sentence, ' ' ORDER BY f.ord)
+      INTO prose
+    FROM converse_facts(p_syn, p_lang)
+         WITH ORDINALITY AS f(fact_kind, sentence, eff_mu, witnesses, path, types, ord)
+    WHERE f.fact_kind <> 'web';
 
-    -- definition (highest eff_mu edge in the definitional band)
-    SELECT render_text(c.object_id, 96) INTO gloss
-    FROM consensus c
-    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_def
-    ORDER BY (c.rating - 2*c.rd) DESC LIMIT 1;
-
-    -- taxonomy: the hypernym (taxonomic band), and (bridge hop) its own definition
-    SELECT c.object_id INTO parent
-    FROM consensus c
-    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_tax
-    ORDER BY (c.rating - 2*c.rd) DESC LIMIT 1;
-    IF parent IS NOT NULL THEN
-        parent_lbl := realize(parent, p_lang);
-        SELECT render_text(c.object_id, 96) INTO parent_gloss
-        FROM consensus c
-        WHERE c.subject_id = parent AND relation_highway_band(c.type_id) = b_def
-        ORDER BY (c.rating - 2*c.rd) DESC LIMIT 1;
-    END IF;
-
-    -- parts (partitive band, up to 3 by eff_mu)
-    SELECT string_agg(x.lbl, ', ' ORDER BY x.mu DESC) INTO parts
-    FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl, (c.rating - 2*c.rd) AS mu
-        FROM consensus c
-        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_part
-        ORDER BY (c.rating - 2*c.rd) DESC LIMIT 3
-    ) x
-    WHERE x.lbl IS NOT NULL;
-
-    -- kin (associative band, up to 2)
-    SELECT string_agg(x.lbl, ' and ' ORDER BY x.mu DESC) INTO kin
-    FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl, (c.rating - 2*c.rd) AS mu
-        FROM consensus c
-        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_assoc
-          AND c.object_id <> COALESCE(parent, '\x00'::bytea)
-        ORDER BY (c.rating - 2*c.rd) DESC LIMIT 8
-    ) x
-    -- the associative band also carries mesh/structural edges; keep only real
-    -- content concepts (skip bare ILI ids "09411430-n" and lexfile "noun.object").
-    WHERE x.lbl IS NOT NULL
-      AND x.lbl !~ '^[0-9]{6,}-[nvasr]$'
-      AND x.lbl !~ '^(noun|verb|adj|adv|adjs)\.'
-      AND x.lbl !~ ' '
-    LIMIT 2;
-
-    -- REALIZE: weave flowing prose from whatever was attested.
-    IF gloss IS NOT NULL THEN
-        out := initcap(COALESCE(label, 'it')) || ' is ' || gloss || '.';
-    ELSIF label IS NOT NULL THEN
-        out := 'The concept ' || label || ' is one I hold.';
-    END IF;
-
-    IF parent_lbl IS NOT NULL THEN
-        out := out || ' It is a kind of ' || parent_lbl;
-        IF parent_gloss IS NOT NULL THEN
-            out := out || ' -- ' || parent_gloss;
+    IF prose IS NULL THEN
+        lbl := realize(p_syn, p_lang);
+        IF lbl IS NOT NULL THEN
+            prose := 'The concept ' || lbl || ' is one I hold.';
         END IF;
-        out := out || '.';
     END IF;
 
-    IF parts IS NOT NULL THEN
-        out := out || ' It has parts such as ' || parts || '.';
-    END IF;
-
-    IF kin IS NOT NULL THEN
-        out := out || ' It is related to ' || kin || '.';
-    END IF;
-
-    RETURN btrim(out);
+    RETURN btrim(COALESCE(prose, ''));
 END;
 $$;
