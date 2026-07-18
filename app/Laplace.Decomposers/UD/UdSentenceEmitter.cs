@@ -45,7 +45,7 @@ public sealed class UdSentenceEmitContext
         // treebank says the SENTENCE is language L, not that each wordform intrinsically
         // is (a wordform's language is a use-property; `chat` is French AND English).
         // Per-token Lang= from MISC (genuine code-switching the source marks) is still
-        // emitted in the token loop below. See .scratchpad/16 §1a — this replaces 5.3M
+        // emitted in the token loop below. See docs/specs/16 §1a — this replaces 5.3M
         // per-word HAS_LANGUAGE rows with one per sentence.
         if (s.TextUtf8 is { Length: > 0 } && ctx.RootFor(s.TextUtf8) is { } sentenceRootId)
             b.AddAttestation(NativeAttestation.Categorical(
@@ -80,7 +80,7 @@ public sealed class UdSentenceEmitContext
                 // Link the language-specific XPOS to its universal POS on the SAME row, so the
                 // ~36k per-treebank XPOS tags collapse onto the 17 UPOS hubs (XPOS IS_A UPOS:
                 // "NNP" is a kind of PROPN). Morphology XPOS also encodes stays in the FEATS
-                // channel (FEAT_* below) — UD's canonical morphology surface. See .scratchpad/16 §5.
+                // channel (FEAT_* below) — UD's canonical morphology surface. See docs/specs/16 §5.
                 if (uposId is { } up)
                     b.AddAttestation(NativeAttestation.Categorical(
                         xposId, "IS_A", up, sourceId, langId, TC.AcademicCurated));

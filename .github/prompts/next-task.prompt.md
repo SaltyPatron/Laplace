@@ -8,7 +8,7 @@ produce a ranked recommendation.
 
 Trust order (do NOT invert):
 1. Running code (`app/`, `engine/`, `extension/`) — verify claims with file:line or grep.
-2. Binding author docs: `.scratchpad/05`, `06`, `08`, `09`, `11`, `12`.
+2. Binding author docs: `docs/specs/05`, `06`, `08`, `09`, `11`, `12`.
 3. Operational config: `scripts/win/witness-manifest.json`, `scripts/decomposer-gates.json`.
 4. Do NOT treat as authority: `.scratchpad/13`, compacted `02` status index alone,
    or the one-line "pipeline chain" — those are agent-written summaries that have drifted.
@@ -16,9 +16,9 @@ Trust order (do NOT invert):
 Read for context:
 - [.scratchpad/17_Decomposer_Full_Stack_Audit.md](../../.scratchpad/17_Decomposer_Full_Stack_Audit.md)
   if decomposer / ingest-spine work is in scope.
-- [.scratchpad/06_Engineering_Ruleset.txt](../../.scratchpad/06_Engineering_Ruleset.txt)
+- [docs/specs/06_Engineering_Ruleset.txt](../../docs/specs/06_Engineering_Ruleset.txt)
   Rule #8 ingest sequence and Rule #6 one-implementation-per-fact.
-- [.scratchpad/09_Substrate_LM_Synthesis.txt](../../.scratchpad/09_Substrate_LM_Synthesis.txt)
+- [docs/specs/09_Substrate_LM_Synthesis.txt](../../docs/specs/09_Substrate_LM_Synthesis.txt)
   for invention framing (construct-don't-train, spider-web Laplacian).
 - Open items in [.scratchpad/02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt)
   ONLY after verifying each candidate against code (status index alone is not truth).

@@ -6,7 +6,7 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The Rule #8 write protocol (.scratchpad/06_Engineering_Ruleset.txt): the
+/// The Rule #8 write protocol (docs/specs/06_Engineering_Ruleset.txt): the
 /// client already knows exactly what is novel (descent + hot caches decided
 /// that before we got here), so the server's only remaining jobs are (1) a
 /// bulk in-transaction verification of the claimed-novel ids — the guard

@@ -7,7 +7,7 @@ namespace Laplace.Chess.Service.Tests;
 
 // The recorder (ChessPgnDecomposer.RecordGame) must transcribe the WITNESSED layer only — no board
 // replay, so no positions/substructures and no geometry (physicalities). All derivation is the
-// analyzer's job. See .scratchpad/08_Record_vs_Calculate.
+// analyzer's job. See docs/specs/08_Record_vs_Calculate_Spec.txt.
 public sealed class ChessRecorderTests
 {
     private const string GameWithComment =

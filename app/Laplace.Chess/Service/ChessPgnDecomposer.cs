@@ -146,7 +146,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
     // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
     // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
-    // (ChessAnalyze), run later off this witnessed layer. See .scratchpad/08_Record_vs_Calculate.
+    // (ChessAnalyze), run later off this witnessed layer. See docs/specs/08_Record_vs_Calculate_Spec.txt.
     // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
     // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
     //

@@ -7,7 +7,7 @@ public sealed class ChessGameMetaTests
 {
     // InitialState is now the analyzer's (calculated) FEN->board step; the SetUp/FEN extraction
     // from PGN text is the recorder's job (ChessPgnDecomposer.RecordStartPosition, covered in
-    // ChessRecorderTests). See .scratchpad/08_Record_vs_Calculate.
+    // ChessRecorderTests). See docs/specs/08_Record_vs_Calculate_Spec.txt.
     [Fact]
     public void InitialState_NoFen_UsesStandardStart()
     {

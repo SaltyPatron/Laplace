@@ -14,7 +14,7 @@ internal static class PredicateMatrixIngest
     // with this dedicated source (not the SemLink source) lets consensus see PM and SemLink as
     // two witnesses corroborating the same VN↔FN↔synset links, which is the whole point of the
     // EVIDENCE layer. Its source id is registered as an entity in SemLinkDecomposer.InitializeAsync
-    // so the attestations' source_id FK is satisfied. See .scratchpad/16 §3a.
+    // so the attestations' source_id FK is satisfied. See docs/specs/16 §3a.
     internal static readonly Hash128 Source = PredicateMatrixSource.SourceId;
     internal static readonly Hash128 TrustClass = PredicateMatrixSource.TrustClass;
 

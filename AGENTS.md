@@ -102,10 +102,10 @@ schema's own helper catalog — check it before assuming something doesn't exist
 
 ## Binding design docs (read before deep work in the area)
 
-- [.scratchpad/05_Substrate_Invariants.txt](.scratchpad/05_Substrate_Invariants.txt) — axioms; binding.
-- [.scratchpad/06_Engineering_Ruleset.txt](.scratchpad/06_Engineering_Ruleset.txt) — Rules #1–#12; Rule #8 = the ingest sequence; binding.
+- [docs/specs/05_Substrate_Invariants.txt](docs/specs/05_Substrate_Invariants.txt) — axioms; binding.
+- [docs/specs/06_Engineering_Ruleset.txt](docs/specs/06_Engineering_Ruleset.txt) — Rules #1–#12; Rule #8 = the ingest sequence; binding.
 - [.scratchpad/17_Decomposer_Full_Stack_Audit.md](.scratchpad/17_Decomposer_Full_Stack_Audit.md) — decomposer + ingest-spine audit (code-verified); start here for decomposer work.
-- [.scratchpad/06_Engineering_Ruleset.txt](.scratchpad/06_Engineering_Ruleset.txt) — Rule #8 ingest sequence; binding for pipeline changes.
+- [docs/specs/06_Engineering_Ruleset.txt](docs/specs/06_Engineering_Ruleset.txt) — Rule #8 ingest sequence; binding for pipeline changes.
 - [.scratchpad/13_Stabilization_Audit_and_Plan.txt](.scratchpad/13_Stabilization_Audit_and_Plan.txt) — historical stabilization notes; verify against code before trusting.
 - Full doc map with status: [CLAUDE.md](CLAUDE.md) § Doc map.
 

@@ -82,7 +82,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (!ConceptNetRelations.TryResolveType(rel, out var typeName)) return false;
         // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
         // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
-        // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See .scratchpad/16 §4.
+        // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See docs/specs/16 §4.
         if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out var startWn)) return false;
         if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return false;
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
