@@ -29,8 +29,8 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
     private static readonly Hash128 ColumnTypeId = EntityTypeRegistry.TabularColumn;
     private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
 
-    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _stagedColumns = new(StringComparer.Ordinal);
+    private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentStringSet _stagedColumns = new(StringComparer.Ordinal);
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
