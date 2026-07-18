@@ -59,10 +59,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$filter = '!XUNIT_TIER_EXCLUDE!';" ^
   "$extra = '%ARGS%'.Trim();" ^
   "$projects = '%PROJECTS%'.Split(';') | Where-Object { $_ };" ^
+  "foreach ($p in $projects) {" ^
+  "  Write-Host ('==== building ' + $p + ' ====');" ^
+  "  & dotnet build (Join-Path $p ($p + '.csproj')) -c Release -v minimal --nologo;" ^
+  "  if ($LASTEXITCODE -ne 0) { Write-Host ('FAIL build ' + $p); exit 1 }" ^
+  "};" ^
   "$procs = @();" ^
   "foreach ($p in $projects) {" ^
   "  $out = Join-Path $env:TEMP ('laplace-test-' + $p + '.log');" ^
-  "  $argList = @('test', (Join-Path $p ($p + '.csproj')), '-c', 'Release', '-v', 'minimal', '--nologo', '--filter', $filter);" ^
+  "  $argList = @('test', (Join-Path $p ($p + '.csproj')), '-c', 'Release', '-v', 'minimal', '--nologo', '--no-build', '--filter', $filter);" ^
   "  if ($extra) { $argList += $extra.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries) };" ^
   "  Write-Host ('==== starting ' + $p + ' ====');" ^
   "  $err = $out + '.err';" ^

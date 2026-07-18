@@ -81,6 +81,7 @@ pg_apply_machine_tuning() {
     -c "ALTER SYSTEM SET huge_pages = try" \
     -c "ALTER SYSTEM SET synchronous_commit = off" \
     -c "ALTER SYSTEM SET io_workers = $PG_TUNE_PDEG" \
+    -c "ALTER SYSTEM SET max_locks_per_transaction = 1024" \
     -c "SELECT pg_reload_conf()"
 
   local io
@@ -123,6 +124,7 @@ WITH want(name, expected, mode) AS (VALUES
   ('wal_compression','on','enabled'),
   ('max_parallel_maintenance_workers','${PG_TUNE_PDEG}','eq'),
   ('effective_io_concurrency','${PG_TUNE_IO_CONC}','eq'),
+  ('max_locks_per_transaction','1024','eq'),
   ('huge_pages','try','eq'))
 SELECT w.name, current_setting(w.name),
        CASE w.mode
