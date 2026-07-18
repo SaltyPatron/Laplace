@@ -19,7 +19,7 @@ STATUS INDEX (one line per issue; detail below for OPEN/FIXED-UNVERIFIED only)
 02  CLOSED     ISO639 summary line misleading — data was correct
 03  CLOSED     39_highway.sql.in — replaced by functions/highway/* (11 objects), live
 04  OPEN       feature_extractor.cpp full stub                      → plan 13 Phase 4
-05  OPEN       astar.cpp heuristic hardcoded 0.0 (Dijkstra today)   → plan 13 Phase 4
+05  PARTIAL    astar.cpp heuristic opt-in 2026-07-18 (PR #349), h=0.0 DEFAULT unchanged
 06  OPEN       MoE experts/attention bias synthesize all-zero       → plan 13 Phase 4
 07  OPEN       highway_mask type-grained, not value-grained (design decision pending)
 08  RESOLVED   55-project sprawl — two consolidation waves, 13 projects, ids verified
@@ -147,6 +147,18 @@ MoE/attention-bias tensors memset-zero). Not free-floating debt: all three sit o
 foundry build path and are scoped inside plan 13 Phase 4 / docs 09+12 (astar heuristic =
 admissible geometric lower bound; MoE = voronoi routing, Milestone B). Do not "fix"
 them out of context.
+[05 UPDATE 2026-07-18, PR #349: astar_open() (engine/core/src/astar.cpp, shared by
+astar_path.c's walk/query path AND the foundry synthesis path this issue scopes to)
+gained an OPTIONAL heuristic-fn parameter, default NULL = h=0.0 unchanged for every
+existing caller including foundry's, if any calls it directly. astar_path.c's SQL-facing
+wrapper (astar_path_raw) gained an opt-in p_use_geometry toggle using
+h=angular_distance/pi (provably admissible, deliberately weak, no live calibration
+needed). This resolves the doc15-vs-Issue02 ownership conflict via a toggle rather than
+picking a side -- the underlying stub work Issue 04/06 describes (feature_extractor,
+MoE tensors) is UNTOUCHED and still scoped to plan 13 Phase 4 / docs 09+12 as before.
+A tighter, CALIBRATED (not just admissible) heuristic is still open if the foundry path
+ever wants a stronger bound than the weak one shipped here -- worth its own GH issue if
+so, do not silently tighten it without profiling per Rule #5.]
 
 ISSUE 07 — highway_mask is relation-TYPE grained (153 canonical types; DEP_*/FEAT_*
 collapse to family-root bits). One bit says "touches HAS_POS", nothing says which POS.

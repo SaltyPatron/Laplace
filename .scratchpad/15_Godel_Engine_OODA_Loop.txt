@@ -52,14 +52,58 @@ SECTION 1 — WHAT EXISTS TODAY (verified 2026-07-05)
     chain, source substrate/source/UserFeedback/v1, trust UserPrompt (.30),
     outcome Confirm/Refute, immediate consensus materialization.
     [2026-07-05: generalized — see §3 B1/B2, FeedbackContent.cs]
-1.4 What the walk consumes per step: relation_rank × eff_mu(rating − 2rd) as
+1.4 [UPDATED 2026-07-18, PR #349] What walk_branches (generate_walk.c)
+    consumes per step, post-Phase-C: the Glicko-complete signed weight
+    w = rank · (eff_mu−neutral)/1e9 · exp(−κ·rd/1e9) · witness_sat(wc) —
+    laplace_walk_edge_weight(), the SAME native function astar_path.c's
+    edge_cost() now calls (doc 14 P5's consensus_adjacency formula, reused,
+    not reimplemented); refutation is no longer a hard drop — a net-negative
+    candidate is scored, then excluded at beam-placement time the moment
+    score drops <=0 (never walked, but visible to ranking — doc 15 I2).
+    Highway-mask gating (p_intent_mask, native bitwise AND against
+    entities.highway_mask, no perfcache dependency for the gate itself),
+    S3 angular distance + hilbert-band locality (always-on additive beam
+    terms), trajectory-ordinal continuity (built, shipped OPT-IN/default-off
+    — see caveat below), and session/topic frontier bias (p_topic_bias) are
+    all consumed now. walk_strongest (generate_walk.c) and walk_continuations
+    (trajectory_generate.c) are UNCHANGED — still consume only their original
+    inputs (see 1.4-old below), and are still what plain/unfiltered
+    recall_walk_response('walk' mode) and walk_text() respectively use.
+1.4-old [SUPERSEDED, kept for the walk_strongest/walk_continuations paths
+    which this pass did not touch]: relation_rank × eff_mu(rating − 2rd) as
     the ranking key; refutation filter (rating + 2rd < neutral); witness_count
-    carried for DISPLAY only (generate_walk.c). walk_continuations consumes
-    corpus counts + temperature only.
-1.5 NOT consumed anywhere on the read side: rd as temperature, witness_count
-    as evidence mass, volatility, highway_mask gating, angular/trajectory/
-    hilbert geometry, source trust classes, session/topic carry-over beyond
-    single-prompt resolve. A* heuristic h=0.0 (Issue 05).
+    carried for DISPLAY only. walk_continuations consumes corpus counts +
+    temperature only.
+1.5 [UPDATED 2026-07-18] Consumed now (walk_branches only, see 1.4): rd as
+    temperature (via exp(-kappa*rd) confidence decay), witness_count as
+    evidence mass (Michaelis-Menten saturation), highway_mask gating,
+    angular/hilbert geometry, session/topic carry-over (as an explicit param,
+    not yet wired to real session state — caller must supply the bias array).
+    A* heuristic is opt-in (p_use_geometry, astar_path_raw) — h=0.0 remains
+    the DEFAULT (Issue 05 not fully closed, see caveat below), non-default
+    heuristic is h=angular_distance/pi (deliberately weak but provably
+    admissible without a live calibration query).
+    STILL NOT consumed anywhere: volatility, source trust classes beyond
+    what's already folded into rating/rd, real session/topic state (the
+    p_topic_bias plumbing exists but nothing populates it from
+    session_topics yet — see GH issue for doc 22 Phase D).
+    CAVEATS from the same pass, load-bearing for anyone building on this:
+    (a) trajectory-ordinal continuity is DISABLED BY DEFAULT
+    (p_ordinal_continuity=false) — its containment probe has no hilbert-band
+    restriction and costs a full 64-partition Append scan per miss (proven
+    live via EXPLAIN ANALYZE); needs a hilbert-band-scoped search before
+    it's safe to default on.
+    (b) recall_walk_response only routes through walk_branches for
+    type-filtered calls ('complete' mode) — plain 'walk' mode (no type
+    filter) stays on walk_strongest because consensus is LIST-partitioned by
+    relation type and an unfiltered walk_branches call Append-scans every
+    partition (measured turning a sub-second regress assertion into 24s).
+    So "the walk IS the forward pass" is only true for the enriched engine
+    on the type-filtered path today; open-ended walk still runs the old,
+    simpler single-strongest-edge stepper.
+    (c) A* heuristic is opt-in specifically because astar_open() (engine/core)
+    is shared with the foundry synthesis path — see Issue 05's doc-13/doc-15
+    ownership note below, now resolved via toggle rather than picking a side.
 
 ================================================================================
 SECTION 2 — INVARIANTS (binding for this build)
@@ -136,6 +180,23 @@ C   RICHER FORWARD PASS (per-step signal; mirrors 14 P5 on the read side):
     d) Session conditioning: topic carry-over as frontier bias (ORIENT).
     Profile-first (Rule #5 caveat); EXPLAIN-verified; KNN points stay bound
     parameters (Rules #1/#4).                        [OPEN]
+    [STATUS 2026-07-18, PR #349 (branch claude/richer-forward-pass): a, b, d
+    are DONE and live on walk_branches/type-filtered recall_walk_response
+    ('complete' mode). c is split -- angular+hilbert are always-on and DONE;
+    trajectory-ordinal continuity is built but shipped OPT-IN/default-off
+    (its containment probe forces a 64-partition Append scan per miss,
+    proven live, needs a hilbert-band-scoped search before defaulting on);
+    the A* admissible bound closes Issue 05 as an OPT-IN toggle
+    (astar_path_raw p_use_geometry), not a default -- astar_open() is
+    shared with the foundry synthesis path so default behavior (h=0.0,
+    Dijkstra) is preserved on purpose. Not closed by this pass: plain/
+    unfiltered walk (recall_walk_response 'walk' mode, no type filter)
+    still runs the OLD walk_strongest engine -- an unfiltered walk_branches
+    call hits the same partition-scan cost (measured: sub-second regress
+    assertion became 24s). Follow-on work tracked as its own GH issues:
+    hilbert-band-scoped ordinal-continuity search; generalizing
+    walk_branches to the unfiltered-type case; a tighter (calibrated, not
+    just admissible) A* heuristic.]
 D   LOOP-CLOSURE METRICS — depth-k grounded-retrieval accuracy, feedback→
     next-walk delta (does an attest visibly move the next walk?), µs/step
     latency budget. B3 is the vehicle.               [OPEN]
