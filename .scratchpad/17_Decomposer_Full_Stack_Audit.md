@@ -1,5 +1,14 @@
 # 17 — Decomposer full-stack audit (code-verified)
 
+[HISTORICAL, marked 2026-07-18: this doc's Section 8 target ("Decomposer<T>
+extract-only; delete dead lanes; extend architecture gate to Chess") is now
+EXECUTED and verified -- dead paths (OMWEtlRegistration, WiktionaryEtlRegistration,
+PCoreParallelCompose, etl_witness_conceptnet.c) are absent from the tree; Chess
+decomposers use ComposeDecomposer<T>; the architecture gate test covers Chess
+(DecomposerArchitectureGateTests.cs). Kept for its original code-verified
+inventory value, not as an active remediation target -- see
+.cursor/plans/full_stack_remediation_bdaba5c3.plan.md for current state.]
+
 Date: 2026-07-06. Method: grep + read of every production `*Decomposer.cs`, helper ingest modules, Rule #8 spine, native `engine/core`, extension SPI.
 
 **Purpose:** code-verified inventory — **input to** [18_Remediation_Plan.md](18_Remediation_Plan.md), not the finish line. Maps every decomposer + spine brand + sabotage/disproof for harness and code unfuck.

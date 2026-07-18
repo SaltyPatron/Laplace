@@ -154,7 +154,14 @@ relation renumbers bits and owes a reseed — regenerate, never backfill.
 glicko2, highway, identity, inference, ingest, inspect, lexical, link, mu, ops,
 readback, realize, recall, relation, structural, taxonomy, trajectory, variant) plus
 native C for the hot paths: `recall.c` (intent-routed serving), `generate_walk.c`
-(batched beam frontier, ranked natively by `relation_rank × eff_mu`), `astar_path.c`,
+(batched beam frontier; `walk_branches` ranks by the Glicko-complete signed weight —
+`relation_rank × eff_mu × exp(−κ·rd) × witness-saturation`, refuted edges negative,
+plus highway-mask gating and S³/hilbert geometry beam terms — the same formula
+`consensus_adjacency` uses on the Foundry export side, doc 15 §3C; `walk_strongest`
+still ranks by the simpler `relation_rank × eff_mu(rating−2rd)` and is what
+unfiltered/open-ended walks use, since an unfiltered `walk_branches` call Append-scans
+every relation-type partition), `astar_path.c` (opt-in admissible geometric A*
+heuristic, default Dijkstra unchanged — shared with the foundry synthesis path),
 `trajectory_generate.c` (n-gram descent with consensus fallback), `consensus_fold_*`,
 `highway_mask.c` (perfcache-backed bit ops), `perfcache.c` (mmap'd blobs, postmaster
 prewarm). `SELECT * FROM api('<substring>')` is the schema's self-introspection catalog

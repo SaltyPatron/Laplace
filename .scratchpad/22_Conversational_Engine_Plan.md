@@ -39,19 +39,31 @@ content-addressed — and prompts/responses become first-class witnessed content
 Gödel loop: evaluation IS ingestion). This is C#/ingest, not SQL; the SQL side already unpacks
 trajectories (converse_walk uses `trajectory_unpacked_points`), so read-side is ready.
 
-## Phase E — Native highway fast-path  [needs perfcache generation + mask backfill]
-On hart-server the highway perfcache blob is NOT loaded (GUC lists only the t0 codepoint blob)
-and `entities.highway_mask` is NULL for 100% of entities. Build: regenerate
-`laplace_highway_perfcache.bin`, set the GUC, backfill `entities.highway_mask` (per-entity
-relation-participation bits). Then intent→`laplace_highway_band_mask` AND `entity.highway_mask`
-is a native bitmask pre-gate (zero SQL) per doc 15 §3C-b, and the read walk consumes the
-highway bits it currently ignores (§1.5).
+## Phase E — Native highway fast-path  [PARTIALLY DONE 2026-07-18, PR #349]
+The native bitmask pre-gate itself is now BUILT and used: `walk_branches` (generate_walk.c)
+takes `p_intent_mask bytea`, ANDs it natively against `entities.highway_mask` in the beam
+candidate loop (`highway_table_mask_and`/`_any`, no perfcache dependency for the gate --
+`entities.highway_mask` is a plain DB column, populated at consensus-fold write time per
+`project_ucd_perfcache_law` memory). What's NOT done: (a) nothing computes a real
+`intent_band(prompt)` yet to feed that mask -- Phase B below is still open, so no live caller
+actually supplies a non-null `p_intent_mask` today; (b) this session did not re-verify
+hart-server's specific highway-perfcache-loaded / highway_mask-backfilled state described
+above -- re-check live (`SELECT laplace_highway_ready()`, `SELECT count(*) FILTER (WHERE
+highway_mask IS NOT NULL) FROM entities`) before assuming either claim still holds on that
+host specifically (hart-desktop was separately backfilled per memory, hart-server was not,
+as of the date that memory was written).
 
-## Phase F — Free-form FLUENCY lift (§3C)  [SQL + C]
+## Phase F — Free-form FLUENCY lift (§3C)  [SQL + C, STILL OPEN]
 Beyond trigram/gloss: consume `rd` as sampling temperature, S³ angular + trajectory-ordinal
 continuity + hilbert locality as beam terms, witness mass as evidence; and a denser sequential
 corpus (example sentences now; the dense PRECEDES layer once the sentence corpora seed). This
 turns recombined-glosses into genuine sentence generation.
+NOTE 2026-07-18: doc 15 Phase 3C (PR #349) built angular-distance and hilbert-band beam terms,
+but for `generate_walk.c`'s graph-fact walker (`walk_branches`), NOT for `converse_walk`'s
+free-form token walk (`steered_walk.c`) or `walk_text`'s n-gram walk (`trajectory_generate.c`)
+-- those are the engines Phase F is actually about. rd-as-sampling-temperature is also still
+unbuilt for either of those. Phase F remains fully open; PR #349 is prior art / a template for
+the geometry-term plumbing, not an implementation of this phase.
 
 ## Order
 A done. B, C now (SQL, verifiable). D, E, F need the ingest spine / perfcache build tooling /
@@ -68,16 +80,23 @@ deeper C — scoped with concrete entry points, done where SQL-reachable, not fa
   small, outranked by design, part of the self-witnessing lane; not force-removed (no clean per-attestation
   delete without the refute path; removing risks the fold).
 
-## KNOWN DEBT: converse_walk is plpgsql RBAR (violates "all math in C/C++/SPI")
-converse_walk builds the corpus stream via plpgsql array appends and runs the trigram->bigram walk
-with `generate_subscripts` FULL SCANS per step (O(n)/step). This is RBAR that native
-`trajectory_generate.c::pg_laplace_walk_continuations` already does in C via a suffix array
-(O(log n)/step). CORRECT FIX (needs the extension build, not psql): extend walk_continuations (or a
-new C fn) to accept (a) a topic-RESTRICTED corpus = the containers_of(word) tier-3 sentence set, and
-(b) per-token topic weights for steering, so the walk is native; converse_walk then becomes a thin SQL
-wrapper like walk_text. Until then converse_walk is a PROTOTYPE demonstrating the tier-fan-out+steering
-approach; chat's describe/what_is could default to converse() (pure SQL, no RBAR, always coherent)
-instead of the RBAR walk. witness_precedes_chain's per-bigram loop should also be a single batched
-native deposit. NOTE the whole free-form walk is starved on hart-server anyway: the literary documents
-(Odyssey/Ulysses/Moby Dick/Sherlock) that would feed rich tier-3 prose are NOT seeded here (Ishmael has
-0 containing sentences); the corpus is CILI/WordNet/FrameNet glosses, so the walk recombines definitions.
+## KNOWN DEBT (STALE -- see resolution below): converse_walk plpgsql RBAR
+[SUPERSEDED 2026-07-14, commit 0f326432 "perf: converse_walk WALK goes native (steered_walk.c);
+GATHER set-based" -- verified live this session (2026-07-17 research pass), two days AFTER this
+doc's "Persistence + cleanup state (2026-07-12)" section was written. The plpgsql body that
+remains in converse_walk.sql.in is ONLY ORIENT (topic-synset resolution) and GATHER (a set-based
+SQL CTE chain) -- no loops, no `generate_subscripts`. The WALK itself now calls a native C kernel,
+`steered_walk_raw` -> `pg_laplace_steered_walk` (steered_walk.c) -- NOT `walk_continuations` as
+this doc's "CORRECT FIX" originally proposed. Instead of extending walk_continuations, a SEPARATE,
+purpose-built native engine was written (trigram/bigram over a caller-built topic-weighted stream,
+LCG sampling, no suffix array). That architectural duplication is real and un-fixed: `steered_walk.c`
+and `trajectory_generate.c`'s suffix-array engine are two independent native n-gram walkers with no
+shared code -- worth its own GH issue if consolidation is ever wanted, but the RBAR/performance
+complaint this section originally raised is resolved.]
+Still open, unaffected by the above: witness_precedes_chain's per-bigram loop is still a plain
+plpgsql FOR loop (`extension/laplace_substrate/sql/functions/converse/witness_precedes_chain.sql.in`,
+unchanged since the original 2026-07-12 commit, one `laplace_witness()` SPI call per bigram) --
+should be a single batched native deposit. NOTE the whole free-form walk may still be starved on
+whichever host this runs against: the literary documents (Odyssey/Ulysses/Moby Dick/Sherlock) that
+would feed rich tier-3 prose were NOT seeded as of 2026-07-12 (Ishmael had 0 containing sentences);
+re-verify corpus coverage live before assuming this is fixed.

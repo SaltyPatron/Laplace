@@ -10,7 +10,7 @@ todos:
     status: completed # verified 2026-07-11: OMWEtlRegistration.cs, WiktionaryEtlRegistration.cs, PCoreParallelCompose.cs, NativeGrammarIngest.cs, etl_witness_conceptnet.c all absent; dispatch table-driven (IngestDispatchTable.cs)
   - id: p2-spine-gates
     content: "P2 Decomposer<T> + shared extractors + ContentWitnessBatch→ContentTierSpine + extend architecture gate BEFORE migration"
-    status: pending
+    status: completed # verified 2026-07-18 (scratchpad-doc audit pass): Decomposer<T> exists (app/Laplace.Substrate/Abstractions/Decomposer.cs); architecture gate now scans Laplace.Chess and bans hand-rolled SubstrateChangeBuilder (DecomposerArchitectureGateTests.cs:26,81)
   - id: p3-tier-attestation
     content: "P3 Doc 16 P1-P6 — Tatoeba/UD language tier, ConceptNet POS, Wiktionary hub, PM source id (P3 done per 16 §8)"
     status: pending
@@ -170,8 +170,8 @@ Order: [`witness-manifest.json`](scripts/win/witness-manifest.json) `cadence_law
 | propbank/verbnet | L61+ / L52+ | Duplicate XML compose ~130 LOC each |
 | framenet | L360–491 | LemmaOf dup with LuIngest |
 | semlink | orchestrator L36–101 | 4 sub-ingests |
-| chess-openings | [`ChessOpeningsDecomposer.cs`](app/Laplace.Chess/Service/ChessOpeningsDecomposer.cs) L31–71 | Full hand builder |
-| chess-pgn | [`ChessPgnDecomposer.cs`](app/Laplace.Chess/Service/ChessPgnDecomposer.cs) L71+L77 | Dual pipeline lanes |
+| chess-openings | [`ChessOpeningsDecomposer.cs`](app/Laplace.Chess/Service/ChessOpeningsDecomposer.cs) | [FIXED, verified 2026-07-18] now derives from `ComposeDecomposer<T>`, not a hand-rolled builder |
+| chess-pgn | [`ChessPgnDecomposer.cs`](app/Laplace.Chess/Service/ChessPgnDecomposer.cs) | [FIXED, verified 2026-07-18] now derives from `ComposeDecomposer<T>`, not dual pipeline lanes |
 | model | 6× DecomposerBatch phases | Model + TokenEdgeETL |
 
 **Per source verify:** `SourceIdPinTests` → isolated DB → `cmd /c scripts\win\seed-step.cmd <source>` → `:verify_step` → 0 novel rows
