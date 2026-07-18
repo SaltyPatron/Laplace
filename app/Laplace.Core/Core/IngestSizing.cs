@@ -86,6 +86,30 @@ public static class IngestSizing
     public static long ResolveWorkingSetBudgetBytes() => MemoryTopology.WorkingSetBudgetBytes;
 
     /// <summary>
+    /// Compose-side flush envelope (resident-memory bound that closes a working set before
+    /// its builder + content bank are reset) — delegated to <see cref="MemoryTopology"/>.
+    /// Far below the apply COPY budget so compose flushes continuously and stays fast; see
+    /// <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/> for the rationale.
+    /// </summary>
+    public static long ResolveWorkingSetFlushEnvelopeBytes() =>
+        MemoryTopology.WorkingSetFlushEnvelopeBytes;
+
+    /// <summary>
+    /// Hard record ceiling for one working set derived from the flush envelope and the
+    /// per-source byte model — the inverse of <see cref="EstimateWorkingSetBytes"/>, so it
+    /// agrees with the byte-estimate close check. Bounds the set even when
+    /// <see cref="SubstrateChangeBuilder.StagedBytesEstimate"/> under-reports resident cost.
+    /// </summary>
+    public static int ResolveFlushEnvelopeRecordCap(
+        IngestSourceProfile profile, long? flushEnvelopeBytes = null)
+    {
+        long envelope = flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes();
+        double perRecord = Math.Max(1, profile.WorkingSetBytesPerRecord) * WorkingSetResidentSlack;
+        long cap = (long)(envelope / perRecord);
+        return (int)Math.Clamp(cap, 256, int.MaxValue);
+    }
+
+    /// <summary>
     /// Resolve a full per-source plan from live Intel topology + RAM. Call after
     /// <see cref="IngestTopology.EnsureReady"/> so worker pools are initialized.
     /// </summary>

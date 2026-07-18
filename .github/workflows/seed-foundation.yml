@@ -7,6 +7,16 @@ name: Seed — foundation ladder
 # (ensure-foundation.sh checks HasLayerCompleted per decomposer). This is the one
 # phase that is a multi-source ladder rather than a single ingest, so it drives
 # ensure-foundation.sh directly instead of the _ingest.yml single-source core.
+#
+# THIS is the fresh-full-build campaign: a single job that COPYs the whole floor +
+# core-lexical ladder in one serialized pass. On a `force` (fresh_db) run it is the
+# one place the index-cycle fast-path is worth turning on — drop the plain secondary
+# indexes ONCE up front (the physicality coord GiST maintains at ~77k rows/s per-row
+# = 4× slow), let every rung COPY into index-free heaps under LAPLACE_INDEX_CYCLE_DEFER
+# (so no rung auto-rebuilds), then rebuild all of them ONCE at the end with the
+# terminal `recover-indexes`. It is deliberately NOT wired into _ingest.yml: a lone
+# per-source re-dispatch is an increment, where dropping + rebuilding the whole index
+# is pure loss.
 
 on:
   workflow_dispatch:
@@ -20,6 +30,10 @@ on:
         description: "re-ingest every rung even if its layer is already complete"
         type: boolean
         default: false
+      index_cycle:
+        description: "fresh build only: drop plain secondary indexes once, COPY index-free, rebuild once at the end"
+        type: boolean
+        default: true
 
 concurrency:
   group: laplace-ingest-${{ inputs.database }}
@@ -32,6 +46,8 @@ env:
   LAPLACE_DATA_ROOT: /vault/Data
   PGDATABASE: ${{ inputs.database }}
   LAPLACE_DBNAME: ${{ inputs.database }}
+  # Build-if-needed CLI runner (the up-front drop precedes the ladder's own build).
+  CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --"
 
 jobs:
   foundation:
@@ -43,8 +59,29 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
+      # Fresh-build fast path: one drop of every plain secondary (journaled), and
+      # LAPLACE_INDEX_CYCLE(+DEFER) exported so the ladder COPYs into index-free heaps
+      # and no rung rebuilds mid-campaign — the terminal step rebuilds once. Gated on a
+      # genuine fresh build (force); an incremental re-dispatch keeps its indexes online.
+      - name: Cycle indexes — drop secondaries once (fresh build only)
+        if: ${{ inputs.force && inputs.index_cycle }}
+        run: |
+          echo "fresh build — dropping plain secondary indexes for an index-free bulk load"
+          echo "LAPLACE_INDEX_CYCLE=1"       >> "$GITHUB_ENV"
+          echo "LAPLACE_INDEX_CYCLE_DEFER=1" >> "$GITHUB_ENV"
+          $CLI drop-indexes
+
       - name: Ensure foundation
         run: |
           args=()
           [ "${{ inputs.force }}" = "true" ] && args+=(--force)
           bash scripts/ensure-foundation.sh "${args[@]}"
+
+      # Always rebuild once at campaign end — even if the ladder failed, dropped
+      # secondaries must not be left down (every walk/hydrate would otherwise scan).
+      # always() lets this run on failure; still gated on the fresh-build cycle path.
+      - name: Cycle indexes — rebuild secondaries once (fresh build only)
+        if: ${{ always() && inputs.force && inputs.index_cycle }}
+        run: |
+          echo "campaign end — rebuilding the journaled secondaries once (serial sort-based builds)"
+          $CLI recover-indexes

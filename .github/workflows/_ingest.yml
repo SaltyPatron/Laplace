@@ -41,6 +41,17 @@ on:
         description: "re-ingest and prove the attestation count is stable (no double-count)"
         type: boolean
         default: false
+      index_cycle_defer:
+        description: >-
+          Campaign participation ONLY — default false. When a fresh-full-build campaign has
+          dropped the plain secondary indexes up front (`drop-indexes`) and will rebuild them
+          once at the end (`recover-indexes`), set this so THIS phase COPYs into the index-free
+          heaps without rebuilding the campaign's drops at its run start
+          (LAPLACE_INDEX_CYCLE_DEFER). Leave false for every individual re-dispatch: a lone
+          source is an increment, and this phase does NOT drop or rebuild anything on its own —
+          the drop/rebuild bracket is owned by the campaign, never by a single-source call.
+        type: boolean
+        default: false
 
 concurrency:
   # Serialize every ingest against a given DB — one ingest at a time (substrate law).
@@ -52,6 +63,10 @@ permissions:
 
 env:
   LAPLACE_DATA_ROOT: /vault/Data
+  # Empty (the default) = no cycling: NpgsqlIndexCycle.Deferred reads only "1"/"true".
+  # Only a campaign sets index_cycle_defer=true, and even then this phase merely refrains
+  # from rebuilding the campaign's up-front drops — it never drops or rebuilds on its own.
+  LAPLACE_INDEX_CYCLE_DEFER: ${{ inputs.index_cycle_defer && '1' || '' }}
 
 jobs:
   ingest:

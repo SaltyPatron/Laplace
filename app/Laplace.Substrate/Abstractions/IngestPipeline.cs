@@ -466,20 +466,33 @@ public static class IngestBatchPipeline
 
     private static bool ShouldCloseWorkingSet(BatchState state, IngestBatchConfig config)
     {
-        int recordCap = config.WorkingSetRecordCap
-            ?? IngestSizing.ResolveWorkingSetRecordCap(IngestSourceProfile.Default);
+        var profile = config.WorkingSetProfile ?? IngestSourceProfile.Default;
+
+        // Close the compose set at the small COMPOSE FLUSH ENVELOPE, not the large apply
+        // COPY budget (WorkingSetMode.BudgetBytes ~ RAM/16, up to 4 GiB). Holding a set open
+        // until the apply budget fills accumulates millions of deferred tier trees plus the
+        // live content bank and collapses compose throughput (MEASURED 30k -> 1.8k rec/s as
+        // a ~4 GiB set filled with ~3M records before flushing). The envelope (RAM/64,
+        // <= 512 MiB) closes the set continuously in small memory-bounded batches so resident
+        // memory stays flat and compose stays fast. It never explodes round-trips: the runner
+        // re-coalesces these bounded changes back up to the apply budget before COPY, and the
+        // content bank is preserved across compose closes (reset only after the apply).
+        long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
+
+        int recordCap = Math.Min(
+            config.WorkingSetRecordCap ?? int.MaxValue,
+            IngestSizing.ResolveFlushEnvelopeRecordCap(profile, envelope));
         if (recordCap > 0 && state.InBatch >= recordCap)
             return true;
 
         long staged = state.Builder.StagedBytesEstimate;
-        if (staged >= WorkingSetMode.BudgetBytes)
+        if (staged >= envelope)
             return true;
 
         if (state.InBatch > 0)
         {
-            var profile = config.WorkingSetProfile ?? IngestSourceProfile.Default;
             long est = IngestSizing.EstimateWorkingSetBytes(state.InBatch, staged, profile);
-            if (est >= WorkingSetMode.BudgetBytes)
+            if (est >= envelope)
                 return true;
         }
 
