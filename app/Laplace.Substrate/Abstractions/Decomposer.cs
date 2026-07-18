@@ -253,14 +253,10 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     protected abstract IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options);
 
-    /// <summary>
-    /// True only when this source's files are INDEPENDENT — no cross-file state or ordering — so
-    /// they may be ingested concurrently across the file-worker pool. Default false: most
-    /// multi-file sources carry cross-file dependencies (e.g. Tatoeba's sentence epoch fills the
-    /// numeric-id -> content-root map the links epoch reads). Documents override this to true.
-    /// </summary>
-    protected virtual bool FilesAreIndependent => false;
-
+    // Multi-file sources ingest PARALLEL BY DEFAULT across the file-worker pool. References resolve
+    // content-addressed (hash of the canonical key), so files carry no cross-file ordering and no
+    // phase concept is needed — cross-source agreement is a hash collision. (Tatoeba is order-
+    // independent too: its links anchor on the deterministic TatoebaSentence(id) external-id.)
     protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
@@ -274,7 +270,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
                            CreateHandlerForFile,
                            label => ConfigForFile(label, context.Reader, options),
                            maxTotalUnits: options.MaxInputUnits,
-                           fileWorkers: FilesAreIndependent ? IngestTopology.Current.FileWorkers : 0,
+                           fileWorkers: IngestTopology.Current.FileWorkers,
                            ct: ct))
             yield return change;
     }

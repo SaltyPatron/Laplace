@@ -12,16 +12,11 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
 {
     private readonly TatoebaRowKind _kind;
     private readonly HashSet<long>? _allowedIds;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, Hash128> _idToRoot;
 
-    public TatoebaGrammarWitness(
-        TatoebaRowKind kind,
-        HashSet<long>? allowedIds,
-        System.Collections.Concurrent.ConcurrentDictionary<long, Hash128> idToRoot)
+    public TatoebaGrammarWitness(TatoebaRowKind kind, HashSet<long>? allowedIds)
     {
         _kind = kind;
         _allowedIds = allowedIds;
-        _idToRoot = idToRoot;
     }
 
     public string ModalityId => "tsv";
@@ -66,10 +61,8 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         if (!ContentTierSpine.TryStageIntoBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
 
-        // Record id → content root so the link epoch can anchor IS_TRANSLATION_OF on the
-        // real content roots (links.csv carries only numeric ids, no text).
-        _idToRoot[id] = emitted;
-
+        // The HAS_EXTERNAL_ID bridge (content root -> deterministic TatoebaSentence(id) anchor) is
+        // what the link lane's IS_TRANSLATION_OF resolves against at read time — no runtime map.
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
         b.AddAttestation(NativeAttestation.Categorical(
@@ -85,15 +78,24 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[0]), out long a)) return;
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[1]), out long bId)) return;
 
-        // Anchor translation on the CONTENT ROOTS resolved from the sentence epoch, not on
-        // synthetic per-id ref entities. If either sentence was absent/filtered/empty (no
-        // root recorded), the link cannot be grounded in content — skip it rather than mint
-        // a translation between two id-hashes. See .scratchpad/16 §2a.
-        if (!_idToRoot.TryGetValue(a, out var rootA)) return;
-        if (!_idToRoot.TryGetValue(bId, out var rootB)) return;
-
+        // Content-addressed and ORDER-INDEPENDENT: the link is witnessed verbatim between the two
+        // DETERMINISTIC external-id anchors TatoebaSentence(id) — computed here from the ids alone,
+        // no runtime id->root map, so links need not run after sentences. Each anchor bridges to its
+        // real content root via HAS_EXTERNAL_ID (attested in WalkSentence), so the content-root-level
+        // translation (and cross-source merge) is the DERIVED read-side join across that bridge —
+        // record vs calculate. The anchor is also load-bearing on its own: it links ILI/concept
+        // hashes (through the sentence's tier entities) back to Tatoeba records for readback and
+        // direct-translation accuracy checks.
+        Hash128 refA = SourceEntityIdConventions.TatoebaSentence(a);
+        Hash128 refB = SourceEntityIdConventions.TatoebaSentence(bId);
+        // Mint the ref anchors here so the edge is referentially sound even if a sentence is absent
+        // (like WordNet referencing a synset defined in another file). If the sentence IS present,
+        // WalkSentence emits the same id (a content-addressed collision) plus the HAS_EXTERNAL_ID
+        // bridge to its content root; if absent, the anchor stays bare (ungrounded, no bridge).
+        b.AddEntity(new EntityRow(refA, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(refB, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddAttestation(NativeAttestation.Categorical(
-            rootA, "IS_TRANSLATION_OF", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            refA, "IS_TRANSLATION_OF", refB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 
     private static ReadOnlySpan<byte> Slice(ReadOnlySpan<byte> utf8, (uint Start, uint End) sp) =>
