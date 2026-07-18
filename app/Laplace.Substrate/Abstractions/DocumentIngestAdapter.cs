@@ -10,30 +10,34 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
 
     public DocumentMultiFileStream(string root) => _root = root;
 
-    public async IAsyncEnumerable<(string FileLabel, ContentIngestRecord Record)> RecordsAsync(
+    public async IAsyncEnumerable<IFileRecordSource<ContentIngestRecord>> FilesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        // Cheap enumeration: yield a source per file with a label derived from the PATH only —
+        // no read here. Each worker opens (reads bytes) its own file, so the read is parallel and
+        // never serialized ahead of the compose. source_id IS the file's content-DAG root, which
+        // the compose already produces when it builds the tree; the name/metadata is a metadata DAG
+        // fetched off it, not hashed in.
+        bool rootIsFile = File.Exists(_root);
         foreach (string file in DocumentDecomposer.EnumerateInputFiles(_root))
         {
             ct.ThrowIfCancellationRequested();
-
-            byte[]? bytes = await ReadFileBytesAsync(file, ct);
-            if (bytes is null || bytes.Length == 0) continue;
-
-            string rel = File.Exists(_root)
-                ? Path.GetFileName(file)
-                : Path.GetRelativePath(_root, file).Replace('\\', '/');
-            string label = $"document/{rel}";
-
-            // The stream is READ-ONLY and fast — no per-file hashing here. source_id IS the file's
-            // content-DAG root (its trunk node), and the compose ALREADY produces that root when it
-            // builds the tree. Computing it here too (FileEntity.SourceId → a full ContentRootId
-            // segmentation per file) ran serially ahead of the parallel compose and segmented every
-            // file twice — the Webster-1913-sized single-thread gate. The compose's root is the
-            // trunk-node source; the name/metadata is a metadata DAG fetched off it, not hashed in.
-            yield return (label, new ContentIngestRecord(bytes));
-            await Task.Yield();
+            string f = file;
+            string rel = rootIsFile
+                ? Path.GetFileName(f)
+                : Path.GetRelativePath(_root, f).Replace('\\', '/');
+            yield return new DelegateFileRecordSource<ContentIngestRecord>(
+                $"document/{rel}", token => OpenAsync(f, token));
         }
+        await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<ContentIngestRecord> OpenAsync(
+        string file, [EnumeratorCancellation] CancellationToken ct)
+    {
+        byte[]? bytes = await ReadFileBytesAsync(file, ct);
+        if (bytes is null || bytes.Length == 0) yield break;
+        yield return new ContentIngestRecord(bytes);
     }
 
     private static async Task<byte[]?> ReadFileBytesAsync(string file, CancellationToken ct)

@@ -87,8 +87,8 @@ public sealed class DocumentIngestPipelineTests
             await File.WriteAllTextAsync(Path.Combine(dir, "b.txt"), "second document text.");
 
             var labels = new List<string>();
-            await foreach (var (label, _) in new DocumentMultiFileStream(dir).RecordsAsync())
-                labels.Add(label);
+            await foreach (var source in new DocumentMultiFileStream(dir).FilesAsync())
+                labels.Add(source.FileLabel);
 
             Assert.Equal(2, labels.Count);
             Assert.Contains(labels, l => l.EndsWith("a.txt"));

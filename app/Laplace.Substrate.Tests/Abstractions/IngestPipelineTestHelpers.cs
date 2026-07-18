@@ -256,18 +256,27 @@ internal static class IngestPipelineTestHelpers
     internal sealed class LabeledContentMultiFileStream(
         IReadOnlyDictionary<string, IReadOnlyList<ContentIngestRecord>> files) : IMultiFileRecordStream<ContentIngestRecord>
     {
-        public async IAsyncEnumerable<(string FileLabel, ContentIngestRecord Record)> RecordsAsync(
+        public async IAsyncEnumerable<IFileRecordSource<ContentIngestRecord>> FilesAsync(
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             foreach (var (label, records) in files)
             {
-                for (int i = 0; i < records.Count; i++)
+                ct.ThrowIfCancellationRequested();
+                var recs = records;
+                yield return new DelegateFileRecordSource<ContentIngestRecord>(label, OpenAsync);
+
+                async IAsyncEnumerable<ContentIngestRecord> OpenAsync(
+                    [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token = default)
                 {
-                    ct.ThrowIfCancellationRequested();
-                    yield return (label, records[i]);
-                    await Task.Yield();
+                    for (int i = 0; i < recs.Count; i++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        yield return recs[i];
+                        await Task.Yield();
+                    }
                 }
             }
+            await Task.CompletedTask;
         }
     }
 

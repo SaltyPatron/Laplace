@@ -148,17 +148,18 @@ internal sealed class MapNetMultiFileStream : IMultiFileRecordStream<CategoryCor
 
     public MapNetMultiFileStream(IReadOnlyList<MapNetIngest.MapNetFileSpec> files) => _files = files;
 
-    public async IAsyncEnumerable<(string FileLabel, CategoryCorrespondenceRecord Record)> RecordsAsync(
+    public async IAsyncEnumerable<IFileRecordSource<CategoryCorrespondenceRecord>> FilesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         foreach (var spec in _files)
         {
-            var records = spec.IsLuFile
-                ? FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
-                    spec.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct)
-                : MapNetIngest.EnumerateFrameRecordsAsync(spec.Path, 0, ct);
-            await foreach (var rec in records)
-                yield return (spec.Label, rec);
+            var s = spec;
+            yield return new DelegateFileRecordSource<CategoryCorrespondenceRecord>(
+                s.Label, token => s.IsLuFile
+                    ? FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
+                        s.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, token)
+                    : MapNetIngest.EnumerateFrameRecordsAsync(s.Path, 0, token));
         }
+        await Task.CompletedTask;
     }
 }
