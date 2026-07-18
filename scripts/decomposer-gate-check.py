@@ -88,11 +88,34 @@ def check_source(
                 user=user,
             )
         )
-        record("attestations", att > 0, f"{att:,} attestations", count=att)
+        if src.get("content_only"):
+            # Pillar-3a: content-only decomposers (documents) emit the content DAG — entities +
+            # physicalities + trajectory geometry — and ZERO distributional attestations (sequence
+            # is the trajectory geometry, containment is containers_of; PRECEDES is a MODEL relation).
+            # Assert exactly that, rather than the KB-source ">0 attestations" expectation.
+            record("attestations", att == 0, f"{att:,} attestations (content-only: expect 0)", count=att)
+        else:
+            record("attestations", att > 0, f"{att:,} attestations", count=att)
     except Exception as e:
         record("attestations", False, str(e), count=0)
 
-    if src.get("skip_layer_complete"):
+    if src.get("content_only"):
+        try:
+            # Content-only physicalities are source-agnostic (content-addressed: same content = same
+            # physicality regardless of witness) and there are no attestations to attribute them by,
+            # so verify the content DAG landed via content physicalities at the document tier.
+            exists = psql(
+                dbname,
+                "SELECT EXISTS(SELECT 1 FROM laplace.physicalities p "
+                "JOIN laplace.entities e ON e.id = p.entity_id "
+                "WHERE e.tier = 4 AND p.type = 1 LIMIT 1);",
+                host=host,
+                user=user,
+            ).lower() in ("t", "true")
+            record("layer_complete", exists, f"content physicalities present (document tier)={exists}")
+        except Exception as e:
+            record("layer_complete", False, str(e))
+    elif src.get("skip_layer_complete"):
         try:
             exists = psql(
                 dbname,
