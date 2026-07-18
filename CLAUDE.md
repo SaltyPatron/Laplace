@@ -316,7 +316,8 @@ never `CodepointPerfcache.Unload()`.
 
 `docs/INDEX.md` is the doc map. Living specs live in `docs/specs/` (binding law,
 annotate-on-supersede); `.scratchpad/` holds session logs and campaign docs.
-`.scratchpad/02` is the issue tracker; `docs/INVENTIONS.md` is the invention catalog
+Open work is tracked in GitHub issues (`.scratchpad/02` is the closed historical
+tracker, migration map in its header); `docs/INVENTIONS.md` is the invention catalog
 (41 mechanisms, enumerated and code-cited). Specs, when deep work touches their area
 (`docs/specs/`): 05 substrate invariants, 06 engineering rules, 08 record-vs-calculate,
 09 substrate-LM thesis, 11 three-layer provenance/consensus + chess ladder, 12

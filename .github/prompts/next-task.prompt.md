@@ -20,8 +20,9 @@ Read for context:
   Rule #8 ingest sequence and Rule #6 one-implementation-per-fact.
 - [docs/specs/09_Substrate_LM_Synthesis.txt](../../docs/specs/09_Substrate_LM_Synthesis.txt)
   for invention framing (construct-don't-train, spider-web Laplacian).
-- Open items in [.scratchpad/02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt)
-  ONLY after verifying each candidate against code (status index alone is not truth).
+- Open GitHub issues (label `tracker-migration` marks the 2026-07-18 batch; `.scratchpad/02`
+  is the closed historical tracker) ONLY after verifying each candidate against code
+  (an issue body alone is not truth).
 
 Judge candidates by whether they:
 - Put more witnessed attestations through ONE Rule #8 spine door (`IngestBatchPipeline`

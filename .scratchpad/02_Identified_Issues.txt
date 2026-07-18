@@ -1,5 +1,19 @@
-LAPLACE — IDENTIFIED ISSUES (02) — COMPACTED CURRENT-TRUTH TRACKER
+LAPLACE — IDENTIFIED ISSUES (02) — CLOSED HISTORICAL TRACKER
 ================================================================================
+CLOSED 2026-07-18: every OPEN/PARTIAL item migrated to GitHub issues (label
+`tracker-migration`). This file is now an append-nothing historical record — do
+NOT add or update entries here; open work lives in GH issues, law-grade lessons
+L1–L12 were promoted into docs/specs/06_Engineering_Ruleset.txt.
+
+MIGRATION MAP (02 entry → GH issue):
+  04→#396  05(residual)→#397  06→#398  07→#399  19(bulk)→#400  23→#401
+  25(residual)→#402  28(follow-up)→#403  37→#404  44b→#405  45→#406  46→#407
+  48→#408  49→#409  50→#410  51→#411  52(ext-residual)→#412  53a→#413
+  53c→#414  53f→#415  54→#416  55→#417  56→#418  57→#419  58→#420
+  chess-scale observations→#421
+  (doc 31 leftovers→#422-#424; doc 15/22 nominations→#425-#428;
+  session-tasks→#429-#434)
+
 Compacted 2026-07-05 from the original append-only log (1,285 lines). Full sagas,
 evidence transcripts, and dead ends are preserved in this file's git history
 (`git log --follow -p .scratchpad/02_Identified_Issues.txt`); this version keeps

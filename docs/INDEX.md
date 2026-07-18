@@ -31,7 +31,7 @@ countable fact; prose docs cite it instead of embedding counts.
 ## Logs and campaigns — `.scratchpad/` (historical, append-only)
 
 - [01_Initial_review.txt](../.scratchpad/01_Initial_review.txt) — log — first whole-repo review (2026-07-01)
-- [02_Identified_Issues.txt](../.scratchpad/02_Identified_Issues.txt) — tracker — compacted issue tracker + lessons L1–L12 (2026-07-18; migrates to GH issues in PR-4)
+- [02_Identified_Issues.txt](../.scratchpad/02_Identified_Issues.txt) — log — CLOSED tracker; open work migrated to GH issues #396–#434, lessons promoted to specs/06 (2026-07-18)
 - [03_Chess.txt](../.scratchpad/03_Chess.txt) — log — chess domain review (2026-07-01)
 - [04_Chess_Fixes.txt](../.scratchpad/04_Chess_Fixes.txt) — log — chess fix sagas (2026-07-10)
 - [07_SQL_Surface_Audit.txt](../.scratchpad/07_SQL_Surface_Audit.txt) — log — SQL surface audit + P-roadmap (2026-07-05)
@@ -53,7 +53,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [30_Git_Object_Witnessing_Repo_Decomposer.md](../.scratchpad/30_Git_Object_Witnessing_Repo_Decomposer.md) — log — repo decomposer / git-object witnessing design notes (2026-07-17)
 - [31_Waste_Audit_Repo_Wide.md](../.scratchpad/31_Waste_Audit_Repo_Wide.md) — log — five-auditor waste audit, tiered findings + status (2026-07-17)
 - [32_Patent_Portfolio_Audit.md](../.scratchpad/32_Patent_Portfolio_Audit.md) — log — patent portfolio audit (2026-07-11; renumbered from 22 to fix collision)
-- [session-tasks.md](../.scratchpad/session-tasks.md) — campaign — ingest-lane session task list (2026-07-18)
+- [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)
 

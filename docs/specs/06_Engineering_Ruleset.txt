@@ -130,3 +130,50 @@ Open items surfaced by the 2026-07-01 survey, not yet actioned:
       confirmed instance, but explicitly flagged this as not exhaustive.
     - Shared view layer: STARTED, see Rule #6's 2026-07-05 status update (v_consensus_
       unrefuted deployed; v_word_points/word_anchor et al. still missing).
+
+================================================================================
+LESSONS THAT MUST NOT BE RELEARNED (promoted 2026-07-18 from the closed
+.scratchpad/02 tracker — these are law-grade operational facts, extracted from
+resolved sagas; each cites its origin issue)
+================================================================================
+L1  rc==0 is success in this codebase's native lookups. The rc==1-vs-0 misread has
+    THREE independent instances (Issue 35 + two repros). Wrap new native lookups in
+    boolean-shaped helpers.
+L2  A GiST KNN comparison point must reach the planner as a genuine bound parameter
+    (Rule #4). Three independent instances found; EXPLAIN before blaming PostGIS.
+L3  After ANY build reporting MSB3027 copy failures, the output tree is poisoned —
+    clean-rebuild before trusting binaries (Issue 38: AV in MoveGen was stale DLLs,
+    not chess bugs).
+L4  Extension DLLs statically import laplace_core_static.lib: extension freshness
+    does NOT imply engine freshness. build-extensions after ANY engine rebuild.
+    Split-hash-universe symptom: word_id() disagrees with seeded data — diagnose
+    with substrate_health()/api()/evidence vs seeded ids. Lexical helpers are
+    ordinary API, not a universal health or invention gate.
+L5  Never edit a .cmd while any invocation is executing (cmd.exe re-reads by byte
+    offset). Recycle PG backends only BETWEEN stages (57P01 kills the seed shell).
+L6  In a backpressured pipeline producer rate == consumer rate by construction —
+    only independent evidence (per-thread CPU, stacks, counters) locates a
+    bottleneck (Rule #11; three runs burned).
+L7  Batching isn't a reflex: profile the call site's TOTAL wall-time contribution,
+    not the isolated sub-call, before expecting an end-to-end win (Issue 32's SIMD
+    kernel: 96.5% of a 2.5ms sub-call inside an 80ms function).
+L8  cmd.exe `goto` into/out of parenthesized blocks is a real parser trap; framenet's
+    dispatch NEEDS the `call :run_ingest_impl` form (Issue 21 — the "cosmetic"
+    normalization of Issue 10 caused the failure it later got blamed for).
+L9  Duplicate content-addressed inserts mean "we agree", not "error" — prevention
+    (advisory lock) over retry (Issue 17); and never dispose caller-owned stages on
+    a failed apply the runner will retry (Issue 15's masker).
+L10 An index can be a landmine armed by a correctness fix: attestations_highway_hash
+    was empty (masks all NULL) for the project's whole history until Issue 35
+    populated masks and chain-walks made every write O(duplicates) (Issue 36).
+L11 Fixing a symptom without verifying the fix caused Issue 21 to be misfiled twice.
+    The verification ritual for ingest changes: isolated re-ingest → hash-identical
+    ids; forced re-run → 0 novel rows + exact observation-count doubling.
+L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
+    constant-folds only IMMUTABLE. `= ANY(fn())` on an indexed column is safe
+    (the array becomes the index condition, forced one-shot); `<> ALL(fn())`
+    and plain WHERE-clause calls are not. A simple one-row subselect does NOT
+    fix it (pulled up and re-pushed); a MATERIALIZED CTE does. Grounded: Issue
+    47, 65.3s → 349ms. Related fence: SQL functions that fail inlining (STRICT,
+    ORDER BY, CTEs — Rule #2) appear as opaque Function Scans the planner
+    cannot see through; chains of them compound. (Standing candidate Rule #13.)
