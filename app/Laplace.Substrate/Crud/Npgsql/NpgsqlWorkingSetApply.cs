@@ -267,6 +267,47 @@ public sealed partial class NpgsqlSubstrateWriter
             // held advisory lock: every snapshot starts after the lock was
             // acquired, so anything a prior applier committed is visible.
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
+
+            // I/O locality — the load-bearing fix for large-DB probes. The native existence
+            // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
+            // physicalities RANGE(hilbert), attestations LIST(type_id)->HASH(subject)). Probing
+            // in staged (content-hash-random) order scatters each 131k chunk across every
+            // partition leaf and heap page — fine while the table fits cache, catastrophic once
+            // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
+            // RANDOM I/O, worsening as the DB grew). Sorting each probe by its partition key makes
+            // every chunk a CONTIGUOUS partition range = sequential index+heap scan. The probes
+            // return a present-id SET, so input order is semantically irrelevant — this reorders
+            // I/O only. The permutation is applied identically to every parallel array, so keyed
+            // alignment is preserved by construction (guarded downstream anyway).
+            if (probeEntIdsUse.Count > 1)
+            {
+                var perm = BuildProbePermutation(probeEntIdsUse.Count, (a, b) =>
+                {
+                    int c = probeEntTiersUse[a].CompareTo(probeEntTiersUse[b]);
+                    return c != 0 ? c : probeEntIdsUse[a].CompareToBytewise(probeEntIdsUse[b]);
+                });
+                probeEntIdsUse = ApplyProbePermutation(probeEntIdsUse, perm);
+                probeEntTiersUse = ApplyProbePermutation(probeEntTiersUse, perm);
+            }
+            if (probePhysIdsUse.Count > 1)
+            {
+                var perm = BuildProbePermutation(probePhysIdsUse.Count,
+                    (a, b) => probePhysHilbertsUse[a].CompareToBytewise(probePhysHilbertsUse[b]));
+                probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
+                probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
+            }
+            if (probeAttIds.Count > 1)
+            {
+                var perm = BuildProbePermutation(probeAttIds.Count, (a, b) =>
+                {
+                    int c = probeAttTypes[a].CompareToBytewise(probeAttTypes[b]);
+                    return c != 0 ? c : probeAttSubjects[a].CompareToBytewise(probeAttSubjects[b]);
+                });
+                probeAttIds = ApplyProbePermutation(probeAttIds, perm);
+                probeAttTypes = ApplyProbePermutation(probeAttTypes, perm);
+                probeAttSubjects = ApplyProbePermutation(probeAttSubjects, perm);
+            }
+
             var probeTasks = new[]
             {
                 ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse, r => Interlocked.Add(ref rtProbe, r), ct),
@@ -640,6 +681,23 @@ public sealed partial class NpgsqlSubstrateWriter
     /// <summary>Triple-keyed presence probe (attestations: LIST(type_id) ->
     /// HASH(subject_id); an id-only probe pays one index descent per leaf —
     /// ~145x).</summary>
+    // Identity permutation sorted by a partition-key comparison over indices, so all parallel
+    // probe arrays can be reordered together for sequential-I/O locality (see the call site).
+    private static int[] BuildProbePermutation(int count, Comparison<int> byKey)
+    {
+        var perm = new int[count];
+        for (int i = 0; i < count; i++) perm[i] = i;
+        Array.Sort(perm, byKey);
+        return perm;
+    }
+
+    private static List<T> ApplyProbePermutation<T>(IReadOnlyList<T> src, int[] perm)
+    {
+        var reordered = new List<T>(src.Count);
+        for (int i = 0; i < perm.Length; i++) reordered.Add(src[perm[i]]);
+        return reordered;
+    }
+
     private Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
         string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
         IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
