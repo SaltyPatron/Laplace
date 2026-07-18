@@ -283,6 +283,65 @@ public sealed class IngestBatchPipelineTests
         Assert.Equal(4, changes.Sum(c => c.Metadata.InputUnitsConsumed));
     }
 
+    // Guards the regression: the parallel pool must OPEN files concurrently (each worker opens its
+    // own source), never funnel every file through one dispatcher that slams whole files into lists.
+    // Each source records the live open-count; with 4 workers over 6 held-open files, opens overlap.
+    [Fact]
+    public async Task MultiFileParallel_OpensFilesConcurrently()
+    {
+        const int fileCount = 6;
+        int current = 0, maxObserved = 0;
+        var gate = new object();
+
+        async IAsyncEnumerable<ContentIngestRecord> OpenTracked(
+            string label,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            int now = System.Threading.Interlocked.Increment(ref current);
+            lock (gate) maxObserved = System.Math.Max(maxObserved, now);
+            await Task.Delay(60, ct); // hold the file "open" so concurrent opens overlap observably
+            yield return ContentRecord($"{label}-record");
+            System.Threading.Interlocked.Decrement(ref current);
+        }
+
+        var sources = Enumerable.Range(0, fileCount)
+            .Select(i => (IFileRecordSource<ContentIngestRecord>)
+                new DelegateFileRecordSource<ContentIngestRecord>(
+                    $"file-{i}", ct => OpenTracked($"file-{i}", ct)))
+            .ToList();
+
+        var changes = new List<SubstrateChange>();
+        await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+            new SourceListMultiFileStream<ContentIngestRecord>(sources),
+            _ => new ContentIngestHandler(TestSource),
+            label => new IngestBatchConfig
+            {
+                SourceId = TestSource,
+                BatchLabelPrefix = $"par/{label}",
+                BatchSize = 2,
+                ProbeChunkSize = 1024,
+            },
+            fileWorkers: 4))
+            changes.Add(change);
+
+        Assert.Equal(fileCount, changes.Count(c =>
+            c.Metadata.SourceContentUnitName.StartsWith(
+                IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
+        Assert.True(maxObserved >= 2,
+            $"parallel pool must open files concurrently; observed max {maxObserved} of {fileCount} with 4 workers");
+    }
+
+    private sealed class SourceListMultiFileStream<TRecord>(IReadOnlyList<IFileRecordSource<TRecord>> sources)
+        : IMultiFileRecordStream<TRecord>
+    {
+        public async IAsyncEnumerable<IFileRecordSource<TRecord>> FilesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            foreach (var s in sources) { ct.ThrowIfCancellationRequested(); yield return s; }
+            await Task.CompletedTask;
+        }
+    }
+
     [Fact]
     public async Task GrammarPipelineViaAdapter_MatchesStructuredIngestPresentBitmap()
     {

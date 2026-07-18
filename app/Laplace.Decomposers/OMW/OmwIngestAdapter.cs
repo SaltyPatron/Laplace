@@ -10,32 +10,41 @@ public sealed class OmwMultiFileStream : IMultiFileRecordStream<GrammarIngestRec
 
     public OmwMultiFileStream(IReadOnlyList<(string Path, string Label, string Lang)> files) => _files = files;
 
-    public async IAsyncEnumerable<(string FileLabel, GrammarIngestRecord Record)> RecordsAsync(
+    public async IAsyncEnumerable<IFileRecordSource<GrammarIngestRecord>> FilesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var omw = EtlManifest.Get("omw");
         foreach (var (path, label, _) in _files)
         {
             ct.ThrowIfCancellationRequested();
-            var stream = GrammarFileRecordStream.ForSource(
-                path, omw, static line => line.Length > 0 && line[0] != (byte)'#');
+            string p = path;
+            yield return new DelegateFileRecordSource<GrammarIngestRecord>(
+                label, token => OpenAsync(p, omw, token));
+        }
+        await Task.CompletedTask;
+    }
 
-            await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
-            while (true)
+    private static async IAsyncEnumerable<GrammarIngestRecord> OpenAsync(
+        string path, EtlSource omw, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var stream = GrammarFileRecordStream.ForSource(
+            path, omw, static line => line.Length > 0 && line[0] != (byte)'#');
+
+        await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
+        while (true)
+        {
+            GrammarIngestRecord record;
+            try
             {
-                GrammarIngestRecord record;
-                try
-                {
-                    if (!await e.MoveNextAsync()) break;
-                    record = e.Current;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    throw new InvalidOperationException(
-                        $"OMW ingest failed in \"{path}\": {ex.Message}", ex);
-                }
-                yield return (label, record);
+                if (!await e.MoveNextAsync()) break;
+                record = e.Current;
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"OMW ingest failed in \"{path}\": {ex.Message}", ex);
+            }
+            yield return record;
         }
     }
 }

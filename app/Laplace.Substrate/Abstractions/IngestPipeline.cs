@@ -10,9 +10,35 @@ public interface IRecordStream<TRecord>
     IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default);
 }
 
+/// <summary>
+/// One file of a multi-file source as an independently-openable record source. Opening is
+/// LAZY: <see cref="RecordsAsync"/> does the read+parse, and it runs inside the worker that
+/// claims this source — never in the dispatcher. So the expensive parse is parallel across
+/// files and no file is materialized into a list.
+/// </summary>
+public interface IFileRecordSource<TRecord>
+{
+    string FileLabel { get; }
+    IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default);
+}
+
 public interface IMultiFileRecordStream<TRecord>
 {
-    IAsyncEnumerable<(string FileLabel, TRecord Record)> RecordsAsync(CancellationToken ct = default);
+    /// <summary>
+    /// The source's files as independently-openable record sources. Enumeration is CHEAP — it
+    /// yields file handles/specs and reads NOTHING; each worker opens and streams ONE source
+    /// end-to-end (read + parse + compose + apply all in the worker). Files are order-independent
+    /// (references resolve content-addressed), so there is no ordering contract on the sources.
+    /// </summary>
+    IAsyncEnumerable<IFileRecordSource<TRecord>> FilesAsync(CancellationToken ct = default);
+}
+
+/// <summary>A file source whose reader is a lazy factory — the common "I have a path, open it on demand" case.</summary>
+public sealed class DelegateFileRecordSource<TRecord>(
+    string fileLabel, Func<CancellationToken, IAsyncEnumerable<TRecord>> open) : IFileRecordSource<TRecord>
+{
+    public string FileLabel => fileLabel;
+    public IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default) => open(ct);
 }
 
 public interface IIngestDeferredUnit : IDisposable
@@ -331,40 +357,20 @@ public static class IngestBatchPipeline
         [EnumeratorCancellation] CancellationToken ct)
     {
         long unitsConsumed = 0;
-        await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
-        if (!await e.MoveNextAsync())
-            yield break;
-
-        while (true)
+        await foreach (var source in stream.FilesAsync(ct))
         {
-            string label = e.Current.FileLabel;
+            string label = source.FileLabel;
             var handler = handlerFactory(label);
             var config = configFactory(label);
-            bool streamEnded = false;
-
-            async IAsyncEnumerable<TRecord> RecordsForFile(
-                [EnumeratorCancellation] CancellationToken token)
-            {
-                yield return e.Current.Record;
-                while (true)
-                {
-                    if (!await e.MoveNextAsync())
-                    {
-                        streamEnded = true;
-                        yield break;
-                    }
-                    if (e.Current.FileLabel != label)
-                        yield break;
-                    yield return e.Current.Record;
-                }
-            }
 
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
+            if (maxTotalUnits > 0 && fileCap <= 0)
+                yield break;
             var runConfig = fileCap > 0 ? config.WithMaxInputUnits(fileCap) : config;
             bool hitCap = false;
 
             await foreach (var change in RunAsync(
-                new AsyncEnumerableRecordStream<TRecord>(RecordsForFile(ct)), handler, runConfig, ct))
+                new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)), handler, runConfig, ct))
             {
                 unitsConsumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -377,7 +383,7 @@ public static class IngestBatchPipeline
 
             yield return BuildPeriodBoundary(config.SourceId, label);
 
-            if (hitCap || streamEnded)
+            if (hitCap)
                 yield break;
         }
     }
@@ -389,12 +395,13 @@ public static class IngestBatchPipeline
         int workers,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // A file = a maximal run of records sharing FileLabel. A dispatcher groups the stream into
-        // per-file record lists and feeds a bounded channel; N workers each ingest one file end-to-
-        // end (own handler/config/working-set/commit) and merge their changes into outCh. Streaming
-        // keeps memory bounded (~workers*2 files in flight). Files are order-independent (references
+        // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
+        // channel; N workers each claim one source and ingest it end-to-end: OPEN + read + parse +
+        // compose + working-set + commit, all in the worker. The expensive parse is therefore
+        // parallel across files, and no file is ever slammed into a list — records stream straight
+        // from the file reader into the working-set spine. Files are order-independent (references
         // resolve content-addressed), so there is no phase/barrier — just the pool.
-        var files = Channel.CreateBounded<(string Label, List<TRecord> Records)>(
+        var sources = Channel.CreateBounded<IFileRecordSource<TRecord>>(
             new BoundedChannelOptions(workers * 2)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false });
         var outCh = Channel.CreateBounded<SubstrateChange>(
@@ -403,37 +410,24 @@ public static class IngestBatchPipeline
 
         var dispatcher = Task.Run(async () =>
         {
-            await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
-            string? cur = null;
-            List<TRecord>? buf = null;
-            while (await e.MoveNextAsync())
-            {
-                var (label, rec) = e.Current;
-                if (cur is null) { cur = label; buf = new List<TRecord>(); }
-                else if (!string.Equals(label, cur, StringComparison.Ordinal))
-                {
-                    await files.Writer.WriteAsync((cur, buf!), ct);
-                    cur = label; buf = new List<TRecord>();
-                }
-                buf!.Add(rec);
-            }
-            if (buf is { Count: > 0 }) await files.Writer.WriteAsync((cur!, buf), ct);
-            files.Writer.Complete();
+            await foreach (var source in stream.FilesAsync(ct))
+                await sources.Writer.WriteAsync(source, ct);
+            sources.Writer.Complete();
         }, ct);
 
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
             workerTasks[w] = Task.Run(async () =>
             {
-                await foreach (var (label, records) in files.Reader.ReadAllAsync(ct))
+                await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
-                    var handler = handlerFactory(label);
-                    var config = configFactory(label);
+                    var handler = handlerFactory(source.FileLabel);
+                    var config = configFactory(source.FileLabel);
                     await foreach (var change in RunAsync(
-                        new AsyncEnumerableRecordStream<TRecord>(ListRecordsAsync(records, ct)),
+                        new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)),
                         handler, config, ct))
                         await outCh.Writer.WriteAsync(change, ct);
-                    await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, label), ct);
+                    await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
                 }
             }, ct);
 
@@ -445,17 +439,6 @@ public static class IngestBatchPipeline
 
         await foreach (var change in outCh.Reader.ReadAllAsync(ct))
             yield return change;
-    }
-
-    private static async IAsyncEnumerable<TRecord> ListRecordsAsync<TRecord>(
-        List<TRecord> items, [EnumeratorCancellation] CancellationToken ct)
-    {
-        foreach (var it in items)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return it;
-        }
-        await Task.CompletedTask;
     }
 
     private static void ResetBatchScope<TRecord>(IIngestRecordHandler<TRecord> handler)
