@@ -18,7 +18,11 @@ of the consensus-weighted token basis. Nothing is learned; everything is compute
 - `V` = vocabulary = substrate token entities (word entities + 256 byte-floor + specials).
 - `E` ∈ ℝ^{V×D} = token basis (the embedding); `D` = `hidden_size`.
 - Relation **planes**: per relation type, a sparse matrix `M[i,j] = eff_mu(rating,rd) × relation_rank`
-  (subject→object, weighted by Glicko consensus × the rank weight, e.g. `standards_structural`=0.91).
+  (subject→object, weighted by Glicko consensus × the rank weight). [Annotated 2026-07-18: this doc's
+  original rank examples predate the salience recalibration that inverted the ladder (content relations
+  on top, standards/structural metadata at the floor — `standards_structural` is now 0.08, not 0.91).
+  The authoritative ladder is `[ranks]` in `engine/manifest/relation_types.toml`; counts in
+  `docs/INVENTORY.md`.]
 - Planes group into **rank-classes** (the real heads — NOT radius bands):
   `associative`, `taxonomic+partitive`, `causal+sequential (PRECEDES∪trajectory)`, `equivalence`,
   plus **metric heads** `angular` / `frechet` / `hausdorff` over trajectories.
