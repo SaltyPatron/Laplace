@@ -111,18 +111,16 @@ public sealed class TextEntityBuilderEmissionTests
     }
 
     [Fact]
-    public void DistributionalBigrams_Carry_Containing_Document_As_Context()
+    public void ContentWitness_Builds_DAG_Without_Distributional_Attestations()
     {
+        // Pillar-3a: text emits NO PRECEDES/CONTAINS distributional attestations — sequence is the
+        // trajectory geometry and containment is containers_of; PRECEDES is a MODEL relation. The
+        // content DAG (entities + physicalities) is still built; the distributional stream is empty.
         byte[] bytes = Encoding.UTF8.GetBytes("Brave whales chase tiny boats. Second sentence holds more words.");
         Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, Src, 1.0,
             out var ents, out _, out var atts, out var rootId, out _));
 
-        Assert.NotEmpty(atts);
-        Assert.All(atts, a =>
-        {
-            Assert.True(a.ContextId.HasValue);
-            Assert.True(a.ContextId!.Value.EqualsBytewise(rootId));
-        });
+        Assert.Empty(atts);
         Assert.Contains(ents, e => e.Id.EqualsBytewise(rootId));
     }
 }

@@ -20,16 +20,17 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
 
-    // Shared across sentence + link epochs: maps Tatoeba numeric id → content root.
-    internal readonly ConcurrentDictionary<long, Hash128> IdToRoot = new();
     private HashSet<long>? _allowedSentenceIds;
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
+    // Order-independent: links anchor IS_TRANSLATION_OF on the deterministic TatoebaSentence(id)
+    // external-id (computed from the id alone), which bridges to the real content root via
+    // HAS_EXTERNAL_ID. No runtime id->root map, so sentences and links ingest fully in parallel
+    // like every other content-addressed source — no phase, no barrier.
     protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
         string ecosystemPath, DecomposerOptions options)
     {
-        IdToRoot.Clear();
         _allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
         string sentences = Path.Combine(ecosystemPath, "sentences.csv");
@@ -62,7 +63,7 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
             : TatoebaRowKind.Sentence;
         return new GrammarIngestHandler(
             Source, "tsv",
-            new TatoebaGrammarWitness(kind, _allowedSentenceIds, IdToRoot),
+            new TatoebaGrammarWitness(kind, _allowedSentenceIds),
             contextId: null);
     }
 

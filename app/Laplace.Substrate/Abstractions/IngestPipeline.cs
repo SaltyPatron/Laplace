@@ -300,14 +300,14 @@ public static class IngestBatchPipeline
     }
 
     /// <summary>
-    /// Drives a multi-file source. Each file is an INDEPENDENT ingest — its own content DAG,
-    /// its own per-file handler/config, its own working-set + commit — never batched together with
-    /// another file. With <paramref name="fileWorkers"/> &gt; 1 (default: the topology's file-worker
-    /// count), up to N files compose CONCURRENTLY across a bounded worker pool: read → segment →
-    /// emit runs in parallel (each builder owns its intent stage; the native compose is lock-free;
-    /// probe reads use pooled connections), while their yielded changes merge into one stream that
-    /// the caller's single apply consumer drains serially. Backpressure comes from the bounded
-    /// channels. One serial file at a time was the "files=0/201, 10 idle cores" bottleneck.
+    /// Drives a multi-file source, PARALLEL BY DEFAULT. Up to <paramref name="fileWorkers"/> files are
+    /// ingested concurrently across a bounded pool — each file its own handler/config/working-set/
+    /// commit; the native compose is lock-free and each builder owns its intent stage; probes use
+    /// pooled connections; changes merge into one stream the caller's single apply consumer drains
+    /// serially, with channel backpressure. No phase/ordering concept: references resolve content-
+    /// addressed (hash of the canonical key), so files are order-independent. A
+    /// <paramref name="maxTotalUnits"/> cap forces the sequential path (it needs the exact cross-file
+    /// stop point). One serial file at a time was the "files=0/201, 10 idle cores" gate.
     /// </summary>
     public static IAsyncEnumerable<SubstrateChange> RunMultiFileAsync<TRecord>(
         IMultiFileRecordStream<TRecord> stream,
@@ -317,10 +317,10 @@ public static class IngestBatchPipeline
         int fileWorkers = 0,
         CancellationToken ct = default)
     {
-        int workers = fileWorkers > 0 ? fileWorkers : Math.Max(1, IngestTopology.Current.FileWorkers);
+        int workers = maxTotalUnits > 0 ? 1 : Math.Max(1, fileWorkers);
         return workers <= 1
             ? RunMultiFileSequentialAsync(stream, handlerFactory, configFactory, maxTotalUnits, ct)
-            : RunMultiFileParallelAsync(stream, handlerFactory, configFactory, maxTotalUnits, workers, ct);
+            : RunMultiFileParallelAsync(stream, handlerFactory, configFactory, workers, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> RunMultiFileSequentialAsync<TRecord>(
@@ -386,20 +386,20 @@ public static class IngestBatchPipeline
         IMultiFileRecordStream<TRecord> stream,
         Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
         Func<string, IngestBatchConfig> configFactory,
-        long maxTotalUnits,
         int workers,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // A file = a maximal run of records sharing FileLabel. The dispatcher groups the stream
-        // into per-file record lists; N workers each ingest one file end-to-end; changes merge.
+        // A file = a maximal run of records sharing FileLabel. A dispatcher groups the stream into
+        // per-file record lists and feeds a bounded channel; N workers each ingest one file end-to-
+        // end (own handler/config/working-set/commit) and merge their changes into outCh. Streaming
+        // keeps memory bounded (~workers*2 files in flight). Files are order-independent (references
+        // resolve content-addressed), so there is no phase/barrier — just the pool.
         var files = Channel.CreateBounded<(string Label, List<TRecord> Records)>(
             new BoundedChannelOptions(workers * 2)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false });
         var outCh = Channel.CreateBounded<SubstrateChange>(
             new BoundedChannelOptions(workers * 4)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = true });
-
-        long unitsConsumed = 0;
 
         var dispatcher = Task.Run(async () =>
         {
@@ -423,33 +423,23 @@ public static class IngestBatchPipeline
 
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
-        {
             workerTasks[w] = Task.Run(async () =>
             {
                 await foreach (var (label, records) in files.Reader.ReadAllAsync(ct))
                 {
-                    if (maxTotalUnits > 0 && Interlocked.Read(ref unitsConsumed) >= maxTotalUnits)
-                        continue;
                     var handler = handlerFactory(label);
                     var config = configFactory(label);
-                    long cap = maxTotalUnits > 0 ? maxTotalUnits - Interlocked.Read(ref unitsConsumed) : 0;
-                    var runConfig = cap > 0 ? config.WithMaxInputUnits(cap) : config;
-
                     await foreach (var change in RunAsync(
                         new AsyncEnumerableRecordStream<TRecord>(ListRecordsAsync(records, ct)),
-                        handler, runConfig, ct))
-                    {
-                        Interlocked.Add(ref unitsConsumed, change.Metadata.InputUnitsConsumed);
+                        handler, config, ct))
                         await outCh.Writer.WriteAsync(change, ct);
-                    }
                     await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, label), ct);
                 }
             }, ct);
-        }
 
         _ = Task.Run(async () =>
         {
-            try { await Task.WhenAll(workerTasks); await dispatcher; outCh.Writer.Complete(); }
+            try { await dispatcher; await Task.WhenAll(workerTasks); outCh.Writer.Complete(); }
             catch (Exception ex) { outCh.Writer.Complete(ex); }
         }, ct);
 
