@@ -30,19 +30,19 @@ DECLARE
     b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
     b_part int := 4;   -- partitive band (parts)
     b_assoc int := 7;  -- associative band (related)
-    lbl      text;
+    v_lbl    text;
     tax_type bytea;
 BEGIN
     IF p_syn IS NULL THEN
         RETURN;
     END IF;
 
-    lbl := COALESCE(realize(p_syn, p_lang), label(p_syn));
+    v_lbl := COALESCE(realize(p_syn, p_lang), label(p_syn));
 
     -- definition: highest eff_mu edge in the definitional band.
     RETURN QUERY
     SELECT 'definition'::text,
-           initcap(lbl) || ' is ' || render_text(c.object_id, 96) || '.',
+           initcap(v_lbl) || ' is ' || render_text(c.object_id, 96) || '.',
            eff_mu_display(c.rating, c.rd),
            c.witness_count::bigint,
            ARRAY[c.subject_id, c.object_id],
@@ -73,7 +73,7 @@ BEGIN
             FROM winner w, generate_series(1, w.depth) AS i
         )
         SELECT 'taxonomy'::text,
-               initcap(lbl)
+               initcap(v_lbl)
                  || string_agg(CASE WHEN s.i = 1 THEN ' is a kind of '
                                     ELSE ', which is a kind of ' END
                                || COALESCE(realize(s.entity_id, p_lang), label(s.entity_id)),
@@ -91,7 +91,7 @@ BEGIN
     -- parts: partitive-band ranked listing (1-hop by nature).
     RETURN QUERY
     SELECT 'parts'::text,
-           initcap(lbl) || ' has parts such as '
+           initcap(v_lbl) || ' has parts such as '
              || string_agg(x.lbl, ', ' ORDER BY x.mu DESC) || '.',
            min(x.mu_disp),
            sum(x.wc)::bigint,
@@ -114,7 +114,7 @@ BEGIN
     -- and lexfile names "noun.object").
     RETURN QUERY
     SELECT 'kin'::text,
-           initcap(lbl) || ' is related to '
+           initcap(v_lbl) || ' is related to '
              || string_agg(x.lbl, ' and ' ORDER BY x.mu DESC) || '.',
            min(x.mu_disp),
            sum(x.wc)::bigint,
@@ -139,7 +139,7 @@ BEGIN
     -- pull-one-strand answer, rendered with its relation arrows.
     RETURN QUERY
     SELECT 'web'::text,
-           lbl || string_agg(' -' || COALESCE(type_label(g.type_id), '?') || '-> '
+           v_lbl || string_agg(' -' || COALESCE(type_label(g.type_id), '?') || '-> '
                              || COALESCE(realize(g.entity_id, p_lang), label(g.entity_id)),
                              '' ORDER BY g.step),
            min(g.eff_mu),

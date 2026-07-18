@@ -18,7 +18,7 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
 
     public override int LayerOrder => 2;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => [];
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => [];
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
@@ -87,10 +87,13 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
             if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
             b.AddAttestation(NativeAttestation.Categorical(
                 id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
+            // CILI asserts a DEFINITION for the ILI concept — only that. The old
+            // duplicate HAS_NAME_ALIAS emission of the same text made resolve_name's
+            // authoritative-name arm serve the gloss as every synset's NAME,
+            // outranking the synset-lemma path substrate-wide (record what the
+            // source asserts, at the relation it asserts it).
             if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
             {
-                b.AddAttestation(NativeAttestation.Categorical(
-                    id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
                 b.AddAttestation(NativeAttestation.Categorical(
                     id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
             }
