@@ -20,8 +20,8 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
 
     private readonly string _targetColumn;
     private readonly string _positiveValue;
-    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _stagedColumns = new(StringComparer.Ordinal);
+    private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentStringSet _stagedColumns = new(StringComparer.Ordinal);
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {

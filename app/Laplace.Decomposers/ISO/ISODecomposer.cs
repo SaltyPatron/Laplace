@@ -26,7 +26,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 
     public override int LayerOrder => 1;
 
-    private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentStringSet _codeNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
 
