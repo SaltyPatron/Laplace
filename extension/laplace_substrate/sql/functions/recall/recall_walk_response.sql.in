@@ -1,13 +1,70 @@
+-- doc 15 Phase 3C / doc 22 Phase E: 'complete' mode (has a type filter,
+-- COMPLETES_TO) routes through walk_branches -- the enriched native beam
+-- engine (Glicko-complete edge weight, highway-mask gating capability,
+-- S3/hilbert/trajectory-ordinal geometry terms). Plain 'walk' mode (NO
+-- type filter) stays on walk_strongest, unchanged from before this pass.
+--
+-- Why the split: consensus is LIST-partitioned by relation type (hot
+-- relations further HASH x8). walk_branches' per-level batch query has no
+-- type predicate to prune on when p_type is NULL, so an unrestricted call
+-- forces an Append scan across every relation-type partition (~200+ leaves)
+-- -- measured live via EXPLAIN ANALYZE, and caught in regress turning a
+-- sub-second converse.sql assertion into 24s. 'complete' mode's COMPLETES_TO
+-- filter keeps walk_branches on the fast, partition-pruned path; plain
+-- 'walk' has no filter to give it, so it stays on walk_strongest (proven
+-- fast for the genuinely-unrestricted case via the original baseline) until
+-- a bounded default relation set or a type-agnostic index makes the
+-- unfiltered case safe for the beam engine too.
+--
+-- 'complete' mode's winner selection is path_mu/depth (average per-hop
+-- confidence), NOT raw depth or raw cumulative path_mu -- also caught live:
+-- ORDER BY depth DESC alone picks whichever branch happened to reach
+-- deepest, which beam search can do via a structurally-well-attested but
+-- narratively-irrelevant detour (e.g. cross-reference/sense-link chains
+-- with real witness weight but no gloss), producing a technically
+-- high-scoring but unreadable raw-hex-id reply. Averaging normalizes for
+-- path length, so a short high-confidence chain beats a long chain diluted
+-- by merely-adequate hops.
 CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
-           || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'\u2192 '
-                         || COALESCE(realize(g.entity_id, word_language(p_topic)),
-                                     label(g.entity_id)), '' ORDER BY g.step),
-           min(g.eff_mu), NULL::bigint
-    FROM walk_strongest(p_topic,
-         CASE WHEN p_mode = 'complete' THEN relation_type_id('COMPLETES_TO') END, 8) g
-    HAVING count(*) > 0
+    WITH complete_branches AS (
+        SELECT * FROM walk_branches(p_topic, relation_type_id('COMPLETES_TO'), 8, 5)
+        WHERE p_mode = 'complete'
+    ),
+    complete_winner AS (
+        SELECT * FROM complete_branches
+        ORDER BY (path_mu / GREATEST(depth, 1)::numeric) DESC, depth DESC
+        LIMIT 1
+    ),
+    complete_steps AS (
+        SELECT i, w.path[i + 1] AS entity_id, w.types[i] AS type_id
+        FROM complete_winner w, generate_series(1, w.depth) AS i
+    ),
+    complete_reply AS (
+        SELECT (SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic)))
+               || string_agg(' —' || COALESCE(type_label(s.type_id), '?') || E'→ '
+                             || COALESCE(realize(s.entity_id, word_language(p_topic)),
+                                         label(s.entity_id)), '' ORDER BY s.i) AS reply,
+               min(b.eff_mu) AS eff_mu,
+               (SELECT w.witnesses FROM complete_winner w) AS witnesses
+        FROM complete_steps s
+        JOIN complete_branches b ON b.entity_id = s.entity_id AND b.depth = s.i
+        HAVING count(*) > 0
+    ),
+    walk_reply AS (
+        SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
+               || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'→ '
+                             || COALESCE(realize(g.entity_id, word_language(p_topic)),
+                                         label(g.entity_id)), '' ORDER BY g.step) AS reply,
+               min(g.eff_mu) AS eff_mu,
+               NULL::bigint AS witnesses
+        FROM walk_strongest(p_topic, NULL, 8) g
+        WHERE p_mode <> 'complete'
+        HAVING count(*) > 0
+    )
+    SELECT * FROM complete_reply
+    UNION ALL
+    SELECT * FROM walk_reply
 $$;

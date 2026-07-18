@@ -1,7 +1,9 @@
+DROP FUNCTION IF EXISTS laplace_astar_path(bytea, bytea, bytea[], integer);
 CREATE OR REPLACE FUNCTION laplace_astar_path(
     p_source bytea, p_target bytea,
     p_type_ids bytea[] DEFAULT NULL,
-    p_max_depth integer DEFAULT 20)
+    p_max_depth integer DEFAULT 20,
+    p_use_geometry bool DEFAULT false)
 RETURNS TABLE(step integer, entity_id bytea, g float8)
 LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
     SELECT step, entity_id, g
@@ -10,5 +12,6 @@ LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
         ARRAY[p_target],
         p_type_ids,
         p_max_depth,
-        false)
+        false,
+        p_use_geometry)
 $$;

@@ -48,7 +48,8 @@ struct astar_query {
 astar_query_t* astar_open(const hash128_t* start,
                           const hash128_t* goal_region, size_t goal_count,
                           size_t max_depth, size_t k_paths,
-                          astar_expand_fn expand, void* ctx) {
+                          astar_expand_fn expand, void* ctx,
+                          astar_heuristic_fn heuristic, void* heur_ctx) {
     (void)k_paths;
     if (start == nullptr || expand == nullptr || goal_region == nullptr ||
         goal_count == 0) {
@@ -94,7 +95,9 @@ astar_query_t* astar_open(const hash128_t* start,
             if (ng < prev) {
                 best_g[e.target]    = ng;
                 came_from[e.target] = cur.node;
-                double h = 0.0;
+                double h = heuristic ? heuristic(heur_ctx, &e.target, goal_region, goal_count)
+                                     : 0.0;
+                if (h < 0.0) h = 0.0; /* a negative estimate is never admissible */
                 frontier.push(Frontier{ng + h, ng, cur.depth + 1, e.target});
             }
         }
@@ -117,7 +120,7 @@ astar_query_t* astar_open(const hash128_t* start,
         astar_step_t step{};
         step.entity = *it;
         step.g      = best_g.count(*it) ? best_g[*it] : 0.0;
-        step.h      = 0.0;
+        step.h      = heuristic ? heuristic(heur_ctx, &(*it), goal_region, goal_count) : 0.0;
         q->path.push_back(step);
     }
     return q;

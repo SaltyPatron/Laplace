@@ -1,5 +1,6 @@
 #include "laplace/core/glicko2.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -437,4 +438,19 @@ int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd) {
 int64_t glicko2_effective_mu(const glicko2_state_t* st) {
     if (!st) return 0;
     return laplace_effective_mu_fp(st->rating, st->rd);
+}
+
+/* Michaelis-Menten witness saturation, half-max at 4 -- mirrors
+ * foundry_witness_sat.sql.in exactly (same constant, same rationale). */
+#define LAPLACE_WITNESS_SAT_HALFMAX 4.0
+
+double laplace_walk_edge_weight(int64_t rating, int64_t rd, int64_t witness_count,
+                                double kappa) {
+    int64_t signed_mu_fp = laplace_effective_mu_fp(rating, rd) - LAPLACE_GLICKO2_NEUTRAL_MU_FP;
+    double  signed_mu    = (double) signed_mu_fp / LAPLACE_GLICKO2_FP_SCALE_D;
+    double  rd_real      = (double) rd / LAPLACE_GLICKO2_FP_SCALE_D;
+    double  decay        = exp(-kappa * rd_real);
+    double  wc           = (double) witness_count;
+    double  sat          = wc / (wc + LAPLACE_WITNESS_SAT_HALFMAX);
+    return signed_mu * decay * sat;
 }

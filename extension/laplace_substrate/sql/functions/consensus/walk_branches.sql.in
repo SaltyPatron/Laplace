@@ -1,8 +1,17 @@
+DROP FUNCTION IF EXISTS walk_branches(bytea, bytea, int, int);
+DROP FUNCTION IF EXISTS walk_branches(bytea, bytea, int, int, bytea, bytea[]);
+-- p_ordinal_continuity defaults false: known slow (64-partition Append scan
+-- per miss on physicalities' hilbert-band partitioning; see generate_walk.c
+-- comment above ordinal_continuity_bonus). Opt in only once a hilbert-band-
+-- scoped search lands; recall_walk_response does not enable it.
 CREATE OR REPLACE FUNCTION walk_branches(
-    p_prompt bytea,
-    p_type     bytea  DEFAULT NULL,
-    p_depth    int    DEFAULT 4,
-    p_breadth  int    DEFAULT 5)
+    p_prompt              bytea,
+    p_type                bytea    DEFAULT NULL,
+    p_depth               int      DEFAULT 4,
+    p_breadth             int      DEFAULT 5,
+    p_intent_mask         bytea    DEFAULT NULL,
+    p_topic_bias          bytea[]  DEFAULT NULL,
+    p_ordinal_continuity  bool     DEFAULT false)
     RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_walk_branches'
