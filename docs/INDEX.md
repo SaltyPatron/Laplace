@@ -3,9 +3,9 @@
 Two classes. **spec** = living law: kept current, superseded statements annotated in
 place with a date, never silently rewritten. **log** = historical session/campaign
 record: append-only, never "fixed" — verify any claim against code before trusting.
-Dates are last-substantive-edit (git). The generated inventory (`docs/INVENTORY.md`,
-once PR-2 lands) owns every countable fact; prose docs cite it instead of embedding
-counts.
+Dates are last-substantive-edit (git). The generated inventory
+([docs/INVENTORY.md](INVENTORY.md), `scripts/docs-inventory.py`, CI-gated) owns every
+countable fact; prose docs cite it instead of embedding counts.
 
 ## Entry points
 
