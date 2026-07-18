@@ -230,11 +230,33 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
         var stream = new AsyncEnumerableRecordStream<TRecord>(
             ExtractRecordsAsync(context.EcosystemPath, options, ct));
-        var handler = CreateHandler();
-        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+
+        IngestBatchConfig BuildConfig() => IngestPipelineDefaults.ApplyMaxInputUnits(
             BuildPipelineConfig(context, options), options);
 
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
+        // A monolithic single-file source has no intra-file parallelism: one working-set
+        // builder, serial DrainInto, idle P-cores. Cut the already-FRAMED record stream on
+        // record boundaries into N independent working-set pipelines — a segmented monolith
+        // rides the same pool as a multi-file source, and content-addressing merges any
+        // cross-segment collisions (same content -> same id) with no coordination. Capped
+        // runs stay serial (ResolveSegments -> 1) so the exact input-unit stop point holds.
+        int segments = MonolithSegmenter.ResolveSegments(BuildConfig());
+        if (segments <= 1)
+        {
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                               stream, CreateHandler(), BuildConfig(), ct))
+                yield return change;
+            yield break;
+        }
+
+        await foreach (var change in MonolithSegmenter.RunSegmentedAsync(
+                           stream,
+                           _ => CreateHandler(),
+                           _ => BuildConfig(),
+                           segments,
+                           MonolithSegmenter.ResolveChunkRecords(BuildConfig()),
+                           BatchLabelPrefix,
+                           ct))
             yield return change;
     }
 }

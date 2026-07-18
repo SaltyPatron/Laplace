@@ -64,6 +64,45 @@ public static class MemoryTopology
         MinWorkingSetBudgetBytes,
         MaxApplyBufferBytes);
 
+    /// <summary>
+    /// Default ceiling for the COMPOSE-side flush envelope (see
+    /// <see cref="WorkingSetFlushEnvelopeBytes"/>). Deliberately far below
+    /// <see cref="MaxApplyBufferBytes"/>: this bounds the RESIDENT compose memory of one
+    /// working set (deferred tier trees + the process-global content bank held live
+    /// while a set is composed), not the COPY buffer.
+    /// </summary>
+    public const long DefaultFlushEnvelopeCeilingBytes = 512L << 20;
+
+    /// <summary>RAM share offered to one compose flush envelope before the ceiling clamps it.</summary>
+    private const int FlushEnvelopeRamShareDivisor = 64;
+
+    /// <summary>
+    /// COMPOSE-side flush envelope — the resident-memory ceiling for ONE working set
+    /// before it is closed, applied, and its builder + content bank reset. This is
+    /// DELIBERATELY far below <see cref="WorkingSetBudgetBytes"/> (which is the apply
+    /// COPY-buffer safety ceiling). Holding millions of deferred tier trees plus a giant
+    /// content bank in a single working set collapses compose throughput (MEASURED
+    /// 30k → 1.8k rec/s as a ~4 GiB set filled with ~3M records before flushing) and
+    /// spikes GC; a tight envelope flushes continuously in small bulk COPYs so compose
+    /// stays fast and resident memory flat. Never exceeds the apply budget. Tunable via
+    /// <c>LAPLACE_WS_FLUSH_MB</c> (megabytes); default RAM/64 clamped to
+    /// [<see cref="MinWorkingSetBudgetBytes"/>, <see cref="DefaultFlushEnvelopeCeilingBytes"/>].
+    /// </summary>
+    public static long WorkingSetFlushEnvelopeBytes => ResolveFlushEnvelope();
+
+    private static long ResolveFlushEnvelope()
+    {
+        long apply = WorkingSetBudgetBytes;
+        string? env = Environment.GetEnvironmentVariable("LAPLACE_WS_FLUSH_MB");
+        if (!string.IsNullOrWhiteSpace(env)
+            && long.TryParse(env.Trim(), out long mb) && mb > 0)
+            return Math.Clamp(mb << 20, MinWorkingSetBudgetBytes, apply);
+
+        long ceiling = Math.Min(DefaultFlushEnvelopeCeilingBytes, apply);
+        return Math.Clamp(TotalPhysicalBytes / FlushEnvelopeRamShareDivisor,
+            MinWorkingSetBudgetBytes, ceiling);
+    }
+
     // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
     // All are functions of physical RAM. tune-pg emits these; nothing hardcodes a GB literal.
 

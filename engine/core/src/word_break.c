@@ -69,11 +69,19 @@ size_t laplace_word_break_next(const uint32_t* codepoints, size_t n, size_t from
         }
     }
 
+    /*
+     * WB-class slide: the previous position's class (`p_lit`, i.e. wb(cps[i-1]))
+     * is carried across iterations instead of re-derived. On advance_no_break `i`
+     * grows by 1, so the next iteration's p_lit is exactly this iteration's `c`.
+     * This drops one codepoint_table lookup per hot-loop step (main derived both
+     * wb(cps[i-1]) and wb(cps[i]) every step) with ZERO heap allocation and values
+     * byte-identical to calling wb() directly. The prev_significant / lookahead
+     * scans keep calling wb() as before, so all UAX#29 rule logic is unchanged.
+     */
+    uint8_t p_lit = wb(codepoints[from]);
     size_t i = from + 1;
     while (i < n) {
-        uint32_t prev = codepoints[i - 1];
         uint32_t curr = codepoints[i];
-        uint8_t p_lit = wb(prev);
         uint8_t c     = wb(curr);
 
         if (p_lit == LAPLACE_WB_CR && c == LAPLACE_WB_LF) {
@@ -172,6 +180,7 @@ advance_no_break:
         } else if (!is_ignored_for_prev(c)) {
             ri_run_len = 0;
         }
+        p_lit = c;
         i += 1;
     }
     return n;

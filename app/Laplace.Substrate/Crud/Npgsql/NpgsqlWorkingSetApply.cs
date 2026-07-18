@@ -49,18 +49,46 @@ public sealed partial class NpgsqlSubstrateWriter
     /// </summary>
     private NpgsqlIndexCycle? _runCycle;
 
+    /// <summary>
+    /// Run-scoped persisted-id caches for the existence probe, active on the
+    /// same BeginBulkRunAsync/CompleteBulkRunAsync bracket as <see cref="_runCycle"/>.
+    /// Inside a bulk run applies are serialized (the runner and the apply advisory
+    /// lock) and the substrate is append-only, so any content id THIS run has already
+    /// COPYed-and-committed is durably present for the rest of the run — a later
+    /// working set that re-stages it (low-tier codepoints/words recur in every working
+    /// set) needs no server round-trip to learn it exists: the write lane treats it as
+    /// present-and-skip, byte-for-byte what a probe hit would have produced. This does
+    /// NOT weaken the pure-COPY invariant (the probe still guards concurrent overlaps
+    /// for every id NOT known-persisted); it only removes re-probes of ids we ourselves
+    /// wrote.
+    ///
+    /// EXACT sets, never a bloom: a false positive would treat a genuinely novel row as
+    /// present and DROP it, so only a no-false-positive membership test may gate the
+    /// skip. Bounded by DISTINCT persisted content (tens of millions of entities/
+    /// physicalities on a full seed — a few GB, not the 12M×N re-probe volume), and
+    /// cleared at run end. Attestations are deliberately NOT cached: a re-seen present
+    /// attestation must still MERGE its observation count (its round-trip is not saved),
+    /// and its id space is unbounded (billions on a model ingest).
+    /// </summary>
+    private HashSet<Hash128>? _persistedEntityIds;
+    private HashSet<Hash128>? _persistedPhysIds;
+
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
         // Recover any journaled drops a crashed prior run left behind
         // BEFORE this run makes its own cycling decisions.
         await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
+        _persistedEntityIds = new HashSet<Hash128>();
+        _persistedPhysIds = new HashSet<Hash128>();
     }
 
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
         var cycle = _runCycle;
         _runCycle = null;
+        _persistedEntityIds = null;
+        _persistedPhysIds = null;
         if (cycle is not null)
             await cycle.FinishAsync(ct);
     }
@@ -203,24 +231,66 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
             }
 
+            // Run-persisted-id fast path: an id THIS run already COPYed-and-committed is
+            // durably present (append-only substrate + serialized applies), so it needs
+            // no probe — drop it from the probe input and fold it straight into the
+            // present set. Everything NOT known-persisted is still probed, so the
+            // concurrent-overlap guard behind the pure-COPY invariant is untouched.
+            // Snapshot the caches once: null outside a bulk run (standalone applies always
+            // probe in full — the safe default).
+            var persistedEnt = _persistedEntityIds;
+            var persistedPhys = _persistedPhysIds;
+            var probeEntIdsUse = probeEntityIds;
+            var probeEntTiersUse = probeEntityTiers;
+            long entCacheSkip = 0;
+            if (persistedEnt is { Count: > 0 })
+            {
+                probeEntIdsUse = new List<Hash128>(probeEntityIds.Count);
+                probeEntTiersUse = new List<short>(probeEntityIds.Count);
+                for (int i = 0; i < probeEntityIds.Count; i++)
+                    if (persistedEnt.Contains(probeEntityIds[i])) entCacheSkip++;
+                    else { probeEntIdsUse.Add(probeEntityIds[i]); probeEntTiersUse.Add(probeEntityTiers[i]); }
+            }
+            var probePhysIdsUse = probePhysIds;
+            var probePhysHilbertsUse = probePhysHilberts;
+            long physCacheSkip = 0;
+            if (persistedPhys is { Count: > 0 })
+            {
+                probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
+                probePhysHilbertsUse = new List<Hash128>(probePhysIds.Count);
+                for (int i = 0; i < probePhysIds.Count; i++)
+                    if (persistedPhys.Contains(probePhysIds[i])) physCacheSkip++;
+                    else { probePhysIdsUse.Add(probePhysIds[i]); probePhysHilbertsUse.Add(probePhysHilberts[i]); }
+            }
+
             // Probes fan out across pooled connections. Correct under the
             // held advisory lock: every snapshot starts after the lock was
             // acquired, so anything a prior applier committed is visible.
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
             var probeTasks = new[]
             {
-                ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntityIds, probeEntityTiers, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentPairKeyedParallelAsync("laplace.physicalities_exist_bitmap", probePhysIds, probePhysHilberts, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse, r => Interlocked.Add(ref rtProbe, r), ct),
+                ProbePresentPairKeyedParallelAsync("laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse, r => Interlocked.Add(ref rtProbe, r), ct),
                 ProbePresentKeyedParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, probeAttTypes, probeAttSubjects, r => Interlocked.Add(ref rtProbe, r), ct),
             };
             await Task.WhenAll(probeTasks);
             var presentEntities = probeTasks[0].Result;
             var presentPhys = probeTasks[1].Result;
             var presentAtts = probeTasks[2].Result;
+            // Fold the known-persisted ids (excluded from the probe above) back into the
+            // present sets — the write lane below skips a row iff its id is present, and
+            // these are present by our own committed writes.
+            if (persistedEnt is { Count: > 0 })
+                foreach (var id in probeEntityIds)
+                    if (persistedEnt.Contains(id)) presentEntities.Add(id);
+            if (persistedPhys is { Count: > 0 })
+                foreach (var id in probePhysIds)
+                    if (persistedPhys.Contains(id)) presentPhys.Add(id);
             _log.LogInformation(
-                "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a distinct ids probed in {Ms:N0}ms "
-                + "(present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
-                probeEntityIds.Count, probePhysIds.Count, probeAttIds.Count, phaseSw.ElapsedMilliseconds,
+                "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
+                + "(cache-skipped {ECache:N0}e/{PCache:N0}p; present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
+                probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIds.Count, phaseSw.ElapsedMilliseconds,
+                entCacheSkip, physCacheSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count);
 
             // Entities: first occurrence of each id, minus stored rows.
@@ -232,11 +302,15 @@ public sealed partial class NpgsqlSubstrateWriter
             // parallel bulk index build instead.
             var keptEnts = new List<KeptRow>(ents.Rows.Count);
             var seenEnt = new HashSet<Hash128>(distinctStagedEntities);
+            // Novel ids to fold into the run-persisted cache — ONLY after this apply
+            // commits (below). null outside a bulk run: no cache, nothing to collect.
+            var novelEntIds = persistedEnt is null ? null : new List<Hash128>(keptEnts.Capacity);
             for (int i = 0; i < ents.Ids.Count; i++)
             {
                 if (!seenEnt.Add(ents.Ids[i])) continue;
                 if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
                 keptEnts.Add(new KeptRow(ents.Ids[i], ents.Rows[i], -1, 0));
+                novelEntIds?.Add(ents.Ids[i]);
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
@@ -246,11 +320,15 @@ public sealed partial class NpgsqlSubstrateWriter
             // way id-sorted groups land in disjoint btree leaf ranges.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
+            // Physicality KeptRow.SortKey is the hilbert key (GiST locality), not the id,
+            // so novel ids are collected here explicitly rather than recovered post-sort.
+            var novelPhysIds = persistedPhys is null ? null : new List<Hash128>(keptPhys.Capacity);
             for (int i = 0; i < phys.Ids.Count; i++)
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
                 keptPhys.Add(new KeptRow(phys.HilbertKeys[i], phys.Rows[i], -1, 0));
+                novelPhysIds?.Add(phys.Ids[i]);
             }
 
             // Attestations: novel groups COPY their representative (count
@@ -402,6 +480,18 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             await tx.CommitAsync(ct);
+
+            // ONLY now that the whole apply committed are these ids durably persisted, so
+            // subsequent applies this run may skip re-probing them. Done post-commit so a
+            // rolled-back apply never poisons the cache with never-persisted ids; a miss is
+            // harmless — the next apply simply probes and finds them present. (The parallel
+            // COPY sub-txns commit their rows independently, so a control-tx failure after
+            // that point still leaves the rows present and a later probe will catch them —
+            // the cache is a pure optimization, never a correctness input.)
+            if (persistedEnt is not null && novelEntIds is not null)
+                foreach (var id in novelEntIds) persistedEnt.Add(id);
+            if (persistedPhys is not null && novelPhysIds is not null)
+                foreach (var id in novelPhysIds) persistedPhys.Add(id);
         }
         catch
         {
