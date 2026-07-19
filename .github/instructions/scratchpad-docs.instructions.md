@@ -11,9 +11,11 @@ them. Doc drift IS the battle (doc 13 §2.4). When editing them:
 
 - Update status IN PLACE; never append a contradiction hundreds of lines below an old
   claim. A reader must not need the full file to know current truth.
-- Issue numbers in [02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt)
-  are NEVER reused. Numbers 20/21/23/32/33/34 were reused historically and caused
-  misfiled fixes — do not repeat.
+- Open work lives in GitHub issues (since 2026-07-18).
+  [02_Identified_Issues.txt](../../.scratchpad/02_Identified_Issues.txt) is the CLOSED
+  historical tracker — never append or update entries there; its header maps old
+  numbers to GH issues. (Historical lesson: issue numbers were reused and caused
+  misfiled fixes — GH numbering makes that structural.)
 - Every claim must be verified against source in the current session, or cite the doc
   that verified it. Nothing is carried forward on faith (grounding rule from 05/06).
 - Docs 05 (invariants) and 06 (engineering rules), in `docs/specs/`, are BINDING —

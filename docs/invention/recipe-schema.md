@@ -82,7 +82,8 @@ determines every weight value; the math turning knowledge into weights is fixed.
 
 **3. FIXED (the laws — not configurable):**
 - The ETL operator→tensor map; S³/glome geometry; DUCET→Super-Fibonacci seeding; content-addressing;
-  the relation-rank hierarchy (mandate 1.0 … probationary 0.09); Glicko-2 mechanics; operator signatures.
+  the relation-rank hierarchy (`[ranks]` in `engine/manifest/relation_types.toml` — the authoritative
+  ladder; numeric values here rotted once already); Glicko-2 mechanics; operator signatures.
 
 UI states: a knob-with-derived-default shows the substrate's natural value and flags overrides as
 "deviates from substrate-natural." Constraints link knobs (`head_dim` integer, `experts_per_token ≤

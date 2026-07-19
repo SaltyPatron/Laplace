@@ -139,6 +139,14 @@ jobs:
           [ "$a" = "$b" ] || { echo "::error::codegen NON-DETERMINISTIC ($a != $b) — same TOML, different output; breaks content-addressing"; exit 1; }
           echo "codegen deterministic across a clean regen: $a"
 
+      - name: Docs inventory drift gate
+        # docs/INVENTORY.md is generated (scripts/docs-inventory.py): the counted
+        # facts prose docs cite (projects, decomposers, SQL families, relations).
+        # The 2026-07-18 audit found every count embedded in prose had drifted;
+        # this gate makes committed counts a function of the tree, like the
+        # codegen determinism gate above.
+        run: python3 scripts/docs-inventory.py --check
+
       - name: Forbid C# attestation policy in decomposers
         run: |
           set -e

@@ -50,11 +50,9 @@ formats, then hand off.
 
 ## Decomposers — the witness boundary
 
-Verified inventory: 24 decomposer classes in `Laplace.Decomposers` (Atomic2020, CILI,
-Code, ConceptNet, FrameNet, ISO, MapNet, Model, OMW, OpenSubtitles, PropBank, Recipe,
-Repo, SemLink, Stack, Tabular, Tatoeba, TinyCodes, UD, Unicode, VerbNet, Wiktionary,
-WordFrameNet, WordNet) plus 3 in `Laplace.Chess` (ChessPgn, ChessAnalyze,
-ChessOpenings). All are pure content → `SubstrateChange` record streams with ZERO inline
+The generated, CI-gated inventory of decomposer classes per assembly is
+`docs/INVENTORY.md` (never trust a count in prose over it; regenerate with
+`scripts\win\docs-inventory.cmd`). All are pure content → `SubstrateChange` record streams with ZERO inline
 SQL; the pipeline spine (`IngestBatchPipeline` working-set mode →
 `ConsensusAccumulatingWriter` → `NpgsqlWorkingSetApply`, bracketed by `IngestRunner`)
 does batching/dedup/fold/COPY. Decomposers are thin VALETS — resolve input → records →
@@ -142,18 +140,19 @@ FrameNet frame/LU, PropBank roleset, WordNet sense, and the word-surface node.
 surface → lemma → sense → ILI concept → frame/class/roleset → roles is a fully attested,
 multi-witnessed, calibrated factorization of meaning — each arrow a typed,
 Glicko-weighted, provenanced edge family. Cross-lingual transfer is free because ILI is
-the address. Relations are governed in `engine/manifest/relation_types.toml` — verified
-right now: 189 relations, 13 salience bands, manifest and generated
-`highway_manifest.h` in parity. Codegen assigns highway bits alphabetically: adding a
-relation renumbers bits and owes a reseed — regenerate, never backfill.
+the address. Relations are governed in `engine/manifest/relation_types.toml` —
+canonical/alias/band counts live in the generated `docs/INVENTORY.md` (CI-gated;
+aliases map to a canonical and add no highway bits); manifest and generated
+`highway_manifest.h` stay in parity via the policy job's determinism gate. Codegen
+assigns highway bits alphabetically: adding a relation renumbers bits and owes a
+reseed — regenerate, never backfill.
 
 ## The SQL surface and the extension
 
-`laplace_substrate` carries the read/serve side natively: 27 SQL function families
-(analysis, cascade, consensus, contrast, converse, corpus, fold, generation, geometry,
-glicko2, highway, identity, inference, ingest, inspect, lexical, link, mu, ops,
-readback, realize, recall, relation, structural, taxonomy, trajectory, variant) plus
-native C for the hot paths: `recall.c` (intent-routed serving), `generate_walk.c`
+`laplace_substrate` carries the read/serve side natively: the SQL function families
+and native sources are enumerated in the generated `docs/INVENTORY.md` (28 families
+incl. `model` as of 2026-07-18; the inventory is the authority). Native C hot paths
+include: `recall.c` (intent-routed serving), `generate_walk.c`
 (batched beam frontier; `walk_branches` ranks by the Glicko-complete signed weight —
 `relation_rank × eff_mu × exp(−κ·rd) × witness-saturation`, refuted edges negative,
 plus highway-mask gating and S³/hilbert geometry beam terms — the same formula
@@ -162,10 +161,15 @@ still ranks by the simpler `relation_rank × eff_mu(rating−2rd)` and is what
 unfiltered/open-ended walks use, since an unfiltered `walk_branches` call Append-scans
 every relation-type partition), `astar_path.c` (opt-in admissible geometric A*
 heuristic, default Dijkstra unchanged — shared with the foundry synthesis path),
-`trajectory_generate.c` (n-gram descent with consensus fallback), `consensus_fold_*`,
-`highway_mask.c` (perfcache-backed bit ops), `perfcache.c` (mmap'd blobs, postmaster
-prewarm). `SELECT * FROM api('<substring>')` is the schema's self-introspection catalog
-— check it before assuming a helper doesn't exist.
+`trajectory_generate.c` (n-gram descent with consensus fallback), `steered_walk.c`
+(topic-steered free-form walk behind `converse_walk` — a second, independent n-gram
+walker; consolidation with `trajectory_generate.c` is tracked open work),
+`consensus_fold_*`, `highway_mask.c` (perfcache-backed bit ops), `perfcache.c`
+(mmap'd blobs, postmaster prewarm), plus `model_factor.c`, `geometry_successors.c`,
+`graph_taxonomy/cascade/contrast.c`, `containers_of.c`, `realize_batch.c` and the
+rest of the src listing in the inventory. `SELECT * FROM api('<substring>')` is the
+schema's self-introspection catalog — check it before assuming a helper doesn't
+exist.
 
 ## Foundry — Mold-A-Model (export)
 
@@ -256,6 +260,7 @@ Two toolchains, not interchangeable:
 | CLI | `cli.cmd` (never `dotnet run` — the ingest mutex matches the command line) |
 | Locks / stuck processes | `locks.cmd` (`locks.ps1 -Kill`) |
 | Status / deploy checks | `status.cmd`, `verify-deploy.cmd`, `verify-toolchain.cmd` |
+| Regenerate docs/INVENTORY.md | `docs-inventory.cmd` (`--check` verifies; CI-gated) |
 | PG recovery / tuning | `fix-postgres.cmd`, `recover-pgdata.cmd`, `tune-pg.cmd`, `tune-laplace.cmd` |
 
 ### Linux
@@ -299,17 +304,20 @@ Bypass: `pipeline.sh --force-all` / `LAPLACE_FORCE_ALL=1` (CI dispatch input
 
 ## Layout
 
-13 projects (verified): libs `Laplace.Core` / `Laplace.Substrate` /
-`Laplace.Decomposers` / `Laplace.Chess`; deployables `Laplace.Cli` /
-`Laplace.Endpoints.OpenAICompat` / `Laplace.Chess.Uci` / `Laplace.Migrations`;
-5 test projects. xunit suites share process-global native state — fixtures must never
-`CodepointPerfcache.Unload()`.
+Project list is generated in `docs/INVENTORY.md` (CI-gated): libs `Laplace.Core` /
+`Laplace.Substrate` / `Laplace.Decomposers` / `Laplace.Chess`; deployables
+`Laplace.Cli` / `Laplace.Endpoints.OpenAICompat` / `Laplace.Endpoints.Mcp` (stdio MCP
+server over the substrate) / `Laplace.Chess.Uci` / `Laplace.Migrations`; plus the test
+projects. `web/` is the SPA (chat, chess lab, explore, billing — Vite/React,
+deployed by publish). xunit suites share process-global native state — fixtures must
+never `CodepointPerfcache.Unload()`.
 
 ## Docs
 
 `docs/INDEX.md` is the doc map. Living specs live in `docs/specs/` (binding law,
 annotate-on-supersede); `.scratchpad/` holds session logs and campaign docs.
-`.scratchpad/02` is the issue tracker; `docs/INVENTIONS.md` is the invention catalog
+Open work is tracked in GitHub issues (`.scratchpad/02` is the closed historical
+tracker, migration map in its header); `docs/INVENTIONS.md` is the invention catalog
 (41 mechanisms, enumerated and code-cited). Specs, when deep work touches their area
 (`docs/specs/`): 05 substrate invariants, 06 engineering rules, 08 record-vs-calculate,
 09 substrate-LM thesis, 11 three-layer provenance/consensus + chess ladder, 12
