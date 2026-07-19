@@ -90,7 +90,7 @@ public static class WeightTensorETL
 
 
 
-    private static long BytesPerElement(string dtype) => dtype switch
+    internal static long BytesPerElement(string dtype) => dtype switch
     {
         "F64" or "I64" => 8,
         "F32" or "I32" => 4,

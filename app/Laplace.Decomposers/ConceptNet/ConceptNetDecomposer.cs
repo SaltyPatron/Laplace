@@ -20,7 +20,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.UserCuratedResource;
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 

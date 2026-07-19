@@ -32,7 +32,7 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false) : ComposeDec
     private static long OpeningGames => 1;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(

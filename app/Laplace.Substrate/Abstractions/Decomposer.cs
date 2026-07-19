@@ -191,6 +191,12 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual int EstimatedComposeUnitsPerRecord => 1;
 
+    // Virtual on the class, not just the interface default: interface mapping is
+    // computed at the class that lists IDecomposer, so a derived class declaring
+    // this property WITHOUT override would shadow it — invisible through
+    // IDecomposer references, silently registering zero readback names.
+    public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
+
     protected IngestSourceProfile PipelineProfile =>
         new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
 
@@ -451,6 +457,10 @@ public abstract class DecomposerMultiPhase : IDecomposer
         IDecomposerContext context, CancellationToken ct = default);
 
     public virtual ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    // See Decomposer<TRecord>.CanonicalNamesForReadback: must be virtual on the
+    // class so derived overrides stay reachable through IDecomposer.
+    public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
     protected abstract IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct);

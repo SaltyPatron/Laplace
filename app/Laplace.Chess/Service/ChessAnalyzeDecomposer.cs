@@ -28,7 +28,7 @@ public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecor
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(

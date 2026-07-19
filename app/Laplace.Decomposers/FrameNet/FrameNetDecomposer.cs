@@ -216,7 +216,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
         return paths;
     }
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {

@@ -49,7 +49,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase<Atomic20
         return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
     }
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {

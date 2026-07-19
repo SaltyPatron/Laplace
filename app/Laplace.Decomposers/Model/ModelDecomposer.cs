@@ -81,7 +81,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     // v4: slice -> circuit-coordinate APPEARS_IN anatomy links added to the
     // factors pass (SQL navigation); trajectories unchanged (insert-if-absent
     // skips them on re-run — only the anatomy attestations are novel).
-    internal const int AnalyzerVersion = 4;
+    internal const int AnalyzerVersion = 5;
 
     // Ledger §6 step 1 — the checkpoint as CONTENT — lives in ModelCheckpoint
     // (Blake3 of literal tensor byte ranges → Merkle root, CONTAINS/PRECEDES),
@@ -94,6 +94,11 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     private readonly Hash128 _source;
     private readonly string _sourceName;
     private readonly bool? _persistEvidence;
+
+    // Canonical names of recipes actually DEPOSITED this run (the synthesized
+    // laplace.recipe differs from the raw config.json canonicalization) — the
+    // readback registration must name the deposited entities, not a re-parse.
+    private readonly List<string> _depositedRecipeNames = [];
 
     public ModelDecomposer(string modelDir, bool? persistEvidence = null)
     {
@@ -113,19 +118,19 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {
             string configPath = Path.Combine(_modelDir, "config.json");
-            if (!File.Exists(configPath)) return Array.Empty<string>();
+            if (!File.Exists(configPath)) return _depositedRecipeNames.ToArray();
             LlamaRecipeExtractor.RecipeInfo r;
             try { r = LlamaRecipeExtractor.Parse(configPath); }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
                     "ModelDecomposer: config parse failed for readback: {Message}", ex.Message);
-                return Array.Empty<string>();
+                return _depositedRecipeNames.ToArray();
             }
             return new[]
             {
@@ -133,7 +138,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
                 System.Text.Encoding.UTF8.GetString(r.CanonicalJson),
                 r.HiddenSize.ToString(), r.NumLayers.ToString(), r.NumHeads.ToString(),
                 r.NumKvHeads.ToString(), r.IntermediateSize.ToString(), r.VocabSize.ToString(),
-            };
+            }.Concat(_depositedRecipeNames).Distinct(StringComparer.Ordinal).ToArray();
         }
     }
 
@@ -510,6 +515,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
                 try
                 {
                     _recipe = RecipeSynthesizer.Synthesize(_manifest);
+                    Owner._depositedRecipeNames.Add(RecipeExtractor.CanonicalName(_recipe));
                     _log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited",
                         _recipe.NumLayers);
                 }

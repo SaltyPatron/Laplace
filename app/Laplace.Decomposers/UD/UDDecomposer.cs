@@ -15,7 +15,7 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
     protected override double SourceTrust => TC.AcademicCurated;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 

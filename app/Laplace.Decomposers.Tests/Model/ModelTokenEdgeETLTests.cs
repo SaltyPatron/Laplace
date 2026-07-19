@@ -35,135 +35,29 @@ public class ModelTokenEdgeETLTests
         public void Dispose() => Environment.SetEnvironmentVariable("LAPLACE_MODEL_PLANES", _old);
     }
 
-    [Fact]
-    public async Task EmitAsync_StagesTokenEdges_AndStoresNoCoordsOrDims()
-    {
-        string dir = Path.Combine(Path.GetTempPath(), "laplace-edges-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-
-
-            int n = 8, d = 4;
-            var rows = new (double x, double y)[]
-            {
-                (1.0, 0.0), (0.96, 0.05), (0.93, 0.10), (0.90, 0.02),
-                (0.0, 1.0), (0.05, 0.96), (0.10, 0.93), (0.02, 0.90),
-            };
-            var embed = new float[n * d];
-            for (int i = 0; i < n; i++)
-            {
-                embed[i * d + 0] = (float)rows[i].x;
-                embed[i * d + 1] = (float)rows[i].y;
-                embed[i * d + 2] = (float)(0.01 * i);
-                embed[i * d + 3] = (float)(-0.01 * i);
-            }
-
-            WriteSafetensors(Path.Combine(dir, "model.safetensors"), new[]
-            {
-                Tensor("model.embed_tokens.weight", new[] { n, d }, embed),
-            });
-
-            var ent = new Hash128[n];
-            var tokens = new LlamaTokenizerParser.TokenRecord[n];
-            for (int i = 0; i < n; i++)
-            {
-                ent[i] = Hash128.OfCanonical($"substrate/test/model-edges/tok/{i}");
-                tokens[i] = new LlamaTokenizerParser.TokenRecord
-                {
-                    TokenId = i,
-                    RawToken = $"t{i}",
-                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
-                    EntityId = ent[i],
-                    Tier = 2,
-                    IsByteLevel = false,
-                    Role = TokenRole.None,
-                    ContentX = double.NaN,
-                    ContentY = double.NaN,
-                    ContentZ = double.NaN,
-                    ContentM = double.NaN,
-                    HasContentCoord = false,
-                };
-            }
-
-            var manifest = ToyManifest(dir, vocab: n, hidden: d);
-            using var _ = PlanesMode("all");
-            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
-            var changes = new List<SubstrateChange>();
-            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default, ct: default)) changes.Add(c);
-
-            var atts = changes.SelectMany(c => c.Attestations).ToList();
-
-
-            var similarTo = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
-
-
-            Assert.NotEmpty(atts);
-            Assert.All(atts, a => Assert.Equal(similarTo, a.TypeId));
-
-
-            var tokenSet = new HashSet<Hash128>(ent);
-            Assert.All(atts, a =>
-            {
-                Assert.Contains(a.SubjectId, tokenSet);
-                Assert.True(a.ObjectId is { } o && tokenSet.Contains(o));
-            });
-
-
-
-            Assert.Empty(changes.SelectMany(c => c.Physicalities));
-            Assert.Empty(changes.SelectMany(c => c.Entities));
-
-
-
-
-            var t0 = atts.Where(a => a.SubjectId == ent[0] || a.ObjectId == ent[0])
-                         .Select(a =>
-                         {
-                             var other = a.SubjectId == ent[0] ? a.ObjectId!.Value : a.SubjectId;
-                             return (idx: Array.IndexOf(ent, other), score: a.SumScoreFp1e9 ?? a.ScoreFp1e9);
-                         }).ToList();
-            var same = t0.Where(p => p.idx is >= 1 and <= 3).Select(p => p.score).ToList();
-            var cross = t0.Where(p => p.idx is >= 4 and <= 7).Select(p => p.score).ToList();
-            Assert.NotEmpty(same);
-            Assert.NotEmpty(cross);
-            Assert.True(same.Min() > cross.Max(),
-                $"within-cluster edges must outscore cross-cluster; same.min={same.Min()} cross.max={cross.Max()}");
-
-
-            var seen = new HashSet<(Hash128, Hash128)>();
-            foreach (var a in atts) seen.Add((a.SubjectId, a.ObjectId!.Value));
-            foreach (var a in atts)
-                Assert.False(seen.Contains((a.ObjectId!.Value, a.SubjectId)),
-                    "symmetric SIMILAR_TO emitted a redundant mirror pair");
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
 
     [Fact]
-    public async Task Fold_NormGain_ShiftsAttendOrdering()
+    public async Task Fold_NormGain_ShiftsAttendSalienceOrdering()
     {
-
-
-
-
+        // The LN gain must fold into the QK projections (LoadGain → ScaleCols):
+        // t1=(2,0) is dim0-heavy, t2=(0,2) dim1-heavy, so γ=(2,1) must make t1's
+        // QK-subspace salience outrank t2's and γ=(1,2) must reverse it. Pair
+        // tiles are deleted (doc 26); the structure recorder's occurrence scores
+        // carry the same folded projections.
         var embed = new float[] { 1, 1, 2, 0, 0, 2, 3, 3 };
 
         var byDim0 = await RunAttend(embed, gamma: new float[] { 2f, 1f });
         var byDim1 = await RunAttend(embed, gamma: new float[] { 1f, 2f });
 
-        Assert.True(byDim0[(0, 1)] > byDim0[(0, 2)],
-            $"γ=(2,1) should make t0→t1 outrank t0→t2; got {byDim0[(0, 1)]} vs {byDim0[(0, 2)]}");
-        Assert.True(byDim1[(0, 2)] > byDim1[(0, 1)],
-            $"γ=(1,2) should make t0→t2 outrank t0→t1; got {byDim1[(0, 2)]} vs {byDim1[(0, 1)]}");
+        Assert.True(byDim0[1] > byDim0[2],
+            $"γ=(2,1) should make t1 salience outrank t2; got {byDim0[1]} vs {byDim0[2]}");
+        Assert.True(byDim1[2] > byDim1[1],
+            $"γ=(1,2) should make t2 salience outrank t1; got {byDim1[2]} vs {byDim1[1]}");
     }
 
 
 
-    private static async Task<Dictionary<(int, int), long>> RunAttend(float[] embed, float[] gamma)
+    private static async Task<Dictionary<int, long>> RunAttend(float[] embed, float[] gamma)
     {
         const int n = 4, d = 2;
         string dir = Path.Combine(Path.GetTempPath(), "laplace-fold-" + Guid.NewGuid().ToString("N"));
@@ -240,17 +134,17 @@ public class ModelTokenEdgeETLTests
                 ModelName = "fold-model",
             };
 
-            using var _ = PlanesMode("all");
+            using var _ = PlanesMode("structure");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
-            var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
-            var map = new Dictionary<(int, int), long>();
+            var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
+            var map = new Dictionary<int, long>();
             await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
             {
                 foreach (var a in c.Attestations)
                 {
-                    if (a.TypeId != attends || a.ObjectId is not { } o) continue;
-                    int si = Array.IndexOf(ent, a.SubjectId), oi = Array.IndexOf(ent, o);
-                    if (si >= 0 && oi >= 0) map[(si, oi)] = a.SumScoreFp1e9 ?? a.ScoreFp1e9;
+                    if (a.TypeId != appearsIn) continue;
+                    int si = Array.IndexOf(ent, a.SubjectId);
+                    if (si >= 0) map[si] = a.SumScoreFp1e9 ?? a.ScoreFp1e9;
                 }
             }
             return map;
@@ -419,7 +313,7 @@ public class ModelTokenEdgeETLTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ContinuesTo_EmittedOnlyWhenUntied(bool untied)
+    public async Task LmFactorPlane_DepositedOnlyWhenUntied(bool untied)
     {
         const int n = 6, d = 4;
 
@@ -494,16 +388,24 @@ public class ModelTokenEdgeETLTests
                 ModelName = "cont-model",
             };
 
-            using var _ = PlanesMode("all");
+            using var _ = PlanesMode("factors");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
-            var continuesTo = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
-            int count = 0;
+            var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
+            var lmAnchor = ModelCoordinates.PlaneAnchor("lm");
+            var embAnchor = ModelCoordinates.PlaneAnchor("emb");
+            int lmSlices = 0, embSlices = 0;
             await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
                 foreach (var a in c.Attestations)
-                    if (a.TypeId == continuesTo) count++;
+                {
+                    if (a.TypeId != appearsIn || a.ObjectId is not { } o) continue;
+                    if (o == lmAnchor) lmSlices++;
+                    if (o == embAnchor) embSlices++;
+                }
 
-            if (untied) Assert.True(count > 0, "untied model must emit CONTINUES_TO (LM-head direct path)");
-            else Assert.Equal(0, count);
+            Assert.True(embSlices > 0, "factors mode must always deposit the emb-plane factor slice");
+            if (untied) Assert.True(lmSlices > 0,
+                "untied model must deposit the lm/completion factor plane (unembed rows)");
+            else Assert.Equal(0, lmSlices);
         }
         finally
         {

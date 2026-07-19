@@ -34,7 +34,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     public override int LayerOrder => 2;
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _vocabularyNames;
 

@@ -24,7 +24,7 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
     public override int LayerOrder => _src.Layer;
     public override Hash128 TrustClassId => _src.TrustClassId;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {
