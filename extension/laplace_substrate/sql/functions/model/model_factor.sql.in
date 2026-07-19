@@ -83,7 +83,78 @@ BEGIN
     cos_theta := raw_dot / NULLIF(mass_q * mass_k, 0);
 END $fn$;
 
--- Token-joinable attention row by circuit NAME and WORD — the everyday entry.
+-- model_forward v0 (doc 26 B/D, first increment): the linearized single-token
+-- forward as an indexed read. Native residual+unembed loop
+-- (pg_laplace_model_forward); loops live in C. NO cross-position attention yet
+-- — this composes emb + every layer's MLP write-vector for the token and
+-- unembeds through the completion plane. Slices are content-addressed per
+-- model, so the directory is resolved by source: the slice deposited BY this
+-- source at each shared coordinate.
+CREATE OR REPLACE FUNCTION pg_laplace_model_forward(
+    p_emb_slice  bytea,
+    p_mlp_slices bytea[],
+    p_lm_slice   bytea,
+    p_tok        bytea,
+    p_k          int)
+    RETURNS TABLE(token bytea, score float8)
+    AS 'MODULE_PATHNAME', 'pg_laplace_model_forward'
+    LANGUAGE C STABLE ROWS 20;
+
+-- The everyday entry: forward a WORD through a MODEL (by source id) to its k
+-- strongest next tokens, word entities out (joinable against the web).
+--   SELECT render_text(token), score FROM model_forward(:src, 'France', 10);
+CREATE OR REPLACE FUNCTION model_forward(
+    p_source bytea,
+    p_word   text,
+    p_k      int DEFAULT 20)
+    RETURNS TABLE(token bytea, score float8)
+    LANGUAGE sql STABLE ROWS 20
+    AS $fn$
+    WITH src_slice AS (
+        -- The slice this source deposited at a given plane coordinate.
+        SELECT s.slice_id, s.coord_id
+        FROM model_circuit_slices('emb') s
+        WHERE EXISTS (SELECT 1 FROM attestations a
+                      WHERE a.subject_id = s.slice_id
+                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.source_id = p_source)
+    ),
+    emb AS (SELECT slice_id FROM src_slice LIMIT 1),
+    lm AS (
+        SELECT s.slice_id
+        FROM model_circuit_slices('lm') s
+        WHERE EXISTS (SELECT 1 FROM attestations a
+                      WHERE a.subject_id = s.slice_id
+                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.source_id = p_source)
+        LIMIT 1
+    ),
+    mlp AS (
+        -- Every MLP write-vector slice this source deposited. The residual is a
+        -- commutative sum over layers, so order is irrelevant; the slices are
+        -- the source-deposited APPEARS_IN subjects at every coordinate that
+        -- CONTAINS the mlp plane anchor (the per-layer mlp circuits).
+        SELECT DISTINCT s.subject_id AS slice_id
+        FROM attestations coord_has_plane
+        JOIN consensus s
+          ON s.object_id = coord_has_plane.subject_id
+         AND s.type_id = relation_type_id('APPEARS_IN')
+        WHERE coord_has_plane.type_id = relation_type_id('CONTAINS')
+          AND coord_has_plane.object_id =
+              canonical_id('substrate/entity/model/plane/mlp/v1')
+          AND EXISTS (SELECT 1 FROM attestations a
+                      WHERE a.subject_id = s.subject_id
+                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.source_id = p_source)
+    )
+    SELECT f.token, f.score
+    FROM pg_laplace_model_forward(
+        (SELECT slice_id FROM emb),
+        (SELECT array_agg(slice_id) FROM mlp),
+        (SELECT slice_id FROM lm),
+        word_id(p_word),
+        p_k) f
+    $fn$;
 -- Returns word entities + text, ready to JOIN against senses/consensus/web:
 --   SELECT r.*, c.rating FROM model_attention_row(2,9,'king',10) r
 --   LEFT JOIN consensus c ON c.subject_id = r.token AND ...
