@@ -36,7 +36,7 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
     protected override string BatchLabelPrefix => "tabular";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     private Hash128 OutcomeId { get; }
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");

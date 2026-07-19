@@ -15,7 +15,7 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
     protected override double SourceTrust => TC.AcademicCurated;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 

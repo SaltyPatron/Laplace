@@ -48,7 +48,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false) : Compos
     private const int MaxContextChars = 480;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(

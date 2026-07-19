@@ -37,7 +37,7 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
     protected override string BatchLabelPrefix => "parquet";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"parquet/column/{col}/v1");
     private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"parquet/value/{col}={tok}/v1");

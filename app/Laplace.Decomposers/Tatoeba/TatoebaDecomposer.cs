@@ -15,7 +15,7 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
     internal static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;

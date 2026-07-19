@@ -29,7 +29,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     private Hash128 _repoId;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 

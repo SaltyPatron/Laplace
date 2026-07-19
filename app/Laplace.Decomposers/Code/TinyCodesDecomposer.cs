@@ -38,7 +38,7 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSour
     protected override string BatchLabelPrefix => "tiny-codes";
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 

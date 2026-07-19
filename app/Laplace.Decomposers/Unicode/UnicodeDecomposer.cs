@@ -226,7 +226,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(UnicodeSeed.CodepointCount);
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {

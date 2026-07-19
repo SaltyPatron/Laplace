@@ -30,7 +30,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(

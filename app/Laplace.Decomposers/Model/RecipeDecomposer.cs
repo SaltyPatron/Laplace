@@ -66,7 +66,7 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1);
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => new[]
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => new[]
     {
         RecipeExtractor.CanonicalName(_recipe),
         _recipe.HiddenSize,

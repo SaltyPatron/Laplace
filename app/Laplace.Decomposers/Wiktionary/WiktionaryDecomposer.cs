@@ -32,7 +32,7 @@ public sealed class WiktionaryDecomposer
     public override int EstimatedComposeUnitsPerRecord => 6;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => VocabularyNames;
 

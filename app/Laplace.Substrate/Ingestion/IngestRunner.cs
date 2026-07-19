@@ -123,6 +123,11 @@ public sealed class IngestRunner
         static long BytesOf(SubstrateChange c)
         {
             long bytes = ((long)c.Entities.Length + c.Physicalities.Length + c.Attestations.Length) * 152;
+            // Trajectory payloads dwarf the fixed tuple estimate (a factor
+            // deposit is tens-to-hundreds of MB in one row); count them or the
+            // byte gates never fire and the working set buffers the whole run.
+            foreach (var p in c.Physicalities)
+                if (p.TrajectoryXyzm is { Length: > 0 } t) bytes += (long)t.Length * 8;
             if (!c.IntentStages.IsDefaultOrEmpty)
                 foreach (var s in c.IntentStages)
                     if (!s.IsInvalid) bytes += s.TotalTupleBytes;
@@ -218,6 +223,11 @@ public sealed class IngestRunner
                 int channelCap = sizing.DecomposeChannelCapacity;
                 long rowBudget = sizing.RowBudget;
                 long bufferedRows = 0;
+                // Compose-ahead is bounded by BYTES as well as rows: with huge
+                // trajectory rows the 58-intent channel alone can hold tens of
+                // GB, so the row budget never constrains anything.
+                long byteBudget = Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes;
+                long bufferedBytes = 0;
                 var drained = new SemaphoreSlim(0, channelCap);
 
                 var channel = Channel.CreateBounded<SubstrateChange>(
@@ -240,12 +250,15 @@ public sealed class IngestRunner
                             if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
                             options.Progress?.Report(MakeProgress(counters));
                             int r = RowsOf(intent);
-                            while (Interlocked.Read(ref bufferedRows) + r > rowBudget
+                            long b = BytesOf(intent);
+                            while ((Interlocked.Read(ref bufferedRows) + r > rowBudget
+                                    || Interlocked.Read(ref bufferedBytes) + b > byteBudget)
                                    && Volatile.Read(ref bufferedRows) > 0)
                             {
                                 await drained.WaitAsync(ct);
                             }
                             Interlocked.Add(ref bufferedRows, r);
+                            Interlocked.Add(ref bufferedBytes, b);
                             await channel.Writer.WriteAsync(intent, ct);
                         }
                         channel.Writer.TryComplete();
@@ -264,6 +277,7 @@ public sealed class IngestRunner
                     {
                         ct.ThrowIfCancellationRequested();
                         Interlocked.Add(ref bufferedRows, -RowsOf(intent));
+                        Interlocked.Add(ref bufferedBytes, -BytesOf(intent));
                         try { drained.Release(); } catch (SemaphoreFullException) { }
 
                         if (!workingSet && batchSize == 1 && commitRows == 0)

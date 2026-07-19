@@ -37,7 +37,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankS
 
     private static readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 

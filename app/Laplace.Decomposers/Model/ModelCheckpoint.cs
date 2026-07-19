@@ -98,19 +98,21 @@ public static class ModelCheckpoint
     // A head's COLUMNS in a row-major [rows, cols] tensor (the O projection:
     // head h owns columns h*hd..(h+1)*hd of every row) are strided, not
     // contiguous — so the content id is Blake3 over the gathered column bytes,
-    // row-major within the slice. Deterministic, literal-content, collides
-    // across checkpoints exactly like contiguous slices. f32 tensors only.
+    // row-major within the slice, at the tensor's literal on-disk element width.
+    // Deterministic, literal-content, collides across checkpoints exactly like
+    // contiguous slices.
     public static Hash128[] ColumnSliceIds(
         SafetensorsContainerParser.TensorReference t, int rows, int cols, int heads)
     {
         long total = t.AbsoluteDataEnd - t.AbsoluteDataStart;
-        if (heads <= 0 || cols % heads != 0 || total != (long)rows * cols * 4)
+        long bpe = WeightTensorETL.BytesPerElement(t.Dtype);
+        if (heads <= 0 || cols % heads != 0 || bpe <= 0 || total != (long)rows * cols * bpe)
             throw new InvalidDataException(
-                $"tensor '{t.Name}' [{rows}x{cols}] f32 does not match byte range {total} / {heads} heads");
+                $"tensor '{t.Name}' [{rows}x{cols}] {t.Dtype} does not match byte range {total} / {heads} heads");
         int hd = cols / heads;
 
         var ids = new Hash128[heads];
-        var gathered = new byte[(long)rows * hd * 4];
+        var gathered = new byte[(long)rows * hd * bpe];
         using var mmf = MemoryMappedFile.CreateFromFile(
             t.FilePath, FileMode.Open, mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
         using var view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
@@ -127,9 +129,9 @@ public static class ModelCheckpoint
                     {
                         for (int r = 0; r < rows; r++)
                             Buffer.MemoryCopy(
-                                data + ((long)r * cols + (long)h * hd) * 4,
-                                pg + (long)r * hd * 4,
-                                hd * 4, hd * 4);
+                                data + ((long)r * cols + (long)h * hd) * bpe,
+                                pg + (long)r * hd * bpe,
+                                hd * bpe, hd * bpe);
                     }
                     ids[h] = Hash128.Blake3(gathered);
                 }

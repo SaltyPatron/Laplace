@@ -30,7 +30,7 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenS
     protected override double SourceTrust => TC.StructuredCorpus;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
