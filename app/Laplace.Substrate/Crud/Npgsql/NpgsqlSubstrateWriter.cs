@@ -162,6 +162,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long attestationsFolded = 0;
         long entitiesSkipped = 0, physicalitiesSkipped = 0;
+        bool journalReplayHit = false;
         bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
         try
@@ -176,14 +177,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 entitiesSkipped = r.eSkip;
                 physicalitiesSkipped = r.pSkip;
                 roundTrips += r.rt;
+                journalReplayHit = r.journalHit;
 
-                // The apply-verify is the sole novelty gate: compose stages the
-                // whole working set (content-addressed, deduped in the content
-                // bank), the verify probes which ids the DB already holds, and
-                // present content is skipped from COPY (present attestations fold
-                // instead). Skipped rows are therefore EXPECTED — shared substrate
-                // already committed by an earlier working set or source, not an
-                // error and not a race. Logged at info for volume visibility.
+                // The insert-time ON CONFLICT adjudication is the sole novelty
+                // gate: compose stages the whole working set (content-addressed,
+                // deduped in the content bank), the apply lands every distinct
+                // row, and the server skips content it already holds (present
+                // attestations merge instead). Skipped rows are therefore
+                // EXPECTED — shared substrate already committed by an earlier
+                // working set or source, not an error and not a race. Logged at
+                // info for volume visibility.
                 if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
                 {
                     _log.LogInformation(
@@ -237,7 +240,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 (entitiesInserted == 0 && physicalitiesInserted == 0
                  && attestationsInserted == 0 && attestationsFolded == 0),
             EntitiesSkippedAtMerge: entitiesSkipped,
-            PhysicalitiesSkippedAtMerge: physicalitiesSkipped);
+            PhysicalitiesSkippedAtMerge: physicalitiesSkipped,
+            JournalReplayHit: journalReplayHit);
     }
 
     private static readonly long RtBudgetPer10K = 64;

@@ -6,35 +6,31 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The Rule #8 write protocol (docs/specs/06_Engineering_Ruleset.txt): the
-/// client already knows exactly what is novel (descent + hot caches decided
-/// that before we got here), so the server's only remaining jobs are (1) a
-/// bulk in-transaction verification of the claimed-novel ids — the guard
-/// against a concurrent ingest having committed an overlapping subtree
-/// between our unlocked descent and this transaction — and (2) pure COPY of
-/// what survives, in entities → physicalities → attestations order. No temp
-/// tables, no anti-join, no ON CONFLICT.
+/// The Rule #8 write protocol (docs/specs/06_Engineering_Ruleset.txt, step 6
+/// as amended 2026-07-18): the client owns dedup — one distinct row per
+/// entity/physicality id, one collapsed group per attestation id — and the
+/// SERVER adjudicates presence at insert time. Each table's client-deduped
+/// rows raw-binary COPY into a session-local TEMP staging table, then ONE
+/// set-based INSERT .. SELECT lands them: ON CONFLICT DO NOTHING for content
+/// (entities/physicalities — present content is immutable, a re-seen id is a
+/// no-op), ON CONFLICT DO UPDATE for attestations (a present row MERGES its
+/// observation count and max timestamp — dropping counts drops testimony).
 ///
-/// The verification probe is flat over the whole claimed-novel set, not
-/// frontier-only: a concurrent ingest commits subtrees rooted at ITS roots,
-/// which can sit strictly below our novel frontier (we hold novel sentence
-/// S ⊃ word w; the other run committed w standalone — probing only S would
-/// miss w and hit a PK violation).
-///
-/// Entity presence is checked with entities_stored_bitmap (perfcache fast
-/// path OFF): this probe decides what gets written, and tier-0 codepoint
-/// rows only exist because the unicode seed writes them through this lane —
-/// answering their presence axiomatically would drop them from the write
-/// list forever.
+/// This replaced the apply-side existence probes (three bitmap probes over
+/// every staged id before a filtered COPY): at Wiktionary scale the probe
+/// re-verified ~12M mostly-novel ids per apply at cache-cold random I/O,
+/// measured 37-53 MINUTES per apply. The ON CONFLICT arbiter is the PK,
+/// which never cycles (PK/unique/exclusion are exempt from the index cycle),
+/// so adjudication is the same keyed descent the probe paid — but paid once,
+/// fused with the write, only where a row actually lands.
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
-    private const int ProbeChunkIds = 131_072;
-
     /// <summary>
     /// Rows below this stay on the fully-atomic single-transaction path;
-    /// above it, COPY fans out across connections (per-table barriers keep
-    /// entities durable before physicalities before attestations).
+    /// above it, staging + adjudication fans out across connections
+    /// (per-table barriers keep entities durable before physicalities
+    /// before attestations).
     /// </summary>
     private const int ParallelCopyMinRows = 65_536;
 
@@ -49,46 +45,18 @@ public sealed partial class NpgsqlSubstrateWriter
     /// </summary>
     private NpgsqlIndexCycle? _runCycle;
 
-    /// <summary>
-    /// Run-scoped persisted-id caches for the existence probe, active on the
-    /// same BeginBulkRunAsync/CompleteBulkRunAsync bracket as <see cref="_runCycle"/>.
-    /// Inside a bulk run applies are serialized (the runner and the apply advisory
-    /// lock) and the substrate is append-only, so any content id THIS run has already
-    /// COPYed-and-committed is durably present for the rest of the run — a later
-    /// working set that re-stages it (low-tier codepoints/words recur in every working
-    /// set) needs no server round-trip to learn it exists: the write lane treats it as
-    /// present-and-skip, byte-for-byte what a probe hit would have produced. This does
-    /// NOT weaken the pure-COPY invariant (the probe still guards concurrent overlaps
-    /// for every id NOT known-persisted); it only removes re-probes of ids we ourselves
-    /// wrote.
-    ///
-    /// EXACT sets, never a bloom: a false positive would treat a genuinely novel row as
-    /// present and DROP it, so only a no-false-positive membership test may gate the
-    /// skip. Bounded by DISTINCT persisted content (tens of millions of entities/
-    /// physicalities on a full seed — a few GB, not the 12M×N re-probe volume), and
-    /// cleared at run end. Attestations are deliberately NOT cached: a re-seen present
-    /// attestation must still MERGE its observation count (its round-trip is not saved),
-    /// and its id space is unbounded (billions on a model ingest).
-    /// </summary>
-    private HashSet<Hash128>? _persistedEntityIds;
-    private HashSet<Hash128>? _persistedPhysIds;
-
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
         // Recover any journaled drops a crashed prior run left behind
         // BEFORE this run makes its own cycling decisions.
         await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
-        _persistedEntityIds = new HashSet<Hash128>();
-        _persistedPhysIds = new HashSet<Hash128>();
     }
 
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
         var cycle = _runCycle;
         _runCycle = null;
-        _persistedEntityIds = null;
-        _persistedPhysIds = null;
         if (cycle is not null)
             await cycle.FinishAsync(ct);
     }
@@ -134,42 +102,34 @@ public sealed partial class NpgsqlSubstrateWriter
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
         var atts = CopyTupleParser.ParseAttestations(attBlobs);
 
-        // Distinct ids in first-seen order. Physicalities are verified by
-        // their OWN content-addressed id, never inferred from their entity:
-        // a physicality legitimately arrives for an already-stored entity
-        // (projections and building blocks land after identity content).
-        var entityIdSet = new HashSet<Hash128>(ents.Ids.Count);
-        var probeEntityIds = new List<Hash128>(ents.Ids.Count);
-        // Partition keys parallel to the probed ids (entities: LIST(tier);
-        // physicalities: RANGE(hilbert_index)) — id alone cannot prune, so
-        // an id-only probe pays one index descent per leaf.
-        var probeEntityTiers = new List<short>(ents.Ids.Count);
+        // Client dedup — the one guarantee the ON CONFLICT offload rests on:
+        // DO UPDATE faults if a single statement touches the same row twice,
+        // so exactly one staged row per id may reach the insert.
+        //
+        // Entities/physicalities: first occurrence of each id, first-seen
+        // order. Physicalities dedup by their OWN content-addressed id,
+        // never inferred from their entity (projections and building blocks
+        // legitimately arrive for an already-stored entity). KeptRow.SortKey
+        // partitions parallel groups into disjoint index keyspaces: row id
+        // for btree tables, hilbert index for the physicality coord GiST.
+        var keptEnts = new List<KeptRow>(ents.Ids.Count);
+        var seenEnt = new HashSet<Hash128>(ents.Ids.Count);
         for (int i = 0; i < ents.Ids.Count; i++)
-            if (entityIdSet.Add(ents.Ids[i]))
-            {
-                probeEntityIds.Add(ents.Ids[i]);
-                probeEntityTiers.Add(ents.Tiers[i]);
-            }
-        int distinctStagedEntities = probeEntityIds.Count;
+            if (seenEnt.Add(ents.Ids[i]))
+                keptEnts.Add(new KeptRow(ents.Ids[i], ents.Rows[i], -1, 0));
 
-        var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
-        var probePhysIds = new List<Hash128>(phys.Ids.Count);
-        var probePhysHilberts = new List<Hash128>(phys.Ids.Count);
+        var keptPhys = new List<KeptRow>(phys.Ids.Count);
+        var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
         for (int i = 0; i < phys.Ids.Count; i++)
-            if (physIdSet.Add(phys.Ids[i]))
-            {
-                probePhysIds.Add(phys.Ids[i]);
-                probePhysHilberts.Add(phys.HilbertKeys[i]);
-            }
+            if (seenPhys.Add(phys.Ids[i]))
+                keptPhys.Add(new KeptRow(phys.HilbertKeys[i], phys.Rows[i], -1, 0));
 
         // Attestation duplicate collapse, exactly apply_batch's semantics:
-        // representative = latest-ts staged row, observation counts sum.
+        // representative = latest-ts staged row, observation counts sum. The
+        // collapsed group stages ONE row carrying the summed count (patched
+        // on the way out) and the max timestamp; a group whose id is already
+        // present then merges via the insert's DO UPDATE.
         var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games)>(atts.Ids.Count);
-        // The keyed attestation probe needs the partition keys parallel to
-        // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
-        var probeAttIds = new List<Hash128>(atts.Ids.Count);
-        var probeAttTypes = new List<Hash128>(atts.Ids.Count);
-        var probeAttSubjects = new List<Hash128>(atts.Ids.Count);
         for (int i = 0; i < atts.Ids.Count; i++)
         {
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
@@ -182,18 +142,30 @@ public sealed partial class NpgsqlSubstrateWriter
             else
             {
                 attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i]);
-                probeAttIds.Add(atts.Ids[i]);
-                probeAttTypes.Add(atts.TypeIds[i]);
-                probeAttSubjects.Add(atts.SubjectIds[i]);
             }
+        }
+        var repIdx = new List<int>(attGroups.Count);
+        foreach (var (_, g) in attGroups)
+            repIdx.Add(g.RepIdx);
+        repIdx.Sort(); // staged order — contiguous rows coalesce in the COPY writer
+        var keptAtts = new List<KeptRow>(repIdx.Count);
+        for (int k = 0; k < repIdx.Count; k++)
+        {
+            int i = repIdx[k];
+            long games = attGroups[atts.Ids[i]].Games;
+            keptAtts.Add(new KeptRow(
+                atts.Ids[i], atts.Rows[i],
+                games == atts.Counts[i] ? -1 : games,
+                atts.CountValueOffsets[i]));
         }
 
         // Per-phase round-trip counters — summed into the returned total AND logged as a
-        // breakdown, so the operator sees WHERE the round-trips go (lock / journal / probe /
-        // copy / merge) instead of one opaque number. Probe fans across connections → atomic.
-        int rtLock = 0, rtJournal = 0, rtProbe = 0, rtCopy = 0, rtMerge = 0;
-        int eIns = 0, pIns = 0, aIns = 0;
-        long aFold = 0, eSkip = 0, pSkip = 0;
+        // breakdown, so the operator sees WHERE the round-trips go (lock / journal /
+        // stage+adjudicate) instead of one opaque number. Phases fan across connections
+        // in the parallel path → atomic adds there.
+        int rtLock = 0, rtJournal = 0, rtApply = 0;
+        long eIns = 0, pIns = 0, aIns = 0;
+        long aFold = 0;
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
         // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
@@ -231,221 +203,45 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
             }
 
-            // Run-persisted-id fast path: an id THIS run already COPYed-and-committed is
-            // durably present (append-only substrate + serialized applies), so it needs
-            // no probe — drop it from the probe input and fold it straight into the
-            // present set. Everything NOT known-persisted is still probed, so the
-            // concurrent-overlap guard behind the pure-COPY invariant is untouched.
-            // Snapshot the caches once: null outside a bulk run (standalone applies always
-            // probe in full — the safe default).
-            var persistedEnt = _persistedEntityIds;
-            var persistedPhys = _persistedPhysIds;
-            var probeEntIdsUse = probeEntityIds;
-            var probeEntTiersUse = probeEntityTiers;
-            long entCacheSkip = 0;
-            if (persistedEnt is { Count: > 0 })
-            {
-                probeEntIdsUse = new List<Hash128>(probeEntityIds.Count);
-                probeEntTiersUse = new List<short>(probeEntityIds.Count);
-                for (int i = 0; i < probeEntityIds.Count; i++)
-                    if (persistedEnt.Contains(probeEntityIds[i])) entCacheSkip++;
-                    else { probeEntIdsUse.Add(probeEntityIds[i]); probeEntTiersUse.Add(probeEntityTiers[i]); }
-            }
-            var probePhysIdsUse = probePhysIds;
-            var probePhysHilbertsUse = probePhysHilberts;
-            long physCacheSkip = 0;
-            if (persistedPhys is { Count: > 0 })
-            {
-                probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
-                probePhysHilbertsUse = new List<Hash128>(probePhysIds.Count);
-                for (int i = 0; i < probePhysIds.Count; i++)
-                    if (persistedPhys.Contains(probePhysIds[i])) physCacheSkip++;
-                    else { probePhysIdsUse.Add(probePhysIds[i]); probePhysHilbertsUse.Add(probePhysHilberts[i]); }
-            }
-
-            // Probes fan out across pooled connections. Correct under the
-            // held advisory lock: every snapshot starts after the lock was
-            // acquired, so anything a prior applier committed is visible.
-            var phaseSw = System.Diagnostics.Stopwatch.StartNew();
-
-            // I/O locality — the load-bearing fix for large-DB probes. The native existence
-            // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
-            // physicalities RANGE(hilbert), attestations LIST(type_id)->HASH(subject)). Probing
-            // in staged (content-hash-random) order scatters each 131k chunk across every
-            // partition leaf and heap page — fine while the table fits cache, catastrophic once
-            // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
-            // RANDOM I/O, worsening as the DB grew). Sorting each probe by its partition key makes
-            // every chunk a CONTIGUOUS partition range = sequential index+heap scan. The probes
-            // return a present-id SET, so input order is semantically irrelevant — this reorders
-            // I/O only. The permutation is applied identically to every parallel array, so keyed
-            // alignment is preserved by construction (guarded downstream anyway).
-            if (probeEntIdsUse.Count > 1)
-            {
-                var perm = BuildProbePermutation(probeEntIdsUse.Count, (a, b) =>
-                {
-                    int c = probeEntTiersUse[a].CompareTo(probeEntTiersUse[b]);
-                    return c != 0 ? c : probeEntIdsUse[a].CompareToBytewise(probeEntIdsUse[b]);
-                });
-                probeEntIdsUse = ApplyProbePermutation(probeEntIdsUse, perm);
-                probeEntTiersUse = ApplyProbePermutation(probeEntTiersUse, perm);
-            }
-            if (probePhysIdsUse.Count > 1)
-            {
-                var perm = BuildProbePermutation(probePhysIdsUse.Count,
-                    (a, b) => probePhysHilbertsUse[a].CompareToBytewise(probePhysHilbertsUse[b]));
-                probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
-                probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
-            }
-            if (probeAttIds.Count > 1)
-            {
-                var perm = BuildProbePermutation(probeAttIds.Count, (a, b) =>
-                {
-                    int c = probeAttTypes[a].CompareToBytewise(probeAttTypes[b]);
-                    return c != 0 ? c : probeAttSubjects[a].CompareToBytewise(probeAttSubjects[b]);
-                });
-                probeAttIds = ApplyProbePermutation(probeAttIds, perm);
-                probeAttTypes = ApplyProbePermutation(probeAttTypes, perm);
-                probeAttSubjects = ApplyProbePermutation(probeAttSubjects, perm);
-            }
-
-            var probeTasks = new[]
-            {
-                ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentPairKeyedParallelAsync("laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentKeyedParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, probeAttTypes, probeAttSubjects, r => Interlocked.Add(ref rtProbe, r), ct),
-            };
-            await Task.WhenAll(probeTasks);
-            var presentEntities = probeTasks[0].Result;
-            var presentPhys = probeTasks[1].Result;
-            var presentAtts = probeTasks[2].Result;
-            // Fold the known-persisted ids (excluded from the probe above) back into the
-            // present sets — the write lane below skips a row iff its id is present, and
-            // these are present by our own committed writes.
-            if (persistedEnt is { Count: > 0 })
-                foreach (var id in probeEntityIds)
-                    if (persistedEnt.Contains(id)) presentEntities.Add(id);
-            if (persistedPhys is { Count: > 0 })
-                foreach (var id in probePhysIds)
-                    if (persistedPhys.Contains(id)) presentPhys.Add(id);
-            _log.LogInformation(
-                "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(cache-skipped {ECache:N0}e/{PCache:N0}p; present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
-                probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIds.Count, phaseSw.ElapsedMilliseconds,
-                entCacheSkip, physCacheSkip,
-                presentEntities.Count, presentPhys.Count, presentAtts.Count);
-
-            // Entities: first occurrence of each id, minus stored rows.
-            // Kept rows carry their id so parallel COPY groups can own
-            // DISJOINT btree key ranges — content-addressed ids are
-            // uniformly random, and un-partitioned parallel inserts
-            // measured as LWLock:BufferContent pile-ups on shared index
-            // pages. Range-partitioned sorted groups fill leaves like a
-            // parallel bulk index build instead.
-            var keptEnts = new List<KeptRow>(ents.Rows.Count);
-            var seenEnt = new HashSet<Hash128>(distinctStagedEntities);
-            // Novel ids to fold into the run-persisted cache — ONLY after this apply
-            // commits (below). null outside a bulk run: no cache, nothing to collect.
-            var novelEntIds = persistedEnt is null ? null : new List<Hash128>(keptEnts.Capacity);
-            for (int i = 0; i < ents.Ids.Count; i++)
-            {
-                if (!seenEnt.Add(ents.Ids[i])) continue;
-                if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
-                keptEnts.Add(new KeptRow(ents.Ids[i], ents.Rows[i], -1, 0));
-                novelEntIds?.Add(ents.Ids[i]);
-            }
-
-            // Physicalities: first occurrence of each id, minus stored rows.
-            // Sort key = HILBERT INDEX, not id: the contended index here is
-            // the coord GiST, and hilbert order is its spatial locality —
-            // range-partitioned groups land in disjoint GiST subtrees the
-            // way id-sorted groups land in disjoint btree leaf ranges.
-            var keptPhys = new List<KeptRow>(phys.Rows.Count);
-            var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
-            // Physicality KeptRow.SortKey is the hilbert key (GiST locality), not the id,
-            // so novel ids are collected here explicitly rather than recovered post-sort.
-            var novelPhysIds = persistedPhys is null ? null : new List<Hash128>(keptPhys.Capacity);
-            for (int i = 0; i < phys.Ids.Count; i++)
-            {
-                if (!seenPhys.Add(phys.Ids[i])) continue;
-                if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
-                keptPhys.Add(new KeptRow(phys.HilbertKeys[i], phys.Rows[i], -1, 0));
-                novelPhysIds?.Add(phys.Ids[i]);
-            }
-
-            // Attestations: novel groups COPY their representative (count
-            // patched to the group sum when duplicates collapsed); present
-            // groups merge via one UPDATE.
-            var novelRepIdx = new List<int>(attGroups.Count);
-            var mergeIds = new List<byte[]>();
-            var mergeGames = new List<long>();
-            var mergeTs = new List<DateTime>();
-            foreach (var (id, g) in attGroups)
-            {
-                if (presentAtts.Contains(id))
-                {
-                    mergeIds.Add(id.ToBytes());
-                    mergeGames.Add(g.Games);
-                    mergeTs.Add(AttestationMergeMath.TimestampFromPgMicros(g.MaxTs));
-                }
-                else
-                {
-                    novelRepIdx.Add(g.RepIdx);
-                }
-            }
-            novelRepIdx.Sort();
-            var keptAtts = new List<KeptRow>(novelRepIdx.Count);
-            for (int k = 0; k < novelRepIdx.Count; k++)
-            {
-                int i = novelRepIdx[k];
-                long games = attGroups[atts.Ids[i]].Games;
-                keptAtts.Add(new KeptRow(
-                    atts.Ids[i], atts.Rows[i],
-                    games == atts.Counts[i] ? -1 : games,
-                    atts.CountValueOffsets[i]));
-            }
-
-            bool parallelCopy = ApplyParallelism > 1
+            bool parallelApply = ApplyParallelism > 1
                 && keptEnts.Count + keptPhys.Count + keptAtts.Count >= ParallelCopyMinRows;
 
-            if (!parallelCopy)
+            if (!parallelApply)
             {
                 // Small applies stay fully atomic inside the control tx.
                 if (keptEnts.Count > 0)
                 {
-                    await CopyKeptAsync(conn, "entities", IntentStageTable.Entities,
+                    (eIns, _) = await StageAdjudicateAsync(conn, "entities", IntentStageTable.Entities,
                         entBlobs, keptEnts, 0, keptEnts.Count, ct);
-                    eIns = keptEnts.Count;
-                    rtCopy++;
+                    rtApply += StageAdjudicateRoundTrips;
                 }
                 if (keptPhys.Count > 0)
                 {
-                    await CopyKeptAsync(conn, "physicalities", IntentStageTable.Physicalities,
+                    (pIns, _) = await StageAdjudicateAsync(conn, "physicalities", IntentStageTable.Physicalities,
                         physBlobs, keptPhys, 0, keptPhys.Count, ct);
-                    pIns = keptPhys.Count;
-                    rtCopy++;
+                    rtApply += StageAdjudicateRoundTrips;
                 }
                 if (keptAtts.Count > 0)
                 {
-                    await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
+                    (aIns, aFold) = await StageAdjudicateAsync(conn, "attestations", IntentStageTable.Attestations,
                         attBlobs, keptAtts, 0, keptAtts.Count, ct);
-                    aIns = keptAtts.Count;
-                    rtCopy++;
+                    rtApply += StageAdjudicateRoundTrips;
                 }
             }
             else
             {
-                // Bulk COPY fans out across connections owning DISJOINT
+                // Bulk staging fans out across connections owning DISJOINT
                 // index keyspaces (sorted + range-partitioned: id for btree
                 // tables, hilbert for the coord GiST). Fresh-seed-shaped
-                // volumes additionally cycle secondary indexes: drop → COPY
+                // volumes additionally cycle secondary indexes: drop → land
                 // clean heaps → parallel sort-based rebuilds (journal-backed
                 // for crash recovery). Per-table barriers keep referenced
                 // rows durable before their referencers (entities →
                 // physicalities → attestations). The control tx holds the
                 // advisory lock across the whole window, so no other applier
                 // interleaves; a crash mid-phase leaves no flush-journal
-                // token and the replay's verification subtracts whatever
-                // landed.
+                // token, and the replay's ON CONFLICT adjudication absorbs
+                // whatever content already landed.
                 //
                 // Cycle scope: inside a bulk run the run-scoped cycle owns
                 // the indexes — each qualifying apply drops whatever is
@@ -453,9 +249,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 // appear in pg_index) and the ONE rebuild happens at
                 // CompleteBulkRunAsync. Outside a bulk run (no bracket),
                 // the apply cycles locally as before. Correct with the
-                // indexes down between applies: every write-lane presence
-                // probe (*_stored_bitmap / *_present_ordinals) is a PK
-                // lookup, and PK/unique/exclusion never cycle.
+                // indexes down between applies: the ON CONFLICT arbiter is
+                // the PK, and PK/unique/exclusion never cycle.
                 var cycle = _runCycle;
                 if (cycle is null)
                 {
@@ -476,63 +271,22 @@ public sealed partial class NpgsqlSubstrateWriter
                     ("consensus", (long)keptAtts.Count),
                 }, ct);
 
-                rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
-                    entBlobs, keptEnts, ct);
-                eIns = keptEnts.Count;
-                rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                    physBlobs, keptPhys, ct);
-                pIns = keptPhys.Count;
-                rtCopy += await CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
-                    attBlobs, keptAtts, ct);
-                aIns = keptAtts.Count;
+                (int rt, long ins, long _) = await AdjudicatePhaseParallelAsync(
+                    "entities", IntentStageTable.Entities, entBlobs, keptEnts, ct);
+                rtApply += rt; eIns = ins;
+                (rt, ins, _) = await AdjudicatePhaseParallelAsync(
+                    "physicalities", IntentStageTable.Physicalities, physBlobs, keptPhys, ct);
+                rtApply += rt; pIns = ins;
+                long merged;
+                (rt, ins, merged) = await AdjudicatePhaseParallelAsync(
+                    "attestations", IntentStageTable.Attestations, attBlobs, keptAtts, ct);
+                rtApply += rt; aIns = ins; aFold = merged;
 
                 if (!ReferenceEquals(cycle, _runCycle))
                     await cycle.FinishAsync(ct);
             }
 
-            if (mergeIds.Count > 0)
-            {
-                // Same class as consensus fold: unbounded unnest UPDATE AVs
-                // postgres 18 on large bytea[] arrays — chunk writes.
-                const int mergeChunk = 32_768;
-                const string mergeSql =
-                    "UPDATE laplace.attestations a SET "
-                    + "  observation_count = a.observation_count + d.games, "
-                    + "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
-                    + "FROM (SELECT unnest($1::bytea[]) AS id, unnest($2::bigint[]) AS games, "
-                    + "             unnest($3::timestamptz[]) AS ts) d "
-                    + "WHERE a.id = d.id";
-                for (int off = 0; off < mergeIds.Count; off += mergeChunk)
-                {
-                    int m = Math.Min(mergeChunk, mergeIds.Count - off);
-                    await using var merge = conn.CreateCommand();
-                    merge.Transaction = tx;
-                    merge.CommandTimeout = 0;
-                    merge.CommandText = mergeSql;
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeIds.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeGames.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    aFold += await merge.ExecuteNonQueryAsync(ct);
-                    rtMerge++;
-                }
-            }
-
             await tx.CommitAsync(ct);
-
-            // ONLY now that the whole apply committed are these ids durably persisted, so
-            // subsequent applies this run may skip re-probing them. Done post-commit so a
-            // rolled-back apply never poisons the cache with never-persisted ids; a miss is
-            // harmless — the next apply simply probes and finds them present. (The parallel
-            // COPY sub-txns commit their rows independently, so a control-tx failure after
-            // that point still leaves the rows present and a later probe will catch them —
-            // the cache is a pure optimization, never a correctness input.)
-            if (persistedEnt is not null && novelEntIds is not null)
-                foreach (var id in novelEntIds) persistedEnt.Add(id);
-            if (persistedPhys is not null && novelPhysIds is not null)
-                foreach (var id in novelPhysIds) persistedPhys.Add(id);
         }
         catch
         {
@@ -541,12 +295,17 @@ public sealed partial class NpgsqlSubstrateWriter
             throw;
         }
 
-        int rt = rtLock + rtJournal + rtProbe + rtCopy + rtMerge;
+        // Novelty telemetry derives from the server's own insert row counts —
+        // a staged distinct row the insert did NOT land was already present.
+        long eSkip = keptEnts.Count - eIns;
+        long pSkip = keptPhys.Count - pIns;
+
+        int rt2 = rtLock + rtJournal + rtApply;
         _log.LogInformation(
-            "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Probe} probe + {Copy} copy + {Merge} merge "
-            + "({E:N0}e/{P:N0}p/{A:N0}a novel, {Fold:N0} merged)",
-            rt, rtLock, rtJournal, rtProbe, rtCopy, rtMerge, eIns, pIns, aIns, aFold);
-        return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt, false);
+            "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Apply} stage/adjudicate "
+            + "({E:N0}e/{P:N0}p/{A:N0}a inserted, {Fold:N0} merged, {ESkip:N0}e/{PSkip:N0}p present)",
+            rt2, rtLock, rtJournal, rtApply, eIns, pIns, aIns, aFold, eSkip, pSkip);
+        return (checked((int)eIns), checked((int)pIns), checked((int)aIns), aFold, eSkip, pSkip, rt2, false);
     }
 
     private static List<(IntPtr Ptr, long Len)> CollectBlobs(
@@ -571,164 +330,88 @@ public sealed partial class NpgsqlSubstrateWriter
         return blobs;
     }
 
+    /// <summary>Round trips per <see cref="StageAdjudicateAsync"/> call. The
+    /// unit in this lane is one serialized server VISIT per connection, not
+    /// one wire command: the retired COPY groups also ran
+    /// BEGIN + GUCs + COPY + COMMIT and counted 1. Staging DDL + COPY +
+    /// adjudicating insert pipeline on one connection the same way.</summary>
+    private const int StageAdjudicateRoundTrips = 1;
+
     /// <summary>
-    /// Shared chunked, connection-parallel presence probe. Sends the ids in
-    /// ProbeChunkIds-sized chunks as $1 (bytea[]), lets
-    /// <paramref name="bindKeys"/> add the target table's partition-key
-    /// arrays for the same [start, start+n) window, and decodes the returned
-    /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
-    /// triple-keyed) rides this one implementation.
+    /// Stages one kept-row range into a session-local TEMP table (raw binary
+    /// COPY, dropped at the surrounding transaction's commit) and lands it
+    /// with one set-based INSERT .. SELECT whose ON CONFLICT clause is the
+    /// presence adjudication. Returns (rows inserted, rows merged); for the
+    /// DO NOTHING tables merged is always 0 and inserted &lt; staged means
+    /// already-present content was skipped server-side.
     /// </summary>
-    private async Task<HashSet<Hash128>> ProbePresentCoreAsync(
-        string commandText, IReadOnlyList<Hash128> ids,
-        Action<NpgsqlParameterCollection, int, int> bindKeys,
-        Action<int> addRoundTrips, CancellationToken ct)
+    private static async Task<(long Inserted, long Merged)> StageAdjudicateAsync(
+        NpgsqlConnection conn, string tableName, IntentStageTable table,
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept,
+        int start, int count, CancellationToken ct)
     {
-        var present = new HashSet<Hash128>();
-        if (ids.Count == 0) return present;
+        string cols = IntentStage.CopyColumnList(table);
+        string stage = "_laplace_stage_" + tableName;
 
-        int chunkCount = (ids.Count + ProbeChunkIds - 1) / ProbeChunkIds;
-        var perChunk = new List<Hash128>[chunkCount];
-
-        async Task ProbeChunkAsync(int c, CancellationToken token)
+        // LIKE .. INCLUDING DEFAULTS mirrors column names/types/typmods (no
+        // geometry re-coercion on the way back out) and keeps NOT NULL
+        // columns outside the COPY list satisfiable; CHECKs, indexes and the
+        // generated radius_origin are deliberately NOT copied — staging is a
+        // pipe, the real table enforces.
+        await using (var ddl = conn.CreateCommand())
         {
-            int start = c * ProbeChunkIds;
-            int n = Math.Min(ProbeChunkIds, ids.Count - start);
-            var chunk = new byte[n][];
-            for (int i = 0; i < n; i++) chunk[i] = ids[start + i].ToBytes();
-
-            await using var conn = await _ds.OpenConnectionAsync(token);
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;
-            cmd.CommandText = commandText;
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            bindKeys(cmd.Parameters, start, n);
-            var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
-
-            var hits = new List<Hash128>();
-            long bits = (long)bm.Length * 8;
-            for (int i = 0; i < n; i++)
-                if (i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0)
-                    hits.Add(ids[start + i]);
-            perChunk[c] = hits;
+            ddl.CommandText =
+                $"CREATE TEMP TABLE {stage} (LIKE laplace.{tableName} INCLUDING DEFAULTS) ON COMMIT DROP";
+            await ddl.ExecuteNonQueryAsync(ct);
         }
 
-        if (chunkCount == 1)
+        await CopyKeptAsync(conn, $"pg_temp.{stage}", table, blobs, kept, start, count, ct);
+
+        if (table == IntentStageTable.Attestations)
         {
-            await ProbeChunkAsync(0, ct);
+            // DO UPDATE, never DO NOTHING: a re-seen attestation id carries new
+            // observations — its count MERGES (additive) and its timestamp
+            // advances, byte-for-byte the semantics of the retired present-
+            // attestation merge UPDATE. RETURNING old (PG 18) distinguishes a
+            // fresh insert (old is the null row) from a conflict-merge, so
+            // novelty telemetry stays honest; the classic xmax = 0 trick is
+            // rejected on partitioned tables ("cannot retrieve a system
+            // column in this context").
+            await using var ins = conn.CreateCommand();
+            ins.CommandTimeout = 0;
+            ins.CommandText =
+                $"WITH adjudicated AS ("
+                + $" INSERT INTO laplace.{tableName} ({cols})"
+                + $" SELECT {cols} FROM pg_temp.{stage}"
+                + " ON CONFLICT (id, type_id, subject_id) DO UPDATE SET"
+                + "   observation_count = attestations.observation_count + EXCLUDED.observation_count,"
+                + "   last_observed_at  = GREATEST(attestations.last_observed_at, EXCLUDED.last_observed_at)"
+                + " RETURNING (old.id IS NULL) AS inserted)"
+                + " SELECT count(*) FILTER (WHERE inserted),"
+                + "        count(*) FILTER (WHERE NOT inserted) FROM adjudicated";
+            await using var rd = await ins.ExecuteReaderAsync(ct);
+            await rd.ReadAsync(ct);
+            return (rd.GetInt64(0), rd.GetInt64(1));
         }
-        else
-        {
-            int workers = Math.Min(chunkCount, Math.Min(ApplyParallelism, 8));
-            int next = -1;
-            await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
-            {
-                for (int c = Interlocked.Increment(ref next); c < chunkCount;
-                     c = Interlocked.Increment(ref next))
-                    await ProbeChunkAsync(c, token);
-            }, ct);
-        }
 
-        foreach (var hits in perChunk)
-            if (hits is not null)
-                foreach (var id in hits) present.Add(id);
-        addRoundTrips(chunkCount);
-        return present;
+        string arbiter = table == IntentStageTable.Entities ? "(id, tier)" : "(hilbert_index, id)";
+        await using var insert = conn.CreateCommand();
+        insert.CommandTimeout = 0;
+        insert.CommandText =
+            $"INSERT INTO laplace.{tableName} ({cols})"
+            + $" SELECT {cols} FROM pg_temp.{stage}"
+            + $" ON CONFLICT {arbiter} DO NOTHING";
+        long inserted = await insert.ExecuteNonQueryAsync(ct);
+        return (inserted, 0);
     }
 
-    /// <summary>Tier-keyed presence probe (entities: LIST(tier), t2 further
-    /// HASH(id)). The write lane stages every entity's tier, so the probe
-    /// prunes to one index descent per id instead of one per leaf.</summary>
-    private Task<HashSet<Hash128>> ProbePresentTieredParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<short> tiers,
-        Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (tiers.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {tiers.Count} tiers");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
-            (parameters, start, n) =>
-            {
-                var chunk = new short[n];
-                for (int i = 0; i < n; i++) chunk[i] = tiers[start + i];
-                parameters.Add(new NpgsqlParameter
-                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            }, addRoundTrips, ct);
-    }
-
-    /// <summary>Pair-keyed presence probe (physicalities:
-    /// RANGE(hilbert_index)). The write lane stages every row's hilbert key
-    /// (it is the parallel-COPY sort key already), so the probe prunes
-    /// per row instead of descending every leaf per id.</summary>
-    private Task<HashSet<Hash128>> ProbePresentPairKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> keys,
-        Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (keys.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {keys.Count} keys");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
-            (parameters, start, n) =>
-            {
-                var chunk = new byte[n][];
-                for (int i = 0; i < n; i++) chunk[i] = keys[start + i].ToBytes();
-                parameters.Add(new NpgsqlParameter
-                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            }, addRoundTrips, ct);
-    }
-
-    /// <summary>Triple-keyed presence probe (attestations: LIST(type_id) ->
-    /// HASH(subject_id); an id-only probe pays one index descent per leaf —
-    /// ~145x).</summary>
-    // Identity permutation sorted by a partition-key comparison over indices, so all parallel
-    // probe arrays can be reordered together for sequential-I/O locality (see the call site).
-    private static int[] BuildProbePermutation(int count, Comparison<int> byKey)
-    {
-        var perm = new int[count];
-        for (int i = 0; i < count; i++) perm[i] = i;
-        Array.Sort(perm, byKey);
-        return perm;
-    }
-
-    private static List<T> ApplyProbePermutation<T>(IReadOnlyList<T> src, int[] perm)
-    {
-        var reordered = new List<T>(src.Count);
-        for (int i = 0; i < perm.Length; i++) reordered.Add(src[perm[i]]);
-        return reordered;
-    }
-
-    private Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
-        IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (typeIds.Count != ids.Count || subjectIds.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {typeIds.Count} types / {subjectIds.Count} subjects");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2, $3)", ids,
-            (parameters, start, n) =>
-            {
-                var chunkTypes = new byte[n][];
-                var chunkSubjects = new byte[n][];
-                for (int i = 0; i < n; i++)
-                {
-                    chunkTypes[i] = typeIds[start + i].ToBytes();
-                    chunkSubjects[i] = subjectIds[start + i].ToBytes();
-                }
-                parameters.Add(new NpgsqlParameter
-                { Value = chunkTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                parameters.Add(new NpgsqlParameter
-                { Value = chunkSubjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            }, addRoundTrips, ct);
-    }
-
-    /// <summary>SortKey partitions parallel COPY groups into disjoint index
+    /// <summary>SortKey partitions parallel apply groups into disjoint index
     /// keyspaces: the row id for btree-indexed tables, the hilbert index for
     /// physicalities (coord GiST locality).</summary>
     private readonly record struct KeptRow(Hash128 SortKey, StagedRowRef Row, long Patch, int CountOff);
 
     private static async Task CopyKeptAsync(
-        NpgsqlConnection conn, string tableName, IntentStageTable table,
+        NpgsqlConnection conn, string target, IntentStageTable table,
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept,
         int start, int count, CancellationToken ct)
     {
@@ -753,23 +436,27 @@ public sealed partial class NpgsqlSubstrateWriter
                 countOffs![i] = k.CountOff;
             }
         }
-        await CopyFilteredAsync(conn, tableName, table, blobs, rows, patches, countOffs, ct);
+        await CopyFilteredAsync(conn, target, table, blobs, rows, patches, countOffs, ct);
     }
 
-    private async Task<int> CopyPhaseParallelAsync(
+    private async Task<(int RoundTrips, long Inserted, long Merged)> AdjudicatePhaseParallelAsync(
         string tableName, IntentStageTable table,
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct)
     {
-        if (kept.Count == 0) return 0;
+        if (kept.Count == 0) return (0, 0, 0);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int groups = (int)Math.Min(ApplyParallelism, Math.Max(1L, kept.Count / 16_384));
 
-        // Sort by id so range-partitioned groups own disjoint btree
-        // keyspaces — measured LWLock:BufferContent contention disappears
-        // when concurrent COPY backends never share index pages.
+        // Sort by the key whose index the insert descends, so range-
+        // partitioned groups own disjoint keyspaces — measured
+        // LWLock:BufferContent contention disappears when concurrent
+        // backends never share index pages — and each group's INSERT..SELECT
+        // walks its staging heap (COPYed in this order) sequentially.
         kept.Sort(static (a, b) => a.SortKey.CompareToBytewise(b.SortKey));
         int per = (kept.Count + groups - 1) / groups;
 
+        long inserted = 0, merged = 0;
+        int roundTrips = 0;
         await CpuTopology.RunPinnedAsyncParallel(groups, async (g, token) =>
         {
             int start = g * per;
@@ -787,26 +474,31 @@ public sealed partial class NpgsqlSubstrateWriter
                     + "SET LOCAL jit = off";
                 await guc.ExecuteNonQueryAsync(token);
             }
-            await CopyKeptAsync(conn, tableName, table, blobs, kept, start, n, token);
+            var r = await StageAdjudicateAsync(conn, tableName, table, blobs, kept, start, n, token);
             await tx.CommitAsync(token);
+            Interlocked.Add(ref inserted, r.Inserted);
+            Interlocked.Add(ref merged, r.Merged);
+            Interlocked.Add(ref roundTrips, StageAdjudicateRoundTrips);
         }, ct);
 
         sw.Stop();
         _log.LogInformation(
-            "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s)",
+            "WS_APPLY {Table}: {Rows:N0} staged rows across {Groups} key-range connection(s) in {Ms:N0}ms "
+            + "({Rps:N0} rows/s; {Inserted:N0} inserted, {Merged:N0} merged)",
             tableName, kept.Count, groups, sw.ElapsedMilliseconds,
-            kept.Count / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
-        return groups;
+            kept.Count / Math.Max(1e-3, sw.Elapsed.TotalSeconds),
+            inserted, merged);
+        return (roundTrips, inserted, merged);
     }
 
     private static async Task CopyFilteredAsync(
-        NpgsqlConnection conn, string tableName, IntentStageTable table,
+        NpgsqlConnection conn, string target, IntentStageTable table,
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, IReadOnlyList<StagedRowRef> rows,
         long[]? patchedCounts, IReadOnlyList<int>? countValueOffsets, CancellationToken ct)
     {
         string cols = IntentStage.CopyColumnList(table);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
+            $"COPY {target} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
         await CopyTupleParser.WriteFilteredAsync(
             stream, blobs, rows, patchedCounts, countValueOffsets, ct);
     }

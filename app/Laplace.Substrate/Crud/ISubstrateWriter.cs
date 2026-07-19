@@ -31,10 +31,11 @@ public interface ISubstrateWriter
         => ApplyManyAsync(changes, ct);
 
     /// <summary>
-    /// Applies one whole working set (Rule #8: descent already filtered the
-    /// change to claimed-novel rows; the writer verifies in-transaction and
-    /// bulk-COPYs what survives). Implementations without a working-set lane
-    /// fall back to a plain apply.
+    /// Applies one whole working set (Rule #8 as amended 2026-07-18: the
+    /// client dedups, the writer bulk-COPYs into session staging and the
+    /// server adjudicates presence with one set-based ON CONFLICT insert per
+    /// table). Implementations without a working-set lane fall back to a
+    /// plain apply.
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyAsync(change, ct);

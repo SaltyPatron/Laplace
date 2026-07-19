@@ -15,7 +15,7 @@ per-file producer/queue) cascades into most of the "perf" rows — do it once, s
 
 ## THE ROOT (do first — cascades)
 - [x] Bound the working set — flush on a memory/row envelope, not 2.85M-record blobs (kills compose collapse 30k→1.8k, shrinks probe/fold)
-- [ ] Client-dedup + ON CONFLICT offload — drop the 12M-id / 37s DB existence probe (DB = lookups)
+- [x] Client-dedup + ON CONFLICT offload — drop the 12M-id / 37s DB existence probe (DB = lookups) — feature/apply-onconflict-offload: apply-side bitmap probes + merge UPDATE + run-persisted-id cache deleted; COPY into per-session TEMP staging + set-based ON CONFLICT (DO NOTHING content / DO UPDATE attestation merge); journal-hit replays now also skip the consensus fold
 - [~] Producer/queue/consumer — N parallel file-producers → bounded queue → one continuous consumer (subsumes core-saturation + per-file identity)
 
 ## Perf (measured)

@@ -125,7 +125,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     ? await _inner.ApplyWorkingSetAsync(forwarded, ct)
                     : await _inner.ApplyManyAsync(forwarded, ct);
 
-            if (delta is { Count: > 0 })
+            // INVARIANT: one fold per claimed flush-journal token. A journal
+            // hit means a prior apply of this exact working set committed —
+            // and that apply's own flow folded this same delta right after its
+            // evidence landed. The fold is additive, not idempotent, so
+            // folding a replay would double-count the batch's testimony in
+            // consensus; a journal hit must no-op evidence AND fold.
+            if (delta is { Count: > 0 } && !result.JournalReplayHit)
                 await UpsertDeltaAsync(delta, ct);
 
             return result;
