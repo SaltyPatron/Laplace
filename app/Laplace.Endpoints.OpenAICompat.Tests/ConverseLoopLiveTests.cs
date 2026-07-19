@@ -31,7 +31,7 @@ public sealed class ConverseLoopLiveTests
     [SkippableFact]
     public async Task Loop_DepositConfirmWalkRefute_AnswerChanges()
     {
-        Skip.IfNot(CanReachSubstrate(), "Postgres substrate not reachable");
+        Skip.IfNot(SubstrateFloorPresent(), "substrate floor absent (unseeded/mid-reseed DB)");
         CodepointPerfcache.LoadDefault();
 
         // Fresh, collision-proof tokens so this run's cell has no prior history.
@@ -89,15 +89,22 @@ public sealed class ConverseLoopLiveTests
         return (long)(await cmd.ExecuteScalarAsync())! > 0;
     }
 
-    private static bool CanReachSubstrate()
+    // The loop test deposits content, folds, and walks — it needs a SEEDED
+    // substrate, not merely a reachable server. word_id() is a pure hash and
+    // returns on an empty schema, so a connectivity check would run the test
+    // against an unseeded/mid-reseed DB and fail spuriously (the codepoint
+    // floor is absent → deposits mint nothing → 'confirmed claim not served').
+    // Gate on the floor itself: present → run and prove the loop; absent →
+    // skip (the deterministic, DB-independent proof is chat_loop.sql regress).
+    private static bool SubstrateFloorPresent()
     {
         try
         {
             using var conn = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString());
             conn.Open();
-            using var cmd = new NpgsqlCommand("SELECT laplace.word_id('the');", conn);
-            cmd.ExecuteScalar();
-            return true;
+            using var cmd = new NpgsqlCommand(
+                "SELECT 1 FROM laplace.entities WHERE type_id = laplace.entity_type_id('Codepoint') LIMIT 1", conn);
+            return cmd.ExecuteScalar() is not null;
         }
         catch
         {
