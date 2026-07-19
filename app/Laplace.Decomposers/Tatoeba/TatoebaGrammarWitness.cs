@@ -57,7 +57,7 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         // The content root is the REAL sentence entity — content-addressed, UAX-tiered,
         // shared with any other source that ingests the same text (OpenSubtitles, a UAX
         // parse). The Tatoeba numeric id becomes a mere external-id annotation ON that
-        // root (HAS_EXTERNAL_ID → extId), never the sentence's identity. See .scratchpad/16 §2a.
+        // root (HAS_EXTERNAL_ID → extId), never the sentence's identity. See docs/specs/16 §2a.
         if (!ContentTierSpine.TryStageIntoBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
 

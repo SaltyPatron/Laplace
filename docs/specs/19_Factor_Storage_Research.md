@@ -462,7 +462,7 @@ Issue 52 lists /v1/completions among the endpoints killed by this
 - Walk-engine findings (memory): the 14s cold walk was per-backend GenCorpus rebuild;
   walk itself ~1 ms/step; "fix = perfcache-class mmap blob". No engine/ code contains
   a GenCorpus blob implementation yet (grep of `engine/` for GenCorpus: no files).
-- `.scratchpad/14_Foundry_Root_Cause_and_Research.txt:536` flags "per-call GUC/mmap
+- `docs/specs/14_Foundry_Root_Cause_and_Research.txt:536` flags "per-call GUC/mmap
   check (Bug A class)" as a suspect pattern — the known hazard note attached to
   perfcache-GUC access from parallel workers (Bug A: recall/label perfcache-GUC
   parallel-worker segfault, memory `project_native_crash_bugs_2026-07-06`).

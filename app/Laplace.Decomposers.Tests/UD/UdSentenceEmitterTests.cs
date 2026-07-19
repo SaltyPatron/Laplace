@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.UD.Tests;
 
-// Validates .scratchpad/16 §1a (HAS_LANGUAGE at sentence root) and §5 (XPOS IS_A UPOS + FEAT_*).
+// Validates docs/specs/16 §1a (HAS_LANGUAGE at sentence root) and §5 (XPOS IS_A UPOS + FEAT_*).
 public sealed class UdSentenceEmitterTests
 {
     private static readonly Hash128 UdSource = UDDecomposer.Source;

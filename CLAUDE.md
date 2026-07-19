@@ -129,7 +129,7 @@ preserved witness; the rating engine runs on the board. Record = PGN tokens verb
 (SAN, clocks, eval tokens, comments, NAGs); calculate = replay/positions/geometry/motifs
 under the versioned ChessAnalysis source. The board geometry ladder (square/piece S³
 anchors → resolved-move transitions → position geometry → mantissa-packed game
-trajectories) is specified in `.scratchpad/11`.
+trajectories) is specified in `docs/specs/11`.
 
 ## The mesh — omni-glottal by construction
 
@@ -307,9 +307,12 @@ Bypass: `pipeline.sh --force-all` / `LAPLACE_FORCE_ALL=1` (CI dispatch input
 
 ## Docs
 
-`.scratchpad/02` is the issue tracker; `.scratchpad/21` is the invention catalog
-(41 mechanisms, enumerated and code-cited). Specs, when deep work touches their area:
-05 substrate invariants, 06 engineering rules, 08 record-vs-calculate, 11 three-layer
-provenance/consensus + chess ladder, 12 Mold-A-Model map, 14 foundry working doc,
-15 Gödel/OODA loop, 16 tier-correct attestation, 17 decomposer audit, 18 typed strata +
-mesh.
+`docs/INDEX.md` is the doc map. Living specs live in `docs/specs/` (binding law,
+annotate-on-supersede); `.scratchpad/` holds session logs and campaign docs.
+`.scratchpad/02` is the issue tracker; `docs/INVENTIONS.md` is the invention catalog
+(41 mechanisms, enumerated and code-cited). Specs, when deep work touches their area
+(`docs/specs/`): 05 substrate invariants, 06 engineering rules, 08 record-vs-calculate,
+09 substrate-LM thesis, 11 three-layer provenance/consensus + chess ladder, 12
+Mold-A-Model map, 14 foundry working doc, 15 Gödel/OODA loop, 16 tier-correct
+attestation, 18 typed strata + mesh, 19 factor storage; `.scratchpad/17` decomposer
+audit.

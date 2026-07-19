@@ -10,8 +10,8 @@ applyTo: 'app/Laplace.Decomposers/**'
   Batching/dedup/Glicko fold/COPY belong to the pipeline spine
   (`IngestBatchPipeline` working-set mode → `ConsensusAccumulatingWriter` → `NpgsqlWorkingSetApply`).
 - The spec is the SEQUENCE: the right algorithm at the wrong pipeline stage is a
-  violation ([doc 06](../../.scratchpad/06_Engineering_Ruleset.txt) Rule #8).
-- Ingestion is RECORDING, not processing ([doc 08](../../.scratchpad/08_Record_vs_Calculate_Spec.txt)):
+  violation ([doc 06](../../docs/specs/06_Engineering_Ruleset.txt) Rule #8).
+- Ingestion is RECORDING, not processing ([doc 08](../../docs/specs/08_Record_vs_Calculate_Spec.txt)):
   transcribe only what the source literally asserts (witnessed layer); anything derived
   goes to the versioned, evictable calculated layer. Never mix them.
 - SourceIds are load-bearing identity — never change one. Re-ingest hash identity is the

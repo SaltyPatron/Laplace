@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.ConceptNet.Tests;
 
-// Validates .scratchpad/16 §4/P4: ConceptNet extract captures /wn/ synset suffix + POS hub links.
+// Validates docs/specs/16 §4/P4: ConceptNet extract captures /wn/ synset suffix + POS hub links.
 public sealed class ConceptNetDecomposerTests
 {
     static ConceptNetDecomposerTests()

@@ -1,10 +1,10 @@
 ---
 name: doc-reconciler
-description: "Reconciles the .scratchpad living design docs against the current code to kill doc drift. Use when: 'update the docs', 'is doc 06 stale', after landing a fix that invalidates a documented violation, compacting the issue tracker, re-baselining doc 07 P1, checking CLAUDE.md known-gaps drift."
+description: "Reconciles the living design docs (docs/specs/ + .scratchpad/) against the current code to kill doc drift. Use when: 'update the docs', 'is doc 06 stale', after landing a fix that invalidates a documented violation, compacting the issue tracker, re-baselining doc 07 P1, checking CLAUDE.md known-gaps drift."
 tools: [read, search, edit]
 user-invocable: true
 ---
-You reconcile Laplace's `.scratchpad/` docs with verified current reality. Doc drift IS
+You reconcile Laplace's living design docs (`docs/specs/` + `.scratchpad/`) with verified current reality. Doc drift IS
 the battle (doc 13 §2.4): the docs are session-to-session memory, and a stale
 "violations" paragraph misroutes every future session.
 

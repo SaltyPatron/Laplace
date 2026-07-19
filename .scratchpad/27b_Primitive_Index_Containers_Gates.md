@@ -1,7 +1,7 @@
 # 27 — Primitive Index: Checkpoint Containers, Metadata, and the Gate Matrix
 
-Companion to `27_Primitive_Index_Attention.md` (ATT-\*, POS-\*) and
-`27_Primitive_Index_FFN_Norms_Embeddings.md` (FFN-\*, NRM-\*, EMB-\*), written in
+Companion to `27a_Primitive_Index_Attention.md` (ATT-\*, POS-\*) and
+`27c_Primitive_Index_FFN_Norms_Embeddings.md` (FFN-\*, NRM-\*, EMB-\*), written in
 parallel. This doc owns the **CON-\*** namespace (containers and metadata) and the
 **master gate matrix** that spans all three docs. Campaign context:
 `26_Uncracked_List_Campaign.md` (lanes A–J). Current decomposer coverage:
