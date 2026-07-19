@@ -26,6 +26,13 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// bans; the deterministic, fully-isolated proof of the same loop is the
 /// rolled-back chat_loop.sql regress test).
 /// </summary>
+// Tier=db: a LIVE, shared-substrate-mutating end-to-end smoke — excluded from
+// the CI deploy gate (DOTNET_FILTER 'Tier!=db') alongside every other
+// DB-dependent test. It is environment-sensitive by nature (needs a seeded
+// substrate, deposits and folds real cells) and must never gate publish. The
+// deterministic, isolated, rolled-back proof of the SAME loop is chat_loop.sql
+// in pg_regress, which does gate CI. Run this locally to exercise the C# lanes.
+[Trait("Tier", "db")]
 public sealed class ConverseLoopLiveTests
 {
     [SkippableFact]
