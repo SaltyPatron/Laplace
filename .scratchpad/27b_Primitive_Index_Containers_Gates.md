@@ -1,4 +1,4 @@
-# 27 — Primitive Index: Checkpoint Containers, Metadata, and the Gate Matrix
+# 27b — Primitive Index: Checkpoint Containers, Metadata, and the Gate Matrix
 
 Companion to `27a_Primitive_Index_Attention.md` (ATT-\*, POS-\*) and
 `27c_Primitive_Index_FFN_Norms_Embeddings.md` (FFN-\*, NRM-\*, EMB-\*), written in

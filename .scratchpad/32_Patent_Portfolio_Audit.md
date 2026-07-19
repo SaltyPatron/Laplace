@@ -1,4 +1,4 @@
-# 22 — Patent Portfolio Audit (code-grounded)
+# 32 — Patent Portfolio Audit (code-grounded)
 
 Date: 2026-07-11. Produced by a seven-way parallel audit of the ACTUAL SOURCE
 (C, C++, C#, SQL) — not doc 21, not comments. Each subsystem auditor extracted

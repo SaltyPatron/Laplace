@@ -64,7 +64,8 @@ vocabularies that accreted around these inventions without ever being consolidat
     the source asserts it — a corpus attests language at the sentence root, not per
     word. (Doc 16.)
 14. HIGHWAY MASK + SALIENCE BANDS. A 256-bit relation-type channel bank on every
-    entity and attestation; 189 governed types in 13 salience bands generated from
+    entity and attestation; governed types in 13 salience bands (count in docs/INVENTORY.md —
+203 as of 2026-07-19, was 189 at writing) generated from
     one manifest; perfcache-backed zero-SQL gating; bands double as head-importance
     priors and intent-conditional read weights. (relation_types.toml,
     highway_mask.c, highway_manifest.h — 189/13 verified in parity 2026-07-10.)

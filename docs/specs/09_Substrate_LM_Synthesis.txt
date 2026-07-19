@@ -153,7 +153,8 @@ HEADS, LAYERS, AND ANNOTATIONS-AS-ENTITIES (the witnessed richness IS the archit
 SUBSTRATE INVENTORY / THE ARCHITECTURE IS COUNTED, NOT CHOSEN (2026-07-04)
 -------------------------------------------------------------------------
   attestations ~144.5M, entities ~69.8M, physicalities ~77.2M.
-  HEADS = 181 relation types (manifest), in ~11 rank families (taxonomic/causal/definitional/
+  HEADS = 181 relation types (manifest) [count superseded 2026-07-19 -> 203; docs/INVENTORY.md
+  is the count authority — cite it, never re-embed a number here], in ~11 rank families (taxonomic/causal/definitional/
     partitive/oppositional/scalar_valued/associative/equivalence/lexical_glue/standards_
     structural/tensor_calculation), weighted by 13 salience bands (mandate..probationary =
     head-importance priors). x conditioning facets (player/clock/phase/rating/context) =>
@@ -161,12 +162,12 @@ SUBSTRATE INVENTORY / THE ARCHITECTURE IS COUNTED, NOT CHOSEN (2026-07-04)
   LAYERS = the tier ladder, all populated (live): t0 codepoint 1,113,869 / t1 grapheme 917,889 /
     t2 word 33,554,125 / t3 sentence 2,946,282 / t4 document 42,984,059. 5 base tiers + modality
     ladders + multi-hop composition => dozens of layers.
-  TENSORS = 181 relation affinity submatrices (relation type = a tensor); "tensor_calculation"
+  TENSORS = 181 relation affinity submatrices [-> 203, docs/INVENTORY.md] (relation type = a tensor); "tensor_calculation"
     is a declared rank family; physicalities carry the geometric tensors.
   KEY: a relation type is SIMULTANEOUSLY a head (lens over its edges), a slice of the tier
   composition (layer), and a tensor (its consensus-weighted affinity block) — three VIEWS of one
   relational structure, which is why layer/head/tensor are counted together. The architecture is
-  READ OFF the data (181 heads, 5+ layers, 181 tensors), not guessed as hyperparameters — no AI
+  READ OFF the data (181 heads, 5+ layers, 181 tensors [-> 203, docs/INVENTORY.md]), not guessed as hyperparameters — no AI
   model ingested. Effective hidden dim / how much depth the material sustains still come from the
   spectral structure (Lanczos on the normalized Laplacian; eigenvalue decay). Residue = ROUTING/
   composition of these heads across layers (eigenmap x consensus x salience), the one build left.

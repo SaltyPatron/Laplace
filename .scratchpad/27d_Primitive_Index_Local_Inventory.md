@@ -1,4 +1,4 @@
-# 27 — Primitive Index: Empirical Tensor-Role Inventory of Local Checkpoints
+# 27d — Primitive Index: Empirical Tensor-Role Inventory of Local Checkpoints
 
 Date: 2026-07-15. Method: PowerShell only — first 8 bytes of each `.safetensors` = LE uint64
 header length N, next N bytes = UTF-8 JSON `{tensor -> {dtype, shape, data_offsets}}`. Headers

@@ -160,7 +160,8 @@ linked into the extension DLL — `extension/CMakeLists.txt:70-80`):
     (`perfcache_format.h:15, 25, 83-87`), decomp/compose sections, BLAKE3 trailer.
 - **Highway blob** (`highway_table_load`, `highway_table.c:102-148`): identical
   mmap-per-platform code (`highway_table.c:37-85`); validates magic `0x5957484C`,
-  version, counts vs compile-time caps (189 relations / 13 bands,
+  version, counts vs compile-time caps (189 relations / 13 bands
+  [relations superseded 2026-07-19 -> 203; see docs/INVENTORY.md],
   `highway_manifest.h:5-8`), and section bounds (`highway_table.c:111-124`).
   **No CRC check** — that is a difference from the T0 blob. After mapping it builds a
   small in-memory derived index: BLAKE3 type-ids of all canonical names + a 1024-slot
