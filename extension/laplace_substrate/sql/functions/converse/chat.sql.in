@@ -7,8 +7,12 @@
 --           fallback answer with the free-form fused walk (converse_walk).
 --   CARRY   session is metadata: unresolved follow-ups ("it"/"more") carry the session's
 --           last resolved topic; "more" advances through non-empty fact layers.
---   CLOSE   witness the prompt (UserPrompt) and response (Response) back as PRECEDES
---           edges -- evaluation IS ingestion; next walk reads this turn.
+--   CLOSE   happens at the FRONTEND, not here: every caller (MCP chat tool, HTTP
+--           TurnWitness, CLI chat) deposits the prompt (UserPrompt) and response
+--           (Response) through the writer spine -- full content mint + evidence +
+--           inline fold, proper trust classes. SQL chat() stays read-side; its only
+--           write is session_topics app-state. (The old in-SQL witness_precedes_chain
+--           close folded consensus with zero evidence rows -- provenance-less.)
 CREATE OR REPLACE FUNCTION chat(p_prompt text, p_session bytea DEFAULT NULL,
                                 p_lang bytea DEFAULT NULL)
     RETURNS text
@@ -207,11 +211,9 @@ BEGIN
         END IF;
     END IF;
 
-    -- RECORD + OODA CLOSE.
+    -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.
     IF p_session IS NOT NULL THEN
         PERFORM session_record_prompt(p_session, p_prompt, resolved);
-        PERFORM witness_precedes_chain(p_prompt, source_id('substrate/source/UserPrompt/v1'));
-        PERFORM witness_precedes_chain(out,      source_id('substrate/source/Response/v1'));
     END IF;
 
     RETURN btrim(out);

@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
@@ -18,7 +19,7 @@ internal sealed class TurnWitness : BackgroundService
             FullMode = BoundedChannelFullMode.Wait
         });
 
-    private readonly record struct TurnItem(string Text, string Label);
+    private readonly record struct TurnItem(string Prompt, string? Reply);
 
     public bool IsOnline { get; private set; }
 
@@ -34,17 +35,18 @@ internal sealed class TurnWitness : BackgroundService
     }
 
     /// <summary>Record-or-fail: returns false when witness lane is offline (caller → 503).</summary>
-    public bool TryEnqueue(string text, string label)
+    public bool TryEnqueueTurn(string prompt, string? reply)
     {
-        if (!IsOnline || string.IsNullOrWhiteSpace(text))
+        if (!IsOnline || string.IsNullOrWhiteSpace(prompt))
             return false;
-        return _queue.Writer.TryWrite(new TurnItem(text.Trim(), label));
+        return _queue.Writer.TryWrite(new TurnItem(prompt.Trim(),
+            string.IsNullOrWhiteSpace(reply) ? null : reply.Trim()));
     }
 
-    public void Enqueue(string text, string label)
+    public void EnqueueTurn(string prompt, string? reply)
     {
-        if (!TryEnqueue(text, label))
-            _log.LogWarning("turn-witness rejected {Label} turn (lane offline or queue full)", label);
+        if (!TryEnqueueTurn(prompt, reply))
+            _log.LogWarning("turn-witness rejected turn (lane offline or queue full)");
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -59,7 +61,12 @@ internal sealed class TurnWitness : BackgroundService
             return;
         }
 
-        var writer = new NpgsqlSubstrateWriter(_substrate.DataSource);
+        // The accumulating wrapper is the load-bearing half: evidence lands AND the
+        // Glicko delta folds into consensus per apply, so the deposited turn is
+        // visible to the very next walk. A bare writer leaves testimony unfolded.
+        var inner = new NpgsqlSubstrateWriter(_substrate.DataSource);
+        await using var acc = new ConsensusAccumulatingWriter(inner, _substrate.DataSource);
+        var writer = (ISubstrateWriter)acc;
         bool floorPresent = false;
         bool bootstrapped = false;
         int consecutiveFailures = 0;
@@ -70,8 +77,6 @@ internal sealed class TurnWitness : BackgroundService
         {
             try
             {
-                _log.LogDebug("turn-witness processing {Label} ({Bytes} bytes)",
-                    item.Label, item.Text.Length);
                 if (!floorPresent && !(floorPresent = await FloorPresentAsync(ct)))
                 {
                     _log.LogWarning(
@@ -80,22 +85,40 @@ internal sealed class TurnWitness : BackgroundService
                     return;
                 }
 
-                var utf8 = Encoding.UTF8.GetBytes(item.Text);
-                if (!UserPromptContent.TryBuildWitnessChange(utf8, item.Label, out var change, out var rootId))
-                    continue;
-                if (await AlreadyWitnessedAsync(rootId, ct))
-                    continue;
-
                 if (!bootstrapped)
                 {
                     await writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
+                    await writer.ApplyAsync(ResponseContent.BuildBootstrapChange(), ct);
                     bootstrapped = true;
                 }
 
-                await writer.ApplyAsync(change, ct);
+                // Every turn is a distinct witnessing event: rows dedup by content
+                // address, but the testimony folds again — a repeated utterance IS
+                // another witness (chess parity: every play of a move counts).
+                var promptRoot = Hash128.Zero;
+                if (UserPromptContent.TryBuildWitnessChange(
+                        Encoding.UTF8.GetBytes(item.Prompt), "turn/prompt",
+                        out var promptChange, out var pr))
+                {
+                    await writer.ApplyAsync(promptChange, ct);
+                    promptRoot = pr;
+                }
+
+                if (item.Reply is { } reply &&
+                    ResponseContent.TryBuildWitnessChange(
+                        Encoding.UTF8.GetBytes(reply), "turn/reply",
+                        promptRoot == Hash128.Zero ? null : promptRoot,
+                        out var replyChange, out var replyRoot))
+                {
+                    await writer.ApplyAsync(replyChange, ct);
+                    _log.LogInformation("turn witnessed: prompt={PromptRoot} reply={ReplyRoot}",
+                        promptRoot, replyRoot);
+                }
+                else
+                {
+                    _log.LogInformation("turn witnessed: prompt={PromptRoot}", promptRoot);
+                }
                 consecutiveFailures = 0;
-                _log.LogInformation("turn witnessed: {Label} root={Root} ({Bytes} bytes)",
-                    item.Label, rootId, utf8.Length);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -110,7 +133,7 @@ internal sealed class TurnWitness : BackgroundService
                     _log.LogError(ex, "turn-witness disabled after {Count} consecutive failures", consecutiveFailures);
                     return;
                 }
-                _log.LogWarning(ex, "turn-witness deposit failed; {Label} turn dropped", item.Label);
+                _log.LogWarning(ex, "turn-witness deposit failed; turn dropped");
             }
         }
     }
@@ -121,15 +144,6 @@ internal sealed class TurnWitness : BackgroundService
         await using var cmd = new NpgsqlCommand(
             "SELECT 1 FROM laplace.entities WHERE type_id = @t LIMIT 1", conn);
         cmd.Parameters.AddWithValue("t", EntityTypeRegistry.Codepoint.ToBytes());
-        return await cmd.ExecuteScalarAsync(ct) is not null;
-    }
-
-    private async Task<bool> AlreadyWitnessedAsync(Hash128 rootId, CancellationToken ct)
-    {
-        await using var conn = await _substrate.DataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(
-            "SELECT 1 FROM laplace.physicalities WHERE entity_id = @e AND type = 1 LIMIT 1", conn);
-        cmd.Parameters.AddWithValue("e", rootId.ToBytes());
         return await cmd.ExecuteScalarAsync(ct) is not null;
     }
 }

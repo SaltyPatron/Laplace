@@ -68,8 +68,7 @@ internal static class InferenceEndpoints
                                 [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
                                 Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
                         }
-                        turnWitness.Enqueue(prompt, "prompt");
-                        turnWitness.Enqueue(genStreamText.ToString().TrimStart(), "reply");
+                        turnWitness.EnqueueTurn(prompt, genStreamText.ToString().TrimStart());
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,
                             [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
@@ -88,8 +87,7 @@ internal static class InferenceEndpoints
                     genTokens.Add(token);
 
                 var genContent = string.Concat(genTokens.Select(t => t.Token)).TrimStart();
-                turnWitness.Enqueue(prompt, "prompt");
-                turnWitness.Enqueue(genContent, "reply");
+                turnWitness.EnqueueTurn(prompt, genContent);
 
                 return Results.Json(new ChatCompletionResponse(
                     Id: $"chatcmpl-{Guid.NewGuid():N}",
@@ -119,8 +117,7 @@ internal static class InferenceEndpoints
 
 
 
-            turnWitness.Enqueue(userTurns[^1], "prompt");
-            if (rows.Count > 0) turnWitness.Enqueue(content, "reply");
+            turnWitness.EnqueueTurn(userTurns[^1], rows.Count > 0 ? content : null);
 
             if (payload.Stream)
             {
@@ -213,8 +210,7 @@ internal static class InferenceEndpoints
                             [new CompletionChoice(token.Token, 0, null,
                                 payload.Logprobs.HasValue ? new CompletionLogprobs([(double)token.Mu]) : null)]), ct);
                     }
-                    turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
-                    turnWitness.Enqueue(streamText.ToString().TrimStart(), "reply");
+                    turnWitness.EnqueueTurn(payload.Prompt.Trim(), streamText.ToString().TrimStart());
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -231,8 +227,7 @@ internal static class InferenceEndpoints
                 tokens.Add(token);
 
             var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
-            turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
-            turnWitness.Enqueue(text, "reply");
+            turnWitness.EnqueueTurn(payload.Prompt.Trim(), text);
             return Results.Json(new CompletionResponse(
                 Id: $"cmpl-{Guid.NewGuid():N}",
                 Object: "text_completion",

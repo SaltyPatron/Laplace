@@ -668,7 +668,18 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     cands[n_cands].rating    = raw[j].rating;
                     cands[n_cands].rd        = raw[j].rd;
                     cands[n_cands].witnesses = raw[j].witnesses;
-                    cands[n_cands].score     = base + bonus;
+
+                    /*
+                     * Bonuses rank CONFIRMED edges only. A refuted edge with
+                     * wide RD has a squashed |base| (exp(-kappa*rd) ~ 0), and
+                     * an unconditional additive bonus (geometry up to +2,
+                     * partition +1, topic +3) would flip it positive and walk
+                     * it -- caught live by the closed-loop test: 60 refutes
+                     * left signed_mu at -600 yet the edge still placed. The
+                     * consensus verdict gates placement; geometry only orders
+                     * what consensus already confirmed.
+                     */
+                    cands[n_cands].score     = base > 0.0 ? base + bonus : base;
                     n_cands++;
                 }
                 qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
@@ -687,7 +698,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 {
                     int shortlist_n = n_cands < beam * 3 ? n_cands : beam * 3;
                     for (int s = 0; s < shortlist_n; s++)
-                        cands[s].score += ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
+                        if (cands[s].score > 0.0) /* confirmed-only, same gate as 3Cc */
+                            cands[s].score += ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
                     qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
                 }
 

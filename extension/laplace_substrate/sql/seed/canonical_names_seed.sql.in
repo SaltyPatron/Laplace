@@ -87,6 +87,7 @@ FROM (VALUES
     ('substrate/source/Test/v1'),
     ('substrate/source/UDDecomposer/v1'),
     ('substrate/source/UnicodeDecomposer/v1'),
+    ('substrate/source/UserFeedback/v1'),
     ('substrate/source/UserPrompt/v1'),
     ('substrate/source/WiktionaryDecomposer/v1'),
     ('substrate/source/WordNetDecomposer/v1'),

@@ -1,5 +1,9 @@
+using System.Text;
 using System.Text.Json.Nodes;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
 namespace Laplace.Endpoints.Mcp;
@@ -43,7 +47,7 @@ internal sealed class SubstrateTools
             Schema(("prompt", "string", "the question", true),
                    ("session", "string", "session key for follow-up context (pronouns, possessives)", false))),
         Tool("chat",
-            "One conversational turn against the substrate (laplace.chat): band-gated prose composed from consensus. NOTE: records the prompt into session state.",
+            "One conversational turn against the substrate (laplace.chat): walk-driven prose composed from rated consensus. Closes the loop: the prompt and reply are deposited as witnessed content (UserPrompt/Response trust classes) and folded, so the turn is visible to the next walk.",
             Schema(("prompt", "string", "the message", true),
                    ("session", "string", "session key for continuity", false))),
         Tool("walk",
@@ -79,12 +83,7 @@ internal sealed class SubstrateTools
                         CASE WHEN @s IS NULL THEN NULL ELSE convert_to(@s, 'UTF8') END)
                     """,
                     DefaultRowCap, ("p", Req(args, "prompt")), ("s", Opt(args, "session"))),
-                "chat" => Rows(_db,
-                    """
-                    SELECT laplace.chat(@p,
-                        CASE WHEN @s IS NULL THEN NULL ELSE convert_to(@s, 'UTF8') END) AS reply
-                    """,
-                    DefaultRowCap, ("p", Req(args, "prompt")), ("s", Opt(args, "session"))),
+                "chat" => ChatTurn(args),
                 "walk" => Rows(_dbReadOnly,
                     """
                     SELECT w.depth,
@@ -133,6 +132,84 @@ internal sealed class SubstrateTools
         catch (ArgumentException ex)
         {
             return (ex.Message, true);
+        }
+    }
+
+    // One conversational turn: SQL chat() composes the reply (read-side), then the
+    // turn is deposited through the writer spine — full content mint + evidence +
+    // inline fold under the UserPrompt/Response trust classes. This is chat()'s
+    // OODA close; the SQL function itself stays read-only (session state aside).
+    private ISubstrateWriter? _turnWriter;
+    private bool _turnBootstrapped;
+    private bool _turnDepositBroken;
+
+    private (string, bool) ChatTurn(JsonObject? args)
+    {
+        var prompt = Req(args, "prompt");
+        var session = Opt(args, "session");
+
+        string? reply;
+        using (var cmd = _db.CreateCommand(
+            """
+            SELECT laplace.chat(@p,
+                CASE WHEN @s IS NULL THEN NULL ELSE convert_to(@s, 'UTF8') END)
+            """))
+        {
+            cmd.Parameters.AddWithValue("p", prompt);
+            if (session is null)
+                cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Text) { Value = DBNull.Value });
+            else
+                cmd.Parameters.AddWithValue("s", session);
+            reply = cmd.ExecuteScalar() as string;
+        }
+
+        DepositTurn(prompt, reply);
+
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply })
+        };
+        return (result.ToJsonString(), false);
+    }
+
+    private void DepositTurn(string prompt, string? reply)
+    {
+        if (_turnDepositBroken)
+            return;
+        try
+        {
+            if (_turnWriter is null)
+            {
+                CodepointPerfcache.LoadDefault();
+                _turnWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
+            }
+            if (!_turnBootstrapped)
+            {
+                _turnWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnBootstrapped = true;
+            }
+
+            var promptRoot = Hash128.Zero;
+            if (UserPromptContent.TryBuildWitnessChange(
+                    Encoding.UTF8.GetBytes(prompt), "turn/prompt", out var promptChange, out var pr))
+            {
+                _turnWriter.ApplyAsync(promptChange).GetAwaiter().GetResult();
+                promptRoot = pr;
+            }
+            if (!string.IsNullOrWhiteSpace(reply) &&
+                ResponseContent.TryBuildWitnessChange(
+                    Encoding.UTF8.GetBytes(reply), "turn/reply",
+                    promptRoot == Hash128.Zero ? null : promptRoot, out var replyChange, out _))
+            {
+                _turnWriter.ApplyAsync(replyChange).GetAwaiter().GetResult();
+            }
+        }
+        catch (Exception ex)
+        {
+            // The reply still flows; the missing deposit is reported, not hidden.
+            _turnDepositBroken = true;
+            Console.Error.WriteLine($"laplace-mcp: turn deposit disabled: {ex.Message}");
         }
     }
 
