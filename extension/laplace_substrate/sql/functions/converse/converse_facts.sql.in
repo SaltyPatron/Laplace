@@ -64,8 +64,14 @@ BEGIN
             SELECT * FROM walk_branches(p_syn, tax_type, 4, 3)
         ),
         winner AS (
+            -- Deepest chain first: the beam never walks a refuted or
+            -- non-positive edge, so every placed node sits on a confirmed
+            -- chain and depth IS ancestry. Average per-hop confidence only
+            -- breaks ties between equally deep chains (an avg-first order
+            -- degenerates to depth 1 whenever edge strength declines with
+            -- distance, which taxonomies always do).
             SELECT * FROM branches w
-            ORDER BY (w.path_mu / GREATEST(w.depth, 1)::numeric) DESC, w.depth DESC
+            ORDER BY w.depth DESC, (w.path_mu / GREATEST(w.depth, 1)::numeric) DESC
             LIMIT 1
         ),
         steps AS (
