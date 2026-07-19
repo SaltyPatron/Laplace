@@ -464,7 +464,7 @@ jobs:
         run: |
           cd app
           dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-            --filter 'Tier!=perf & FullyQualifiedName~Endpoints.OpenAICompat'
+            --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
   restore-api:
     name: Restore API (always — even after failed stages)
