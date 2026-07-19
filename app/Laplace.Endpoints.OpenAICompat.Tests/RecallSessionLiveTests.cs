@@ -5,6 +5,7 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>Live recall_session smoke — skipped when Postgres substrate is unreachable.</summary>
+[Trait("Tier", "db")]
 public sealed class RecallSessionLiveTests
 {
     [SkippableFact]
