@@ -1,4 +1,7 @@
-# Session task list — ingest lane / substrate (main @ #344)
+# Session task list — ingest lane / substrate (main @ #344) — HISTORICAL
+
+CLOSED 2026-07-18: unfinished rows migrated to GH issues #429–#434 (label
+`tracker-migration`); do not update this file — open work lives in GH issues.
 
 Load-bearing first. The ROOT fix (bounded working set + client-dedup + clean COPY offload +
 per-file producer/queue) cascades into most of the "perf" rows — do it once, several fall.
