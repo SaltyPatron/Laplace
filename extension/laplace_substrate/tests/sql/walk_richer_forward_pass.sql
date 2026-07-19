@@ -14,18 +14,20 @@ SET search_path TO laplace, public;
 -- hashes.
 CREATE TEMP TABLE walk_c_fixtures AS
 SELECT * FROM (VALUES
-    ('subject',       decode(repeat('a1', 16), 'hex')),
-    ('obj_confirmed', decode(repeat('a2', 16), 'hex')),
-    ('obj_refuted',   decode(repeat('a3', 16), 'hex')),
-    ('dummy_type',    decode(repeat('a0', 16), 'hex'))
+    ('subject',          decode(repeat('a1', 16), 'hex')),
+    ('obj_confirmed',    decode(repeat('a2', 16), 'hex')),
+    ('obj_refuted',      decode(repeat('a3', 16), 'hex')),
+    ('obj_refuted_wide', decode(repeat('a4', 16), 'hex')),
+    ('dummy_type',       decode(repeat('a0', 16), 'hex'))
 ) v(name, id);
 
 INSERT INTO entities (id, tier, type_id, highway_mask)
 SELECT id, 2::smallint,
        (SELECT id FROM walk_c_fixtures WHERE name = 'dummy_type'),
        CASE name
-           WHEN 'obj_confirmed' THEN decode(repeat('01', 32), 'hex')
-           WHEN 'obj_refuted'   THEN decode(repeat('01', 32), 'hex')
+           WHEN 'obj_confirmed'    THEN decode(repeat('01', 32), 'hex')
+           WHEN 'obj_refuted'      THEN decode(repeat('01', 32), 'hex')
+           WHEN 'obj_refuted_wide' THEN decode(repeat('01', 32), 'hex')
            ELSE NULL
        END
 FROM walk_c_fixtures
@@ -50,12 +52,37 @@ VALUES
      (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
      relation_type_id('COMPLETES_TO'),
      (SELECT id FROM walk_c_fixtures WHERE name = 'obj_refuted'),
-     500000000000, 200000000000, 60000000, 5, now())
+     500000000000, 200000000000, 60000000, 5, now()),
+    -- obj_refuted_wide: refuted (signed_mu ~ -1300) with RD so wide that
+    -- exp(-kappa*rd) squashes |base| toward 0 -- the case where unconditional
+    -- additive bonuses (geometry +2, partition +1) would flip a refuted edge
+    -- positive and walk it (caught by the live closed-loop test: 60 refutes,
+    -- signed_mu -600, edge still served). Its coords below sit EXACTLY on the
+    -- subject's point (max geometry bonus) in the same hilbert partition.
+    (decode(repeat('b3', 16), 'hex'),
+     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
+     relation_type_id('COMPLETES_TO'),
+     (SELECT id FROM walk_c_fixtures WHERE name = 'obj_refuted_wide'),
+     1000000000000, 400000000000, 60000000, 5, now())
 ON CONFLICT (id, type_id, subject_id) DO NOTHING;
 
--- 3Ca: with beam wide enough to hold both (beam=10, only 2 real candidates),
--- only the confirmed edge is walked -- the refuted edge scores negative and
--- is never placed, matching the syn_bad regression guard.
+INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index, n_constituents, observed_at)
+SELECT decode(repeat('c1', 16), 'hex'), id, 1,
+       ST_SetSRID(ST_MakePoint(0.5, 0.5, 0.5, 0.5), 0),
+       decode(repeat('00', 16), 'hex'), 0, now()
+FROM walk_c_fixtures WHERE name = 'subject'
+UNION ALL
+SELECT decode(repeat('c2', 16), 'hex'), id, 1,
+       ST_SetSRID(ST_MakePoint(0.5, 0.5, 0.5, 0.5), 0),
+       decode(repeat('00', 16), 'hex'), 0, now()
+FROM walk_c_fixtures WHERE name = 'obj_refuted_wide'
+ON CONFLICT DO NOTHING;
+
+-- 3Ca: with beam wide enough to hold all (beam=10, 3 real candidates), only
+-- the confirmed edge is walked -- both refuted edges score non-positive and
+-- are never placed. obj_refuted_wide additionally pins that geometry/partition
+-- bonuses CANNOT resurrect a refuted edge: bonuses rank confirmed candidates
+-- only; the consensus verdict gates placement.
 SELECT count(*) = 1 AS only_confirmed_walked
 FROM walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
@@ -103,9 +130,10 @@ SELECT
         ARRAY[relation_type_id('COMPLETES_TO')], 4, false, false))
     AS astar_default_matches_explicit_false;
 
--- A*: p_use_geometry=true with zero physicalities rows on file must degrade
--- gracefully (heuristic returns 0.0 throughout, never errors) and still find
--- the same path as the non-geometry call.
+-- A*: p_use_geometry=true where the GOAL has no physicality row (only the
+-- subject and refuted_wide carry coords) must degrade gracefully (heuristic
+-- contributes 0.0 for coordless goals, never errors) and still find the same
+-- path as the non-geometry call.
 SELECT
     (SELECT array_agg(entity_id ORDER BY step) FROM astar_path_raw(
         (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
@@ -119,5 +147,6 @@ SELECT
     AS astar_geometry_toggle_no_coords_matches_default;
 
 DELETE FROM consensus WHERE subject_id = (SELECT id FROM walk_c_fixtures WHERE name = 'subject');
+DELETE FROM physicalities WHERE entity_id IN (SELECT id FROM walk_c_fixtures);
 DELETE FROM entities WHERE id IN (SELECT id FROM walk_c_fixtures);
 DROP TABLE walk_c_fixtures;
