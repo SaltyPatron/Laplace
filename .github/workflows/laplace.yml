@@ -328,7 +328,7 @@ jobs:
 
   integration-test:
     name: Integration tests — pg_regress || dotnet (parallel)
-    needs: db-ops
+    needs: seed
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -366,7 +366,7 @@ jobs:
 
   seed:
     name: Seed — foundation ladder (idempotent, no-op when present)
-    needs: integration-test
+    needs: db-ops
     runs-on: [self-hosted, laplace]
     timeout-minutes: 240
     steps:
@@ -384,7 +384,7 @@ jobs:
 
   publish:
     name: Publish — API + SPA, restart service
-    needs: seed
+    needs: integration-test
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     # Runtime credentials: repository Secrets (encrypted), not machine secrets.env.
