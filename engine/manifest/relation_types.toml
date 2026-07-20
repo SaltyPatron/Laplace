@@ -1465,7 +1465,7 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VERSION"
 
-# --- Part 1 + modalities campaign (M0) — witnessed ladders; NO ingest until KEYMASTER ---
+# --- Part 1 + modalities campaign (M0) — witnessed ladders; NO ingest until the operator-ordered full reseed ---
 
 # Audio: sentence/content root ↔ recording entity (Tatoeba audio lane).
 [[relation]]

@@ -142,6 +142,40 @@ public class WorkingSetApplyTests
     }
 
     [Fact]
+    public async Task AttestationsEmbeddingNovelEntities_InsertWithoutProbe_ThenMergeWhenPresent()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = H("source/structural");
+        var subj = H("structural/e1");
+
+        SubstrateChange Change(string unit, long games) => new SubstrateChangeBuilder(src, unit)
+            .AddEntity(Entity("structural/e1"))
+            .AddPhysicality(Phys("structural/e1"))
+            .AddAttestation(new AttestationRow(
+                H("att/structural"), subj, H("rel"), null, src, subj,
+                AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs + 3_000_000, games,
+                1_000_000_000L, 30_000_000_000L))
+            .Build();
+
+        // First working set: the attestation's subject/context entity is
+        // novel in the SAME batch, so the structural filter proves it novel
+        // without a probe — it must still COPY.
+        var first = await writer.ApplyWorkingSetAsync(Change("structural-a", 2));
+        Assert.Equal(1, first.EntitiesInserted);
+        Assert.Equal(1, first.AttestationsInserted);
+        var (games, _) = await AttStateAsync(H("att/structural"));
+        Assert.Equal(2, games);
+
+        // Fresh unit (new journal token), same content: the entity is
+        // present now, the filter no longer fires, and the attestation rides
+        // the routed merge lane.
+        var second = await writer.ApplyWorkingSetAsync(Change("structural-b", 5));
+        Assert.Equal(0, second.AttestationsInserted);
+        (games, _) = await AttStateAsync(H("att/structural"));
+        Assert.Equal(7, games);
+    }
+
+    [Fact]
     public async Task WorkingSetReplay_JournalTokenMakesSecondApplyNoOp()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);

@@ -1,10 +1,10 @@
 # Campaign reseed queue — Part 1 + modalities (living)
 
-**Do NOT execute** until the operator orders KEYMASTER (`db-reset` / foundation / seed).
+**Do NOT execute** until the operator orders the full reseed (`db-reset` / foundation / seed).
 Code and TOML for the listed items may land earlier; highway bits renumber alphabetically
 on codegen and **owe one full reseed**. Never ship partial bit-order changes.
 
-Updated: 2026-07-12 (pre-KEYMASTER: M0 TOML + codegen; R1/R2 code ready).
+Updated: 2026-07-12 (pre-reseed: M0 TOML + codegen; R1/R2 code ready).
 
 ## Queued items (batch into ONE reseed)
 
@@ -33,7 +33,7 @@ via `RegisterManifestAsync`).
 `IS_TRANSLATION_OF` stays under `SEMANTIC_EQUIVALENCE`.
 `bubble_up` reads the family via `relation_type_in_family(..., 'HAS_SENSE')`.
 
-### 3. Modality canonicals (+10) — declared in TOML; no ingest until KEYMASTER
+### 3. Modality canonicals (+10) — declared in TOML; no ingest until the operator-ordered reseed
 
 **Audio:**
 - `HAS_RECORDING` (alias flip: `RECORDING_OF`)
@@ -79,7 +79,7 @@ Electronics + Morse + NCVEC pool (local):
 - Missing for R5 acquire later: Technician 2026–2030 + General 2023–2027 text pools
   (Extra PDF present; NCVEC fetch historically 403'd — extract/mirror as text before exam harness)
 
-## Operator steps (when KEYMASTER ordered)
+## Operator steps (when the operator orders the reseed)
 
 ```text
 cmd /c "scripts\win\db-reset.cmd"          # ONLY when explicitly ordered

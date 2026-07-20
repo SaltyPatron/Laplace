@@ -1,0 +1,85 @@
+BEGIN;
+SET search_path = laplace, public;
+
+DO $$
+DECLARE
+    src      bytea := laplace_hash128_blake3('test/merge/source');
+    rel_hot  bytea := relation_type_id('IS_A');
+    rel_dyn  bytea := laplace_hash128_blake3('test/merge/rel_dyn');
+    subj     bytea := laplace_hash128_blake3('test/merge/subject');
+    o1       bytea := laplace_hash128_blake3('test/merge/obj1');
+    o2       bytea := laplace_hash128_blake3('test/merge/obj2');
+    a1       bytea := laplace_hash128_blake3('test/merge/att1');
+    a2       bytea := laplace_hash128_blake3('test/merge/att2');
+    ghost    bytea := laplace_hash128_blake3('test/merge/never-written');
+    t1       timestamptz := '2026-01-01 00:00:00+00';
+    t2       timestamptz := '2026-02-01 00:00:00+00';
+    t0       timestamptz := '2025-12-01 00:00:00+00';
+    affected bigint;
+    row1     attestations%ROWTYPE;
+    row2     attestations%ROWTYPE;
+    leafname text;
+BEGIN
+    -- Seed: one row in a hot (IS_A) leaf, one in the dynamic DEFAULT leaf.
+    INSERT INTO attestations
+        (id, subject_id, type_id, object_id, source_id, context_id,
+         outcome, last_observed_at, observation_count)
+    VALUES
+        (a1, subj, rel_hot, o1, src, NULL, 2, t1, 3),
+        (a2, subj, rel_dyn, o2, src, NULL, 1, t1, 1);
+
+    -- 1) one routed call, two types: counts accumulate, GREATEST advances a
+    --    newer ts and keeps a stored ts that is already newer.
+    affected := attestation_merge(
+        ARRAY[a1, a2], ARRAY[rel_hot, rel_dyn], ARRAY[subj, subj],
+        ARRAY[5, 2]::bigint[], ARRAY[t2, t0]);
+    IF affected <> 2 THEN
+        RAISE EXCEPTION 'FAIL: merge affected % rows, expected 2', affected;
+    END IF;
+
+    SELECT * INTO row1 FROM attestations
+    WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
+    IF row1.observation_count <> 8 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=%, expected 3+5=8', row1.observation_count;
+    END IF;
+    IF row1.last_observed_at <> t2 THEN
+        RAISE EXCEPTION 'FAIL: last_observed_at=%, expected advanced to %', row1.last_observed_at, t2;
+    END IF;
+
+    SELECT * INTO row2 FROM attestations
+    WHERE type_id = rel_dyn AND subject_id = subj AND id = a2;
+    IF row2.observation_count <> 3 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=%, expected 1+2=3', row2.observation_count;
+    END IF;
+    IF row2.last_observed_at <> t1 THEN
+        RAISE EXCEPTION 'FAIL: last_observed_at=%, GREATEST must keep the newer stored %', row2.last_observed_at, t1;
+    END IF;
+
+    -- 2) partition routing: the hot row lives in an IS_A hash leaf (runtime
+    --    prune has a leaf to prune TO).
+    SELECT a.tableoid::regclass::text INTO leafname FROM attestations a
+    WHERE a.type_id = rel_hot AND a.subject_id = subj AND a.id = a1;
+    IF leafname NOT LIKE '%attestations_r_is_a_h%' THEN
+        RAISE EXCEPTION 'FAIL: hot row routed to %, expected an is_a hash leaf', leafname;
+    END IF;
+
+    -- 3) second call in the SAME transaction (chunked applies share the
+    --    control tx): the temp-table guard must not trip, and an id that was
+    --    never written merges zero rows (the probe contract violated upstream
+    --    surfaces as a count shortfall, never silent corruption).
+    affected := attestation_merge(
+        ARRAY[a1, ghost], ARRAY[rel_hot, rel_hot], ARRAY[subj, subj],
+        ARRAY[1, 1]::bigint[], ARRAY[t2, t2]);
+    IF affected <> 1 THEN
+        RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 1 (ghost id merges nothing)', affected;
+    END IF;
+    SELECT * INTO row1 FROM attestations
+    WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
+    IF row1.observation_count <> 9 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=% after repeat call, expected 9', row1.observation_count;
+    END IF;
+
+    RAISE NOTICE '✓ attestation_merge: routed accumulation, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold';
+END $$;
+
+ROLLBACK;

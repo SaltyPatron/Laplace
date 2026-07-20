@@ -49,6 +49,14 @@ internal static class CopyTupleParser
         /// keyed presence probe needs them because id alone cannot prune.</summary>
         public readonly List<Hash128> SubjectIds = new();
         public readonly List<Hash128> TypeIds = new();
+        /// <summary>Remaining id-embedded entity references (attestation id =
+        /// BLAKE3(subject‖type‖object‖source‖context)): a row whose subject,
+        /// object, or context entity is novel in this batch is novel by
+        /// construction and needs no presence probe. NULL columns parse to the
+        /// zero hash — the same sentinel the id computation hashes for them —
+        /// which can never collide with a real novel entity id.</summary>
+        public readonly List<Hash128> ObjectIds = new();
+        public readonly List<Hash128> ContextIds = new();
         /// <summary>last_observed_at as stored on the wire (µs since PG epoch 2000-01-01).</summary>
         public readonly List<long> TimestampsPgUs = new();
         public readonly List<long> Counts = new();
@@ -127,6 +135,7 @@ internal static class CopyTupleParser
             {
                 long rowStart = off;
                 Hash128 id = default, subjectId = default, typeId = default;
+                Hash128 objectId = default, contextId = default;
                 long ts = 0, games = 0;
                 long countValOff = -1;
                 WalkRow(p, len, ref off, AttestationFields, "attestations", (field, valOff, valLen) =>
@@ -136,6 +145,12 @@ internal static class CopyTupleParser
                         case 0: id = ReadHash(p, valOff, valLen, "attestations.id"); break;
                         case 1: subjectId = ReadHash(p, valOff, valLen, "attestations.subject_id"); break;
                         case 2: typeId = ReadHash(p, valOff, valLen, "attestations.type_id"); break;
+                        case 3:
+                            if (valLen == 16) objectId = ReadHash(p, valOff, valLen, "attestations.object_id");
+                            break;
+                        case 5:
+                            if (valLen == 16) contextId = ReadHash(p, valOff, valLen, "attestations.context_id");
+                            break;
                         case 7: ts = ReadInt64(p, valOff, valLen, "attestations.last_observed_at"); break;
                         case 8:
                             games = ReadInt64(p, valOff, valLen, "attestations.observation_count");
@@ -148,6 +163,8 @@ internal static class CopyTupleParser
                 result.Ids.Add(id);
                 result.SubjectIds.Add(subjectId);
                 result.TypeIds.Add(typeId);
+                result.ObjectIds.Add(objectId);
+                result.ContextIds.Add(contextId);
                 result.TimestampsPgUs.Add(ts);
                 result.Counts.Add(games);
                 result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));

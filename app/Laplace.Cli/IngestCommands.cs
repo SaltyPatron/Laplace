@@ -127,12 +127,18 @@ internal static class IngestCommands
 
     public static async Task<int> IngestAsync(string[] args)
     {
+        if (args.Length > 0 && args[0].Equals("chain", StringComparison.OrdinalIgnoreCase))
+            return await IngestChainAsync(args[1..]);
+
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
+                        + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | parquet | tiny-codes | stack | safetensors | image | audio | document\n"
                         + "  --langs: language scope for this run\n"
-                        + "  --no-evidence: fold consensus only; skip laplace.attestations");
+                        + "  --no-evidence: fold consensus only; skip laplace.attestations\n"
+                        + "  chain: run several ingests sequentially in ONE process (one startup, one\n"
+                        + "         perfcache load); stops at the first failing spec");
 
 
 
@@ -146,6 +152,44 @@ internal static class IngestCommands
             return await task;
 
         return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+    }
+
+    /// <summary>
+    /// Sequential multi-source ingest in one process: each spec is a complete
+    /// `ingest` argument vector ("wordnet", "document D:\\data\\text",
+    /// "wiktionary --langs en"). One process start, one perfcache map, one
+    /// native runtime init for the whole ladder instead of one per source.
+    /// Specs split on whitespace — a path containing spaces needs its own
+    /// single-source invocation. First nonzero exit stops the chain.
+    /// </summary>
+    private static async Task<int> IngestChainAsync(string[] specs)
+    {
+        if (specs.Length == 0)
+            return Fail("usage: laplace ingest chain \"<source [path] [flags]>\" ...\n"
+                        + "  example: laplace ingest chain unicode iso639 cili wordnet \"document D:\\Data\\Ingest\\test-data\\text\"");
+
+        CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
+
+        for (int i = 0; i < specs.Length; i++)
+        {
+            var tokens = specs[i].Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var cli = ParseIngestCliArgs(tokens);
+            if (string.IsNullOrEmpty(cli.Source))
+                return Fail($"ingest chain: spec {i + 1} is empty");
+            Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");
+            if (!IngestDispatchTable.TryDispatch(cli.Source.ToLowerInvariant(), cli, out var task))
+                return Fail($"ingest chain: unknown source '{cli.Source}' in spec {i + 1} "
+                            + $"(supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+            int rc = await task;
+            if (rc != 0)
+            {
+                Console.Error.WriteLine($"==== chain [{i + 1}/{specs.Length}] '{specs[i]}' exited {rc} — chain stopped ====");
+                return rc;
+            }
+        }
+        Console.WriteLine($"==== chain complete: {specs.Length} source(s) ====");
+        return 0;
     }
 
     internal static async Task<int> OmwProbeAsync(IngestCliArgs cli)

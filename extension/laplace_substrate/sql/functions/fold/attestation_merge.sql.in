@@ -1,0 +1,64 @@
+-- Routed attestation observation merge — the present-row half of the apply.
+--
+-- The write lane's probe already proved every row here EXISTS; the only job
+-- is observation_count accumulation + last_observed_at advance. The naive
+-- form (UPDATE ... FROM unnest(ids) WHERE a.id = d.id) carries no partition
+-- key, so on the LIST(type_id)->HASH(subject_id) attestation tree it
+-- Append-scans EVERY leaf per chunk — measured 2026-07-19 on the OMW seed:
+-- ~10s per 32k chunk flat, ~9 minutes of a 19-minute step. Same disease,
+-- same cure as consensus_upsert (the 2026-07-16 CILI MERGE peg): materialize
+-- the batch ONCE, then loop one relation type at a time bound to a plpgsql
+-- variable so the planner RUNTIME-PRUNES each UPDATE to that type's <=8
+-- HASH(subject) leaves and seeks the leaf PK (id, type_id, subject_id).
+--
+-- Contract with the caller (NpgsqlWorkingSetApply):
+--   * arrays are parallel and CLIENT-DEDUPED per call — one row per
+--     attestation id (a duplicate id would fault the UPDATE loudly);
+--   * every id was probe-verified present under the apply advisory lock;
+--   * rows arrive sorted by (type, subject, id) — partition-key order, so
+--     cross-writer lock acquisition stays globally ordered.
+CREATE OR REPLACE FUNCTION attestation_merge(
+    p_ids      bytea[],
+    p_types    bytea[],
+    p_subjects bytea[],
+    p_games    bigint[],
+    p_ts       timestamptz[])
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    affected bigint := 0;
+    v_rc     bigint;
+    v_type   bytea;
+BEGIN
+    -- Materialize the batch ONCE (single unnest); ON COMMIT DROP owns
+    -- cleanup, the to_regclass guard handles repeated calls inside one
+    -- transaction (chunked applies share the control tx).
+    IF to_regclass('pg_temp._am_batch') IS NOT NULL THEN
+        DROP TABLE _am_batch;
+    END IF;
+    CREATE TEMP TABLE _am_batch ON COMMIT DROP AS
+    SELECT u.id, u.t, u.s, u.games, u.ts
+    FROM unnest(p_ids, p_types, p_subjects, p_games, p_ts)
+         AS u(id, t, s, games, ts);
+
+    -- Per-type slices read through this index — O(N_type) per iteration,
+    -- not a full-batch rescan.
+    CREATE INDEX _am_batch_t ON _am_batch (t);
+    ANALYZE _am_batch;
+
+    FOR v_type IN SELECT DISTINCT t FROM _am_batch ORDER BY t LOOP
+        UPDATE attestations a SET
+            observation_count = a.observation_count + b.games,
+            last_observed_at  = GREATEST(a.last_observed_at, b.ts)
+        FROM _am_batch b
+        WHERE b.t = v_type
+          AND a.type_id = v_type          -- variable -> runtime partition prune
+          AND a.subject_id = b.s
+          AND a.id = b.id;
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        affected := affected + v_rc;
+    END LOOP;
+
+    RETURN affected;
+END $$;

@@ -35,6 +35,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     // no deadlocks, no advisory locks.
     private readonly SemaphoreSlim _upsertGate = new(1, 1);
 
+    // Fold pipeline (bulk runs only): the fold of batch N runs as a chained
+    // background task so the apply lane starts probing/COPYing batch N+1
+    // immediately — the fold leaves the critical path (it was the serial
+    // tail of every batch: 188s on an 11.9M-cell document delta). FIFO by
+    // construction (each link awaits its predecessor), bounded to
+    // FoldPipelineDepth outstanding deltas as backpressure on RAM, drained
+    // at FinalizeSource/CompleteBulkRun/Dispose so ingest completion is
+    // still fold completion. A fold failure poisons the chain and surfaces
+    // at the next apply call or at the drain — never silently. OUTSIDE a
+    // bulk run the fold stays inline: online lanes (feedback → immediate
+    // fold → next walk) require read-your-writes consensus.
+    private const int FoldPipelineDepth = 2;
+    private readonly SemaphoreSlim _foldDepth = new(FoldPipelineDepth, FoldPipelineDepth);
+    private readonly object _foldChainLock = new();
+    private Task _foldChain = Task.CompletedTask;
+    private volatile bool _bulkRun;
+
     private long _observations;
     private long _cellsFolded;
     private int _inflightApplies;
@@ -115,6 +132,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
             var delta = BuildDelta(changes);
 
+            // A fold that already failed in the background poisons the run
+            // NOW, before any more evidence lands.
+            await ObserveFoldFailureAsync();
+
             // Evidence lands FIRST; the fold runs only after it succeeds, so a
             // retried batch folds exactly once (a throw below leaves consensus
             // untouched for this batch).
@@ -130,9 +151,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // and that apply's own flow folded this same delta right after its
             // evidence landed. The fold is additive, not idempotent, so
             // folding a replay would double-count the batch's testimony in
-            // consensus; a journal hit must no-op evidence AND fold.
+            // consensus; a journal hit must no-op evidence AND fold. The
+            // guard sits OUTSIDE the bulk/inline split: an enqueued fold is
+            // still a fold, so a replay must not reach the queue either.
             if (delta is { Count: > 0 } && !result.JournalReplayHit)
-                await UpsertDeltaAsync(delta, ct);
+            {
+                if (_bulkRun) await EnqueueFoldAsync(delta, ct);
+                else await UpsertDeltaAsync(delta, ct);
+            }
 
             return result;
         }
@@ -365,7 +391,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
         Interlocked.Add(ref _cellsFolded, folded);
         _log.LogInformation(
-            "consensus fold (inline): {Cells:N0} cells folded, {Masks:N0} masks deposited in {Ms:N0}ms ({Rate:N0} cells/s)",
+            "consensus fold: {Cells:N0} cells folded, {Masks:N0} masks deposited in {Ms:N0}ms ({Rate:N0} cells/s)",
             folded, masks, sw.ElapsedMilliseconds,
             folded / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
     }
@@ -373,15 +399,74 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private static DateTime TsFromUnixUs(long unixUs)
         => DateTime.UnixEpoch.AddTicks(unixUs * 10);
 
-    public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
+    /// <summary>
+    /// Chains the delta fold behind every fold already queued. FIFO, bounded:
+    /// waits for a pipeline slot first, so at most FoldPipelineDepth deltas
+    /// are alive. The returned task completes when the fold is QUEUED (the
+    /// apply lane moves on); the fold itself completes in the chain.
+    /// </summary>
+    private async Task EnqueueFoldAsync(
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
+    {
+        await _foldDepth.WaitAsync(ct);
+        lock (_foldChainLock)
+        {
+            _foldChain = RunAfterAsync(_foldChain);
+        }
+
+        async Task RunAfterAsync(Task prior)
+        {
+            try
+            {
+                // A faulted predecessor rethrows here: the chain stays
+                // poisoned and every later link (and the drain) sees it.
+                await prior.ConfigureAwait(false);
+                await UpsertDeltaAsync(delta, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _foldDepth.Release();
+            }
+        }
+    }
+
+    private Task SnapshotFoldChain()
+    {
+        lock (_foldChainLock) return _foldChain;
+    }
+
+    private async Task ObserveFoldFailureAsync()
+    {
+        var chain = SnapshotFoldChain();
+        if (chain.IsFaulted || chain.IsCanceled) await chain;
+    }
+
+    /// <summary>Awaits every queued fold. Ingest completion IS fold
+    /// completion: finalize/complete/dispose all pass through here.</summary>
+    public Task DrainFoldsAsync() => SnapshotFoldChain();
+
+    public async Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
-        => _inner.FinalizeSourceAsync(sourceId, ct);
+    {
+        await DrainFoldsAsync();
+        return await _inner.FinalizeSourceAsync(sourceId, ct);
+    }
 
     public Task BeginBulkRunAsync(CancellationToken ct = default)
-        => _inner.BeginBulkRunAsync(ct);
+    {
+        _bulkRun = true;
+        return _inner.BeginBulkRunAsync(ct);
+    }
 
-    public Task CompleteBulkRunAsync(CancellationToken ct = default)
-        => _inner.CompleteBulkRunAsync(ct);
+    public async Task CompleteBulkRunAsync(CancellationToken ct = default)
+    {
+        // Folds drain BEFORE the inner writer rebuilds the cycled consensus
+        // secondaries — a live fold during the rebuild would pay live index
+        // maintenance on every insert.
+        await DrainFoldsAsync();
+        _bulkRun = false;
+        await _inner.CompleteBulkRunAsync(ct);
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -398,6 +483,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 waitSw.Restart();
             }
         }
+        try
+        {
+            await DrainFoldsAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "dispose: queued consensus fold failed");
+        }
         _upsertGate.Dispose();
+        _foldDepth.Dispose();
     }
 }
