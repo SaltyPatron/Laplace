@@ -81,17 +81,29 @@ domain AS (
     WHERE d IS NOT NULL
 ),
 members AS (
+    -- Feeds domain_scores ONLY, whose sole output (domain_hits) is 0 for every
+    -- synset when no domain context is supplied. The domain-presence gate below
+    -- is a one-time filter on the p_domain_context parameter: when the caller
+    -- passes NULL/empty (the common senses()/define()/salient_facts() path) it
+    -- makes `members` empty, so the geometry_neighbours lateral in domain_scores
+    -- is never evaluated. Without it, geometry_neighbours(member,200,8) runs once
+    -- per synset member of a high-frequency word -- 14s each for "dog", 37s total
+    -- -- for a domain_hits of 0 that changes nothing (measured 2026-07-20; this is
+    -- what CommandTimeout-cancelled the explore preview endpoint). Output-identical:
+    -- only the no-domain case changes, where every domain_hits was already 0.
     SELECT r.synset_id,
            m.object_id AS member_id
     FROM resolved r
     JOIN consensus m ON m.subject_id = r.synset_id
     WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+      AND COALESCE(cardinality(p_domain_context), 0) > 0
     UNION
     SELECT r.synset_id,
            m.subject_id AS member_id
     FROM resolved r
     JOIN consensus m ON m.object_id = r.synset_id
     WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+      AND COALESCE(cardinality(p_domain_context), 0) > 0
 ),
 domain_scores AS (
     SELECT m.synset_id,

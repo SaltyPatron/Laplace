@@ -352,8 +352,16 @@ export function ResolveRedirect() {
   const { ref = '' } = useParams();
   const nav = useNavigate();
   useEffect(() => {
-    exploreResolve(decodeURIComponent(ref))
-      .then((r) => nav(`/explore/entity/${r.id_hex}`, { replace: true }))
+    const surface = decodeURIComponent(ref);
+    exploreResolve(surface)
+      .then((r) =>
+        // A resolvable-but-unwitnessed reference (exists=false) has no entity
+        // page to show; route to the not-found explorer, which navigates by the
+        // computed geometric anchor instead of a dead id.
+        r.exists
+          ? nav(`/explore/entity/${r.id_hex}`, { replace: true })
+          : nav(`/explore/notfound/${encodeURIComponent(surface)}`, { replace: true }),
+      )
       .catch(() => nav('/explore', { replace: true }));
   }, [ref, nav]);
   return <LoadingText>Resolving…</LoadingText>;

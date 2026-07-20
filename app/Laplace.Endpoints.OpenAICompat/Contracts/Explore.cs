@@ -47,6 +47,28 @@ public sealed record ExploreEntityPreviewResponse(
     [property: JsonPropertyName("evidence_count")] long EvidenceCount,
     [property: JsonPropertyName("preview_facts")] IReadOnlyList<SalientFactRow> PreviewFacts);
 
+// The not-found explorer: a valid content id that was never witnessed
+// (exists=false) still has a computed anchor on S3, so we return navigable
+// neighbours instead of a dead 404. `neighbors` carries both axes (axis =
+// "geodesic" any-tier position, or "shape" word Frechet); `did_you_mean` is the
+// closest shape peer by surface edit distance, when one is close enough.
+public sealed record ExploreNotFoundResponse(
+    [property: JsonPropertyName("reference")] string Reference,
+    [property: JsonPropertyName("word_id_hex")] string WordIdHex,
+    [property: JsonPropertyName("exists")] bool Exists,
+    [property: JsonPropertyName("coord")] IReadOnlyList<double> Coord,
+    [property: JsonPropertyName("decomposition")] IReadOnlyList<DecomposeNodeRow> Decomposition,
+    [property: JsonPropertyName("neighbors")] IReadOnlyList<ExploreAnchorNeighborRow> Neighbors,
+    [property: JsonPropertyName("did_you_mean")] string? DidYouMean);
+
+public sealed record ExploreAnchorNeighborRow(
+    [property: JsonPropertyName("axis")] string Axis,
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("tier")] short? Tier,
+    [property: JsonPropertyName("geodesic")] double? Geodesic,
+    [property: JsonPropertyName("frechet")] double? Frechet);
+
 public sealed record SalientFactRow(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("fact")] string Fact,

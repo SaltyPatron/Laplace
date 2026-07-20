@@ -582,6 +582,80 @@
         }
       }
     },
+    "/v1/explore/notfound": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "geodesic_k",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "frechet_k",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "frechet_max",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExploreNotFoundResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/explore/entities/{idHex}": {
       "get": {
         "tags": [
@@ -4374,6 +4448,55 @@
           }
         }
       },
+      "ExploreAnchorNeighborRow": {
+        "required": [
+          "axis",
+          "id_hex",
+          "label",
+          "tier",
+          "geodesic",
+          "frechet"
+        ],
+        "type": "object",
+        "properties": {
+          "axis": {
+            "type": "string"
+          },
+          "id_hex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "tier": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "geodesic": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "frechet": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "ExploreCatalogResponse": {
         "required": [
           "counts",
@@ -5218,6 +5341,58 @@
             "items": {
               "$ref": "#/components/schemas/SalientFactRow"
             }
+          }
+        }
+      },
+      "ExploreNotFoundResponse": {
+        "required": [
+          "reference",
+          "word_id_hex",
+          "exists",
+          "coord",
+          "decomposition",
+          "neighbors",
+          "did_you_mean"
+        ],
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "word_id_hex": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "coord": {
+            "type": "array",
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          },
+          "decomposition": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecomposeNodeRow"
+            }
+          },
+          "neighbors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreAnchorNeighborRow"
+            }
+          },
+          "did_you_mean": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

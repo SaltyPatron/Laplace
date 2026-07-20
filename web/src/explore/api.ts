@@ -4,6 +4,7 @@ import type {
   ExploreCatalogResponse,
   ExploreEntityDetailResponse,
   ExploreEntityPreviewResponse,
+  ExploreNotFoundResponse,
   ExploreResolveResponse,
   ExploreTrainingExportDetailResponse,
   SalientFactRow,
@@ -29,6 +30,13 @@ export function exploreResolve(reference: string, opts: ApiOptions = {}) {
 
 export function explorePreview(idHex: string, opts: ApiOptions = {}) {
   return apiGet<ExploreEntityPreviewResponse>(`/v1/explore/entities/${idHex}/preview`, opts);
+}
+
+export function exploreNotFound(reference: string, opts: ApiOptions = {}) {
+  return apiGet<ExploreNotFoundResponse>(
+    `/v1/explore/notfound?reference=${encodeURIComponent(reference)}`,
+    opts,
+  );
 }
 
 export function exploreEntity(idHex: string, opts: ApiOptions = {}) {

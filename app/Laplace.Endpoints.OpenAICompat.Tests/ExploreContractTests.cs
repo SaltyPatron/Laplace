@@ -58,6 +58,29 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task ExploreNotFound_ReturnsAnchorNeighbors()
+    {
+        using var response = await _client.GetAsync("/v1/explore/notfound?reference=conflagurate");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ExploreNotFoundResponse>();
+        Assert.NotNull(body);
+        Assert.Equal("conflagurate", body!.Reference);
+        Assert.Equal(32, body.WordIdHex.Length);
+        Assert.False(body.Exists);
+        Assert.Equal(4, body.Coord.Count);
+        Assert.NotEmpty(body.Decomposition);
+        Assert.NotEmpty(body.Neighbors);
+        Assert.Contains(body.Neighbors, n => n.Axis == "geodesic");
+    }
+
+    [Fact]
+    public async Task ExploreNotFound_RequiresReference()
+    {
+        using var response = await _client.GetAsync("/v1/explore/notfound");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task ExploreDecompose_ReturnsNodes()
     {
         using var response = await _client.PostAsJsonAsync("/v1/explore/decompose", new DecomposeRequest("hello world"));

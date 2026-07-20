@@ -51,6 +51,9 @@ internal interface ISubstrateClient
     Task<ExploreEntityResponse?> ExploreEntityAsync(
         string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct);
 
+    Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
+        ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct);
+
     Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct);
 
