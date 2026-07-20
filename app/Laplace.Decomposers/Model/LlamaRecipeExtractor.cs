@@ -3,6 +3,7 @@ using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
@@ -26,51 +27,123 @@ public sealed class LlamaRecipeExtractor
         public required byte[] CanonicalJson { get; init; }
     }
 
+    /// <summary>
+    /// Reads config.json through the NATIVE recipe parser (engine/synthesis/src/recipe.cpp)
+    /// — one parser for this file, not one per language. Typed fields come from
+    /// recipe_get_int / recipe_get_double, which refuse a malformed value instead of
+    /// substituting a default.
+    ///
+    /// CanonicalizeJson stays managed on purpose: its bytes are hashed into
+    /// RecipeEntityId, so any change to it moves a content id. Relocating it to the
+    /// engine is GH #552, gated on proving byte-identical output over real configs.
+    /// </summary>
     public static RecipeInfo Parse(string configJsonPath)
     {
         byte[] raw = File.ReadAllBytes(configJsonPath);
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement;
 
-        string arch = "LlamaForCausalLM";
-        if (root.TryGetProperty("architectures", out var archArr))
+        IntPtr r;
+        unsafe
         {
-            int len = archArr.GetArrayLength();
-            if (len > 0) arch = archArr[0].GetString() ?? arch;
+            fixed (byte* p = raw) r = SynInterop.RecipeParse(p, (nuint)raw.Length);
         }
+        if (r == IntPtr.Zero)
+            throw new InvalidDataException($"recipe_parse rejected '{configJsonPath}' — not a JSON object.");
 
-        int hiddenSize = GetIntRequired(root, "hidden_size");
-        int numLayers = GetIntRequired(root, "num_hidden_layers");
-        int numHeads = GetIntRequired(root, "num_attention_heads");
-        int numKvHeads = GetInt(root, "num_key_value_heads", numHeads);
-        int intermSize = GetIntRequired(root, "intermediate_size");
-        int vocabSize = GetIntRequired(root, "vocab_size");
-        string dtype = root.TryGetProperty("torch_dtype", out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
-        string act = root.TryGetProperty("hidden_act", out var actProp) ? actProp.GetString() ?? "silu" : "silu";
-        double theta = GetDoubleOr(root, "rope_theta", 10000.0);
-        double rmsEps = GetDoubleOr(root, "rms_norm_eps", GetDoubleOr(root, "layer_norm_eps", 1e-5));
-        string mtype = root.TryGetProperty("model_type", out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
-
-        byte[] canonical = CanonicalizeJson(root);
-        var recipeId = Hash128.Blake3(canonical);
-
-        return new RecipeInfo
+        try
         {
-            RecipeEntityId = recipeId,
-            Architecture = arch,
-            HiddenSize = hiddenSize,
-            NumLayers = numLayers,
-            NumHeads = numHeads,
-            NumKvHeads = numKvHeads,
-            IntermediateSize = intermSize,
-            VocabSize = vocabSize,
-            TorchDtype = dtype,
-            HiddenAct = act,
-            RopeTheta = theta,
-            RmsNormEps = rmsEps,
-            ModelType = mtype,
-            CanonicalJson = canonical,
-        };
+            // architectures is an array; the native parser surfaces its first element.
+            string arch = GetString(r, "architectures") ?? "LlamaForCausalLM";
+
+            int hiddenSize = RequireInt(r, "hidden_size", configJsonPath);
+            int numLayers  = RequireInt(r, "num_hidden_layers", configJsonPath);
+            int numHeads   = RequireInt(r, "num_attention_heads", configJsonPath);
+            int numKvHeads = OptionalInt(r, "num_key_value_heads", numHeads, configJsonPath);
+            int intermSize = RequireInt(r, "intermediate_size", configJsonPath);
+            int vocabSize  = RequireInt(r, "vocab_size", configJsonPath);
+
+            string dtype = GetString(r, "torch_dtype") ?? "bfloat16";
+            string act   = GetString(r, "hidden_act") ?? "silu";
+            string mtype = GetString(r, "model_type") ?? "llama";
+
+            double theta  = OptionalDouble(r, "rope_theta", 10000.0, configJsonPath);
+            double rmsEps = OptionalDouble(r, "rms_norm_eps",
+                                OptionalDouble(r, "layer_norm_eps", 1e-5, configJsonPath),
+                                configJsonPath);
+
+            byte[] canonical = CanonicalizeJson(raw);
+            var recipeId = Hash128.Blake3(canonical);
+
+            return new RecipeInfo
+            {
+                RecipeEntityId = recipeId,
+                Architecture = arch,
+                HiddenSize = hiddenSize,
+                NumLayers = numLayers,
+                NumHeads = numHeads,
+                NumKvHeads = numKvHeads,
+                IntermediateSize = intermSize,
+                VocabSize = vocabSize,
+                TorchDtype = dtype,
+                HiddenAct = act,
+                RopeTheta = theta,
+                RmsNormEps = rmsEps,
+                ModelType = mtype,
+                CanonicalJson = canonical,
+            };
+        }
+        finally
+        {
+            SynInterop.RecipeFree(r);
+        }
+    }
+
+    private const int RecipeOk = 0, RecipeMissing = -2, RecipeTypeErr = -3;
+
+    private static string? GetString(IntPtr recipe, string field)
+    {
+        IntPtr p = SynInterop.RecipeGetField(recipe, field);
+        return p == IntPtr.Zero ? null : System.Runtime.InteropServices.Marshal.PtrToStringUTF8(p);
+    }
+
+    private static int RequireInt(IntPtr recipe, string field, string path)
+    {
+        long v;
+        int rc;
+        unsafe { rc = SynInterop.RecipeGetInt(recipe, field, &v); }
+        if (rc == RecipeMissing)
+            throw new InvalidOperationException(
+                $"config.json missing required field '{field}' — refusing to assume a default. " +
+                "The model architecture must declare its dimensions explicitly.");
+        if (rc != RecipeOk)
+            throw new InvalidDataException(
+                $"config.json field '{field}' in '{path}' is not an integer (recipe_get_int={rc}).");
+        return checked((int)v);
+    }
+
+    private static int OptionalInt(IntPtr recipe, string field, int fallback, string path)
+    {
+        long v;
+        int rc;
+        unsafe { rc = SynInterop.RecipeGetInt(recipe, field, &v); }
+        if (rc == RecipeMissing) return fallback;
+        if (rc != RecipeOk)
+            throw new InvalidDataException(
+                $"config.json field '{field}' in '{path}' is present but not an integer " +
+                $"(recipe_get_int={rc}) — refusing to fall back to {fallback} over a malformed value.");
+        return checked((int)v);
+    }
+
+    private static double OptionalDouble(IntPtr recipe, string field, double fallback, string path)
+    {
+        double v;
+        int rc;
+        unsafe { rc = SynInterop.RecipeGetDouble(recipe, field, &v); }
+        if (rc == RecipeMissing) return fallback;
+        if (rc != RecipeOk)
+            throw new InvalidDataException(
+                $"config.json field '{field}' in '{path}' is present but not a number " +
+                $"(recipe_get_double={rc}) — refusing to fall back to {fallback} over a malformed value.");
+        return v;
     }
 
     public static SubstrateChange BuildChange(
@@ -132,31 +205,15 @@ public sealed class LlamaRecipeExtractor
         AddAttestation(isATypeId, architectureEntityId);
     }
 
-    private static int GetInt(JsonElement root, string key, int def)
-    {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
-            return prop.GetInt32();
-        return def;
-    }
 
-    private static double GetDoubleOr(JsonElement root, string key, double def)
-    {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
-            return prop.GetDouble();
-        return def;
-    }
 
-    private static int GetIntRequired(JsonElement root, string key)
-    {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
-            return prop.GetInt32();
-        throw new InvalidOperationException(
-            $"config.json missing required field '{key}' — refusing to assume a default. " +
-            "The model architecture must declare its dimensions explicitly.");
-    }
 
-    private static byte[] CanonicalizeJson(JsonElement root)
+    // The ONLY remaining managed JSON use: its output bytes are hashed into
+    // RecipeEntityId, so moving it is an identity-affecting change (GH #552).
+    private static byte[] CanonicalizeJson(byte[] rawUtf8)
     {
+        using var doc = JsonDocument.Parse(rawUtf8);
+        var root = doc.RootElement;
         var opts = new JsonSerializerOptions { WriteIndented = false };
         using var ms = new System.IO.MemoryStream();
         using var writer = new Utf8JsonWriter(ms);

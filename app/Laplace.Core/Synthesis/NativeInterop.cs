@@ -48,6 +48,17 @@ public static partial class NativeInterop
         StringMarshalling = StringMarshalling.Utf8)]
     public static unsafe partial IntPtr RecipeGetField(IntPtr recipe, string fieldName);
 
+    // Typed reads over the same parsed recipe — callers must not re-parse config.json
+    // in managed code to get a number out of it. Status: 0 ok, -1 null, -2 missing,
+    // -3 present-but-not-that-type (never a silent default).
+    [LibraryImport(Library, EntryPoint = "recipe_get_int",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int RecipeGetInt(IntPtr recipe, string fieldName, long* outValue);
+
+    [LibraryImport(Library, EntryPoint = "recipe_get_double",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int RecipeGetDouble(IntPtr recipe, string fieldName, double* outValue);
+
     [LibraryImport(Library, EntryPoint = "recipe_free")]
     public static partial void RecipeFree(IntPtr recipe);
 

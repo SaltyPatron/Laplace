@@ -1,7 +1,10 @@
 #include "laplace/synthesis/recipe.h"
 
 #include <cctype>
+#include <cerrno>
+#include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -128,6 +131,45 @@ extern "C" const char* recipe_get_field(const recipe_t* r, const char* field_nam
     auto it = r->fields.find(field_name);
     if (it == r->fields.end()) return nullptr;
     return it->second.c_str();
+}
+
+extern "C" int recipe_get_int(const recipe_t* r, const char* field_name, long long* out_value) {
+    if (!r || !field_name || !out_value) return RECIPE_ERR_NULL;
+    auto it = r->fields.find(field_name);
+    if (it == r->fields.end()) return RECIPE_ERR_MISSING;
+
+    const std::string& s = it->second;
+    if (s.empty()) return RECIPE_ERR_TYPE;
+
+    errno = 0;
+    char* endp = nullptr;
+    long long v = std::strtoll(s.c_str(), &endp, 10);
+    /* Require the WHOLE field to be consumed: "12abc", "1.5" and "" are type errors,
+     * not silently truncated dimensions. */
+    if (errno != 0 || endp == s.c_str() || *endp != '\0') return RECIPE_ERR_TYPE;
+
+    *out_value = v;
+    return RECIPE_OK;
+}
+
+extern "C" int recipe_get_double(const recipe_t* r, const char* field_name, double* out_value) {
+    if (!r || !field_name || !out_value) return RECIPE_ERR_NULL;
+    auto it = r->fields.find(field_name);
+    if (it == r->fields.end()) return RECIPE_ERR_MISSING;
+
+    const std::string& s = it->second;
+    if (s.empty()) return RECIPE_ERR_TYPE;
+
+    errno = 0;
+    char* endp = nullptr;
+    double v = std::strtod(s.c_str(), &endp);
+    if (endp == s.c_str() || *endp != '\0') return RECIPE_ERR_TYPE;
+    /* ERANGE on underflow (e.g. 1e-400) still yields a usable 0.0/denormal; only a
+     * genuine overflow to infinity is refused. */
+    if (errno == ERANGE && (v == HUGE_VAL || v == -HUGE_VAL)) return RECIPE_ERR_TYPE;
+
+    *out_value = v;
+    return RECIPE_OK;
 }
 
 extern "C" void recipe_free(recipe_t* r) {
