@@ -27,6 +27,20 @@ public static partial class NativeInterop
     public static unsafe partial int F32GatherToF64(
         float* src, int* rowMap, nuint nRows, nuint d, double* outValues);
 
+    // Unified tensor dtype codec — one native entry for every safetensors numeric/bool
+    // dtype. Unknown names (block-quant containers) resolve to -1 so the caller refuses
+    // rather than ingesting zeros.
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_dtype_from_name",
+                   StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int TensorDtypeFromName(string name);
+
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_dtype_size")]
+    public static partial nuint TensorDtypeSize(int dtype);
+
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_decode_f32")]
+    public static unsafe partial int TensorDecodeF32(
+        void* rawBytes, nuint nElements, int dtype, float* outValues);
+
     [LibraryImport(Library, EntryPoint = "recipe_parse")]
     public static unsafe partial IntPtr RecipeParse(byte* jsonText, nuint len);
 

@@ -6,6 +6,7 @@ set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_feature_extractor.cpp
     test_gguf_writer.cpp
     test_bf16_decoder.cpp
+    test_tensor_dtype_codec.cpp
     test_tensor_decompose.cpp
     test_qk_pairs_threshold.cpp
     test_qk_pairs_threshold_pruned.cpp
