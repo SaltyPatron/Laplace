@@ -27,15 +27,12 @@ CREATE OR REPLACE FUNCTION pos_transition_plane(
     ),
     nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
     -- fused word-adjacency counts (same evidence as the conditional plane)
+    -- Pillar 5 (2026-07-20): PRECEDES-consensus leg removed; word_order already
+    -- reads the ordered sequence from physicalities.trajectory via
+    -- laplace_trajectory_constituents (Pillar 3a, e5e1b42).
     pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
         FROM word_order(p_vocab, p_trajs, 1)
-        UNION ALL
-        SELECT c.subject_id, c.object_id, c.witness_count::float8
-        FROM v
-        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
-            AND c.type_id = relation_type_id('PRECEDES')
-        JOIN v vo ON vo.id = c.object_id
     ),
     class_pairs AS (
         SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c

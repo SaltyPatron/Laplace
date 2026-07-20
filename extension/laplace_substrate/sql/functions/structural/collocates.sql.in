@@ -4,15 +4,18 @@ CREATE OR REPLACE FUNCTION collocates(p_word text, p_limit int DEFAULT 12)
     SET search_path = @extschema@, public AS $$
     -- Rank + LIMIT on ids first, render the ≤p_limit survivors (define/examples pattern) —
     -- render() was projected over every PRECEDES edge of the word before the cut.
-    SELECT render(s.object_id), s.mu, s.witness_count
+    -- Pillar 5 (2026-07-20): collocates are read from the GEOMETRY --
+    -- geometry_successors returns the next content constituent in every
+    -- trajectory containing the word, aggregated by observed frequency. There is
+    -- no rated PRECEDES edge to read any more (Pillar 3a, e5e1b42), so `mu` is
+    -- NULL: observed frequency is the signal, and inventing a rating here would
+    -- fabricate a number the substrate never adjudicated.
+    SELECT render(s.successor_id), NULL::numeric, s.seen
     FROM (
-        SELECT c.object_id, eff_mu_display(c.rating, c.rd) AS mu, c.witness_count,
-               eff_mu(c.rating, c.rd) AS er
-        FROM v_consensus_unrefuted c
-        WHERE c.subject_id = word_id(p_word)
-          AND c.type_id = relation_type_id('PRECEDES')
-        ORDER BY er DESC
+        SELECT gs.successor_id, gs.seen
+        FROM geometry_successors(word_id(p_word), p_limit, 8) gs
+        ORDER BY gs.seen DESC
         LIMIT p_limit
     ) s
-    ORDER BY s.er DESC
+    ORDER BY s.seen DESC
 $$;

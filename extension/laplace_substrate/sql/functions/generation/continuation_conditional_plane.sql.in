@@ -8,8 +8,13 @@
 --   corpus order  : word_order (tier>2 trajectory adjacency, punctuation
 --                   included once vocab admits it)
 --   discourse     : sentence_order_word_bridge (sentence-boundary pairs)
---   consensus mass: PRECEDES witness_count (unrefuted), so evidence folded
---                   from every source contributes
+--
+-- Pillar 5 (2026-07-20): the PRECEDES-consensus leg is GONE. Text never should
+-- have materialized word adjacency as attestations (Pillar 3a, e5e1b42) -- the
+-- trajectory already holds the ordered sequence losslessly, and word_order
+-- reads it via laplace_trajectory_constituents. Keeping a PRECEDES leg here is
+-- what forced every text lane to keep emitting the redundant edges; both legs
+-- above are geometry-derived, so the same knowledge arrives without them.
 -- Emitted w = log((c(x,y) + k) / (c(x) + k*V)) — add-k smoothing over the
 -- vocab, so each row is a proper (log) conditional distribution up to the
 -- unseen-mass remainder. NEGATIVE values are expected and meaningful.
@@ -29,19 +34,11 @@ CREATE OR REPLACE FUNCTION continuation_conditional_plane(
         SELECT subject_id AS x, object_id AS y, w AS c
         FROM sentence_order_word_bridge(p_vocab, p_trajs)
     ),
-    consensus_pairs AS (
-        SELECT c.subject_id AS x, c.object_id AS y, c.witness_count::float8 AS c
-        FROM v
-        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
-            AND c.type_id = relation_type_id('PRECEDES')
-        JOIN v vo ON vo.id = c.object_id
-    ),
     fused AS (
         SELECT x, y, sum(c) AS c
         FROM (
             SELECT * FROM corpus_pairs
             UNION ALL SELECT * FROM bridge_pairs
-            UNION ALL SELECT * FROM consensus_pairs
         ) u
         GROUP BY x, y
     ),

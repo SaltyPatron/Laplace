@@ -37,29 +37,30 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     
     
     
+    -- Pillar 5 (2026-07-20): continuations come from geometry_successors -- the
+    -- next content constituent in every trajectory containing the point --
+    -- not from PRECEDES consensus, which merely materialized the same sequence
+    -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
+    -- frequency (seen), not eff_mu, because there is no rated edge to read.
     order1 AS (
-        SELECT c.object_id AS entity_id,
-               eff_mu(c.rating, c.rd)::numeric AS w,
-               row_number() OVER (PARTITION BY seed.wid ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
+        SELECT gs.successor_id AS entity_id,
+               gs.seen::numeric AS w,
+               row_number() OVER (PARTITION BY seed.wid ORDER BY gs.seen DESC, gs.successor_id) AS rn
         FROM seed_ids si
         CROSS JOIN unnest(si.ids) AS seed(wid)
-        JOIN v_consensus_unrefuted c ON c.subject_id = seed.wid
-            AND c.type_id = relation_type_id('PRECEDES')
-            AND c.object_id IS NOT NULL
-        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+        CROSS JOIN LATERAL geometry_successors(seed.wid, p_fanout, 8) gs
+        JOIN entities e ON e.id = gs.successor_id AND e.tier = 2
     ),
     order1_cut AS (
         SELECT entity_id, w, w::bigint AS weight FROM order1 WHERE rn <= p_fanout
     ),
     order2 AS (
-        SELECT c.object_id AS entity_id,
-               (o.w * eff_mu(c.rating, c.rd)::numeric / 1000000000)::bigint AS weight,
-               row_number() OVER (ORDER BY o.w * eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
+        SELECT gs.successor_id AS entity_id,
+               (o.w * gs.seen::numeric)::bigint AS weight,
+               row_number() OVER (ORDER BY o.w * gs.seen DESC, gs.successor_id) AS rn
         FROM order1_cut o
-        JOIN v_consensus_unrefuted c ON c.subject_id = o.entity_id
-            AND c.type_id = relation_type_id('PRECEDES')
-            AND c.object_id IS NOT NULL
-        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+        CROSS JOIN LATERAL geometry_successors(o.entity_id, p_fanout, 8) gs
+        JOIN entities e ON e.id = gs.successor_id AND e.tier = 2
     ),
     order2_cut AS (
         SELECT entity_id, weight FROM order2 WHERE rn <= p_max
@@ -99,14 +100,18 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
         SELECT f.id AS entity_id, f.d::bigint AS weight,
                row_number() OVER (ORDER BY f.d DESC) AS rn
         FROM (
-            SELECT c.subject_id AS id,
-                   (sum((eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::float8 / 1e9
-                        * exp(- foundry_rd_kappa() * c.rd::float8 / 1e9)
-                        * foundry_witness_sat(c.witness_count)) * 1000)::bigint AS d
-            FROM v_consensus_unrefuted c
-            JOIN entities e ON e.id = c.subject_id AND e.tier = 2
-            WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
-            GROUP BY c.subject_id
+            -- Pillar 5: corpus frequency from the trajectory, not PRECEDES mass.
+            SELECT tc.entity_id AS id, count(*)::bigint AS d
+            FROM (
+                SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+                FROM physicalities p
+                JOIN entities et ON et.id = p.entity_id AND et.tier > 2
+                WHERE p.type = 1 AND p.trajectory IS NOT NULL
+                ORDER BY p.entity_id, p.id LIMIT 400000
+            ) t
+            CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+            JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
+            GROUP BY tc.entity_id
         ) f
     ),
     picked AS (
