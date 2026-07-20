@@ -122,8 +122,14 @@ pg_laplace_geometry_successors(PG_FUNCTION_ARGS)
     window     = PG_ARGISNULL(2) ? 8  : PG_GETARG_INT32(2);
     /* Direction. The trajectory holds the exact ordered sequence, so "what comes
      * BEFORE x" is as readable as "what comes after" -- same containment query,
-     * same separator cache, same aggregation. Only the candidate walk flips. */
-    backward   = PG_ARGISNULL(3) ? false : PG_GETARG_BOOL(3);
+     * same separator cache, same aggregation. Only the candidate walk flips.
+     *
+     * PG_NARGS() guard is load-bearing: the extension version hash is fixed at
+     * configure time, so a rebuilt .so can be installed while the catalog still
+     * declares the OLD 3-arg signature. Reading arg 3 unconditionally in that
+     * window reads past fcinfo->args and can take down the backend. Default to
+     * forward whenever the argument was not declared. */
+    backward   = (PG_NARGS() > 3 && !PG_ARGISNULL(3)) ? PG_GETARG_BOOL(3) : false;
     if (VARSIZE_ANY_EXHDR(point) != 16)
         ereport(ERROR, (errmsg("geometry_successors: point must be a 16-byte id")));
     if (limit_rows < 1) limit_rows = 20;
