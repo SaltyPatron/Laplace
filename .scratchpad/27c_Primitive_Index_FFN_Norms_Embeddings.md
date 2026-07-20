@@ -1,3 +1,16 @@
+<!-- STATUS COLUMN STALE 2026-07-20 — this is a REFERENCE CATALOG of transformer
+     primitives (formulations, tensor names, mutation-check gates, sources). Keep it.
+     Its 'Laplace status' column is NOT a tracker and is already wrong in four places:
+     ATT-BIAS, EMB-POS, EMB-SEG and NRM-LN are fixed (ModelTokenEdgeETL.cs:243,
+     ArchitectureProfile.cs:183-186).
+     Live gaps are GitHub issues: #476 gate matrix, #477 rope_scaling, #478 sliding_window,
+     #479 shard index.json, #480 __metadata__, #481 unknown model_type, #482 fused layouts,
+     #483 GELU kernels, #484 generation_config, #485 WordPiece, #383/#384 family coverage,
+     #537 quant refusal, #538 BPE encode-replay, #539 tokenizer sidecars, #540 hidden_act,
+     #541 norm epsilon, #542 per-projection bias, #543 Bert FinalNorm, #544 norm placement,
+     #545 phi profile.
+     Open work lives in GitHub issues. -->
+
 # 27c — Primitive Index: FFN / Normalization / Embeddings
 
 Reference catalog and test checklist for the model decomposer (ETL) and its read-side

@@ -1,3 +1,11 @@
+<!-- DRAINED 2026-07-20 — the relation lists here are landed in
+     engine/manifest/relation_types.toml, which is the authority; all five credit/license
+     canonicals and the ten modality canonicals are present, and the HAS_SENSE family_root
+     parents are correct. The reseed itself is tracked by #413; the missing NCVEC pools by
+     #505; the M0 modality ladders (code/audio/image/video, no decomposer exists yet) by #527.
+     RETAINED as a record: the Wave-0 data-path inventory and the operator reseed runbook.
+     Open work lives in GitHub issues. -->
+
 # Campaign reseed queue — Part 1 + modalities (living)
 
 **Do NOT execute** until the operator orders the full reseed (`db-reset` / foundation / seed).

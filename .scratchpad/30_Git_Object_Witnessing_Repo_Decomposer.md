@@ -1,3 +1,11 @@
+<!-- DRAINED 2026-07-20 — tracked by GitHub issues #452 (witness the git object DB
+     as a Merkle-DAG; RepoDecomposer.cs:123 still skips .git, and the vendored
+     tree-sitter-gitcommit/gitdiff grammars are still unregistered in grammar_registry.c)
+     and #504 (decide the git-lane relation ledger BEFORE codegen — adding relations
+     renumbers highway bits alphabetically and owes a reseed).
+     Section 6's two-stage grammar-unpack plan is folded into #452.
+     Open work lives in GitHub issues. -->
+
 # 30 — Git-object witnessing: the Repo decomposer as a Merkle-DAG valet
 
 **Thesis.** Git is *already* a content-addressed Merkle DAG. It maps onto the

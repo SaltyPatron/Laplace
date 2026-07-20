@@ -1,3 +1,8 @@
+<!-- DRAINED 2026-07-20 — fully reproduced by GitHub issue #451
+     (witness-trajectory evidence virtualization: O(witnesses) rows -> O(facts) rows
+     + testimony vertices). The law amendment this design implies is #535.
+     Open work lives in GitHub issues. Kept as the design record. -->
+
 # 29 — Witness-Trajectory Evidence (design, operator-prompted 2026-07-15)
 
 Question: "record witnessing so it deduplicates but keeps the truths — store
