@@ -49,30 +49,32 @@ internal static unsafe class CopyBlobValidator
 
         long off = 0;
         int row = 0;
+        long prevRowStart = -1;
         while (off < len)
         {
             long rowStart = off;
             if (off + 2 > len)
                 FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, -1,
-                    "truncated field-count (need 2 bytes)");
+                    "truncated field-count (need 2 bytes)", prevRowStart);
             int fields = (blob[off] << 8) | blob[off + 1];
             off += 2;
             if (fields != expectedFields)
                 FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
-                    $"unexpected field count (got {fields})");
+                    $"unexpected field count (got {fields})", prevRowStart);
             for (int f = 0; f < fields; f++)
             {
                 if (off + 4 > len)
                     FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
-                        $"truncated length prefix at field {f}");
+                        $"truncated length prefix at field {f}", prevRowStart);
                 int flen = (blob[off] << 24) | (blob[off + 1] << 16) | (blob[off + 2] << 8) | blob[off + 3];
                 off += 4;
                 if (flen == -1) continue;
                 if (flen < 0 || off + flen > len)
                     FailCopyBlob(blob, len, rowStart, row, tableName, expectedFields, fields,
-                        $"field {f} length {flen} overruns blob (off={off}, len={len})");
+                        $"field {f} length {flen} overruns blob (off={off}, len={len})", prevRowStart);
                 off += flen;
             }
+            prevRowStart = rowStart;
             row++;
         }
         if (row != rowCount)
@@ -81,10 +83,16 @@ internal static unsafe class CopyBlobValidator
     }
 
     private static void FailCopyBlob(
-        byte* blob, long len, long rowStart, int row, string tableName, int expected, int got, string why)
+        byte* blob, long len, long rowStart, int row, string tableName, int expected, int got, string why,
+        long prevRowStart = -1)
     {
-        long winStart = Math.Max(0, rowStart - 160);
-        long winEnd = Math.Min(len, rowStart + 160);
+        // The window must be wider than one row or it cannot contain the fault. A full
+        // attestation/physicality row is ~188 bytes (10 fields, six hash128 + int2 + two
+        // int8 + a 32-byte mask), so the old +/-160 dump was guaranteed to start PAST the
+        // previous row's header -- it showed the operator bytes that could never identify
+        // which field desynced. 512 covers two full rows on each side.
+        long winStart = Math.Max(0, rowStart - 512);
+        long winEnd = Math.Min(len, rowStart + 512);
         var sb = new StringBuilder();
         for (long i = winStart; i < winEnd; i++)
         {
@@ -110,12 +118,51 @@ internal static unsafe class CopyBlobValidator
             strideReport.Append(DescribeEntityStride(blob, len, rowStart));
         }
 
+        // The desync is always introduced by the row BEFORE the one that failed to parse:
+        // that row's declared field lengths summed to fewer (or more) bytes than it
+        // physically occupies, so the walk lands off the next row's header. Dumping its
+        // per-field length table names the offending field directly instead of leaving the
+        // operator to reverse-engineer it from hex. Without this, every attestation-side
+        // corruption report is unactionable.
+        var prevReport = new StringBuilder();
+        if (prevRowStart >= 0)
+        {
+            prevReport.Append($"\nPrevious row #{row - 1} at offset {prevRowStart} ");
+            prevReport.Append($"(walk consumed {rowStart - prevRowStart} bytes): ");
+            prevReport.Append(DescribeRowFields(blob, len, prevRowStart));
+        }
+
         throw new InvalidOperationException(
             $"COPY blob CORRUPT in '{tableName}': {why}; row #{row}, rowStart byte offset {rowStart}, " +
-            $"expected {expected} fields. Hex window (rowStart marked [>..<]):\n{sb}\nASCII: {ascii}{strideReport}");
+            $"expected {expected} fields. Hex window (rowStart marked [>..<]):\n{sb}\nASCII: {ascii}" +
+            $"{prevReport}{strideReport}");
     }
 
 
+
+    /// <summary>
+    /// Per-field length table for one row, plus the byte total those lengths account for.
+    /// Compare that total against the walk's actual consumption to see the desync directly.
+    /// </summary>
+    private static string DescribeRowFields(byte* blob, long len, long rowStart)
+    {
+        if (rowStart + 2 > len) return "(truncated)";
+        int fields = (blob[rowStart] << 8) | blob[rowStart + 1];
+        var sb = new StringBuilder();
+        sb.Append($"field_count={fields} lens=[");
+        long p = rowStart + 2;
+        for (int f = 0; f < fields; f++)
+        {
+            if (p + 4 > len) { sb.Append("<truncated>"); break; }
+            int flen = (blob[p] << 24) | (blob[p + 1] << 16) | (blob[p + 2] << 8) | blob[p + 3];
+            p += 4;
+            if (f > 0) sb.Append(',');
+            sb.Append(flen);
+            if (flen >= 0) p += flen;
+        }
+        sb.Append($"] accounts_for={p - rowStart} bytes");
+        return sb.ToString();
+    }
 
     private static string DescribeEntityStride(byte* blob, long len, long failOffset)
     {
