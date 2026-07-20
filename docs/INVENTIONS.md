@@ -242,11 +242,17 @@ gates) and never to the system's own nomenclature.
   a. The export act: the author's words are SYNTHESIZE (also the CLI verb) and
      Mold-A-Model (the product name). "Synthesis" and bare "export" are operator-minted
      slang that spread through docs, comments, and session notes and must retire.
-     [UNRESOLVED 2026-07-20 — three binding docs name this act three different ways and
-     this rule contradicts two of them; operator decision owed, no winner picked here:
-     this line retires bare "export"; CLAUDE.md:174 states "'Pour' is EXPORT vocabulary
-     exclusively"; README.md:53 uses "scoped synthesis". Until ruled, treat all three as
-     the same act and do not mass-rewrite either way.]
+     [RULED 2026-07-20 by the operator, superseding the sentence above:
+     **"Substrate Synthesis" = "Model Export"** — one act, two acceptable names, and
+     bare "export" is NOT retired. The act is: take substrate data, generate the
+     standardized portions of a conventional AI model, and get it running.
+     "Pour", "foundry" and "recipe" were explanatory scaffolding invented to convey
+     that concept — they are description, not canon, and nothing needs renaming to
+     match them. Operator's status note, recorded verbatim because it is the honest
+     state: "we got close... but no cigar yet."
+     Consequence: no mass-rewrite is owed in either direction. CLAUDE.md:174's
+     "'Pour' is EXPORT vocabulary exclusively" and README.md:53's "scoped synthesis"
+     are both consistent with this ruling.]
   b. Ranking signals: relation_rank (manifest salience) vs edge_rank vs eff_mu vs
      band weight vs "salience" — "rank" alone is ambiguous between the manifest
      prior and the read-time ordering.

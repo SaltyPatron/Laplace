@@ -1,3 +1,14 @@
+SUPERSEDE NOTE, appended 2026-07-20 (append-only: nothing below is edited).
+Two of this file's "MIGRATIONS PERFORMED" were later REVERSED and the reversal was
+never recorded here, so the sections below read as current fact when they are not:
+  - functions/fold/finish_consensus_fold_steps.sql.in — no longer exists.
+  - schema/tuning/table_tuning.sql.in — no longer exists; the tuning DDL moved to
+    scripts/win/tune-laplace.cmd and scripts/pipeline.sh.
+  - the two passing tests named for those objects are gone from SqlConsolidationTests.cs.
+Verify every claim in this file against the tree before trusting it. Open work lives in
+GitHub issues; docs/INDEX.md is the doc map.
+================================================================================
+
 ================================================================================
 SQL CONSOLIDATION — ZERO-LOSS RECONCILIATION REPORT
 Removing the legacy numbered NN_*.sql.in monolith bundles; single modular

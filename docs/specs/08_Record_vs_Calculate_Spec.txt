@@ -142,6 +142,14 @@ Existing 126.3M ChessPgn attestations on hart-desktop are today's monolithic wit
 mix under one source. The split separates them going forward. Existing rows can be left as-is or
 evicted+re-derived once the analyzer exists (per-source eviction, then re-run). Don't re-ingest
 without eviction (double-counts consensus — IngestRunner completion-marker guard).
+[Resolved 2026-07-20: MOOT on this host, and the decision is not owed. Live source_counts()
+on hart-server shows 12 sources, all lexical (WordNet 2.27M, Unicode 1.63M, CILI 1.38M,
+FrameNet, PropBank, PredicateMatrix, ISO639, WordFrameNet, VerbNet, SemLink, MapNet,
+SubstrateCanonical) and ZERO chess attestations — no legacy monolithic rows exist to
+migrate. The 126.3M figure was a hart-desktop generation. Whenever chess is seeded here it
+lands under the already-split recorder/analyzer sources, so the migration question never
+arises. If a host somewhere still carries the monolithic rows, evict per-source and
+re-derive; do not attempt an in-place reclassification.]
 
 CODE SEAMS
 ----------
