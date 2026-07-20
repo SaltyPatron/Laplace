@@ -4,6 +4,7 @@ import { AuditPanel } from './catalog/AuditPanel';
 import { StageBrowse } from './browse/StageBrowse';
 import { SourceBrowse } from './browse/SourceBrowse';
 import { EntityDetail, ResolveRedirect } from './entity/EntityDetail';
+import { NotFoundExplorer } from './entity/NotFoundExplorer';
 import { ConstellationView } from './glome/ConstellationView';
 import { WalkPanel } from './walk/WalkPanel';
 import { Breadcrumb } from './components/Breadcrumb';
@@ -54,6 +55,7 @@ export function ExploreView() {
           <Route path="stage/:stageId" element={<StageBrowse />} />
           <Route path="source/:sourceKey" element={<SourceBrowse />} />
           <Route path="entity/:idHex" element={<EntityDetail />} />
+          <Route path="notfound/:ref" element={<NotFoundExplorer />} />
           <Route path="resolve/:ref" element={<ResolveRedirect />} />
           <Route path="walk" element={<WalkPanel />} />
           <Route path="audit" element={<AuditPanel />} />

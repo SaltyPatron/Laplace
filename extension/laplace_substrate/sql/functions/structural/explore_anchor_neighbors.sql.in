@@ -1,0 +1,104 @@
+-- explore_anchor_neighbors: neighbour search from a COMPUTED anchor geometry,
+-- not a stored one. When a word (or any content) is typed but never witnessed,
+-- its content hash resolves to an id with no entities/physicalities row
+-- (exists = false) -- yet its geometry is fully determined: HashComposer pins
+-- every codepoint on S3 from the t0 perfcache and composes the parent coord and
+-- trajectory in-process. The endpoint hands that computed anchor here as bound
+-- parameters (centroid coord + optional trajectory WKT), so the KNN runs on a
+-- real index-ordered scan (bound param, GiST-eligible -- unlike a correlated
+-- subquery anchor) instead of returning nothing for want of a stored row.
+--
+-- Two axes, deliberately different notions of "near" (both returned so the UI
+-- can navigate either way):
+--   geodesic -- nearest witnessed content of ANY tier by the anchor centroid on
+--     the glome. Positional/content proximity; centroids commute, so it mixes
+--     tiers/modalities. Fast: index-ordered coord <<->> prefilter.
+--   shape    -- nearest witnessed WORDS by trajectory shape (Frechet over the
+--     curve the word traces on S3). Orthographic/morphological proximity -- what
+--     is spelled/shaped like this. Costlier: coord prefilter then Frechet rank,
+--     bounded by p_frechet_max and the 500-row prefilter.
+CREATE OR REPLACE FUNCTION explore_anchor_neighbors(
+    p_cx float8, p_cy float8, p_cz float8, p_cm float8,
+    p_traj_wkt   text    DEFAULT NULL,
+    p_geodesic_k integer DEFAULT 12,
+    p_frechet_k  integer DEFAULT 12,
+    p_frechet_max float8  DEFAULT 0.08)
+RETURNS TABLE(
+    axis        text,
+    entity_id   bytea,
+    label       text,
+    tier        smallint,
+    geodesic    float8,
+    frechet     float8)
+LANGUAGE plpgsql STABLE PARALLEL SAFE
+SET search_path = @extschema@, public AS $$
+DECLARE
+    v_anchor geometry := public.ST_SetSRID(
+        public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0);
+    v_traj   geometry := CASE
+        WHEN p_traj_wkt IS NULL OR p_traj_wkt = '' THEN NULL
+        ELSE public.ST_SetSRID(public.ST_GeomFromText(p_traj_wkt), 0)
+    END;
+BEGIN
+    -- Geodesic: any-tier content nearest the anchor centroid. Over-fetch on the
+    -- index-ordered coord distance, then re-rank by the true angular distance
+    -- (the same two-step structural_neighbors_of uses) and label once.
+    RETURN QUERY
+    WITH g AS (
+        SELECT p.entity_id,
+               public.laplace_angular_distance_4d(p.coord, v_anchor) AS geo
+        FROM physicalities p
+        WHERE p.type = 1 AND p.coord IS NOT NULL
+        ORDER BY p.coord <<->> v_anchor
+        LIMIT GREATEST(p_geodesic_k * 6, 60)
+    ),
+    dedup AS (
+        SELECT DISTINCT ON (g.entity_id) g.entity_id, g.geo
+        FROM g ORDER BY g.entity_id, g.geo
+    ),
+    nearest AS (
+        SELECT d.entity_id, d.geo
+        FROM dedup d ORDER BY d.geo LIMIT GREATEST(p_geodesic_k, 1)
+    )
+    SELECT 'geodesic'::text,
+           n.entity_id,
+           COALESCE(NULLIF(render_text_fast(n.entity_id, 8), ''),
+                    label_or_hex(n.entity_id)),
+           (SELECT e.tier FROM entities e WHERE e.id = n.entity_id),
+           n.geo,
+           NULL::float8
+    FROM nearest n
+    ORDER BY n.geo;
+
+    -- Shape: nearest witnessed words by Frechet over the trajectory curve.
+    -- Prefilter by the same coord KNN (shape-similar words sit near on the
+    -- glome) so Frechet only rates a bounded pool, then threshold + top-k.
+    IF v_traj IS NOT NULL THEN
+        RETURN QUERY
+        WITH pre AS (
+            SELECT p.entity_id, p.trajectory
+            FROM physicalities p
+            JOIN entities e ON e.id = p.entity_id AND e.tier = 2
+            WHERE p.type = 1 AND p.trajectory IS NOT NULL
+            ORDER BY p.coord <<->> v_anchor
+            LIMIT 500
+        ),
+        f AS (
+            SELECT pre.entity_id,
+                   public.laplace_frechet_4d(pre.trajectory, v_traj) AS fr
+            FROM pre
+        )
+        SELECT 'shape'::text,
+               f.entity_id,
+               COALESCE(NULLIF(render_text_fast(f.entity_id, 8), ''),
+                        label_or_hex(f.entity_id)),
+               2::smallint,
+               NULL::float8,
+               f.fr
+        FROM f
+        WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
+        ORDER BY f.fr
+        LIMIT GREATEST(p_frechet_k, 1);
+    END IF;
+END;
+$$;

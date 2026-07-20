@@ -67,6 +67,31 @@ export interface ExploreEntityPreviewResponse {
   evidence_count: number;
   preview_facts: SalientFactRow[];
 }
+export interface DecomposeNodeRow {
+  ordinal: number;
+  id_hex: string;
+  label: string;
+  tier: number;
+  text_offset: number;
+  text_length: number;
+}
+export interface ExploreAnchorNeighborRow {
+  axis: string;
+  id_hex: string;
+  label: string;
+  tier?: number | null;
+  geodesic?: number | null;
+  frechet?: number | null;
+}
+export interface ExploreNotFoundResponse {
+  reference: string;
+  word_id_hex: string;
+  exists: boolean;
+  coord: number[];
+  decomposition: DecomposeNodeRow[];
+  neighbors: ExploreAnchorNeighborRow[];
+  did_you_mean?: string | null;
+}
 export interface ExplorePhysicalityRow {
   type: number;
   x: number;

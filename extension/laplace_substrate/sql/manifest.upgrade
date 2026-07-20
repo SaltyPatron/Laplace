@@ -188,6 +188,7 @@ functions/structural/containers_of.sql.in
 functions/structural/geometry_successors.sql.in
 functions/structural/collocates.sql.in
 functions/structural/entity_curve.sql.in
+functions/structural/explore_anchor_neighbors.sql.in
 functions/structural/nearest_neighbors_4d.sql.in
 functions/structural/consensus_export_relations.sql.in
 functions/structural/consensus_export_unary.sql.in

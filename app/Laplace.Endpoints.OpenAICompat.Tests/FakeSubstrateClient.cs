@@ -62,6 +62,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
+        ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
@@ -262,6 +266,14 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<ExploreEntityResponse?> ExploreEntityAsync(
         string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct) =>
         Task.FromResult<ExploreEntityResponse?>(SampleEntity(idHex));
+
+    public Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
+        ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ExploreAnchorNeighborRow>>(
+        [
+            new ExploreAnchorNeighborRow("geodesic", CetaceanIdHex, "cetacean", 2, 0.12, null),
+            new ExploreAnchorNeighborRow("shape", WhaleIdHex, "whale", 2, null, 0.03),
+        ]);
 
     public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>

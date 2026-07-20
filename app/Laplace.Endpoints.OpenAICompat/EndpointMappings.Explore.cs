@@ -65,6 +65,52 @@ internal static class ExploreEndpoints
         .Produces<ExploreEntityPreviewResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        // Not-found explorer: keyed by the SURFACE (a content hash can't be
+        // reversed to recover "conflagurate"), so the caller passes the original
+        // reference. The anchor is computed in-process; neighbours come from the
+        // bound-anchor KNN. Returns 200 with navigable neighbours, never a 503,
+        // for a valid-but-unwitnessed word.
+        app.MapGet("/v1/explore/notfound", async (
+            string? reference,
+            int? geodesic_k,
+            int? frechet_k,
+            double? frechet_max,
+            ExploreDecomposeService decompose,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(reference))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'reference' is required.");
+
+            var surface = reference.Trim();
+            try
+            {
+                var anchor = decompose.ComputeAnchor(surface);
+                var neighbors = await substrate.ExploreAnchorNeighborsAsync(
+                    anchor,
+                    Math.Clamp(geodesic_k ?? 12, 1, 48),
+                    Math.Clamp(frechet_k ?? 12, 1, 48),
+                    Math.Clamp(frechet_max ?? 0.08, 0.0, 2.0),
+                    ct);
+
+                return Results.Json(new ExploreNotFoundResponse(
+                    Reference: surface,
+                    WordIdHex: anchor.WordIdHex,
+                    Exists: false,
+                    Coord: new[] { anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm },
+                    Decomposition: anchor.Decomposition,
+                    Neighbors: neighbors,
+                    DidYouMean: BestSurfaceSuggestion(surface, neighbors)));
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<ExploreNotFoundResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/explore/entities/{idHex}", async (
             HttpRequest request,
             string idHex,
@@ -307,6 +353,62 @@ internal static class ExploreEndpoints
         .Produces<ExploreGraphDetailResponse>()
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    // "Did you mean X?": the closest shape peer by surface edit distance. The
+    // Frechet peers are already the shape neighbourhood; Levenshtein only
+    // re-ranks that small pool, so a one-letter typo (conflagurate ->
+    // conflagrate) surfaces even when it isn't the geometrically nearest curve.
+    // Threshold scales with length; the reference itself never suggests itself.
+    private static string? BestSurfaceSuggestion(
+        string reference, IReadOnlyList<ExploreAnchorNeighborRow> neighbors)
+    {
+        var refLower = reference.ToLowerInvariant();
+        var budget = Math.Max(2, refLower.Length / 3);
+        string? best = null;
+        var bestDist = int.MaxValue;
+
+        foreach (var n in neighbors)
+        {
+            if (!string.Equals(n.Axis, "shape", StringComparison.Ordinal)) continue;
+            var label = n.Label?.Trim();
+            if (string.IsNullOrEmpty(label)) continue;
+            var cand = label.ToLowerInvariant();
+            if (cand == refLower) continue;
+
+            var d = Levenshtein(refLower, cand, budget);
+            if (d >= 0 && d < bestDist)
+            {
+                bestDist = d;
+                best = label;
+            }
+        }
+        return bestDist <= budget ? best : null;
+    }
+
+    // Bounded Levenshtein: returns -1 once every cell in a row exceeds `max`
+    // (early-out for the re-rank), the true distance otherwise.
+    private static int Levenshtein(string a, string b, int max)
+    {
+        if (Math.Abs(a.Length - b.Length) > max) return -1;
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            var rowMin = cur[0];
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost);
+                if (cur[j] < rowMin) rowMin = cur[j];
+            }
+            if (rowMin > max) return -1;
+            (prev, cur) = (cur, prev);
+        }
+        return prev[b.Length];
     }
 
     private static async Task<IResult> RunGatedExploreAsync(

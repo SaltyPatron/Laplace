@@ -220,7 +220,12 @@ internal sealed partial class SubstrateClient
             if (label is null) return null;
 
             var evidenceCount = await ReadEvidenceCountAsync(conn, id, ct);
-            var facts = await ReadSalientFactsAsync(conn, id, 3, ct);
+            // A resolvable-but-unwitnessed id has no facts to fetch; skip the
+            // salient-facts walk entirely for it. The not-found explorer
+            // (/v1/explore/notfound) serves the navigable view for these.
+            var facts = exists
+                ? await ReadSalientFactsAsync(conn, id, 3, ct)
+                : (IReadOnlyList<SalientFactRow>)Array.Empty<SalientFactRow>();
 
             return new ExploreEntityPreviewResponse(
                 IdHex: idHex.ToLowerInvariant(),
@@ -234,6 +239,55 @@ internal sealed partial class SubstrateClient
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
             throw new SubstrateUnavailableException("Explore entity preview query failed.", ex);
+        }
+    }
+
+    // Neighbour search from a COMPUTED anchor (see ExploreDecomposeService /
+    // explore_anchor_neighbors). Used by the not-found explorer: the id resolved
+    // but was never witnessed, so there is no stored coord -- the anchor comes
+    // from HashComposer instead, and the KNN runs on bound parameters.
+    public async Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
+        ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct)
+    {
+        const string sql = """
+            SELECT n.axis, encode(n.entity_id, 'hex'), n.label, n.tier, n.geodesic, n.frechet
+            FROM laplace.explore_anchor_neighbors(
+                @cx, @cy, @cz, @cm, @traj, @gk, @fk, @fmax) n;
+            """;
+
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            // Frechet over a bounded prefilter is the slow arm; keep it inside a
+            // real budget so the not-found page renders instead of hanging.
+            cmd.CommandTimeout = Math.Max(DefaultCommandTimeoutSeconds, 20);
+            cmd.Parameters.AddWithValue("cx", anchor.Cx);
+            cmd.Parameters.AddWithValue("cy", anchor.Cy);
+            cmd.Parameters.AddWithValue("cz", anchor.Cz);
+            cmd.Parameters.AddWithValue("cm", anchor.Cm);
+            cmd.Parameters.AddWithValue("traj", (object?)anchor.TrajectoryWkt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("gk", geodesicK);
+            cmd.Parameters.AddWithValue("fk", frechetK);
+            cmd.Parameters.AddWithValue("fmax", frechetMax);
+
+            var rows = new List<ExploreAnchorNeighborRow>(geodesicK + frechetK);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                rows.Add(new ExploreAnchorNeighborRow(
+                    Axis: reader.GetString(0),
+                    IdHex: reader.GetString(1),
+                    Label: reader.IsDBNull(2) ? reader.GetString(1) : reader.GetString(2),
+                    Tier: reader.IsDBNull(3) ? null : reader.GetInt16(3),
+                    Geodesic: reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                    Frechet: reader.IsDBNull(5) ? null : reader.GetDouble(5)));
+            }
+            return rows;
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Explore anchor neighbours query failed.", ex);
         }
     }
 
