@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.ConceptNet;
 public readonly struct ConceptNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/ConceptNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("ConceptNetDecomposer");
 
     public static string SourceName => "ConceptNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
+        SubstrateCanonicalIds.TrustClass("UserCuratedResource");
 
     /// <summary>ConceptNet /r/ name → substrate relation canonical.</summary>
     public static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)

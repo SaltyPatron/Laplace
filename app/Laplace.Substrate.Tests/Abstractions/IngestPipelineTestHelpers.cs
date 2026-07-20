@@ -9,7 +9,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 internal static class IngestPipelineTestHelpers
 {
     internal static readonly Hash128 TestSource =
-        Hash128.OfCanonical("substrate/source/test/ingest-pipeline/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "ingest-pipeline");
 
     internal static long ContentEntityCount(IEnumerable<SubstrateChange> changes) =>
         changes.Sum(c => c.IntentStages.IsDefaultOrEmpty

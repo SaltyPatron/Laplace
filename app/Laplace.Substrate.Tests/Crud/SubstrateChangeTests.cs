@@ -20,7 +20,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_ProducesIntentWithAllRows()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-A");
         b.AddEntity(H(1), 0, H(99));
         b.AddEntity(H(2), 0, H(99));
@@ -140,7 +140,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_DeduplicatesIdentityRowsWithinIntent()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-dedup");
         b.AddEntity(H(1), 0, H(99));
         b.AddEntity(H(1), 0, H(99));
@@ -157,7 +157,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_FoldsRepeatedTestimonyIntoGames()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-fold");
         for (int i = 0; i < 3; i++)
             b.AddAttestation(new AttestationRow(
@@ -173,7 +173,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_FoldNetOutcomeIsClassOfScoreSum()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-net");
         b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
             AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));
@@ -187,7 +187,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_FoldOutcome_HugeGameCount_DoesNotOverflowOnDrawThreshold()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-huge-games");
         var row = new AttestationRow(
             H(4), H(1), H(50), H(2), src, null,
@@ -203,7 +203,7 @@ public class SubstrateChangeTests
     [Fact]
     public void Builder_FoldRejectsMixedPhi()
     {
-        var src = Hash128.OfCanonical("substrate/source/Test/v1");
+        var src = SubstrateCanonicalIds.Source("Test");
         var b = new SubstrateChangeBuilder(src, "unit-phi");
         b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
             AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));

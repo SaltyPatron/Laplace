@@ -11,7 +11,7 @@ public static class ChessVocabulary
 
 
 
-    public static readonly Hash128 SourceId = Hash128.OfCanonical("substrate/source/ChessSelfPlay/v1");
+    public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source("ChessSelfPlay");
     public static readonly Hash128 PositionType = EntityTypeRegistry.Id("Chess_Position");
     public static readonly Hash128 SubstructureType = EntityTypeRegistry.Id("Chess_Substructure");
     public static readonly Hash128 MoveType = EntityTypeRegistry.Id("MOVE");
@@ -23,12 +23,12 @@ public static class ChessVocabulary
 
 
 
-    public static readonly Hash128 PgnSourceId = Hash128.OfCanonical("substrate/source/ChessPgn/v1");
-    public static readonly Hash128 EvalPgnSourceId = Hash128.OfCanonical("substrate/source/ChessEvalPgn/v1");
-    public static readonly Hash128 ReviewSourceId = Hash128.OfCanonical("substrate/source/ChessReview/v1");
-    public static readonly Hash128 UserPromptSourceId = Hash128.OfCanonical("substrate/source/ChessUserPrompt/v1");
-    public static readonly Hash128 OpeningsSourceId = Hash128.OfCanonical("substrate/source/ChessOpenings/v1");
-    public static readonly Hash128 BookSourceId = Hash128.OfCanonical("substrate/source/ChessBook/v1");
+    public static readonly Hash128 PgnSourceId = SubstrateCanonicalIds.Source("ChessPgn");
+    public static readonly Hash128 EvalPgnSourceId = SubstrateCanonicalIds.Source("ChessEvalPgn");
+    public static readonly Hash128 ReviewSourceId = SubstrateCanonicalIds.Source("ChessReview");
+    public static readonly Hash128 UserPromptSourceId = SubstrateCanonicalIds.Source("ChessUserPrompt");
+    public static readonly Hash128 OpeningsSourceId = SubstrateCanonicalIds.Source("ChessOpenings");
+    public static readonly Hash128 BookSourceId = SubstrateCanonicalIds.Source("ChessBook");
 
     private static Hash128 TrustClass(string cls) => Hash128.OfCanonical($"substrate/trust_class/{cls}/v1");
 
@@ -69,7 +69,7 @@ public static class ChessVocabulary
     // Analysis watermark: analyzer stamps each game once it has derived at a given version.
     public static readonly Hash128 AnalyzedAtType = EntityTypeRegistry.Id("ANALYZED_AT");
     public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
-    public static readonly Hash128 AnalysisSourceId = Hash128.OfCanonical("substrate/source/ChessAnalysis/v1");
+    public static readonly Hash128 AnalysisSourceId = SubstrateCanonicalIds.Source("ChessAnalysis");
     public static readonly Hash128 AnalysisTrustClass = TrustClass("DerivedCalculation");
 
     // Deterministic per-(game, analysis version) marker. The analyzer scan bulk-probes these for

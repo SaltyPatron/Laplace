@@ -22,7 +22,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_EmptyIntentIsNoOp()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/empty");
+        var src = SubstrateCanonicalIds.Of("source", "test", "empty");
         var change = new SubstrateChangeBuilder(src, "empty-unit").Build();
         var result = await writer.ApplyAsync(change);
         Assert.Equal(0, result.EntitiesInserted);
@@ -35,7 +35,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_InsertsNovelEntities()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/novel-ents");
+        var src = SubstrateCanonicalIds.Of("source", "test", "novel-ents");
         var typeId = await EnsureTestTypeAsync(src);
 
         var idA = H(1001);
@@ -62,7 +62,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_IsIdempotentOnReapply()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/idempotent");
+        var src = SubstrateCanonicalIds.Of("source", "test", "idempotent");
         var typeId = await EnsureTestTypeAsync(src);
 
         var change = new SubstrateChangeBuilder(src, "idem-unit")
@@ -83,7 +83,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_DedupsEntitiesAcrossIntents()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/dedup");
+        var src = SubstrateCanonicalIds.Of("source", "test", "dedup");
         var typeId = await EnsureTestTypeAsync(src);
 
         var shared = H(3001);
@@ -106,7 +106,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_InsertsPhysicalityAndAttestation()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/full-row");
+        var src = SubstrateCanonicalIds.Of("source", "test", "full-row");
         var typeId = await EnsureTestTypeAsync(src);
         var relTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST");
 
@@ -158,7 +158,7 @@ public class NpgsqlSubstrateWriterTests
 
 
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/phys-natkey");
+        var src = SubstrateCanonicalIds.Of("source", "test", "phys-natkey");
         var typeId = await EnsureTestTypeAsync(src);
         var entId = H(9001);
 
@@ -214,7 +214,7 @@ public class NpgsqlSubstrateWriterTests
 
 
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/forwardref");
+        var src = SubstrateCanonicalIds.Of("source", "test", "forwardref");
         var typeId = await EnsureTestTypeAsync(src);
 
         var goodEntity = H(5001);
@@ -244,7 +244,7 @@ public class NpgsqlSubstrateWriterTests
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/reader");
+        var src = SubstrateCanonicalIds.Of("source", "test", "reader");
         var typeId = await EnsureTestTypeAsync(src);
 
         var idA = H(6001);
@@ -272,7 +272,7 @@ public class NpgsqlSubstrateWriterTests
     public async Task ApplyAsync_ReobservedAttestation_AccumulatesGames()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/att-reobserve");
+        var src = SubstrateCanonicalIds.Of("source", "test", "att-reobserve");
         var typeId = await EnsureTestTypeAsync(src);
         var relTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST");
 
@@ -314,7 +314,7 @@ public class NpgsqlSubstrateWriterTests
         IntentStage.ResetContentBank();
 
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/content-coalesce");
+        var src = SubstrateCanonicalIds.Of("source", "test", "content-coalesce");
         await EnsureTestTypeAsync(src);
 
         var batch = Enumerable.Range(0, 8)

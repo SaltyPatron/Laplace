@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 public sealed class ParallelIngestPipelineTests
 {
-    private static readonly Hash128 Src = Hash128.OfCanonical("substrate/source/test/parallel-ingest");
+    private static readonly Hash128 Src = SubstrateCanonicalIds.Of("source", "test", "parallel-ingest");
 
     private sealed class ParallelIntRecordStream(int count, int workerCount) : IRecordStream<int>
     {

@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.WordNet;
 public readonly struct WordNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("WordNetDecomposer");
 
     public static string SourceName => "WordNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+        SubstrateCanonicalIds.TrustClass("StandardsDerived");
 
     public static readonly Dictionary<string, string> PointerTypes = new()
     {

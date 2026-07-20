@@ -39,9 +39,9 @@ public class RelationTypeRegistryTests
     [Fact]
     public void SymmetricTranslation_BothDirections_OneAttestationId()
     {
-        var src = Hash128.OfCanonical("substrate/test/reg/source");
-        var a = Hash128.OfCanonical("substrate/test/reg/a");
-        var b = Hash128.OfCanonical("substrate/test/reg/b");
+        var src = SubstrateCanonicalIds.Of("test", "reg", "source");
+        var a = SubstrateCanonicalIds.Of("test", "reg", "a");
+        var b = SubstrateCanonicalIds.Of("test", "reg", "b");
         var ab = NativeAttestation.Categorical(a, "IS_TRANSLATION_OF", b, src, null, SourceTrust.StructuredCorpus);
         var ba = NativeAttestation.Categorical(b, "IS_TRANSLATION_OF", a, src, null, SourceTrust.StructuredCorpus);
         Assert.Equal(ab.Id, ba.Id);

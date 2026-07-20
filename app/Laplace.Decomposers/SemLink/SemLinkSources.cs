@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.SemLink;
 public readonly struct SemLinkSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
+        SubstrateCanonicalIds.Source("SemLinkDecomposer");
 
     public static string SourceName => "SemLinkDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"];
@@ -28,12 +28,12 @@ public readonly struct SemLinkSource : ISeedSource
 public readonly struct PredicateMatrixSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/PredicateMatrixDecomposer/v1");
+        SubstrateCanonicalIds.Source("PredicateMatrixDecomposer");
 
     public static string SourceName => "PredicateMatrixDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"];
@@ -49,12 +49,12 @@ public readonly struct PredicateMatrixSource : ISeedSource
 public readonly struct MapNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/MapNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("MapNetDecomposer");
 
     public static string SourceName => "MapNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO"];
@@ -70,12 +70,12 @@ public readonly struct MapNetSource : ISeedSource
 public readonly struct WordFrameNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/WordFrameNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("WordFrameNetDecomposer");
 
     public static string SourceName => "WordFrameNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO"];

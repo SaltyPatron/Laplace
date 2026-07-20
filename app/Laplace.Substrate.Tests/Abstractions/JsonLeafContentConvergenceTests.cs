@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class JsonLeafContentConvergenceTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/json-leaf-convergence/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "json-leaf-convergence");
 
     [Theory]
     [InlineData("cat")]

@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.VerbNet;
 public readonly struct VerbNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("VerbNetDecomposer");
 
     public static string SourceName => "VerbNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

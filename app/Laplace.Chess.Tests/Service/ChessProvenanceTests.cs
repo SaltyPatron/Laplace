@@ -33,7 +33,7 @@ public sealed class ChessProvenanceTests
     [Fact]
     public void PgnAndOpenings_PointAt_AcademicCurated()
     {
-        var id = Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        var id = SubstrateCanonicalIds.TrustClass("AcademicCurated");
         Assert.Equal(id, ChessVocabulary.PgnTrustClass);
         Assert.Equal(id, ChessVocabulary.OpeningsTrustClass);
     }
@@ -41,9 +41,9 @@ public sealed class ChessProvenanceTests
     [Fact]
     public void SelfPlayAndUserPrompt_PointAt_SeededTrustClasses()
     {
-        Assert.Equal(Hash128.OfCanonical("substrate/trust_class/ResponseContent/v1"),
+        Assert.Equal(SubstrateCanonicalIds.TrustClass("ResponseContent"),
             ChessVocabulary.SelfPlayTrustClass);
-        Assert.Equal(Hash128.OfCanonical("substrate/trust_class/UserPromptContent/v1"),
+        Assert.Equal(SubstrateCanonicalIds.TrustClass("UserPromptContent"),
             ChessVocabulary.UserPromptTrustClass);
     }
 }

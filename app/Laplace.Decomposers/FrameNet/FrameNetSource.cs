@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.FrameNet;
 public readonly struct FrameNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
+        SubstrateCanonicalIds.Source("FrameNetDecomposer");
 
     public static string SourceName => "FrameNetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

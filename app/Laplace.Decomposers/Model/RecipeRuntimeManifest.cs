@@ -15,7 +15,7 @@ public sealed class RecipeRuntimeManifest : ISourceManifest
     public Hash128 SourceId { get; }
     public string SourceName { get; }
     public Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
+        SubstrateCanonicalIds.TrustClass("UserCuratedResource");
 
     public IReadOnlyList<string> Relations { get; } =
         ["HAS_HIDDEN_SIZE", "HAS_NUM_LAYERS"];

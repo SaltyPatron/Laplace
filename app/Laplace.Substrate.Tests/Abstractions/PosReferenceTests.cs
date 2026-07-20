@@ -38,7 +38,7 @@ public class PosReferenceTests
     {
         var id = PosReference.Resolve("proverb", PosReference.PosTagset.Wiktionary);
 
-        Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/wiktionary/proverb/v1"), id);
+        Assert.Equal(SubstrateCanonicalIds.PosProbationary("wiktionary", "proverb"), id);
         Assert.DoesNotContain(PosReference.Canonical,
             t => PosReference.CanonicalId(t) == id);
     }
@@ -47,9 +47,9 @@ public class PosReferenceTests
     public void SeedCanonical_EmitsTypePlusSeventeenValues()
     {
         var b = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(
-            Hash128.OfCanonical("substrate/test/pos/source"), "test/pos-seed", null,
+            SubstrateCanonicalIds.Of("test", "pos", "source"), "test/pos-seed", null,
             entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
-        PosReference.SeedCanonical(b, Hash128.OfCanonical("substrate/test/pos/source"));
+        PosReference.SeedCanonical(b, SubstrateCanonicalIds.Of("test", "pos", "source"));
         var change = b.Build();
 
 

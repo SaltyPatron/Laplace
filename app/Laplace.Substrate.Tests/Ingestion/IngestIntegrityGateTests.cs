@@ -71,7 +71,7 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
         public string SourceName => "EmptyYieldTest";
         public int LayerOrder => 2;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.CompletedTask;
@@ -94,7 +94,7 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
     [Fact]
     public async Task IngestRunner_DeclaredInputWithZeroApplied_Throws()
     {
-        var sourceId = Hash128.OfCanonical("substrate/source/EmptyYieldTest/gate/v1");
+        var sourceId = SubstrateCanonicalIds.OfVersioned("source", "EmptyYieldTest", "gate");
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader, NullLoggerFactory.Instance);

@@ -15,7 +15,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase<Atomic20
     private static readonly Hash128 MarkerTypeId = EntityTypeRegistry.AtomicMarker;
     private static readonly Hash128 SplitTypeId = EntityTypeRegistry.AtomicSplit;
 
-    private static readonly Hash128 NoneId = Hash128.OfCanonical("substrate/atomic/none/v1");
+    private static readonly Hash128 NoneId = SubstrateCanonicalIds.OfVersioned("atomic", "none");
 
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 

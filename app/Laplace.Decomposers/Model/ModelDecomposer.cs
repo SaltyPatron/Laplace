@@ -13,7 +13,7 @@ namespace Laplace.Decomposers.Model;
 public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
+        SubstrateCanonicalIds.TrustClass("AIModelProbe");
 
     public static (Hash128 Id, string Name) SourceForModel(string modelDir)
     {
@@ -61,7 +61,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     public static readonly Hash128 IsATypeId = RelationTypeRegistry.RelationTypeId("IS_A");
 
     private static readonly Hash128 LlamaArchitectureId =
-        Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
+        SubstrateCanonicalIds.OfVersioned("entity", "Architecture_Llama");
 
     private const string LlamaArchitectureCanonical = "substrate/entity/Architecture_Llama/v1";
 

@@ -17,7 +17,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class DeferredContentBatchTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/DeferredContent/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "DeferredContent");
 
     private sealed class FakeReader : ISubstrateReader
     {

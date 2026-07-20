@@ -34,7 +34,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticTest";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -102,7 +102,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticEnd2End/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticEnd2End");
         var decomposer = new SyntheticDecomposer(unitCount: 10, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -123,7 +123,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticResume/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticResume");
 
         var options = IngestRunOptions.Default with { SkipLayerOrderingCheck = true };
 
@@ -145,7 +145,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticParallel/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticParallel");
         var decomposer = new SyntheticDecomposer(unitCount: 20, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -165,7 +165,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatched/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticBatched");
         var decomposer = new SyntheticDecomposer(unitCount: 10, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -187,7 +187,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatchedResume/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticBatchedResume");
 
         var options = IngestRunOptions.Default with
         {
@@ -212,7 +212,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticOverlap/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticOverlap");
         var decomposer = new OverlapDecomposer(unitCount: 8, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -233,7 +233,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticPhased/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticPhased");
         var decomposer = new PhasedDecomposer(sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -256,7 +256,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticMultiFile/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticMultiFile");
         var decomposer = new MultiFileParallelDecomposer(fileCount: 8, batchesPerFile: 6, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -279,7 +279,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticParallelOverlap/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticParallelOverlap");
         var decomposer = new OverlapDecomposer(unitCount: 40, sourceId: srcId);
 
         var options = IngestRunOptions.Default with
@@ -303,7 +303,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticPhased";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -374,7 +374,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticMultiFile";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -461,7 +461,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticOverlap";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
@@ -516,7 +516,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
-        var srcId = Hash128.OfCanonical("substrate/source/SyntheticLayer/v1");
+        var srcId = SubstrateCanonicalIds.Source("SyntheticLayer");
         var decomposer = new HighLayerDecomposer(srcId);
 
         var result = await runner.RunAsync(decomposer, IngestRunOptions.Default);

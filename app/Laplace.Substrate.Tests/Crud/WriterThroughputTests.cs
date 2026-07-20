@@ -15,7 +15,7 @@ public sealed class EntityWriterThroughputTests
     private readonly LocalPgFixture _pg;
 
     private static readonly Hash128 ThroughputSrc =
-        Hash128.OfCanonical("substrate/source/test/throughput-ent/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "throughput-ent");
     private static readonly Hash128 ThroughputTypeId =
         Hash128.OfCanonical("ThroughputFixture");
 
@@ -58,7 +58,7 @@ public sealed class WriterThroughputTests
     private readonly LocalPgFixture _pg;
 
     private static readonly Hash128 ThroughputSrc =
-        Hash128.OfCanonical("substrate/source/test/throughput/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "throughput");
     private static readonly Hash128 ThroughputTypeId =
         Hash128.OfCanonical("ThroughputFixture");
     private static readonly Hash128 RelTypeId =

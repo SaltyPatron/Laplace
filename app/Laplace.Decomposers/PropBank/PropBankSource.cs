@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.PropBank;
 public readonly struct PropBankSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/PropBankDecomposer/v1");
+        SubstrateCanonicalIds.Source("PropBankDecomposer");
 
     public static string SourceName => "PropBankDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

@@ -9,9 +9,9 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class BootstrapIntentBuilderTests
 {
     private static readonly Hash128 SourceId =
-        Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
+        SubstrateCanonicalIds.Source("UnicodeDecomposer");
     private static readonly Hash128 TrustClassId =
-        Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+        SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
     private static Hash128 TypeHash(string name) =>
         Hash128.Blake3(Encoding.UTF8.GetBytes(name));
@@ -95,7 +95,7 @@ public class BootstrapIntentBuilderTests
 public class BootstrapIntentBuilderAliasTests
 {
     private static readonly Hash128 TrustClassId =
-        Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
+        SubstrateCanonicalIds.TrustClass("AIModelProbe");
 
     // A content-hash source (an AI model) must register its own name so render()/
     // label() stop showing raw hex and seed-step verify can resolve name → id

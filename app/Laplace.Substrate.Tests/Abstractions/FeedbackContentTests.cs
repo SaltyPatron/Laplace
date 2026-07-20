@@ -32,8 +32,8 @@ public class FeedbackContentTests
     [Fact]
     public void BuildTriple_ConfirmAndRefute_MapToOutcomePolarity()
     {
-        var s = Hash128.OfCanonical("substrate/test/feedback/subject");
-        var o = Hash128.OfCanonical("substrate/test/feedback/object");
+        var s = SubstrateCanonicalIds.Of("test", "feedback", "subject");
+        var o = SubstrateCanonicalIds.Of("test", "feedback", "object");
 
         var confirm = FeedbackContent.BuildTriple(s, "IS_A", o, confirm: true);
         var refute = FeedbackContent.BuildTriple(s, "IS_A", o, confirm: false);
@@ -56,9 +56,9 @@ public class FeedbackContentTests
     {
         var ids = new[]
         {
-            Hash128.OfCanonical("substrate/test/feedback/t1"),
-            Hash128.OfCanonical("substrate/test/feedback/t2"),
-            Hash128.OfCanonical("substrate/test/feedback/t3"),
+            SubstrateCanonicalIds.Of("test", "feedback", "t1"),
+            SubstrateCanonicalIds.Of("test", "feedback", "t2"),
+            SubstrateCanonicalIds.Of("test", "feedback", "t3"),
         };
 
         var change = FeedbackContent.BuildPrecedesChain(ids, confirm: true);
@@ -75,7 +75,7 @@ public class FeedbackContentTests
     [Fact]
     public void BuildPrecedesChain_FewerThanTwo_Throws()
     {
-        var one = new[] { Hash128.OfCanonical("substrate/test/feedback/only") };
+        var one = new[] { SubstrateCanonicalIds.Of("test", "feedback", "only") };
         Assert.Throws<ArgumentException>(() => FeedbackContent.BuildPrecedesChain(one, confirm: true));
     }
 }

@@ -234,7 +234,7 @@ public sealed class FrameNetDecomposerTests
 
 
 
-            var idioPos = Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1");
+            var idioPos = SubstrateCanonicalIds.PosProbationary("framenet", "IDIO");
             Assert.Contains(idioPos, referenced);
         }
         finally

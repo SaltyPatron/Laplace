@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class StructuredGrammarIngestTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/structured-ingest/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "structured-ingest");
 
     private sealed class NullGrammarWitness(string modalityId) : IGrammarWitness
     {

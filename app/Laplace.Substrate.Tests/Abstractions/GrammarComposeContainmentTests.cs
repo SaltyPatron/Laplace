@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class GrammarComposeContainmentTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/compose-containment/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "compose-containment");
 
     [Theory]
     [InlineData("1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]

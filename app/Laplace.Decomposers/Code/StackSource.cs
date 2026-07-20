@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.Code;
 public readonly struct StackSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/StackDecomposer/v1");
+        SubstrateCanonicalIds.Source("StackDecomposer");
 
     public static string SourceName => "StackDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_EXAMPLE", "HAS_DEFINITION", "CALLS", "DEFINES", "REFERENCES"];

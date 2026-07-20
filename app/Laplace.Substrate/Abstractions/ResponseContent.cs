@@ -14,9 +14,9 @@ namespace Laplace.Decomposers.Abstractions;
 public static class ResponseContent
 {
     public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/Response/v1");
+        SubstrateCanonicalIds.Source("Response");
     public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/ResponseContent/v1");
+        SubstrateCanonicalIds.TrustClass("ResponseContent");
 
     public static double WitnessWeight =>
         RelationTypeRank.Associative * SourceTrust.Response;

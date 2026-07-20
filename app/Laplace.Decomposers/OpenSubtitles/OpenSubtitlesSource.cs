@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.OpenSubtitles;
 public readonly struct OpenSubtitlesSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
+        SubstrateCanonicalIds.Source("OpenSubtitlesDecomposer");
 
     public static string SourceName => "OpenSubtitlesDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_TRANSLATION_OF", "HAS_LANGUAGE"];

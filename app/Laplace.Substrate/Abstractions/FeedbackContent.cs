@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Abstractions;
 public static class FeedbackContent
 {
     public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/UserFeedback/v1");
+        SubstrateCanonicalIds.Source("UserFeedback");
 
     public readonly record struct ResolvedToken(string Token, Hash128? Id, bool Present)
     {

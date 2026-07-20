@@ -11,9 +11,9 @@ namespace Laplace.Decomposers.Abstractions;
 public static class UserPromptContent
 {
     public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/UserPrompt/v1");
+        SubstrateCanonicalIds.Source("UserPrompt");
     public static readonly Hash128 TrustClass =
-        Hash128.OfCanonical("substrate/trust_class/UserPromptContent/v1");
+        SubstrateCanonicalIds.TrustClass("UserPromptContent");
 
     public static double WitnessWeight =>
         RelationTypeRank.Associative * SourceTrust.UserPrompt;

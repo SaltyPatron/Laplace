@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.Tatoeba;
 public readonly struct TatoebaSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
+        SubstrateCanonicalIds.Source("TatoebaDecomposer");
 
     public static string SourceName => "TatoebaDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"];
