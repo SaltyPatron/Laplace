@@ -1,4 +1,4 @@
-# 27 — Primitive Index: FFN / Normalization / Embeddings
+# 27c — Primitive Index: FFN / Normalization / Embeddings
 
 Reference catalog and test checklist for the model decomposer (ETL) and its read-side
 replay. Companion to the attention/positional primitive index. Scope: everything in a

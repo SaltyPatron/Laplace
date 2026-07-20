@@ -1,4 +1,4 @@
-# 27 — Primitive Index: Attention
+# 27a — Primitive Index: Attention
 
 Reference catalog of every attention-related primitive found in transformer checkpoints,
 used as the test checklist for the model ETL: scrape a checkpoint into the substrate,

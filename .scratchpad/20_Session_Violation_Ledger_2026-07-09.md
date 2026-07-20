@@ -156,7 +156,7 @@ On the clean 189-bit generation (db-reset + seed-foundation, verified 18:53):
   mode; MoE router coordinates; scalar content-law fix (Issue 53g); analyzer/
   recorder phase split + guard bypass for analyzer modes; ResolvePlanesMode
   visibility fix. Manifest at 189 bits (APPEARS_IN + six HAS_* recipe relations).
-- Research artifact: .scratchpad/19_Factor_Storage_Research.md — full-source,
+- Research artifact: docs/specs/19_Factor_Storage_Research.md — full-source,
   line-cited facts on mantissa/trajectory payload capacity, perfcache loader
   contract, qk kernel linkability, physicality wire format, Issue-49 precedent.
 - Issue 53 filed in doc 02 (residuals a–g).

@@ -11,7 +11,7 @@ inventory value, not as an active remediation target -- see
 
 Date: 2026-07-06. Method: grep + read of every production `*Decomposer.cs`, helper ingest modules, Rule #8 spine, native `engine/core`, extension SPI.
 
-**Purpose:** code-verified inventory — **input to** [18_Remediation_Plan.md](18_Remediation_Plan.md), not the finish line. Maps every decomposer + spine brand + sabotage/disproof for harness and code unfuck.
+**Purpose:** code-verified inventory — **input to** [the full-stack remediation plan](../.cursor/plans/full_stack_remediation_bdaba5c3.plan.md), not the finish line. Maps every decomposer + spine brand + sabotage/disproof for harness and code unfuck.
 
 ## Trust order
 

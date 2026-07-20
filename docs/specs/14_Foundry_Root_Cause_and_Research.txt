@@ -72,6 +72,7 @@ M2. ALL HEADS SHARE ONE SUBSPACE; RELATIONS RE-MASH IN THE RESIDUAL STREAM.
     relation slices into one matrix loses the relational structure (RESCAL,
     Nickel 2011), and every serious multi-relational GNN keeps RELATION-SPECIFIC
     transforms (R-GCN, Schlichtkrull 2018; r-GAT). The substrate's 181 relation
+    [count superseded 2026-07-19 -> 203; docs/INVENTORY.md is the count authority]
     types are the tensor slices; the synthesis re-flattens them twice (union basis +
     summed residual). → Prescriptions P3, P4.
 

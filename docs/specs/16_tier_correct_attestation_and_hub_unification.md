@@ -178,6 +178,7 @@ Each Pn is a decomposer edit; none needs a framework. Stage all, reseed once.
 ## 8. Validation results (2026-07-06, fresh foundation reseed on the fixed build)
 
 Build: rebuild-all regenerated relation_law.c + highway perfcache to 182 relations
+(historical build record; count later moved to 203 — see docs/INVENTORY.md, the count authority)
 (SEMANTIC_EQUIVALENCE added). NOTE landmine hit + fixed: rebuild-all failed at phase 4
 (a new SQL file `related_objects.sql.in` was unlisted in manifest.install/upgrade — added
 it), which meant phase 6 (build app) never ran, so the CLI kept STALE 181-count native

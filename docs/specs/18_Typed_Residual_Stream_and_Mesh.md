@@ -244,7 +244,9 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
        IS preserved — in tier-4 document trajectories — so the dialogue plane is a
        CALCULATED plane over witnessed trajectories (sentence_order, plan Phase 4), not
        an unpoured consensus asset.
-  C-3  Highway bits: 182 assigned (highway_manifest.h:7 LAPLACE_HIGHWAY_REL_COUNT 182u),
+  C-3  Highway bits: 182 assigned (highway_manifest.h:7 LAPLACE_HIGHWAY_REL_COUNT 182u)
+       [this correction is itself superseded 2026-07-19 -> 203u; stop pinning the number
+       here — docs/INVENTORY.md is the generated count authority],
        not 153 (CLAUDE.md stale; fixed 2026-07-08). Doc 09's "181 relation types"
        (2026-07-04 inventory) predates one addition.
   C-4  The Glicko fold consumes the CONTINUOUS mean score (sum_score_fp1e9/games,

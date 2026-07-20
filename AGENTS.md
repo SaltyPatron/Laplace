@@ -87,7 +87,7 @@ schema's own helper catalog — check it before assuming something doesn't exist
   `substrate_health()` / `api(...)` / the claim's own layer — not a single
   lexical helper. MSB3027 copy failure ⇒ clean-rebuild.
 - `seed-step.cmd` runs an independent `:verify_step` — trust it, not the CLI summary line.
-- Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L11).
+- Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L12; promoted into docs/specs/06_Engineering_Ruleset.txt — that file is now a CLOSED HISTORICAL tracker, open work lives in GitHub issues).
 - Postgres service: never `pg_ctl start` (orphans outside SCM); never agent UAC
   (`Start-Process -Verb RunAs`); never `db-reset`/`DROP DATABASE` unless the user
   explicitly asked this turn. Orphan = service Stopped + port 5432 live → point at
