@@ -44,17 +44,19 @@ END;
 $$;
 
 -- Class-transition log-conditionals P^(class(y) | class(x)) from the same
--- fused continuation evidence as the conditional plane (word_order corpus
--- adjacency + PRECEDES consensus), aggregated to the dominant-POS classes.
+-- fused continuation evidence as the conditional plane (word_order trajectory
+-- adjacency), aggregated to the dominant-POS classes.
+--
+-- Pillar 5 (2026-07-20): PRECEDES-consensus leg removed. word_order reads the
+-- ordered sequence straight from physicalities.trajectory via
+-- laplace_trajectory_constituents, which is the same knowledge PRECEDES
+-- materialized as redundant attestations (Pillar 3a, e5e1b42).
 CREATE OR REPLACE FUNCTION pos_class_transitions(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
     SET search_path = @extschema@, public AS $$
-DECLARE
-    v_prec bytea;
 BEGIN
-    v_prec := relation_type_id('PRECEDES');
     RETURN QUERY
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     word_pos AS MATERIALIZED (
@@ -64,12 +66,6 @@ BEGIN
     pairs AS (
         SELECT wo.subject_id AS x, wo.object_id AS y, wo.w AS c
         FROM word_order(p_vocab, p_trajs, 1) wo
-        UNION ALL
-        SELECT c.subject_id, c.object_id, c.witness_count::float8
-        FROM v
-        JOIN consensus c ON c.type_id = v_prec AND c.subject_id = v.id
-        JOIN v vo ON vo.id = c.object_id
-        WHERE c.object_id IS NOT NULL
     ),
     class_pairs AS (
         SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c
