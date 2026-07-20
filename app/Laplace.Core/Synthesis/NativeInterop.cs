@@ -62,6 +62,42 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "recipe_free")]
     public static partial void RecipeFree(IntPtr recipe);
 
+    // safetensors container header — [u64 LE json length][json]. Entries come back in
+    // data-offset (on-disk) order. NULL on any malformed header: a file that does not
+    // describe its own bytes must be refused, not half-read.
+    [LibraryImport(Library, EntryPoint = "safetensors_parse_header")]
+    public static unsafe partial IntPtr SafetensorsParseHeader(void* bytes, nuint len);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_header_bytes")]
+    public static partial long SafetensorsHeaderBytes(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_count")]
+    public static partial int SafetensorsTensorCount(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_has_metadata")]
+    public static partial int SafetensorsHasMetadata(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_name")]
+    public static partial IntPtr SafetensorsTensorName(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_dtype")]
+    public static partial IntPtr SafetensorsTensorDtype(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_rank")]
+    public static partial int SafetensorsTensorRank(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_dim")]
+    public static partial long SafetensorsTensorDim(IntPtr header, int index, int axis);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_data_start")]
+    public static partial long SafetensorsTensorDataStart(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_data_end")]
+    public static partial long SafetensorsTensorDataEnd(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_header_free")]
+    public static partial void SafetensorsHeaderFree(IntPtr header);
+
     [LibraryImport(Library, EntryPoint = "arch_template_load",
         StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr ArchTemplateLoad(string templateName);

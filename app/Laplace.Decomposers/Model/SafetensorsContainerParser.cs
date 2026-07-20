@@ -1,7 +1,14 @@
-using System.Text.Json;
+using System.Runtime.InteropServices;
+using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
+/// <summary>
+/// Valet over the NATIVE safetensors header parser
+/// (engine/synthesis/src/safetensors_parser.cpp). This type resolves files and shapes
+/// the result into <see cref="TensorReference"/> records; it does not parse the
+/// container itself — one parser for the format, in C++, per the layer law.
+/// </summary>
 public sealed class SafetensorsContainerParser
 {
     public sealed class TensorReference
@@ -46,60 +53,72 @@ public sealed class SafetensorsContainerParser
         return refs;
     }
 
+    /// <summary>
+    /// Reads the container header ([u64 LE json length][json]) and hands it to the
+    /// native parser. Only the header is read — tensor data is never pulled here.
+    /// </summary>
     public static IReadOnlyList<TensorReference> ParseHeader(Stream stream)
     {
         Span<byte> lenBuf = stackalloc byte[8];
-        int read = stream.Read(lenBuf);
-        if (read < 8) throw new InvalidDataException("safetensors: truncated header-length field");
+        if (stream.Read(lenBuf) < 8)
+            throw new InvalidDataException("safetensors: truncated header-length field");
 
         long headerJsonLen = 0;
         for (int i = 0; i < 8; i++) headerJsonLen |= ((long)lenBuf[i]) << (8 * i);
         if (headerJsonLen <= 0 || headerJsonLen > 256 * 1024 * 1024)
             throw new InvalidDataException($"safetensors: implausible header length {headerJsonLen}");
 
-        byte[] jsonBytes = new byte[headerJsonLen];
-        int total = 0;
-        while (total < jsonBytes.Length)
+        // The native parser takes the length prefix and the JSON as one buffer.
+        byte[] header = new byte[8 + headerJsonLen];
+        lenBuf.CopyTo(header);
+        int total = 8;
+        while (total < header.Length)
         {
-            int n = stream.Read(jsonBytes, total, jsonBytes.Length - total);
+            int n = stream.Read(header, total, header.Length - total);
             if (n == 0) throw new InvalidDataException("safetensors: truncated header JSON");
             total += n;
         }
 
-        long headerBytes = 8 + headerJsonLen;
-
-        using var doc = JsonDocument.Parse(jsonBytes);
-        var refs = new List<TensorReference>();
-
-        foreach (var prop in doc.RootElement.EnumerateObject())
+        IntPtr h;
+        unsafe
         {
-            if (prop.Name == "__metadata__") continue;
-
-            var entry = prop.Value;
-            string dtype = entry.GetProperty("dtype").GetString() ?? "BF16";
-
-            var shapeArr = entry.GetProperty("shape");
-            int[] shape = new int[shapeArr.GetArrayLength()];
-            int si = 0;
-            foreach (var dim in shapeArr.EnumerateArray())
-                shape[si++] = dim.GetInt32();
-
-            var offsets = entry.GetProperty("data_offsets");
-            long dataStart = offsets[0].GetInt64();
-            long dataEnd = offsets[1].GetInt64();
-
-            refs.Add(new TensorReference
-            {
-                Name = prop.Name,
-                Dtype = dtype,
-                Shape = shape,
-                DataStart = dataStart,
-                DataEnd = dataEnd,
-                HeaderBytes = headerBytes,
-            });
+            fixed (byte* p = header) h = SynInterop.SafetensorsParseHeader(p, (nuint)header.Length);
         }
+        if (h == IntPtr.Zero)
+            throw new InvalidDataException(
+                "safetensors: header does not describe its own tensors — malformed JSON, or an entry " +
+                "missing dtype/shape/data_offsets, or reversed offsets. Refusing to read it.");
 
-        refs.Sort((a, b) => a.DataStart.CompareTo(b.DataStart));
-        return refs;
+        try
+        {
+            long headerBytes = SynInterop.SafetensorsHeaderBytes(h);
+            int count = SynInterop.SafetensorsTensorCount(h);
+            var refs = new List<TensorReference>(count);
+
+            for (int i = 0; i < count; i++)
+            {
+                int rank = SynInterop.SafetensorsTensorRank(h, i);
+                var shape = new int[rank];
+                for (int a = 0; a < rank; a++)
+                    shape[a] = checked((int)SynInterop.SafetensorsTensorDim(h, i, a));
+
+                refs.Add(new TensorReference
+                {
+                    Name = Marshal.PtrToStringUTF8(SynInterop.SafetensorsTensorName(h, i))!,
+                    Dtype = Marshal.PtrToStringUTF8(SynInterop.SafetensorsTensorDtype(h, i))!,
+                    Shape = shape,
+                    DataStart = SynInterop.SafetensorsTensorDataStart(h, i),
+                    DataEnd = SynInterop.SafetensorsTensorDataEnd(h, i),
+                    HeaderBytes = headerBytes,
+                });
+            }
+
+            // Native already returns data-offset order; nothing to re-sort.
+            return refs;
+        }
+        finally
+        {
+            SynInterop.SafetensorsHeaderFree(h);
+        }
     }
 }
