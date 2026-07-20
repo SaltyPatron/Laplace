@@ -127,6 +127,12 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "sp_model_buffer_free")]
     public static unsafe partial void SpModelBufferFree(byte* buf);
 
+    // HF -> GGML tensor naming. Lives with the writer because it is format grammar:
+    // a GGUF carrying HuggingFace names is a file no llama.cpp build will load.
+    [LibraryImport(Library, EntryPoint = "gguf_tensor_name_hf_to_ggml",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int GgufTensorNameHfToGgml(string hfName, byte* outBuf, nuint outCap);
+
     [LibraryImport(Library, EntryPoint = "arch_template_load",
         StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr ArchTemplateLoad(string templateName);

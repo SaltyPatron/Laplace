@@ -344,3 +344,55 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
 extern "C" void gguf_writer_free(gguf_writer_t* w) {
     delete w;
 }
+
+/* ---- HF -> GGML tensor naming ------------------------------------------------
+ * Table-driven so the per-layer suffixes stay readable next to the format they
+ * serve. Anything unrecognized passes through unchanged: a tensor we cannot name
+ * is still a tensor the caller asked us to write.
+ */
+extern "C" int gguf_tensor_name_hf_to_ggml(const char* hf_name, char* out_buf, size_t out_cap) {
+    if (!hf_name || !out_buf || out_cap == 0) return -1;
+
+    auto emit = [&](const std::string& s) -> int {
+        if (s.size() + 1 > out_cap) return -1;
+        std::memcpy(out_buf, s.c_str(), s.size() + 1);
+        return (int)s.size();
+    };
+
+    const std::string hf(hf_name);
+
+    if (hf == "model.embed_tokens.weight") return emit("token_embd.weight");
+    if (hf == "model.norm.weight")         return emit("output_norm.weight");
+    if (hf == "lm_head.weight")            return emit("output.weight");
+
+    static const char kPrefix[] = "model.layers.";
+    const size_t plen = sizeof(kPrefix) - 1;
+
+    if (hf.compare(0, plen, kPrefix) == 0) {
+        size_t dot = hf.find('.', plen);
+        if (dot != std::string::npos && dot > plen) {
+            const std::string idx  = hf.substr(plen, dot - plen);
+            const std::string rest = hf.substr(dot + 1);
+
+            static const struct { const char* hf_suffix; const char* ggml_suffix; } kMap[] = {
+                {"self_attn.q_proj.weight",        "attn_q.weight"},
+                {"self_attn.k_proj.weight",        "attn_k.weight"},
+                {"self_attn.v_proj.weight",        "attn_v.weight"},
+                {"self_attn.o_proj.weight",        "attn_output.weight"},
+                {"mlp.gate_proj.weight",           "ffn_gate.weight"},
+                {"mlp.up_proj.weight",             "ffn_up.weight"},
+                {"mlp.down_proj.weight",           "ffn_down.weight"},
+                {"input_layernorm.weight",         "attn_norm.weight"},
+                {"post_attention_layernorm.weight","ffn_norm.weight"},
+            };
+
+            const char* mapped = rest.c_str();
+            for (const auto& e : kMap) {
+                if (rest == e.hf_suffix) { mapped = e.ggml_suffix; break; }
+            }
+            return emit("blk." + idx + "." + mapped);
+        }
+    }
+
+    return emit(hf);
+}

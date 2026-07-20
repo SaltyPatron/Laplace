@@ -1939,38 +1939,25 @@ internal static class FoundryCommands
             Console.WriteLine($"  vocab pin: all {resolved} crawl seeds reserved ({pinned} newly pinned), {sel.Count:N0} surfaces in mold");
     }
 
+    /// <summary>
+    /// HuggingFace tensor name -> GGML/GGUF name, resolved by the engine
+    /// (gguf_tensor_name_hf_to_ggml) so the mapping lives with the format it serves.
+    /// Unknown names pass through unchanged.
+    /// </summary>
     private static string HfToGgmlName(string hf)
     {
-        if (hf == "model.embed_tokens.weight") return "token_embd.weight";
-        if (hf == "model.norm.weight") return "output_norm.weight";
-        if (hf == "lm_head.weight") return "output.weight";
-
-        const string prefix = "model.layers.";
-        if (hf.StartsWith(prefix, StringComparison.Ordinal))
+        unsafe
         {
-            int dot = hf.IndexOf('.', prefix.Length);
-            if (dot > 0)
-            {
-                string idx = hf.Substring(prefix.Length, dot - prefix.Length);
-                string rest = hf.Substring(dot + 1);
-                string g = rest switch
-                {
-                    "self_attn.q_proj.weight" => "attn_q.weight",
-                    "self_attn.k_proj.weight" => "attn_k.weight",
-                    "self_attn.v_proj.weight" => "attn_v.weight",
-                    "self_attn.o_proj.weight" => "attn_output.weight",
-                    "mlp.gate_proj.weight" => "ffn_gate.weight",
-                    "mlp.up_proj.weight" => "ffn_up.weight",
-                    "mlp.down_proj.weight" => "ffn_down.weight",
-                    "input_layernorm.weight" => "attn_norm.weight",
-                    "post_attention_layernorm.weight" => "ffn_norm.weight",
-                    _ => rest,
-                };
-                return $"blk.{idx}.{g}";
-            }
+            const int cap = 512;
+            byte* buf = stackalloc byte[cap];
+            int n = SynthInterop.GgufTensorNameHfToGgml(hf, buf, cap);
+            if (n < 0)
+                throw new InvalidOperationException(
+                    $"gguf_tensor_name_hf_to_ggml failed for '{hf}' (name longer than {cap} bytes?)");
+            return System.Text.Encoding.UTF8.GetString(buf, n);
         }
-        return hf;
     }
+
 
 
 
