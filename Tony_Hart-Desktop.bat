@@ -78,10 +78,14 @@ rem ---- Optionals ----
 
 call :tee seed-documents "seed-step.cmd document \"D:\Data\Ingest\test-data\text\"" || goto :fail
 call :tee seed-chess-books "seed-step.cmd chess-books \"D:\Data\Ingest\test-data\text\"" || goto :fail
-call :tee seed-chess-magnus "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\MagnusCarlsen_chesscom.pgn\"" || goto :fail
-rem call :tee seed-chess-hikaru "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Hikaru_chesscom.pgn\"" || goto :fail
-call :tee seed-chess-fabiano "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\FabianoCaruana_chesscom.pgn\"" || goto :fail
-call :tee seed-chess-anthony "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Anthony-Hart_chesscom.pgn\"" || goto :fail
+call :tee seed-chess-magnus "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\01_MagnusCarlsen_chesscom.pgn\"" || goto :fail
+rem call :tee seed-chess-hikaru "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\02_Hikaru_chesscom.pgn\"" || goto :fail
+call :tee seed-chess-fabiano "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\03_FabianoCaruana_chesscom.pgn\"" || goto :fail
+call :tee seed-chess-anthony "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\04_Anthony-Hart_chesscom.pgn\"" || goto :fail
+call :tee seed-chess-anthony1 "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\05_chessscom-Anthony-Hart-00.pgn\"" || goto :fail
+call :tee seed-chess-anthony2 "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\06_chessscom-Anthony-Hart-01.pgn\"" || goto :fail
+call :tee seed-chess-anthony3 "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\07_chessscom-Anthony-Hart-02.pgn\"" || goto :fail
+call :tee seed-chess-derjascha "seed-step.cmd chess \"D:\Data\Ingest\Games\Chess\Initial-Corpus\08_chessscom-derjascha.pgn\"" || goto :fail
 call :tee seed-chess-games "seed-step.cmd chess \"C:\Users\ahart\Downloads\games.pgn\"" || goto :fail
 call :tee seed-chess-games1 "seed-step.cmd chess \"C:\Users\ahart\Downloads\games(1).pgn\"" || goto :fail
 
