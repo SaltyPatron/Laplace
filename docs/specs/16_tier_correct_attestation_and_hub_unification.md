@@ -29,6 +29,10 @@ source is talking about. Sub-constituents do not inherit it as their own attesta
 ### 1a. HAS_LANGUAGE attested per-word by corpus sources
 - UD emits `HAS_LANGUAGE` per FORM token (`UdSentenceEmitter.cs:84-85`, plus per-token
   MISC `Lang=` at `:142-147`). A CoNLL-U treebank asserts ONE language for the sentence.
+  [Superseded 2026-07-20: FIXED in code (§8 records this; §1a did not).
+  `UdSentenceEmitter.cs:49-52` now emits HAS_LANGUAGE ONCE at `sentenceRootId`; the only
+  per-token emission left is explicit MISC `Lang=` — genuine code-switching the source
+  marks — at `:165-170`. The rule below is what ships.]
 - Live: `IS_TRANSLATION_OF` subjects span every tier — codepoint 3 455, grapheme 1 490,
   Word 1.47M, Sentence 318 900, Document 55 — because the aligned unit's content root
   falls at whatever tier its length implies. Legit when the aligned unit genuinely IS a
@@ -100,6 +104,14 @@ correct template.
   "PredicateMatrixDecomposer"` returns ONLY the EtlManifest string. Orphaned registration.
 - Consequence: PredicateMatrix (arguably the richest cross-resource map — each row ties
   VN class + FN frame + PB roleset + WN sense + MCR/ILI) has NO independent provenance.
+  [Superseded 2026-07-20: the provenance half is FIXED. "PredicateMatrixDecomposer" is now
+  a real SOURCE NAME, not a dangling class reference: `SemLinkSources.cs:31,33` mints
+  `substrate/source/PredicateMatrixDecomposer/v1` and `PredicateMatrixIngest.cs:18,327`
+  declares that source id + trust class, so PM stamps its own independent provenance and
+  corroborates SemLink as a second witness. The manifest row survives at
+  `EtlManifest.cs:145` (line moved) and is no longer orphaned. What is still NOT built is a
+  standalone `PredicateMatrixDecomposer` CLASS — PM runs as a sub-lane of
+  `SemLinkDecomposer` (`SemLinkDecomposer.cs:58-63`).]
   PM and SemLink's own maps fold into one source, so consensus cannot see them as two
   witnesses corroborating the same VN↔FN↔synset link. That corroboration is the entire
   point of the EVIDENCE layer.
@@ -166,9 +178,15 @@ swap, but it buys nothing functional. Open for the user to confirm intent before
 
 P1. Tatoeba → anchor translation on the UAX content root; external id as annotation (§2a).
 P2. Corpus HAS_LANGUAGE → attest once at the unit root, not per token (§1a); UD first.
-P3. PredicateMatrix → own source id/trust (§3a); build or wire `PredicateMatrixDecomposer`.
+P3. (done, 2026-07-20 — own source id/trust landed: `SemLinkSources.cs:31,33` +
+    `PredicateMatrixIngest.cs:18,327`; the standalone decomposer class remains unbuilt by
+    design, PM rides SemLink's lane) PredicateMatrix → own source id/trust (§3a); build or
+    wire `PredicateMatrixDecomposer`.
 P4. ConceptNet → capture `/wn/` synset + POS, node→synset membership (§4).
-P5. UD XPOS → `IS_A` UPOS + `FEAT_*` split (§5).
+P5. (done, 2026-07-20 — landed at `UdSentenceEmitter.cs:84-86`: `xposId IS_A uposId`
+    emitted on the same row, collapsing the ~36k per-treebank XPOS tags onto the 17 UPOS
+    hubs; FEATS ride the `FEAT_*` channel in the same loop) UD XPOS → `IS_A` UPOS +
+    `FEAT_*` split (§5).
 P6. Wiktionary → route lexicalized senses/translations to synset hub (§4).
 P7. (done) `SEMANTIC_EQUIVALENCE` family unifies the equivalence relation NAMES (relation_
     types.toml + relation_law.c regenerated, verified). Hub-shape unification is P1/P4/P6.

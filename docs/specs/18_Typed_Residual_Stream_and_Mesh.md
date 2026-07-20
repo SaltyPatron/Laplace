@@ -58,17 +58,19 @@ ResolveSynsetAnchor :199, ParseMcrSynsetKey :138, WordNetIli :90).
 
 MESH POINT A — synset ≡ ILI (the master hub). One node per interlingual concept; the
 witnesses that converge on it:
-  - CILI mints it (CILIDecomposer.cs:98,168): IS_TYPED_AS WordNet_Synset, HAS_DEFINITION,
-    HAS_SYNSET_KEY.
-  - WordNet (WordNetDecomposer.cs:316,336): IS_SYNONYM_OF from lemma :346, IS_SENSE_OF
-    from sense :431, all pointer relations :411 (IS_A/HAS_PART/ENTAILS/CAUSES/...).
-  - OMW (OMWGrammarWitness.cs:39,55): multilingual lemma IS_SYNONYM_OF synset, defs/
+  - CILI mints it (CILIDecomposer.cs:87,96,162): IS_TYPED_AS WordNet_Synset,
+    HAS_DEFINITION, HAS_SYNSET_KEY.
+  - WordNet (WordNetDecomposer.cs:266,286 anchor): IS_SYNONYM_OF from lemma :296,
+    IS_SENSE_OF from sense :371,381, all pointer relations :351
+    (IS_A/HAS_PART/ENTAILS/CAUSES/...).
+  - OMW (OMWGrammarWitness.cs:56): multilingual lemma IS_SYNONYM_OF synset, defs/
     examples with language context — 393 languages, one knot.
-  - ConceptNet /c/en/word/n/wn/... suffix (ConceptNetDecomposer.cs:149-150 →
-    RelationTripleIngest.cs:180): CORRESPONDS_TO synset.
-  - Wiktionary sense links/senseids/wikidata (WiktionaryGrammarWitness.cs:294-304):
+  - ConceptNet /c/en/word/n/wn/... suffix (ConceptNetDecomposer.cs:84-85):
     CORRESPONDS_TO synset.
-  - SemLink pb-wn/vn-wn/fn-wn (SemLinkGrammarWitness.cs:155-158): category
+  - Wiktionary sense links/senseids/wikidata (WiktionaryEmit.cs:194,199 — the emission
+    moved out of WiktionaryGrammarWitness.cs, which is now 33 lines):
+    CORRESPONDS_TO synset.
+  - SemLink pb-wn/vn-wn/fn-wn (SemLinkGrammarWitness.cs:158): category
     CORRESPONDS_TO synset.
   - PredicateMatrix (PredicateMatrixIngest.cs:73,85-108): roleset/frame/vnclass
     CORRESPONDS_TO synset via MCR/ILI per row.
@@ -105,8 +107,8 @@ SemLink pb-vn2/pb-wn/external_vn2pb (SemLinkGrammarWitness.cs:43,126) and Predic
 :83-90.
 
 MESH POINT F — WordNet sense node (SenseAnchor.Id("lemma%ss:lex:id"), type
-WordNet_Sense). Authority WordNetDecomposer.cs:421; re-hit by VerbNet member wn keys and
-PredicateMatrix ColWnSense :80-81.
+WordNet_Sense). Authority WordNetDecomposer.cs:371,381; re-hit by VerbNet member wn keys
+and PredicateMatrix ColWnSense (PredicateMatrixIngest.cs:27,77).
 
 MESH POINT G — word SURFACE node (ContentTierSpine, space-normalized). The
 surface-collision join: WordNet lemmas, OMW lemmas, ConceptNet terms, Wiktionary words,
@@ -124,7 +126,8 @@ PredicateMatrix VN-role↔FN-FE (:118-123). All carry the VerbNet class as conte
 role alignment is SCOPED, not global.
 
 PREDICATE MATRIX = ENGINEERED SECOND WITNESS. Distinct source id
-(PredicateMatrixDecomposer/v1, registered SemLinkDecomposer.cs:29-33) so consensus counts
+(PredicateMatrixDecomposer/v1, minted SemLinkSources.cs:31,33 and declared
+PredicateMatrixIngest.cs:18,327) so consensus counts
 PM and SemLink as independent witnesses on the same VN↔FN↔synset edges — redundancy in
 the evidence layer, on purpose. Beyond SemLink it adds direct WN-sense anchoring of
 roleset/frame/vnclass, VN-role↔FN-FE alignment, and per-row MCR/ILI resolution across
@@ -135,7 +138,8 @@ IS_SYNONYM_OF / IS_TRANSLATION_OF / HAS_SENSE all sit in the equivalence band (.
 EVOKES_FRAME / INHERITS_FROM / MEMBER_OF_VERBNET_CLASS taxonomic (.90); HAS_FRAME_ELEMENT
 / HAS_THEMATIC_ROLE / HAS_SEMANTIC_ROLE partitive (.73). IS_SYNONYM_OF and
 IS_TRANSLATION_OF share family root SEMANTIC_EQUIVALENCE for read-time family queries but
-stay distinct in consensus (toml :913-928) — recording never mashes.
+stay distinct in consensus (relation_types.toml :810 IS_SYNONYM_OF / :818
+IS_TRANSLATION_OF, both `family_root = "SEMANTIC_EQUIVALENCE"`) — recording never mashes.
 
 What the mesh yields, in one sentence: surface → lemma → sense → ILI concept → frame/
 class/roleset → roles is a FULLY ATTESTED, multi-witnessed, calibrated factorization of
@@ -224,7 +228,9 @@ slices to ontology strata. P4b (tier schedule) = §3. P6 (vocab + dialogue) = th
 entity-id law + the L-real/lm_head composition. P7 (positions) = the S stratum. New here,
 beyond 14: the SELECTOR synthesis (§4 EVOKES_FRAME-as-QK) and ILI-as-internal-basis (§2 C),
 neither named in 14's prescriptions. The 2026-07-08 remediation plan
-(.claude/plans/wild-orbiting-shamir.md) implements the mechanical prerequisites
+(.claude/plans/wild-orbiting-shamir.md — GONE as of 2026-07-20: `.claude/plans/` does not
+exist, so every "plan Phase N" marker in this doc is now UNRESOLVABLE; doc 14 §6b is the
+surviving execution log of that plan) implements the mechanical prerequisites
 (P5/P4a/P3/P6/P7/P2 + rank adjudication); THIS doc is the build spec for the phase after
 it: typed allocation, selectors, WSD/frame/realization layers.
 
@@ -235,12 +241,21 @@ SECTION 6 — CORRECTIONS TO THE RECORD (2026-07-08 audit; propagate + keep)
        (eigenmaps.cpp:56 — L = I − D^-1/2 W D^-1/2, Spectra/Lanczos low eigenvectors,
        trivial vector dropped, D^-1/2 row rescale); BuildBasisAffinity (raw SVD) is dead
        code (affRaw hardcoded null). hidden='auto' spectral-rank sizing IS implemented
-       (FoundryCommands.cs:1080-1091). P1 is effectively done. M2 is HALF-fixed (per-head
+       (FoundryCommands.cs:1020 validation, :1198 "hidden_size auto → spectral rank …").
+       P1 is effectively done. M2 is HALF-fixed (per-head
        input subspaces distinct; write collision remains → P3).
   C-2  Doc 14 C3 is WRONG: no sentence-level turn/response plane exists in consensus.
        OpenSubtitles emits ONLY cross-language IS_TRANSLATION_OF line pairs
-       (OpenSubtitlesDecomposer.cs:55-57); Tatoeba only translations; PRECEDES is
+       (OpenSubtitlesDecomposer.cs:48); Tatoeba only translations; PRECEDES is
        word-tier only (TextEntityBuilder.BuildDistributionalAttestations). Sentence order
+       [Superseded 2026-07-20: there is no `BuildDistributionalAttestations` (0 hits), and
+       text emits NO PRECEDES at all. TextEntityBuilder.cs:241-248 (Pillar 3a): text emits
+       its content DAG (entities + physicalities/trajectory) ONLY, `attestations =
+       ImmutableArray<AttestationRow>.Empty`; the comment states PRECEDES is a MODEL
+       relation (token couplings from Q/K/V/O/gate/up/down/norms), NOT text word-adjacency,
+       and the word→word emission was DELETED. Corroborated by commit e150a9f. C-2's
+       conclusion — no sentence-level turn/response plane in consensus — stands, and is now
+       true a fortiori.]
        IS preserved — in tier-4 document trajectories — so the dialogue plane is a
        CALCULATED plane over witnessed trajectories (sentence_order, plan Phase 4), not
        an unpoured consensus asset.

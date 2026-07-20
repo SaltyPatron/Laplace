@@ -10,6 +10,9 @@ DONE + VALIDATED (unit + live against the 144M-row DB):
   - Recorder = ChessPgnDecomposer, witnessed-only, no chess engine, comments captured. Emits ZERO
     geometry (unit-verified).
   - Analyzer = ChessAnalyzeDecomposer (`laplace ingest chess-analyze <path>`), gated by the
+    [Superseded 2026-07-20: the command takes NO path —
+    app/Laplace.Chess/Service/ChessAnalyzeDecomposer.cs:11 "Run: `laplace ingest chess-analyze`
+    (no path — substrate is the source of truth)"; it scans witnessed Chess_Game rows in PG.]
     per-(game, version) AnalysisMarker watermark (EntitiesExistBitmapAsync probe). Derives
     positions/geometry/moves/motifs/opening/consensus + bridges PGN eval/quality onto positions
     under lower-trust sources. Live run: 488 ChessAnalysis attestations + 2 markers applied,
@@ -18,6 +21,10 @@ DONE + VALIDATED (unit + live against the 144M-row DB):
     marker is the only skip gate. Watermark skip unit-verified (FilterUnanalyzedAsync).
   - Opt-in engine eval: LAPLACE_CHESS_ANALYZE_DEPTH>0 runs our own eval per position (currently
     UNBIASED / deterministic; see NEXT PHASE).
+    [Superseded 2026-07-20: no such env var exists (0 hits repo-wide outside this doc). The knob
+    is a constructor parameter: ChessAnalyzeDecomposer.cs:17 `ChessAnalyzeDecomposer(int
+    engineDepth = 0)` — >0 runs the Laplace search per position, 0 (default) records only
+    witnessed structure.]
 
 NEXT PHASE — corpus-growth re-analysis (replace, not accumulate):
   The witness layer (each game's outcome at each position) accumulates correctly and is
@@ -44,6 +51,11 @@ Chess PGN ingest is slow vs WordNet because current ingest REPLAYS a chess engin
 (San.Resolve legal-move-gen) and folds consensus inline. WordNet just transcribes. Move the
 replay + derivation out of ingest and chess ingest becomes transcription too. Also de-risks
 the PCoreParallelCompose drop bug (append-only recording is idempotent/re-runnable) and
+[Superseded 2026-07-20: PCoreParallelCompose.cs was deleted (0 hits across app/engine/
+extension; removal recorded in .cursor/plans/full_stack_remediation_bdaba5c3.plan.md:115 as
+having zero production callers). Compose now runs through the shared pipeline spine
+(ComposeDecomposer → IngestPipelineDefaults.Compose, Decomposer.cs:339-348). The named drop
+bug is moot with the code.]
 subsumes the per-ply waste (EmitNodes 6x, 2M memo cap, AppendEval substructure re-iterate).
 
 RECORDER (new cheap ingest path)
@@ -58,6 +70,11 @@ Records, per game, WITHOUT any chess logic (no board replay, no move gen, no geo
   - Per-ply witnessed annotations: %clk, %eval token, NAG/glyph, AND free-text comment prose
     (** currently DROPPED — gap to close: emit comment text as a witnessed content node on the
     ply **).
+    [Superseded 2026-07-20: GAP CLOSED. ChessPgnDecomposer.cs:197-205 (RecordMovetext) witnesses
+    the VERBATIM PGN movetext — clocks, evals, comments, NAGs, result token — as one content
+    edge per game (HAS_MOVETEXT); every per-ply token is reconstructible from it via
+    MovetextTokens.Parse. Deliberately at game grain, not per ply (see :153-157: per-ply record
+    tokens were measured at ~40M of 62M consensus rows). Matches CLAUDE.md:124.]
   All append-only, content-addressed, idempotent. Source = ChessPgn (witnessed trust class).
 
 ANALYZER (new deferred pass, UI-triggered / batched)
@@ -112,6 +129,8 @@ APPLY-SIDE PERF (independent of the split, still needed)
 IngestRunner consumer is SINGLE-THREADED (one ApplyWorkingSetAsync at a time, IngestRunner.cs
 ~237-266), serialized by global pg_advisory_xact_lock('laplace_apply_batch'). Decompose is
 already parallel (PCoreParallelCompose, up to 8 P-core-pinned workers, ChessPgnDecomposer.cs:62).
+[Superseded 2026-07-20: PCoreParallelCompose no longer exists — see the note at §"WHY (measured)".
+Compose parallelism is owned by the pipeline spine, not by a chess-specific worker pool.]
   Fix 1: N apply lanes sharded by subject-id hash, each own connection + PARTITION-SCOPED
          advisory lock => disjoint shards apply concurrently.
   Fix 2: stage-then-fold — COPY raw attestations (append-only, shardable), then ONE bulk

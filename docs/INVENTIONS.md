@@ -68,7 +68,10 @@ vocabularies that accreted around these inventions without ever being consolidat
 203 as of 2026-07-19, was 189 at writing) generated from
     one manifest; perfcache-backed zero-SQL gating; bands double as head-importance
     priors and intent-conditional read weights. (relation_types.toml,
-    highway_mask.c, highway_manifest.h — 189/13 verified in parity 2026-07-10.)
+    highway_mask.c, highway_manifest.h — manifest/generated-header parity is CI-gated;
+    the canonical relation and band counts live in docs/INVENTORY.md, never here.
+    [Superseded 2026-07-20: "189/13 verified in parity 2026-07-10" — docs/INVENTORY.md:123
+    reports 203 governed canonical relations (+23 aliases).])
 15. THE TRUST-CLASS LATTICE. UserPrompt, Response, UserFeedback, AiModelProbe,
     ChessAnalysis, curated lexica — the engine's own voice structurally outranked so
     self-confirmation cannot outshout curated sources.
@@ -81,13 +84,20 @@ vocabularies that accreted around these inventions without ever being consolidat
     binary COPY of client-proven-novel rows. The server receives records; it never
     re-derives novelty. The spec is the SEQUENCE itself. (IngestBatchPipeline →
     ConsensusAccumulatingWriter → NpgsqlWorkingSetApply.)
-17. THE DECOMPOSER WITNESS BOUNDARY — OMNI-MODAL. 27 decomposers (count verified
-    2026-07-10), all pure content → SubstrateChange streams, zero inline SQL:
+17. THE DECOMPOSER WITNESS BOUNDARY — OMNI-MODAL. The decomposer roster (per-assembly
+    class list and count: docs/INVENTORY.md § Decomposers — never a number in prose),
+    all pure content → SubstrateChange streams, zero inline SQL:
     lexical (WordNet, OMW, CILI, Wiktionary), frame semantics (FrameNet, VerbNet,
-    PropBank, SemLink, PredicateMatrix, MapNet, WordFrameNet), commonsense
-    (ConceptNet, Atomic2020), corpora (UD, Tatoeba, OpenSubtitles, Document), code
-    (Code, Repo, Stack, TinyCodes), Tabular, Unicode itself, ISO-639, three chess
+    PropBank, SemLink, MapNet, WordFrameNet), commonsense
+    (ConceptNet, Atomic2020), corpora (UD, Tatoeba, OpenSubtitles), code
+    (Code, Repo, Stack, TinyCodes), Tabular, Unicode itself, ISO-639, the chess
     lanes, AI models. Every modality reduced to the same 5-tuple.
+    [Superseded 2026-07-20: "27 decomposers (count verified 2026-07-10)" —
+    docs/INVENTORY.md:28 says 25 in Laplace.Decomposers + 4 in Laplace.Chess.
+    PredicateMatrix is not a decomposer class: it rides SemLink's lane
+    (app/Laplace.Decomposers/SemLink/PredicateMatrixIngest.cs). Document is not in the
+    counted assembly: DocumentDecomposer.cs lives in
+    app/Laplace.Substrate/Abstractions/.]
 18. THE OMNI-GLOTTAL MESH. ILI as the ingested interlingua: synset nodes addressed
     BY their ILI string, so WordNet, OMW's multilingual lemmas, ConceptNet URIs,
     Wiktionary sense links, SemLink, and PredicateMatrix converge by hash collision;
@@ -112,6 +122,12 @@ vocabularies that accreted around these inventions without ever being consolidat
     resolved-move transitions as geometry; positions as occupied-square content;
     whole games as mantissa-packed spatial linestrings — opening trees and maneuver
     search become GiST index hits. (Doc 11 §2.)
+    [Superseded 2026-07-20: NOT YET BUILT — specified in docs/specs/11 §2, which itself
+    labels this the "GAP — the geometric board layer" (11:165-174). No square/piece
+    anchor exists in the tree (0 hits for SquareAnchor/board_anchor across app, engine,
+    extension); ChessCompose.cs:101 still composes positions from the codepoint coords
+    of the notation via Math4d.Centroid — the very path spec 11 says this ladder
+    replaces. Spec 11 is the authority; this entry is aspiration, not enumeration.]
 23. FLAT-COST DEPTH. Depth is consumed at fold time (real games ran to terminal and
     folded back through the position); a depth-N-grounded answer costs O(1) at
     query — the inversion of the search engine's exponential online cost.
@@ -166,6 +182,12 @@ vocabularies that accreted around these inventions without ever being consolidat
     cells as deterministic MoE routing — and S³-Procrustes canonical orientation
     solving the eigenvector sign/basis ambiguity the graph-transformer literature
     hacks around. (Doc 12.)
+    [Superseded 2026-07-20: the voronoi/MoE clause is NOT BUILT — Milestone B. 0 hits
+    for "voronoi" across app, engine, extension, scripts, web; `SELECT count(*) FROM
+    api('voronoi')` = 0; docs/specs/12:142 marks it GAP and FoundryCommands.cs:1005
+    prints "MoE is Milestone B". The rest of the entry (angular/Fréchet heads,
+    intersects masks, hilbert/trajectory PE, S³-Procrustes) stands. The same unbuilt
+    "voronoi containers" phrase appears in #41 below.]
 34. DECOMPOSABLE EXPORT. GGUF written closed-form (gguf_writer.cpp,
     FoundryCommands); every exported weight decomposes back to its witnesses.
     Construction-without-training — verified against the literature (doc 14 §7) as
@@ -189,8 +211,10 @@ vocabularies that accreted around these inventions without ever being consolidat
     answer through ONE lane (FeedbackContent → writer spine → immediate fold).
     EVALUATION IS INGESTION — the self-improving loop that makes it a mind and not
     a lookup. Self-signals outranked by design.
-39. THE ONE QUERY SURFACE. 27 native SQL function families plus api() — a schema
-    that introspects itself.
+39. THE ONE QUERY SURFACE. The native SQL function families (count and roster:
+    docs/INVENTORY.md § SQL function families) plus api() — a schema that introspects
+    itself. [Superseded 2026-07-20: "27 native SQL function families" — INVENTORY.md:63
+    says 28.]
 40. THE SUBSTRATE SERVED AS AN LLM. Laplace.Endpoints.OpenAICompat —
     OpenAI-compatible chat/completions over the walk engine, SSE streaming, plus
     endpoints incumbents structurally cannot offer: evidence receipts,
@@ -199,6 +223,11 @@ vocabularies that accreted around these inventions without ever being consolidat
 41. THE PRODUCT SHAPE. Conversational base + topic packages (scoped synthesis
     in voronoi containers) — training replaced by compilation; models as
     build-to-order artifacts.
+    [Annotated 2026-07-20: the "voronoi containers" half is NOT BUILT — same
+    Milestone B gap annotated on #33 above (0 hits for "voronoi" repo-wide;
+    `api('voronoi')` = 0). The scoped-pour mechanism itself IS built
+    (RecipeCompileService.cs, FoundryExportService.cs, `model_recipes()`); it is
+    the voronoi routing that is absent. Tracked by GH #376 / #398.]
 
 --------------------------------------------------------------------------------
 ## §8 Synonym debt — parallel vocabularies that accreted around one system
@@ -213,6 +242,11 @@ gates) and never to the system's own nomenclature.
   a. The export act: the author's words are SYNTHESIZE (also the CLI verb) and
      Mold-A-Model (the product name). "Synthesis" and bare "export" are operator-minted
      slang that spread through docs, comments, and session notes and must retire.
+     [UNRESOLVED 2026-07-20 — three binding docs name this act three different ways and
+     this rule contradicts two of them; operator decision owed, no winner picked here:
+     this line retires bare "export"; CLAUDE.md:174 states "'Pour' is EXPORT vocabulary
+     exclusively"; README.md:53 uses "scoped synthesis". Until ruled, treat all three as
+     the same act and do not mass-rewrite either way.]
   b. Ranking signals: relation_rank (manifest salience) vs edge_rank vs eff_mu vs
      band weight vs "salience" — "rank" alone is ambiguous between the manifest
      prior and the read-time ordering.

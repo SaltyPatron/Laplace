@@ -1,5 +1,17 @@
 # 19 — Factor-Storage Research (facts only, no design)
 
+> [Annotated 2026-07-20 — WHOLE-DOC STATUS. This doc is framed as a facts-only research
+> survey with no design commitment. That framing is now historical: **candidate (b)-adjacent
+> work shipped and candidate (a)'s vertex class was BUILT.** The FACTOR vertex class exists
+> (`engine/core/include/laplace/core/mantissa.h:34-45`, `LAPLACE_VFLAG_FACTOR` +
+> `LAPLACE_FACTOR_VALUES_PER_VERTEX 6`; pack/unpack at `engine/core/src/mantissa.c:118,147`)
+> and the extension reads it (`extension/laplace_substrate/src/model_factor.c:134`,
+> surfaced live as `model_pair_score` / `model_row_topk` / `model_forward` /
+> `model_jitter_catalog`). The blob half of the scope was promoted into
+> **`docs/specs/33_Perfcache_Blob_Law.md` (2026-07-18)**, which names "docs/specs/19
+> candidate b" directly. Read 33 for the current law; read this doc for the survey that
+> produced it, with the per-claim supersessions below.]
+
 Research date: 2026-07-09. Question served: where can per-circuit factor matrices
 (vocab × rank floats — the lossless token→token operators of ingested transformers) live
 so that PG-extension native code can score arbitrary token pairs at query time. Two
@@ -79,6 +91,11 @@ Per vertex a testimony walk carries (`mantissa.c:79-99`):
 - **Exact per-vertex payload capacity**: 212 bits (128 id + 16 ordinal + 16 run + 52
   flags), of which the flags word is the only "free-form" region and it is 52 bits.
 - **Is there an existing vertex class that carries raw float data losslessly?** No.
+  [Superseded 2026-07-20: there IS one now — this survey's own recommendation was built.
+  `mantissa.h:34-45` defines the FACTOR vertex class (`LAPLACE_VFLAG_FACTOR` = bit 7,
+  `LAPLACE_FACTOR_VALUES_PER_VERTEX 6` — exactly the "6 × float32 = 192 bits fits per
+  vertex" ceiling computed two bullets down), packed/unpacked at `mantissa.c:118`
+  (`laplace_factor_pack_values`) and `:147` (`laplace_factor_unpack_vertex`).]
   The only scalar channel is the testimony class's 36-bit zigzagged fixed-point-1e-9
   score (`mantissa.c:87-95`) — one scalar per vertex, precision 1e-9, range ±34.36.
   Factually: any 32-bit pattern (e.g. a raw float32's bits reinterpreted as int32)
@@ -126,14 +143,14 @@ C# bindings exist for all three builders: `NativeInterop.cs:49-56`,
 ### 3.1 GUC contract (`perfcache.c:37-70`)
 
 `laplace_substrate_perfcache_init()` registers, in `_PG_init`
-(`laplace_substrate.c:713-724`):
+(`laplace_substrate.c:946` `_PG_init`, calls at `:954-955`):
 - `laplace_substrate.perfcache_path` — string, default `""`, **PGC_SIGHUP**
   (`perfcache.c:40-48`). Empty disables; consumers fall back or error per their contract.
 - `laplace_substrate.highway_perfcache_path` — string, default `""`, PGC_SIGHUP
   (`perfcache.c:49-57`).
 - `laplace_substrate.native_mkl_threads` — int, default 1, range 1–64, **PGC_SUSET**
   (`perfcache.c:58-68`); consumed by `laplace_runtime_init(LAPLACE_RUNTIME_HOST_PG, n)`
-  at `_PG_init` (`laplace_substrate.c:726-737`).
+  at `_PG_init` (`laplace_substrate.c:957-968`).
 - `MarkGUCPrefixReserved("laplace_substrate")` (`perfcache.c:69`) — a third blob's GUC
   must be registered in this same init to live under the reserved prefix.
 
@@ -158,6 +175,10 @@ linked into the extension DLL — `extension/CMakeLists.txt:70-80`):
   - Blob format: 128-byte header (magic `0x4652504C`, version 2, record
     count/size/offsets, `perfcache_format.h:64-88`), fixed 1,114,112 × 80-byte records
     (`perfcache_format.h:15, 25, 83-87`), decomp/compose sections, BLAKE3 trailer.
+    [Superseded 2026-07-20: the record count is no longer fixed —
+    `codepoint_table.c:117-125` accepts SCOPED DENSE PREFIXES (`ascii=0x80`, `bmp=0x10000`,
+    `full=0x110000`), with lookup returning NULL for cp ≥ record_count. Now law in
+    `docs/specs/33_Perfcache_Blob_Law.md` §5.]
 - **Highway blob** (`highway_table_load`, `highway_table.c:102-148`): identical
   mmap-per-platform code (`highway_table.c:37-85`); validates magic `0x5957484C`,
   version, counts vs compile-time caps (189 relations / 13 bands
@@ -205,7 +226,7 @@ linked into the extension DLL — `extension/CMakeLists.txt:70-80`):
 5. A branch in `laplace_substrate_perfcache_prewarm` (WARN-not-ERROR,
    postmaster-only, `perfcache.c:159-197`).
 6. Staging/config by `install-extensions.cmd` (referenced at `perfcache.c:96-97,
-   253-254`, `highway_mask.c:187-189`).
+   253-254`, `highway_mask.c:245`).
 7. Blob generation at build time — CLAUDE.md documents both existing blobs as
    build-products deployed by the perfcache phase of rebuild-all
    (also `.scratchpad/03_Chess.txt:419`: "both build-time-generated, mmap'd, loaded
@@ -215,7 +236,7 @@ linked into the extension DLL — `extension/CMakeLists.txt:70-80`):
 
 ## 4. `extension/laplace_substrate/src/highway_mask.c` — the in-extension perfcache consumer pattern
 
-Full file read (342 lines). How native extension code resolves relations at query time:
+Full file read (408 lines as of 2026-07-20; 342 at writing — `pg_laplace_highway_mask_from_bits` at `:180-235` was added and shifted every citation below it). How native extension code resolves relations at query time:
 
 - Pure-compute SQL functions over bytea masks with NO table access:
   `pg_laplace_highway_match` (64-bit-word AND-accumulate over two bytea,
@@ -225,8 +246,8 @@ Full file read (342 lines). How native extension code resolves relations at quer
   violation" (`:20-33`). Byte-order contract: mask bytea is the raw little-endian
   `uint64 w[4]` struct memory, memcpy is the identity mapping (`:28-33`).
 - Perfcache-table consumers gate on `require_highway_table()` →
-  `laplace_highway_ready()` → ereport with GUC errhint (`:180-190`).
-  `pg_laplace_highway_band_mask` (`:192-214`), `pg_laplace_relation_highway_bit`
+  `laplace_highway_ready()` → ereport with GUC errhint (`:237-246`).
+  `pg_laplace_highway_band_mask` (`:259-281`), `pg_laplace_relation_highway_bit`
   (`:216-232`), `pg_laplace_relation_highway_band` (`:234-249`) are **pure in-memory
   lookups against the mmap'd blob** — hash-bucket probe by BLAKE3 type id
   (`highway_table.c:150-169`) or direct record index by bit (`highway_table.c:171-182`).
@@ -304,7 +325,10 @@ files are single-threaded scalar C++ (only `<vector>`, `<algorithm>`, `<cmath>`)
 ### 5.5 Could they compile into `laplace_substrate` as-is? Build facts
 
 - The extension module compiles **only C sources** today: `EXT_C_SOURCES` is 19 `.c`
-  files (`laplace_substrate/CMakeLists.txt:49-70`); the qk files are `.cpp` living in
+  files (`laplace_substrate/CMakeLists.txt:49`); the qk files are `.cpp` living in
+  [Superseded 2026-07-20: 24 `.c` files now (`ls extension/laplace_substrate/src/*.c`),
+  matching docs/INVENTORY.md's native-source listing — INVENTORY is the count authority,
+  not this line.]
   the `laplace_synthesis` shared lib (`engine/synthesis/CMakeLists.txt:26-33`).
 - The extension links `laplace_core`, `laplace_dynamics`, `postgres.lib`
   (`laplace_substrate/CMakeLists.txt:85-89` Windows; `:99` non-Windows).
@@ -322,7 +346,7 @@ files are single-threaded scalar C++ (only `<vector>`, `<algorithm>`, `<cmath>`)
   into the imported dynamics target (`extension/CMakeLists.txt:60-68, 80`), MKLROOT is
   a hard configure requirement (`:60-64`). `_PG_init` calls
   `laplace_runtime_init(LAPLACE_RUNTIME_HOST_PG, laplace_substrate_native_mkl_threads())`
-  and FATALs if MKL is unavailable (`laplace_substrate.c:726-737`); in PG the thread
+  and FATALs if MKL is unavailable (`laplace_substrate.c:957-968`); in PG the thread
   count must come from the GUC — autodetect is refused (`dynamics/src/init.cpp:86-88`).
 - **TBB is NOT available in-extension** (sequential MKL + `LAPLACE_RUNTIME_NO_TBB`;
   no TBB lib in the extension link set anywhere in `extension/CMakeLists.txt`).
@@ -387,7 +411,7 @@ Emission: signature + flags + 0-extension header, tuple bytes, `0xFF 0xFF` trail
 (`intent_stage.c:18-23, 657-679`); or raw tuple pointer for streaming
 (`intent_stage.c:681-689`). Transport is
 `COPY laplace.physicalities (...) FROM STDIN (FORMAT BINARY)` via
-`BeginRawBinaryCopyAsync` (`NpgsqlWorkingSetApply.cs:546-549`), parallel over id-range
+`BeginRawBinaryCopyAsync` (`NpgsqlWorkingSetApply.cs:951-954`), parallel over id-range
 groups with `session_replication_role=replica`, `synchronous_commit=off`, `jit=off`
 (`NpgsqlWorkingSetApply.cs:497-538`). Partitioning is by referenced `entity_id` for
 referential co-location, Hilbert-sorted within a partition (`intent_stage.c:456-504,
@@ -409,6 +433,10 @@ referential co-location, Hilbert-sorted within a partition (`intent_stage.c:456-
   is default-ON (`:8-15`). Total apply footprint is budgeted at 1 GiB by
   `MemoryTopology` so no single-table buffer approaches the 2 GiB int wall
   (`app/Laplace.Core/Core/MemoryTopology.cs:18-19`, `IngestSizing.cs:82-83`).
+  [Superseded 2026-07-20: the budget is 4 GiB, not 1 GiB —
+  `app/Laplace.Core/Core/MemoryTopology.cs:33` `MaxApplyBufferBytes = 4L << 30`, carrying a
+  HISTORY comment and used at `:65,70`. The 2 GiB-int-wall reasoning is unchanged (the cap
+  bounds RESIDENT compose memory, not one COPY stage buffer).]
 
 ### 6.5 Read-side reality for candidate (a)
 
@@ -420,12 +448,21 @@ trajectory's payload in-extension means an SPI fetch of the geometry varlena and
 existing native bulk-mmap path over physicalities. (No function in the extension
 currently unpacks testimony vertices from SQL-fetched trajectories; the unpack helpers
 live in engine/core, linked and available.)
+[Superseded 2026-07-20: one does now — `extension/laplace_substrate/src/model_factor.c:134`
+calls `laplace_factor_unpack_vertex` over an SQL-fetched trajectory's vertices, surfaced
+live as `model_pair_score`, `model_row_topk`, `model_forward` and `model_jitter_catalog`.
+The "no native bulk-mmap path over physicalities" half still holds.]
 
 ---
 
 ## 7. Issue 49 and the GenCorpus "perfcache-class mmap blob" precedent
 
 ### 7.1 Issue 49 verbatim substance (`.scratchpad/02_Identified_Issues.txt:197-202`)
+
+[Repointed 2026-07-20: `.scratchpad/02` is a CLOSED tracker (append-only history); its open
+items migrated to GitHub. **Issue 49 → GH #409, still OPEN** ("walk_text generation lane
+times out at scale — GenCorpus perfcache blob prescribed"). Track and update the work there,
+not in 02. The quoted text below stays as the historical record.]
 
 > ISSUE 49 (update 2026-07-09) — walk_text cold path now >240s at 135M attestations
 > (statement_timeout fired inside corpus_sentence_constituents_since). recall chat
@@ -435,7 +472,7 @@ live in engine/core, linked and available.)
 > perfcache-class mmap'd GenCorpus blob (walk-engine findings), engine-side.**
 
 Issue 52 lists /v1/completions among the endpoints killed by this
-(`02_Identified_Issues.txt:204-209`).
+(`02_Identified_Issues.txt:204-209` — historical; see the GH repointing note above).
 
 ### 7.2 What GenCorpus is today (the thing the blob would replace)
 
@@ -479,4 +516,4 @@ Issue 52 lists /v1/completions among the endpoints killed by this
 | Query-time access from extension | SPI fetch of geometry + in-memory unpack; no existing native bulk reader; GenCorpus shows per-backend SPI materialization costs (Issue 49: >240 s cold at 135M attestations) | Direct pointer arithmetic on mmap; postmaster prewarm inherits mapping into every backend for free (`perfcache.c:159-197`) |
 | Consistency with ingest | Rides the existing COPY/dedup/content-addressing spine (`intent_stage.c:321-368`); content-addressed id; transactional | Out-of-band artifact; regenerated at build/export time; version/CRC-gated (`codepoint_table.c:112-133`); stale-path failure mode is WARN-then-lazy-ERROR |
 | Scoring kernels | qk kernels not linked in extension; scalar variants compile dependency-free; sequential MKL IS linked in-extension but unused by these kernels (`extension/CMakeLists.txt:65-80`, §5) | Same kernel facts; blob supplies E/W or precomputed q/k caches as raw float arrays in the layouts of §5.2 |
-| Existing in-extension consumer template | `consensus_band_edges`: blob resolves operands in memory, ONE bound-param SPI query fetches rows (`highway_mask.c:251-341`) | Same file is the template; plus known hazard: per-call GUC/mmap check from parallel workers = Bug A class (`14_Foundry...:536`) |
+| Existing in-extension consumer template | `consensus_band_edges`: blob resolves operands in memory, ONE bound-param SPI query fetches rows (`highway_mask.c:341-408`) | Same file is the template; plus known hazard: per-call GUC/mmap check from parallel workers = Bug A class (`14_Foundry...:536`) |

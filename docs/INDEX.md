@@ -9,24 +9,24 @@ countable fact; prose docs cite it instead of embedding counts.
 
 ## Entry points
 
-- [README.md](../README.md) — what Laplace is, the epistemic map (arrives with PR-3)
+- [README.md](../README.md) — what Laplace is, the epistemic map (2026-07-18)
 - [CLAUDE.md](../CLAUDE.md) — the operating law: architecture, binding rules, build/seed tables
 - [AGENTS.md](../AGENTS.md) — agent conduct + PG service law + binding-doc pointers
-- [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog: 41 mechanisms, code-cited (2026-07-10)
+- [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; mechanism count per [INVENTORY.md](INVENTORY.md) (2026-07-19)
 
 ## Specs — `docs/specs/` (binding, annotate-on-supersede)
 
 - [05_Substrate_Invariants.txt](specs/05_Substrate_Invariants.txt) — spec — the axioms; identity/tier/geometry law (2026-07-02)
-- [06_Engineering_Ruleset.txt](specs/06_Engineering_Ruleset.txt) — spec — Rules #1–#12; Rule #8 is the ingest sequence (2026-07-05)
+- [06_Engineering_Ruleset.txt](specs/06_Engineering_Ruleset.txt) — spec — Rules #1–#12; Rule #8 is the ingest sequence (2026-07-19)
 - [08_Record_vs_Calculate_Spec.txt](specs/08_Record_vs_Calculate_Spec.txt) — spec — witnessed vs calculated layers; analyzer versioning (2026-07-04)
-- [09_Substrate_LM_Synthesis.txt](specs/09_Substrate_LM_Synthesis.txt) — spec — construct-don't-train thesis; the open routing question (2026-07-10)
+- [09_Substrate_LM_Synthesis.txt](specs/09_Substrate_LM_Synthesis.txt) — spec — construct-don't-train thesis; the open routing question (2026-07-19)
 - [11_Chess_Provenance_Consensus_Spec.txt](specs/11_Chess_Provenance_Consensus_Spec.txt) — spec — three-layer provenance/consensus + the chess board ladder (2026-07-04)
 - [12_Mold_A_Model_Synthesis_Map.txt](specs/12_Mold_A_Model_Synthesis_Map.txt) — spec — substrate primitive → transformer slot bijection (2026-07-10)
-- [14_Foundry_Root_Cause_and_Research.txt](specs/14_Foundry_Root_Cause_and_Research.txt) — spec — foundry working doc: mechanisms M1–M5, prescriptions P1–P10 (2026-07-10)
+- [14_Foundry_Root_Cause_and_Research.txt](specs/14_Foundry_Root_Cause_and_Research.txt) — spec — foundry working doc: mechanisms M1–M5, prescriptions P1–P10 (2026-07-19)
 - [15_Godel_Engine_OODA_Loop.txt](specs/15_Godel_Engine_OODA_Loop.txt) — spec — the closed loop: walk/deposit/feedback/fold; §3C richer forward pass (2026-07-18)
-- [16_tier_correct_attestation_and_hub_unification.md](specs/16_tier_correct_attestation_and_hub_unification.md) — spec — tier-correct attestation; ILI hub mesh fixes P1–P7 (2026-07-12)
-- [18_Typed_Residual_Stream_and_Mesh.md](specs/18_Typed_Residual_Stream_and_Mesh.md) — spec — typed strata replacing the anonymous residual; mesh factorization (2026-07-10)
-- [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-10)
+- [16_tier_correct_attestation_and_hub_unification.md](specs/16_tier_correct_attestation_and_hub_unification.md) — spec — tier-correct attestation; ILI hub mesh fixes P1–P7 (2026-07-19)
+- [18_Typed_Residual_Stream_and_Mesh.md](specs/18_Typed_Residual_Stream_and_Mesh.md) — spec — typed strata replacing the anonymous residual; mesh factorization (2026-07-19)
+- [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-19)
 - [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
 
 ## Logs and campaigns — `.scratchpad/` (historical, append-only)
@@ -58,10 +58,10 @@ countable fact; prose docs cite it instead of embedding counts.
 
 ## `docs/invention/` (agent onboarding)
 
-- [00-CONTINUITY.md](invention/00-CONTINUITY.md) — onboarding — rewritten as pointer + verified traps in PR-3
-- [05-synthesis-layers-heads.md](invention/05-synthesis-layers-heads.md) — notes — synthesis layers/heads; verify-or-annotate pass owed (PR-3)
-- [modality-ladder-law.md](invention/modality-ladder-law.md) — notes — modality ladder law; verify-or-annotate pass owed (PR-3)
-- [recipe-schema.md](invention/recipe-schema.md) — notes — model recipe schema; verify-or-annotate pass owed (PR-3)
+- [00-CONTINUITY.md](invention/00-CONTINUITY.md) — onboarding — pointer + verified traps; rewritten 2026-07-18
+- [05-synthesis-layers-heads.md](invention/05-synthesis-layers-heads.md) — notes — synthesis layers/heads; verify-or-annotate pass done, rank ladder annotated 2026-07-18
+- [modality-ladder-law.md](invention/modality-ladder-law.md) — notes — modality ladder law; verified clean 2026-07-19 (all cited relation names present in `engine/manifest/relation_types.toml`)
+- [recipe-schema.md](invention/recipe-schema.md) — notes — model recipe schema; verify-or-annotate pass done, rank-ladder note 2026-07-18
 
 ## Decisions — `docs/decisions/`
 
