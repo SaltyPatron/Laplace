@@ -98,6 +98,35 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "safetensors_header_free")]
     public static partial void SafetensorsHeaderFree(IntPtr header);
 
+    // SentencePiece ModelProto reader/writer. Piece bytes are carried verbatim — the
+    // vocabulary is full of U+2581 and other multi-byte forms, and a lossy re-encode
+    // would change token identity.
+    [LibraryImport(Library, EntryPoint = "sp_model_parse")]
+    public static unsafe partial IntPtr SpModelParse(void* bytes, nuint len);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_piece_count")]
+    public static partial int SpModelPieceCount(IntPtr model);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_piece")]
+    public static unsafe partial IntPtr SpModelPiece(IntPtr model, int index, nuint* outLen);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_score")]
+    public static partial float SpModelScore(IntPtr model, int index);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_type")]
+    public static partial int SpModelType(IntPtr model, int index);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_free")]
+    public static partial void SpModelFree(IntPtr model);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_write")]
+    public static unsafe partial int SpModelWrite(
+        byte** pieces, nuint* pieceLens, float* scores, int* types, int count,
+        byte** outBuf, nuint* outLen);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_buffer_free")]
+    public static unsafe partial void SpModelBufferFree(byte* buf);
+
     [LibraryImport(Library, EntryPoint = "arch_template_load",
         StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr ArchTemplateLoad(string templateName);

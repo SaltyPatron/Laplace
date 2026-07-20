@@ -8,6 +8,7 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/bf16_decoder.h
     include/laplace/synthesis/tensor_dtype_codec.h
     include/laplace/synthesis/safetensors_parser.h
+    include/laplace/synthesis/sentencepiece_parser.h
     include/laplace/synthesis/tensor_decompose.h
     include/laplace/synthesis/qk_pairs_threshold.h
     include/laplace/synthesis/qk_pairs_threshold_pruned.h
@@ -26,6 +27,7 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/bf16_decoder.c
     src/tensor_dtype_codec.c
     src/safetensors_parser.cpp
+    src/sentencepiece_parser.cpp
     src/tensor_decompose.cpp
     src/qk_pairs_threshold.cpp
     src/qk_pairs_threshold_pruned.cpp

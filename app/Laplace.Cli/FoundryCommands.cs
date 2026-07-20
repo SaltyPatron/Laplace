@@ -383,22 +383,68 @@ internal static class FoundryCommands
 
 
 
+    /// <summary>
+    /// Serializes a SentencePiece ModelProto through the NATIVE writer, the inverse of
+    /// <see cref="ParseSentencePieceModel"/>. Round-trip equality is pinned by
+    /// LaplaceSentencePiece.WriteThenParseRoundTrips in the engine test suite.
+    /// </summary>
     private static void WriteSentencePieceModel(string path, IReadOnlyList<(string piece, float score, int type)> pieces)
     {
-        static void Varint(System.IO.Stream s, ulong v) { while (v >= 0x80) { s.WriteByte((byte)(v | 0x80UL)); v >>= 7; } s.WriteByte((byte)v); }
-        static void Tag(System.IO.Stream s, int field, int wire) => Varint(s, ((ulong)(uint)field << 3) | (uint)wire);
-        using var ms = new System.IO.MemoryStream();
-        foreach (var (piece, score, type) in pieces)
+        int count = pieces.Count;
+        var blobs = new byte[count][];
+        var lens = new nuint[count];
+        var scores = new float[count];
+        var types = new int[count];
+        for (int i = 0; i < count; i++)
         {
-            using var inner = new System.IO.MemoryStream();
-            byte[] pb = Encoding.UTF8.GetBytes(piece);
-            Tag(inner, 1, 2); Varint(inner, (ulong)pb.Length); inner.Write(pb);
-            Tag(inner, 2, 5); inner.Write(BitConverter.GetBytes(score));
-            Tag(inner, 3, 0); Varint(inner, (ulong)type);
-            byte[] ib = inner.ToArray();
-            Tag(ms, 1, 2); Varint(ms, (ulong)ib.Length); ms.Write(ib);
+            blobs[i] = System.Text.Encoding.UTF8.GetBytes(pieces[i].piece);
+            lens[i] = (nuint)blobs[i].Length;
+            scores[i] = pieces[i].score;
+            types[i] = pieces[i].type;
         }
-        File.WriteAllBytes(path, ms.ToArray());
+
+        unsafe
+        {
+            var handles = new System.Runtime.InteropServices.GCHandle[count];
+            var ptrs = new byte*[count == 0 ? 1 : count];
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    handles[i] = System.Runtime.InteropServices.GCHandle.Alloc(
+                        blobs[i], System.Runtime.InteropServices.GCHandleType.Pinned);
+                    ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+                }
+
+                byte* outBuf = null;
+                nuint outLen = 0;
+                int rc;
+                fixed (byte** pp = ptrs)
+                fixed (nuint* pl = lens)
+                fixed (float* ps = scores)
+                fixed (int* pt = types)
+                {
+                    rc = SynthInterop.SpModelWrite(pp, pl, ps, pt, count, &outBuf, &outLen);
+                }
+                if (rc != 0)
+                    throw new InvalidOperationException($"sp_model_write returned {rc}");
+
+                try
+                {
+                    var span = new ReadOnlySpan<byte>(outBuf, (int)outLen);
+                    File.WriteAllBytes(path, span.ToArray());
+                }
+                finally
+                {
+                    SynthInterop.SpModelBufferFree(outBuf);
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < count; i++)
+                    if (handles[i].IsAllocated) handles[i].Free();
+            }
+        }
     }
 
 
@@ -2138,59 +2184,46 @@ internal static class FoundryCommands
 
     private sealed record SpPiece(string Piece, float Score, int Type);
 
+    /// <summary>
+    /// Reads a SentencePiece ModelProto through the NATIVE parser
+    /// (engine/synthesis/src/sentencepiece_parser.cpp). Piece bytes come back verbatim,
+    /// so U+2581 and other multi-byte forms keep their exact token identity.
+    /// </summary>
     private static SpPiece[] ParseSentencePieceModel(string path)
     {
         byte[] d = File.ReadAllBytes(path);
-        var pieces = new List<SpPiece>(32000);
-        int pos = 0;
-        while (pos < d.Length)
+        IntPtr m;
+        unsafe
         {
-            ulong key = ReadVarint(d, ref pos);
-            int field = (int)(key >> 3), wt = (int)(key & 7);
-            if (field == 1 && wt == 2)
+            fixed (byte* p = d) m = SynthInterop.SpModelParse(p, (nuint)d.Length);
+        }
+        if (m == IntPtr.Zero)
+            throw new InvalidDataException(
+                $"sentencepiece: '{path}' is not a readable ModelProto (malformed varint or " +
+                "truncated field). Refusing to load a partial vocabulary — every token id depends on it.");
+
+        try
+        {
+            int n = SynthInterop.SpModelPieceCount(m);
+            var pieces = new SpPiece[n];
+            for (int i = 0; i < n; i++)
             {
-                int len = (int)ReadVarint(d, ref pos);
-                int end = pos + len;
-                string piece = ""; float score = 0f; int type = 1;
-                while (pos < end)
+                string text;
+                unsafe
                 {
-                    ulong k2 = ReadVarint(d, ref pos);
-                    int f2 = (int)(k2 >> 3), w2 = (int)(k2 & 7);
-                    if (f2 == 1 && w2 == 2) { int l = (int)ReadVarint(d, ref pos); piece = Encoding.UTF8.GetString(d, pos, l); pos += l; }
-                    else if (f2 == 2 && w2 == 5) { score = BitConverter.ToSingle(d, pos); pos += 4; }
-                    else if (f2 == 3 && w2 == 0) { type = (int)ReadVarint(d, ref pos); }
-                    else SkipField(d, ref pos, w2);
+                    nuint len;
+                    IntPtr p = SynthInterop.SpModelPiece(m, i, &len);
+                    text = p == IntPtr.Zero
+                        ? string.Empty
+                        : System.Text.Encoding.UTF8.GetString((byte*)p, (int)len);
                 }
-                pieces.Add(new SpPiece(piece, score, type));
-                pos = end;
+                pieces[i] = new SpPiece(text, SynthInterop.SpModelScore(m, i), SynthInterop.SpModelType(m, i));
             }
-            else SkipField(d, ref pos, wt);
+            return pieces;
         }
-        return pieces.ToArray();
-    }
-
-    private static ulong ReadVarint(byte[] d, ref int pos)
-    {
-        ulong v = 0; int shift = 0;
-        while (pos < d.Length)
+        finally
         {
-            byte b = d[pos++];
-            v |= (ulong)(b & 0x7F) << shift;
-            if ((b & 0x80) == 0) break;
-            shift += 7;
-        }
-        return v;
-    }
-
-    private static void SkipField(byte[] d, ref int pos, int wireType)
-    {
-        switch (wireType)
-        {
-            case 0: ReadVarint(d, ref pos); break;
-            case 1: pos += 8; break;
-            case 2: { int l = (int)ReadVarint(d, ref pos); pos += l; break; }
-            case 5: pos += 4; break;
-            default: throw new InvalidDataException($"SP proto: unsupported wire type {wireType}");
+            SynthInterop.SpModelFree(m);
         }
     }
 
