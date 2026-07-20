@@ -2,7 +2,7 @@
 
 Status: **PROPOSED — operator decision pending.** Written 2026-07-18 from the forest
 audit. Implementation, whichever way the decision goes, is its own GH issue; nothing
-changes until decided AND the next KEYMASTER reseed is scheduled.
+changes until decided AND the next operator-ordered full reseed is scheduled.
 
 ## The problem
 
@@ -50,7 +50,7 @@ assigning. New relations take the next free bit; existing bits never move.
 
 ## Recommendation
 
-Adopt the explicit `bit` field, frozen from the layout of the **next** KEYMASTER
+Adopt the explicit `bit` field, frozen from the layout of the **next** operator-ordered full
 reseed (the one `.scratchpad/24` already owes). That reseed was being paid anyway;
 freezing the layout at that moment makes it the last bit-order reseed the project
 ever pays. The purity argument is fully preserved because the assignment lives in the

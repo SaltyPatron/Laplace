@@ -37,12 +37,17 @@ if errorlevel 3 (
 
 powershell -NoProfile -Command "Restart-Service postgresql-x64-18 -ErrorAction Stop"
 if errorlevel 1 (
+  rem GUCs + pg_reload_conf already applied; service is up. Soft-ok so unelevated
+  rem pipelines (Tony_Hart-Desktop) do not abort — pending_restart waits for a later elevated bounce.
   echo tune-pg: Restart-Service denied ^(not elevated^). GUCs are applied; pending_restart may remain.
   echo   When YOU elevate ^(no agent UAC^): net stop postgresql-x64-18 ^&^& net start postgresql-x64-18
   echo   Or: cmd /c "scripts\win\reclaim-postgres.cmd"
-  exit /b 3
 )
-goto verify
 
 :verify
 %PSQL% -P pager=off -c "SELECT name, setting, unit, pending_restart FROM pg_settings WHERE name IN ('shared_buffers','effective_cache_size','synchronous_commit','max_wal_size','work_mem','maintenance_work_mem','max_connections','max_parallel_workers','max_parallel_maintenance_workers','wal_buffers','random_page_cost','effective_io_concurrency') ORDER BY name;"
+if errorlevel 1 (
+  echo tune-pg: verify query failed — Postgres not accepting connections
+  exit /b 1
+)
+exit /b 0

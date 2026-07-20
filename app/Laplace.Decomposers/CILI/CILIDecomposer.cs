@@ -18,8 +18,6 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
 
     public override int LayerOrder => 2;
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => [];
-
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,

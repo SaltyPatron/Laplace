@@ -3,7 +3,7 @@
 Binding template from the forward plan. Geometry = identity/reconstruction only.
 Semantics live in the Glicko attestation graph. Do **not** hash embeddings as identity.
 
-**Status:** M0 specs + TOML relations declared. **No ingest until KEYMASTER reseed.**
+**Status:** M0 specs + TOML relations declared. **No ingest until the operator-ordered full reseed.**
 
 ## The one law (every modality)
 
@@ -62,4 +62,4 @@ Operator may override **before** first image seed only.
 
 All new names + HAS_SENSE family_root edits batch into
 [`.scratchpad/24_Campaign_Reseed_Queue.md`](../.scratchpad/24_Campaign_Reseed_Queue.md).
-Highway bit renumber ⇒ one KEYMASTER reseed before modality ingest and before R3 mask gate claims.
+Highway bit renumber ⇒ one operator-ordered full reseed before modality ingest and before R3 mask gate claims.
