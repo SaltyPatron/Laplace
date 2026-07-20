@@ -119,6 +119,29 @@ public class ConsensusAccumulatingWriterTests
     }
 
     [Fact]
+    public async Task BulkRun_PipelinesFolds_AndDrainsAtComplete()
+    {
+        var src = H(900); var relType = H(901); var subj = H(910);
+        var o1 = H(920); var o2 = H(921);
+        await EnsureScaffoldAsync(src, relType, subj, o1, o2);
+
+        await using var accumulator = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        await accumulator.BeginBulkRunAsync();
+        await accumulator.ApplyWorkingSetAsync(
+            Change(src, "bulk-fold-a", Obs(H(930), subj, relType, o1, src, 900_000_000)));
+        await accumulator.ApplyWorkingSetAsync(
+            Change(src, "bulk-fold-b", Obs(H(931), subj, relType, o2, src, 900_000_000)));
+        // Bulk-run folds are queued behind the apply lane; completing the run
+        // drains the pipeline, so both cells must be folded and visible here.
+        await accumulator.CompleteBulkRunAsync();
+
+        Assert.Equal(2L, accumulator.CellsFolded);
+        Assert.NotNull(await ConsensusRowAsync(subj, relType, o1));
+        Assert.NotNull(await ConsensusRowAsync(subj, relType, o2));
+    }
+
+    [Fact]
     public async Task Accumulation_PersistsProvenanceOnlyEvidence()
     {
         var src = H(200); var relType = H(201); var subj = H(210); var obj = H(220);

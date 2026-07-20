@@ -71,6 +71,7 @@ functions/mu/foundry_witness_sat.sql.in
 functions/fold/scoped_consensus.sql.in
 functions/fold/consensus_fold_result.sql.in
 functions/fold/consensus_upsert.sql.in
+functions/fold/attestation_merge.sql.in
 functions/readback/canonical_id.sql.in
 functions/readback/canonical_names.sql.in
 functions/readback/register_canonical.sql.in

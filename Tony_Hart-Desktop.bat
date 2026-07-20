@@ -63,8 +63,8 @@ call :tee seed-verbnet "seed-step.cmd verbnet" || goto :fail
 call :tee seed-framenet "seed-step.cmd framenet" || goto :fail
 call :tee seed-mapnet "seed-step.cmd mapnet" || goto :fail
 call :tee seed-wordframenet "seed-step.cmd wordframenet" || goto :fail
-rem call :tee seed-omw "seed-step.cmd omw" || goto :fail
-rem call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
+call :tee seed-omw "seed-step.cmd omw" || goto :fail
+call :tee seed-atomic2020 "seed-step.cmd atomic2020" || goto :fail
 rem call :tee seed-ud "seed-step.cmd ud" || goto :fail
 rem call :tee seed-conceptnet "seed-step.cmd conceptnet" || goto :fail
 rem call :tee seed-wiktionary "seed-step.cmd wiktionary" || goto :fail

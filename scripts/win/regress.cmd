@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$root='%LAPLACE_ROOT%'; $pgbin='%PGBIN%'; $pg='%PGREGRESS%'; $ext='%LAPLACE_EXT_BUILD%';" ^
   "$geomOut=Join-Path $ext 'regress_geom'; $subOut=Join-Path $ext 'regress_substrate';" ^
   "$gArgs=@('--bindir='+[char]34+$pgbin+[char]34,'--host=localhost','--user=postgres','--inputdir=extension\laplace_geom\tests','--outputdir='+$geomOut,'--dbname=laplace_regress_geom','--use-existing','hash128','st_4d');" ^
-  "$sArgs=@('--bindir='+[char]34+$pgbin+[char]34,'--host=localhost','--user=postgres','--inputdir=extension\laplace_substrate\tests','--outputdir='+$subOut,'--dbname=laplace_regress_substrate','--use-existing','bootstrap','glicko2_aggregate','entities_exist_bitmap','consensus_signed','consensus_upsert','generation_corpus','converse','word_law','identity_law','schema_law','structural_surface','constituent_edges','walk_richer_forward_pass');" ^
+  "$sArgs=@('--bindir='+[char]34+$pgbin+[char]34,'--host=localhost','--user=postgres','--inputdir=extension\laplace_substrate\tests','--outputdir='+$subOut,'--dbname=laplace_regress_substrate','--use-existing','bootstrap','glicko2_aggregate','entities_exist_bitmap','consensus_signed','consensus_upsert','attestation_merge','generation_corpus','converse','word_law','identity_law','schema_law','structural_surface','constituent_edges','walk_richer_forward_pass');" ^
   "$g=Start-Process -FilePath $pg -ArgumentList $gArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $geomOut 'parallel.out') -RedirectStandardError (Join-Path $geomOut 'parallel.err');" ^
   "$s=Start-Process -FilePath $pg -ArgumentList $sArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $subOut 'parallel.out') -RedirectStandardError (Join-Path $subOut 'parallel.err');" ^
   "$null=$g.Handle; $null=$s.Handle; $g.WaitForExit(); $s.WaitForExit();" ^
@@ -45,7 +45,7 @@ set GEOM_RC=%ERRORLEVEL%
   --inputdir=extension\laplace_substrate\tests ^
   --outputdir=%LAPLACE_EXT_BUILD%\regress_substrate ^
   --dbname=laplace_regress_substrate --use-existing ^
-  bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_upsert generation_corpus converse word_law identity_law schema_law structural_surface constituent_edges walk_richer_forward_pass
+  bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_upsert attestation_merge generation_corpus converse word_law identity_law schema_law structural_surface constituent_edges walk_richer_forward_pass
 set SUB_RC=%ERRORLEVEL%
 
 echo geom_rc=%GEOM_RC% substrate_rc=%SUB_RC%

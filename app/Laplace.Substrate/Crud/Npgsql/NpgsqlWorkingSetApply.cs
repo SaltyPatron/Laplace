@@ -25,7 +25,21 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// path OFF): this probe decides what gets written, and tier-0 codepoint
 /// rows only exist because the unicode seed writes them through this lane —
 /// answering their presence axiomatically would drop them from the write
-/// list forever.
+/// list forever. The one licensed shortcut is DB-state-conditioned, not
+/// axiomatic: once the UnicodeDecomposer L0 layer-complete marker exists in
+/// the TARGET database (checked once per bulk run), the tier-0 entity space
+/// is closed (UCD law: UnicodeDecomposer is the single origin of tier 0) and
+/// every tier-0 id is present by definition — those ids skip the probe
+/// client-side. During the unicode seed itself the marker is absent and
+/// every tier-0 row still flows through the probe + COPY lane.
+///
+/// Attestation presence has a structural fast path: an attestation id is
+/// BLAKE3(subject‖type‖object‖source‖context), so a row whose subject,
+/// object, or context entity is NOVEL in this same batch cannot exist
+/// server-side (entities always finish COPY before attestations start, and
+/// the apply advisory lock serializes writers) — it skips the probe and goes
+/// straight to COPY. Only attestations whose id-embedded entities all
+/// already exist can be present, and only those are probed.
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
@@ -73,6 +87,18 @@ public sealed partial class NpgsqlSubstrateWriter
     private HashSet<Hash128>? _persistedEntityIds;
     private HashSet<Hash128>? _persistedPhysIds;
 
+    /// <summary>
+    /// Tier-0 completeness gate, resolved ONCE per bulk run: true iff the
+    /// UnicodeDecomposer L0 HasLayerCompleted marker exists in the target DB.
+    /// While true, every tier-0 entity id is present by definition (the t0
+    /// space is closed and fully seeded — UCD single-origin law) and skips
+    /// the presence probe client-side. Conservative by construction: absent
+    /// marker (fresh DB, mid-unicode-seed) leaves the gate off and every t0
+    /// row probes as before. Entities only — t0 physicalities are NOT
+    /// guaranteed 1:1 (projections land after identity content).
+    /// </summary>
+    private bool _tier0LayerComplete;
+
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
         // Recover any journaled drops a crashed prior run left behind
@@ -81,6 +107,11 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
         _persistedEntityIds = new HashSet<Hash128>();
         _persistedPhysIds = new HashSet<Hash128>();
+        _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
+        if (_tier0LayerComplete)
+            _log.LogInformation(
+                "WS_APPLY tier-0 gate ON: unicode L0 layer-complete marker present — "
+                + "tier-0 entity ids answer presence client-side, zero probes");
     }
 
     public async Task CompleteBulkRunAsync(CancellationToken ct = default)
@@ -89,8 +120,20 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = null;
         _persistedEntityIds = null;
         _persistedPhysIds = null;
+        _tier0LayerComplete = false;
         if (cycle is not null)
             await cycle.FinishAsync(ct);
+    }
+
+    private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT laplace.evidence_count("
+            + "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/0/v1'), "
+            + "p_source => laplace.source_id('UnicodeDecomposer')) > 0";
+        return await cmd.ExecuteScalarAsync(ct) is true;
     }
 
     /// <summary>
@@ -144,13 +187,23 @@ public sealed partial class NpgsqlSubstrateWriter
         // physicalities: RANGE(hilbert_index)) — id alone cannot prune, so
         // an id-only probe pays one index descent per leaf.
         var probeEntityTiers = new List<short>(ents.Ids.Count);
+        // Tier-0 gate (snapshot once per apply): with the unicode L0 layer
+        // complete in the target DB, a tier-0 id is present by definition —
+        // it never enters the probe and folds straight into the present set.
+        bool tier0Gate = _tier0LayerComplete;
+        List<Hash128>? tier0Present = tier0Gate ? new List<Hash128>() : null;
         for (int i = 0; i < ents.Ids.Count; i++)
             if (entityIdSet.Add(ents.Ids[i]))
             {
+                if (tier0Gate && ents.Tiers[i] == 0)
+                {
+                    tier0Present!.Add(ents.Ids[i]);
+                    continue;
+                }
                 probeEntityIds.Add(ents.Ids[i]);
                 probeEntityTiers.Add(ents.Tiers[i]);
             }
-        int distinctStagedEntities = probeEntityIds.Count;
+        int distinctStagedEntities = entityIdSet.Count;
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
@@ -167,9 +220,12 @@ public sealed partial class NpgsqlSubstrateWriter
         var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games)>(atts.Ids.Count);
         // The keyed attestation probe needs the partition keys parallel to
         // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
+        // The first-occurrence source index rides along so the structural
+        // novelty filter below can read each candidate's object/context ids.
         var probeAttIds = new List<Hash128>(atts.Ids.Count);
         var probeAttTypes = new List<Hash128>(atts.Ids.Count);
         var probeAttSubjects = new List<Hash128>(atts.Ids.Count);
+        var probeAttSrcIdx = new List<int>(atts.Ids.Count);
         for (int i = 0; i < atts.Ids.Count; i++)
         {
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
@@ -185,6 +241,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 probeAttIds.Add(atts.Ids[i]);
                 probeAttTypes.Add(atts.TypeIds[i]);
                 probeAttSubjects.Add(atts.SubjectIds[i]);
+                probeAttSrcIdx.Add(i);
             }
         }
 
@@ -296,42 +353,92 @@ public sealed partial class NpgsqlSubstrateWriter
                 probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
                 probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
             }
-            if (probeAttIds.Count > 1)
-            {
-                var perm = BuildProbePermutation(probeAttIds.Count, (a, b) =>
-                {
-                    int c = probeAttTypes[a].CompareToBytewise(probeAttTypes[b]);
-                    return c != 0 ? c : probeAttSubjects[a].CompareToBytewise(probeAttSubjects[b]);
-                });
-                probeAttIds = ApplyProbePermutation(probeAttIds, perm);
-                probeAttTypes = ApplyProbePermutation(probeAttTypes, perm);
-                probeAttSubjects = ApplyProbePermutation(probeAttSubjects, perm);
-            }
+            // Entities and physicalities probe concurrently. The attestation
+            // probe waits on the ENTITY result: an attestation id embeds
+            // subject/object/context entity ids, so any row referencing an
+            // entity that just proved novel is itself novel by construction
+            // (entities COPY before attestations in every apply and the
+            // advisory lock serializes appliers — a novel entity implies no
+            // committed attestation can embed it). Only rows whose embedded
+            // entities all already exist can possibly be present; only those
+            // are probed. On fresh-content sources this collapses the
+            // attestation probe (the largest probe volume) to near zero.
+            var entProbeTask = ProbePresentTieredParallelAsync(
+                "laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse,
+                r => Interlocked.Add(ref rtProbe, r), ct);
+            var physProbeTask = ProbePresentPairKeyedParallelAsync(
+                "laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse,
+                r => Interlocked.Add(ref rtProbe, r), ct);
 
-            var probeTasks = new[]
-            {
-                ProbePresentTieredParallelAsync("laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentPairKeyedParallelAsync("laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse, r => Interlocked.Add(ref rtProbe, r), ct),
-                ProbePresentKeyedParallelAsync("laplace.attestations_exist_bitmap", probeAttIds, probeAttTypes, probeAttSubjects, r => Interlocked.Add(ref rtProbe, r), ct),
-            };
-            await Task.WhenAll(probeTasks);
-            var presentEntities = probeTasks[0].Result;
-            var presentPhys = probeTasks[1].Result;
-            var presentAtts = probeTasks[2].Result;
+            var presentEntities = await entProbeTask;
             // Fold the known-persisted ids (excluded from the probe above) back into the
-            // present sets — the write lane below skips a row iff its id is present, and
-            // these are present by our own committed writes.
+            // present set — the write lane below skips a row iff its id is present, and
+            // these are present by our own committed writes. Tier-0 gated ids
+            // are present by the layer-complete marker.
             if (persistedEnt is { Count: > 0 })
                 foreach (var id in probeEntityIds)
                     if (persistedEnt.Contains(id)) presentEntities.Add(id);
+            if (tier0Present is not null)
+                foreach (var id in tier0Present) presentEntities.Add(id);
+
+            // Novel-entity set drives the structural attestation filter.
+            var novelEnts = new HashSet<Hash128>(
+                Math.Max(0, entityIdSet.Count - presentEntities.Count));
+            foreach (var id in entityIdSet)
+                if (!presentEntities.Contains(id)) novelEnts.Add(id);
+
+            long attStructuralSkip = 0;
+            var probeAttIdsUse = probeAttIds;
+            var probeAttTypesUse = probeAttTypes;
+            var probeAttSubjectsUse = probeAttSubjects;
+            if (novelEnts.Count > 0 && probeAttIds.Count > 0)
+            {
+                probeAttIdsUse = new List<Hash128>(probeAttIds.Count);
+                probeAttTypesUse = new List<Hash128>(probeAttIds.Count);
+                probeAttSubjectsUse = new List<Hash128>(probeAttIds.Count);
+                for (int k = 0; k < probeAttIds.Count; k++)
+                {
+                    int i = probeAttSrcIdx[k];
+                    if (novelEnts.Contains(atts.SubjectIds[i])
+                        || novelEnts.Contains(atts.ObjectIds[i])
+                        || novelEnts.Contains(atts.ContextIds[i]))
+                    {
+                        attStructuralSkip++;
+                        continue;
+                    }
+                    probeAttIdsUse.Add(probeAttIds[k]);
+                    probeAttTypesUse.Add(probeAttTypes[k]);
+                    probeAttSubjectsUse.Add(probeAttSubjects[k]);
+                }
+            }
+            if (probeAttIdsUse.Count > 1)
+            {
+                var attIds = probeAttIdsUse;
+                var attTypes = probeAttTypesUse;
+                var attSubjects = probeAttSubjectsUse;
+                var perm = BuildProbePermutation(attIds.Count, (a, b) =>
+                {
+                    int c = attTypes[a].CompareToBytewise(attTypes[b]);
+                    return c != 0 ? c : attSubjects[a].CompareToBytewise(attSubjects[b]);
+                });
+                probeAttIdsUse = ApplyProbePermutation(attIds, perm);
+                probeAttTypesUse = ApplyProbePermutation(attTypes, perm);
+                probeAttSubjectsUse = ApplyProbePermutation(attSubjects, perm);
+            }
+
+            var presentAtts = await ProbePresentKeyedParallelAsync(
+                "laplace.attestations_exist_bitmap", probeAttIdsUse, probeAttTypesUse,
+                probeAttSubjectsUse, r => Interlocked.Add(ref rtProbe, r), ct);
+            var presentPhys = await physProbeTask;
             if (persistedPhys is { Count: > 0 })
                 foreach (var id in probePhysIds)
                     if (persistedPhys.Contains(id)) presentPhys.Add(id);
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(cache-skipped {ECache:N0}e/{PCache:N0}p; present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
-                probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIds.Count, phaseSw.ElapsedMilliseconds,
-                entCacheSkip, physCacheSkip,
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {AStruct:N0}a novel-by-construction; "
+                + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
+                probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
+                entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0, attStructuralSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count);
 
             // Entities: first occurrence of each id, minus stored rows.
@@ -376,16 +483,18 @@ public sealed partial class NpgsqlSubstrateWriter
             // patched to the group sum when duplicates collapsed); present
             // groups merge via one UPDATE.
             var novelRepIdx = new List<int>(attGroups.Count);
-            var mergeIds = new List<byte[]>();
-            var mergeGames = new List<long>();
-            var mergeTs = new List<DateTime>();
+            // Merge rows carry their PARTITION KEYS (type, subject): the
+            // routed attestation_merge prunes per relation type to that
+            // type's hash leaves and seeks the leaf PK — the bare-id UPDATE
+            // it replaces Append-scanned every attestation leaf per chunk
+            // (~10s/chunk flat, the OMW 9-minute merge).
+            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, DateTime Ts)>();
             foreach (var (id, g) in attGroups)
             {
                 if (presentAtts.Contains(id))
                 {
-                    mergeIds.Add(id.ToBytes());
-                    mergeGames.Add(g.Games);
-                    mergeTs.Add(AttestationMergeMath.TimestampFromPgMicros(g.MaxTs));
+                    mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
+                        g.Games, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
                 }
                 else
                 {
@@ -476,48 +585,82 @@ public sealed partial class NpgsqlSubstrateWriter
                     ("consensus", (long)keptAtts.Count),
                 }, ct);
 
+                // Entities COMPLETE first — the structural attestation
+                // novelty rule (and crash recovery) depends on "attestation
+                // committed ⇒ its batch's entities committed". Physicalities
+                // and attestations have no cross-dependency and are the two
+                // expensive phases: they overlap, so the phase cost is
+                // max(phys, atts) instead of the old sequential sum.
                 rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
                     entBlobs, keptEnts, ct);
                 eIns = keptEnts.Count;
-                rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
                     physBlobs, keptPhys, ct);
-                pIns = keptPhys.Count;
-                rtCopy += await CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
+                var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
                     attBlobs, keptAtts, ct);
+                await Task.WhenAll(physCopyTask, attCopyTask);
+                rtCopy += physCopyTask.Result + attCopyTask.Result;
+                pIns = keptPhys.Count;
                 aIns = keptAtts.Count;
 
                 if (!ReferenceEquals(cycle, _runCycle))
                     await cycle.FinishAsync(ct);
             }
 
-            if (mergeIds.Count > 0)
+            if (mergeRows.Count > 0)
             {
-                // Same class as consensus fold: unbounded unnest UPDATE AVs
-                // postgres 18 on large bytea[] arrays — chunk writes.
-                const int mergeChunk = 32_768;
-                const string mergeSql =
-                    "UPDATE laplace.attestations a SET "
-                    + "  observation_count = a.observation_count + d.games, "
-                    + "  last_observed_at  = GREATEST(a.last_observed_at, d.ts) "
-                    + "FROM (SELECT unnest($1::bytea[]) AS id, unnest($2::bigint[]) AS games, "
-                    + "             unnest($3::timestamptz[]) AS ts) d "
-                    + "WHERE a.id = d.id";
-                for (int off = 0; off < mergeIds.Count; off += mergeChunk)
+                var mergeSw = System.Diagnostics.Stopwatch.StartNew();
+                // Routed merge: sorted by (type, subject, id) so the server
+                // function's per-type loop reads contiguous slices and every
+                // writer acquires row locks in one global order; chunked
+                // because unbounded unnest over large bytea[] arrays AVs
+                // postgres 18.
+                mergeRows.Sort(static (a, b) =>
                 {
-                    int m = Math.Min(mergeChunk, mergeIds.Count - off);
+                    int c = a.Type.CompareToBytewise(b.Type);
+                    if (c != 0) return c;
+                    c = a.Subj.CompareToBytewise(b.Subj);
+                    return c != 0 ? c : a.Id.CompareToBytewise(b.Id);
+                });
+                const int mergeChunk = 32_768;
+                for (int off = 0; off < mergeRows.Count; off += mergeChunk)
+                {
+                    int m = Math.Min(mergeChunk, mergeRows.Count - off);
+                    var ids = new byte[m][];
+                    var types = new byte[m][];
+                    var subjects = new byte[m][];
+                    var games = new long[m];
+                    var ts = new DateTime[m];
+                    for (int i = 0; i < m; i++)
+                    {
+                        var r = mergeRows[off + i];
+                        ids[i] = r.Id.ToBytes();
+                        types[i] = r.Type.ToBytes();
+                        subjects[i] = r.Subj.ToBytes();
+                        games[i] = r.Games;
+                        ts[i] = r.Ts;
+                    }
                     await using var merge = conn.CreateCommand();
                     merge.Transaction = tx;
                     merge.CommandTimeout = 0;
-                    merge.CommandText = mergeSql;
+                    merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5)";
                     merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeIds.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeGames.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     merge.Parameters.Add(new NpgsqlParameter
-                    { Value = mergeTs.GetRange(off, m).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    aFold += await merge.ExecuteNonQueryAsync(ct);
+                    { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    aFold += (long)(await merge.ExecuteScalarAsync(ct) ?? 0L);
                     rtMerge++;
                 }
+                _log.LogInformation(
+                    "WS_APPLY merge: {Rows:N0} present rows merged in {Ms:N0}ms ({Rps:N0} rows/s)",
+                    mergeRows.Count, mergeSw.ElapsedMilliseconds,
+                    mergeRows.Count / Math.Max(1e-3, mergeSw.Elapsed.TotalSeconds));
             }
 
             await tx.CommitAsync(ct);

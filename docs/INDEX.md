@@ -42,7 +42,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [20_Session_Violation_Ledger_2026-07-09.md](../.scratchpad/20_Session_Violation_Ledger_2026-07-09.md) — log — session violation ledger (2026-07-12)
 - [22_Conversational_Engine_Plan.md](../.scratchpad/22_Conversational_Engine_Plan.md) — campaign — converse/chat phases A–F with dated status (2026-07-18)
 - [23_Perfcache_Codegen_Valet.md](../.scratchpad/23_Perfcache_Codegen_Valet.md) — log — perfcache codegen valet notes (2026-07-12)
-- [24_Campaign_Reseed_Queue.md](../.scratchpad/24_Campaign_Reseed_Queue.md) — campaign — queued reseed items; do NOT execute until KEYMASTER (2026-07-12)
+- [24_Campaign_Reseed_Queue.md](../.scratchpad/24_Campaign_Reseed_Queue.md) — campaign — queued reseed items; do NOT execute until the operator orders the full reseed (2026-07-12)
 - [25_Refactor_Audit_Inventory.md](../.scratchpad/25_Refactor_Audit_Inventory.md) — log — audit-refactor inventory + baseline timings (2026-07-15)
 - [26_Uncracked_List_Campaign.md](../.scratchpad/26_Uncracked_List_Campaign.md) — campaign — the A→I critical path; factor gates; Argentina gate (2026-07-15)
 - [27a_Primitive_Index_Attention.md](../.scratchpad/27a_Primitive_Index_Attention.md) — log — transformer primitive index: attention (2026-07-15)
