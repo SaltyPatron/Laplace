@@ -2,11 +2,23 @@ CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH freq AS (
-        SELECT c.subject_id AS id, count(*) AS d
-        FROM consensus c
-        WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
-        GROUP BY c.subject_id
+    -- Pillar 5 (2026-07-20): seed frequency comes from the GEOMETRY, not from
+    -- PRECEDES out-degree. A word's corpus frequency is how many times it appears
+    -- as a tier-2 constituent across trajectories -- the same count PRECEDES
+    -- materialized as redundant edges (Pillar 3a, e5e1b42). Identical shape to
+    -- corpus_word_vocab, which is already the geometry-native vocabulary source.
+    WITH traj AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.id LIMIT 400000
+    ),
+    freq AS (
+        SELECT tc.entity_id AS id, count(*) AS d
+        FROM traj CROSS JOIN LATERAL laplace_trajectory_constituents(traj.trajectory) tc
+        JOIN entities ew ON ew.id = tc.entity_id AND ew.tier = 2
+        GROUP BY tc.entity_id
     ),
     seeds AS (
         SELECT f.id, f.d
