@@ -17,7 +17,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class SharedContentStageParityTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/StageParity/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "StageParity");
 
     public static readonly TheoryData<string> Cases = new()
     {

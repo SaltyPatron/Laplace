@@ -57,9 +57,13 @@ MASTER TABLE
                             clustering / coarse vocab    expert; cells = experts
                                                         (Milestone B); coarse-
                                                         grain vocabulary regions
- relation types (153)       the HEADS themselves         one head per relation
+ relation types (see        the HEADS themselves         one head per relation
+   docs/INVENTORY.md)
    / highway bands                                       band; head_r's pattern =
                                                         consensus(·,r,·)
+ [Superseded 2026-07-20: this row read "relation types (153)" — stale.
+  docs/INVENTORY.md:123 reports 203 governed canonical relations (+23 aliases);
+  INVENTORY is the count authority, not this table.]
  spectral rank of L         HIDDEN DIM (d_model)         natural truncation of the
                                                         eigenmap (hidden='auto')
 
@@ -134,6 +138,10 @@ The OPERATORS, by primitive:
      address where content-neighbors get near indices → a content-aware absolute
      PE (and a cheap key for local-window attention in CONTENT space, not token
      space). GAP (no explicit hilbert/traj PE yet).
+     [Superseded 2026-07-20: GAP CLOSED. Hilbert PE is exported —
+     app/Laplace.Core/Core/FoundryDefaults.cs:50 `HilbertPeScale = 0.25`, consumed at
+     app/Laplace.Cli/FoundryExport.cs:1569,1576 (PE rides at HilbertPeScale over unit-norm
+     content dims).]
 
 7. ROUTING ← VORONOI: partition S³ into cells around anchor coords; a token's
    cell = its expert. This IS the MoE router (Milestone B) — deterministic,
@@ -170,6 +178,9 @@ completion lm-head. What the IDEAL adds (the gaps this map names):
     intersects (sparse containment mask) — molded straight from the geometry,
     not only from relation planes.
   - hidden='auto' = spectral rank of L (the natural d_model), not a hand-set int.
+    [Superseded 2026-07-20: LIVE, not a gap. FoundryCommands.cs:1020 validates
+    `hidden_size must be a positive integer or 'auto'`; :1198 prints
+    "hidden_size auto → spectral rank {…} → dModel={…}, ffn={…}".]
   - HILBERT/TRAJECTORY positional encoding (content-aware PE), replacing implicit
     position.
   - VORONOI MoE routing (Milestone B): deterministic content-addressed experts.

@@ -23,7 +23,7 @@ public class ConceptAnchorTests
 
         CodepointPerfcache.LoadDefault();
 
-        var source = Hash128.OfCanonical("substrate/source/test/wn-anchor/v1");
+        var source = SubstrateCanonicalIds.OfVersioned("source", "test", "wn-anchor");
         var b = new SubstrateChangeBuilder(source, "test/concept-anchor", null,
             entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
 

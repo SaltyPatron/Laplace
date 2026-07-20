@@ -17,10 +17,6 @@ Hard law (violations have corrupted state before):
   `no-unsolicited-crisis-boilerplate.mdc`. Coding agent only — code and facts.
 - Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
   `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
-- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
-  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
-- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
-  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
 - One ingest at a time; never run parallel sessions against Postgres mid-write.
 - Never edit a `.cmd` while it is executing.
 - After ANY engine rebuild run `scripts\win\build-extensions.cmd`. Confirm
@@ -32,8 +28,10 @@ Hard law (violations have corrupted state before):
   assuming a helper doesn't exist). Never present a narrow patch as the architectural fix.
 - `docs/specs/05` (invariants) and `docs/specs/06` (rules) are binding. `.scratchpad/13`
   is historical stabilization notes — verify against code before trusting; it is NOT the
-  active plan. Active remediation work: `.cursor/plans/full_stack_remediation_bdaba5c3.plan.md`,
-  evidence in `docs/specs/16` + `.scratchpad/17`.
+  active plan. [Updated 2026-07-20: the full-stack remediation plan
+  (`.cursor/plans/full_stack_remediation_bdaba5c3.plan.md`) is also CLOSED — P0–P8 all
+  verified landed at the code layer. There is no active plan file. Open work lives in
+  GitHub issues; `docs/INDEX.md` is the doc map.]
 
 Postgres service law (orphan / detach — do not recreate):
 

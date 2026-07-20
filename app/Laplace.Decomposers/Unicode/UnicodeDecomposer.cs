@@ -167,8 +167,8 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                 entityCapacity: 512, physicalityCapacity: 128, attestationCapacity: 512)
                 .SetCommitEpoch(1);
 
-            var latin1 = Hash128.OfCanonical("substrate/encoding/ISO-8859-1/v1");
-            var cp1252 = Hash128.OfCanonical("substrate/encoding/windows-1252/v1");
+            var latin1 = SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1");
+            var cp1252 = SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252");
             var encType = EntityTypeRegistry.CharacterEncoding;
             var roleType = EntityTypeRegistry.Utf8Role;
             bb.AddEntity(new EntityRow(latin1, EntityTier.Word, encType, Source));

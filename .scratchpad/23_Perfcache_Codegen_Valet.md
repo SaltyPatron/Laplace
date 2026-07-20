@@ -1,3 +1,11 @@
+<!-- DRAINED 2026-07-20 — checklist superseded by GitHub issues.
+     Steps landed: CMake DEPENDS rewire (engine/core/CMakeLists.txt:139-155),
+     gitignored blobs (.gitignore:414-418), --scope full.
+     Still open, tracked in #382: C# valet routing, highway source-hash header parity.
+     Separately: #524 (highway blob has no BLAKE3 CRC / input fingerprint, spec 33 law 3)
+     and #503 (skip t0 re-CRC on per-backend remap).
+     Open work lives in GitHub issues. -->
+
 # 23 — Perfcache codegen via the decomposer valet (source-hash-gated, gitignored)
 
 Author-directed 2026-07-12. Make the perfcache blobs (codepoint T0 **and** highway)

@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class GrammarCompositionTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/CodeDecomposer/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "CodeDecomposer");
 
     private static (ImmutableArray<EntityRow> Ents,
                     ImmutableArray<PhysicalityRow> Phys,

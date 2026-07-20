@@ -103,7 +103,7 @@ public sealed class FakeTabIngestDecomposer : IDecomposer
     public Hash128 SourceId => _config.SourceId;
     public string SourceName => "FakeTab";
     public int LayerOrder => 99;
-    public Hash128 TrustClassId => Hash128.OfCanonical("substrate/trust/test/fake-tab/v1");
+    public Hash128 TrustClassId => SubstrateCanonicalIds.OfVersioned("trust", "test", "fake-tab");
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.CompletedTask;

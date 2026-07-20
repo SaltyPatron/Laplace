@@ -27,6 +27,20 @@ public static partial class NativeInterop
     public static unsafe partial int F32GatherToF64(
         float* src, int* rowMap, nuint nRows, nuint d, double* outValues);
 
+    // Unified tensor dtype codec — one native entry for every safetensors numeric/bool
+    // dtype. Unknown names (block-quant containers) resolve to -1 so the caller refuses
+    // rather than ingesting zeros.
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_dtype_from_name",
+                   StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int TensorDtypeFromName(string name);
+
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_dtype_size")]
+    public static partial nuint TensorDtypeSize(int dtype);
+
+    [LibraryImport(Library, EntryPoint = "laplace_tensor_decode_f32")]
+    public static unsafe partial int TensorDecodeF32(
+        void* rawBytes, nuint nElements, int dtype, float* outValues);
+
     [LibraryImport(Library, EntryPoint = "recipe_parse")]
     public static unsafe partial IntPtr RecipeParse(byte* jsonText, nuint len);
 
@@ -34,8 +48,90 @@ public static partial class NativeInterop
         StringMarshalling = StringMarshalling.Utf8)]
     public static unsafe partial IntPtr RecipeGetField(IntPtr recipe, string fieldName);
 
+    // Typed reads over the same parsed recipe — callers must not re-parse config.json
+    // in managed code to get a number out of it. Status: 0 ok, -1 null, -2 missing,
+    // -3 present-but-not-that-type (never a silent default).
+    [LibraryImport(Library, EntryPoint = "recipe_get_int",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int RecipeGetInt(IntPtr recipe, string fieldName, long* outValue);
+
+    [LibraryImport(Library, EntryPoint = "recipe_get_double",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int RecipeGetDouble(IntPtr recipe, string fieldName, double* outValue);
+
     [LibraryImport(Library, EntryPoint = "recipe_free")]
     public static partial void RecipeFree(IntPtr recipe);
+
+    // safetensors container header — [u64 LE json length][json]. Entries come back in
+    // data-offset (on-disk) order. NULL on any malformed header: a file that does not
+    // describe its own bytes must be refused, not half-read.
+    [LibraryImport(Library, EntryPoint = "safetensors_parse_header")]
+    public static unsafe partial IntPtr SafetensorsParseHeader(void* bytes, nuint len);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_header_bytes")]
+    public static partial long SafetensorsHeaderBytes(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_count")]
+    public static partial int SafetensorsTensorCount(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_has_metadata")]
+    public static partial int SafetensorsHasMetadata(IntPtr header);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_name")]
+    public static partial IntPtr SafetensorsTensorName(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_dtype")]
+    public static partial IntPtr SafetensorsTensorDtype(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_rank")]
+    public static partial int SafetensorsTensorRank(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_dim")]
+    public static partial long SafetensorsTensorDim(IntPtr header, int index, int axis);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_data_start")]
+    public static partial long SafetensorsTensorDataStart(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_tensor_data_end")]
+    public static partial long SafetensorsTensorDataEnd(IntPtr header, int index);
+
+    [LibraryImport(Library, EntryPoint = "safetensors_header_free")]
+    public static partial void SafetensorsHeaderFree(IntPtr header);
+
+    // SentencePiece ModelProto reader/writer. Piece bytes are carried verbatim — the
+    // vocabulary is full of U+2581 and other multi-byte forms, and a lossy re-encode
+    // would change token identity.
+    [LibraryImport(Library, EntryPoint = "sp_model_parse")]
+    public static unsafe partial IntPtr SpModelParse(void* bytes, nuint len);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_piece_count")]
+    public static partial int SpModelPieceCount(IntPtr model);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_piece")]
+    public static unsafe partial IntPtr SpModelPiece(IntPtr model, int index, nuint* outLen);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_score")]
+    public static partial float SpModelScore(IntPtr model, int index);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_type")]
+    public static partial int SpModelType(IntPtr model, int index);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_free")]
+    public static partial void SpModelFree(IntPtr model);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_write")]
+    public static unsafe partial int SpModelWrite(
+        byte** pieces, nuint* pieceLens, float* scores, int* types, int count,
+        byte** outBuf, nuint* outLen);
+
+    [LibraryImport(Library, EntryPoint = "sp_model_buffer_free")]
+    public static unsafe partial void SpModelBufferFree(byte* buf);
+
+    // HF -> GGML tensor naming. Lives with the writer because it is format grammar:
+    // a GGUF carrying HuggingFace names is a file no llama.cpp build will load.
+    [LibraryImport(Library, EntryPoint = "gguf_tensor_name_hf_to_ggml",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int GgufTensorNameHfToGgml(string hfName, byte* outBuf, nuint outCap);
 
     [LibraryImport(Library, EntryPoint = "arch_template_load",
         StringMarshalling = StringMarshalling.Utf8)]

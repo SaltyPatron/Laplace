@@ -17,7 +17,7 @@ public class ModelTokenEdgeETLTests
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
     }
 
-    private static readonly Hash128 Source = Hash128.OfCanonical("substrate/test/model-edges/source");
+    private static readonly Hash128 Source = SubstrateCanonicalIds.Of("test", "model-edges", "source");
 
     // Pair-plane pins construct the ETL under an explicit mode; the default mode is
     // "structure" (APPEARS_IN occurrences). Tests in this class run sequentially, so
@@ -115,7 +115,7 @@ public class ModelTokenEdgeETLTests
                 QkRopeHeadDim = 0,
                 QkNopeHeadDim = 0,
                 VHeadDim = 0,
-                RecipeEntityId = Hash128.OfCanonical("substrate/test/fold/recipe"),
+                RecipeEntityId = SubstrateCanonicalIds.Of("test", "fold", "recipe"),
                 CanonicalJson = Encoding.UTF8.GetBytes("{}"),
             };
             var roles = new[]
@@ -219,7 +219,7 @@ public class ModelTokenEdgeETLTests
                 QkRopeHeadDim = 0,
                 QkNopeHeadDim = 0,
                 VHeadDim = 0,
-                RecipeEntityId = Hash128.OfCanonical("substrate/test/occ/recipe"),
+                RecipeEntityId = SubstrateCanonicalIds.Of("test", "occ", "recipe"),
                 CanonicalJson = Encoding.UTF8.GetBytes("{}"),
             };
             var roles = new[]
@@ -371,7 +371,7 @@ public class ModelTokenEdgeETLTests
                 QkRopeHeadDim = 0,
                 QkNopeHeadDim = 0,
                 VHeadDim = 0,
-                RecipeEntityId = Hash128.OfCanonical("substrate/test/cont/recipe"),
+                RecipeEntityId = SubstrateCanonicalIds.Of("test", "cont", "recipe"),
                 CanonicalJson = Encoding.UTF8.GetBytes("{}"),
             };
             var roles = new List<TensorRole>
@@ -436,7 +436,7 @@ public class ModelTokenEdgeETLTests
             QkRopeHeadDim = 0,
             QkNopeHeadDim = 0,
             VHeadDim = 0,
-            RecipeEntityId = Hash128.OfCanonical("substrate/test/model-edges/recipe"),
+            RecipeEntityId = SubstrateCanonicalIds.Of("test", "model-edges", "recipe"),
             CanonicalJson = Encoding.UTF8.GetBytes("{}"),
         };
         var roles = new[]

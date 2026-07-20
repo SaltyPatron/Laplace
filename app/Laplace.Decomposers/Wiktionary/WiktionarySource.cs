@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.Wiktionary;
 public readonly struct WiktionarySource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
+        SubstrateCanonicalIds.Source("WiktionaryDecomposer");
 
     public static string SourceName => "WiktionaryDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCuratedWithUserInput/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCuratedWithUserInput");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

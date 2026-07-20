@@ -70,3 +70,55 @@ TEST(LaplaceSynthesisRecipe, EmptyObjectParsesOk) {
     EXPECT_EQ(recipe_get_field(r, "anything"), nullptr);
     recipe_free(r);
 }
+
+// ---- typed accessors (#263) --------------------------------------------------
+// These exist so no caller re-parses config.json in its own language just to read
+// a number out of it. A malformed dimension must fail loudly, never read as 0.
+
+TEST(LaplaceSynthesisRecipe, TypedIntAndDoubleReads) {
+    const char* json =
+        "{\"hidden_size\": 4096, \"num_hidden_layers\": 32, \"rope_theta\": 10000.0,"
+        " \"rms_norm_eps\": 1e-05, \"model_type\": \"llama\", \"neg\": -7}";
+    recipe_t* r = recipe_parse(json, strlen(json));
+    ASSERT_NE(r, nullptr);
+
+    long long i = 0;
+    EXPECT_EQ(recipe_get_int(r, "hidden_size", &i), RECIPE_OK);
+    EXPECT_EQ(i, 4096);
+    EXPECT_EQ(recipe_get_int(r, "num_hidden_layers", &i), RECIPE_OK);
+    EXPECT_EQ(i, 32);
+    EXPECT_EQ(recipe_get_int(r, "neg", &i), RECIPE_OK);
+    EXPECT_EQ(i, -7);
+
+    double d = 0;
+    EXPECT_EQ(recipe_get_double(r, "rope_theta", &d), RECIPE_OK);
+    EXPECT_DOUBLE_EQ(d, 10000.0);
+    EXPECT_EQ(recipe_get_double(r, "rms_norm_eps", &d), RECIPE_OK);
+    EXPECT_DOUBLE_EQ(d, 1e-05);
+
+    recipe_free(r);
+}
+
+TEST(LaplaceSynthesisRecipe, TypedReadsRejectRatherThanGuess) {
+    const char* json = "{\"model_type\": \"llama\", \"frac\": 1.5, \"junk\": 12}";
+    recipe_t* r = recipe_parse(json, strlen(json));
+    ASSERT_NE(r, nullptr);
+
+    long long i = 99;
+    double d = 99;
+    // a string field is not an int
+    EXPECT_EQ(recipe_get_int(r, "model_type", &i), RECIPE_ERR_TYPE);
+    // 1.5 is not an integer — must not truncate to 1
+    EXPECT_EQ(recipe_get_int(r, "frac", &i), RECIPE_ERR_TYPE);
+    EXPECT_EQ(i, 99);  // out param untouched on failure
+    // absent fields are distinguishable from malformed ones
+    EXPECT_EQ(recipe_get_int(r, "not_here", &i), RECIPE_ERR_MISSING);
+    EXPECT_EQ(recipe_get_double(r, "not_here", &d), RECIPE_ERR_MISSING);
+    EXPECT_EQ(recipe_get_double(r, "model_type", &d), RECIPE_ERR_TYPE);
+    // null guards
+    EXPECT_EQ(recipe_get_int(nullptr, "junk", &i), RECIPE_ERR_NULL);
+    EXPECT_EQ(recipe_get_int(r, nullptr, &i), RECIPE_ERR_NULL);
+    EXPECT_EQ(recipe_get_int(r, "junk", nullptr), RECIPE_ERR_NULL);
+
+    recipe_free(r);
+}

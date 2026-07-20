@@ -1,3 +1,14 @@
+<!-- DRAINED 2026-07-20 — items A-J are GitHub issues #368-#375, plus #472 (OV rank-aware
+     storage), #473 (A2 while-hot analyzer), #474 (recorder-first enforcement), #475
+     (Tier-2 behavioral gates), #485 (WordPiece), #385 (TinyLlama perf gate), #535 (the
+     owed doc-08 amendment), #536 (B-prime lens re-measurement).
+     Landed since writing: factor payloads + arena vertex, EmitBilinearPairs deleted,
+     self-describing v2 trajectory layout, and all three MiniLM/BERT defects (biases,
+     NormFold-as-column-scale, position/segment roles).
+     RETAINED as binding design rationale, not a checklist: the gate taxonomy (Tier 1/2/3),
+     the while-hot law, the B/D contract, and the B-v1 post-mortem.
+     Open work lives in GitHub issues. -->
+
 # 26 — Uncracked-List Campaign (2026-07-15)
 
 Objective: empty the uncracked list. Every item below is a construction step with a

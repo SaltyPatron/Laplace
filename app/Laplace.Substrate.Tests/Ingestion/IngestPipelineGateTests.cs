@@ -38,7 +38,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         public string SourceName => "DeferredContentSynthetic";
         public int LayerOrder => 2;
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+            SubstrateCanonicalIds.TrustClass("SubstrateMandate");
 
         public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.CompletedTask;
@@ -106,7 +106,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         long inputBytes = (long)unitCount * bytesPerUnit;
         double maxSeconds = IngestBaselineGates.MaxSecondsForBytes(inputBytes);
 
-        var srcId = Hash128.OfCanonical("substrate/source/test/pipeline-warm/v1");
+        var srcId = SubstrateCanonicalIds.OfVersioned("source", "test", "pipeline-warm");
         var decomposer = new DeferredContentSyntheticDecomposer(unitCount, bytesPerUnit, srcId);
         var runner = NewRunner(_pg.DataSource);
 

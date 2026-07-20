@@ -59,8 +59,10 @@ does batching/dedup/fold/COPY. Decomposers are thin VALETS — resolve input →
 pipeline; the spine owns the Merkle-DAG tier tree / content-addressing / fold. Two rules
 that bite: (1) a decomposer MUST declare in its `InitializeAsync` `relationNodeNames`
 EVERY relation type it emits — an emitted-but-undeclared relation faults the native
-attestation path (the UD `HAS_POS` 0xC0000005; `family_root` membership is not
-auto-registered — family-aware bootstrap is the open fix). (2) Multi-file sources accept a
+attestation path (the UD `HAS_POS` 0xC0000005). Declaring a family member now pulls its
+ancestors: `SourceVocabularyBootstrap.ExpandRelationsWithFamily` runs inside
+`RegisterAsync`, and `DecomposerArchitectureGateTests` pins the `HAS_XPOS`→`HAS_POS`
+case. (2) Multi-file sources accept a
 `<path>` (single file, bare dir, or ecosystem root) via the shared
 `IngestInput.ResolveFiles` valet, so `ingest ud <one.conllu>` works — validate one file in
 seconds, not a full corpus run.

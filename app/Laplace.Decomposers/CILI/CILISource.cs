@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.CILI;
 public readonly struct CILISource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/CILIDecomposer/v1");
+        SubstrateCanonicalIds.Source("CILIDecomposer");
 
     public static string SourceName => "CILIDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_SYNSET_KEY"];

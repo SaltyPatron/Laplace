@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.UD;
 public readonly struct UDSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
+        SubstrateCanonicalIds.Source("UDDecomposer");
 
     public static string SourceName => "UDDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",

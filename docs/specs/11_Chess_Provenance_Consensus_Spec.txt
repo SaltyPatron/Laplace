@@ -26,7 +26,12 @@ see these are THREE DIFFERENT TABLES with three different keys:
 
   CONSENSUS (consensus)  keyed by consensus_id(subject_id, type_id, object_id)
             — GROUP BY (subject,type,object), verified in
-            materialize_period_partition.sql.in:27. Folds evidence into literal
+            extension/laplace_substrate/sql/functions/fold/scoped_consensus.sql.in:28
+            (also fold/consensus_upsert.sql.in — the write-side fold).
+            [Superseded 2026-07-20: the cited materialize_period_partition.sql.in:27 no
+            longer exists; the whole materialize_period_* family is gone (`api('materialize')`
+            returns 0 rows; the only surviving mention is a parity.py CONFLICT entry).
+            The GROUP BY key itself is unchanged.] Folds evidence into literal
             Glicko-2 (rating, rd, volatility, witness_count). GLOBAL aggregate.
 
 So: the move ENTITY dedupes (content), every PLAY is a preserved attestation
@@ -174,6 +179,10 @@ GAP — the geometric board layer (this is the "fix everything" for chess):
   6. Extend GameId to the full 7-tag roster for true game uniqueness.
 
 All of it sits ON the unified PhysicalityCompose service (#20) and the
+[Superseded 2026-07-20: there is no PhysicalityCompose — 0 hits across app, engine,
+extension. Physicality composition is done by the per-modality compose path
+(e.g. app/Laplace.Chess/.../ChessCompose.cs ComposeOver) over the shared native
+content-tree/Merkle spine; the unified service was never built under that name.]
 content-hash identity (shipped). Nothing here reduces the existing provenance
 model — it adds the geometry the current text-token model is missing.
 

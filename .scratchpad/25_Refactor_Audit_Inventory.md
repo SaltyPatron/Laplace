@@ -1,3 +1,14 @@
+<!-- DRAINED 2026-07-20 — the H/M/L finding list is not a tracker; every open row is
+     a GitHub issue: #500 (H2 transcendental math), #502 (M3 + phase-2 EXPLAIN/VTune),
+     #498 (M4/L2 row allocation), #497 (M8 chess _writeGate), #470 (M6 CTE
+     materialization), #499 (M7 monoliths), #501 (L1 salient_facts exclusions),
+     #471 (id-vs-label audit), #459/#460/#461 (native lifts 2-4).
+     Landed since writing: evidence_receipt src_labels MATERIALIZED fix, realize_batch,
+     H1 converse_walk native, H3 word_case_map_surface, M1, M2, native lift 5 (#428).
+     RETAINED as a record: the labeling-discipline census (122 render sites, 85
+     id-returning functions, 257 per-row label sites) and the measured latency table.
+     Open work lives in GitHub issues. -->
+
 # 25 — Repo Refactor Audit Inventory (breadth-first pass, 2026-07-14)
 
 Scope actually swept: extension SQL surface (330 functions across ~7.9k lines of

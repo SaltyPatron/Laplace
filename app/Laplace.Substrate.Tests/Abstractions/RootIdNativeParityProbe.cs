@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class RootIdNativeParityProbe
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/RootIdParity/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "RootIdParity");
 
     private const string DataNoun = @"D:\vault\Data\Wordnet\WordNet-3.0\dict\data.noun";
 

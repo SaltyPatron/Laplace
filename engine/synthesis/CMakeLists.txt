@@ -6,6 +6,9 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/feature_extractor.h
     include/laplace/synthesis/gguf_writer.h
     include/laplace/synthesis/bf16_decoder.h
+    include/laplace/synthesis/tensor_dtype_codec.h
+    include/laplace/synthesis/safetensors_parser.h
+    include/laplace/synthesis/sentencepiece_parser.h
     include/laplace/synthesis/tensor_decompose.h
     include/laplace/synthesis/qk_pairs_threshold.h
     include/laplace/synthesis/qk_pairs_threshold_pruned.h
@@ -22,6 +25,9 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/feature_extractor.cpp
     src/gguf_writer.cpp
     src/bf16_decoder.c
+    src/tensor_dtype_codec.c
+    src/safetensors_parser.cpp
+    src/sentencepiece_parser.cpp
     src/tensor_decompose.cpp
     src/qk_pairs_threshold.cpp
     src/qk_pairs_threshold_pruned.cpp
@@ -77,12 +83,13 @@ else()
         "  Source /opt/intel/oneapi/setvars.sh and re-run cmake to enable DGEMM path.")
 endif()
 
-if(CMAKE_C_COMPILER_ID MATCHES "Intel")
+if(CMAKE_C_COMPILER_ID MATCHES "Intel|GNU|Clang")
     set_source_files_properties(src/bf16_decoder.c PROPERTIES
         COMPILE_OPTIONS "-mavx2")
-elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(src/bf16_decoder.c PROPERTIES
-        COMPILE_OPTIONS "-mavx2")
+    # tensor_dtype_codec also takes the F16C half<->float instruction for the F16 lane;
+    # both paths fall back to the scalar reference when the ISA is absent.
+    set_source_files_properties(src/tensor_dtype_codec.c PROPERTIES
+        COMPILE_OPTIONS "-mavx2;-mf16c")
 endif()
 
 if(BUILD_TESTING)

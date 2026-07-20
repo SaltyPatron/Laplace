@@ -8,21 +8,16 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
 
 - **Scoped instructions** ([.github/instructions/](.github/instructions)): auto-apply by
   glob — decomposers, engine-native, sql-substrate, tests, scripts-win, scratchpad-docs.
-- **Skills** ([.claude/skills/](.claude/skills), read by VS Code + Claude Code):
-  `/laplace-health` (multi-layer stack check), `/laplace-seed` (user-invoked only),
-  `/substrate-query` (three-layer model + probes), `/foundry-loop` (synthesize→verdict→gate).
 - **MCP**: `laplace-db` — read-only (restricted) Postgres server over the `laplace` DB,
-  configured for VS Code ([.vscode/mcp.json](.vscode/mcp.json)), Claude Code
-  ([.mcp.json](.mcp.json)), and Cursor ([.cursor/mcp.json](.cursor/mcp.json)). Prefer it
-  for exploration; it cannot write, which is the point.
-- **Guard hook** ([.claude/settings.json](.claude/settings.json) →
-  [.claude/hooks/laplace-guard.ps1](.claude/hooks/laplace-guard.ps1)): deterministically
-  DENIES (1) bare `scripts/win/*.cmd` invocations not wrapped in `cmd /c`, and
-  (2) seed/reset/ingest commands while a `Laplace.Cli` ingest is already running. If it
-  blocks you, it is right — fix the command, do not route around it.
+  configured for Claude Code ([.mcp.json](.mcp.json)) and Cursor
+  ([.cursor/mcp.json](.cursor/mcp.json)). Prefer it for exploration; it cannot write,
+  which is the point.
+- **No skills or guard hooks are wired up.** There is no `.claude/skills/` and no
+  `.claude/settings.json` → `.claude/hooks/` guard. The `cmd /c` wrapping rule and the
+  one-ingest-at-a-time rule below are enforced by you reading them, not by a hook.
 - **Subagents** ([.github/agents/](.github/agents)): `substrate-verifier` (read-only
   live-data proof of claims), `doc-reconciler` (kills .scratchpad doc drift).
-- **Prompt**: `/next-task` ranks work from binding docs (05/06/09) + code-verified open items — not doc 13 alone.
+- **Prompt**: [.github/prompts/next-task.prompt.md](.github/prompts/next-task.prompt.md) ranks work from binding docs (05/06/09) + code-verified open items — not doc 13 alone. It is a file to read, not a registered slash command in every harness.
 - **Cursor**: [.cursor/rules/](.cursor/rules) mirrors the hard law + scoped rules.
 - **Ingest sizing**: batch/commit/working-set defaults are source-aware in `IngestSizing` — do not override via `LAPLACE_INGEST_*` env vars unless debugging a one-off run.
 
@@ -87,7 +82,7 @@ schema's own helper catalog — check it before assuming something doesn't exist
   `substrate_health()` / `api(...)` / the claim's own layer — not a single
   lexical helper. MSB3027 copy failure ⇒ clean-rebuild.
 - `seed-step.cmd` runs an independent `:verify_step` — trust it, not the CLI summary line.
-- Full lesson list: [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt) (L1–L12; promoted into docs/specs/06_Engineering_Ruleset.txt — that file is now a CLOSED HISTORICAL tracker, open work lives in GitHub issues).
+- Full lesson list: lessons L1–L12 now live in [docs/specs/06_Engineering_Ruleset.txt](docs/specs/06_Engineering_Ruleset.txt), promoted there 2026-07-18. Their origin log, [.scratchpad/02_Identified_Issues.txt](.scratchpad/02_Identified_Issues.txt), is a CLOSED HISTORICAL tracker — read it for the sagas, never for status; open work lives in GitHub issues.
 - Postgres service: never `pg_ctl start` (orphans outside SCM); never agent UAC
   (`Start-Process -Verb RunAs`); never `db-reset`/`DROP DATABASE` unless the user
   explicitly asked this turn. Orphan = service Stopped + port 5432 live → point at
@@ -107,7 +102,7 @@ schema's own helper catalog — check it before assuming something doesn't exist
 - [.scratchpad/17_Decomposer_Full_Stack_Audit.md](.scratchpad/17_Decomposer_Full_Stack_Audit.md) — decomposer + ingest-spine audit (code-verified); start here for decomposer work.
 - [docs/specs/06_Engineering_Ruleset.txt](docs/specs/06_Engineering_Ruleset.txt) — Rule #8 ingest sequence; binding for pipeline changes.
 - [.scratchpad/13_Stabilization_Audit_and_Plan.txt](.scratchpad/13_Stabilization_Audit_and_Plan.txt) — historical stabilization notes; verify against code before trusting.
-- Full doc map with status: [CLAUDE.md](CLAUDE.md) § Doc map.
+- Full doc map with status: [docs/INDEX.md](docs/INDEX.md) (CLAUDE.md § Docs points there).
 
 ## Conventions that differ from common practice
 

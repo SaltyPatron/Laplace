@@ -38,8 +38,8 @@ public class NativeAttestationParityTests
     [Fact]
     public void PosAttest_MatchesCanonicalResolve_AndAliasCollapses()
     {
-        Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
-        Hash128 src = Hash128.OfCanonical("substrate/test/src/v1");
+        Hash128 form = SubstrateCanonicalIds.OfVersioned("test", "word");
+        Hash128 src = SubstrateCanonicalIds.OfVersioned("test", "src");
 
         var b = new SubstrateChangeBuilder(src, "test/pos-attest", null);
         PosReference.Attest(b, form, "NOUN", PosReference.PosTagset.Upos, src, null, SourceTrust.AcademicCurated);
@@ -58,8 +58,8 @@ public class NativeAttestationParityTests
     [Fact]
     public void PosAttest_ProbationaryTag_EmitsThePosEntityInBatch()
     {
-        Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
-        Hash128 src = Hash128.OfCanonical("substrate/test/src/v1");
+        Hash128 form = SubstrateCanonicalIds.OfVersioned("test", "word");
+        Hash128 src = SubstrateCanonicalIds.OfVersioned("test", "src");
 
         var b = new SubstrateChangeBuilder(src, "test/pos-probationary", null);
         var posId = PosReference.Attest(b, form, "IDIO", PosReference.PosTagset.FrameNet,
@@ -68,7 +68,7 @@ public class NativeAttestationParityTests
 
 
 
-        Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1"), posId);
+        Assert.Equal(SubstrateCanonicalIds.PosProbationary("framenet", "IDIO"), posId);
 
 
 
@@ -84,11 +84,11 @@ public class NativeAttestationParityTests
 
     {
 
-        var src = Hash128.OfCanonical("substrate/test/reg/source");
+        var src = SubstrateCanonicalIds.Of("test", "reg", "source");
 
-        var a = Hash128.OfCanonical("substrate/test/reg/a");
+        var a = SubstrateCanonicalIds.Of("test", "reg", "a");
 
-        var b = Hash128.OfCanonical("substrate/test/reg/b");
+        var b = SubstrateCanonicalIds.Of("test", "reg", "b");
 
         var ab = NativeAttestation.Categorical(a, "IS_TRANSLATION_OF", b, src, null, SourceTrust.StructuredCorpus);
 

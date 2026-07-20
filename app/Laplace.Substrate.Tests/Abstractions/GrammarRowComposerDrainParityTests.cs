@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class GrammarRowComposerDrainParityTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/drain-parity/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "drain-parity");
     private const long NowUs = 1_700_000_000_000_000L;
 
     [Theory]

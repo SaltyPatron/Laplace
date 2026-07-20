@@ -1,3 +1,12 @@
+DRAINED 2026-07-20 — the C-numbered status marks in this file are STALE; GitHub issues
+are the authority. Fixed since writing: C02 (26 chess relations now in relation_types.toml),
+C03 (auto-ingest), C06 (CountOutposts), C10 (UCI stop/clamp/FEN), C11 (#448), C12, C17.
+Still open: C01 #494, C04 #489 + #528 (path traversal), C07/C08/C09 #447, C13 #491,
+C14 #449, C15 #492, C16 #493, C18 #450, PART 4 Q1 #529, PART 5 perfcache #490.
+RETAINED as a record: the self-verified evidence (real cutechess build, real perft, real
+PGN) and the PART 5 rationale.
+================================================================================
+
 LAPLACE — CHESS SUBSYSTEM AUDIT (03)
 Scope: every chess-related file in the repo (excluding the vendored external/cutechess
 submodule's own internals, audited only as a black box via a real build+run). Four parallel

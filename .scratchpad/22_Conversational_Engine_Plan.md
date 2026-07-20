@@ -1,3 +1,12 @@
+<!-- DRAINED 2026-07-20 — this doc is no longer a tracker.
+     Phases A-F map 1:1 onto GitHub issues: A done+verified; B #358; C #359;
+     D #360; E blocked on B (#358) with its highway half re-verified live
+     (laplace_highway_ready()=t, 2.11M masked entities); F #361.
+     Also drained: converse_walk RBAR (superseded by native steered_walk.c),
+     walker duplication #354, witness_precedes_chain #428 (closed),
+     starved free-form walk #361 + reseed #413.
+     Open work lives in GitHub issues. Keep this file for the design rationale only. -->
+
 # 22 — Conversational Engine: remaining architecture plan
 
 Goal: the substrate converses like a human — deterministic, grounded, language-agnostic —

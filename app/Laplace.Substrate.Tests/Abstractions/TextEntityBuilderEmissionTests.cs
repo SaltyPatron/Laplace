@@ -11,7 +11,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class TextEntityBuilderEmissionTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/TextEmission/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "TextEmission");
 
     [Theory]
     [InlineData("foo.\r\n\r\n")]

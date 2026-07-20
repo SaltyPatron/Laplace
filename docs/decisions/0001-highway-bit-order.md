@@ -1,8 +1,8 @@
 # 0001 — Highway bit assignment: alphabetical codegen vs append-only registry
 
-Status: **PROPOSED — operator decision pending.** Written 2026-07-18 from the forest
-audit. Implementation, whichever way the decision goes, is its own GH issue; nothing
-changes until decided AND the next operator-ordered full reseed is scheduled.
+Status: **ACCEPTED 2026-07-20** — explicit `bit = N`, append-only. Written 2026-07-18
+from the forest audit; decided by the operator 2026-07-20 (see §Decision). Implementation
+is GH #551; the layout freezes at the next operator-ordered full reseed.
 
 ## The problem
 
@@ -58,4 +58,33 @@ manifest itself — nothing becomes hidden state.
 
 ## Decision
 
-_(operator)_ —
+**Operator, 2026-07-20: adopt the explicit `bit = N` append-only registry.**
+
+Verbatim reasoning: *"standard practice would say to come up with as complete a list as
+possible and anything in the future would be appended as to prevent data loss... these
+will be in millions/billions of records."*
+
+That adds one binding requirement the recommendation above did not state: the freeze is
+not merely "stop moving bits from now on" — it is **enumerate as completely as possible
+FIRST, then append forever**. The one-time cost of thinking hard about the full relation
+inventory is paid once; every bit assigned carelessly now is a bit that can never be
+reordered later, because at billions of rows a re-mask is not a maintenance operation.
+
+Binding consequences:
+
+1. `bit = N` becomes a required field on every `[[relation]]` in
+   `engine/manifest/relation_types.toml`. Codegen VALIDATES (unique, in range, no
+   reuse of a retired bit) instead of assigning.
+2. Before the freeze, do a deliberate completeness pass over the relation inventory —
+   the known-coming families (the M0 modality ladders in
+   `docs/invention/modality-ladder-law.md`, the git-lane ledger in GH #504, any
+   governance/credit bands) get their bits reserved in that pass rather than appended
+   piecemeal afterwards. Reserved-but-unused bits are cheap; renumbering is not.
+3. Retired relations leave a **tombstone**, never a reused bit. A reused bit would make
+   an old stored mask decode as a different relation — silent corruption, exactly the
+   failure mode this decision exists to end.
+4. The layout freezes at the next operator-ordered full reseed. That reseed is the last
+   bit-order reseed the project pays.
+5. Capacity is the thing to watch, not order: 256 bits against 203 live canonicals.
+   Family collapse (GH #399) remains the capacity lever, and the completeness pass in
+   (2) must not blow the budget — count before reserving.

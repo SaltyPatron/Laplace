@@ -61,6 +61,12 @@ Rule #6: No duplicate/overlapping logic without a documented reason it isn't con
       ~25 inline copies of the entity+physicality type=1 join — word_anchor(),
       v_attestation_readable). Roadmap + statuses: 07 §5 re-baseline; execution order:
       .scratchpad/13 Phase 2.
+      [Repointed 2026-07-20: the STATUS above is still correct — all four of v_word_senses /
+      v_word_points / word_anchor / v_attestation_readable return 0 rows from api() on the
+      live DB. But the execution pointer was dead: .scratchpad/13 is marked "NOT the active
+      plan" (docs/INDEX.md:40) and .scratchpad is an append-only historical log. **The
+      tracker is GitHub issue #463** (read-side: v_word_points + word_anchor() +
+      v_attestation_readable unbuilt — Rule #6 residual), which also covers v_word_senses.]
 
 Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
 chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
@@ -137,6 +143,9 @@ Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - materialize_period_partition / materialize_period_partition_fresh differ only by whether
       the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized
       function.
+      [Superseded 2026-07-20: MOOT — both functions are gone from the extension
+      (`SELECT count(*) FROM api('materialize')` = 0; no .sql.in defines either). The fold
+      lives in fold/consensus_upsert.sql.in and fold/scoped_consensus.sql.in. Nothing to merge.]
     - Full audit for other instances of the Rule #1 (05_Substrate_Invariants.txt) OR-combined
       order-sensitive/order-insensitive metric bug: survey did one pass, found no other
       confirmed instance, but explicitly flagged this as not exhaustive.

@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.OMW;
 public readonly struct OMWSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
+        SubstrateCanonicalIds.Source("OMWDecomposer");
 
     public static string SourceName => "OMWDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+        SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS"];

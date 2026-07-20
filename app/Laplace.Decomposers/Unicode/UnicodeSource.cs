@@ -7,12 +7,12 @@ namespace Laplace.Decomposers.Unicode;
 public readonly struct UnicodeSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
+        SubstrateCanonicalIds.Source("UnicodeDecomposer");
 
     public static string SourceName => "UnicodeDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+        SubstrateCanonicalIds.TrustClass("StandardsDerived");
 
     public static IReadOnlyList<string> Relations { get; } =
     [

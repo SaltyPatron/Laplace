@@ -110,3 +110,51 @@ TEST(LaplaceSynthesisGgufWriter, NullPathReturnsNull) {
     gguf_writer_t* w = gguf_writer_create(nullptr);
     EXPECT_EQ(w, nullptr);
 }
+
+// ---- HF -> GGML tensor naming (#273) ----------------------------------------
+// A writer that emits HuggingFace names produces a file no llama.cpp build loads,
+// so this mapping is load-bearing format grammar, not cosmetics.
+
+namespace {
+std::string MapName(const char* hf) {
+    char buf[256];
+    int n = gguf_tensor_name_hf_to_ggml(hf, buf, sizeof buf);
+    EXPECT_GE(n, 0) << hf;
+    return std::string(buf, (size_t)(n < 0 ? 0 : n));
+}
+}  // namespace
+
+TEST(LaplaceGgufTensorNames, TopLevelTensors) {
+    EXPECT_EQ(MapName("model.embed_tokens.weight"), "token_embd.weight");
+    EXPECT_EQ(MapName("model.norm.weight"), "output_norm.weight");
+    EXPECT_EQ(MapName("lm_head.weight"), "output.weight");
+}
+
+TEST(LaplaceGgufTensorNames, PerLayerTensorsKeepTheirIndex) {
+    EXPECT_EQ(MapName("model.layers.0.self_attn.q_proj.weight"), "blk.0.attn_q.weight");
+    EXPECT_EQ(MapName("model.layers.7.self_attn.k_proj.weight"), "blk.7.attn_k.weight");
+    EXPECT_EQ(MapName("model.layers.21.self_attn.v_proj.weight"), "blk.21.attn_v.weight");
+    EXPECT_EQ(MapName("model.layers.3.self_attn.o_proj.weight"), "blk.3.attn_output.weight");
+    EXPECT_EQ(MapName("model.layers.3.mlp.gate_proj.weight"), "blk.3.ffn_gate.weight");
+    EXPECT_EQ(MapName("model.layers.3.mlp.up_proj.weight"), "blk.3.ffn_up.weight");
+    EXPECT_EQ(MapName("model.layers.3.mlp.down_proj.weight"), "blk.3.ffn_down.weight");
+    EXPECT_EQ(MapName("model.layers.3.input_layernorm.weight"), "blk.3.attn_norm.weight");
+    EXPECT_EQ(MapName("model.layers.3.post_attention_layernorm.weight"), "blk.3.ffn_norm.weight");
+}
+
+TEST(LaplaceGgufTensorNames, UnknownNamesPassThroughRatherThanBeingDropped) {
+    EXPECT_EQ(MapName("some.future.tensor"), "some.future.tensor");
+    // unknown per-layer suffix keeps the blk.N rewrite but preserves the suffix
+    EXPECT_EQ(MapName("model.layers.5.brand_new.weight"), "blk.5.brand_new.weight");
+    // a layer prefix with no suffix is not a layer tensor
+    EXPECT_EQ(MapName("model.layers."), "model.layers.");
+}
+
+TEST(LaplaceGgufTensorNames, GuardsAndCapacity) {
+    char buf[8];
+    EXPECT_EQ(gguf_tensor_name_hf_to_ggml(nullptr, buf, sizeof buf), -1);
+    EXPECT_EQ(gguf_tensor_name_hf_to_ggml("x", nullptr, 8), -1);
+    EXPECT_EQ(gguf_tensor_name_hf_to_ggml("x", buf, 0), -1);
+    // too small for the mapped name -> refuse, never truncate a tensor name
+    EXPECT_EQ(gguf_tensor_name_hf_to_ggml("model.embed_tokens.weight", buf, sizeof buf), -1);
+}

@@ -26,6 +26,13 @@ FoundryExport.cs ~923-1530)
      env LAPLACE_FOUNDRY_BASIS_RANK default 256), rows L2-normalized, last dim =
      bias. S³ anchors are passed and used for Procrustes orientation
      (BasisStats.ProcrustesResidual), NOT as the graph normalization.
+     [Superseded 2026-07-20: LAPLACE_FOUNDRY_BASIS_RANK is RETIRED — every
+     LAPLACE_FOUNDRY_* env var is now rejected outright by
+     FoundryCommands.cs:1825 RejectRetiredFoundryEnvVars (called at :527 and :1001,
+     message: "knobs live in FoundryDefaults"). The rank cap is
+     app/Laplace.Core/Core/FoundryDefaults.cs:12 `BasisRank = 256`, used at
+     FoundryCommands.cs:1017,1190. Same correction applies wherever this doc names a
+     LAPLACE_FOUNDRY_* env var, including §4's table and §6b.]
   3. Per layer, per operator key (relation:X / metric:frechet / trajectory /
      unary): m = ProjectOperator(R, plane) (project into the CURRENT residual
      representation R); mResid = m − I; Q/K = Factor(m, rank ≤ headDim);
@@ -36,13 +43,33 @@ FoundryExport.cs ~923-1530)
      (Array.Fill(vals, 1.0f)) — no per-dimension gain anywhere.
   6. FFN gate: constant-column trick (gateZ=6.0 bias column; upGain =
      1/silu(gateZ) exactly cancels it) — the gate NEVER depends on the token.
+     [Superseded 2026-07-20: the gate DOES depend on the token now. The faithful path
+     routes mlp.gate_proj.weight to FoundryExport.cs:1962 FillGateBanded
+     (FoundryCommands.cs:1777): gate rows are keyed on per-salience-band embedding
+     centroids — silu(gain·cos + floor), so an aligned token sees ≈silu(gain) and a
+     misaligned one a small leak. The constant-open column survives only as the
+     per-band fallback when a band has no centroid (FoundryExport.cs:1974). §6b P2
+     records this fix.]
   7. lm_head: ONE plane (trajectory/PRECEDES stride): lmHead[y] = Σ_x w·R_final[x],
      in-degree idf, row-normalized. Off the composed state (good), but the plane
      is word-adjacency-within-documents (bigram-flavored, tier-2 flat).
+     [Superseded 2026-07-20: lm_head is no longer one PRECEDES-stride plane. The
+     calibrated base is the CONDITIONAL floor — a rank-d factorization of log P(y|x)
+     from attested continuations, POS-corrected: `continuation_conditional_plane`,
+     `pos_class_transitions`, `vocab_dominant_pos` are all live in the extension
+     (verified via api()), with correction layers gated to improve it monotonically
+     (FoundryDefaults.cs:33 FloorCorrectionGain = 0.10, :36 PosFloorGain = 1.0, embed
+     ops "conditional"/"conditional_pos"). Same correction applies to §3's line 150.]
   8. "context" head: identity-scaled QK (raw embed similarity), identity V —
      copies similar-token content forward; the only sequence machinery present.
   9. Glicko: plane values carry the folded edge weight (eff_mu-derived). rd,
      volatility, witness_count, source, context, outcome polarity: never read.
+     [Superseded 2026-07-20: rd AND witness_count ARE read, in every generation plane —
+     `... * exp(-foundry_rd_kappa()*e.rd/1e9) * foundry_witness_sat(e.witness_count)`
+     in extension/.../generation/consensus_type_plane.sql.in:31-32,
+     consensus_adjacency.sql.in:40-41, entity_relation_plane.sql.in:13-14, and
+     consensus_layer_plane{,_masked}.sql.in:27-28. §6b P5 records this fix. volatility,
+     source, context and raw outcome polarity remain unread here.]
  10. Salience ranks: used to GROUP relations into head families (rankNames:
      "taxo+part", "causal+seq", "equivalence") — never as weights or priors.
 
@@ -67,6 +94,11 @@ M2. ALL HEADS SHARE ONE SUBSPACE; RELATIONS RE-MASH IN THE RESIDUAL STREAM.
     perturbations of the same subspace. And V/O factors all write back into the
     same unallocated residual dimensions — no per-head orthogonal allocation, no
     Gram-Schmidt across head bases (named in 09's toolkit, never implemented).
+    [Superseded 2026-07-20: Gram-Schmidt IS implemented —
+    engine/dynamics/src/gram_schmidt.cpp, invoked from the export path at
+    FoundryExport.cs:1448 and :1669 via DynInterop.GramSchmidtOrthonormalize. Whether
+    the resulting per-head allocation fully cures M2 is a separate question; "never
+    implemented" is false.]
     The knowledge-graph literature learned this lesson a decade ago: a
     multi-relational graph is a 3-TENSOR (subject, relation, object); collapsing
     relation slices into one matrix loses the relational structure (RESCAL,
@@ -121,6 +153,14 @@ M5. THE GLICKO TUPLE IS TRUNCATED TO A SCALAR; TENSION≠CERTAINTY IN THE SYNTHE
     tight one. 12 §Family-A names the full mapping (rd→temperature,
     witness→mass, volatility→update signal); none of it is wired.
     → Prescriptions P5, P8.
+    [Superseded 2026-07-20: "none of it is wired" is false for rd and witness_count.
+    Every generation plane now carries
+    `* exp(-foundry_rd_kappa()*e.rd/1e9) * foundry_witness_sat(e.witness_count)` —
+    generation/consensus_type_plane.sql.in:31-32, consensus_adjacency.sql.in:40-41,
+    entity_relation_plane.sql.in:13-14, consensus_layer_plane{,_masked}.sql.in:27-28 —
+    so the single-witness rumor and the 10k-witness taut strand no longer differ only in
+    one number. volatility, source trust and raw outcome polarity remain unwired here.
+    §6b P5 records the fix.]
 
 ================================================================================
 SECTION 3 — WHY NO CONVERSATION, SPECIFICALLY
@@ -174,7 +214,18 @@ target slot; extends 12's master table with the "consumed?" truth column)
 ================================================================================
  primitive                 consumed today?          target slot (12) / fix
  ------------------------- ------------------------ --------------------------
- relation types (181)      recipe-named planes only  one head per type/band (P3)
+ relation types (count:    recipe-named planes only  one head per type/band (P3)
+   docs/INVENTORY.md)
+ [Superseded 2026-07-20 for this whole table: this row read "relation types (181)" —
+  docs/INVENTORY.md:123 reports 203 governed canonical relations (+23 aliases).
+  AND the three "NO" rows rd / witness_count / hilbert_index are now YES:
+  rd + witness_count are consumed in every generation plane
+  (exp(-foundry_rd_kappa()*rd/1e9) * foundry_witness_sat(witness_count) in
+  generation/consensus_type_plane.sql.in:31-32, consensus_adjacency.sql.in:40-41,
+  entity_relation_plane.sql.in:13-14, consensus_layer_plane{,_masked}.sql.in:27-28);
+  hilbert_index is exported as content PE (FoundryExport.cs:652 entity_hilbert_keys,
+  :1591 "hilbert content-PE: … tokens in … trailing dims"). §6b P5 records the fix;
+  P7's hilbert item is likewise delivered.]
  salience ranks (13)       head GROUPING only        head-importance priors,
                                                      o_proj scaling (P3)
  eff_mu edge weight        YES (plane values)        keep
@@ -281,6 +332,10 @@ this is the current cost of "regenerate, never backfill".
     run bracket (lane fragmentation, Issue 45, biting exactly as predicted).
     Journal recovery contained it (that safety layer works), but the bracket
     should close on every lane. Filed as Issue 44b in 02.
+    [Repointed 2026-07-20: .scratchpad/02 is a CLOSED tracker — its open items migrated
+    to GitHub. Issue 44b → GH #405 (unicode lane exits without run-end index rebuild),
+    CLOSED as of 2026-07-20; Issue 45 (lane fragmentation) → GH #406, CLOSED. Address
+    this work through GH, not 02.]
   - WORKING_SET_SUBTRACTION grows across OMW's sets (292k → 338k/473k →
     623k/607k claimed-novel rows subtracted): the EmitNodes/hot-cache gap (02
     chess-scale observations) reproducing on lexical data — real wasted
@@ -318,6 +373,11 @@ rebuilt; all synthesis runs = Path A via laplace.recipe, d256/L2/H4, vocab 1500+
        that layer's input R, silu floor 0.5 logit; membership DERIVED from
        consensus participation via perfcache MaskForRelationType because
        entities.highway_mask is 0-populated on this DB generation (live finding).
+       [Superseded 2026-07-20: no longer 0-populated on the live `laplace` DB —
+       2,474,744 entities carry a non-zero highway_mask (e.g.
+       \x80a0000000080510000280192050000600004...). The perfcache
+       MaskForRelationType derivation still works, but the reason given for it no
+       longer holds; re-measure before treating the mask as unusable.]
   RoPE VERDICT: CORRUPTS (191% drift). freq_base=1e9 alone insufficient — rotary
        pair 0 rotates at frequency 1 regardless of theta; fix = freq_base 1e9 +
        rotary-pair-0 component skip in Q/K fills (Q,K same mapping). Verified:
@@ -396,7 +456,11 @@ PHASE 3 gate test written: app/Laplace.Decomposers.Tests/Model/
   embed mean-centering (cos(dog,water) 0.86→0.74; bias dim = the floor),
   block gains 0.5 (additions perturb, don't bury), synthesized PairNorm (per-dim
   SNR weights in the previously all-ones norm tensors; ffn_norm keeps bias
-  for the gate floor), content-word metric added to the harness
+  for the gate floor) [RETRACTED — read the BISECT CLOSED entry below before
+  believing this line: the synthesized-PairNorm norm weights were REVERTED to
+  all-ones (FoundryCommands.cs:1680, "2026-07-09 bisect"), together with
+  E-accumulation (:1581). §1.5 of this doc ("every layernorm weight tensor = 1.0")
+  is the state that actually ships], content-word metric added to the harness
   (content_word_pass_rate; GLUE_WORDS stoplist).
   THE RESIDUE (doc 09's routing-at-depth, now mechanically characterized):
   content words rank ~3000/6421 in the readout and are INVARIANT under five
@@ -576,7 +640,10 @@ BISECT CLOSED (2026-07-09): PASS-era code re-gated 16/16 on the substrate
   + vocab_dominant_pos; every step ALTER'd + smoke-tested live).
 STILL OPEN from the plan: Phase 7 depth-k metric now exists
   (content_word_pass_rate) — its target is layer attenuation on the floor +
-  doc-18 build; Issue 51. Baselines in D:\Models\laplace-gen
+  doc-18 build; Issue 51. [Corrected 2026-07-20: wrong issue — 02's Issue 51 is the
+  word_shape_peers_fast Fréchet gate (now GH #411, CLOSED), not the depth-k metric.
+  .scratchpad/02 is a closed tracker; open foundry/generation work lives in GH issues.]
+  Baselines in D:\Models\laplace-gen
   (phase0-baseline.gguf Path B / phase16-mold-a.gguf / mold-b.gguf / mold-c.gguf
   + report JSONs).
 
@@ -633,10 +700,11 @@ What WORKS, measured (the competence layer is real):
                                       word; the universal translator is REAL
   recall('synonyms of …'), facts routing: works but topic extraction is naive
                                       ('facts about give' → topic 'facts';
-                                      Issue 50)
+                                      Issue 50 → GH #410, CLOSED)
 What DOESN'T:
   walk_text('the dog', 12)     >90s TIMEOUT in corpus_whitespace_vocab_indices
-                                      → SQL constituents() (Issue 49). Retrieval
+                                      → SQL constituents() (Issue 49 → GH #409,
+                                      still OPEN as of 2026-07-20). Retrieval
                                       150-360ms; GENERATION does not complete.
                                       The conversational fallback lane rides this.
 THE 68s TRANSLATE ROOT CAUSE (Issue 47, fixed in source, 65,311ms → 349ms):
@@ -644,7 +712,10 @@ THE 68s TRANSLATE ROOT CAUSE (Issue 47, fixed in source, 65,311ms → 349ms):
   members index scans as a per-row filter → the ~75ms native-KNN peer fetch
   executed ~900 times. STABLE ≠ constant-folded; `= ANY` on an indexed column
   is immune (array becomes the index condition); a plain subselect hoist gets
-  pulled up and re-pushed; MATERIALIZED CTE holds. Lesson L12 in 02.
+  pulled up and re-pushed; MATERIALIZED CTE holds.
+  [Repointed 2026-07-20: "Lesson L12 in 02" — .scratchpad/02 is a CLOSED tracker;
+  lessons L1–L12 were promoted into docs/specs/06_Engineering_Ruleset.txt. Read it there.
+  Issue 47 itself was fixed in source.]
   Chronic disease underneath (author-called, confirmed): the serving chain is
   non-inlined SQL functions (STRICT/ORDER BY/CTE blockers) stacking opaque
   Function Scans — senses() alone is a 213ms black box the planner cannot see
@@ -656,5 +727,5 @@ CONVERSATIONAL VERDICT (empirical form of §3): the substrate answered every
   response-act pairs, discourse state, realization beyond templates): not
   attested by any ingested source and not queried by any operator. Chat is not
   blocked by missing knowledge; it is blocked by the missing TIER-3 DIALOGUE
-  OPERATOR (P6) + the generation lane's perf (Issue 49) + sequencing (P7).
+  OPERATOR (P6) + the generation lane's perf (Issue 49 → GH #409) + sequencing (P7).
 ================================================================================

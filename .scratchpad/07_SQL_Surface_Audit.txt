@@ -1,3 +1,15 @@
+DRAINED 2026-07-20 — the P0-P3 roadmap in this file is NOT a tracker.
+Open items now live in GitHub issues: #457 translate_to_fast, #458/#460/#461 native
+path+closure lifts, #459 rank_edges, #462 reconstruct_content/entity_form/decompose,
+#463 Rule #6 views, #464 edge_strength + renderer ruling, #465 math4d_distance_sq,
+#466 eval kernel, #467 karcher/log_s3/exp_s3, #468 walk_text hash128_lo, #469 Mask256
+vs highway_table.c, #401 KNN driver, #407 read gateway, #530 entity_count,
+#531 consume_credit, #532 manifest.install signature collisions, #533 api() blind spots,
+#534 substrate-inference-demo.sql.
+RETAINED as a record: section 3 (C#-vs-native duplicate implementations) and section 4.1
+(the six enumerated string->id paths) are a census nothing else holds.
+================================================================================
+
 SQL SURFACE AUDIT (07) — layering, duplication, centralization, missing views
 ================================================================================
 Full-repo audit (2026-07-02) of the SQL surface against the Rule #1 architecture

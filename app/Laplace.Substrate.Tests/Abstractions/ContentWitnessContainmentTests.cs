@@ -14,7 +14,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class ContentWitnessContainmentTests
 {
     private static readonly Hash128 Src =
-        Hash128.OfCanonical("substrate/source/test/ContentContainment/v1");
+        SubstrateCanonicalIds.OfVersioned("source", "test", "ContentContainment");
 
     [Theory]
     [InlineData("dog")]

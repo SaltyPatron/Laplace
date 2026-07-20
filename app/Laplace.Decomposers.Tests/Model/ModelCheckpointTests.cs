@@ -104,7 +104,7 @@ public class ModelCheckpointTests
         try
         {
             var tensors = SafetensorsContainerParser.ParseModel(dir);
-            var source = Hash128.OfCanonical("substrate/source/test-model/v1");
+            var source = SubstrateCanonicalIds.Source("test-model");
             var b = new SubstrateChangeBuilder(source, "checkpoint/byte-ranges", null,
                 entityCapacity: n + 1, physicalityCapacity: 0, attestationCapacity: 2 * n);
 

@@ -8,5 +8,9 @@ Decomposers are pure content → `SubstrateChange` streams with ZERO inline SQL
 ConsensusAccumulatingWriter → NpgsqlWorkingSetApply) does all batching/dedup/Glicko
 fold/COPY. The spec is the SEQUENCE (Rule #8) — right algorithm at the wrong stage is a
 violation. Never change a SourceId. Do not create a new source by copying the nearest
-neighbor: seven historical lanes exist (Issue 45); check `.scratchpad/13` Phase 1 for
-the target lane. Full rules: `.github/instructions/decomposers.instructions.md` — read it.
+neighbor. [Updated 2026-07-20: the seven historical lanes are collapsed — every
+`*Decomposer.cs` now inherits the `Decomposer<T>` family and the architecture gate's
+escape-hatch allowlists are empty sets (`DecomposerArchitectureGateTests.cs:30-35,148-172`);
+dispatch is table-driven (`IngestDispatchTable.cs`). GH #406 closed on that evidence.
+`.scratchpad/13` is historical, not a lane index.] Full rules:
+`.github/instructions/decomposers.instructions.md` — read it.

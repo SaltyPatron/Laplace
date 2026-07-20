@@ -35,7 +35,7 @@ public class NormRoleAccessorsTests
             QkRopeHeadDim = 0,
             QkNopeHeadDim = 0,
             VHeadDim = 0,
-            RecipeEntityId = Hash128.OfCanonical("substrate/test/norm/recipe"),
+            RecipeEntityId = SubstrateCanonicalIds.Of("test", "norm", "recipe"),
             CanonicalJson = Encoding.UTF8.GetBytes("{}"),
         },
         Roles = roles,

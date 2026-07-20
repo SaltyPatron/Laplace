@@ -13,12 +13,12 @@ namespace Laplace.Decomposers.Code;
 public readonly struct ParquetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/ParquetDecomposer/v1");
+        SubstrateCanonicalIds.Source("ParquetDecomposer");
 
     public static string SourceName => "ParquetDecomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+        SubstrateCanonicalIds.TrustClass("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
         ["IS_VALUE_IN", "IS_INSTANCE_OF"];

@@ -13,26 +13,31 @@ todos:
     status: completed # verified 2026-07-18 (scratchpad-doc audit pass): Decomposer<T> exists (app/Laplace.Substrate/Abstractions/Decomposer.cs); architecture gate now scans Laplace.Chess and bans hand-rolled SubstrateChangeBuilder (DecomposerArchitectureGateTests.cs:26,81)
   - id: p3-tier-attestation
     content: "P3 Doc 16 P1-P6 — Tatoeba/UD language tier, ConceptNet POS, Wiktionary hub, PM source id (P3 done per 16 §8)"
-    status: pending
+    status: completed # verified 2026-07-20: all six landed. P2 UdSentenceEmitter.cs:51-52 (HAS_LANGUAGE at sentenceRootId, per-token loop removed :44-50); P4 ConceptNetDecomposer.cs:86-96 (TryParseConceptUri + ResolveSynsetFromWnSuffix); P5 UdSentenceEmitter.cs:84-86 (XPOS IS_A UPOS) + FEAT_* :88-100 / relation_types.toml:1672; P6 WiktionaryEmit.cs:57,187-198 (RouteSynsetLinks -> ResolveSynsetAnchor). Live-scale validation only: GH #419, #378
   - id: p4-migrate-sources
     content: "P4 Migrate 34 decomposers — 17 §4 row-by-row, witness-manifest order, seed-step :verify_step each"
-    status: pending
+    status: completed # verified 2026-07-20: DecomposerArchitectureGateTests.cs:30-35 — UnicodeAllowlist / HandBuilderAllowlist / PipelineInDecomposerAllowlist / PipelineInIngestAdapterAllowlist are all EMPTY sets; gate :148-172 requires every *Decomposer.cs (incl. Laplace.Chess) to inherit Decomposer<T>. Named rows fixed: TabularDecomposer.cs:60-88,113 streams; WordNetDecomposer.cs:11 DecomposerMultiPhase (ContentWitnessBatch has no decomposer callers); framenet lemma dup -> Abstractions/FrameNetLemmaHelper.cs
   - id: p5-bulk-descent
     content: "P5 Rule #8 step 5 — cross-working-set O(tiers) bulk descent (06 L93-94)"
-    status: pending
+    status: completed # verified 2026-07-20: IngestDescentFlush.cs:140-143 one BulkDescent.ProbeFlushBatchAsync per flush batch, class doc :186-190 "at most five tier rounds total"; driven from IngestPipeline.cs:217,264,293,322. GH #400 closed on this evidence
   - id: p6-product-read
     content: "P6 SQL read — SubstrateClient L51-54 laplace.recall, define_fast/recall.c, QueryCommands, 07 P2 dupes"
-    status: pending
+    status: completed # verified 2026-07-20: api('recall') = 20 functions incl. recall_session; resolve() is the blessed string->id gateway. NOTE cited path is stale — define_fast.sql.in moved from sql/functions/lexical/ to sql/functions/recall/. Residual tracked by GH #407 + #462/#463
   - id: p7-product-export
     content: "P7 Foundry — RecipeDescriptor, FoundryCommands SynthesizeMoldAModelAsync, engine/synthesis, ModelDecomposer"
-    status: pending
+    status: completed # verified 2026-07-20: FoundryCommands.cs:456,470,986 (SynthesizeFromSubstrateAsync -> SynthesizeMoldAModelAsync), engine/synthesis, RecipeDescriptor. Residual tracked by GH #396/#398
   - id: p8-product-api
     content: "P8 OpenAICompat — recall_session, billing/quotes, recipe compile/export; no GGUF on request path"
-    status: pending
+    status: completed # verified 2026-07-20: SubstrateClient.cs:53 (FROM laplace.recall_session), RecipeCompileService.cs, FoundryExportService.cs (out-of-band CLI subprocess — no GGUF load on the request path), Billing.cs / QuoteGate.cs, EndpointMappings.Foundry.cs
 isProject: false
 ---
 
 # Full-stack remediation
+
+> **CLOSED 2026-07-20.** All of P0–P8 verified landed at the code layer (evidence in the
+> `status:` comments above). This plan is now historical. Open work lives in GitHub issues —
+> the residuals it hands off are #378, #396, #398, #407, #419, plus the read-side lifts filed
+> as #457–#471. Do not resume execution from this file.
 
 ## Self-audit — why the prior plan was garbage
 

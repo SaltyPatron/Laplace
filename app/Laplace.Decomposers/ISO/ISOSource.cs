@@ -6,12 +6,12 @@ namespace Laplace.Decomposers.ISO;
 public readonly struct ISOSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
-        Hash128.OfCanonical("substrate/source/ISO639Decomposer/v1");
+        SubstrateCanonicalIds.Source("ISO639Decomposer");
 
     public static string SourceName => "ISO639Decomposer";
 
     public static Hash128 TrustClass { get; } =
-        Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
+        SubstrateCanonicalIds.TrustClass("StandardsDerived");
 
     public static IReadOnlyList<string> Relations { get; } =
     [
