@@ -96,13 +96,15 @@ members AS (
 domain_scores AS (
     SELECT m.synset_id,
            count(*)::bigint AS domain_hits
+    -- Pillar 5 (2026-07-20): domain co-occurrence is read from the GEOMETRY.
+    -- geometry_neighbours walks the trajectories containing the member and
+    -- returns the adjacent content constituents in BOTH directions -- the same
+    -- bidirectional adjacency the consensus form matched, without the
+    -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
     FROM members m
     JOIN domain d ON true
-    JOIN consensus prec ON prec.type_id = relation_type_id('PRECEDES')
-     AND (
-            (prec.subject_id = m.member_id AND prec.object_id = d.id)
-         OR (prec.object_id = m.member_id AND prec.subject_id = d.id)
-     )
+    JOIN LATERAL geometry_neighbours(m.member_id, 200, 8) gn
+      ON gn.neighbour_id = d.id
     GROUP BY m.synset_id
 ),
 ranked AS (
