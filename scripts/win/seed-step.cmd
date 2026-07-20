@@ -128,6 +128,24 @@ if "%REBUILD%"=="1" goto ensure_cli_build
 if defined LAPLACE_FORCE_CLI_BUILD goto ensure_cli_build
 if not exist "%LAPLACE_CLI_EXE%" goto ensure_cli_build
 if not exist "%LAPLACE_CLI_EXE%.r2r-stamp" goto ensure_cli_build
+
+rem FRESHNESS, not existence. The r2r tree is separate from the plain build output,
+rem so rebuild-all can rebuild every assembly while this exe stays old — a seed then
+rem silently runs pre-fix ingest code. Republish whenever any built assembly is newer
+rem than the r2r exe. No env var, no flag: correct by default.
+set "CLI_PLAIN_OUT=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Cli\Release\net10.0"
+powershell -NoProfile -Command ^
+  "$r = '%LAPLACE_CLI_EXE%'; $p = '%CLI_PLAIN_OUT%';" ^
+  "if (-not (Test-Path $r)) { exit 1 };" ^
+  "$rt = (Get-Item $r).LastWriteTimeUtc;" ^
+  "$n = Get-ChildItem -Path $p -Filter *.dll -ErrorAction SilentlyContinue |" ^
+  "     Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1;" ^
+  "if ($n -and $n.LastWriteTimeUtc -gt $rt) { exit 1 };" ^
+  "exit 0"
+if errorlevel 1 (
+  echo seed-step: CLI ReadyToRun tree is older than the built assemblies — republishing
+  goto ensure_cli_build
+)
 exit /b 0
 :ensure_cli_build
 echo ==== seed-step: publish CLI Release ^(ReadyToRun → net10.0-r2r^) ====
