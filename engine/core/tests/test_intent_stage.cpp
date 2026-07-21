@@ -619,3 +619,105 @@ TEST(LaplaceCoreIntentStage, PartitionCountOnePreservesAllRows) {
     intent_stage_free(parts[0]);
     intent_stage_free(s);
 }
+
+// Repro harness for the CILI COPY-blob corruption (attestations row truncated to
+// 9 of 10 fields, so the next row's be16 field-count is read as a giant field
+// length). Stage a CILI-shaped attestation load — mixed NULL object/context,
+// 32-byte masks, and enough rows to force several arena reallocs past the initial
+// reserve — then emit the COPY binary and walk it asserting EVERY row carries
+// exactly 10 fields and the walk consumes the body EXACTLY. A truncated row trips
+// an assertion here; a heap overrun in the arena trips ASan at the write.
+TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
+    const size_t N = 1400000;  // ~260 MB of rows -> multiple doubling reallocs
+    intent_stage_t* s = intent_stage_new(N);
+    ASSERT_NE(nullptr, s);
+
+    uint8_t mask[32];
+    for (int i = 0; i < 32; ++i) mask[i] = (uint8_t)(i * 7 + 1);
+
+    for (size_t i = 0; i < N; ++i) {
+        hash128_t id, subj, type, obj, src, ctx;
+        std::memset(&id,   (uint8_t)(i),       sizeof(id));
+        std::memset(&subj, (uint8_t)(i >> 8),  sizeof(subj));
+        std::memset(&type, (uint8_t)(i >> 16), sizeof(type));
+        std::memset(&obj,  (uint8_t)(i * 3),   sizeof(obj));
+        std::memset(&src,  0xAB,               sizeof(src));
+        std::memset(&ctx,  (uint8_t)(i * 5),   sizeof(ctx));
+        // CILI shape: some unary (NULL object), some contextless — variable row width.
+        const hash128_t* obj_ptr = (i % 3 == 0) ? nullptr : &obj;
+        const hash128_t* ctx_ptr = (i % 4 == 0) ? nullptr : &ctx;
+        ASSERT_EQ(0, intent_stage_add_attestation(
+            s, &id, &subj, &type, obj_ptr, &src, ctx_ptr,
+            (int16_t)(i % 3), (int64_t)i, (int64_t)(i % 100 + 1), mask));
+    }
+    ASSERT_EQ(N, intent_stage_attestation_count(s));
+
+    const size_t need =
+        intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS, nullptr, 0);
+    std::vector<uint8_t> buf(need);
+    ASSERT_EQ(need, intent_stage_emit_copy_binary(
+                        s, INTENT_STAGE_TABLE_ATTESTATIONS, buf.data(), buf.size()));
+
+    size_t off = kHeader;
+    const size_t body_end = buf.size() - kTrailer;
+    size_t rows = 0;
+    while (off < body_end) {
+        ASSERT_LE(off + 2, body_end);
+        uint16_t cols = read_be16(buf.data() + off);
+        ASSERT_EQ(10u, cols) << "row " << rows << " at byte " << off << " has " << cols << " cols";
+        off += 2;
+        for (int c = 0; c < 10; ++c) {
+            ASSERT_LE(off + 4, body_end) << "row " << rows << " field " << c << " len overruns";
+            int32_t flen = (int32_t)read_be32(buf.data() + off);
+            off += 4;
+            if (flen < 0) continue;  // SQL NULL
+            ASSERT_LE(off + (size_t)flen, body_end)
+                << "row " << rows << " field " << c << " data (len " << flen << ") overruns";
+            off += (size_t)flen;
+        }
+        ++rows;
+    }
+    EXPECT_EQ(N, rows);
+    EXPECT_EQ(body_end, off) << "walk did not consume the body exactly — a row is mis-sized";
+
+    // The real apply validates the PARTITIONED buffers, not the source stage.
+    // Partition into 12 (as the seed does) and walk each partition's emit the
+    // same way — this covers intent_stage_partition / partition_one_buf / the
+    // per-row copy, which is where a mis-cut boundary would land.
+    const size_t P = 12;
+    std::vector<intent_stage_t*> parts(P, nullptr);
+    ASSERT_EQ(0, intent_stage_partition(s, P, parts.data()));
+    size_t partitioned_rows = 0;
+    for (size_t p = 0; p < P; ++p) {
+        ASSERT_NE(nullptr, parts[p]);
+        const size_t pneed =
+            intent_stage_emit_copy_binary(parts[p], INTENT_STAGE_TABLE_ATTESTATIONS, nullptr, 0);
+        std::vector<uint8_t> pbuf(pneed);
+        ASSERT_EQ(pneed, intent_stage_emit_copy_binary(
+                             parts[p], INTENT_STAGE_TABLE_ATTESTATIONS, pbuf.data(), pbuf.size()));
+        size_t poff = kHeader;
+        const size_t pend = pbuf.size() - kTrailer;
+        while (poff < pend) {
+            ASSERT_LE(poff + 2, pend);
+            uint16_t pc = read_be16(pbuf.data() + poff);
+            ASSERT_EQ(10u, pc) << "partition " << p << " row " << partitioned_rows
+                               << " at byte " << poff << " has " << pc << " cols";
+            poff += 2;
+            for (int c = 0; c < 10; ++c) {
+                ASSERT_LE(poff + 4, pend);
+                int32_t fl = (int32_t)read_be32(pbuf.data() + poff);
+                poff += 4;
+                if (fl < 0) continue;
+                ASSERT_LE(poff + (size_t)fl, pend)
+                    << "partition " << p << " row " << partitioned_rows
+                    << " field " << c << " (len " << fl << ") overruns";
+                poff += (size_t)fl;
+            }
+            ++partitioned_rows;
+        }
+        EXPECT_EQ(pend, poff) << "partition " << p << " body not consumed exactly";
+        intent_stage_free(parts[p]);
+    }
+    EXPECT_EQ(N, partitioned_rows) << "partitioning lost or duplicated rows";
+    intent_stage_free(s);
+}
