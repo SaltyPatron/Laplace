@@ -20,14 +20,14 @@ BEGIN
         IF p_vocab IS NULL THEN
             RETURN QUERY
             SELECT c.subject_id, c.object_id,
-                   (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+                   (c.rating - glicko2_neutral_mu())::double precision / 1e9
             FROM consensus c
             WHERE c.type_id = v_type AND c.object_id IS NOT NULL;
         ELSE
             RETURN QUERY
             WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
             SELECT c.subject_id, c.object_id,
-                   (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+                   (c.rating - glicko2_neutral_mu())::double precision / 1e9
             FROM v
             JOIN consensus c ON c.type_id = v_type AND c.subject_id = v.id
             JOIN v vo ON vo.id = c.object_id

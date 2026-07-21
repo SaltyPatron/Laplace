@@ -125,5 +125,17 @@ BEGIN
 
     END LOOP;
 
+    -- Mask refresh queue (2026-07-21). highway_mask_refresh derives a mask purely
+    -- from consensus participation, so the subjects and objects written above ARE
+    -- the exact set whose masks can have changed. Queue them once per call, in the
+    -- same transaction that wrote the cells: dedup is the primary key, so there is
+    -- no cap to overflow and no full-table rebuild to fall back to. Drained by
+    -- highway_mask_drain() — per fold epoch, or once at the end of a bulk run.
+    INSERT INTO highway_mask_dirty (id)
+    SELECT b.s FROM _cu_batch b
+    UNION
+    SELECT b.o FROM _cu_batch b WHERE b.o IS NOT NULL
+    ON CONFLICT (id) DO NOTHING;
+
     RETURN affected;
 END $$;

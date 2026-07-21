@@ -58,6 +58,7 @@ indexes/consensus_subject_eff_mu_btree.sql.in
 indexes/consensus_subject_type_eff_mu_btree.sql.in
 indexes/consensus_object_type_btree.sql.in
 schema/tables/consensus_id.sql.in
+schema/tables/highway_mask_dirty.sql.in
 functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
 functions/mu/eff_mu_display.sql.in
@@ -335,6 +336,7 @@ functions/highway/laplace_highway_mask_bits.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in
 functions/highway/highway_mask_refresh.sql.in
+functions/highway/highway_mask_drain.sql.in
 functions/highway/highway_mask_deposit.sql.in
 functions/model/model_factor.sql.in
 functions/ops/highway_mask_rebuild.sql.in
