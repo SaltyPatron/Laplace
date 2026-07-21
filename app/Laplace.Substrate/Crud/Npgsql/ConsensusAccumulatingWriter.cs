@@ -73,6 +73,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     // like the 12-way COPY apply above them. One connection per segment.
     private static readonly int FoldConnections = Math.Clamp(Environment.ProcessorCount, 1, 12);
 
+    // GLOBAL connection budget for the fold, shared by every type lane and the
+    // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
+    // width; once per-type lanes could run concurrently, that width stopped
+    // bounding anything — 4 type lanes + a mask lane across 2 in-flight deltas
+    // is up to 120 simultaneous connections against a 12-core server, on top of
+    // the apply path's own id-range COPY connections. The single gate before the
+    // lanes existed (SemaphoreSlim(1,1) over the whole delta) had been holding
+    // that number down as a side effect. This makes the bound explicit and
+    // independent of how many lanes happen to be live.
+    private readonly SemaphoreSlim _foldConnections = new(FoldConnections, FoldConnections);
+
     // Run-scoped mask-pair dedup: masks only ACCRETE, so a pair deposited once
     // this run never needs resending — without this, every flush re-verifies
     // every earlier flush's pairs server-side (~6 leaf probes per pair) for
@@ -441,12 +452,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         long folded = 0, masks = 0;
         var completions = new List<Task>(runs.Count + 1);
 
+        // The lane bodies are STARTED OUTSIDE THE LOCK (Task.Run), and only the
+        // chain pointers are swapped under it (2026-07-21). Invoking an async
+        // method inside the lock runs its synchronous prefix on the calling
+        // thread while the lock is held — for these bodies that prefix reaches
+        // Parallel.ForEachAsync and can open connections and dispatch the first
+        // consensus_upsert before it ever suspends, so every other delta's
+        // dispatch blocked behind one delta's first DB round trip. Starting the
+        // body on the pool keeps the critical section to dictionary writes.
         lock (_laneLock)
         {
             foreach (var run in runs)
             {
                 var prior = _typeLanes.TryGetValue(run.Type, out var p) ? p : Task.CompletedTask;
-                var next = FoldRunAfterAsync(prior, run);
+                var r = run;
+                var next = Task.Run(() => FoldRunAfterAsync(prior, r), ct);
                 _typeLanes[run.Type] = next;
                 completions.Add(next);
             }
@@ -459,7 +479,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // deposits costs nothing in ordering terms: OR-accumulate is
             // commutative and idempotent, so the mask lane is order-free even
             // though the fold lanes are not.
-            _maskLane = DepositAfterAsync(_maskLane, maskPairs);
+            var priorMask = _maskLane;
+            _maskLane = Task.Run(() => DepositAfterAsync(priorMask, maskPairs), ct);
             completions.Add(_maskLane);
         }
 
@@ -505,6 +526,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
                 async (seg, token) =>
             {
+                // Global budget, not the per-loop width: see _foldConnections.
+                await _foldConnections.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 await using var tx = await conn.BeginTransactionAsync(token);
                 long segFolded = 0;
@@ -544,6 +569,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 }
                 await tx.CommitAsync(token);
                 Interlocked.Add(ref folded, segFolded);
+                }
+                finally { _foldConnections.Release(); }
             });
         }
 
@@ -579,6 +606,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 async (bucket, token) =>
             {
                 if (bucket.Count == 0) return;
+                await _foldConnections.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 await using var tx = await conn.BeginTransactionAsync(token);
                 long dep = 0;
@@ -602,6 +632,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 }
                 await tx.CommitAsync(token);
                 Interlocked.Add(ref maskTotal, dep);
+                }
+                finally { _foldConnections.Release(); }
             });
             Interlocked.Add(ref masks, maskTotal);
 
@@ -780,5 +812,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             _log.LogError(ex, "dispose: queued consensus fold failed");
         }
         _foldDepth.Dispose();
+        _foldConnections.Dispose();
     }
 }
