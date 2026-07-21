@@ -1,0 +1,22 @@
+-- The structural read entry point.
+--
+-- The caller names the shape of the read and passes resolved content ids; the
+-- substrate never guesses either from the surface form of a question. This is
+-- what replaced parse_ask() and the English pattern ladder behind it.
+--
+--   p_intent       one of laplace.query_shapes().shape
+--   p_topic        subject id (laplace.resolve_ref accepts a word or an id hex)
+--   p_topic2       object id, for the two-topic shapes (is_a, reason)
+--   p_type_name    canonical relation type, for the related / related_in shapes
+--   p_lang         target language, for the translate shape
+--   p_context_ids  other resolved ids, used to disambiguate a sense
+CREATE OR REPLACE FUNCTION recall_intent(
+        p_intent text,
+        p_topic bytea,
+        p_topic2 bytea DEFAULT NULL,
+        p_type_name text DEFAULT NULL,
+        p_lang text DEFAULT NULL,
+        p_context_ids bytea[] DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_recall_intent';

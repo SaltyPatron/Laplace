@@ -1,60 +1,60 @@
--- chat(prompt, session, lang): a conversational turn -- a THIN orchestrator over the
--- EXISTING intent machinery, not a reinvention of it.
+-- chat(prompt, session, lang, shape, bands, topic, topic2, type_name, elaborate)
+-- A conversational turn: a THIN orchestrator over the existing intent machinery.
 --
---   PARSE   parse_ask(prompt) -> (ask_kind, phrase, phrase2, type_name)   [recall_route.c]
---   RESOLVE resolve_topic(phrase, session-context) -> topic concept       [content_resolve]
---   ROUTE   by ask_kind to the pre-existing recall_*_response composers; describe/what_is/
---           fallback answer with the free-form fused walk (converse_walk).
---   CARRY   session is metadata: unresolved follow-ups ("it"/"more") carry the session's
---           last resolved topic; "more" advances through non-empty fact layers.
+--   ORIENT  the topic is the prompt token whose synset carries the most
+--           content-band consensus mass -- a measurement over the graph, not a
+--           parse. An explicit p_topic from the caller wins outright.
+--   SHAPE   the caller names the read (laplace.query_shapes()); nothing is
+--           inferred from how the prompt is phrased.
+--   LENS    p_bands selects salience bands. One band-parameterized read now
+--           covers what used to be three hardcoded English branches
+--           (parts / kinds / causes) and covers the other ten bands with it.
+--   CARRY   session is metadata: a turn with no resolvable topic carries the
+--           session's last resolved topic. p_elaborate advances through
+--           non-empty fact layers.
 --   CLOSE   happens at the FRONTEND, not here: every caller (MCP chat tool, HTTP
 --           TurnWitness, CLI chat) deposits the prompt (UserPrompt) and response
 --           (Response) through the writer spine -- full content mint + evidence +
 --           inline fold, proper trust classes. SQL chat() stays read-side; its only
---           write is session_topics app-state. (The old in-SQL witness_precedes_chain
---           close folded consensus with zero evidence rows -- provenance-less.)
-CREATE OR REPLACE FUNCTION chat(p_prompt text, p_session bytea DEFAULT NULL,
-                                p_lang bytea DEFAULT NULL)
+--           write is session_topics app-state.
+--
+-- The English pattern ladder this function used to run on (parse_ask, plus five
+-- inline regexes over the prompt) is gone. It answered only English, in a
+-- substrate whose identity law is language-agnostic by construction.
+DROP FUNCTION IF EXISTS chat(text, bytea, bytea);
+
+CREATE OR REPLACE FUNCTION chat(p_prompt text,
+                                p_session bytea DEFAULT NULL,
+                                p_lang bytea DEFAULT NULL,
+                                p_shape text DEFAULT NULL,
+                                p_bands int[] DEFAULT NULL,
+                                p_topic bytea DEFAULT NULL,
+                                p_topic2 bytea DEFAULT NULL,
+                                p_type_name text DEFAULT NULL,
+                                p_elaborate boolean DEFAULT false)
     RETURNS text
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
-    b_part int := 4; b_tax int := 2; b_assoc int := 7;
-    ask   text; phrase text; phrase2 text; tname text;
     ctx   bytea; topic bytea; topic2 bytea;
     cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
     xl    text;
-    more  bool := p_prompt ~* '\m(more|else|another|continue|elaborate)\M';
     depth int;
     layers text[]; s text;
     resolved bytea;
+    shape text := NULLIF(btrim(COALESCE(p_shape, '')), '');
     out   text := '';
 BEGIN
-    -- PARSE (existing route_prompt_impl) + session context for pronoun resolution.
-    SELECT pa.ask_kind, pa.phrase, pa.phrase2, pa.type_name
-      INTO ask, phrase, phrase2, tname
-      FROM parse_ask(p_prompt) pa;
     IF p_session IS NOT NULL THEN ctx := session_last_resolved(p_session); END IF;
 
     -- TOPIC = the prompt token whose SYNSET carries the most content-band mass.
-    -- Content-band mass ranks the real topic noun above function/intent words
-    -- (river>part, water>there, anger>cause) -- more robust than resolve_topic/
-    -- resolve_last_word for multi-word prompts, and it yields the SYNSET the band
-    -- queries and recall_*_response need. parse_ask still owns the INTENT.
-    -- FOLLOW-UP carry: a pronoun referent ("what is IT made of") or "more" points at
-    -- the session's last topic, NOT a word in the prompt ("it"/"made"/"more" would
-    -- otherwise resolve as their own concepts).
-    IF p_session IS NOT NULL AND ctx IS NOT NULL
-       AND (more OR p_prompt ~* '\m(it|its|they|them|that|this|those|these)\M') THEN
-        topic := ctx;
+    -- Content-band mass ranks the real topic above incidental tokens by counting
+    -- witnessed edges -- a graph measurement, so it holds in any language. The
+    -- whole ranked candidate list is kept (cands): the segmentation and the
+    -- per-candidate band-mass aggregate run ONCE per turn, and topic2 reuses them.
+    IF p_topic IS NOT NULL THEN
+        topic := p_topic;
     ELSE
-        -- richest content-band SYNSET over parse_ask's PHRASE (intent verb already
-        -- split into ask_kind, so define/about/describe can't be picked; no stoplist).
-        -- Orient keys computed once per DISTINCT candidate (fenced projection);
-        -- repeated tokens collapse before realize/band-mass run. The WHOLE ranked
-        -- candidate list is kept (cands): the segmentation + per-candidate band-mass
-        -- aggregate runs ONCE per turn -- topic2 below reuses it instead of
-        -- re-segmenting and re-aggregating the same input.
         SELECT array_agg(y.syn ORDER BY y.exact_hit DESC NULLS LAST,
                                         y.band_mass DESC,
                                         char_length(y.surface) DESC)
@@ -65,38 +65,47 @@ BEGIN
                    (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
                       AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
             FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-                  FROM prompt_state(COALESCE(phrase, p_prompt)) p WHERE p.id IS NOT NULL) x
+                  FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
             WHERE x.syn IS NOT NULL
         ) y;
         topic := cands[1];
+        -- Nothing in this turn resolved: carry the session's standing topic.
         IF topic IS NULL THEN topic := ctx; END IF;
     END IF;
+
     IF topic IS NULL THEN
-        -- nothing to resolve: free-form. When the orientation above already ran
-        -- over the FULL prompt (phrase IS NULL) and produced no candidate,
-        -- converse(p_prompt) would re-segment and re-orient the identical input
-        -- only to reach the same NULL -- skip the re-run. A phrase-restricted
-        -- miss still gets the full-prompt attempt.
-        out := CASE WHEN phrase IS NOT NULL THEN converse(p_prompt) END;
+        out := converse(p_prompt);
     ELSE
         resolved := topic;  xl := realize(topic, p_lang);
+        topic2 := p_topic2;
 
-        IF more AND p_session IS NOT NULL THEN
+        -- Second topic for the two-topic shapes: the caller's, else the next
+        -- ranked candidate that is not the first. Reuses the ranking already
+        -- computed above rather than re-segmenting the same input.
+        IF topic2 IS NULL AND shape IN ('reason', 'is_a') AND cands IS NOT NULL THEN
+            SELECT u.syn INTO topic2
+            FROM unnest(cands) WITH ORDINALITY u(syn, ord)
+            WHERE u.syn <> topic
+            ORDER BY u.ord
+            LIMIT 1;
+        END IF;
+
+        IF p_elaborate AND p_session IS NOT NULL THEN
             -- ELABORATE: advance through NON-EMPTY fact layers by prior mentions.
             layers := ARRAY[]::text[];
             SELECT initcap(xl)||' has parts such as '||string_agg(l,', ' ORDER BY m DESC)||'.'
               INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_part
+                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=4
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
             SELECT 'Kinds of '||xl||' include '||string_agg(l,', ' ORDER BY m DESC)||'.'
               INTO s FROM (SELECT realize(c.subject_id,p_lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=b_tax
+                FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=2
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
             SELECT initcap(xl)||' is related to '||string_agg(l,' and ' ORDER BY m DESC)||'.'
               INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_assoc
+                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=7
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z
                WHERE l IS NOT NULL AND l !~ '^[0-9]{6,}-[nvasr]$' AND l !~ '^(noun|verb|adj|adv)\.' AND l !~ ' ' LIMIT 3;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
@@ -106,101 +115,56 @@ BEGIN
                         THEN layers[depth]
                         ELSE 'That is the core of what I hold about '||xl||'.' END;
 
-        -- parts / kinds / causes: intents parse_ask does not model (it labels them
-        -- what_is) -- supplement with a band listing over the resolved topic.
-        ELSIF p_prompt ~* '\m(part|parts|made of|consist|contain|component|comprise)\M' THEN
-            SELECT string_agg(l, ', ' ORDER BY m DESC) INTO out FROM (
-                SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m FROM consensus c
-                WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=b_part
-                ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
-            out := CASE WHEN out IS NULL THEN 'I hold no witnessed parts of '||xl||' yet.'
-                        ELSE initcap(xl)||' has parts such as '||out||'.' END;
-
-        ELSIF p_prompt ~* '\m(kind|kinds|type|types|sort|instance)\M' THEN
-            SELECT string_agg(l, ', ' ORDER BY m DESC) INTO out FROM (
-                SELECT realize(c.subject_id,p_lang) l,(c.rating-2*c.rd) m FROM consensus c
-                WHERE c.object_id=topic AND relation_highway_band(c.type_id)=b_tax
-                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
-            out := CASE WHEN out IS NULL THEN 'I hold no witnessed kinds of '||xl||' yet.'
-                        ELSE 'Kinds of '||xl||' include '||out||'.' END;
-
-        ELSIF p_prompt ~* '\m(cause|causes|caused|why|because|effect|effects)\M'
-              OR (ask='related_in' AND tname='CAUSES') THEN
-            SELECT string_agg(realize(c.object_id,p_lang), ', ' ORDER BY (c.rating-2*c.rd) DESC)
-              INTO out FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=5;
-            IF out IS NOT NULL THEN out := initcap(xl)||' causes '||out||'.'; END IF;
-            SELECT string_agg(realize(c.subject_id,p_lang), ', ' ORDER BY (c.rating-2*c.rd) DESC)
-              INTO s FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=5;
-            IF s IS NOT NULL THEN out := btrim(COALESCE(out,'')||' '||initcap(xl)||' is caused by '||s||'.'); END IF;
-            IF out IS NULL OR out='' THEN
-                -- topic already resolved: describe IT (converse(xl) re-segmented
-                -- the label and re-oriented from scratch just to land back here).
-                out := 'I hold no witnessed causes for '||xl||' yet; '||converse_about(topic); END IF;
-
-        ELSIF ask = 'reason' OR p_prompt ~* '(relat|connect|between|compar|\mvs\M)' THEN
-            -- TWO concepts -> existing relation-summary composer. Second concept =
-            -- parse_ask's phrase2, else (pronoun-relational "how does IT relate to the
-            -- sea") the richest OTHER concept in the prompt.
-            topic2 := top_synset(resolve_last_word(phrase2));
-            IF topic2 IS NULL OR topic2 = topic THEN
-                IF phrase IS NULL AND cands IS NOT NULL THEN
-                    -- Orientation over p_prompt already ran for topic1 (phrase IS
-                    -- NULL means identical input): topic2 = first ranked candidate
-                    -- that is not topic1. Reuses the computed segmentation +
-                    -- band-mass ranking instead of running both again. (The old
-                    -- re-run ordered only on (exact_hit, band_mass) -- ties beyond
-                    -- that were planner-order nondeterministic; the reused ranking
-                    -- carries topic1's deterministic surface-length tiebreak.)
-                    SELECT u.syn INTO topic2
-                    FROM unnest(cands) WITH ORDINALITY u(syn, ord)
-                    WHERE u.syn <> topic
-                    ORDER BY u.ord
-                    LIMIT 1;
-                ELSE
-                    -- phrase-restricted topic1 (or session-carried topic with no
-                    -- orientation run): the OTHER concept must be sought over the
-                    -- FULL prompt -- different input, not a redundant re-run.
-                    SELECT y.syn INTO topic2
-                    FROM (
-                        SELECT x.syn, x.surface,
-                               (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
-                               (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                                  AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
-                        FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-                              FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-                        WHERE x.syn IS NOT NULL AND x.syn <> topic
-                    ) y
-                    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC
-                    LIMIT 1;
-                END IF;
-            END IF;
-            IF topic2 IS NOT NULL THEN
-                SELECT string_agg(reply, ' ') INTO out
-                  FROM recall_relation_summary_response(topic, topic2);
-            END IF;
-            IF out IS NULL OR out = '' THEN out := converse_about(topic); END IF;
-
-        ELSIF ask IN ('related','related_in') AND tname IS NOT NULL THEN
-            SELECT string_agg(reply, ' ') INTO out FROM recall_related_response(topic, tname);
+        ELSIF p_bands IS NOT NULL AND array_length(p_bands, 1) > 0 THEN
+            -- BAND LENS: every edge of the topic inside the selected bands, both
+            -- directions, ranked by eff_mu. This one read replaces the former
+            -- parts / kinds / causes English branches and generalizes to all 13.
+            SELECT string_agg(line, ' ') INTO out FROM (
+                SELECT b.name || ': ' || string_agg(z.l, ', ' ORDER BY z.m DESC) || '.' AS line,
+                       max(z.m) AS top_m
+                FROM (
+                    SELECT relation_highway_band(c.type_id) AS band,
+                           realize(c.object_id, p_lang) AS l,
+                           (c.rating - 2*c.rd) AS m
+                    FROM consensus c
+                    WHERE c.subject_id = topic
+                      AND relation_highway_band(c.type_id) = ANY(p_bands)
+                    UNION ALL
+                    SELECT relation_highway_band(c.type_id),
+                           realize(c.subject_id, p_lang),
+                           (c.rating - 2*c.rd)
+                    FROM consensus c
+                    WHERE c.object_id = topic
+                      AND relation_highway_band(c.type_id) = ANY(p_bands)
+                ) z
+                JOIN relation_bands() b ON b.band = z.band
+                WHERE z.l IS NOT NULL
+                GROUP BY b.band, b.name
+                ORDER BY b.band
+            ) q;
             IF out IS NULL OR out = '' THEN
-                out := 'I hold no witnessed '||lower(tname)||' for '||xl||' yet.';
+                out := 'I hold no witnessed edges for '||xl||' in the selected bands yet.';
             END IF;
 
-        ELSIF ask = 'define' THEN
-            SELECT string_agg(reply, ' ') INTO out FROM recall_define_response(p_prompt, topic);
+        ELSIF shape = 'reason' AND topic2 IS NOT NULL THEN
+            SELECT string_agg(reply, ' ') INTO out
+              FROM recall_relation_summary_response(topic, topic2);
 
-        ELSIF ask = 'synonyms' THEN
-            SELECT string_agg(reply, ' ') INTO out FROM recall_synonyms_response(topic);
+        ELSIF shape IN ('related','related_in') AND p_type_name IS NOT NULL THEN
+            SELECT string_agg(reply, ' ') INTO out
+              FROM recall_intent(shape, topic, NULL, p_type_name);
+            IF out IS NULL OR out = '' THEN
+                out := 'I hold no witnessed '||lower(p_type_name)||' for '||xl||' yet.';
+            END IF;
 
-        ELSIF ask = 'examples' THEN
-            SELECT string_agg(reply, ' ') INTO out FROM recall_examples_response(topic);
+        ELSIF shape IS NOT NULL AND shape NOT IN ('describe','fallback','walk','what_is') THEN
+            -- Any other published shape answers through the shared responder family.
+            SELECT string_agg(reply, ' ') INTO out
+              FROM recall_intent(shape, topic, topic2, p_type_name);
 
         ELSE
-            -- what_is / describe / walk / fallback: free-form fused walk (my value-add).
-            -- Topic in hand -> converse_about directly (converse(xl) re-oriented from
-            -- the LABEL text, re-running segmentation + band-mass to re-derive the
-            -- synset we already resolved). No label to speak with -> the full prompt
-            -- still gets converse()'s own orientation.
+            -- describe / what_is / walk / fallback and the no-shape default:
+            -- the free-form fused walk over the topic already in hand.
             out := CASE WHEN xl IS NOT NULL THEN converse_about(topic)
                         ELSE converse(p_prompt) END;
         END IF;

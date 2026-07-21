@@ -1,0 +1,25 @@
+-- The read shapes a caller may ask for, and what each one needs.
+--
+-- Published so a client builds its controls from the substrate instead of
+-- hardcoding a menu. Every shape is named for the structure it reads, not for
+-- an English phrasing that would select it.
+CREATE OR REPLACE FUNCTION query_shapes()
+    RETURNS TABLE(shape text, summary text, needs_topic2 boolean,
+                  needs_type boolean, accepts_lang boolean)
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    VALUES
+      ('define',      'witnessed glosses, disambiguated by context ids', false, false, false),
+      ('what_is',     'gloss plus the IS_A ladder upward',               false, false, false),
+      ('describe',    'salient facts across the content bands',          false, false, false),
+      ('synonyms',    'equivalence-band surfaces',                       false, false, false),
+      ('translate',   'cross-lingual surfaces through the ILI hub',      false, false, true),
+      ('languages',   'which languages witness this concept',            false, false, false),
+      ('examples',    'witnessed usage examples',                        false, false, false),
+      ('related',     'outgoing edges of one relation type',             false, true,  false),
+      ('related_in',  'incoming edges of one relation type',             false, true,  false),
+      ('is_a',        'witnessed IS_A chain between two topics',         true,  false, false),
+      ('reason',      'how two topics relate, with a verdict',           true,  false, false),
+      ('walk',        'greedy strongest-edge chain from the topic',      false, false, false),
+      ('complete',    'COMPLETES_TO beam from the topic',                false, false, false),
+      ('fallback',    'gloss, then the strongest chain',                 false, false, false)
+$$;

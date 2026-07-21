@@ -18,7 +18,7 @@
 #include "spi_nested.h"
 #include "recall_route.h"
 
-PG_FUNCTION_INFO_V1(pg_laplace_parse_ask);
+PG_FUNCTION_INFO_V1(pg_laplace_recall_intent);
 PG_FUNCTION_INFO_V1(pg_laplace_recall);
 PG_FUNCTION_INFO_V1(pg_laplace_recall_session);
 PG_FUNCTION_INFO_V1(pg_laplace_define_fast);
@@ -43,24 +43,6 @@ typedef struct ReplyBuf
     int       n;
     int       cap;
 } ReplyBuf;
-
-static void
-emit_route_row(ReturnSetInfo *rsinfo, const RouteResult *r)
-{
-    Datum values[4];
-    bool  nulls[4] = { false, false, false, false };
-
-    if (!r->intent) nulls[0] = true;
-    else values[0] = CStringGetTextDatum(r->intent);
-    if (!r->phrase) nulls[1] = true;
-    else values[1] = CStringGetTextDatum(r->phrase);
-    if (!r->phrase2) nulls[2] = true;
-    else values[2] = CStringGetTextDatum(r->phrase2);
-    if (!r->type_name) nulls[3] = true;
-    else values[3] = CStringGetTextDatum(r->type_name);
-
-    tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-}
 
 static void
 reply_buf_init(ReplyBuf *buf)
@@ -192,6 +174,34 @@ emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
     reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0, false, true, true);
 }
 
+/* Sense-disambiguation context for the gloss responders: the other resolvable
+ * tokens the caller supplied. Structural callers pass ids directly; the text
+ * entry points derive them from the prompt via prompt_state(). Either way this
+ * is pure id resolution — no grammar is consulted. */
+static Datum
+spi_context_ids(const char *prompt, Datum topic)
+{
+    Oid   types[2] = { TEXTOID, BYTEAOID };
+    Datum args[2];
+    bool  isnull;
+    int   rc;
+
+    if (prompt == NULL || topic == (Datum) 0)
+        return (Datum) 0;
+
+    args[0] = CStringGetTextDatum(prompt);
+    args[1] = topic;
+    rc = SPI_execute_with_args(
+        "SELECT laplace.recall_context_exclude($1, $2)",
+        2, types, args, NULL, true, 1);
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        return (Datum) 0;
+    {
+        Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+        return isnull ? (Datum) 0 : d;
+    }
+}
+
 static void
 emit_label_fallback(ReplyBuf *buf, Datum topic, const char *suffix)
 {
@@ -220,16 +230,13 @@ emit_type_miss(ReplyBuf *buf, Datum topic, const char *type_name, bool incoming)
 }
 
 static void
-respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
+respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
 {
-    Datum topic2 = spi_resolve_topic(route->phrase2, (Datum) 0, true);
-
     if (topic2 == (Datum) 0)
     {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "I hold no consensus about \"%s\" yet.",
-                 route->phrase2 ? route->phrase2 : "?");
-        reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0, false, true, true);
+        reply_buf_add(buf,
+                      CStringGetTextDatum("is_a needs a second topic; none resolved."),
+                      (Datum) 0, (Datum) 0, false, true, true);
         return;
     }
 
@@ -307,29 +314,37 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
     }
 }
 
+/* The default read shape when a caller supplies no intent. A bare prompt says
+ * nothing structural about what is being asked, so answering it means showing
+ * what is witnessed about the topic: gloss first, then the strongest chain.
+ * Every other shape is selected explicitly by the caller. */
+#define ROUTE_DEFAULT_INTENT "fallback"
+
 static void respond_routed(const char *prompt, Datum context, bool ctx_null,
-                           RouteResult *routep, Datum topic, ReplyBuf *buf);
+                           RouteResult *routep, const RouteBind *bind,
+                           ReplyBuf *buf);
 
 static void
 respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
 {
-    RouteResult route;
-    Datum       topic;
+    RouteResult route = { 0 };
+    RouteBind   bind = { 0 };
 
-    route_prompt_impl(prompt, &route);
-    topic = spi_resolve_topic(route.phrase, context, ctx_null);
-    respond_routed(prompt, context, ctx_null, &route, topic, buf);
+    route.intent = pstrdup(ROUTE_DEFAULT_INTENT);
+    bind.topic = spi_resolve_topic(prompt, context, ctx_null);
+    bind.ctx_ids = spi_context_ids(prompt, bind.topic);
+    respond_routed(prompt, context, ctx_null, &route, &bind, buf);
 }
 
-/* The routed body of respond_impl: takes an already-computed route + topic
- * so recall_session (which needs both for session_record_prompt) doesn't
- * re-run the ~30-pattern prompt router and the SQL topic resolution a
- * second time per turn. Owns route: frees it on every path. */
+/* The routed body: takes an intent plus already-resolved ids. recall_session
+ * shares it so session_record_prompt and the reply resolve the topic once.
+ * Owns route: frees it on every path. */
 static void
 respond_routed(const char *prompt, Datum context, bool ctx_null,
-               RouteResult *routep, Datum topic, ReplyBuf *buf)
+               RouteResult *routep, const RouteBind *bind, ReplyBuf *buf)
 {
     RouteResult route = *routep;
+    Datum       topic = bind->topic;
     int         n;
 
     if (topic == (Datum) 0)
@@ -341,23 +356,29 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
 
     if (route.intent && strcmp(route.intent, "define") == 0)
     {
-        Oid   types[2] = { TEXTOID, BYTEAOID };
-        Datum args[2] = { CStringGetTextDatum(prompt), topic };
+        Oid   types[2] = { BYTEAOID, BYTEAARRAYOID };
+        Datum args[2] = { topic, bind->ctx_ids };
+        char  nulls[3] = "  ";
+
+        if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
             "FROM laplace.recall_define_response($1, $2)",
-            2, types, args, NULL);
+            2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
     }
     else if (route.intent && strcmp(route.intent, "what_is") == 0)
     {
-        Oid   types[2] = { TEXTOID, BYTEAOID };
-        Datum args[2] = { CStringGetTextDatum(prompt), topic };
+        Oid   types[2] = { BYTEAOID, BYTEAARRAYOID };
+        Datum args[2] = { topic, bind->ctx_ids };
+        char  nulls[3] = "  ";
+
+        if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
             "FROM laplace.recall_what_is_response($1, $2)",
-            2, types, args, NULL);
+            2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no sense consensus has been witnessed yet.");
     }
@@ -464,17 +485,16 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
     }
     else if (route.intent && strcmp(route.intent, "is_a") == 0)
     {
-        respond_is_a(buf, topic, &route);
+        respond_is_a(buf, topic, bind->topic2);
     }
     else if (route.intent && strcmp(route.intent, "reason") == 0)
     {
-        Datum topic2 = spi_resolve_topic(route.phrase2, (Datum) 0, true);
+        Datum topic2 = bind->topic2;
         if (topic2 == (Datum) 0)
         {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "I hold no consensus about \"%s\" yet.",
-                     route.phrase2 ? route.phrase2 : "?");
-            reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0, false, true, true);
+            reply_buf_add(buf,
+                          CStringGetTextDatum("reason needs a second topic; none resolved."),
+                          (Datum) 0, (Datum) 0, false, true, true);
         }
         else
         {
@@ -506,12 +526,15 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
 
 
 
-        Oid   dtypes[2] = { TEXTOID, BYTEAOID };
-        Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
+        Oid   dtypes[2] = { BYTEAOID, BYTEAARRAYOID };
+        Datum dargs[2] = { topic, bind->ctx_ids };
+        char  dnulls[3] = "  ";
+
+        if (bind->ctx_ids == (Datum) 0) dnulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
             "FROM laplace.recall_fallback_gloss($1, $2)",
-            2, dtypes, dargs, NULL);
+            2, dtypes, dargs, dnulls);
         if (n == 0)
         {
             Oid   wtypes[1] = { BYTEAOID };
@@ -526,12 +549,18 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
     }
     else
     {
-        Oid   types[2] = { TEXTOID, BYTEAOID };
-        Datum args[2] = { CStringGetTextDatum(prompt), topic };
+        /* Unknown intent. recall_intent() rejects these before dispatch, so
+         * reaching here means an internal caller passed something outside the
+         * published vocabulary; answer with the gloss rather than nothing. */
+        Oid   types[2] = { BYTEAOID, BYTEAARRAYOID };
+        Datum args[2] = { topic, bind->ctx_ids };
+        char  nulls[3] = "  ";
+
+        if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
             "FROM laplace.recall_define_response($1, $2)",
-            2, types, args, NULL);
+            2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
     }
@@ -1187,24 +1216,56 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(DatumGetArrayTypeP(result));
 }
 
+/* recall_intent(p_intent, p_topic, p_topic2, p_type_name, p_lang, p_context_ids)
+ *
+ * The structural read entry point: the caller names the shape of the read and
+ * supplies resolved content ids. Nothing about the answer depends on the
+ * language the question was asked in, because no question text is consulted. */
 Datum
-pg_laplace_parse_ask(PG_FUNCTION_ARGS)
+pg_laplace_recall_intent(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    text          *prompt_txt;
-    char          *prompt;
-    RouteResult    route;
+    RouteResult    route = { 0 };
+    RouteBind      bind = { 0 };
+    char          *intent;
+    ReplyBuf       buf;
+    bool           spi_top = false;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("parse_ask: p_prompt must not be NULL")));
-    prompt_txt = PG_GETARG_TEXT_PP(0);
-    prompt = text_to_cstring(prompt_txt);
+        ereport(ERROR, (errmsg("recall_intent: p_intent must not be NULL"),
+                        errhint("SELECT shape FROM laplace.query_shapes()")));
+    if (PG_ARGISNULL(1))
+        ereport(ERROR, (errmsg("recall_intent: p_topic must not be NULL"),
+                        errhint("resolve it first: laplace.resolve_ref('<word or id hex>')")));
 
-    route_prompt_impl(prompt, &route);
+    intent = trim_dup(text_to_cstring(PG_GETARG_TEXT_PP(0)));
+    if (!route_intent_known(intent))
+        ereport(ERROR, (errmsg("recall_intent: unknown shape \"%s\"", intent),
+                        errhint("SELECT shape FROM laplace.query_shapes()")));
+
+    route.intent = intent;
+    bind.topic = PG_GETARG_DATUM(1);
+    if (!PG_ARGISNULL(2))
+        bind.topic2 = PG_GETARG_DATUM(2);
+    if (!PG_ARGISNULL(3))
+        route.type_name = text_to_cstring(PG_GETARG_TEXT_PP(3));
+    /* p_lang carries the target language for the translate shape. It names a
+     * language, it does not parse one — any language can be asked for from any
+     * language. */
+    if (!PG_ARGISNULL(4))
+        route.phrase2 = text_to_cstring(PG_GETARG_TEXT_PP(4));
+    if (!PG_ARGISNULL(5))
+        bind.ctx_ids = PG_GETARG_DATUM(5);
+
+    reply_buf_init(&buf);
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "recall_intent: SPI_connect failed");
+
+    respond_routed("", (Datum) 0, true, &route, &bind, &buf);
+
+    laplace_spi_finish(spi_top);
     InitMaterializedSRF(fcinfo, 0);
-    emit_route_row(rsinfo, &route);
-    route_free(&route);
-    pfree(prompt);
+    reply_buf_emit(rsinfo, &buf);
     return (Datum) 0;
 }
 
@@ -1311,28 +1372,27 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
         }
 
         {
-            RouteResult route;
-            Datum       topic;
+            RouteResult route = { 0 };
+            RouteBind   bind = { 0 };
             Oid         itypes[3] = { BYTEAOID, TEXTOID, BYTEAOID };
             Datum       iargs[3];
 
-            route_prompt_impl(prompt, &route);
-            topic = spi_resolve_topic(route.phrase, context, ctx_null);
+            route.intent = pstrdup(ROUTE_DEFAULT_INTENT);
+            bind.topic = spi_resolve_topic(prompt, context, ctx_null);
+            bind.ctx_ids = spi_context_ids(prompt, bind.topic);
 
             iargs[0] = session;
             iargs[1] = CStringGetTextDatum(prompt);
-            iargs[2] = topic;
-
-
+            iargs[2] = bind.topic;
 
             SPI_execute_with_args(
                 "SELECT laplace.session_record_prompt($1, $2, $3)",
-                3, itypes, iargs, topic == (Datum) 0 ? "  n" : NULL, false, 0);
+                3, itypes, iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
 
-            /* Reuse the route + topic just computed for session_record_prompt
-             * instead of re-routing and re-resolving inside respond_impl —
-             * respond_routed takes ownership of route. */
-            respond_routed(prompt, context, ctx_null, &route, topic, &buf);
+            /* Reuse the topic just resolved for session_record_prompt instead
+             * of resolving again inside respond_impl — respond_routed takes
+             * ownership of route. */
+            respond_routed(prompt, context, ctx_null, &route, &bind, &buf);
         }
         laplace_spi_finish(spi_top);
 

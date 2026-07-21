@@ -1,7 +1,12 @@
-CREATE OR REPLACE FUNCTION recall_define_response(p_prompt text, p_topic bytea)
+-- Witnessed glosses for a topic, sense-disambiguated by the other content ids
+-- the caller resolved. Takes ids, not prompt text: what disambiguates a sense is
+-- the company it keeps in the substrate, not the sentence it arrived in.
+DROP FUNCTION IF EXISTS recall_define_response(text, bytea);
+
+CREATE OR REPLACE FUNCTION recall_define_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT d.definition, d.eff_mu, d.witnesses
-    FROM define_fast(p_topic, recall_context_exclude(p_prompt, p_topic)) d
+    FROM define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[])) d
 $$;

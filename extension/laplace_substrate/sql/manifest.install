@@ -160,7 +160,9 @@ functions/converse/realize_path.sql.in
 functions/converse/isa_path.sql.in
 functions/converse/epistemic_status.sql.in
 functions/converse/contrast.sql.in
-functions/converse/parse_ask.sql.in
+functions/converse/recall_intent.sql.in
+functions/converse/query_shapes.sql.in
+functions/converse/relation_bands.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
 functions/converse/witness_precedes_chain.sql.in

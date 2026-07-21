@@ -1,0 +1,43 @@
+-- The salience bands, with how much consensus each one actually holds.
+--
+-- A band is a lens: a set of relation types sharing a read-time rank, addressed
+-- by one precomputed highway mask. Selecting bands is how a caller narrows a
+-- walk without naming a single relation and without naming a language.
+-- Counts come from live consensus, so a client shows what is there, not what
+-- the manifest says should be there.
+CREATE OR REPLACE FUNCTION relation_bands()
+    RETURNS TABLE(band integer, name text, rank double precision,
+                  relation_types bigint, consensus_rows bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH live AS (
+        SELECT relation_highway_band(c.type_id) AS band,
+               c.type_id,
+               count(*) AS rows
+        FROM consensus c
+        GROUP BY 1, 2
+    )
+    SELECT b.band,
+           b.name,
+           b.rank,
+           count(live.type_id)::bigint,
+           COALESCE(sum(live.rows), 0)::bigint
+    FROM (VALUES
+            (0,  'mandate',              1.00::double precision),
+            (1,  'definitional',         0.97),
+            (2,  'taxonomic',            0.90),
+            (3,  'equivalence',          0.82),
+            (4,  'partitive',            0.73),
+            (5,  'causal',               0.64),
+            (6,  'oppositional',         0.45),
+            (7,  'associative',          0.36),
+            (8,  'tensor_calculation',   0.27),
+            (9,  'lexical_glue',         0.18),
+            (10, 'scalar_valued',        0.12),
+            (11, 'standards_structural', 0.08),
+            (12, 'probationary',         0.05)
+         ) AS b(band, name, rank)
+    LEFT JOIN live ON live.band = b.band
+    GROUP BY b.band, b.name, b.rank
+    ORDER BY b.band
+$$;

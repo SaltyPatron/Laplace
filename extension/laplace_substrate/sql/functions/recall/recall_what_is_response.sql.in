@@ -1,11 +1,14 @@
-CREATE OR REPLACE FUNCTION recall_what_is_response(p_prompt text, p_topic bytea)
+-- Gloss plus the IS_A ladder upward. Context ids disambiguate the sense.
+DROP FUNCTION IF EXISTS recall_what_is_response(text, bytea);
+
+CREATE OR REPLACE FUNCTION recall_what_is_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-    FROM define_fast(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
+    FROM define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     UNION ALL
-    SELECT repeat('  ', h.depth) || E'\u2192 is ' || COALESCE(h.hypernym, '?')
+    SELECT repeat('  ', h.depth) || E'→ is ' || COALESCE(h.hypernym, '?')
            || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint
     FROM hypernyms(p_topic, 6) h
     WHERE h.depth > 0
