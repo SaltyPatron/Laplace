@@ -253,12 +253,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         });
 
         // Mask pairs from the same delta: (subject, type) + (object, type).
-        var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(n * 2);
-        foreach (var cell in cells)
-        {
-            maskPairs.Add((cell.Key.S, cell.Key.T));
-            if (cell.Key.O is { } obj) maskPairs.Add((obj, cell.Key.T));
-        }
+        // Deferred entirely during a bulk run: depositing per batch is ~2M
+        // UPDATEs on the entities table WHILE that table is being bulk COPY-
+        // loaded (HOT-update churn, index maintenance, bloat, IO contention),
+        // it re-does work the once-at-completion highway_mask_rebuild performs
+        // in a single pass, and the client dedup set clears under its cap so
+        // pairs get re-deposited. CompleteBulkRunAsync rebuilds the masks once
+        // after the load. Online lanes (feedback, non-bulk) still deposit inline
+        // so read-side gating sees them immediately.
+        var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(_bulkRun ? 0 : n * 2);
+        if (!_bulkRun)
+            foreach (var cell in cells)
+            {
+                maskPairs.Add((cell.Key.S, cell.Key.T));
+                if (cell.Key.O is { } obj) maskPairs.Add((obj, cell.Key.T));
+            }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         long folded = 0, masks = 0;
@@ -464,8 +473,36 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // secondaries — a live fold during the rebuild would pay live index
         // maintenance on every insert.
         await DrainFoldsAsync();
+        bool wasBulk = _bulkRun;
         _bulkRun = false;
         await _inner.CompleteBulkRunAsync(ct);
+
+        // Masks were deferred through the bulk run (see the fold). Rebuild them
+        // ONCE now — after the COPY load and the inner index rebuild — from the
+        // folded consensus, instead of ~2M entity UPDATEs per batch during load.
+        // Same masks, one sequential pass, no contention with the loader.
+        if (wasBulk)
+        {
+            var msw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await using var conn = await _ds.OpenConnectionAsync(ct);
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 0;
+                cmd.CommandText = "CALL laplace.highway_mask_rebuild()";
+                await cmd.ExecuteNonQueryAsync(ct);
+                _log.LogInformation(
+                    "bulk-run highway mask rebuild complete in {Ms:N0}ms", msw.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                // Masks are a read-side accelerator, not a correctness input to
+                // the fold; a failed rebuild must not fail the seed. It is
+                // idempotent and re-runnable (highway_mask_refresh only writes
+                // changed masks).
+                _log.LogWarning(ex, "bulk-run highway mask rebuild failed — masks may be stale until re-run");
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()
