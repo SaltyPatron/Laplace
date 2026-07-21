@@ -72,6 +72,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly HashSet<(Hash128 Ent, Hash128 Typ)> _depositedMaskPairs = new();
     private const int DepositedMaskPairsCap = 8_388_608;
 
+    // Bulk runs defer highway-mask maintenance out of the per-batch fold (where
+    // it was ~2M entity UPDATEs contending with the concurrent COPY load) and
+    // into ONE targeted refresh at CompleteBulkRunAsync — the same bulk-load-
+    // then-build-index model the consensus secondary indexes already use. This
+    // set is the entities this run touched (subject/object of any folded cell);
+    // at completion we highway_mask_refresh exactly those, so untouched entities
+    // are never rescanned. Overflow past the cap falls back to a full rebuild so
+    // resident memory stays bounded. Mutated only under _upsertGate.
+    private readonly HashSet<Hash128> _bulkTouched = new();
+    private bool _bulkTouchedOverflow;
+    private const int BulkTouchedCap = 8_388_608;
+
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         bool? persistEvidence = null,
@@ -253,14 +265,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         });
 
         // Mask pairs from the same delta: (subject, type) + (object, type).
-        // Deferred entirely during a bulk run: depositing per batch is ~2M
-        // UPDATEs on the entities table WHILE that table is being bulk COPY-
-        // loaded (HOT-update churn, index maintenance, bloat, IO contention),
-        // it re-does work the once-at-completion highway_mask_rebuild performs
-        // in a single pass, and the client dedup set clears under its cap so
-        // pairs get re-deposited. CompleteBulkRunAsync rebuilds the masks once
-        // after the load. Online lanes (feedback, non-bulk) still deposit inline
-        // so read-side gating sees them immediately.
+        // Built ONLY for online lanes. In a bulk run these are not materialised
+        // per batch: depositing per batch is ~2M UPDATEs on the entities table
+        // WHILE it is being bulk COPY-loaded (HOT-update churn, index
+        // maintenance, bloat, IO contention against the loader), and the client
+        // dedup set clears under its cap so pairs get re-deposited. Bulk runs
+        // instead record touched entities under the gate (below) and refresh
+        // them once at completion. Online lanes (feedback, non-bulk) still
+        // deposit inline so read-side gating sees them immediately.
         var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(_bulkRun ? 0 : n * 2);
         if (!_bulkRun)
             foreach (var cell in cells)
@@ -274,9 +286,30 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _upsertGate.WaitAsync(ct);
         try
         {
-            // Never resend a pair this run already deposited: the server-side
-            // no-op still costs ~6 tier-leaf probes per pair for zero writes.
-            maskPairs.ExceptWith(_depositedMaskPairs);
+            // Bulk: don't deposit masks per batch. Record the touched entities
+            // (under the gate = serialized) for one targeted refresh at run
+            // completion. Online: never resend a pair this run already deposited
+            // — the server-side no-op still costs ~6 tier-leaf probes per pair.
+            if (_bulkRun)
+            {
+                if (!_bulkTouchedOverflow)
+                {
+                    foreach (var cell in cells)
+                    {
+                        _bulkTouched.Add(cell.Key.S);
+                        if (cell.Key.O is { } tob) _bulkTouched.Add(tob);
+                    }
+                    if (_bulkTouched.Count > BulkTouchedCap)
+                    {
+                        _bulkTouchedOverflow = true; // completion does a full rebuild
+                        _bulkTouched.Clear();        // release the memory
+                    }
+                }
+            }
+            else
+            {
+                maskPairs.ExceptWith(_depositedMaskPairs);
+            }
 
             // Fixed-size chunks over the sorted cells, folded on PARALLEL
             // connections — the same width the COPY apply uses — instead of
@@ -481,26 +514,65 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // ONCE now — after the COPY load and the inner index rebuild — from the
         // folded consensus, instead of ~2M entity UPDATEs per batch during load.
         // Same masks, one sequential pass, no contention with the loader.
-        if (wasBulk)
+        // Folds are drained above, so _bulkTouched / _bulkTouchedOverflow are
+        // stable here. Build the deferred masks in ONE pass now: refresh exactly
+        // the entities this run touched (highway_mask_refresh recomputes each
+        // from its full consensus edge set, so untouched entities keep their
+        // correct masks and are never rescanned). Only a touched-set overflow
+        // falls back to the full-table rebuild.
+        if (wasBulk && (_bulkTouchedOverflow || _bulkTouched.Count > 0))
         {
             var msw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 await using var conn = await _ds.OpenConnectionAsync(ct);
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = 0;
-                cmd.CommandText = "CALL laplace.highway_mask_rebuild()";
-                await cmd.ExecuteNonQueryAsync(ct);
-                _log.LogInformation(
-                    "bulk-run highway mask rebuild complete in {Ms:N0}ms", msw.ElapsedMilliseconds);
+                if (_bulkTouchedOverflow)
+                {
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandTimeout = 0;
+                    cmd.CommandText = "CALL laplace.highway_mask_rebuild()";
+                    await cmd.ExecuteNonQueryAsync(ct);
+                    _log.LogInformation(
+                        "bulk-run highway mask FULL rebuild (touched-set overflowed cap) in {Ms:N0}ms",
+                        msw.ElapsedMilliseconds);
+                }
+                else
+                {
+                    var ids = new Hash128[_bulkTouched.Count];
+                    _bulkTouched.CopyTo(ids);
+                    long refreshed = 0;
+                    const int chunk = 100_000;
+                    for (int off = 0; off < ids.Length; off += chunk)
+                    {
+                        int m = Math.Min(chunk, ids.Length - off);
+                        var arr = new byte[m][];
+                        for (int i = 0; i < m; i++) arr[i] = ids[off + i].ToBytes();
+                        await using var cmd = conn.CreateCommand();
+                        cmd.CommandTimeout = 0;
+                        cmd.CommandText = "SELECT laplace.highway_mask_refresh($1)";
+                        cmd.Parameters.Add(new NpgsqlParameter
+                        {
+                            Value = arr,
+                            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                        });
+                        refreshed += (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+                    }
+                    _log.LogInformation(
+                        "bulk-run highway mask refresh: {Masks:N0} masks over {Ents:N0} touched entities in {Ms:N0}ms",
+                        refreshed, ids.Length, msw.ElapsedMilliseconds);
+                }
             }
             catch (Exception ex)
             {
-                // Masks are a read-side accelerator, not a correctness input to
-                // the fold; a failed rebuild must not fail the seed. It is
-                // idempotent and re-runnable (highway_mask_refresh only writes
-                // changed masks).
-                _log.LogWarning(ex, "bulk-run highway mask rebuild failed — masks may be stale until re-run");
+                // Masks are a read-side accelerator, not a fold-correctness input;
+                // a failed refresh must not fail the seed. It is idempotent and
+                // re-runnable (highway_mask_refresh only writes changed masks).
+                _log.LogWarning(ex, "bulk-run highway mask refresh failed — masks may be stale until re-run");
+            }
+            finally
+            {
+                _bulkTouched.Clear();
+                _bulkTouchedOverflow = false;
             }
         }
     }
