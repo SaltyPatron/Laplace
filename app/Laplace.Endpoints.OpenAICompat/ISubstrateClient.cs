@@ -54,6 +54,9 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ExploreAnchorNeighborRow>> ExploreAnchorNeighborsAsync(
         ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct);
 
+    Task<IReadOnlyList<WitnessedWord>> WitnessedWordsAsync(
+        IReadOnlyList<string> surfaces, CancellationToken ct);
+
     Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct);
 

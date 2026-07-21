@@ -81,6 +81,19 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task ExploreNotFound_SuggestsWitnessedEditNeighbor()
+    {
+        // "wale" is one insertion from the witnessed "whale" — the edit-distance
+        // did-you-mean should surface it (not the frechet shape peers).
+        using var response = await _client.GetAsync("/v1/explore/notfound?reference=wale");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ExploreNotFoundResponse>();
+        Assert.NotNull(body);
+        Assert.Equal("whale", body!.DidYouMean);
+        Assert.Contains(body.Suggestions, s => s.Surface == "whale" && s.Distance == 1);
+    }
+
+    [Fact]
     public async Task ExploreDecompose_ReturnsNodes()
     {
         using var response = await _client.PostAsJsonAsync("/v1/explore/decompose", new DecomposeRequest("hello world"));

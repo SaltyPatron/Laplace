@@ -45,14 +45,18 @@ export function NotFoundExplorer() {
         <code className={styles.idhex}>{data.word_id_hex}</code>
       </header>
 
-      {data.did_you_mean ? (
+      {data.suggestions.length > 0 ? (
         <Panel title="Did you mean">
-          <RouterLink
-            className={styles.suggest}
-            to={`/explore/resolve/${encodeURIComponent(data.did_you_mean)}`}
-          >
-            {data.did_you_mean}
-          </RouterLink>
+          <ul className={styles.list}>
+            {data.suggestions.map((s) => (
+              <li key={s.id_hex} className={styles.row}>
+                <EntityLink idHex={s.id_hex} label={s.surface} />
+                <span className={styles.dist}>
+                  {s.distance} edit{s.distance === 1 ? '' : 's'}
+                </span>
+              </li>
+            ))}
+          </ul>
         </Panel>
       ) : null}
 

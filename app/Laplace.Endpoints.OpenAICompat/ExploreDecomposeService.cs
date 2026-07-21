@@ -19,6 +19,9 @@ internal sealed record ExploreAnchor(
     string? TrajectoryWkt,
     IReadOnlyList<DecomposeNodeRow> Decomposition);
 
+// A candidate surface that resolves to a witnessed word id.
+internal sealed record WitnessedWord(string Surface, string IdHex, long Witnesses);
+
 internal sealed class ExploreDecomposeService
 {
     private static int _perfcacheLoaded;

@@ -5352,6 +5352,7 @@
           "coord",
           "decomposition",
           "neighbors",
+          "suggestions",
           "did_you_mean"
         ],
         "type": "object",
@@ -5386,6 +5387,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ExploreAnchorNeighborRow"
+            }
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreSuggestion"
             }
           },
           "did_you_mean": {
@@ -5727,6 +5734,30 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ExploreSuggestion": {
+        "required": [
+          "surface",
+          "id_hex",
+          "distance"
+        ],
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string"
+          },
+          "id_hex": {
+            "type": "string"
+          },
+          "distance": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
