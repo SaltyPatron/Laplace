@@ -1,36 +1,50 @@
--- The inline consensus fold — identity-routed, dedup-first, batch-once.
+-- The inline consensus fold — identity-routed, dedup-first, native.
 --
--- Consensus is content: dedup it the way ingest dedups entities. Instead of a
--- MERGE (which fans out across ALL 145 consensus leaves because the partition
--- key is a runtime join value — measured 2026-07-16, the CILI 7-minute peg), we
--- split the batch by what it IS, per relation type:
---   * EXISTING cells  -> bulk UPDATE, re-fold against current state.
---   * NOVEL cells      -> bulk INSERT; INSERT tuple-routes to the one owning
---                         leaf (prunes), and they are provably novel, so there
---                         is NO conflict to arbitrate.
--- The loop binds one relation type at a time to a plpgsql variable, so the
--- planner RUNTIME-PRUNES both statements to that type's <=8 HASH(subject) leaves
--- — small partitions, partition-local index maintenance.
+-- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
+-- Consensus is content: dedup it the way ingest dedups entities. The batch is
+-- split by what it IS, per relation type:
+--   * EXISTING cells  -> bulk UPDATE, re-fold against current state;
+--   * NOVEL cells     -> bulk INSERT; INSERT tuple-routes to the one owning
+--                        leaf, and NOT EXISTS (literal type -> pruned) proves
+--                        novelty, so there is NO conflict to arbitrate.
 --
--- BATCH-ONCE (2026-07-16, the second half of the fix): the first loop version
--- re-unnested the FULL parameter arrays inside every per-type UPDATE and INSERT
--- — O(2·N·T) row materializations per call, single-core, measured 21s insert /
--- 60s re-fold at N=200k,T=10. The batch is now materialized EXACTLY ONCE into an
--- indexed temp table (ids + fresh fold state precomputed in the same pass); each
--- type's statements read only their slice via the (t) index. Same routed writes,
--- O(N) total scan work: 10.6s insert / 18.4s re-fold on the same batch, fold
--- results verified bit-identical against the array-rescan version.
+-- History of the SQL forms this replaces (all measured, kept so nobody
+-- re-tries them):
+--  * MERGE: fans out across ALL consensus leaves because the partition key is
+--    a runtime join value (2026-07-16, the CILI 7-minute peg).
+--  * per-type loop re-unnesting the FULL arrays each iteration: O(2·N·T)
+--    materializations (21s insert / 60s re-fold at N=200k,T=10).
+--  * BATCH-ONCE temp table (2026-07-16): correct and O(N) — but still a fresh
+--    CREATE TEMP TABLE + CREATE INDEX + ANALYZE on every call, and generic
+--    per-type statements re-planned per call.
 --
--- The Glicko fold runs server-side in the native scalar
--- (laplace_glicko2_accumulate_games) — computed ONCE per row into a record
--- (no 3x rating/rd/volatility re-eval). The rating period IS the batch: a period
--- is a set of contemporaneous observations, which a batch is.
+-- The native routing groups the batch by type in C and executes SESSION-CACHED
+-- prepared plans per type whose type_id is a LITERAL in the plan text (HTAB of
+-- type -> SPI_keepplan'd plan in TopMemoryContext): LIST pruning once per
+-- (backend, type) reused across every call, HASH pruning per row, no temp
+-- table, no ANALYZE, no re-plan.
 --
--- Contract with the caller (ConsensusAccumulatingWriter):
+-- One implementation per fact, preserved:
+--  * the Glicko fold runs in the SAME native scalar the plpgsql called
+--    (laplace_glicko2_accumulate_games), once per row, record-valued — the
+--    rating period IS the batch;
+--  * cell ids are computed in C through the SAME core hash the SQL
+--    consensus_id() wraps — blake3(subject || type || COALESCE(object, 16 zero
+--    bytes)) — byte-identical layout;
+--  * the duplicate-cell contract check raises the same cardinality_violation.
+--
+-- NO mask queue here: the caller deposits highway bits INLINE for this same
+-- delta (highway_mask_deposit); highway_mask_dirty is populated only by the
+-- repair verbs, which need to CLEAR bits (per-source evict) — something an
+-- OR-accumulate deposit cannot express.
+--
+-- Contract with the caller (ConsensusAccumulatingWriter) — unchanged:
 --   * arrays are parallel and CLIENT-DEDUPED per call — one row per
 --     (subject, type, object) cell;
 --   * phi is uniform per cell per call (the writer's merge invariant);
---   * rows arrive sorted by (type, subject, id) — partition-key order.
+--   * rows arrive sorted by (type, subject, id) — partition-key order; the
+--     router only needs same-type rows ADJACENT and remains correct (merely
+--     one extra plan execution) if they are not.
 CREATE OR REPLACE FUNCTION consensus_upsert(
     p_subjects bytea[],
     p_types    bytea[],
@@ -40,125 +54,5 @@ CREATE OR REPLACE FUNCTION consensus_upsert(
     p_sums     bigint[],
     p_ts       timestamptz[])
     RETURNS bigint
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
-DECLARE
-    affected bigint := 0;
-    v_rc     bigint;
-    v_type   bytea;
-BEGIN
-    -- Materialize the batch ONCE: single unnest, cell id + fresh fold state
-    -- computed in the same pass.
-    --
-    -- SESSION-SCOPED, NOT PER-CALL (2026-07-21). This was
-    -- CREATE TEMP TABLE ... ON COMMIT DROP + CREATE INDEX + ANALYZE on EVERY
-    -- invocation: three catalog mutations, a fresh relfilenode and an index
-    -- build per fold call. That fixed cost is what forced the caller to make
-    -- every fold call enormous to amortize it, which is half of why ingest
-    -- globs. The table and its index are now created ONCE per backend session
-    -- and TRUNCATEd per call, so a fold call costs the INSERT and nothing else
-    -- and small, frequent folds are as cheap per row as one giant one.
-    --
-    -- Correctness: pg_temp is private to the backend, one fold call per
-    -- connection is in flight at a time (the caller opens a connection per
-    -- fold segment), and TRUNCATE at entry means no row can survive into the
-    -- next call — including after an exception aborts a call mid-way.
-    IF to_regclass('pg_temp._cu_batch') IS NULL THEN
-        CREATE TEMP TABLE _cu_batch (
-            id           bytea,
-            s            bytea,
-            t            bytea,
-            o            bytea,
-            phi          bigint,
-            games        bigint,
-            sum          bigint,
-            ts           timestamptz,
-            fresh_rating bigint,
-            fresh_rd     bigint,
-            fresh_vol    bigint);
-        -- The per-type slices read through this index — O(N_type) per
-        -- iteration, not a full-batch rescan.
-        CREATE INDEX _cu_batch_t ON _cu_batch (t);
-    ELSE
-        TRUNCATE _cu_batch;
-    END IF;
-
-    INSERT INTO _cu_batch (id, s, t, o, phi, games, sum, ts,
-                           fresh_rating, fresh_rd, fresh_vol)
-    SELECT consensus_id(u.s, u.t, u.o),
-           u.s, u.t, u.o, u.phi, u.games, u.sum, u.ts,
-           f.rating, f.rd, f.volatility
-    FROM unnest(p_subjects, p_types, p_objects,
-                p_phis, p_games, p_sums, p_ts)
-         AS u(s, t, o, phi, games, sum, ts)
-    CROSS JOIN LATERAL laplace_glicko2_accumulate_games(
-             glicko2_neutral_mu(), glicko2_initial_rd(),
-             glicko2_initial_volatility(),
-             glicko2_neutral_mu(), u.phi, u.games, u.sum,
-             glicko2_tau()) AS f;
-
-    -- Contract enforcement (parity with the old MERGE's "cannot affect row a
-    -- second time"): one row per cell or fail loudly. The cell id IS the
-    -- (subject, type, object) identity, so one GROUP BY key suffices.
-    IF EXISTS (SELECT 1 FROM _cu_batch GROUP BY id HAVING count(*) > 1) THEN
-        RAISE EXCEPTION
-            'consensus_upsert: duplicate cell in one call (client-dedup contract violated)'
-            USING ERRCODE = 'cardinality_violation';
-    END IF;
-
-    ANALYZE _cu_batch;
-
-    -- Types in sorted order: cross-writer lock acquisition stays globally
-    -- ordered at type grain (the caller already sorts within type).
-    FOR v_type IN SELECT DISTINCT t FROM _cu_batch ORDER BY t LOOP
-
-        -- EXISTING cells of this type: re-fold against their current state.
-        -- ONE native fold call per row, record-valued.
-        UPDATE consensus c SET
-            (rating, rd, volatility) = (
-                SELECT r.rating, r.rd, r.volatility
-                FROM laplace_glicko2_accumulate_games(
-                        c.rating, c.rd, c.volatility, glicko2_neutral_mu(),
-                        b.phi, b.games, b.sum, glicko2_tau()) AS r),
-            witness_count    = c.witness_count + b.games,
-            last_observed_at = GREATEST(c.last_observed_at, b.ts)
-        FROM _cu_batch b
-        WHERE b.t = v_type
-          AND c.type_id = v_type            -- variable -> runtime partition prune
-          AND c.subject_id = b.s
-          AND c.id = b.id;
-        GET DIAGNOSTICS v_rc = ROW_COUNT;
-        affected := affected + v_rc;
-
-        -- NOVEL cells of this type: fresh fold state was precomputed in the
-        -- batch pass. INSERT tuple-routes to the owning leaf; NOT EXISTS (also
-        -- runtime-pruned via v_type) proves novelty — no ON CONFLICT.
-        INSERT INTO consensus
-            (id, subject_id, type_id, object_id,
-             rating, rd, volatility, witness_count, last_observed_at)
-        SELECT b.id, b.s, v_type, b.o,
-               b.fresh_rating, b.fresh_rd, b.fresh_vol,
-               b.games, b.ts
-        FROM _cu_batch b
-        WHERE b.t = v_type
-          AND NOT EXISTS (
-            SELECT 1 FROM consensus c
-            WHERE c.type_id = v_type        -- variable -> runtime partition prune
-              AND c.subject_id = b.s
-              AND c.id = b.id);
-        GET DIAGNOSTICS v_rc = ROW_COUNT;
-        affected := affected + v_rc;
-
-    END LOOP;
-
-    -- NO mask queue here (2026-07-21). The caller deposits highway bits INLINE
-    -- for the (entity, type) pairs of this same delta — highway_mask_deposit,
-    -- O(pairs already in RAM), zero consensus re-reads. Queueing the touched
-    -- entities for a terminal highway_mask_drain() instead meant recomputing
-    -- every touched mask from its full consensus edge set (the object-side leaf
-    -- probes measured at 75s of a 118s fold) in one serial pass at the end of the
-    -- run. highway_mask_dirty is now populated only by the repair verbs, which
-    -- need to CLEAR bits (per-source evict) — something an OR-accumulate deposit
-    -- cannot express.
-    RETURN affected;
-END $$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
+    LANGUAGE C VOLATILE;
