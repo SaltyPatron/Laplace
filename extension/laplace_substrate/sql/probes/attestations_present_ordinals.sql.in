@@ -7,26 +7,39 @@
 -- source, context), so it always holds the partition keys: binding the type
 -- to a plpgsql variable prunes the LIST parent at plan time, and the
 -- subject equality prunes the HASH leaves per row -- one descent per id.
--- The per-type re-unnest is bounded by the probe chunk size (<=131,072 ids
--- per call), unlike the fold's whole-delta arrays.
+-- ONE PASS (2026-07-21). The previous body looped over the DISTINCT relation
+-- types in the batch and re-unnested the FULL three arrays inside every
+-- iteration, discarding all but that type's share via `WHERE u.t = v_type` --
+-- O(N_ids x N_types) row materializations for O(N_ids) of actual work.
+--
+-- MEASURED on the OMW seed: one backend pinned at 100% of a single core for
+-- 5m28s with 4.1 GB RSS while 11 cores sat idle, stalling the whole ingest
+-- inside this probe. Cost is quadratic in the batch's type diversity, so it is
+-- invisible on single-type batches and lethal on a multilingual source that
+-- touches many relation types at once.
+--
+-- The loop bought nothing. Its stated purpose was to bind the type to a
+-- plpgsql variable so the LIST parent prunes at plan time -- but this is a
+-- SELECT, and runtime pruning IS available to reads: with the type joined
+-- per row, the nested-loop inner Append prunes to the single matching leaf at
+-- execution (verified: `Append (rows=8) (actual rows=1.00 loops=32000)` on the
+-- sibling merge path). Plan-time pruning is only load-bearing for UPDATE,
+-- whose target result relations are opened and locked at plan time -- which is
+-- why attestation_merge still needs its EXECUTE-with-literal and this does not.
+--
+-- Joining u.t directly keeps the same per-row LIST+HASH descent, one pass, one
+-- plan, and lets the planner parallelize.
 DROP FUNCTION IF EXISTS attestations_present_ordinals(bytea[]);
 CREATE OR REPLACE FUNCTION attestations_present_ordinals(
     p_ids bytea[], p_type_ids bytea[], p_subject_ids bytea[])
     RETURNS TABLE(idx int)
-    LANGUAGE plpgsql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-DECLARE
-    v_type bytea;
-BEGIN
-    FOR v_type IN SELECT DISTINCT t FROM unnest(p_type_ids) AS t LOOP
-        RETURN QUERY
-        SELECT (u.ord - 1)::int
-        FROM unnest(p_ids, p_type_ids, p_subject_ids)
-             WITH ORDINALITY u(id, t, s, ord)
-        JOIN attestations a
-          ON a.type_id = v_type          -- variable -> planner partition prune
-         AND a.subject_id = u.s          -- runtime HASH-leaf prune per row
-         AND a.id = u.id
-        WHERE u.t = v_type;
-    END LOOP;
-END $$;
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids, p_type_ids, p_subject_ids)
+         WITH ORDINALITY u(id, t, s, ord)
+    JOIN attestations a
+      ON a.type_id = u.t               -- runtime LIST prune per row
+     AND a.subject_id = u.s            -- runtime HASH-leaf prune per row
+     AND a.id = u.id
+$$;
