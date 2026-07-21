@@ -83,6 +83,11 @@ export interface ExploreAnchorNeighborRow {
   geodesic?: number | null;
   frechet?: number | null;
 }
+export interface ExploreSuggestion {
+  surface: string;
+  id_hex: string;
+  distance: number;
+}
 export interface ExploreNotFoundResponse {
   reference: string;
   word_id_hex: string;
@@ -90,6 +95,7 @@ export interface ExploreNotFoundResponse {
   coord: number[];
   decomposition: DecomposeNodeRow[];
   neighbors: ExploreAnchorNeighborRow[];
+  suggestions: ExploreSuggestion[];
   did_you_mean?: string | null;
 }
 export interface ExplorePhysicalityRow {

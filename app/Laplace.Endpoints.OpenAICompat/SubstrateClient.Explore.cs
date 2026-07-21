@@ -291,6 +291,50 @@ internal sealed partial class SubstrateClient
         }
     }
 
+    // Of a batch of candidate surfaces, which are witnessed words? Resolves each
+    // through word_id (the content hash) and keeps the ids that entity_exists.
+    // One round trip -> did-you-mean is an exact index probe over the edit-distance
+    // neighbourhood, no fuzzy extension or full-surface scan.
+    public async Task<IReadOnlyList<WitnessedWord>> WitnessedWordsAsync(
+        IReadOnlyList<string> surfaces, CancellationToken ct)
+    {
+        if (surfaces.Count == 0) return Array.Empty<WitnessedWord>();
+
+        const string sql = """
+            WITH c AS (
+                SELECT s, laplace.word_id(s) AS id
+                FROM unnest(@surfaces) AS s
+            )
+            SELECT c.s, encode(c.id, 'hex'),
+                   laplace.evidence_count(NULL, NULL, c.id)
+            FROM c
+            WHERE laplace.entity_exists(c.id);
+            """;
+
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            var p = cmd.Parameters.AddWithValue("surfaces", surfaces.ToArray());
+            p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text;
+
+            var rows = new List<WitnessedWord>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                rows.Add(new WitnessedWord(
+                    Surface: reader.GetString(0),
+                    IdHex: reader.GetString(1),
+                    Witnesses: reader.IsDBNull(2) ? 0L : reader.GetInt64(2)));
+            }
+            return rows;
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Explore witnessed-words query failed.", ex);
+        }
+    }
+
     public async Task<ExploreEntityResponse?> ExploreEntityAsync(
         string idHex, int consensusLimit, int evidenceLimit, CancellationToken ct)
     {
@@ -757,18 +801,26 @@ internal sealed partial class SubstrateClient
             FROM laplace.entity_facets(@id) f;
             """, conn);
         cmd.Parameters.AddWithValue("id", id);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
+        // The reader MUST be closed before the no-row fallback runs another command
+        // on this connection: Npgsql has no MARS, so calling ReadLabelAsync() while
+        // this reader is still open throws NpgsqlOperationInProgressException (~5ms,
+        // client-side, no server error) -- which the caller wraps as a 503. That is
+        // the fallback path for every unwitnessed id (entity_facets returns no rows),
+        // i.e. exactly the not-found case. Scope the reader so it disposes first.
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
         {
-            var label = await ReadLabelAsync(conn, id, ct);
-            return label is null ? (null!, null, null, false) : (label, null, null, false);
+            if (await reader.ReadAsync(ct))
+            {
+                return (
+                    Label: reader.GetString(2),
+                    Tier: reader.GetInt16(0),
+                    Type: reader.GetString(1),
+                    Exists: reader.GetBoolean(3));
+            }
         }
 
-        return (
-            Label: reader.GetString(2),
-            Tier: reader.GetInt16(0),
-            Type: reader.GetString(1),
-            Exists: reader.GetBoolean(3));
+        var fallbackLabel = await ReadLabelAsync(conn, id, ct);
+        return fallbackLabel is null ? (null!, null, null, false) : (fallbackLabel, null, null, false);
     }
 
     private static async Task<long> ReadEvidenceCountAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct)

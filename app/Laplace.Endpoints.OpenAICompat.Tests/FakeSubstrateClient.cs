@@ -66,6 +66,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         ExploreAnchor anchor, int geodesicK, int frechetK, double frechetMax, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<IReadOnlyList<WitnessedWord>> WitnessedWordsAsync(
+        IReadOnlyList<string> surfaces, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
@@ -274,6 +278,13 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             new ExploreAnchorNeighborRow("geodesic", CetaceanIdHex, "cetacean", 2, 0.12, null),
             new ExploreAnchorNeighborRow("shape", WhaleIdHex, "whale", 2, null, 0.03),
         ]);
+
+    public Task<IReadOnlyList<WitnessedWord>> WitnessedWordsAsync(
+        IReadOnlyList<string> surfaces, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<WitnessedWord>>(
+            surfaces.Contains("whale")
+                ? [new WitnessedWord("whale", WhaleIdHex, 42)]
+                : []);
 
     public Task<ExploreTrainingExportResponse?> ExploreTrainingExportAsync(
         string idHex, int consensusLimit, int evidenceLimit, bool includeMembers, bool includePeers, CancellationToken ct) =>

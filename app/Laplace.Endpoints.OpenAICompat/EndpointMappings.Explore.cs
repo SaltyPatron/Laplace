@@ -90,8 +90,24 @@ internal static class ExploreEndpoints
                     anchor,
                     Math.Clamp(geodesic_k ?? 12, 1, 48),
                     Math.Clamp(frechet_k ?? 12, 1, 48),
-                    Math.Clamp(frechet_max ?? 0.08, 0.0, 2.0),
+                    Math.Clamp(frechet_max ?? 0.5, 0.0, 2.0),
                     ct);
+
+                // Did-you-mean by surface edit distance: witnessed words within one
+                // edit of what was typed. Deterministic and exact -- no fuzzy index,
+                // no scan -- because we generate the edit-distance-1 neighbourhood and
+                // keep only the word ids that entity_exists. "conflagrate" is one
+                // deletion from "conflagurate", so it surfaces directly.
+                var refLower = surface.ToLowerInvariant();
+                var witnessed = await substrate.WitnessedWordsAsync(
+                    EditDistance1Candidates(refLower), ct);
+                var suggestions = witnessed
+                    .Select(w => (w, dist: Levenshtein(refLower, w.Surface.ToLowerInvariant(), 3)))
+                    .Where(x => x.dist > 0)
+                    .OrderBy(x => x.dist).ThenByDescending(x => x.w.Witnesses)
+                    .Take(8)
+                    .Select(x => new ExploreSuggestion(x.w.Surface, x.w.IdHex, x.dist))
+                    .ToList();
 
                 return Results.Json(new ExploreNotFoundResponse(
                     Reference: surface,
@@ -100,7 +116,8 @@ internal static class ExploreEndpoints
                     Coord: new[] { anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm },
                     Decomposition: anchor.Decomposition,
                     Neighbors: neighbors,
-                    DidYouMean: BestSurfaceSuggestion(surface, neighbors)));
+                    Suggestions: suggestions,
+                    DidYouMean: suggestions.Count > 0 ? suggestions[0].Surface : null));
             }
             catch (SubstrateUnavailableException ex)
             {
@@ -355,35 +372,38 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
-    // "Did you mean X?": the closest shape peer by surface edit distance. The
-    // Frechet peers are already the shape neighbourhood; Levenshtein only
-    // re-ranks that small pool, so a one-letter typo (conflagurate ->
-    // conflagrate) surfaces even when it isn't the geometrically nearest curve.
-    // Threshold scales with length; the reference itself never suggests itself.
-    private static string? BestSurfaceSuggestion(
-        string reference, IReadOnlyList<ExploreAnchorNeighborRow> neighbors)
+    // The edit-distance-1 neighbourhood of a lowercase word: deletions,
+    // substitutions, insertions, and adjacent transpositions over [a-z]. ~54n
+    // strings for length n -- resolved in one batched entity_exists round trip,
+    // so did-you-mean is an exact index probe, not a fuzzy scan. Capped to keep
+    // a pasted paragraph from generating a runaway set.
+    private static IReadOnlyList<string> EditDistance1Candidates(string word)
     {
-        var refLower = reference.ToLowerInvariant();
-        var budget = Math.Max(2, refLower.Length / 3);
-        string? best = null;
-        var bestDist = int.MaxValue;
+        if (string.IsNullOrEmpty(word) || word.Length > 40)
+            return Array.Empty<string>();
 
-        foreach (var n in neighbors)
-        {
-            if (!string.Equals(n.Axis, "shape", StringComparison.Ordinal)) continue;
-            var label = n.Label?.Trim();
-            if (string.IsNullOrEmpty(label)) continue;
-            var cand = label.ToLowerInvariant();
-            if (cand == refLower) continue;
+        const string alpha = "abcdefghijklmnopqrstuvwxyz";
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        var n = word.Length;
 
-            var d = Levenshtein(refLower, cand, budget);
-            if (d >= 0 && d < bestDist)
+        for (var i = 0; i < n; i++)
+            set.Add(word.Remove(i, 1));                       // deletions
+        for (var i = 0; i < n - 1; i++)                       // transpositions
+            if (word[i] != word[i + 1])
             {
-                bestDist = d;
-                best = label;
+                var c = word.ToCharArray();
+                (c[i], c[i + 1]) = (c[i + 1], c[i]);
+                set.Add(new string(c));
             }
-        }
-        return bestDist <= budget ? best : null;
+        for (var i = 0; i < n; i++)                           // substitutions
+            foreach (var ch in alpha)
+                if (word[i] != ch) set.Add(word.Remove(i, 1).Insert(i, ch.ToString()));
+        for (var i = 0; i <= n; i++)                          // insertions
+            foreach (var ch in alpha)
+                set.Add(word.Insert(i, ch.ToString()));
+
+        set.Remove(word);
+        return set.ToArray();
     }
 
     // Bounded Levenshtein: returns -1 once every cell in a row exceeds `max`

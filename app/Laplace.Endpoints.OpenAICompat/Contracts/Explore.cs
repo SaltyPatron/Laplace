@@ -59,7 +59,15 @@ public sealed record ExploreNotFoundResponse(
     [property: JsonPropertyName("coord")] IReadOnlyList<double> Coord,
     [property: JsonPropertyName("decomposition")] IReadOnlyList<DecomposeNodeRow> Decomposition,
     [property: JsonPropertyName("neighbors")] IReadOnlyList<ExploreAnchorNeighborRow> Neighbors,
+    [property: JsonPropertyName("suggestions")] IReadOnlyList<ExploreSuggestion> Suggestions,
     [property: JsonPropertyName("did_you_mean")] string? DidYouMean);
+
+// A witnessed word within a small surface edit distance of the typed reference —
+// the exact "did you mean" set, each a live id.
+public sealed record ExploreSuggestion(
+    [property: JsonPropertyName("surface")] string Surface,
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("distance")] int Distance);
 
 public sealed record ExploreAnchorNeighborRow(
     [property: JsonPropertyName("axis")] string Axis,
