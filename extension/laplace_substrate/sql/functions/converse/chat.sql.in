@@ -137,7 +137,7 @@ BEGIN
                     WHERE c.object_id = topic
                       AND relation_highway_band(c.type_id) = ANY(p_bands)
                 ) z
-                JOIN relation_bands() b ON b.band = z.band
+                JOIN relation_band_catalog() b ON b.band = z.band
                 WHERE z.l IS NOT NULL
                 GROUP BY b.band, b.name
                 ORDER BY b.band

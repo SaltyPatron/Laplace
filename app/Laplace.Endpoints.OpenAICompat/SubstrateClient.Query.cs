@@ -108,7 +108,9 @@ internal sealed partial class SubstrateClient
         const string sql = """
             SELECT b.name || ' · ' || laplace.relation_canonical(z.type_id) || ' → '
                      || laplace.label_or_hex(z.other) AS reply,
-                   laplace.eff_mu(z.rating, z.rd) AS eff_mu,
+                   -- eff_mu() is fixed-point bigint and carries the index;
+                   -- eff_mu_display() is the numeric the client reads.
+                   laplace.eff_mu_display(z.rating, z.rd) AS eff_mu,
                    z.witness_count
             FROM (
                 SELECT c.type_id, c.object_id AS other, c.rating, c.rd, c.witness_count
@@ -123,7 +125,9 @@ internal sealed partial class SubstrateClient
                   AND (@bands::int[] IS NULL
                        OR laplace.relation_highway_band(c.type_id) = ANY(@bands::int[]))
             ) z
-            JOIN laplace.relation_bands() b
+            -- The naming catalog, not the counting one: this must not drag a
+            -- full-consensus aggregate into every band_facts read.
+            JOIN laplace.relation_band_catalog() b
               ON b.band = laplace.relation_highway_band(z.type_id)
             ORDER BY b.rank DESC, laplace.eff_mu(z.rating, z.rd) DESC
             LIMIT @limit

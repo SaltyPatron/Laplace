@@ -1,10 +1,33 @@
--- The salience bands, with how much consensus each one actually holds.
+-- The salience bands: the lens vocabulary.
 --
--- A band is a lens: a set of relation types sharing a read-time rank, addressed
--- by one precomputed highway mask. Selecting bands is how a caller narrows a
--- walk without naming a single relation and without naming a language.
--- Counts come from live consensus, so a client shows what is there, not what
--- the manifest says should be there.
+-- A band is a set of relation types sharing a read-time rank, addressed by one
+-- precomputed highway mask. Selecting bands is how a caller narrows a read
+-- without naming a single relation and without naming a language.
+--
+-- Two functions, because they cost different amounts. relation_band_catalog()
+-- is the NAMING — IMMUTABLE, no table access, safe to JOIN inside any read.
+-- relation_bands() adds LIVE consensus counts, which is a full aggregate over
+-- the consensus tree (measured 1.34s at 5.66M rows), so it belongs in a catalog
+-- call a client makes once and caches — never in a per-query join.
+CREATE OR REPLACE FUNCTION relation_band_catalog()
+    RETURNS TABLE(band integer, name text, rank double precision)
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    VALUES
+      (0,  'mandate',              1.00::double precision),
+      (1,  'definitional',         0.97),
+      (2,  'taxonomic',            0.90),
+      (3,  'equivalence',          0.82),
+      (4,  'partitive',            0.73),
+      (5,  'causal',               0.64),
+      (6,  'oppositional',         0.45),
+      (7,  'associative',          0.36),
+      (8,  'tensor_calculation',   0.27),
+      (9,  'lexical_glue',         0.18),
+      (10, 'scalar_valued',        0.12),
+      (11, 'standards_structural', 0.08),
+      (12, 'probationary',         0.05)
+$$;
+
 CREATE OR REPLACE FUNCTION relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)
@@ -22,21 +45,7 @@ CREATE OR REPLACE FUNCTION relation_bands()
            b.rank,
            count(live.type_id)::bigint,
            COALESCE(sum(live.rows), 0)::bigint
-    FROM (VALUES
-            (0,  'mandate',              1.00::double precision),
-            (1,  'definitional',         0.97),
-            (2,  'taxonomic',            0.90),
-            (3,  'equivalence',          0.82),
-            (4,  'partitive',            0.73),
-            (5,  'causal',               0.64),
-            (6,  'oppositional',         0.45),
-            (7,  'associative',          0.36),
-            (8,  'tensor_calculation',   0.27),
-            (9,  'lexical_glue',         0.18),
-            (10, 'scalar_valued',        0.12),
-            (11, 'standards_structural', 0.08),
-            (12, 'probationary',         0.05)
-         ) AS b(band, name, rank)
+    FROM relation_band_catalog() b
     LEFT JOIN live ON live.band = b.band
     GROUP BY b.band, b.name, b.rank
     ORDER BY b.band
