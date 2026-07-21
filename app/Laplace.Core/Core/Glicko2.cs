@@ -33,8 +33,20 @@ public static unsafe class Glicko2
     public const long DefaultTauFp1e9 = 500_000_000L;
 
     public const long ScoreLoss = 0L;
+
+    /// <summary>
+    /// Draw score. MIRRORS <c>kScoreHalfFp</c> in engine/core/src/attestation_engine.c,
+    /// which is the definition; <see cref="NativeDrawScoreFp"/> reads it back so a
+    /// drift between the two fails a test instead of silently reclassifying
+    /// outcomes. Nothing on a write path should branch on this constant — call
+    /// the native classifier (AttestationMergeMath.ClassifyOutcome).
+    /// </summary>
     public const long ScoreDraw = 500_000_000L;
+
     public const long ScoreWin = 1_000_000_000L;
+
+    /// <summary>The native draw threshold, for parity assertions.</summary>
+    internal static long NativeDrawScoreFp() => NativeInterop.LaplaceAttestationScoreDrawFp();
 
     public static long EffectiveMuFp1e9(long ratingFp1e9, long rdFp1e9)
     {

@@ -148,6 +148,34 @@ int laplace_attestation_outcome_from_score_fp(int64_t score_fp, int16_t* out_out
     return 0;
 }
 
+/* Net outcome of an AGGREGATED cell: games observations whose fixed-point scores
+ * sum to sum_score_fp. The comparison is sum vs games*half, NOT (sum/games) vs
+ * half -- integer division would silently reclassify (games=2, sum=1e9+1 is a
+ * CONFIRM but divides to exactly half). Falls back to per-game averaging only
+ * when games*half would overflow, which no real batch reaches.
+ *
+ * This exists so the draw threshold has ONE home. The managed merge lane
+ * (AttestationMergeMath.ClassifyOutcome) previously reimplemented this rule
+ * against its own copy of the 500000000 constant -- two definitions of what
+ * "draw" means, free to drift. */
+int laplace_attestation_outcome_from_totals_fp(
+    int64_t games, int64_t sum_score_fp, int16_t* out_outcome) {
+    if (!out_outcome) return -1;
+    if (games <= 0) { *out_outcome = LAPLACE_ATTESTATION_OUTCOME_DRAW; return 0; }
+
+    if (games <= INT64_MAX / kScoreHalfFp) {
+        int64_t draw_total = games * kScoreHalfFp;
+        if (sum_score_fp > draw_total)      *out_outcome = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
+        else if (sum_score_fp < draw_total) *out_outcome = LAPLACE_ATTESTATION_OUTCOME_REFUTE;
+        else                                *out_outcome = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+        return 0;
+    }
+
+    return laplace_attestation_outcome_from_score_fp(sum_score_fp / games, out_outcome);
+}
+
+int64_t laplace_attestation_score_draw_fp(void) { return kScoreHalfFp; }
+
 int laplace_attestation_outcome_from_score(double score, int16_t* out_outcome) {
     if (!out_outcome) return -1;
     double s = score;

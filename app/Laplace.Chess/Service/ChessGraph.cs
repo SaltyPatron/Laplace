@@ -7,11 +7,15 @@ namespace Laplace.Chess.Service;
 
 public static class ChessGraph
 {
+    // PlyOutcome is bit-identical to the attestation outcome enum on purpose, so
+    // the score points are the Glicko2 constants — not a fourth transcription of
+    // the same three literals. (Glicko2.ScoreDraw is itself pinned against the
+    // native kScoreHalfFp definition by Glicko2Tests.)
     public static long ScoreFp1e9(PlyOutcome outcome) => outcome switch
     {
-        PlyOutcome.Win => 1_000_000_000L,
-        PlyOutcome.Draw => 500_000_000L,
-        _ => 0L,
+        PlyOutcome.Win => Glicko2.ScoreWin,
+        PlyOutcome.Draw => Glicko2.ScoreDraw,
+        _ => Glicko2.ScoreLoss,
     };
 
     // AGGREGATING lane only: deduped substructure/position outcome deposits + the MOVE edge.

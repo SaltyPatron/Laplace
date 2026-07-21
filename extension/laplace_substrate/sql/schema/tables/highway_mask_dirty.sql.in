@@ -12,8 +12,18 @@
 -- rebuild is a rare REGENERATE tool for highway bit renumbering only.
 --
 -- Capturing the set here instead makes it exact, unbounded, and deduplicated by the
--- primary key, with no client memory and no overflow path. consensus_upsert appends;
--- highway_mask_drain() consumes and deletes.
+-- primary key, with no client memory and no overflow path.
+--
+-- SUPERSEDED ON THE INGEST PATH (2026-07-21). The fold no longer queues here and
+-- no ingest drains it: highway_mask_deposit runs INLINE in every lane, which is
+-- O(pairs the fold already holds in RAM) with zero consensus re-reads, versus this
+-- queue's O(touched entities x consensus probes) recompute in one serial pass at
+-- the end of a run. What survives here is the REPAIR path, which deposit cannot
+-- express: deposit only OR-accumulates, so anything that must CLEAR bits --
+-- per-source eviction removing an entity's last governed edge -- queues the
+-- affected entities here and calls highway_mask_drain(), whose
+-- highway_mask_refresh recomputes each mask from scratch and can therefore clear.
+-- (highway_mask_rebuild remains the full REGENERATE tool for bit renumbering.)
 --
 -- UNLOGGED: pure derived work-queue. Losing it on a crash costs a regenerate, never
 -- data — and the masks it would have written are themselves recomputable from

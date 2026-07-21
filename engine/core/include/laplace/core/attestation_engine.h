@@ -76,6 +76,14 @@ int laplace_attestation_outcome_from_score(double score, int16_t* out_outcome);
 
 int laplace_attestation_outcome_from_score_fp(int64_t score_fp, int16_t* out_outcome);
 
+/* Net outcome of an aggregated (games, sum_score_fp) cell. THE definition of the
+ * draw threshold for every caller, managed included — see the note in the .c. */
+int laplace_attestation_outcome_from_totals_fp(
+    int64_t games, int64_t sum_score_fp, int16_t* out_outcome);
+
+/* The draw threshold itself, so no other layer has to restate the literal. */
+int64_t laplace_attestation_score_draw_fp(void);
+
 int laplace_attestation_categorical_build(
     const char*      surface_relation,
     const hash128_t* subject,

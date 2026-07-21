@@ -408,11 +408,49 @@ public static class IngestBatchPipeline
             new BoundedChannelOptions(workers * 4)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = true });
 
+        // FEW-BIG-FILES SOURCES SEGMENT INSIDE THE FILE (2026-07-21). One worker
+        // per file is right when files outnumber workers, and badly wrong when
+        // they don't: a source of two 400 MB files pinned two compose workers and
+        // idled the other ten, with no intra-file parallelism anywhere because
+        // DecomposerMultiFile seals the monolith path away.
+        //
+        // Peek at most workers+1 file sources (they are CHEAP handles that read
+        // NOTHING). If the stream ends inside that peek, the whole source is
+        // smaller than the pool, so each file is cut into record-aligned chunks
+        // across MonolithSegmenter — the same machinery a single-file source
+        // already uses — sized so total compose concurrency lands near the pool
+        // width instead of the file count. Otherwise nothing changes.
+        var peeked = new List<IFileRecordSource<TRecord>>(workers + 1);
+        bool exhaustedInPeek = true;
+        var fileEnumerator = stream.FilesAsync(ct).GetAsyncEnumerator(ct);
+        while (peeked.Count <= workers)
+        {
+            if (!await fileEnumerator.MoveNextAsync())
+                break;
+            peeked.Add(fileEnumerator.Current);
+            if (peeked.Count > workers) exhaustedInPeek = false;
+        }
+
+        int segmentsPerFile = 1;
+        if (exhaustedInPeek && peeked.Count > 0)
+            segmentsPerFile = Math.Max(1,
+                Math.Max(1, IngestTopology.Current.ComposeWorkers) / peeked.Count);
+
         var dispatcher = Task.Run(async () =>
         {
-            await foreach (var source in stream.FilesAsync(ct))
-                await sources.Writer.WriteAsync(source, ct);
-            sources.Writer.Complete();
+            try
+            {
+                foreach (var source in peeked)
+                    await sources.Writer.WriteAsync(source, ct);
+                if (!exhaustedInPeek)
+                    while (await fileEnumerator.MoveNextAsync())
+                        await sources.Writer.WriteAsync(fileEnumerator.Current, ct);
+                sources.Writer.Complete();
+            }
+            finally
+            {
+                await fileEnumerator.DisposeAsync();
+            }
         }, ct);
 
         var workerTasks = new Task[workers];
@@ -421,11 +459,24 @@ public static class IngestBatchPipeline
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
-                    var handler = handlerFactory(source.FileLabel);
                     var config = configFactory(source.FileLabel);
-                    await foreach (var change in RunAsync(
-                        new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)),
-                        handler, config, ct))
+                    var records = new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct));
+                    int segments = segmentsPerFile > 1
+                        ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
+                        : 1;
+
+                    var changes = segments > 1
+                        ? MonolithSegmenter.RunSegmentedAsync(
+                            records,
+                            _ => handlerFactory(source.FileLabel),
+                            _ => configFactory(source.FileLabel),
+                            segments,
+                            MonolithSegmenter.ResolveChunkRecords(config),
+                            source.FileLabel,
+                            ct)
+                        : RunAsync(records, handlerFactory(source.FileLabel), config, ct);
+
+                    await foreach (var change in changes)
                         await outCh.Writer.WriteAsync(change, ct);
                     await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
                 }
