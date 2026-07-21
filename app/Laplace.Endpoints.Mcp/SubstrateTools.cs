@@ -51,14 +51,20 @@ internal sealed class SubstrateTools
             Schema(("prompt", "string", "the message", true),
                    ("session", "string", "session key for continuity", false))),
         Tool("walk",
-            "Beam-walk the consensus graph from a prompt (laplace.walk_branches) and realize each path as text. Optionally constrain to one relation type (canonical name, e.g. IS_A).",
-            Schema(("prompt", "string", "starting content", true),
+            "Beam-walk the consensus graph from a prompt (laplace.walk_branches) and realize each path as text. Optionally constrain to one relation type (canonical name, e.g. IS_A). Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text.",
+            Schema(("prompt", "string", "starting content (omit if entity given)", false),
+                   ("entity", "string", "hex entity id to start from, e.g. from bubble", false),
                    ("relation_type", "string", "canonical relation name to constrain the walk", false),
                    ("depth", "integer", "walk depth, default 4", false),
                    ("breadth", "integer", "beam breadth, default 5", false))),
+        Tool("bubble",
+            "Bubble a surface term up the mesh to the highway (laplace.bubble_up): surface -> sense -> synset, then the hub above it (IS_INSTANCE_OF/IS_A) and every relation channel available there with edge counts. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge.",
+            Schema(("term", "string", "the surface word or phrase", true),
+                   ("k", "integer", "sense frontier width, default 5", false))),
         Tool("facts",
-            "Salient rated facts about a word (laplace.salient_facts): typed relations ranked by eff_mu with witness counts.",
-            Schema(("term", "string", "the word", true),
+            "Salient rated facts about a word (laplace.salient_facts): typed relations ranked by eff_mu with witness counts. Pass entity (hex id from bubble/walk) to read facts at a specific mesh layer instead of resolving text at the surface.",
+            Schema(("term", "string", "the word (omit if entity given)", false),
+                   ("entity", "string", "hex entity id to read from, e.g. from bubble", false),
                    ("limit", "integer", "max facts, default 24", false))),
         Tool("health",
             "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts().",
@@ -84,28 +90,64 @@ internal sealed class SubstrateTools
                     """,
                     DefaultRowCap, ("p", Req(args, "prompt")), ("s", Opt(args, "session"))),
                 "chat" => ChatTurn(args),
+                "bubble" => Rows(_dbReadOnly,
+                    """
+                    WITH b AS MATERIALIZED (
+                        SELECT * FROM laplace.bubble_up(laplace.resolve(@term), NULL, @k)
+                    ),
+                    top AS MATERIALIZED (SELECT synset_id AS id FROM b LIMIT 1)
+                    SELECT 'sense' AS kind, b.via_relation AS via,
+                           encode(b.sense_id, 'hex') AS entity,
+                           laplace.render(b.sense_id) AS label,
+                           b.witnesses
+                    FROM b
+                    UNION ALL
+                    SELECT 'synset', b.via_relation, encode(b.synset_id, 'hex'),
+                           laplace.render(b.synset_id), b.witnesses
+                    FROM b
+                    UNION ALL
+                    SELECT 'hub', laplace.relation_canonical(c.type_id),
+                           encode(c.object_id, 'hex'), laplace.render(c.object_id),
+                           c.witness_count
+                    FROM top JOIN laplace.consensus c ON c.subject_id = top.id
+                    WHERE c.type_id IN (laplace.relation_type_id('IS_INSTANCE_OF'),
+                                        laplace.relation_type_id('IS_A'))
+                    UNION ALL
+                    SELECT 'channel', laplace.relation_canonical(c.type_id),
+                           encode(top.id, 'hex'), NULL, count(*)
+                    FROM top JOIN laplace.consensus c ON c.subject_id = top.id
+                    GROUP BY laplace.relation_canonical(c.type_id), top.id
+                    """,
+                    DefaultRowCap, ("term", Req(args, "term")), ("k", Int(args, "k", 5))),
                 "walk" => Rows(_dbReadOnly,
                     """
+                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve(@p)
+                                              ELSE decode(@e, 'hex') END AS id)
                     SELECT w.depth,
                            laplace.realize_path(w.path, w.types) AS path,
                            round(w.eff_mu, 1) AS eff_mu,
                            round(w.path_mu, 1) AS path_mu,
                            w.witnesses
-                    FROM laplace.walk_branches(
-                             laplace.resolve(@p),
+                    FROM node, laplace.walk_branches(
+                             node.id,
                              CASE WHEN @t IS NULL THEN NULL ELSE laplace.relation_type_id(@t) END,
                              @depth, @breadth) w
                     ORDER BY w.depth, w.path_mu DESC
                     """,
                     DefaultRowCap,
-                    ("p", Req(args, "prompt")), ("t", Opt(args, "relation_type")),
+                    ("p", NodeText(args, "prompt")), ("e", Opt(args, "entity")),
+                    ("t", Opt(args, "relation_type")),
                     ("depth", Int(args, "depth", 4)), ("breadth", Int(args, "breadth", 5))),
                 "facts" => Rows(_dbReadOnly,
                     """
-                    SELECT type, fact, round(eff_mu, 1) AS eff_mu, witnesses
-                    FROM laplace.salient_facts(laplace.word_id(@term), NULL, @limit)
+                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.word_id(@term)
+                                              ELSE decode(@e, 'hex') END AS id)
+                    SELECT encode(node.id, 'hex') AS entity,
+                           f.type, f.fact, round(f.eff_mu, 1) AS eff_mu, f.witnesses
+                    FROM node, laplace.salient_facts(node.id, NULL, @limit) f
                     """,
-                    DefaultRowCap, ("term", Req(args, "term")), ("limit", Int(args, "limit", 24))),
+                    DefaultRowCap, ("term", NodeText(args, "term")), ("e", Opt(args, "entity")),
+                    ("limit", Int(args, "limit", 24))),
                 "health" => Rows(_dbReadOnly,
                     """
                     SELECT x.metric, x.value
@@ -287,6 +329,20 @@ internal sealed class SubstrateTools
         ?? throw new ArgumentException($"missing required argument: {name}");
 
     private static string? Opt(JsonObject? args, string name) => args?[name]?.GetValue<string>();
+
+    /// <summary>
+    /// Text half of a text-or-entity tool: either is accepted, but not neither.
+    /// Returning null when an entity was supplied keeps the SQL CASE honest — the
+    /// text branch is never evaluated, so an absent term is not a silent empty
+    /// resolve() that would read as "the substrate doesn't know this".
+    /// </summary>
+    private static string? NodeText(JsonObject? args, string name)
+    {
+        var text = Opt(args, name);
+        if (text is not null) return text;
+        if (Opt(args, "entity") is not null) return null;
+        throw new ArgumentException($"missing required argument: {name} (or entity)");
+    }
 
     private static int Int(JsonObject? args, string name, int fallback) =>
         args?[name]?.GetValue<int>() ?? fallback;
