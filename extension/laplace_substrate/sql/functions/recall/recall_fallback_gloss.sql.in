@@ -1,7 +1,10 @@
-CREATE OR REPLACE FUNCTION recall_fallback_gloss(p_prompt text, p_topic bytea)
+-- Labelled gloss, the default answer when the caller named no read shape.
+DROP FUNCTION IF EXISTS recall_fallback_gloss(text, bytea);
+
+CREATE OR REPLACE FUNCTION recall_fallback_gloss(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-    FROM define_fast(p_topic, recall_context_exclude(p_prompt, p_topic), 3) d
+    FROM define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
 $$;

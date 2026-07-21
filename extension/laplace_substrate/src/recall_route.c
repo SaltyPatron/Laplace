@@ -1,7 +1,13 @@
-
-
-
-
+/* String helpers and the canonical intent vocabulary for the recall responders.
+ *
+ * This file used to hold a ~30-pattern English regex ladder (route_prompt_impl)
+ * that guessed a read intent and a relation type from the surface form of a
+ * prompt: "^what\s+does\s+(.+?)\s+mean", "^is\s+(?:a|an|the)\s+", "vs\.?",
+ * "^tell\s+me\s+about", and so on. It was the one place where a substrate whose
+ * identity law is content-addressed and language-agnostic could only be
+ * questioned in English. Callers now pass the intent structurally — see
+ * laplace.recall_intent() and laplace.query_shapes().
+ */
 
 #include "postgres.h"
 
@@ -13,14 +19,6 @@
 #include "utils/fmgrprotos.h"
 
 #include "recall_route.h"
-static void
-route_clear(RouteResult *r)
-{
-    r->intent = NULL;
-    r->phrase = NULL;
-    r->phrase2 = NULL;
-    r->type_name = NULL;
-}
 
 void
 route_free(RouteResult *r)
@@ -29,7 +27,10 @@ route_free(RouteResult *r)
     if (r->phrase) pfree(r->phrase);
     if (r->phrase2) pfree(r->phrase2);
     if (r->type_name) pfree(r->type_name);
-    route_clear(r);
+    r->intent = NULL;
+    r->phrase = NULL;
+    r->phrase2 = NULL;
+    r->type_name = NULL;
 }
 
 char *
@@ -41,10 +42,6 @@ text_to_cstr(Datum d)
 char *
 trim_dup(const char *s)
 {
-    
-
-
-
     return text_to_cstr(DirectFunctionCall1Coll(btrim1, DEFAULT_COLLATION_OID,
                                                 CStringGetTextDatum(s)));
 }
@@ -62,300 +59,32 @@ lower_dup(const char *s)
                                                 CStringGetTextDatum(s)));
 }
 
-static bool
-str_prefix_ci(const char *s, const char *pfx)
+/* The read shapes recall_intent() dispatches. Kept in one place so the C
+ * dispatch, the SQL catalog (query_shapes) and any UI stay in parity. */
+static const char *const route_intents[] = {
+    "define",                   /* witnessed glosses, sense-disambiguated */
+    "what_is",                  /* gloss + IS_A ladder upward */
+    "describe",                 /* salient facts across the content bands */
+    "synonyms",
+    "translate",                /* cross-lingual surfaces via the ILI hub */
+    "languages",                /* which languages witness this concept */
+    "examples",
+    "related",                  /* outgoing edges of one relation type */
+    "related_in",               /* incoming edges of one relation type */
+    "is_a",                     /* witnessed IS_A chain between two topics */
+    "reason",                   /* how two topics relate, with verdict */
+    "walk",                     /* greedy strongest-edge chain */
+    "complete",                 /* COMPLETES_TO beam */
+    "fallback",                 /* gloss, then walk */
+};
+
+bool
+route_intent_known(const char *intent)
 {
-    char *l = lower_dup(s);
-    char *p = lower_dup(pfx);
-    bool  ok = (strncmp(l, p, strlen(p)) == 0);
-
-    pfree(l);
-    pfree(p);
-    return ok;
-}
-
-static bool
-str_in_ci(const char *s, const char *const *opts, int n)
-{
-    char *l = lower_dup(s);
-    bool  ok = false;
-
-    for (int i = 0; i < n; i++)
-    {
-        if (strcmp(l, opts[i]) == 0)
-        {
-            ok = true;
-            break;
-        }
-    }
-    pfree(l);
-    return ok;
-}
-
-static int
-regexp_groups(const char *str, const char *pat, const char *flags,
-              char **g1, char **g2)
-{
-    Datum      result;
-    ArrayType *arr;
-    Datum     *elems;
-    bool      *nulls;
-    int        nelems;
-
-    *g1 = NULL;
-    *g2 = NULL;
-
-    
-
-    {
-        LOCAL_FCINFO(fcinfo, 3);
-
-        InitFunctionCallInfoData(*fcinfo, NULL, 3, DEFAULT_COLLATION_OID,
-                                 NULL, NULL);
-        fcinfo->args[0].value = CStringGetTextDatum(str);
-        fcinfo->args[0].isnull = false;
-        fcinfo->args[1].value = CStringGetTextDatum(pat);
-        fcinfo->args[1].isnull = false;
-        fcinfo->args[2].value = CStringGetTextDatum(flags);
-        fcinfo->args[2].isnull = false;
-
-        result = regexp_match(fcinfo);
-        if (fcinfo->isnull)
-            return 0;
-    }
-
-    arr = DatumGetArrayTypeP(result);
-    deconstruct_array(arr, TEXTOID, -1, false, TYPALIGN_INT,
-                      &elems, &nulls, &nelems);
-    if (nelems < 1 || nulls[0])
-        return 0;
-
-    *g1 = text_to_cstr(elems[0]);
-    if (nelems >= 2 && !nulls[1])
-        *g2 = text_to_cstr(elems[1]);
-    return 1;
-}
-
-static bool
-try_groups(const char *p, const char *pat, RouteResult *r,
-           const char *intent, const char *type_name, bool need_g2)
-{
-    char *g1 = NULL;
-    char *g2 = NULL;
-
-    if (!regexp_groups(p, pat, "i", &g1, &g2))
+    if (intent == NULL)
         return false;
-    if (need_g2 && g2 == NULL)
-    {
-        if (g1) pfree(g1);
-        if (g2) pfree(g2);
-        return false;
-    }
-
-    r->intent = pstrdup(intent);
-    if (g1) r->phrase = g1;
-    if (g2) r->phrase2 = g2;
-    if (type_name) r->type_name = pstrdup(type_name);
-    return true;
+    for (size_t i = 0; i < lengthof(route_intents); i++)
+        if (strcmp(intent, route_intents[i]) == 0)
+            return true;
+    return false;
 }
-
-static bool
-try_groups_alt(const char *p, const char *pat1, const char *pat2,
-               RouteResult *r, const char *intent, const char *type_name)
-{
-    if (try_groups(p, pat1, r, intent, type_name, false))
-        return true;
-    if (pat2 == NULL)
-        return false;
-    return try_groups(p, pat2, r, intent, type_name, false);
-}
-
-static void
-set_possessive_intent(const char *cap, RouteResult *r)
-{
-    char *lc = lower_dup(cap);
-
-    {
-        const char *def_meaning[] = { "definition", "meaning" };
-        if (str_in_ci(lc, def_meaning, 2))
-            r->intent = pstrdup("define");
-        else if (str_prefix_ci(lc, "synonym"))
-            r->intent = pstrdup("synonyms");
-        else if (str_prefix_ci(lc, "translation"))
-            r->intent = pstrdup("translate");
-        else if (str_prefix_ci(lc, "example"))
-            r->intent = pstrdup("examples");
-        else if (str_prefix_ci(lc, "cause"))
-        {
-            r->intent = pstrdup("related_in");
-            r->type_name = pstrdup("CAUSES");
-        }
-        else
-            r->intent = pstrdup("related");
-    }
-
-    if (str_prefix_ci(lc, "antonym"))
-        r->type_name = pstrdup("IS_ANTONYM_OF");
-    else if (str_prefix_ci(lc, "part"))
-        r->type_name = pstrdup("HAS_PART");
-    else if (str_prefix_ci(lc, "cause") && r->type_name == NULL)
-        r->type_name = pstrdup("CAUSES");
-    else if (str_prefix_ci(lc, "use"))
-        r->type_name = pstrdup("USED_FOR");
-
-    pfree(lc);
-}
-
-void
-route_prompt_impl(const char *prompt, RouteResult *r)
-{
-    char *p;
-    char *g1 = NULL;
-    char *g2 = NULL;
-
-    route_clear(r);
-    p = trim_dup(prompt);
-
-    if (try_groups_alt(p,
-                       "^what\\s+does\\s+(.+?)\\s+mean\\y",
-                       "^(?:define|meaning\\s+of)\\s+(.+)$",
-                       r, "define", NULL))
-        goto done;
-
-    if (try_groups_alt(p,
-                       "^what\\s+(?:is|are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\s+used\\s+for\\??$",
-                       "^uses?\\s+of\\s+(.+?)\\??$",
-                       r, "related", "USED_FOR"))
-        goto done;
-
-    g1 = NULL;
-    g2 = NULL;
-    if (regexp_groups(p,
-                          "^how\\s+(?:are|is)\\s+(.+?)\\s+(?:and|&)\\s+(.+?)\\s+related\\??$",
-                          "i", &g1, &g2) ||
-        (!g1 && regexp_groups(p,
-                                  "^how\\s+(?:is|are)\\s+(.+?)\\s+related\\s+to\\s+(.+?)\\??$",
-                                  "i", &g1, &g2)) ||
-        (!g1 && regexp_groups(p,
-                                  "^(?:relate|relation\\s+(?:between|of))\\s+(.+?)\\s+(?:and|to|&)\\s+(.+?)\\??$",
-                                  "i", &g1, &g2)) ||
-        (!g1 && regexp_groups(p, "^(.+?)\\s+vs\\.?\\s+(.+?)\\??$", "i", &g1, &g2)))
-    {
-        r->intent = pstrdup("reason");
-        r->phrase = g1;
-        r->phrase2 = g2;
-        goto done;
-    }
-
-    if (try_groups(p,
-                   "^(?:translate|how\\s+(?:do|would|can|should)\\s+(?:i|you|we|one)\\s+say|how\\s+to\\s+say|say)\\s+(.+?)\\s+(?:in|to|into)\\s+([a-z][a-z '\\-]*?)\\??$",
-                   r, "translate", NULL, true))
-        goto done;
-    if (try_groups(p,
-                   "^what(?:'s|\\s+is|\\s+are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\s+in\\s+([a-z][a-z '\\-]*?)\\??$",
-                   r, "translate", NULL, true))
-        goto done;
-    if (try_groups(p,
-                   "^(?:translate|how\\s+(?:do|would|can|should)\\s+(?:i|you|we|one)\\s+say|how\\s+to\\s+say)\\s+(.+?)\\??$",
-                   r, "translate", NULL, false))
-        goto done;
-
-    if (try_groups_alt(p,
-                       "^(?:in\\s+)?how\\s+many\\s+languages?\\s+(?:is|are|does|do|has|have|can)?\\s*(.+?)(?:\\s+(?:have|in|cover|witnessed|known|appear|exist|be))?\\??$",
-                       "^(?:what|which)\\s+languages?\\s+(?:is|are|does|do|has|have|can)\\s+(.+?)(?:\\s+(?:have|in|cover|witnessed|known|appear|exist|be))?\\??$",
-                       r, "languages", NULL))
-        goto done;
-    if (try_groups(p, "^languages?\\s+(?:of|for)\\s+(.+?)\\??$", r, "languages", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^(?:is|are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\s+(?:a|an|the)\\s+(.+?)\\??$",
-                   r, "is_a", NULL, true))
-        goto done;
-
-    if (try_groups(p, "^what(?:'s|\\s+is|\\s+are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\??$",
-                   r, "what_is", NULL, false))
-        goto done;
-
-    /* "facts about give" previously fell to the fallback, whose leftmost-span
-     * resolution took 'facts' as the topic (Issue 50). Route the facts/info
-     * framing to describe so the phrase after the preposition is the topic. */
-    if (try_groups(p, "^(?:tell\\s+me\\s+about|describe|about|(?:facts|information|info)\\s+(?:about|on|of|for))\\s+(.+?)\\??$",
-                   r, "describe", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^(?:walk|continue|free[- ]?associate(?:\\s+from)?)\\s+(.+?)\\??$",
-                   r, "walk", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^complete\\s+(.+?)\\??$", r, "complete", NULL, false))
-        goto done;
-
-    if (try_groups(p,
-                   "^(?:what\\s+(?:word\\s+|comes?\\s+)?(?:comes?\\s+)?after|what\\s+follows?|after|follows?)\\s+(.+?)\\??$",
-                   r, "related", "PRECEDES", false))
-        goto done;
-
-    if (try_groups(p,
-                   "^(?:what\\s+(?:word\\s+|comes?\\s+)?(?:comes?\\s+)?before|what\\s+precedes?|before|precedes?)\\s+(.+?)\\??$",
-                   r, "related", "FOLLOWS", false))
-        goto done;
-
-    g1 = NULL;
-    if (regexp_groups(p,
-                          "^(?:(?:and|what\\s+about)\\s+)?(?:its|their|his|her)\\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\\??$",
-                          "i", &g1, &g2))
-    {
-        set_possessive_intent(g1, r);
-        pfree(g1);
-        goto done;
-    }
-
-    if (try_groups(p, "^(?:what\\s+about|and)\\s+(?:it|that|this|them|those)\\??$",
-                   r, "describe", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^antonyms?\\s+(?:of|for)?\\s*(.+?)\\??$",
-                   r, "related", "IS_ANTONYM_OF", false))
-        goto done;
-
-    if (try_groups(p, "^parts?\\s+of\\s+(.+?)\\??$", r, "related", "HAS_PART", false))
-        goto done;
-
-    if (try_groups_alt(p,
-                       "^(?:what\\s+causes|causes?\\s+of)\\s+(.+?)\\??$",
-                       NULL,
-                       r, "related_in", "CAUSES"))
-        goto done;
-
-    if (try_groups(p, "^what\\s+does\\s+(.+?)\\s+cause\\??$", r, "related", "CAUSES", false))
-        goto done;
-
-    if (try_groups(p, "synonyms?\\s+(?:of|for)?\\s*(.+)$", r, "synonyms", NULL, false))
-        goto done;
-
-    if (try_groups(p, "examples?\\s+(?:of|for)?\\s*(.+)$", r, "examples", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^how\\s+(?:do\\s+(?:i|you|we)|to)\\s+(.+?)(?:\\s+in\\s+\\w+)?$",
-                   r, "related", "HAS_EXAMPLE", false))
-        goto done;
-
-    if (try_groups(p,
-                   "^(?:show\\s+(?:me\\s+)?(?:an?\\s+)?)?(?:code\\s+)?example\\s+(?:of|for)\\s+(.+?)$",
-                   r, "related", "HAS_EXAMPLE", false))
-        goto done;
-
-    if (try_groups(p,
-                   "^(?:write|generate|implement|create|develop|build|code|construct|make)\\s+"
-                   "(?:(?:a|an|some|the)\\s+)?"
-                   "(.+?)(?:\\s+(?:function|method|script|snippet|code|program|class|application|app|website|service|tool))?$",
-                   r, "related", "HAS_EXAMPLE", false))
-        goto done;
-
-    r->intent = pstrdup("fallback");
-    r->phrase = pstrdup(p);
-
-done:
-    pfree(p);
-}
-

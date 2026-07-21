@@ -91,6 +91,123 @@
         }
       }
     },
+    "/v1/query/shapes": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryShapesResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/query/bands": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationBandsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/query": {
+      "post": {
+        "tags": [
+          "query"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/completions": {
       "post": {
         "tags": [
@@ -6812,6 +6929,283 @@
           }
         }
       },
+      "QueryRequest": {
+        "required": [
+          "topic"
+        ],
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "topic2": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "shape": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "bands": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "relation_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lang": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "context": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "breadth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "steps": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "spread": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "max_stride": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "seed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "directed": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "use_geometry": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "QueryResponse": {
+        "required": [
+          "object",
+          "shape",
+          "topic_id",
+          "topic_label",
+          "topic2_id",
+          "topic2_label",
+          "bands",
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "shape": {
+            "type": "string"
+          },
+          "topic_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "topic_label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "topic2_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "topic2_label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "bands": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueryRow"
+            }
+          }
+        }
+      },
+      "QueryRow": {
+        "required": [
+          "reply",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "reply": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "QueryShape": {
+        "required": [
+          "shape",
+          "summary",
+          "needs_topic2",
+          "needs_type",
+          "accepts_lang"
+        ],
+        "type": "object",
+        "properties": {
+          "shape": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "needs_topic2": {
+            "type": "boolean"
+          },
+          "needs_type": {
+            "type": "boolean"
+          },
+          "accepts_lang": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QueryShapesResponse": {
+        "required": [
+          "object",
+          "shapes"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "shapes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueryShape"
+            }
+          }
+        }
+      },
       "QuoteNextStep": {
         "required": [
           "execute_header",
@@ -7148,6 +7542,71 @@
           },
           "next": {
             "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "RelationBand": {
+        "required": [
+          "band",
+          "name",
+          "rank",
+          "relation_types",
+          "consensus_rows"
+        ],
+        "type": "object",
+        "properties": {
+          "band": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rank": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "relation_types": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consensus_rows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "RelationBandsResponse": {
+        "required": [
+          "object",
+          "bands"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelationBand"
+            }
           }
         }
       },
@@ -8032,6 +8491,9 @@
   "tags": [
     {
       "name": "core"
+    },
+    {
+      "name": "query"
     },
     {
       "name": "openai"

@@ -10,6 +10,16 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal interface ISubstrateClient
 {
 
+    Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct);
+
+    Task<IReadOnlyList<RelationBand>> RelationBandsAsync(CancellationToken ct);
+
+    Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct);
+
+    Task<IReadOnlyList<QueryRow>> QueryAsync(
+        string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
+        byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct);
+
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 

@@ -1,0 +1,86 @@
+@layer components {
+  .picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .summary {
+    font-size: var(--text-xs);
+    margin: 0;
+  }
+
+  .clear {
+    margin-left: auto;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .clear:hover {
+    color: var(--color-text-primary);
+  }
+
+  .grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /* Salience is the ordering principle of the band list, so it is also the
+     visual weight: a definitional edge reads louder than a Unicode property. */
+  .band {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-pill);
+    background: var(--color-bg-panel-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: border-color var(--duration-fast) var(--ease-standard),
+                color var(--duration-fast) var(--ease-standard),
+                background var(--duration-fast) var(--ease-standard);
+    opacity: calc(0.55 + 0.45 * var(--band-weight, 0.5));
+  }
+
+  .band:hover {
+    border-color: var(--primitive-blue-500);
+    color: var(--color-text-primary);
+  }
+
+  .band.on {
+    background: var(--primitive-blue-600);
+    border-color: var(--primitive-blue-600);
+    color: #fff;
+    opacity: 1;
+  }
+
+  .bandName {
+    font-weight: 600;
+  }
+
+  .bandCount {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+}
