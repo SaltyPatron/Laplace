@@ -72,18 +72,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly HashSet<(Hash128 Ent, Hash128 Typ)> _depositedMaskPairs = new();
     private const int DepositedMaskPairsCap = 8_388_608;
 
-    // Bulk runs defer highway-mask maintenance out of the per-batch fold (where
-    // it was ~2M entity UPDATEs contending with the concurrent COPY load) and
-    // into ONE targeted refresh at CompleteBulkRunAsync — the same bulk-load-
-    // then-build-index model the consensus secondary indexes already use. This
-    // set is the entities this run touched (subject/object of any folded cell);
-    // at completion we highway_mask_refresh exactly those, so untouched entities
-    // are never rescanned. Overflow past the cap falls back to a full rebuild so
-    // resident memory stays bounded. Mutated only under _upsertGate.
-    // The bulk touched-set lives server-side in highway_mask_dirty, populated by
-    // consensus_upsert in the same transaction that writes each cell. The former
-    // client-side HashSet + 8,388,608 cap is gone: it made large ingests discard
-    // the set and fall back to a full-substrate highway_mask_rebuild.
+    // There is NO deferred mask phase (2026-07-21). Masks deposit inline in every
+    // lane, bulk included — see UpsertDeltaAsync. Both former deferral schemes are
+    // gone: the client-side touched-entity HashSet (capped, and any ingest past the
+    // cap discarded it and fell back to a full-substrate highway_mask_rebuild) and
+    // the server-side highway_mask_dirty queue drained at CompleteBulkRunAsync
+    // (exact and uncapped, but still an O(touched entities x consensus probes)
+    // recompute parked at the end of the run).
 
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,

@@ -1,6 +1,13 @@
 -- Drain the mask refresh queue: recompute highway_mask for exactly the entities whose
--- consensus participation changed, then forget them. This is the INCREMENTAL path that
--- replaces an ingest-triggered highway_mask_rebuild (full pass over every entity).
+-- consensus participation changed, then forget them. Narrower than
+-- highway_mask_rebuild (full pass over every entity).
+--
+-- NOT ON THE INGEST PATH (2026-07-21). Ingest deposits masks inline via
+-- highway_mask_deposit and neither queues nor drains. This is the REPAIR verb for the
+-- one thing deposit cannot do: deposit only OR-accumulates bits ON, so a mutation that
+-- must turn bits OFF -- per-source eviction removing an entity's last governed edge --
+-- queues the affected entities into highway_mask_dirty and calls this, because
+-- highway_mask_refresh recomputes from scratch and can therefore clear.
 --
 -- Batched with a COMMIT per batch so a long drain never holds one transaction open, and
 -- so an interrupted drain keeps its progress: rows are deleted only after their masks
