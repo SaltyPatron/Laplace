@@ -91,3 +91,12 @@
     max-width: 92%;
   }
 }
+
+@layer components {
+  .modeHint {
+    margin: 0;
+    font-size: var(--text-xs);
+    flex: 1;
+    min-width: 0;
+  }
+}

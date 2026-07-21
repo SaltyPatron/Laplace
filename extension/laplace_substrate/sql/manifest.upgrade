@@ -160,7 +160,9 @@ functions/converse/realize_path.sql.in
 functions/converse/isa_path.sql.in
 functions/converse/epistemic_status.sql.in
 functions/converse/contrast.sql.in
-functions/converse/parse_ask.sql.in
+functions/converse/recall_intent.sql.in
+functions/converse/query_shapes.sql.in
+functions/converse/relation_bands.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
 functions/converse/witness_precedes_chain.sql.in
@@ -199,6 +201,7 @@ functions/structural/model_recipes.sql.in
 functions/lexical/word_case_variants.sql.in
 functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/drop_retired_case_surface.sql.in
+functions/converse/drop_retired_english_router.sql.in
 functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/lexical_peers.sql.in

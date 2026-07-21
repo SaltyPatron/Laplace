@@ -90,6 +90,20 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<RelationBand>> RelationBandsAsync(CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<QueryRow>> QueryAsync(
+        string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
+        byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -332,6 +346,37 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             ],
             Truncated: false,
             MaxNodes: 160));
+
+    public Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<QueryShape>>(
+        [
+            new QueryShape("define", "witnessed glosses", false, false, false),
+            new QueryShape("related", "outgoing edges of one relation type", false, true, false),
+            new QueryShape("is_a", "witnessed IS_A chain between two topics", true, false, false),
+        ]);
+
+    public Task<IReadOnlyList<RelationBand>> RelationBandsAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<RelationBand>>(
+        [
+            new RelationBand(2, "taxonomic", 0.90, 11, 89_414),
+            new RelationBand(4, "partitive", 0.73, 26, 9_097),
+        ]);
+
+    public Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct)
+    {
+        if (reference is "unknown-word")
+            return Task.FromResult<(byte[], string)?>(null);
+        return Task.FromResult<(byte[], string)?>((Convert.FromHexString(WhaleIdHex), "whale"));
+    }
+
+    public Task<IReadOnlyList<QueryRow>> QueryAsync(
+        string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
+        byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<QueryRow>>(
+        [
+            new QueryRow("whale IS_A cetacean.", 0.91m, 42),
+            new QueryRow("A whale is a marine mammal.", 0.84m, 17),
+        ]);
 
     private static ExploreEntityResponse SampleEntity(string idHex) => new(
         idHex, "whale", 2, "Word", true, 42,

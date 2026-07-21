@@ -422,6 +422,37 @@ phase_sync_extension() {
   else
     echo "OK laplace_substrate already at $avail"
   fi
+  verify_c_symbols
+}
+
+# Orphan gate. The install/upgrade SQL is CREATE-OR-REPLACE over the manifest:
+# it adds and replaces, it never drops. A C function removed from the manifest
+# (or renamed) without a matching drop_retired_*.sql.in stays in the catalog
+# bound to a symbol the freshly installed .so no longer exports — it errors only
+# when someone calls it. sync-extension's existing nm check covers symbols the
+# UPGRADE bridge binds; it cannot see rows already in the catalog. This closes
+# that gap: EVERY laplace C-bound function must resolve its symbol in the loaded
+# image, or the phase fails loudly here instead of at some user's first call.
+verify_c_symbols() {
+  local so sym missing=0
+  so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
+  [[ -f "$so" ]] || { echo "::error::verify_c_symbols: $so not found"; return 1; }
+  command -v nm >/dev/null 2>&1 || { echo "verify_c_symbols: nm unavailable — skipped"; return 0; }
+  echo "===== GATE — C symbol integrity ====="
+  while IFS= read -r sym; do
+    [[ -z "$sym" ]] && continue
+    if ! nm -D "$so" 2>/dev/null | grep -q " T ${sym}\$"; then
+      echo "::error::orphaned C function: laplace catalog binds '${sym}' but the installed .so does not export it — a manifest removal is missing its drop_retired_*.sql.in" >&2
+      missing=$((missing+1))
+    fi
+  done < <(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
+      "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace \
+       WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c')")
+  if [[ "$missing" -gt 0 ]]; then
+    echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
+    return 1
+  fi
+  echo "OK all laplace C functions resolve in the loaded image"
 }
 
 phase_tune_pg() {

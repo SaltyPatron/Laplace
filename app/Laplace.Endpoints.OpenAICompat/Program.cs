@@ -100,6 +100,7 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
 app.MapCoreEndpoints();
+app.MapQueryEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
