@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BrowserRouter, Link as RouterLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { AppHeader, NavTabs, TenantField } from '@ui';
 import { ChatView } from './chat/ChatView';
+import { HomeView } from './home/HomeView';
 import { QueryConsole } from './query/QueryConsole';
 import { BillingView } from './billing/BillingView';
 import { ChessView } from './chess/ChessView';
@@ -11,10 +12,10 @@ import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import styles from './App.module.css';
 
-type Tab = 'chat' | 'query' | 'billing' | 'chess-play' | 'chess-lab';
+type Tab = 'home' | 'chat' | 'query' | 'billing' | 'chess-play' | 'chess-lab';
 
 function MainShell() {
-  const [tab, setTab] = useState<Tab>('chat');
+  const [tab, setTab] = useState<Tab>('home');
   const { tenant, setTenant } = useAppStore();
   const nav = useNavigate();
 
@@ -26,6 +27,7 @@ function MainShell() {
         nav={
           <NavTabs
             tabs={[
+              { id: 'home', label: 'Home', active: tab === 'home', onClick: () => setTab('home') },
               { id: 'chat', label: 'Chat', active: tab === 'chat', onClick: () => setTab('chat') },
               { id: 'query', label: 'Query', active: tab === 'query', onClick: () => setTab('query') },
               { id: 'explore', label: 'Explore', onClick: () => nav('/explore') },
@@ -39,7 +41,8 @@ function MainShell() {
       />
       <SubstrateStatusBanner />
       <main className={styles.main}>
-        {tab === 'chat' ? <ChatView />
+        {tab === 'home' ? <HomeView onGoto={(t) => setTab(t)} />
+          : tab === 'chat' ? <ChatView />
           : tab === 'query' ? <QueryConsole />
           : tab === 'chess-play' ? <ChessView />
           : tab === 'chess-lab' ? <ChessLabView />

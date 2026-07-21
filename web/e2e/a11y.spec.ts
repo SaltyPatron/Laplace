@@ -9,6 +9,15 @@ test('App header has no critical a11y violations', async ({ page }) => {
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
 });
 
+test('Home landing has no critical a11y violations', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: /Open the console/ })).toBeVisible();
+  const results = await new AxeBuilder({ page })
+    .include('main')
+    .analyze();
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
+});
+
 test('Chess Lab tab loads with accessible form controls', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Lab' }).click();
