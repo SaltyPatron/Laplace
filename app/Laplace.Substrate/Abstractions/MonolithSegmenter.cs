@@ -44,10 +44,18 @@ public static class MonolithSegmenter
     /// lane spreads its files across.
     /// </summary>
     public static int ResolveSegments(IngestBatchConfig config)
+        => ResolveSegments(config, Math.Max(1, IngestTopology.Current.ComposeWorkers));
+
+    /// <summary>
+    /// As <see cref="ResolveSegments(IngestBatchConfig)"/>, but with an explicit
+    /// width — the multi-file lane uses this to give each file only its SHARE of
+    /// the compose pool when a source has fewer files than workers.
+    /// </summary>
+    public static int ResolveSegments(IngestBatchConfig config, int desiredSegments)
     {
         if (!config.WorkingSet) return 1;
         if (config.MaxInputUnits > 0) return 1;
-        return Math.Max(1, IngestTopology.Current.ComposeWorkers);
+        return Math.Max(1, desiredSegments);
     }
 
     /// <summary>

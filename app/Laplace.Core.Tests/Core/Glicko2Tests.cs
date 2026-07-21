@@ -27,6 +27,16 @@ public class Glicko2Tests
         Assert.Equal(1_000_000_000L, Glicko2.ScoreWin);
     }
 
+    /// <summary>
+    /// The draw threshold is DEFINED in engine/core/src/attestation_engine.c
+    /// (kScoreHalfFp). The managed constant mirrors it for callers that only need
+    /// the value; if the two ever drift, every aggregated outcome silently
+    /// reclassifies. Pin them together.
+    /// </summary>
+    [Fact]
+    public void ScoreDraw_MatchesNativeDefinition()
+        => Assert.Equal(Glicko2.ScoreDraw, Glicko2.NativeDrawScoreFp());
+
     [Fact]
     public void EffectiveMu_AtPrior_Is1500Minus2x350Equal800()
     {

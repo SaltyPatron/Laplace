@@ -33,26 +33,22 @@ internal static class AttestationMergeMath
     public static long SafeAddGames(long left, long right) => checked(left + right);
 
     /// <summary>
-    /// Classify net outcome from summed score_fp totals vs observation count,
-    /// matching the draw threshold used in <see cref="SubstrateChangeBuilder"/>.
+    /// Net outcome of an aggregated (games, sum_score_fp) cell.
+    ///
+    /// CALLS NATIVE, DOES NOT RESTATE IT (2026-07-21). This method used to
+    /// reimplement laplace_attestation_outcome_from_totals_fp in managed code
+    /// against its own copy of the 500,000,000 draw threshold — a second,
+    /// independently-editable definition of what "draw" means, sitting on the
+    /// ingest path. The rule and the constant live in attestation_engine.c; this
+    /// is a call.
     /// </summary>
-    public static AttestationOutcome ClassifyOutcome(long games, long sumScoreFp1e9)
+    public static unsafe AttestationOutcome ClassifyOutcome(long games, long sumScoreFp1e9)
     {
-        if (games <= 0) return AttestationOutcome.Draw;
-
-        long drawPerGame = Glicko2.ScoreDraw;
-        if (games <= long.MaxValue / drawPerGame)
-        {
-            long drawTotal = checked(games * drawPerGame);
-            if (sumScoreFp1e9 > drawTotal) return AttestationOutcome.Confirm;
-            if (sumScoreFp1e9 < drawTotal) return AttestationOutcome.Refute;
-            return AttestationOutcome.Draw;
-        }
-
-        long avg = sumScoreFp1e9 / games;
-        return avg > drawPerGame ? AttestationOutcome.Confirm
-             : avg < drawPerGame ? AttestationOutcome.Refute
-             : AttestationOutcome.Draw;
+        short outcome;
+        if (NativeInterop.LaplaceAttestationOutcomeFromTotalsFp(games, sumScoreFp1e9, &outcome) != 0)
+            throw new InvalidOperationException(
+                $"laplace_attestation_outcome_from_totals_fp failed for games={games} sum={sumScoreFp1e9}");
+        return (AttestationOutcome)outcome;
     }
 
     /// <summary>PG COPY timestamptz wire value (µs since 2000-01-01) → UTC DateTime.</summary>

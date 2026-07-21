@@ -46,6 +46,19 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
     internal static partial long LaplaceScoreFp(double v, double m);
 
+    // The draw threshold and the outcome rule live in attestation_engine.c and are
+    // called, not restated. SuppressGCTransition: both are leaf integer functions
+    // with no allocation, no callback and no blocking, so the full GC transition
+    // costs more than the work — this is on the per-cell merge path.
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_outcome_from_totals_fp")]
+    [System.Runtime.InteropServices.SuppressGCTransition]
+    internal static partial int LaplaceAttestationOutcomeFromTotalsFp(
+        long games, long sumScoreFp, short* outOutcome);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_score_draw_fp")]
+    [System.Runtime.InteropServices.SuppressGCTransition]
+    internal static partial long LaplaceAttestationScoreDrawFp();
+
     [LibraryImport(Library, EntryPoint = "laplace_score_inverse_fp")]
     internal static partial double LaplaceScoreInverseFp(long scoreFp, double m);
 
