@@ -48,14 +48,33 @@ BEGIN
     ANALYZE _am_batch;
 
     FOR v_type IN SELECT DISTINCT t FROM _am_batch ORDER BY t LOOP
-        UPDATE attestations a SET
-            observation_count = a.observation_count + b.games,
-            last_observed_at  = GREATEST(a.last_observed_at, b.ts)
-        FROM _am_batch b
-        WHERE b.t = v_type
-          AND a.type_id = v_type          -- variable -> runtime partition prune
-          AND a.subject_id = b.s
-          AND a.id = b.id;
+        -- The type must reach the planner as a CONSTANT, not a parameter.
+        -- Runtime partition pruning is a read-side facility: it removes Append
+        -- subplans during execution. An UPDATE's target result relations are
+        -- opened and locked at PLAN time, so a plpgsql variable (which plans
+        -- generically) makes every call open every attestation leaf --
+        -- ~1,600 of them (203 relation types x 8 HASH(subject) leaves), each
+        -- with its indexes -- before a single row is touched.
+        --
+        -- Measured 2026-07-21 on the stalled OMW seed: one 32k chunk at 93.8%
+        -- CPU for 58 minutes, 10.2 GB RSS in the backend (relcache for every
+        -- leaf), zero rows updated; EXPLAIN (GENERIC_PLAN) listed all 148
+        -- partition targets. The previous body claimed this loop pruned; it
+        -- did not, and it reproduced the exact Append-scan disease it replaced.
+        --
+        -- EXECUTE with the type inlined as a literal re-plans per type and
+        -- prunes at plan time to that type's <= 8 leaves. USING binds the batch
+        -- rows; only the partition key is inlined.
+        EXECUTE format(
+            'UPDATE attestations a SET
+                 observation_count = a.observation_count + b.games,
+                 last_observed_at  = GREATEST(a.last_observed_at, b.ts)
+             FROM _am_batch b
+             WHERE b.t = %L::bytea
+               AND a.type_id = %L::bytea
+               AND a.subject_id = b.s
+               AND a.id = b.id',
+            v_type, v_type);
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         affected := affected + v_rc;
     END LOOP;
