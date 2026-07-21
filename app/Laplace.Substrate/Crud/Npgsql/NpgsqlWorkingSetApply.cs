@@ -354,15 +354,30 @@ public sealed partial class NpgsqlSubstrateWriter
                 probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
             }
             // Entities and physicalities probe concurrently. The attestation
-            // probe waits on the ENTITY result: an attestation id embeds
-            // subject/object/context entity ids, so any row referencing an
-            // entity that just proved novel is itself novel by construction
-            // (entities COPY before attestations in every apply and the
-            // advisory lock serializes appliers — a novel entity implies no
-            // committed attestation can embed it). Only rows whose embedded
-            // entities all already exist can possibly be present; only those
-            // are probed. On fresh-content sources this collapses the
-            // attestation probe (the largest probe volume) to near zero.
+            // probe waits on the ENTITY result only for ordering; every staged
+            // attestation is probed.
+            //
+            // The "novel by construction" shortcut that used to live here is
+            // GONE (2026-07-21). It skipped the probe for any attestation whose
+            // subject/object/context entity looked novel, reasoning that a novel
+            // entity implies no committed attestation can embed it, and asserted
+            // those rows were new. MEASURED on the OMW seed: one apply declared
+            // 1,532,066 attestations novel-by-construction and the COPY died on
+            //   23505 duplicate key ... attestations_r_has_language_h1_pkey
+            // The retry, probing the same batch with the shortcut inactive, found
+            // 3,495,027 PRESENT and only 826,624 genuinely novel. The inference
+            // was wrong by millions of rows.
+            //
+            // Its failure mode is the worst kind: not a slow path but a hard
+            // ingest abort plus a whole-batch retry (~5 minutes re-done, then the
+            // run dies anyway). An unsound novelty proof cannot be traded for
+            // probe time — COPY has no ON CONFLICT, so being wrong is fatal,
+            // while being slow is merely slow. Probe cost for the rows it used to
+            // skip is roughly +40% on the attestation leg of the verify.
+            //
+            // If this is ever reinstated it needs a proof that survives
+            // multi-batch runs and retries, plus an assertion sampling skipped
+            // ids against the DB — not a comment asserting the invariant holds.
             var entProbeTask = ProbePresentTieredParallelAsync(
                 "laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse,
                 r => Interlocked.Add(ref rtProbe, r), ct);
@@ -381,36 +396,11 @@ public sealed partial class NpgsqlSubstrateWriter
             if (tier0Present is not null)
                 foreach (var id in tier0Present) presentEntities.Add(id);
 
-            // Novel-entity set drives the structural attestation filter.
-            var novelEnts = new HashSet<Hash128>(
-                Math.Max(0, entityIdSet.Count - presentEntities.Count));
-            foreach (var id in entityIdSet)
-                if (!presentEntities.Contains(id)) novelEnts.Add(id);
 
             long attStructuralSkip = 0;
             var probeAttIdsUse = probeAttIds;
             var probeAttTypesUse = probeAttTypes;
             var probeAttSubjectsUse = probeAttSubjects;
-            if (novelEnts.Count > 0 && probeAttIds.Count > 0)
-            {
-                probeAttIdsUse = new List<Hash128>(probeAttIds.Count);
-                probeAttTypesUse = new List<Hash128>(probeAttIds.Count);
-                probeAttSubjectsUse = new List<Hash128>(probeAttIds.Count);
-                for (int k = 0; k < probeAttIds.Count; k++)
-                {
-                    int i = probeAttSrcIdx[k];
-                    if (novelEnts.Contains(atts.SubjectIds[i])
-                        || novelEnts.Contains(atts.ObjectIds[i])
-                        || novelEnts.Contains(atts.ContextIds[i]))
-                    {
-                        attStructuralSkip++;
-                        continue;
-                    }
-                    probeAttIdsUse.Add(probeAttIds[k]);
-                    probeAttTypesUse.Add(probeAttTypes[k]);
-                    probeAttSubjectsUse.Add(probeAttSubjects[k]);
-                }
-            }
             if (probeAttIdsUse.Count > 1)
             {
                 var attIds = probeAttIdsUse;
@@ -622,41 +612,102 @@ public sealed partial class NpgsqlSubstrateWriter
                     c = a.Subj.CompareToBytewise(b.Subj);
                     return c != 0 ? c : a.Id.CompareToBytewise(b.Id);
                 });
+                // PARALLEL by relation type (2026-07-21). This was a serial
+                // for-loop on the apply's single connection — the only phase of
+                // the apply that never fanned out, while entities/physicalities/
+                // attestations all COPY across ApplyParallelism connections.
+                // MEASURED on the OMW seed: 3,495,027 present rows = 107 serial
+                // chunks, ~9 minutes, and it is what the run sat on before being
+                // cancelled (the phase log never printed because it never
+                // finished).
+                //
+                // Types partition the work SAFELY: attestations is
+                // LIST(type_id) -> HASH(subject_id), so two groups holding
+                // disjoint type sets touch disjoint leaves and can never
+                // contend on the same row, index page, or partition lock. The
+                // (type, subject, id) sort is preserved inside each group, so
+                // row-lock acquisition stays ordered within a partition and the
+                // cross-applier advisory lock still serializes whole applies.
+                // Same connection-per-group shape as CopyPhaseParallelAsync —
+                // the apply is already multi-transaction there, so this
+                // introduces no new atomicity boundary.
                 const int mergeChunk = 32_768;
-                for (int off = 0; off < mergeRows.Count; off += mergeChunk)
+                var typeSpans = new List<(int Off, int Len)>();
+                for (int i = 0; i < mergeRows.Count;)
                 {
-                    int m = Math.Min(mergeChunk, mergeRows.Count - off);
-                    var ids = new byte[m][];
-                    var types = new byte[m][];
-                    var subjects = new byte[m][];
-                    var games = new long[m];
-                    var ts = new DateTime[m];
-                    for (int i = 0; i < m; i++)
-                    {
-                        var r = mergeRows[off + i];
-                        ids[i] = r.Id.ToBytes();
-                        types[i] = r.Type.ToBytes();
-                        subjects[i] = r.Subj.ToBytes();
-                        games[i] = r.Games;
-                        ts[i] = r.Ts;
-                    }
-                    await using var merge = conn.CreateCommand();
-                    merge.Transaction = tx;
-                    merge.CommandTimeout = 0;
-                    merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5)";
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    aFold += (long)(await merge.ExecuteScalarAsync(ct) ?? 0L);
-                    rtMerge++;
+                    int j = i + 1;
+                    while (j < mergeRows.Count && mergeRows[j].Type.Equals(mergeRows[i].Type)) j++;
+                    typeSpans.Add((i, j - i));
+                    i = j;
                 }
+                // Greedy longest-first bin packing: one type larger than a fair
+                // share must not strand a group while the others idle.
+                int mergeGroups = (int)Math.Min(ApplyParallelism,
+                    Math.Max(1, Math.Min(typeSpans.Count, mergeRows.Count / 16_384)));
+                var bins = new List<(int Off, int Len)>[mergeGroups];
+                var binRows = new long[mergeGroups];
+                for (int g = 0; g < mergeGroups; g++) bins[g] = new List<(int, int)>();
+                foreach (var span in typeSpans.OrderByDescending(s => s.Len))
+                {
+                    int best = 0;
+                    for (int g = 1; g < mergeGroups; g++) if (binRows[g] < binRows[best]) best = g;
+                    bins[best].Add(span);
+                    binRows[best] += span.Len;
+                }
+
+                long mergeFolded = 0;
+                int mergeRt = 0;
+                await CpuTopology.RunPinnedAsyncParallel(mergeGroups, async (g, token) =>
+                {
+                    if (bins[g].Count == 0) return;
+                    await using var mconn = await _ds.OpenConnectionAsync(token);
+                    await using var mtx = await mconn.BeginTransactionAsync(token);
+                    await using (var guc = mconn.CreateCommand())
+                    {
+                        guc.Transaction = mtx;
+                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off";
+                        await guc.ExecuteNonQueryAsync(token);
+                    }
+                    foreach (var (spanOff, spanLen) in bins[g])
+                        for (int off = spanOff; off < spanOff + spanLen; off += mergeChunk)
+                        {
+                            int m = Math.Min(mergeChunk, spanOff + spanLen - off);
+                            var ids = new byte[m][];
+                            var types = new byte[m][];
+                            var subjects = new byte[m][];
+                            var games = new long[m];
+                            var ts = new DateTime[m];
+                            for (int i = 0; i < m; i++)
+                            {
+                                var r = mergeRows[off + i];
+                                ids[i] = r.Id.ToBytes();
+                                types[i] = r.Type.ToBytes();
+                                subjects[i] = r.Subj.ToBytes();
+                                games[i] = r.Games;
+                                ts[i] = r.Ts;
+                            }
+                            await using var merge = mconn.CreateCommand();
+                            merge.Transaction = mtx;
+                            merge.CommandTimeout = 0;
+                            merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5)";
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                            Interlocked.Add(ref mergeFolded,
+                                (long)(await merge.ExecuteScalarAsync(token) ?? 0L));
+                            Interlocked.Increment(ref mergeRt);
+                        }
+                    await mtx.CommitAsync(token);
+                }, ct);
+                aFold += mergeFolded;
+                rtMerge += mergeRt;
                 _log.LogInformation(
                     "WS_APPLY merge: {Rows:N0} present rows merged in {Ms:N0}ms ({Rps:N0} rows/s)",
                     mergeRows.Count, mergeSw.ElapsedMilliseconds,

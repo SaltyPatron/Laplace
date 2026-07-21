@@ -1,0 +1,23 @@
+-- Mask refresh queue: entities whose CONSENSUS participation changed and whose
+-- highway_mask therefore needs recomputing.
+--
+-- Why this exists (2026-07-21): highway_mask_refresh derives a mask purely from an
+-- entity's consensus edges, so the exact refresh set after a fold is "every subject
+-- and object written by that fold". That set was being tracked client-side in a
+-- HashSet<Hash128> capped at 8,388,608 (ConsensusAccumulatingWriter); any ingest
+-- larger than the cap threw the set away and fell back to highway_mask_rebuild --
+-- a full pass over every entity in the substrate. Every large source therefore paid
+-- a multi-minute full rebuild, which is batch-rebuild-as-a-class, the thing the
+-- substrate forbids: the fold-time refresh is the intended mechanism and the full
+-- rebuild is a rare REGENERATE tool for highway bit renumbering only.
+--
+-- Capturing the set here instead makes it exact, unbounded, and deduplicated by the
+-- primary key, with no client memory and no overflow path. consensus_upsert appends;
+-- highway_mask_drain() consumes and deletes.
+--
+-- UNLOGGED: pure derived work-queue. Losing it on a crash costs a regenerate, never
+-- data — and the masks it would have written are themselves recomputable from
+-- consensus at any time (recompute-not-accumulate).
+CREATE UNLOGGED TABLE IF NOT EXISTS highway_mask_dirty (
+    id bytea PRIMARY KEY
+);

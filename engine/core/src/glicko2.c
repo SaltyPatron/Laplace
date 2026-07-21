@@ -444,9 +444,35 @@ int64_t glicko2_effective_mu(const glicko2_state_t* st) {
  * foundry_witness_sat.sql.in exactly (same constant, same rationale). */
 #define LAPLACE_WITNESS_SAT_HALFMAX 4.0
 
+/*
+ * SIGN comes from the RATING, magnitude from RD and witness count.
+ *
+ * Glicko-2 adjudicates win/draw/loss against neutral: rating > neutral means the
+ * claim won its matches, rating < neutral means it lost (was refuted). That
+ * verdict belongs to the rating alone. RD is a CONFIDENCE interval, not a
+ * verdict, and it is already applied below as exp(-kappa*rd).
+ *
+ * This previously signed on laplace_effective_mu_fp (rating - 2*rd), the
+ * conservative lower bound. That double-counted RD -- once in the bound, again
+ * in the decay -- and, because a single-witness cell carries a wide RD, pushed
+ * the bound below neutral for claims that had WON. Measured over 300k consensus
+ * rows: 100% had rating > neutral (all won), yet 99.04% scored negative here.
+ * generate_walk.c stops placing at the first non-positive score, so the walk
+ * could reach 0.96% of the graph -- an accidental floor at eff_mu >= neutral,
+ * precisely the operator-invented floor the substrate invariants forbid.
+ *
+ * "Uncertain" must not be conflated with "refuted": a wide-RD win ranks LOW
+ * (decay and saturation shrink it toward zero) but stays walkable, while a
+ * genuine refutation goes negative and still dead-ends. This is consistent with
+ * refuted() (mu/refuted.sql.in), which tests the OPTIMISTIC bound
+ * rating + 2*rd < neutral -- lost even at its best.
+ *
+ * eff_mu remains the correct conservative RANKING key everywhere it is used for
+ * ordering; only its use as a sign/gate is removed.
+ */
 double laplace_walk_edge_weight(int64_t rating, int64_t rd, int64_t witness_count,
                                 double kappa) {
-    int64_t signed_mu_fp = laplace_effective_mu_fp(rating, rd) - LAPLACE_GLICKO2_NEUTRAL_MU_FP;
+    int64_t signed_mu_fp = rating - LAPLACE_GLICKO2_NEUTRAL_MU_FP;
     double  signed_mu    = (double) signed_mu_fp / LAPLACE_GLICKO2_FP_SCALE_D;
     double  rd_real      = (double) rd / LAPLACE_GLICKO2_FP_SCALE_D;
     double  decay        = exp(-kappa * rd_real);

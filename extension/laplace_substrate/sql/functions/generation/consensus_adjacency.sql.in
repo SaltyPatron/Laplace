@@ -36,7 +36,7 @@ BEGIN
          summed AS (
              SELECT e.subject_id, e.object_id,
                     sum(rk.rank
-                        * (eff_mu(e.rating, e.rd) - glicko2_neutral_mu())::float8 / 1e9
+                        * (e.rating - glicko2_neutral_mu())::float8 / 1e9
                         * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
                         * foundry_witness_sat(e.witness_count)) AS w
              FROM edges e

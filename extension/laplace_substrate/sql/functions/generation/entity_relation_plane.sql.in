@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
              -- P5 Glicko-complete weight (doc 14 M5): already neutral-centered
              -- (signed); adds rd-uncertainty discount + witness-mass saturation.
              SELECT c.subject_id, c.object_id,
-                    (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
+                    (c.rating - glicko2_neutral_mu())::double precision / 1e9
                       * exp(- foundry_rd_kappa() * c.rd::float8 / 1e9)
                       * foundry_witness_sat(c.witness_count) AS w
              FROM v

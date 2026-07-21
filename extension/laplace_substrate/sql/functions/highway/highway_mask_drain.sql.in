@@ -1,0 +1,52 @@
+-- Drain the mask refresh queue: recompute highway_mask for exactly the entities whose
+-- consensus participation changed, then forget them. This is the INCREMENTAL path that
+-- replaces an ingest-triggered highway_mask_rebuild (full pass over every entity).
+--
+-- Batched with a COMMIT per batch so a long drain never holds one transaction open, and
+-- so an interrupted drain keeps its progress: rows are deleted only after their masks
+-- are written, making the whole procedure resumable and idempotent. Re-running it after
+-- a crash re-refreshes at most one batch that was already correct — highway_mask_refresh
+-- is recompute-not-accumulate, so that is a no-op, never drift.
+--
+-- Emits LOG (not NOTICE) progress: NOTICE is client-only and with log_min_messages at
+-- its WARNING default it reaches the server log never, which is what made the old full
+-- rebuild look like a dead stall for minutes at a time.
+--
+-- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction control
+-- (COMMIT), so references are schema-qualified instead.
+CREATE OR REPLACE PROCEDURE highway_mask_drain(p_batch int DEFAULT 100000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    ids     bytea[];
+    n       bigint;
+    total   bigint := 0;
+    drained bigint := 0;
+    queued  bigint;
+    t0      timestamptz := clock_timestamp();
+BEGIN
+    SELECT count(*) INTO queued FROM @extschema@.highway_mask_dirty;
+    IF queued = 0 THEN
+        RETURN;
+    END IF;
+    RAISE LOG 'highway_mask_drain: start — % entities queued', queued;
+
+    LOOP
+        SELECT array_agg(d.id) INTO ids
+        FROM (SELECT id FROM @extschema@.highway_mask_dirty LIMIT p_batch) d;
+        EXIT WHEN ids IS NULL;
+
+        n := @extschema@.highway_mask_refresh(ids);
+        DELETE FROM @extschema@.highway_mask_dirty WHERE id = ANY(ids);
+
+        total   := total + n;
+        drained := drained + cardinality(ids);
+        RAISE LOG 'highway_mask_drain: % masks written / % of % drained (%%) — %s elapsed',
+            total, drained, queued,
+            round(100.0 * drained / NULLIF(queued, 0), 1),
+            round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+        COMMIT;
+    END LOOP;
+
+    RAISE LOG 'highway_mask_drain: done — % masks written / % entities in %s',
+        total, drained, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+END $$;
