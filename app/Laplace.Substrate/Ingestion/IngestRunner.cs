@@ -682,8 +682,16 @@ public sealed class IngestRunner
         const string periodBoundary = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
         if (unit.StartsWith(periodBoundary, StringComparison.Ordinal))
         {
-            Interlocked.Increment(ref c._filesDone);
-            c._currentFile = unit[periodBoundary.Length..];
+            int done = Interlocked.Increment(ref c._filesDone);
+            string file = unit[periodBoundary.Length..];
+            c._currentFile = file;
+            // A file's boundary intent APPLYING is the moment that file is durable.
+            // Emitted per file, not just counted, so the log names what landed and
+            // when — "files=37/1226" tells you nothing about which file is slow.
+            Console.Error.WriteLine(
+                $"INGEST_FILE_COMMITTED source={c.SourceName} file={file} "
+                + $"files={done}/{c.Inventory?.FileCount ?? 0} "
+                + $"run_elapsed_s={c.Sw?.Elapsed.TotalSeconds ?? 0:F0}");
             return;
         }
         if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
