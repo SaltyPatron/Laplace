@@ -632,28 +632,33 @@ public sealed partial class NpgsqlSubstrateWriter
                 // the apply is already multi-transaction there, so this
                 // introduces no new atomicity boundary.
                 const int mergeChunk = 32_768;
-                var typeSpans = new List<(int Off, int Len)>();
-                for (int i = 0; i < mergeRows.Count;)
-                {
-                    int j = i + 1;
-                    while (j < mergeRows.Count && mergeRows[j].Type.Equals(mergeRows[i].Type)) j++;
-                    typeSpans.Add((i, j - i));
-                    i = j;
-                }
-                // Greedy longest-first bin packing: one type larger than a fair
-                // share must not strand a group while the others idle.
-                int mergeGroups = (int)Math.Min(ApplyParallelism,
-                    Math.Max(1, Math.Min(typeSpans.Count, mergeRows.Count / 16_384)));
+                // CHUNK-level distribution, not whole-type bins (2026-07-21).
+                // The first version packed whole relation types into bins so a
+                // type could never be split across connections. Relation volume
+                // is heavily skewed — measured mid-OMW, the top consensus types
+                // are 995,176 / 711,861 / 686,409 rows — so the largest type
+                // swallowed a bin and ran ALONE as the tail while every other
+                // connection sat idle. Sampled live: 23 of 25 probes of
+                // pg_stat_activity showed exactly ONE active backend, and it was
+                // always attestation_merge. Type-granular packing cannot
+                // parallelize a skewed batch; it only parallelizes a balanced one.
+                //
+                // Splitting a type across connections is SAFE: mergeRows is
+                // deduplicated by attestation id, so distinct chunks hold
+                // disjoint ROWS and no two connections can contend on the same
+                // tuple. Partition-level locks are RowExclusiveLock, which is
+                // self-compatible, and the cross-applier advisory lock still
+                // serializes whole applies. The (type, subject, id) sort is
+                // retained so each chunk stays partition-contiguous — a chunk
+                // that straddles a type boundary is fine, attestation_merge
+                // already loops the distinct types it is handed.
+                var chunks = new List<(int Off, int Len)>();
+                for (int off = 0; off < mergeRows.Count; off += mergeChunk)
+                    chunks.Add((off, Math.Min(mergeChunk, mergeRows.Count - off)));
+                int mergeGroups = (int)Math.Min(ApplyParallelism, Math.Max(1, chunks.Count));
                 var bins = new List<(int Off, int Len)>[mergeGroups];
-                var binRows = new long[mergeGroups];
                 for (int g = 0; g < mergeGroups; g++) bins[g] = new List<(int, int)>();
-                foreach (var span in typeSpans.OrderByDescending(s => s.Len))
-                {
-                    int best = 0;
-                    for (int g = 1; g < mergeGroups; g++) if (binRows[g] < binRows[best]) best = g;
-                    bins[best].Add(span);
-                    binRows[best] += span.Len;
-                }
+                for (int c = 0; c < chunks.Count; c++) bins[c % mergeGroups].Add(chunks[c]);
 
                 long mergeFolded = 0;
                 int mergeRt = 0;
