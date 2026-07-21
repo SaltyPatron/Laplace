@@ -163,9 +163,23 @@ public sealed class IngestRunner
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
 
-        // A file boundary is a commit point: the source has fully witnessed that
-        // file, so committing here is what makes files=n/N advance during the run
-        // and what makes a re-ingest resumable at file grain.
+        // A file boundary is a commit OPPORTUNITY, not a commit requirement
+        // (2026-07-21). Flushing on EVERY boundary shreds a many-small-files
+        // source: OMW's 1226 files each yielded one working-set change plus one
+        // boundary, so every apply was "intents=2 rows=~1,200" paying 10-12 round
+        // trips and running at 1.5-9k rows/s, against 23,498 rows/s for the one
+        // apply in that run that actually reached the envelope
+        // (intents=3 rows=90,426, 29 round trips). It also produced
+        // "intents=1 rows=0" applies — a full apply cycle for a lone boundary
+        // carrying nothing.
+        //
+        // So a boundary commits only once the batch is worth a COPY. Below the
+        // floor it rides along and commits with the next group, which still
+        // advances files=n/N live (in steps of several files) and still bounds
+        // what a cancelled run loses. Per-FILE visibility does not depend on
+        // this: INGEST_FILE_COMPOSED/COMMITTED name every file individually.
+        long boundaryCommitFloor = applyEnvelope / 8;
+
         static bool IsPeriodBoundary(SubstrateChange c) =>
             c.Metadata.SourceContentUnitName.StartsWith(
                 IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
@@ -229,7 +243,8 @@ public sealed class IngestRunner
                     sbatch.Add(intent);
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
-                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows) || IsPeriodBoundary(intent))
+                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
+                        || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                     {
                         await ProcessBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, ct);
@@ -327,7 +342,8 @@ public sealed class IngestRunner
                         batch.Add(intent);
                         batchRows += RowsOf(intent);
                         wsBytes += ib;
-                        if (ShouldFlushWithCap(batch.Count, batchRows) || IsPeriodBoundary(intent))
+                        if (ShouldFlushWithCap(batch.Count, batchRows)
+                            || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                         {
                             await ProcessBatchAsync(batch, decomposer, options, rng,
                                                     counters, failures, log, workingSet, ct);
