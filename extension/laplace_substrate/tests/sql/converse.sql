@@ -110,11 +110,25 @@ SELECT synonym FROM synonyms(word_id('dog'));
 
 SELECT translation, language FROM translations(word_id('dog')) ORDER BY translation;
 
-SELECT reply, witnesses FROM recall('what does dog mean?');
-SELECT reply FROM recall('synonyms of dog');
-SELECT reply FROM recall('translate dog');
-SELECT reply FROM recall('what is zzzunknownzzz');
-SELECT reply FROM recall('translate h');
+-- The read shape is an ARGUMENT, never inferred from the phrasing. These same
+-- calls answer identically whatever language the caller thinks in.
+SELECT reply, witnesses FROM recall_intent('define', word_id('dog'));
+SELECT reply FROM recall_intent('synonyms', word_id('dog'));
+SELECT reply FROM recall_intent('translate', word_id('dog'));
+SELECT reply FROM recall_intent('translate', word_id('h'));
+SELECT count(*) = 0 AS unknown_topic_has_no_id FROM prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
+
+-- Every published shape is dispatchable, and only published shapes are.
+SELECT count(*) AS published_shapes FROM query_shapes();
+SELECT bool_and(NOT needs_topic2) AS single_topic_shapes_dominate FROM query_shapes();
+
+DO $$
+BEGIN
+    PERFORM * FROM recall_intent('what does dog mean', word_id('dog'));
+    RAISE EXCEPTION 'recall_intent accepted an unpublished shape';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%unknown shape%' THEN RAISE; END IF;
+END $$;
 
 SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
 
@@ -138,26 +152,32 @@ SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                     laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
 
 SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
-SELECT reply FROM recall('antonyms of dog');
+SELECT reply FROM recall_intent('related', word_id('dog'), NULL, 'IS_ANTONYM_OF');
 SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
 
-SELECT reply FROM recall('is a dog a c?');
-SELECT reply FROM recall('is h a c?');
+SELECT reply FROM recall_intent('is_a', word_id('dog'), word_id('c'));
+SELECT reply FROM recall_intent('is_a', word_id('h'), word_id('c'));
 
 SELECT g.step, type_label(g.type_id) AS rel_type,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
 FROM walk_strongest(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
 SELECT count(*) AS tree_nodes
 FROM walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
-SELECT reply, eff_mu FROM recall('walk p');
+SELECT reply, eff_mu FROM recall_intent('walk', word_id('p'));
 
-SELECT reply, witnesses FROM recall_session('what does dog mean?', convert_to('s1', 'UTF8'));
-SELECT reply FROM recall_session('what about its synonyms?', convert_to('s1', 'UTF8'));
-SELECT reply, witnesses FROM recall_session('and its causes?', convert_to('s1', 'UTF8'));
+-- recall_session stays a text entry point because it carries session state, but
+-- it no longer routes on phrasing: a bare prompt gets the default shape, and the
+-- session carries the topic forward. Callers wanting a specific shape name it.
+SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
+SELECT reply FROM recall_session('dog', convert_to('s1', 'UTF8'));
+SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
 FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
 SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
+
+SELECT count(*) AS band_rows FROM relation_bands();
+SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM relation_bands();
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
 
@@ -167,7 +187,7 @@ FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
 SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog'), word_id('h'));
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
-FROM recall('how are dog and h related');
+FROM recall_intent('reason', word_id('dog'), word_id('h'));
 
 SELECT holder, type, fact FROM contrast(word_id('dog'), word_id('c'))
 ORDER BY holder, type, fact;
@@ -179,11 +199,11 @@ SELECT cardinality(path) > 1 AS isa_path_found
 FROM isa_path(word_id('dog'), word_id('c'));
 
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
-FROM recall('is a dog a c?');
+FROM recall_intent('is_a', word_id('dog'), word_id('c'));
 
 
 
 SELECT count(*) >= 1 AS null_session_converse_runs
-FROM recall_session('what does dog mean?');
+FROM recall_session('dog');
 
 ROLLBACK;
