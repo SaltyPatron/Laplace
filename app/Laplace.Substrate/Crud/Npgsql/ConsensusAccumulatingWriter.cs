@@ -181,10 +181,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
+    /// <summary>
+    /// Cells below which the parallel merge's shard + combine overhead outweighs
+    /// the scan it saves. Above it the merge shards across P-cores.
+    /// </summary>
+    private const int ParallelDeltaMinAttestations = 65_536;
+
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
         IReadOnlyList<SubstrateChange> changes)
     {
-        Dictionary<(Hash128, Hash128, Hash128?), Delta>? delta = null;
+        // Flatten to the attestation arrays that actually carry testimony. The
+        // merge below is over a contiguous index space across those arrays, so
+        // sharding never has to care about change boundaries (one 512 MiB working
+        // set is often ONE change — splitting per change would leave every core
+        // but one idle).
+        List<ImmutableArray<AttestationRow>>? blocks = null;
+        long total = 0;
         foreach (var c in changes)
         {
             if (!c.TestimonyWalks.IsDefaultOrEmpty)
@@ -194,16 +206,95 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal)
                 || c.Metadata.SourceContentUnitName.StartsWith(PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
                 continue;
+            if (c.Attestations.IsEmpty) continue;
+            (blocks ??= new()).Add(c.Attestations);
+            total += c.Attestations.Length;
+        }
+        if (blocks is null || total == 0) return null;
 
-            var atts = c.Attestations;
-            for (int i = 0; i < atts.Length; i++)
+        // MERGE IS ORDER-INDEPENDENT, SO IT PARALLELIZES EXACTLY (2026-07-21).
+        // Every combine op is integer: SafeAddGames / SafeAddScores over
+        // fixed-point 1e9 longs, and max on the timestamp. Integer add and max
+        // are associative and commutative, so any shard split and any combine
+        // order yields the BIT-IDENTICAL delta a serial walk yields — this is a
+        // pure speedup, not an approximation, and it keeps the fold
+        // deterministic. (Float sums would NOT have this property; the
+        // fixed-point representation is what makes it sound.)
+        //
+        // The per-row Interlocked.Add on _observations is gone: it was a locked
+        // bus operation per attestation on what was a single-threaded loop.
+        // Shards count locally and publish once.
+        int workers = total >= ParallelDeltaMinAttestations
+            ? Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16)
+            : 1;
+
+        if (workers == 1)
+        {
+            var single = NewDeltaMap((int)Math.Min(total, int.MaxValue));
+            long obs = MergeRange(blocks, 0, total, single);
+            Interlocked.Add(ref _observations, obs);
+            return single.Count == 0 ? null : single;
+        }
+
+        var shards = new Dictionary<(Hash128, Hash128, Hash128?), Delta>[workers];
+        var shardObs = new long[workers];
+        long per = (total + workers - 1) / workers;
+        Parallel.For(0, workers, w =>
+        {
+            long start = per * w;
+            long end = Math.Min(total, start + per);
+            var map = NewDeltaMap((int)Math.Max(0, Math.Min(end - start, int.MaxValue)));
+            shardObs[w] = end > start ? MergeRange(blocks, start, end, map) : 0;
+            shards[w] = map;
+        });
+
+        long observed = 0;
+        for (int w = 0; w < workers; w++) observed += shardObs[w];
+        Interlocked.Add(ref _observations, observed);
+
+        // Combine into the largest shard so the fold-in walks the fewest cells.
+        int into = 0;
+        for (int w = 1; w < workers; w++)
+            if (shards[w].Count > shards[into].Count) into = w;
+        var delta = shards[into];
+        for (int w = 0; w < workers; w++)
+        {
+            if (w == into) continue;
+            foreach (var (key, src) in shards[w])
+            {
+                if (!delta.TryGetValue(key, out var d)) delta[key] = src;
+                else FoldInto(d, src.PhiFp1e9, src.Games, src.SumScoreFp1e9, src.MaxTsUnixUs);
+            }
+        }
+        return delta.Count == 0 ? null : delta;
+    }
+
+    private static Dictionary<(Hash128, Hash128, Hash128?), Delta> NewDeltaMap(int hint) =>
+        new(Math.Clamp(hint, 16, 1 << 20));
+
+    /// <summary>Merges attestations [start, end) of the flattened block space into
+    /// <paramref name="map"/>; returns the observation count it consumed.</summary>
+    private static long MergeRange(
+        List<ImmutableArray<AttestationRow>> blocks, long start, long end,
+        Dictionary<(Hash128, Hash128, Hash128?), Delta> map)
+    {
+        long obs = 0;
+        long pos = 0;
+        foreach (var atts in blocks)
+        {
+            long blockEnd = pos + atts.Length;
+            if (blockEnd <= start) { pos = blockEnd; continue; }
+            if (pos >= end) break;
+
+            int from = (int)Math.Max(0, start - pos);
+            int to = (int)Math.Min(atts.Length, end - pos);
+            for (int i = from; i < to; i++)
             {
                 var a = atts[i];
-                delta ??= new Dictionary<(Hash128, Hash128, Hash128?), Delta>();
                 var key = (a.SubjectId, a.TypeId, a.ObjectId);
-                if (!delta.TryGetValue(key, out var d))
+                if (!map.TryGetValue(key, out var d))
                 {
-                    delta[key] = new Delta
+                    map[key] = new Delta
                     {
                         PhiFp1e9 = a.OpponentRdFp1e9,
                         Games = a.ObservationCount,
@@ -213,19 +304,25 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 }
                 else
                 {
-                    if (d.PhiFp1e9 != a.OpponentRdFp1e9)
-                        throw new InvalidOperationException(
-                            $"fold invariant violated: cell observed with φ={a.OpponentRdFp1e9} "
-                            + $"after φ={d.PhiFp1e9} in the same batch");
-                    d.Games = AttestationMergeMath.SafeAddGames(d.Games, a.ObservationCount);
-                    d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
-                        d.SumScoreFp1e9, AttestationMergeMath.RowScoreTotal(a));
-                    if (a.LastObservedAtUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = a.LastObservedAtUnixUs;
+                    FoldInto(d, a.OpponentRdFp1e9, a.ObservationCount,
+                             AttestationMergeMath.RowScoreTotal(a), a.LastObservedAtUnixUs);
                 }
-                Interlocked.Add(ref _observations, a.ObservationCount);
+                obs += a.ObservationCount;
             }
+            pos = blockEnd;
         }
-        return delta;
+        return obs;
+    }
+
+    private static void FoldInto(Delta d, long phi, long games, long score, long tsUnixUs)
+    {
+        if (d.PhiFp1e9 != phi)
+            throw new InvalidOperationException(
+                $"fold invariant violated: cell observed with φ={phi} "
+                + $"after φ={d.PhiFp1e9} in the same batch");
+        d.Games = AttestationMergeMath.SafeAddGames(d.Games, games);
+        d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(d.SumScoreFp1e9, score);
+        if (tsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = tsUnixUs;
     }
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
@@ -266,41 +363,41 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         });
 
         // Mask pairs from the same delta: (subject, type) + (object, type).
-        // Built ONLY for online lanes. In a bulk run these are not materialised
-        // per batch: depositing per batch is ~2M UPDATEs on the entities table
-        // WHILE it is being bulk COPY-loaded (HOT-update churn, index
-        // maintenance, bloat, IO contention against the loader), and the client
-        // dedup set clears under its cap so pairs get re-deposited. Bulk runs
-        // instead record touched entities under the gate (below) and refresh
-        // them once at completion. Online lanes (feedback, non-bulk) still
-        // deposit inline so read-side gating sees them immediately.
-        var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(_bulkRun ? 0 : n * 2);
-        if (!_bulkRun)
-            foreach (var cell in cells)
-            {
-                maskPairs.Add((cell.Key.S, cell.Key.T));
-                if (cell.Key.O is { } obj) maskPairs.Add((obj, cell.Key.T));
-            }
+        //
+        // DEPOSIT IS THE POPULATION, IN EVERY LANE (2026-07-21). This used to be
+        // built for online lanes only; bulk runs skipped the deposit entirely and
+        // paid a terminal highway_mask_drain() instead. That trade was backwards.
+        // highway_mask_deposit is O(pairs the fold already holds in RAM) — an
+        // OR-accumulate with ZERO consensus re-reads. The deferred path replaced
+        // it with highway_mask_refresh over every touched entity, which recomputes
+        // each mask from that entity's full consensus edge set: the object-side
+        // join whose leaf probes were MEASURED at 75s of a 118s fold. Deferring
+        // therefore swapped an O(touched pairs) write for an
+        // O(touched entities x consensus probes) recompute AND parked it at the
+        // end of the run as one serial pass.
+        //
+        // The stated reason for deferring — "~2M entity UPDATEs contending with
+        // the concurrent COPY" — is an argument against per-batch UPDATE CHURN,
+        // not against deposit: the run-scoped pair dedup below means each pair is
+        // written at most once per run, so the total UPDATE volume is strictly
+        // LOWER than the drain's, and it is spread across the run instead of
+        // landing in one lump at the end.
+        var maskPairs = new HashSet<(Hash128 Ent, Hash128 Typ)>(n * 2);
+        foreach (var cell in cells)
+        {
+            maskPairs.Add((cell.Key.S, cell.Key.T));
+            if (cell.Key.O is { } obj) maskPairs.Add((obj, cell.Key.T));
+        }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         long folded = 0, masks = 0;
         await _upsertGate.WaitAsync(ct);
         try
         {
-            // Bulk: don't deposit masks per batch. consensus_upsert queues every
-            // subject/object it writes into highway_mask_dirty in the same
-            // transaction, so the touched set is captured server-side — exact,
-            // deduplicated by primary key, and unbounded. Completion drains it.
-            // (Until 2026-07-21 this was a client-side HashSet capped at 8,388,608;
-            // any larger ingest discarded it and fell back to a full-substrate
-            // highway_mask_rebuild, which is why every big source stalled for
-            // minutes on masks.)
-            // Online: never resend a pair this run already deposited
-            // — the server-side no-op still costs ~6 tier-leaf probes per pair.
-            if (!_bulkRun)
-            {
-                maskPairs.ExceptWith(_depositedMaskPairs);
-            }
+            // Never resend a pair this run already deposited — masks only
+            // ACCRETE, so a pair deposited once is permanently satisfied, and the
+            // server-side no-op still costs ~6 tier-leaf probes per pair.
+            maskPairs.ExceptWith(_depositedMaskPairs);
 
             // Fixed-size chunks over the sorted cells, folded on PARALLEL
             // connections — the same width the COPY apply uses — instead of
@@ -501,38 +598,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _bulkRun = false;
         await _inner.CompleteBulkRunAsync(ct);
 
-        // Masks were deferred through the bulk run (see the fold). Rebuild them
-        // ONCE now — after the COPY load and the inner index rebuild — from the
-        // folded consensus, instead of ~2M entity UPDATEs per batch during load.
-        // Same masks, one sequential pass, no contention with the loader.
-        // Folds are drained above, so the queue is stable here. Drain the deferred
-        // masks in ONE pass: consensus_upsert queued exactly the entities this run
-        // touched, and highway_mask_refresh recomputes each from its full consensus
-        // edge set, so untouched entities keep their correct masks and are never
-        // rescanned. There is no full-table fallback — the queue cannot overflow.
-        if (wasBulk)
-        {
-            var msw = System.Diagnostics.Stopwatch.StartNew();
-            try
-            {
-                await using var conn = await _ds.OpenConnectionAsync(ct);
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandTimeout = 0;
-                cmd.CommandText = "CALL laplace.highway_mask_drain()";
-                await cmd.ExecuteNonQueryAsync(ct);
-                _log.LogInformation(
-                    "bulk-run highway mask drain completed in {Ms:N0}ms (per-batch progress in the PG log)",
-                    msw.ElapsedMilliseconds);
-            }
-            catch (Exception ex)
-            {
-                // Masks are a read-side accelerator, not a fold-correctness input;
-                // a failed drain must not fail the seed. It is idempotent and
-                // re-runnable (rows leave the queue only after their masks land,
-                // and highway_mask_refresh only writes changed masks).
-                _log.LogWarning(ex, "bulk-run highway mask drain failed — masks may be stale until re-run");
-            }
-        }
+        // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
+        // fold, in every lane — see UpsertDeltaAsync. There is nothing left to
+        // defer: by the time the last fold drains above, every pair this run
+        // touched has already had its bits OR'd in, spread across the run instead
+        // of landing as one serial recompute after the loader finishes.
+        //
+        // highway_mask_dirty / highway_mask_drain() survive as the REPAIR verbs
+        // (per-source evict has to CLEAR bits, which an OR-accumulate deposit
+        // cannot do), alongside highway_mask_rebuild for highway bit renumbering.
+        // Nothing on the ingest hot path populates or drains the queue.
+        _ = wasBulk;
     }
 
     public async ValueTask DisposeAsync()

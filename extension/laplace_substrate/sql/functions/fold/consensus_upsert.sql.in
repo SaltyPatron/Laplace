@@ -48,17 +48,46 @@ DECLARE
     v_type   bytea;
 BEGIN
     -- Materialize the batch ONCE: single unnest, cell id + fresh fold state
-    -- computed in the same pass. ON COMMIT DROP owns cleanup on any exit; the
-    -- to_regclass guard (not DROP IF EXISTS — that raises a NOTICE and pollutes
-    -- pg_regress output) handles repeated calls inside one transaction.
-    IF to_regclass('pg_temp._cu_batch') IS NOT NULL THEN
-        DROP TABLE _cu_batch;
+    -- computed in the same pass.
+    --
+    -- SESSION-SCOPED, NOT PER-CALL (2026-07-21). This was
+    -- CREATE TEMP TABLE ... ON COMMIT DROP + CREATE INDEX + ANALYZE on EVERY
+    -- invocation: three catalog mutations, a fresh relfilenode and an index
+    -- build per fold call. That fixed cost is what forced the caller to make
+    -- every fold call enormous to amortize it, which is half of why ingest
+    -- globs. The table and its index are now created ONCE per backend session
+    -- and TRUNCATEd per call, so a fold call costs the INSERT and nothing else
+    -- and small, frequent folds are as cheap per row as one giant one.
+    --
+    -- Correctness: pg_temp is private to the backend, one fold call per
+    -- connection is in flight at a time (the caller opens a connection per
+    -- fold segment), and TRUNCATE at entry means no row can survive into the
+    -- next call — including after an exception aborts a call mid-way.
+    IF to_regclass('pg_temp._cu_batch') IS NULL THEN
+        CREATE TEMP TABLE _cu_batch (
+            id           bytea,
+            s            bytea,
+            t            bytea,
+            o            bytea,
+            phi          bigint,
+            games        bigint,
+            sum          bigint,
+            ts           timestamptz,
+            fresh_rating bigint,
+            fresh_rd     bigint,
+            fresh_vol    bigint);
+        -- The per-type slices read through this index — O(N_type) per
+        -- iteration, not a full-batch rescan.
+        CREATE INDEX _cu_batch_t ON _cu_batch (t);
+    ELSE
+        TRUNCATE _cu_batch;
     END IF;
-    CREATE TEMP TABLE _cu_batch ON COMMIT DROP AS
-    SELECT consensus_id(u.s, u.t, u.o) AS id,
+
+    INSERT INTO _cu_batch (id, s, t, o, phi, games, sum, ts,
+                           fresh_rating, fresh_rd, fresh_vol)
+    SELECT consensus_id(u.s, u.t, u.o),
            u.s, u.t, u.o, u.phi, u.games, u.sum, u.ts,
-           f.rating AS fresh_rating, f.rd AS fresh_rd,
-           f.volatility AS fresh_vol
+           f.rating, f.rd, f.volatility
     FROM unnest(p_subjects, p_types, p_objects,
                 p_phis, p_games, p_sums, p_ts)
          AS u(s, t, o, phi, games, sum, ts)
@@ -77,9 +106,6 @@ BEGIN
             USING ERRCODE = 'cardinality_violation';
     END IF;
 
-    -- The per-type slices read through this index — O(N_type) per iteration,
-    -- not a full-batch rescan.
-    CREATE INDEX _cu_batch_t ON _cu_batch (t);
     ANALYZE _cu_batch;
 
     -- Types in sorted order: cross-writer lock acquisition stays globally
@@ -125,17 +151,14 @@ BEGIN
 
     END LOOP;
 
-    -- Mask refresh queue (2026-07-21). highway_mask_refresh derives a mask purely
-    -- from consensus participation, so the subjects and objects written above ARE
-    -- the exact set whose masks can have changed. Queue them once per call, in the
-    -- same transaction that wrote the cells: dedup is the primary key, so there is
-    -- no cap to overflow and no full-table rebuild to fall back to. Drained by
-    -- highway_mask_drain() — per fold epoch, or once at the end of a bulk run.
-    INSERT INTO highway_mask_dirty (id)
-    SELECT b.s FROM _cu_batch b
-    UNION
-    SELECT b.o FROM _cu_batch b WHERE b.o IS NOT NULL
-    ON CONFLICT (id) DO NOTHING;
-
+    -- NO mask queue here (2026-07-21). The caller deposits highway bits INLINE
+    -- for the (entity, type) pairs of this same delta — highway_mask_deposit,
+    -- O(pairs already in RAM), zero consensus re-reads. Queueing the touched
+    -- entities for a terminal highway_mask_drain() instead meant recomputing
+    -- every touched mask from its full consensus edge set (the object-side leaf
+    -- probes measured at 75s of a 118s fold) in one serial pass at the end of the
+    -- run. highway_mask_dirty is now populated only by the repair verbs, which
+    -- need to CLEAR bits (per-source evict) — something an OR-accumulate deposit
+    -- cannot express.
     RETURN affected;
 END $$;

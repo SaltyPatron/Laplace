@@ -145,9 +145,34 @@ public sealed class IngestRunner
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
+        // COMMIT GRANULARITY (2026-07-21). The apply gate used to be the 4 GiB
+        // COPY-buffer CEILING alone, so a source whose whole output is smaller
+        // than that composed the ENTIRE run into RAM and wrote once, at the end:
+        // OMW showed composed=1.6M / committed=0 / files=0/1226 / round_trips=0
+        // for its whole run, then one terminal COPY with compose stalled behind
+        // it. The ceiling is a memory SAFETY bound, not a batching policy —
+        // using it as the batch size is what globbed every source.
+        //
+        // Commit at the same granularity compose already closes at (the flush
+        // envelope, RAM/64 <= 512 MiB), and at every file boundary. Same total
+        // COPY volume, same O(partitions) round-trips per apply, ~8x more
+        // applies of 1/8 the size: the loader stays busy, files=n/N advances
+        // live, and a cancelled run keeps every committed file instead of
+        // losing the whole source.
+        long applyEnvelope = Math.Min(
+            IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
+            Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
+
+        // A file boundary is a commit point: the source has fully witnessed that
+        // file, so committing here is what makes files=n/N advance during the run
+        // and what makes a re-ingest resumable at file grain.
+        static bool IsPeriodBoundary(SubstrateChange c) =>
+            c.Metadata.SourceContentUnitName.StartsWith(
+                IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
+
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
-                ? wsBytes >= Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                ? wsBytes >= applyEnvelope
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
 
@@ -204,7 +229,7 @@ public sealed class IngestRunner
                     sbatch.Add(intent);
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
-                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
+                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows) || IsPeriodBoundary(intent))
                     {
                         await ProcessBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, ct);
@@ -302,7 +327,7 @@ public sealed class IngestRunner
                         batch.Add(intent);
                         batchRows += RowsOf(intent);
                         wsBytes += ib;
-                        if (ShouldFlushWithCap(batch.Count, batchRows))
+                        if (ShouldFlushWithCap(batch.Count, batchRows) || IsPeriodBoundary(intent))
                         {
                             await ProcessBatchAsync(batch, decomposer, options, rng,
                                                     counters, failures, log, workingSet, ct);
