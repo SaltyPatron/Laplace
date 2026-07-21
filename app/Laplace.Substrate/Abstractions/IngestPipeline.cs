@@ -465,6 +465,15 @@ public static class IngestBatchPipeline
                         ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
                         : 1;
 
+                    // Per-file compose telemetry. Aggregate counters ("files=37/1226")
+                    // say how many finished but never WHICH, or how long one took —
+                    // so a single pathological file is invisible in the log.
+                    int workerId = w;
+                    var fileSw = System.Diagnostics.Stopwatch.StartNew();
+                    Console.Error.WriteLine(
+                        $"INGEST_FILE_START file={source.FileLabel} worker={workerId}"
+                        + (segments > 1 ? $" segments={segments}" : ""));
+
                     var changes = segments > 1
                         ? MonolithSegmenter.RunSegmentedAsync(
                             records,
@@ -476,9 +485,18 @@ public static class IngestBatchPipeline
                             ct)
                         : RunAsync(records, handlerFactory(source.FileLabel), config, ct);
 
+                    long fileUnits = 0;
                     await foreach (var change in changes)
+                    {
+                        fileUnits += change.Metadata.InputUnitsConsumed;
                         await outCh.Writer.WriteAsync(change, ct);
+                    }
                     await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
+
+                    double secs = Math.Max(1e-3, fileSw.Elapsed.TotalSeconds);
+                    Console.Error.WriteLine(
+                        $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
+                        + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
                 }
             }, ct);
 
