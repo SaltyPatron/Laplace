@@ -22,7 +22,7 @@ const CARDS: { name: string; key: keyof Counts; blurb: string; ladder: string; h
   },
   {
     name: 'Chess', key: 'chess',
-    blurb: 'Self-play games — the proving domain, where ground truth is objectively checkable.',
+    blurb: "Magnus Carlsen's ~9k chess.com games plus the openings book, recorded as PGN testimony with the analysis layer folded over them — the proving domain, where ground truth is objectively checkable.",
     ladder: 'square → piece → move → position → game',
   },
   {
