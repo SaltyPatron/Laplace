@@ -105,6 +105,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -389,6 +392,10 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             new QueryRow("whale IS_A cetacean.", 0.91m, 42),
             new QueryRow("A whale is a marine mammal.", 0.84m, 17),
         ]);
+
+    public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
+        Task.FromResult(new PulseResponse("pulse", nowUnix, 4_440_000, 6_300_000, 5_700_000,
+            4_337_000, nowUnix - 3, 120, true));
 
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<BandLeaders>>(
