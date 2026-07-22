@@ -20,6 +20,14 @@ internal interface ISubstrateClient
         string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
         byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct);
 
+    Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct);
+
+    Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct);
+
+    Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct);
+
+    Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct);
+
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 

@@ -1,0 +1,154 @@
+@layer components {
+  .leaders {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .sub {
+    margin: 0;
+    font-size: var(--text-sm);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .arena {
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-panel);
+    padding: var(--space-3) var(--space-4);
+    min-height: 12rem;
+  }
+
+  .arenaName {
+    font-size: var(--text-sm);
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-accent);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--color-border-default);
+  }
+
+  .rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 50%, transparent);
+  }
+
+  .row:last-child {
+    border-bottom: none;
+  }
+
+  .rank {
+    flex-shrink: 0;
+    width: 1.2rem;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .edge {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    overflow: hidden;
+  }
+
+  .subject {
+    flex-shrink: 0;
+    font-weight: 600;
+    font-size: var(--text-sm);
+    color: var(--color-text-primary);
+    text-decoration: none;
+  }
+
+  .subject:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  .relation {
+    flex-shrink: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .object {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    color: var(--color-text-primary);
+  }
+
+  /* The rating is the point — sports-numeral treatment. */
+  .stat {
+    flex-shrink: 0;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .mu {
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    font-size: var(--text-base);
+    color: var(--color-accent);
+  }
+
+  .wit {
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .loading {
+    height: 10rem;
+    border-radius: var(--radius-md);
+    background: linear-gradient(90deg, transparent, var(--color-bg-panel-2), transparent);
+    background-size: 200% 100%;
+    animation: leaders-shimmer 1.2s infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .loading { animation: none; background: var(--color-bg-panel-2); }
+  }
+
+  @keyframes leaders-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+}

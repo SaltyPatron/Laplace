@@ -4,6 +4,7 @@ import { Muted } from '@ui';
 import { exploreCatalog } from '../explore/api';
 import type { ExploreCatalogResponse } from '../explore/types';
 import { useAppStore, type QuerySeed } from '../store';
+import { Leaderboards } from './Leaderboards';
 import styles from './HomeView.module.css';
 
 /** Where a mode card or example sends the user. */
@@ -36,6 +37,11 @@ export function HomeView({ onGoto }: Props) {
   }, []);
 
   const runExample = (seed: QuerySeed) => {
+    // Two-topic comparisons have a home of their own — the matchup page.
+    if (seed.topic2 && (seed.shape === 'reason' || seed.shape === 'is_a')) {
+      nav(`/explore/matchup/${encodeURIComponent(seed.topic)}/${encodeURIComponent(seed.topic2)}`);
+      return;
+    }
     setQuerySeed(seed);
     onGoto('query');
   };
@@ -67,6 +73,8 @@ export function HomeView({ onGoto }: Props) {
         <Vital label="Consensus edges" value={consensus} hint="evidence folded into ratings" />
         <Vital label="Sources" value={sources} hint="independent witnesses meshed" />
       </section>
+
+      <Leaderboards />
 
       <section className={styles.modes} aria-label="What you can do">
         <ModeCard

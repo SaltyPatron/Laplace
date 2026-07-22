@@ -53,6 +53,33 @@ internal static class QueryEndpoints
         .Produces<RelationBandsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        // The storefront leaderboard: top consensus edges per salience band,
+        // fully labeled. Ungated like the catalog — it IS the shop window.
+        app.MapGet("/v1/query/leaders", async (string? bands, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            var bandIds = (bands ?? "1,2,4,5")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var b) ? b : -1)
+                .Where(b => b is >= 0 and <= 12)
+                .Distinct().Take(8).ToArray();
+            if (bandIds.Length == 0)
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-12.");
+            var per = Math.Clamp(limit ?? 5, 1, 25);
+            try
+            {
+                var leaders = await substrate.LeadersAsync(bandIds, per, ct);
+                return Results.Json(new LeadersResponse("list", leaders));
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("query")
+        .Produces<LeadersResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPost("/v1/query", async (QueryRequest payload, ISubstrateClient substrate, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(payload.Topic))

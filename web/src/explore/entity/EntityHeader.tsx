@@ -1,5 +1,6 @@
-import { Button, ConsensusBadge, Muted } from '@ui';
+import { Button, Muted } from '@ui';
 import type { ExploreEntityPreviewResponse } from '../types';
+import { PlayerCard } from './PlayerCard';
 import styles from './EntityDetail.module.css';
 
 export function EntityHeader({
@@ -29,7 +30,7 @@ export function EntityHeader({
             {copied ? 'Copied' : 'Copy id'}
           </Button>
         </Muted>
-        <ConsensusBadge witnesses={preview.evidence_count} tone="explore" />
+        <PlayerCard preview={preview} />
       </div>
       <div className={styles.actions}>
         <Button disabled={!unlocked || exportBusy} loading={exportBusy} onClick={onExport}>
