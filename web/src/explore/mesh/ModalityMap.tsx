@@ -27,7 +27,7 @@ const CARDS: { name: string; key: keyof Counts; blurb: string; ladder: string; h
   },
   {
     name: 'Languages', key: 'multilingual',
-    blurb: 'The ISO-639 code catalog is seeded; the multilingual lemmas (OMW) that mesh every language at ILI await ingestion.',
+    blurb: 'OMW multilingual lemmas meshing every language at the ILI hub — the largest source in the substrate — plus the full ISO-639 code catalog.',
     ladder: 'lemma → sense → ILI concept (cross-lingual)',
   },
   {
