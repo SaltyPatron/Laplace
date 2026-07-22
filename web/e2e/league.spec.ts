@@ -78,3 +78,21 @@ test('mesh landing shows the honest modality map', async ({ page }) => {
   // an unseeded modality is honestly labelled, not shown as a zero scoreboard
   await expect(page.getByText('awaiting ingest').first()).toBeVisible();
 });
+
+// The provenance tier: warehouse → stage → source → roster → entity. The
+// stage→source drill was broken (cli names never matched live keys) and the
+// source page had no roster at all.
+test('stage drills into a live source with a roster', async ({ page }) => {
+  await page.goto('/explore/stage/knowledge');
+  await expect(page.getByText('Stage — knowledge')).toBeVisible({ timeout: 15_000 });
+  await page.getByText('wordnet', { exact: true }).click();
+  await expect(page).toHaveURL(/\/explore\/source\//, { timeout: 15_000 });
+  await expect(page.getByText('Roster — what this witness asserts')).toBeVisible();
+  // the roster samples real testimony rows with entity links
+  await expect(page.locator('a[href*="/explore/entity/"]').first()).toBeVisible({ timeout: 30_000 });
+});
+
+test('unseeded cadence source is honestly labelled on the stage page', async ({ page }) => {
+  await page.goto('/explore/stage/knowledge');
+  await expect(page.getByText('not yet ingested').first()).toBeVisible({ timeout: 15_000 });
+});

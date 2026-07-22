@@ -114,6 +114,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -405,6 +408,12 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
 
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
         Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0));
+
+    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SourceRosterRow>>(
+        [
+            new SourceRosterRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 42),
+        ]);
 
     public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
     {

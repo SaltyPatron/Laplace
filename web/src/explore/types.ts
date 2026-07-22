@@ -19,16 +19,28 @@ export interface VisualizationEdge {
 export interface ExploreSourceRow {
   key: string;
   evidence: number;
-  content: number;
+  content: number | null;
   stage?: string | null;
   layer?: string | null;
   role?: string | null;
+  id_hex?: string | null;
+}
+
+export interface SourceRosterRow {
+  subject_id: string;
+  subject: string;
+  relation: string;
+  object_id: string;
+  object: string;
+  observations: number;
 }
 export interface ExploreStageSourceRow {
   cli: string;
   layer?: string | null;
   role?: string | null;
   links?: string | null;
+  source_key?: string | null;
+  evidence?: number | null;
 }
 export interface ExploreStageRow {
   stage: string;

@@ -36,7 +36,8 @@
       "content": 500000,
       "stage": "knowledge",
       "layer": "L2",
-      "role": "synsets"
+      "role": "synsets",
+      "id_hex": null
     }
   ],
   "stages": [
@@ -49,7 +50,9 @@
           "cli": "wordnet",
           "layer": "L2",
           "role": "synsets",
-          "links": null
+          "links": null,
+          "source_key": null,
+          "evidence": null
         }
       ]
     }

@@ -457,6 +457,26 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/explore/sources/{idHex}/roster", async (string idHex, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            byte[] sid;
+            try { sid = Convert.FromHexString(idHex); }
+            catch (FormatException) { return EndpointJson.NotFound("source_not_found", $"'{idHex}' is not a hex source id."); }
+            try
+            {
+                var rows = await substrate.SourceRosterAsync(sid, Math.Clamp(limit ?? 40, 1, 200), ct);
+                return Results.Json(new SourceRosterResponse("source.roster", idHex.ToLowerInvariant(), rows));
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<SourceRosterResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/explore/entities/{idHex}/record", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
             try
