@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Muted } from '@ui';
-import { exploreCatalog } from '../explore/api';
-import type { ExploreCatalogResponse } from '../explore/types';
 import { useAppStore, type QuerySeed } from '../store';
+import { Leaderboards } from './Leaderboards';
+import { Scoreboard } from './Scoreboard';
 import styles from './HomeView.module.css';
 
 /** Where a mode card or example sends the user. */
@@ -18,8 +17,8 @@ interface Props {
  * The landing. It answers the two questions a first visit actually has — "what
  * is this?" and "what can I do with it?" — before offering any input box.
  *
- * "What is this" is answered by the substrate's own vitals: the size of the
- * witnessed graph, live. "What can I do" is the three modes, named for the
+ * "What is this" is answered by the live scoreboard: the size of the
+ * witnessed graph and whether a source is folding right now. "What can I do" is the three modes, named for the
  * distinct thing each one does, plus concrete example reads that deep-link into
  * the Query console already set up. Nothing here is decorative — every number
  * and every mode is a real capability of the substrate underneath.
@@ -27,26 +26,16 @@ interface Props {
 export function HomeView({ onGoto }: Props) {
   const nav = useNavigate();
   const setQuerySeed = useAppStore((s) => s.setQuerySeed);
-  const [catalog, setCatalog] = useState<ExploreCatalogResponse | null>(null);
-
-  useEffect(() => {
-    exploreCatalog()
-      .then(setCatalog)
-      .catch(() => setCatalog(null));
-  }, []);
 
   const runExample = (seed: QuerySeed) => {
+    // Two-topic comparisons have a home of their own — the matchup page.
+    if (seed.topic2 && (seed.shape === 'reason' || seed.shape === 'is_a')) {
+      nav(`/explore/matchup/${encodeURIComponent(seed.topic)}/${encodeURIComponent(seed.topic2)}`);
+      return;
+    }
     setQuerySeed(seed);
     onGoto('query');
   };
-
-  const entities = pick(catalog, 'entities');
-  const attestations = pick(catalog, 'attestations');
-  const consensus = catalog?.consensus?.consensusRows ?? null;
-  // source_counts() can time out into an empty list while a seed is running.
-  // Zero sources beside millions of attestations would be a lie — an empty
-  // read renders as unavailable, never as a count.
-  const sources = catalog?.sources?.length ? catalog.sources.length : null;
 
   return (
     <div className={styles.home}>
@@ -61,12 +50,9 @@ export function HomeView({ onGoto }: Props) {
         </p>
       </section>
 
-      <section className={styles.vitals} aria-label="Substrate vitals">
-        <Vital label="Entities" value={entities} hint="deduplicated content, content-addressed" />
-        <Vital label="Attestations" value={attestations} hint="individual witnessed assertions" />
-        <Vital label="Consensus edges" value={consensus} hint="evidence folded into ratings" />
-        <Vital label="Sources" value={sources} hint="independent witnesses meshed" />
-      </section>
+      <Scoreboard />
+
+      <Leaderboards />
 
       <section className={styles.modes} aria-label="What you can do">
         <ModeCard
@@ -111,15 +97,6 @@ export function HomeView({ onGoto }: Props) {
   );
 }
 
-function Vital({ label, value, hint }: { label: string; value: number | null; hint: string }) {
-  return (
-    <div className={styles.vital}>
-      <span className={styles.vitalValue}>{value == null ? '—' : compact(value)}</span>
-      <span className={styles.vitalLabel}>{label}</span>
-      <span className={styles.vitalHint}>{hint}</span>
-    </div>
-  );
-}
 
 function ModeCard({
   name, tagline, body, cta, accent, onClick,
@@ -144,15 +121,3 @@ const EXAMPLES: { label: string; seed: QuerySeed }[] = [
   { label: 'Everything witnessed about "gravity"', seed: { topic: 'gravity', shape: 'band_facts' } },
   { label: '"water" across languages', seed: { topic: 'water', shape: 'languages' } },
 ];
-
-function pick(catalog: ExploreCatalogResponse | null, metricPrefix: string): number | null {
-  if (!catalog) return null;
-  const row = catalog.counts.find((c) => c.metric.startsWith(metricPrefix));
-  return row ? Number(row.value) : null;
-}
-
-function compact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}

@@ -17,8 +17,13 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     WebRootPath = LaplaceInstall.WebRoot,
 });
 
+// LAPLACE_API_PORT lets a dev instance run beside the deployed one (which owns
+// the canonical port); unset, the canonical LaplaceInstall.EndpointPort binds.
 builder.WebHost.ConfigureKestrel(options =>
-    options.ListenLocalhost(LaplaceInstall.EndpointPort));
+    options.ListenLocalhost(
+        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_API_PORT"), out var devPort)
+            ? devPort
+            : LaplaceInstall.EndpointPort));
 
 builder.Host.UseSerilog((_, lc) =>
 {

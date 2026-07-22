@@ -32,6 +32,28 @@ internal static class CoreEndpoints
             new ModelInfo("laplace-embed-meaning-001", "model", 0, "laplace")
         ]))).WithTags("core").Produces<ModelList>();
 
+        app.MapGet("/v1/pulse", async (ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var pulse = await substrate.PulseAsync(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ct);
+                return Results.Json(pulse);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        }).WithTags("core").Produces<PulseResponse>()
+          .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/modalities", async (ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try { return Results.Json(await substrate.ModalitiesAsync(ct)); }
+            catch (SubstrateUnavailableException ex)
+            { return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message); }
+        }).WithTags("explore").Produces<ModalitiesResponse>()
+          .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(
             ChatCompletions: new CapabilityStatus("live", Backend: "laplace.recall_session", Billing: "preflight_quote_required"),
             Completions: new CapabilityStatus("live", Backend: "laplace.completions", Billing: "preflight_quote_required"),
