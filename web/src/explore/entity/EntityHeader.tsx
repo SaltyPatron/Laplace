@@ -1,3 +1,4 @@
+import { Link as RouterLink } from 'react-router-dom';
 import { Button, Muted } from '@ui';
 import type { ExploreEntityPreviewResponse } from '../types';
 import { PlayerCard } from './PlayerCard';
@@ -33,6 +34,9 @@ export function EntityHeader({
         <PlayerCard preview={preview} />
       </div>
       <div className={styles.actions}>
+        <Button asChild>
+          <RouterLink to={`/explore/mesh/${preview.id_hex}`}>View in mesh</RouterLink>
+        </Button>
         <Button disabled={!unlocked || exportBusy} loading={exportBusy} onClick={onExport}>
           Export for training
         </Button>

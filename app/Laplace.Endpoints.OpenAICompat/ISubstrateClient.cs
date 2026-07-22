@@ -22,6 +22,8 @@ internal interface ISubstrateClient
 
     Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct);
 
+    Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct);
+
     Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct);
 
     Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct);

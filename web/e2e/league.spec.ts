@@ -45,3 +45,24 @@ test('entity page leads with the player-card stat row', async ({ page }) => {
   await expect(page.getByText('top rating')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('games', { exact: true })).toBeVisible();
 });
+
+// The semantic-mesh drill-down: the tiered master/detail over the factorization
+// of meaning — belongs_to (up) | node | roster (down), re-centering on click.
+test('mesh landing explains the ladder and enters at a node', async ({ page }) => {
+  await page.goto('/explore/mesh');
+  await expect(page.getByRole('heading', { name: 'The mesh' })).toBeVisible();
+  await expect(page.getByText('ILI concept')).toBeVisible();
+  await page.getByRole('button', { name: 'whale', exact: true }).click();
+  await expect(page).toHaveURL(/\/explore\/mesh\/[0-9a-f]{32}/i, { timeout: 15_000 });
+});
+
+test('mesh drill shows belongs-to, roster, and re-centers on a member', async ({ page }) => {
+  await page.goto('/explore/mesh/014488e93e050f3f0f19ed9847ec5d65');
+  await expect(page.getByText('Belongs to')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Roster')).toBeVisible();
+  // a roster member re-centers the drill (URL changes to that node)
+  const before = page.url();
+  await page.locator('button', { hasText: 'whale' }).first().click();
+  await expect(page).not.toHaveURL(before, { timeout: 15_000 });
+  await expect(page.getByText('Belongs to')).toBeVisible();
+});

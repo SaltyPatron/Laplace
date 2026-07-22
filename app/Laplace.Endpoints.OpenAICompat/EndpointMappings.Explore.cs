@@ -438,6 +438,25 @@ internal static class ExploreEndpoints
         // The entity's verdict record — confirmed/contested/refuted/thin counts
         // from the canonical epistemic_status logic. Preview-class information,
         // served ungated like the entity preview.
+        app.MapGet("/v1/explore/entities/{idHex}/mesh", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var mesh = await substrate.MeshAsync(idHex, ct);
+                return mesh is null
+                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                    : Results.Json(mesh);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<MeshResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/explore/entities/{idHex}/record", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
             try

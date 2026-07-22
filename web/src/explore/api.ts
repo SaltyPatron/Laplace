@@ -141,3 +141,7 @@ export async function preflight(serviceId: string, tenant: string, units = 1) {
     { tenant },
   );
 }
+
+export function exploreMesh(idHex: string, opts?: ApiOptions) {
+  return apiGet<import('./mesh/types').MeshResponse>(`/v1/explore/entities/${idHex}/mesh`, opts);
+}

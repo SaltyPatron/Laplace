@@ -70,6 +70,26 @@ public sealed class LeagueContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task Mesh_ReturnsBelongsToAndRoster()
+    {
+        using var response = await _client.GetAsync(
+            "/v1/explore/entities/00112233445566778899aabbccddeeff/mesh");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<MeshResponse>();
+        Assert.NotNull(body);
+        Assert.False(string.IsNullOrEmpty(body!.Label));
+        Assert.NotEmpty(body.BelongsTo);
+        Assert.NotEmpty(body.Roster);
+    }
+
+    [Fact]
+    public async Task Mesh_RejectsNonHexId()
+    {
+        using var response = await _client.GetAsync("/v1/explore/entities/not-a-hex/mesh");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Matchup_ReturnsBothSidesAndTape()
     {
         using var response = await _client.GetAsync("/v1/explore/matchup?x=dog&y=cat");

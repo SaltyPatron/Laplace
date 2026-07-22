@@ -108,6 +108,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -396,6 +399,17 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
         Task.FromResult(new PulseResponse("pulse", nowUnix, 4_440_000, 6_300_000, 5_700_000,
             4_337_000, nowUnix - 3, 120, true));
+
+    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
+    {
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<MeshResponse?>(null);
+        return Task.FromResult<MeshResponse?>(new MeshResponse("mesh", idHex.ToLowerInvariant(), "whale",
+            "WordNet_Synset",
+            [ new MeshLink(CetaceanIdHex, "cetacean", "is a", "WordNet_Synset", 0.91m, 42) ],
+            [ new MeshLink(WhaleIdHex, "whale", "sense", null, 1.0m, 12),
+              new MeshLink(CetaceanIdHex, "orca", "sense", null, 0.8m, 5) ]));
+    }
 
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<BandLeaders>>(

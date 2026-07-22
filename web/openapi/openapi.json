@@ -672,6 +672,55 @@
         }
       }
     },
+    "/v1/explore/entities/{idHex}/mesh": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeshResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/explore/entities/{idHex}/record": {
       "get": {
         "tags": [
@@ -6898,6 +6947,91 @@
               "string"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "MeshLink": {
+        "required": [
+          "id",
+          "label",
+          "relation",
+          "hub_type",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "hub_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "MeshResponse": {
+        "required": [
+          "object",
+          "id",
+          "label",
+          "hub_type",
+          "belongs_to",
+          "roster"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "hub_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "belongs_to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshLink"
+            }
+          },
+          "roster": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshLink"
+            }
           }
         }
       },
