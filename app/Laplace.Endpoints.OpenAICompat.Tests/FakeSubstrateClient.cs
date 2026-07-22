@@ -111,6 +111,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -408,6 +411,16 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
 
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
         Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0));
+
+    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
+    {
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<TaxonomyResponse?>(null);
+        return Task.FromResult<TaxonomyResponse?>(new TaxonomyResponse("taxonomy",
+            WhaleIdHex, "whale",
+            [ new TaxonomyNode(CetaceanIdHex, "cetacean", 1325.09m), new TaxonomyNode(IsAIdHex, "mammal", 1319.14m) ],
+            [ new TaxonomyNode(WordNetIdHex, "sperm whale", 1325.09m) ]));
+    }
 
     public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<SourceRosterRow>>(

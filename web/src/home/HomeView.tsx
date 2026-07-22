@@ -33,6 +33,12 @@ export function HomeView({ onGoto }: Props) {
       nav(`/explore/matchup/${encodeURIComponent(seed.topic)}/${encodeURIComponent(seed.topic2)}`);
       return;
     }
+    // Shaped reads still seed the console; a bare topic goes to the topic page,
+    // which shows every read at once instead of making you pick one.
+    if (!seed.shape || seed.shape === 'describe' || seed.shape === 'band_facts' || seed.shape === 'define') {
+      nav(`/topic/${encodeURIComponent(seed.topic)}`);
+      return;
+    }
     setQuerySeed(seed);
     onGoto('query');
   };

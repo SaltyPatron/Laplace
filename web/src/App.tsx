@@ -3,6 +3,7 @@ import { AppHeader, NavTabs, TenantField } from '@ui';
 import { ChatView } from './chat/ChatView';
 import { HomeView } from './home/HomeView';
 import { QueryConsole } from './query/QueryConsole';
+import { TopicView } from './topic/TopicView';
 import { BillingView } from './billing/BillingView';
 import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
@@ -62,6 +63,8 @@ function Shell() {
           <Route path="/" element={<HomeView onGoto={(t) => nav(`/${t}`)} />} />
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<QueryConsole />} />
+          <Route path="/topic" element={<TopicView />} />
+          <Route path="/topic/:ref" element={<TopicView />} />
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab" element={<ChessLabView />} />

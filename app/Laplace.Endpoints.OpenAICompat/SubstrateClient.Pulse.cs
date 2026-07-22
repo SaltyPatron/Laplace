@@ -13,19 +13,20 @@ internal sealed partial class SubstrateClient
 {
     public async Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct)
     {
-        // Each is a FAST targeted count, not the slow all-sources aggregate:
-        // chess by its source id, models by a model-plane relation type,
-        // multilingual by content actually tagged with a language. Text is the
-        // reliable total minus the others — it dominates and never times out.
+        // Counted by SOURCE FAMILY from the ~200ms approx catalog — the seeds
+        // proved the old proxies wrong: chess arrived as ChessAnalysis/ChessPgn/
+        // ChessOpenings (not ChessSelfPlay), and OMW meshes languages through
+        // the ILI hub, minting no HAS_TRANSLATION edges at all. Source presence
+        // is the truthful residency signal; models stay on their plane relation.
         const string sql = """
+            WITH s AS (SELECT source, evidence_approx FROM laplace.source_counts_approx())
             SELECT
-              (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'attestations%') AS total,
-              (SELECT count(*) FROM laplace.attestations a
-                 WHERE a.source_id = laplace.source_id('ChessSelfPlay')) AS chess,
+              COALESCE((SELECT sum(evidence_approx) FROM s), 0) AS total,
+              COALESCE((SELECT sum(evidence_approx) FROM s WHERE source ILIKE '%chess%'), 0) AS chess,
               (SELECT count(*) FROM laplace.consensus c
                  WHERE c.type_id = laplace.relation_type_id('ATTENDS')) AS models,
-              (SELECT count(*) FROM laplace.consensus c
-                 WHERE c.type_id = laplace.relation_type_id('HAS_TRANSLATION')) AS multilingual
+              COALESCE((SELECT sum(evidence_approx) FROM s
+                 WHERE source ILIKE '%OMWDecomposer%' OR source ILIKE '%tatoeba%'), 0) AS multilingual
             """;
         try
         {

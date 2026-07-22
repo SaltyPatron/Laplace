@@ -477,6 +477,25 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/explore/entities/{idHex}/taxonomy", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var tax = await substrate.TaxonomyAsync(idHex, ct);
+                return tax is null
+                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                    : Results.Json(tax);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<TaxonomyResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/explore/entities/{idHex}/record", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
             try

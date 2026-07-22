@@ -96,3 +96,14 @@ test('unseeded cadence source is honestly labelled on the stage page', async ({ 
   await page.goto('/explore/stage/knowledge');
   await expect(page.getByText('not yet ingested').first()).toBeVisible({ timeout: 15_000 });
 });
+
+// The topic page: one lookup, every read at once — no shape dropdown to pick,
+// with the IS_A tree drawn as an actual tree.
+test('topic page shows everything at once with the taxonomy tree', async ({ page }) => {
+  await page.goto('/topic/dog');
+  await expect(page.getByText('Taxonomy — the IS_A tree')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Definition', { exact: true })).toBeVisible();
+  await expect(page.getByText('Strongest facts, by band')).toBeVisible();
+  // the tree renders the highlighted topic node and a clickable parent rung
+  await expect(page.getByRole('link', { name: 'animal', exact: true })).toBeVisible({ timeout: 30_000 });
+});

@@ -91,6 +91,50 @@ internal sealed partial class SubstrateClient
             cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
             "mesh_roster", ct);
 
+    public async Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
+    {
+        if (!TryParseHex(idHex, out var id)) return null;
+
+        // Taxonomy lives on concepts: a bare surface hops to its top synset,
+        // a synset/frame stays itself (top_synset returns NULL for non-words).
+        var root = await ReadRowsAsync("""
+            SELECT encode(r.id, 'hex'), laplace.label_or_hex(r.id)
+            FROM (SELECT COALESCE(laplace.top_synset(@id), @id) AS id) r
+            """,
+            static r => (Id: r.GetString(0), Label: r.IsDBNull(1) ? "" : r.GetString(1)),
+            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
+            "taxonomy_root", ct);
+        if (root.Count == 0) return null;
+        var rootId = Convert.FromHexString(root[0].Id);
+
+        var upTask = ReadRowsAsync("""
+            SELECT encode(w.entity_id, 'hex'), laplace.label_or_hex(w.entity_id), w.eff_mu
+            FROM laplace.walk_strongest(@id, laplace.relation_type_id('IS_A'), 10) w
+            ORDER BY w.step
+            """, TaxNode,
+            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = rootId,
+            "taxonomy_up", ct, timeoutSeconds: 30);
+
+        var childrenTask = ReadRowsAsync("""
+            SELECT encode(c.subject_id, 'hex'), laplace.label_or_hex(c.subject_id),
+                   laplace.eff_mu_display(c.rating, c.rd)
+            FROM laplace.consensus c
+            WHERE c.object_id = @id AND c.type_id = laplace.relation_type_id('IS_A')
+            ORDER BY laplace.eff_mu_display(c.rating, c.rd) DESC
+            LIMIT 24
+            """, TaxNode,
+            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = rootId,
+            "taxonomy_children", ct, timeoutSeconds: 30);
+
+        await Task.WhenAll(upTask, childrenTask);
+        return new TaxonomyResponse("taxonomy", root[0].Id, root[0].Label,
+            upTask.Result, childrenTask.Result);
+    }
+
+    private static TaxonomyNode TaxNode(NpgsqlDataReader r) => new(
+        r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1),
+        r.IsDBNull(2) ? null : r.GetDecimal(2));
+
     private static MeshLink MeshRow(NpgsqlDataReader r) => new(
         r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1), r.GetString(2),
         r.IsDBNull(3) ? null : r.GetString(3),

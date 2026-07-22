@@ -811,6 +811,55 @@
         }
       }
     },
+    "/v1/explore/entities/{idHex}/taxonomy": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/explore/entities/{idHex}/record": {
       "get": {
         "tags": [
@@ -8951,6 +9000,64 @@
               "string"
             ],
             "format": "double"
+          }
+        }
+      },
+      "TaxonomyNode": {
+        "required": [
+          "id",
+          "label",
+          "eff_mu"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TaxonomyResponse": {
+        "required": [
+          "object",
+          "root_id",
+          "root_label",
+          "up",
+          "children"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "root_id": {
+            "type": "string"
+          },
+          "root_label": {
+            "type": "string"
+          },
+          "up": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
           }
         }
       },
