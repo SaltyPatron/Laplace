@@ -51,7 +51,7 @@ test('entity page leads with the player-card stat row', async ({ page }) => {
 test('mesh landing explains the ladder and enters at a node', async ({ page }) => {
   await page.goto('/explore/mesh');
   await expect(page.getByRole('heading', { name: 'The mesh' })).toBeVisible();
-  await expect(page.getByText('ILI concept')).toBeVisible();
+  await expect(page.getByText('ILI concept').first()).toBeVisible();
   await page.getByRole('button', { name: 'whale', exact: true }).click();
   await expect(page).toHaveURL(/\/explore\/mesh\/[0-9a-f]{32}/i, { timeout: 15_000 });
 });
@@ -65,4 +65,16 @@ test('mesh drill shows belongs-to, roster, and re-centers on a member', async ({
   await page.locator('button', { hasText: 'whale' }).first().click();
   await expect(page).not.toHaveURL(before, { timeout: 15_000 });
   await expect(page.getByText('Belongs to')).toBeVisible();
+});
+
+// The omni-modal map is honest: the resident modality reads live, the absent
+// ones read "awaiting ingest" — never a faked scoreboard.
+test('mesh landing shows the honest modality map', async ({ page }) => {
+  await page.goto('/explore/mesh');
+  await expect(page.getByText('One law, every modality')).toBeVisible({ timeout: 15_000 });
+  // Text is the resident foundation → live
+  const text = page.locator('section[aria-label="Modalities"]').getByText('Text', { exact: true });
+  await expect(text).toBeVisible();
+  // an unseeded modality is honestly labelled, not shown as a zero scoreboard
+  await expect(page.getByText('awaiting ingest').first()).toBeVisible();
 });

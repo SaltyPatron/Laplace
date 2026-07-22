@@ -11,6 +11,45 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// </summary>
 internal sealed partial class SubstrateClient
 {
+    public async Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct)
+    {
+        // Each is a FAST targeted count, not the slow all-sources aggregate:
+        // chess by its source id, models by a model-plane relation type,
+        // multilingual by content actually tagged with a language. Text is the
+        // reliable total minus the others — it dominates and never times out.
+        const string sql = """
+            SELECT
+              (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'attestations%') AS total,
+              (SELECT count(*) FROM laplace.attestations a
+                 WHERE a.source_id = laplace.source_id('ChessSelfPlay')) AS chess,
+              (SELECT count(*) FROM laplace.consensus c
+                 WHERE c.type_id = laplace.relation_type_id('ATTENDS')) AS models,
+              (SELECT count(*) FROM laplace.consensus c
+                 WHERE c.type_id = laplace.relation_type_id('HAS_TRANSLATION')) AS multilingual
+            """;
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.CommandTimeout = 20;
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            long total = 0, chess = 0, models = 0, ml = 0;
+            if (await r.ReadAsync(ct))
+            {
+                total = r.IsDBNull(0) ? 0 : r.GetInt64(0);
+                chess = r.IsDBNull(1) ? 0 : r.GetInt64(1);
+                models = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                ml = r.IsDBNull(3) ? 0 : r.GetInt64(3);
+            }
+            var text = Math.Max(0, total - chess - models - ml);
+            return new ModalitiesResponse("modalities", text, chess, models, ml);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Substrate is unreachable.", ex);
+        }
+    }
+
     public async Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct)
     {
         // One round trip: the estimate counts, then the heartbeat. Both are

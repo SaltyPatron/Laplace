@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
 import { exploreMatchup, exploreMatchupVerdict } from '../../query/api';
 import type { Matchup, MatchupSide, MatchupVerdict, TapeRow } from '../../query/types';
@@ -17,11 +17,14 @@ import styles from './MatchupView.module.css';
  */
 export function MatchupView() {
   const { x = '', y = '' } = useParams();
+  const [params] = useSearchParams();
   const nav = useNavigate();
   const { tenant, quoteId } = useAppStore();
 
-  const [xInput, setXInput] = useState(decodeURIComponent(x));
-  const [yInput, setYInput] = useState(decodeURIComponent(y));
+  // Path params drive the loaded comparison; ?x=/?y= only prefill the picker
+  // (a "compare from here" handoff that waits for the second contender).
+  const [xInput, setXInput] = useState(decodeURIComponent(x) || params.get('x') || '');
+  const [yInput, setYInput] = useState(decodeURIComponent(y) || params.get('y') || '');
 
   const [data, setData] = useState<Matchup | null>(null);
   const [verdict, setVerdict] = useState<MatchupVerdict | null>(null);

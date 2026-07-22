@@ -85,9 +85,17 @@ function MeshDrill({ idHex }: { idHex: string }) {
                 id_hex: data.id, label: data.label, tier: null, type: data.hub_type ?? null,
                 exists: true, evidence_count: 0, preview_facts: [],
               }} />
-              <RouterLink to={`/explore/entity/${data.id}`} className={styles.openEntity}>
-                open full entity page →
-              </RouterLink>
+              <div className={styles.nodeLinks}>
+                <RouterLink to={`/explore/entity/${data.id}`} className={styles.openEntity}>
+                  full entity →
+                </RouterLink>
+                <RouterLink
+                  to={`/explore/matchup?x=${encodeURIComponent(data.label)}`}
+                  className={styles.openEntity}
+                >
+                  head-to-head →
+                </RouterLink>
+              </div>
             </div>
 
             <Column

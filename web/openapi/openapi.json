@@ -101,6 +101,35 @@
         }
       }
     },
+    "/v1/explore/modalities": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModalitiesResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "tags": [
@@ -7035,6 +7064,53 @@
           }
         }
       },
+      "ModalitiesResponse": {
+        "required": [
+          "object",
+          "text",
+          "chess",
+          "models",
+          "multilingual"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "text": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "chess": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "models": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "multilingual": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "ModelInfo": {
         "required": [
           "id",
@@ -9258,6 +9334,9 @@
       "name": "core"
     },
     {
+      "name": "explore"
+    },
+    {
       "name": "query"
     },
     {
@@ -9265,9 +9344,6 @@
     },
     {
       "name": "reports"
-    },
-    {
-      "name": "explore"
     },
     {
       "name": "foundry"

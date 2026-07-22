@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LookupRow, Muted } from '@ui';
 import { exploreResolve } from '../api';
 import { useExploreStore } from '../store';
+import { ModalityMap } from './ModalityMap';
 import styles from './MeshView.module.css';
 
 /**
@@ -90,6 +91,8 @@ export function MeshLanding() {
           ))}
         </div>
       </div>
+
+      <ModalityMap />
     </div>
   );
 }

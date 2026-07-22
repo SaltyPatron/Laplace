@@ -70,6 +70,18 @@ public sealed class LeagueContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task Modalities_ReturnsHonestCounts()
+    {
+        using var response = await _client.GetAsync("/v1/explore/modalities");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ModalitiesResponse>();
+        Assert.NotNull(body);
+        Assert.True(body!.Text > 0);           // text is the resident foundation
+        Assert.True(body.Models >= 0);         // absent modalities read zero, not faked
+        Assert.True(body.Multilingual >= 0);
+    }
+
+    [Fact]
     public async Task Mesh_ReturnsBelongsToAndRoster()
     {
         using var response = await _client.GetAsync(

@@ -1,0 +1,51 @@
+@layer components {
+  .map { display: flex; flex-direction: column; gap: var(--space-3); }
+  .head { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
+  .title { font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
+  .sub { margin: 0; font-size: var(--text-sm); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-3);
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-panel);
+    text-decoration: none;
+    color: inherit;
+  }
+  .live { transition: border-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard); }
+  a.live:hover { border-color: var(--primitive-blue-500); transform: translateY(-2px); }
+  .awaitingCard { border-style: dashed; background: var(--color-bg-surface); }
+
+  .cardHead { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .name { font-size: var(--text-lg); font-weight: 650; color: var(--color-text-primary); }
+  .ladder { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-accent); overflow-wrap: anywhere; }
+  .blurb { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.45; }
+  .count {
+    margin-top: auto;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+    padding-top: var(--space-2);
+  }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: var(--radius-pill);
+    font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    border: 1px solid var(--color-border-default);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-muted); }
+  .live.pill, .pill.live { color: var(--color-confirm); border-color: color-mix(in srgb, var(--color-confirm) 40%, var(--color-border-default)); }
+  .pill.live .dot { background: var(--color-confirm); }
+  .pill.sparse { color: var(--color-draw); border-color: color-mix(in srgb, var(--color-draw) 40%, var(--color-border-default)); }
+  .pill.sparse .dot { background: var(--color-draw); }
+  .pill.awaiting { color: var(--color-text-muted); }
+}

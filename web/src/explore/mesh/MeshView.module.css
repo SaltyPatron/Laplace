@@ -103,6 +103,7 @@
     text-align: center;
     letter-spacing: -0.01em;
   }
+  .nodeLinks { display: flex; gap: var(--space-3); }
   .openEntity { font-size: var(--text-sm); color: var(--color-accent); text-decoration: none; }
   .openEntity:hover { text-decoration: underline; }
 
