@@ -46,7 +46,6 @@ export function ExploreView() {
           <Link className={styles.navLink} to="/explore/constellation">Constellation</Link>
           <Link className={styles.navLink} to="/explore/walk">Walk</Link>
           <Link className={styles.navLink} to="/explore/audit">Audit</Link>
-          <Link className={styles.navLink} to="/">← App</Link>
         </nav>
       </aside>
       <div className={styles.content}>

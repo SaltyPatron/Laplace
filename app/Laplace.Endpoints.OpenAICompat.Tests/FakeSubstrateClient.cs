@@ -404,9 +404,14 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                 new LeaderRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 1325.09m, 42),
             ])).ToList());
 
-    public Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct) =>
-        Task.FromResult<EntityRecordResponse?>(
+    public Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
+    {
+        // Honor the real contract: a non-32-hex id resolves to null (→ 404).
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<EntityRecordResponse?>(null);
+        return Task.FromResult<EntityRecordResponse?>(
             new EntityRecordResponse("entity.record", idHex.ToLowerInvariant(), 34, 2, 1, 12));
+    }
 
     public Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct)
     {

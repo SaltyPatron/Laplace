@@ -209,7 +209,7 @@ export function EntityDetail() {
   function askSubstrate() {
     if (!preview) return;
     setExploreSeedPrompt(`Tell me about "${preview.label}" (${preview.id_hex}) in the substrate consensus graph.`);
-    nav('/');
+    nav('/chat');
   }
 
   const glomeExtraNodes = useMemo((): GlomeNode[] => {

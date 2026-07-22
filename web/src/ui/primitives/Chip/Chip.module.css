@@ -35,8 +35,9 @@
   }
 
   .engineMissing {
+    /* No opacity: dimming muted text drops it under 4.5:1 (axe serious). The
+       "✗" glyph carries the missing state; the color stays accessible. */
     color: var(--color-text-muted);
-    opacity: 0.85;
     padding: 0.12rem 0.55rem;
     font-size: var(--text-sm);
   }
