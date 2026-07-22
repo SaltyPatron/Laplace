@@ -64,6 +64,7 @@ set(EXT_C_SOURCES
     src/perfcache.c
     src/content_resolve.c
     src/descent_probe.c
+    src/fold_route.c
     src/containers_of.c
     src/geometry_successors.c
     src/highway_mask.c
