@@ -27,8 +27,9 @@ export function BandPicker({ bands, selected, onChange }: Props) {
 
   return (
     <div className={styles.picker}>
+      {/* No heading of its own — the host panel titles it; a second "Lens"
+          label doubled the word in the console. */}
       <div className={styles.head}>
-        <span className={styles.title}>Lens</span>
         <Muted className={styles.summary}>
           {selected.length === 0
             ? `all bands · ${total.toLocaleString()} edges`

@@ -22,6 +22,15 @@ export interface QuoteGate {
   message: string;
 }
 
+/** A structural read preset handed from the Home landing to the Query console. */
+export interface QuerySeed {
+  topic: string;
+  topic2?: string;
+  shape?: string;
+  bands?: number[];
+  relationType?: string;
+}
+
 interface AppState {
   tenant: string;
   quoteId: string;
@@ -29,6 +38,7 @@ interface AppState {
   messages: ChatMessage[];
   pendingQuote: QuoteGate | null;
   exploreSeedPrompt: string | null;
+  querySeed: QuerySeed | null;
   setTenant: (tenant: string) => void;
   setQuoteId: (quoteId: string) => void;
   setModel: (model: string) => void;
@@ -36,6 +46,7 @@ interface AppState {
   updateLastAssistant: (update: (m: ChatMessage) => ChatMessage) => void;
   setPendingQuote: (gate: QuoteGate | null) => void;
   setExploreSeedPrompt: (prompt: string | null) => void;
+  setQuerySeed: (seed: QuerySeed | null) => void;
   clearConversation: () => void;
 }
 
@@ -46,6 +57,7 @@ export const useAppStore = create<AppState>((set) => ({
   messages: [],
   pendingQuote: null,
   exploreSeedPrompt: null,
+  querySeed: null,
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
     set({ tenant });
@@ -66,6 +78,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
   setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
+  setQuerySeed: (querySeed) => set({ querySeed }),
   clearConversation: () => set({ messages: [], pendingQuote: null }),
 }));
 
