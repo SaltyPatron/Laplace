@@ -47,6 +47,16 @@ SECTION 1 — WHAT EXISTS TODAY (verified 2026-07-05)
     TurnWitness BackgroundService witnesses every conversation turn (bounded
     channel, drop-on-full, floor-gated). Response bigrams therefore land as
     PRECEDES attestations — the n-gram walk's OWN edges are already witnessed.
+    [Superseded 2026-07-23, spec 34: endpoint + MCP turns now witness with FULL
+    provenance — per-tenant sources (UserPrompt@{tenant}/Response@{tenant}),
+    session as context_id on every evidence row (chess-game parity), user via
+    HAS_ATTRIBUTION, tenant trust as the third witness-weight factor, and
+    turn-level attestations (APPEARS_IN membership + one PRECEDES prompt→reply
+    corroborating cell) via ConversationContent. The bigram-chain claim above
+    was stale — Pillar 3a had deleted content-chain attestations, leaving turns
+    with NO testimony; spec 34 closes that with turn-level rows, not chains.
+    Session ids mint canonically (substrate/conversation/session/{tenant}/{key}/v1);
+    the SHA256 endpoint session hack is dead and gated.]
 1.3 Feedback (the loop close): `laplace attest <confirm|refute> <tok...>`
     (QueryCommands.AttestAsync) — deposits PRECEDES witnesses for a token
     chain, source substrate/source/UserFeedback/v1, trust UserPrompt (.30),

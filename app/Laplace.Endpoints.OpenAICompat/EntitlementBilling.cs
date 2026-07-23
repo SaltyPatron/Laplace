@@ -237,6 +237,7 @@ internal interface IBillingWebhookHandler
 internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 {
     private readonly StripeBillingOptions _options;
+    private readonly IWebhookSecretProvider _webhookSecret;
     private readonly IBillingCatalog _catalog;
     private readonly IBillingOrchestrator _billing;
     private readonly IBillingEntitlementStore _entitlements;
@@ -244,12 +245,14 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
     public BillingWebhookHandler(
         IOptions<StripeBillingOptions> options,
+        IWebhookSecretProvider webhookSecret,
         IBillingCatalog catalog,
         IBillingOrchestrator billing,
         IBillingEntitlementStore entitlements,
         IBillingWebhookEventStore eventStore)
     {
         _options = options.Value;
+        _webhookSecret = webhookSecret;
         _catalog = catalog;
         _billing = billing;
         _entitlements = entitlements;
@@ -258,14 +261,15 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
     public async Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
+        var webhookSecret = await _webhookSecret.GetAsync(ct);
+        if (string.IsNullOrWhiteSpace(webhookSecret))
             return Result(false, false, false, null, "unknown", "webhook_secret_unconfigured", null, null, null, null);
 
         if (!_options.SkipSignatureVerification)
         {
             try
             {
-                EventUtility.ConstructEvent(payload, signature, _options.WebhookSecret, throwOnApiVersionMismatch: false);
+                EventUtility.ConstructEvent(payload, signature, webhookSecret, throwOnApiVersionMismatch: false);
             }
             catch (Exception)
             {

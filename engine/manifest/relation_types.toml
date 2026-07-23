@@ -38,6 +38,9 @@ family_root = "RELATED_TO"
 # score = the token's salience (projection norm) in that circuit's subspace. The
 # consensus cell (token, APPEARS_IN, coord) therefore rates cross-model structural
 # convergence; per-model provenance stays on the evidence rows via source.
+# Also the conversational membership relation (spec 34): (turn content root,
+# APPEARS_IN, conversation session) under the tenant's source with the session as
+# context — same occurrence semantics, different modality.
 [[relation]]
 canonical = "APPEARS_IN"
 hot = true

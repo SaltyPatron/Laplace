@@ -27,6 +27,7 @@ public sealed record ChatMetadata(
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses = null,
     [property: JsonPropertyName("reply_rows"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ReplyRows = null,
     [property: JsonPropertyName("generated_tokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? GeneratedTokens = null,
+    [property: JsonPropertyName("session"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Session = null,
     [property: JsonPropertyName("laplace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LaplaceChatMetadata? Laplace = null);
 
 

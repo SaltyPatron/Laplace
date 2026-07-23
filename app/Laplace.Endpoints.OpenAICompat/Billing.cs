@@ -12,6 +12,9 @@ internal sealed class StripeBillingOptions
     public string Currency { get; set; } = "usd";
     public string SuccessUrl { get; set; } = "http://localhost:5187/billing/success";
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
+
+    /// <summary>Externally reachable base URL; enables webhook self-provisioning when set.</summary>
+    public string? PublicBaseUrl { get; set; }
     public bool Bypass { get; set; }
 
 
@@ -489,10 +492,20 @@ internal sealed class InMemoryBillingLedger : IBillingLedger
 
 internal sealed record StripeCheckoutSessionResult(bool Created, string? SessionId, string? Url, string? Reason);
 
+internal sealed record StripeSessionDetails(
+    bool Found,
+    bool Paid,
+    string? Tenant,
+    string? ServiceId,
+    string? QuoteId,
+    string? CustomerId,
+    string? SubscriptionId);
+
 internal interface IStripeCheckoutGateway
 {
     Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(BillingQuote quote, ServicePrice price, CancellationToken ct);
     Task<bool> IsSessionPaidAsync(string sessionId, CancellationToken ct);
+    Task<StripeSessionDetails> TryGetSessionAsync(string sessionId, CancellationToken ct);
 }
 
 internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
@@ -589,21 +602,33 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
         }
     }
 
-    public async Task<bool> IsSessionPaidAsync(string sessionId, CancellationToken ct)
+    public async Task<bool> IsSessionPaidAsync(string sessionId, CancellationToken ct) =>
+        (await TryGetSessionAsync(sessionId, ct)).Paid;
+
+    public async Task<StripeSessionDetails> TryGetSessionAsync(string sessionId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
-            return false;
+            return new StripeSessionDetails(false, false, null, null, null, null, null);
 
         StripeConfiguration.ApiKey = _options.ApiKey;
         try
         {
             var service = new SessionService();
             var session = await service.GetAsync(sessionId, cancellationToken: ct);
-            return string.Equals(session.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase);
+            string? Meta(string name) =>
+                session.Metadata is not null && session.Metadata.TryGetValue(name, out var v) ? v : null;
+            return new StripeSessionDetails(
+                Found: true,
+                Paid: string.Equals(session.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase),
+                Tenant: Meta("tenant"),
+                ServiceId: Meta("service_id"),
+                QuoteId: Meta("quote_id"),
+                CustomerId: session.CustomerId,
+                SubscriptionId: session.SubscriptionId);
         }
         catch (StripeException)
         {
-            return false;
+            return new StripeSessionDetails(false, false, null, null, null, null, null);
         }
     }
 }
@@ -613,7 +638,7 @@ internal sealed record QuoteExecutionGate(bool Allowed, string Code, string Mess
 internal interface IBillingOrchestrator
 {
     Task<BillingQuote> CreatePreflightQuoteAsync(string tenant, string serviceId, int units, CancellationToken ct);
-    Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct);
+    Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string tenant, string serviceId, CancellationToken ct);
     Task<BillingQuote?> TryApproveQuoteAsync(string quoteId, CancellationToken ct);
     Task MarkConsumedAndRecordAsync(BillingQuote quote, CancellationToken ct);
     Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct);
@@ -627,6 +652,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
     private readonly IBillingQuoteStore _store;
     private readonly IBillingLedger _ledger;
     private readonly IStripeCheckoutGateway _stripe;
+    private readonly IBillingEntitlementStore _entitlements;
     private readonly StripeBillingOptions _options;
 
     public BillingOrchestrator(
@@ -634,12 +660,14 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         IBillingQuoteStore store,
         IBillingLedger ledger,
         IStripeCheckoutGateway stripe,
+        IBillingEntitlementStore entitlements,
         IOptions<StripeBillingOptions> options)
     {
         _catalog = catalog;
         _store = store;
         _ledger = ledger;
         _stripe = stripe;
+        _entitlements = entitlements;
         _options = options.Value;
     }
 
@@ -695,10 +723,43 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         }, ct);
     }
 
-    public async Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct)
+    public async Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string tenant, string serviceId, CancellationToken ct)
     {
         if (_options.Bypass)
             return new QuoteExecutionGate(true, "bypass", "Billing bypass active (local endpoint).", null);
+
+        // No quote presented: a subscriber's monthly plan credits cover flat
+        // (non-metered) services directly — one unit per request, debited atomically.
+        // Metered services size their units through a quote, so credits for those
+        // are redeemed against the quote below.
+        if (string.IsNullOrWhiteSpace(quoteId))
+        {
+            if (!string.IsNullOrWhiteSpace(tenant) &&
+                _catalog.TryGet(serviceId, out var flatPrice) && !flatPrice.Metered)
+            {
+                var (consumed, debit) = await _entitlements.TryConsumeCreditAsync(tenant, serviceId, 1, ct);
+                if (consumed)
+                {
+                    var creditQuote = await _store.PutAsync(new BillingQuote(
+                        QuoteId: $"q_credit_{Guid.NewGuid():N}",
+                        Tenant: tenant,
+                        ServiceId: serviceId,
+                        Units: 1,
+                        AmountCents: 0,
+                        Currency: flatPrice.Currency,
+                        Status: "approved_credit",
+                        StripeSessionId: null,
+                        StripeCheckoutUrl: null,
+                        CreatedAt: DateTimeOffset.UtcNow,
+                        ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
+                        Consumed: false), ct);
+                    return new QuoteExecutionGate(true, "plan_credit",
+                        $"Covered by plan '{debit.PlanId}' credits ({debit.Remaining} remaining).", creditQuote);
+                }
+            }
+
+            return new QuoteExecutionGate(false, "quote_not_found", "Quote does not exist.", null);
+        }
 
         var quote = await _store.TryGetAsync(quoteId, ct);
         if (quote is null)
@@ -713,11 +774,27 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         if (quote.Consumed)
             return new QuoteExecutionGate(false, "quote_already_consumed", "Quote already consumed.", quote);
 
-        if (string.Equals(quote.Status, "approved", StringComparison.OrdinalIgnoreCase))
+        if (quote.Status is { } status &&
+            (string.Equals(status, "approved", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(status, "approved_credit", StringComparison.OrdinalIgnoreCase)))
             return new QuoteExecutionGate(true, "approved", "Quote approved.", quote);
 
+        // Pending quote of any shape (incl. metered): plan credits redeem it in full
+        // for the quoted units before we ever ask Stripe whether cash arrived.
+        if (!string.IsNullOrWhiteSpace(tenant) &&
+            string.Equals(quote.Tenant, tenant, StringComparison.OrdinalIgnoreCase))
+        {
+            var (consumed, debit) = await _entitlements.TryConsumeCreditAsync(tenant, quote.ServiceId, quote.Units, ct);
+            if (consumed)
+            {
+                var credited = await _store.UpdateAsync(quote with { Status = "approved_credit", AmountCents = 0 }, ct);
+                return new QuoteExecutionGate(true, "plan_credit",
+                    $"Covered by plan '{debit.PlanId}' credits ({debit.Remaining} remaining).", credited);
+            }
+        }
+
         if (string.Equals(quote.Status, "awaiting_manual_approval", StringComparison.OrdinalIgnoreCase))
-            return new QuoteExecutionGate(false, "payment_pending", "Stripe is not configured; quote is awaiting manual approval.", quote);
+            return new QuoteExecutionGate(false, "payment_pending", "Stripe is not configured; quote is awaiting manual approval (operator: POST /v1/billing/operator/quotes/{id}/approve).", quote);
 
         if (!string.IsNullOrWhiteSpace(quote.StripeSessionId))
         {

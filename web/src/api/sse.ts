@@ -30,6 +30,7 @@ export async function* streamChat(
   payload: unknown,
   opts: ApiOptions,
   signal?: AbortSignal,
+  onSession?: (sessionKey: string) => void,
 ): AsyncGenerator<ChatChunk> {
   const res = await fetch(path, {
     method: 'POST',
@@ -37,6 +38,10 @@ export async function* streamChat(
     body: JSON.stringify(payload),
     signal,
   });
+  // The session key arrives on the response headers before the stream body —
+  // capture it so the next turn continues the same substrate session.
+  const sessionKey = res.headers.get('X-Laplace-Session');
+  if (sessionKey && onSession) onSession(sessionKey);
   if (!res.ok) {
     let body: unknown = null;
     try {

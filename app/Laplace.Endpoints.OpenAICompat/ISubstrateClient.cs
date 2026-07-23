@@ -20,6 +20,12 @@ internal interface ISubstrateClient
         string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
         byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct);
 
+    Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct);
+
+    Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct);
+
     Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct);
 
     Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct);

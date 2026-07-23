@@ -259,3 +259,48 @@ public sealed record UsageEntry(
     int Units,
     long AmountCents,
     DateTimeOffset ExecutedAt);
+
+public sealed record ApiKeyView(
+    [property: JsonPropertyName("key_prefix")] string KeyPrefix,
+    [property: JsonPropertyName("tenant")] string Tenant,
+    [property: JsonPropertyName("label")] string? Label,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("revoked_at")] DateTimeOffset? RevokedAt,
+    [property: JsonPropertyName("last_used_at")] DateTimeOffset? LastUsedAt);
+
+public sealed record ApiKeyIssueResponse(
+    [property: JsonPropertyName("api_key")] string ApiKey,
+    [property: JsonPropertyName("key_prefix")] string KeyPrefix,
+    [property: JsonPropertyName("tenant")] string Tenant,
+    [property: JsonPropertyName("label")] string? Label,
+    [property: JsonPropertyName("note")] string Note);
+
+public sealed record ApiKeyListResponse(
+    [property: JsonPropertyName("tenant")] string Tenant,
+    [property: JsonPropertyName("keys")] IReadOnlyList<ApiKeyView> Keys);
+
+public sealed record ApiKeyRedeemResponse(
+    [property: JsonPropertyName("redeemed")] bool Redeemed,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("tenant")] string? Tenant,
+    [property: JsonPropertyName("plan_id")] string? PlanId,
+    [property: JsonPropertyName("api_key")] string? ApiKey,
+    [property: JsonPropertyName("key_prefix")] string? KeyPrefix,
+    [property: JsonPropertyName("note")] string? Note);
+
+public sealed record OperatorApproveResponse(
+    [property: JsonPropertyName("approved")] bool Approved,
+    [property: JsonPropertyName("quote_id")] string QuoteId,
+    [property: JsonPropertyName("status")] string? Status);
+
+public sealed record BillingBootstrapResponse(
+    [property: JsonPropertyName("store_mode")] string StoreMode,
+    [property: JsonPropertyName("stripe_configured")] bool StripeConfigured,
+    [property: JsonPropertyName("billing_enforced")] bool BillingEnforced,
+    [property: JsonPropertyName("catalog")] CatalogSyncResponse Catalog,
+    [property: JsonPropertyName("webhook")] WebhookProvisionView Webhook);
+
+public sealed record WebhookProvisionView(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("endpoint_id")] string? EndpointId,
+    [property: JsonPropertyName("url")] string? Url);

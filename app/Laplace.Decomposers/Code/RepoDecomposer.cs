@@ -119,13 +119,10 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
 
     private static IEnumerable<(string File, string Modality)> EnumerateRepoFiles(string root)
     {
-        char sep = Path.DirectorySeparatorChar;
-        string[] skipSegs = { $"{sep}obj{sep}", $"{sep}bin{sep}", $"{sep}.git{sep}", $"{sep}node_modules{sep}" };
-
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                                       .OrderBy(p => p, StringComparer.Ordinal))
         {
-            if (skipSegs.Any(s => file.Contains(s))) continue;
+            if (VendoredPathFilter.IsVendoredOrBuildPath(file)) continue;
 
             string fileName = Path.GetFileName(file);
             string ext = Path.GetExtension(file);

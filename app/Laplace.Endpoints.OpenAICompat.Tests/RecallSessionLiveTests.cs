@@ -14,9 +14,11 @@ public sealed class RecallSessionLiveTests
         Skip.IfNot(CanReachSubstrate(), "Postgres substrate not reachable");
 
         await using var client = new SubstrateClient();
-        var session = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes("live-smoke-session"))[..16];
-        var rows = await client.ConverseTurnsAsync(["what does dog mean?"], session, CancellationToken.None);
+        // The canonical session mint (spec 34) — recall_session treats it as an
+        // opaque carry key, so the 16-byte id passes unchanged.
+        var session = Laplace.Decomposers.Abstractions.ConversationContent
+            .SessionId("live-smoke", "live-smoke-session").ToBytes();
+        var rows = await client.ConverseAsync("what does dog mean?", session, CancellationToken.None);
         Assert.NotNull(rows);
     }
 
