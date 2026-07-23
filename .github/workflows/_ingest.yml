@@ -94,16 +94,6 @@ jobs:
             scripts/ingest-source.sh "${{ inputs.source }}"
           fi
 
-      - name: Refresh generation corpus pairs
-        run: |
-          # The trajectory-pair table is the generation engine's n-gram store,
-          # rebuilt from the corpus fingerprint (count + max observed_at of
-          # trajectory physicalities). Without this step a seed lands content
-          # the engine never sees — the corpus went silently dark for exactly
-          # that reason. ensure() is fingerprint-guarded: a seed that minted no
-          # trajectories skips in milliseconds.
-          psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1             -c "SELECT laplace.trajectory_pairs_ensure(8) AS corpus_pairs;"
-
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
     needs: ingest
