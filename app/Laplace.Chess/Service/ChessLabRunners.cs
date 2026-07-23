@@ -165,6 +165,16 @@ public static class ChessLabRunners
         => Task.Run(() =>
         {
             string path = Config(slot.Job.Config, "path", "");
+            // GH #528 class: `path` arrives from the (still unauthenticated, #489) HTTP config
+            // dict. Reviewing is legitimate only over the dirs this stack writes PGNs to — an
+            // unconstrained path is an arbitrary-file-read primitive.
+            if (!IsReviewablePath(path))
+            {
+                lab.Publish(slot, new ChessLabLogEvent("error",
+                    $"path must be a .pgn under the lab dir or the chess games dir (got '{path}')"));
+                Finish(lab, slot, ChessLabJobState.Failed, "path outside allowed dirs");
+                return;
+            }
             int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
             int max = int.Parse(Config(slot.Job.Config, "maxGames", "10"));
             var games = ChessGameReview.ReviewFile(path, depth, max);
@@ -291,6 +301,24 @@ public static class ChessLabRunners
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string def)
         => cfg.TryGetValue(key, out var v) ? v : def;
+
+    internal static bool IsReviewablePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception) { return false; }
+        if (!full.EndsWith(".pgn", StringComparison.OrdinalIgnoreCase)) return false;
+        foreach (var root in new[] { LabDir, LaplaceInstall.ResolveChessGamesDir() })
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            var rooted = Path.GetFullPath(root);
+            if (full.StartsWith(rooted.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
 
     // Live-board tap for in-process self-play: convert the recorded ply's position surface
     // to a FEN and publish it as a board event. Parallel games at shallow depth emit plies

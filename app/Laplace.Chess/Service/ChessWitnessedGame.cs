@@ -18,7 +18,8 @@ public sealed record ChessWitnessedGame(
     string? StartFen,
     string?[]? ClockTokens,
     string?[]? EvalTokens,
-    string?[]? QualityTokens)
+    string?[]? QualityTokens,
+    double[]? SpentSeconds = null)
     : ITrunkRootRecord
 {
     public Hash128 TrunkRootId => GameId;

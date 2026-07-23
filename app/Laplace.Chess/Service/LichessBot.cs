@@ -68,6 +68,11 @@ public sealed class LichessBot : IAsyncDisposable
     public async Task RunAsync(int maxConcurrent = 4, CancellationToken ct = default)
     {
         var games = new Dictionary<string, Task>();
+        // Exponential backoff with jitter (GH #493): a lichess outage shouldn't be hammered
+        // every fixed 10s, and a one-off blip shouldn't wait a full 10s either. Resets to the
+        // floor once a stream delivers an event.
+        var backoff = TimeSpan.FromSeconds(1);
+        var backoffMax = TimeSpan.FromSeconds(60);
 
         while (!ct.IsCancellationRequested)
         {
@@ -76,6 +81,7 @@ public sealed class LichessBot : IAsyncDisposable
                 _log.LogInformation("connecting to lichess event stream…");
                 await foreach (var ev in StreamNdjsonAsync("/api/stream/event", ct))
                 {
+                    backoff = TimeSpan.FromSeconds(1);
                     var type = ev.TryGetProperty("type", out var t) ? t.GetString() : null;
 
                     if (type == "challenge")
@@ -115,8 +121,11 @@ public sealed class LichessBot : IAsyncDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                _log.LogWarning(ex, "event stream dropped — reconnecting in 10s");
-                await Task.Delay(10_000, ct).ConfigureAwait(false);
+                var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
+                _log.LogWarning(ex, "event stream dropped — reconnecting in {Delay:0.#}s",
+                    (backoff + jitter).TotalSeconds);
+                await Task.Delay(backoff + jitter, ct).ConfigureAwait(false);
+                backoff = TimeSpan.FromTicks(Math.Min((backoff + backoff).Ticks, backoffMax.Ticks));
             }
         }
 
@@ -372,7 +381,12 @@ public sealed class LichessBot : IAsyncDisposable
     {
         try
         {
-            using var resp = await _http.PostAsync(url, content: null, ct).ConfigureAwait(false);
+            // _http carries an infinite overall timeout because the SAME client serves the
+            // never-ending NDJSON streams; plain POSTs (accept/decline/move) must not inherit
+            // "wait forever" (GH #493) — a hung move POST would silently stall the game loop.
+            using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            reqCts.CancelAfter(TimeSpan.FromSeconds(15));
+            using var resp = await _http.PostAsync(url, content: null, reqCts.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
                 _log.LogWarning("POST {Url} → {Status}", url, (int)resp.StatusCode);
         }

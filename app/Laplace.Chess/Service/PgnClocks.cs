@@ -4,14 +4,18 @@ namespace Laplace.Chess.Service;
 
 internal static partial class PgnClocks
 {
-    // Deliberately lichess-only: cutechess-cli's own comments carry per-move TIME SPENT
-    // ("0.13s" in "{+0.48/17 0.13s}"), not remaining clock time — a different quantity than
-    // what this file models (SecondsRemaining/ThinkFactor diff consecutive remaining-clock
-    // readings). Reconstructing a synthetic remaining-clock series from spent-time + the PGN's
-    // TimeControl tag is possible but not done here; see PgnEvals.CutechessEvalRegex for the eval
-    // half of this same format, which IS handled.
+    // Two clock dialects, two quantities. Lichess [%clk H:M:S] carries time REMAINING —
+    // SecondsRemaining/ThinkFactor diff consecutive readings to recover per-move think time.
+    // cutechess-cli comments ("{+0.48/17 0.13s}") carry per-move time SPENT directly — the
+    // very quantity the remaining-clock dance exists to reconstruct — so SpentSeconds hands
+    // it straight to ThinkFactorFromSpent. No synthetic remaining-clock series is ever
+    // fabricated from spent time (it would mint a quantity the source never asserted); the
+    // spent dialect feeds think-class only, never HAS_CLOCK deposits.
     [GeneratedRegex(@"\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]")]
     private static partial Regex ClkRegex();
+
+    [GeneratedRegex(@"\{[^{}]*?(\d+(?:\.\d+)?)s\}")]
+    private static partial Regex SpentRegex();
 
     public static double[] SecondsRemaining(string gameText, int moveCount)
     {
@@ -41,6 +45,34 @@ internal static partial class PgnClocks
             outv[i] = canon;
         }
         return outv;
+    }
+
+    /// <summary>Per-move seconds SPENT from cutechess-style comments; null unless every ply has one.</summary>
+    public static double[]? SpentSeconds(string gameText, int moveCount)
+    {
+        var ms = SpentRegex().Matches(gameText);
+        if (ms.Count == 0 || ms.Count != moveCount) return null;
+        var outv = new double[moveCount];
+        for (int i = 0; i < moveCount; i++)
+            outv[i] = double.Parse(ms[i].Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        return outv;
+    }
+
+    public static double MedianSpent(double[]? spent)
+    {
+        if (spent is null || spent.Length < 3) return 0;
+        var positive = spent.Where(s => s > 0).ToList();
+        if (positive.Count == 0) return 0;
+        positive.Sort();
+        return positive[positive.Count / 2];
+    }
+
+    /// <summary>Same clamp semantics as ThinkFactor, but on directly-witnessed spent time.</summary>
+    public static double ThinkFactorFromSpent(double[] spent, double medianSpent, int i)
+    {
+        if (spent.Length == 0 || i >= spent.Length || medianSpent <= 0) return 1.0;
+        if (spent[i] <= 0) return 0.5;
+        return Math.Clamp(spent[i] / medianSpent, 0.5, 1.5);
     }
 
     public static double ThinkFactor(double[] clocks, double medianDrop, int i)
