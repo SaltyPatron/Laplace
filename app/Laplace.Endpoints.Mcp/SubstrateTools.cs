@@ -176,79 +176,27 @@ internal sealed class SubstrateTools
                     ("lang", Opt(args, "lang"))),
                 "taxonomy" => Rows(_dbReadOnly,
                     """
-                    WITH root AS MATERIALIZED (
-                        SELECT COALESCE(laplace.top_synset(r.id), r.id) AS id
-                        FROM (SELECT CASE WHEN @e IS NULL THEN laplace.resolve_ref(@term)
-                                          ELSE decode(@e, 'hex') END AS id) r)
-                    SELECT 'up' AS dir, w.step AS ord,
-                           encode(w.entity_id, 'hex') AS entity,
-                           laplace.label_or_hex(w.entity_id) AS label,
-                           round(w.eff_mu, 1) AS eff_mu
-                    FROM root, laplace.walk_strongest(root.id, laplace.relation_type_id('IS_A'), 10) w
-                    UNION ALL
-                    SELECT 'child',
-                           row_number() OVER (ORDER BY laplace.eff_mu_display(c.rating, c.rd) DESC)::int,
-                           encode(c.subject_id, 'hex'),
-                           laplace.label_or_hex(c.subject_id),
-                           round(laplace.eff_mu_display(c.rating, c.rd), 1)
-                    FROM root JOIN laplace.consensus c
-                      ON c.object_id = root.id AND c.type_id = laplace.relation_type_id('IS_A')
-                    ORDER BY dir DESC, ord
-                    LIMIT 40
+                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve_ref(@term)
+                                              ELSE decode(@e, 'hex') END AS id)
+                    SELECT t.dir, t.ord, encode(t.id, 'hex') AS entity, t.label,
+                           round(t.eff_mu, 1) AS eff_mu
+                    FROM node, laplace.taxonomy_tree(node.id) t
+                    ORDER BY t.dir DESC, t.ord
                     """,
                     DefaultRowCap, ("term", NodeText(args, "term")), ("e", Opt(args, "entity"))),
                 "translate" => Rows(_db,
                     """
-                    -- translations() emits eff_mu in RAW FIXED-POINT (an extension
-                    -- inconsistency; the display conversion lives in eff_mu_display and
-                    -- is not re-derived here). Column named honestly until the
-                    -- extension-side fix lands.
-                    SELECT t.translation, t.language, t.eff_mu AS eff_mu_fp, t.witnesses
+                    SELECT t.translation, t.language, t.eff_mu, t.witnesses
                     FROM laplace.translations(laplace.resolve_ref(@term), @limit) t
                     """,
                     DefaultRowCap, ("term", Req(args, "term")), ("limit", Int(args, "limit", 24))),
                 "leaders" => Rows(_dbReadOnly,
                     """
-                    SELECT b.band,
-                           laplace.label_or_hex(e.subject_id) AS subject,
-                           laplace.relation_canonical(e.type_id) AS relation,
-                           laplace.label_or_hex(e.object_id) AS object,
-                           round(laplace.eff_mu_display(e.rating, e.rd), 1) AS eff_mu,
-                           e.witness_count
-                    FROM unnest(string_to_array(@bands, ',')::int[]) AS b(band)
-                    CROSS JOIN LATERAL laplace.consensus_band_edges(b.band, NULL, @per) e
+                    SELECT band, subject, relation, object, eff_mu, witnesses
+                    FROM laplace.band_leaders(string_to_array(@bands, ',')::int[], @per)
                     """,
                     DefaultRowCap,
                     ("bands", Opt(args, "bands") ?? "1,2,4,5"), ("per", Int(args, "per_band", 5))),
-                "bubble" => Rows(_dbReadOnly,
-                    """
-                    WITH b AS MATERIALIZED (
-                        SELECT * FROM laplace.bubble_up(laplace.resolve(@term), NULL, @k)
-                    ),
-                    top AS MATERIALIZED (SELECT synset_id AS id FROM b LIMIT 1)
-                    SELECT 'sense' AS kind, b.via_relation AS via,
-                           encode(b.sense_id, 'hex') AS entity,
-                           laplace.render(b.sense_id) AS label,
-                           b.witnesses
-                    FROM b
-                    UNION ALL
-                    SELECT 'synset', b.via_relation, encode(b.synset_id, 'hex'),
-                           laplace.render(b.synset_id), b.witnesses
-                    FROM b
-                    UNION ALL
-                    SELECT 'hub', laplace.relation_canonical(c.type_id),
-                           encode(c.object_id, 'hex'), laplace.render(c.object_id),
-                           c.witness_count
-                    FROM top JOIN laplace.consensus c ON c.subject_id = top.id
-                    WHERE c.type_id IN (laplace.relation_type_id('IS_INSTANCE_OF'),
-                                        laplace.relation_type_id('IS_A'))
-                    UNION ALL
-                    SELECT 'channel', laplace.relation_canonical(c.type_id),
-                           encode(top.id, 'hex'), NULL, count(*)
-                    FROM top JOIN laplace.consensus c ON c.subject_id = top.id
-                    GROUP BY laplace.relation_canonical(c.type_id), top.id
-                    """,
-                    DefaultRowCap, ("term", Req(args, "term")), ("k", Int(args, "k", 5))),
                 "walk" => Rows(_dbReadOnly,
                     """
                     WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve(@p)

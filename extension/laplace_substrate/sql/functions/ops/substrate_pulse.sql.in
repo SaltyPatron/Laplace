@@ -1,0 +1,30 @@
+-- The live scoreboard read: running totals plus the ingest heartbeat, cheap
+-- enough to poll every few seconds (estimate counts + a PK scan of the tiny
+-- flush journal + one pg_stat_activity pass). Consolidated from the API's
+-- inline C# SQL — the HTTP /v1/pulse and any MCP caller read THIS.
+CREATE OR REPLACE FUNCTION substrate_pulse()
+    RETURNS TABLE(entities bigint, attestations bigint, consensus bigint,
+                  physicalities bigint, last_flush_at timestamptz,
+                  flushes_last_min bigint, folding boolean)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT
+      (SELECT value FROM substrate_counts() WHERE metric LIKE 'entities%'),
+      (SELECT value FROM substrate_counts() WHERE metric LIKE 'attestations%'),
+      (SELECT value FROM substrate_counts() WHERE metric LIKE 'consensus%'),
+      (SELECT value FROM substrate_counts() WHERE metric LIKE 'physicalities%'),
+      (SELECT max(applied_at) FROM ingest_flush_journal),
+      (SELECT count(*) FROM ingest_flush_journal
+        WHERE applied_at > now() - interval '60 seconds'),
+      -- Folding = rows landed recently OR a fold/apply backend is active. The
+      -- journal alone under-reports a slow-flush ingest mid-working-set.
+      -- pg_backend_pid() is excluded: this query's own text contains the
+      -- pattern strings and would otherwise match itself forever.
+      (SELECT (SELECT max(applied_at) FROM ingest_flush_journal) > now() - interval '20 seconds')
+        OR EXISTS (
+          SELECT 1 FROM pg_stat_activity a
+          WHERE a.datname = current_database()
+            AND a.state = 'active'
+            AND a.pid <> pg_backend_pid()
+            AND a.query ILIKE ANY (ARRAY['%attestation_merge%', '%consensus_upsert%', '%COPY %laplace.%']))
+$$;

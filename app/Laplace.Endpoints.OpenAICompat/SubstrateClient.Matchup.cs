@@ -18,16 +18,9 @@ internal sealed partial class SubstrateClient
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
         const string sql = """
-            SELECT b.band,
-                   encode(e.subject_id, 'hex'),
-                   laplace.label_or_hex(e.subject_id),
-                   laplace.relation_canonical(e.type_id),
-                   encode(e.object_id, 'hex'),
-                   laplace.label_or_hex(e.object_id),
-                   laplace.eff_mu_display(e.rating, e.rd),
-                   e.witness_count
-            FROM unnest(@bands) AS b(band)
-            CROSS JOIN LATERAL laplace.consensus_band_edges(b.band, NULL, @per) e
+            SELECT band, encode(subject_id, 'hex'), subject, relation,
+                   encode(object_id, 'hex'), object, eff_mu, witnesses
+            FROM laplace.band_leaders(@bands, @per)
             """;
         var rows = await ReadRowsAsync(sql,
             static r => (Band: r.GetInt32(0), Row: new LeaderRow(
@@ -57,18 +50,13 @@ internal sealed partial class SubstrateClient
     public async Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
     {
         if (!TryParseHex(idHex, out var id)) return null;
-        const string sql = """
-            SELECT s.status, count(*)
-            FROM laplace.epistemic_status(@id, NULL, 500) s
-            GROUP BY s.status
-            """;
+        const string sql = "SELECT confirmed, contested, refuted, thin FROM laplace.entity_record(@id)";
         var rows = await ReadRowsAsync(sql,
-            static r => (Status: r.GetString(0), Count: r.GetInt64(1)),
+            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
             cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
             "entity_record", ct);
-        long Of(string s) => rows.FirstOrDefault(r => r.Status == s).Count;
-        return new EntityRecordResponse("entity.record", idHex.ToLowerInvariant(),
-            Of("confirmed"), Of("contested"), Of("refuted"), Of("thin"));
+        var (c, x, f, t) = rows.Count == 0 ? (0L, 0L, 0L, 0L) : rows[0];
+        return new EntityRecordResponse("entity.record", idHex.ToLowerInvariant(), c, x, f, t);
     }
 
     /// <summary>The fast half of a matchup: both cards plus the tale of the tape.</summary>
@@ -158,13 +146,9 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
         ReadRowsAsync("""
-            SELECT encode(a.subject_id, 'hex'), laplace.label_or_hex(a.subject_id),
-                   laplace.relation_canonical(a.type_id),
-                   encode(a.object_id, 'hex'), laplace.label_or_hex(a.object_id),
-                   a.observation_count
-            FROM laplace.attestations a
-            WHERE a.source_id = @sid
-            LIMIT @lim
+            SELECT encode(subject_id, 'hex'), subject, relation,
+                   encode(object_id, 'hex'), object, observations
+            FROM laplace.source_roster(@sid, @lim)
             """,
             static r => new SourceRosterRow(
                 r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1), r.GetString(2),
