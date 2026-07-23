@@ -1,0 +1,41 @@
+-- A node's position in the semantic mesh, one call: dir='self' names the node
+-- and its hub type, dir='up' the hubs it plays for (a bare surface's synsets
+-- via senses() — gated off typed nodes, whose senses() roundtrips its own
+-- members — plus the coarser hubs it connects to), dir='down' its roster.
+CREATE OR REPLACE FUNCTION mesh_position(p_id bytea)
+    RETURNS TABLE(dir text, id bytea, label text, relation text,
+                  hub_type text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'self', p_id, label_or_hex(p_id), NULL::text,
+           (SELECT label_or_hex(t.object_id) FROM consensus t
+             WHERE t.subject_id = p_id AND t.type_id = relation_type_id('IS_TYPED_AS') LIMIT 1),
+           NULL::numeric, NULL::bigint
+    UNION ALL
+    (SELECT 'up', s.synset_id, label_or_hex(s.synset_id), 'has sense',
+            'WordNet_Synset', s.eff_mu, s.witnesses
+     FROM senses(p_id) s
+     WHERE NOT EXISTS (SELECT 1 FROM consensus t
+       WHERE t.subject_id = p_id AND t.type_id = relation_type_id('IS_TYPED_AS')))
+    UNION ALL
+    (SELECT 'up', c.object_id, label_or_hex(c.object_id),
+            relation_canonical(c.type_id),
+            (SELECT label_or_hex(t.object_id) FROM consensus t
+              WHERE t.subject_id = c.object_id
+                AND t.type_id = relation_type_id('IS_TYPED_AS') LIMIT 1),
+            eff_mu_display(c.rating, c.rd), c.witness_count
+     FROM consensus c
+     WHERE c.subject_id = p_id
+       AND c.type_id IN (relation_type_id('IS_SENSE_OF'), relation_type_id('HAS_SENSE'),
+                         relation_type_id('EVOKES_FRAME'), relation_type_id('MEMBER_OF_VERBNET_CLASS'),
+                         relation_type_id('IS_INSTANCE_OF'), relation_type_id('IS_A'),
+                         relation_type_id('CORRESPONDS_TO'), relation_type_id('HAS_SEMANTIC_ROLE'))
+     ORDER BY eff_mu_display(c.rating, c.rd) DESC NULLS LAST
+     LIMIT 40)
+    UNION ALL
+    (SELECT 'down', m.member, label_or_hex(m.member), m.kind, NULL,
+            m.mu, m.witnesses
+     FROM concept_members(p_id) m
+     ORDER BY m.mu DESC NULLS LAST
+     LIMIT 60)
+$$;

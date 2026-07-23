@@ -336,6 +336,13 @@ functions/highway/laplace_highway_popcount.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/relation_highway.sql.in
 functions/highway/consensus_band_edges.sql.in
+functions/ops/substrate_pulse.sql.in
+functions/ops/modality_counts.sql.in
+functions/ops/source_roster.sql.in
+functions/ops/mesh_position.sql.in
+functions/ops/taxonomy_tree.sql.in
+functions/ops/band_leaders.sql.in
+functions/ops/entity_record.sql.in
 functions/highway/laplace_highway_mask_bits.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in

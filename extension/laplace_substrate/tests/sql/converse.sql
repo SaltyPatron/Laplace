@@ -120,7 +120,7 @@ SELECT count(*) = 0 AS unknown_topic_has_no_id FROM prompt_state('zzzunknownzzz'
 
 -- Every published shape is dispatchable, and only published shapes are.
 SELECT count(*) AS published_shapes FROM query_shapes();
-SELECT bool_and(NOT needs_topic2) AS single_topic_shapes_dominate FROM query_shapes();
+SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FROM query_shapes();
 
 DO $$
 BEGIN
