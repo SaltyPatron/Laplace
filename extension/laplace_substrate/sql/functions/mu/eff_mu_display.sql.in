@@ -2,3 +2,10 @@ CREATE OR REPLACE FUNCTION eff_mu_display(p_rating bigint, p_rd bigint)
     RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
     SELECT round((@extschema@.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3)
 $$;
+
+-- Display form of an ALREADY-COMPUTED fp1e9 eff-mu (e.g. synset_members.mu).
+-- Same rounding, same scale, one definition file — never re-derived inline.
+CREATE OR REPLACE FUNCTION eff_mu_display(p_eff_mu_fp bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT round((p_eff_mu_fp / 1e9)::numeric, 3)
+$$;

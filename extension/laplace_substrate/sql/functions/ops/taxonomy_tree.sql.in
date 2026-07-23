@@ -1,0 +1,23 @@
+-- The IS_A tree around a topic: dir='self' the root (a bare surface hops to
+-- its top synset — taxonomy lives on concepts, not spellings), dir='up' the
+-- parent chain to the root, dir='child' the strongest sub-kinds.
+CREATE OR REPLACE FUNCTION taxonomy_tree(p_id bytea)
+    RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH root AS MATERIALIZED (
+        SELECT COALESCE(top_synset(p_id), p_id) AS id)
+    SELECT 'self', 0, root.id, label_or_hex(root.id), NULL::numeric FROM root
+    UNION ALL
+    SELECT 'up', w.step, w.entity_id, label_or_hex(w.entity_id), w.eff_mu
+    FROM root, walk_strongest(root.id, relation_type_id('IS_A'), 10) w
+    UNION ALL
+    (SELECT 'child',
+            row_number() OVER (ORDER BY eff_mu_display(c.rating, c.rd) DESC)::int,
+            c.subject_id, label_or_hex(c.subject_id),
+            eff_mu_display(c.rating, c.rd)
+     FROM root JOIN consensus c
+       ON c.object_id = root.id AND c.type_id = relation_type_id('IS_A')
+     ORDER BY eff_mu_display(c.rating, c.rd) DESC
+     LIMIT 24)
+$$;

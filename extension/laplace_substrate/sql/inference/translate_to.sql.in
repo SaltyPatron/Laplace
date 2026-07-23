@@ -50,7 +50,8 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
                         AND d.type_id = relation_type_id('HAS_DEFINITION')
                         AND lower(render_text(d.object_id, 32)) = w.name)
     )
-    SELECT r.txt AS translation, label(a.lang) AS language, a.mu::numeric, a.witnesses
+    -- a.mu is fp1e9 (synset_members) — convert through the one display definition
+    SELECT r.txt AS translation, label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         WHERE lang IN (SELECT lang FROM lang_match)

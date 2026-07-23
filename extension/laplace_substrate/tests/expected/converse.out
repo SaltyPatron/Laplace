@@ -166,36 +166,58 @@ SELECT translation, language FROM translations(word_id('dog')) ORDER BY translat
  h           | test/lang/de
 (1 row)
 
-SELECT reply, witnesses FROM recall('what does dog mean?');
+-- The read shape is an ARGUMENT, never inferred from the phrasing. These same
+-- calls answer identically whatever language the caller thinks in.
+SELECT reply, witnesses FROM recall_intent('define', word_id('dog'));
  reply | witnesses 
 -------+-----------
  G     |         2
 (1 row)
 
-SELECT reply FROM recall('synonyms of dog');
+SELECT reply FROM recall_intent('synonyms', word_id('dog'));
  reply 
 -------
  p
 (1 row)
 
-SELECT reply FROM recall('translate dog');
+SELECT reply FROM recall_intent('translate', word_id('dog'));
       reply       
 ------------------
  h [test/lang/de]
 (1 row)
 
-SELECT reply FROM recall('what is zzzunknownzzz');
-                     reply                      
-------------------------------------------------
- I hold no consensus about "zzzunknownzzz" yet.
-(1 row)
-
-SELECT reply FROM recall('translate h');
+SELECT reply FROM recall_intent('translate', word_id('h'));
       reply       
 ------------------
  p [test/lang/en]
 (1 row)
 
+SELECT count(*) = 0 AS unknown_topic_has_no_id FROM prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
+ unknown_topic_has_no_id 
+-------------------------
+ t
+(1 row)
+
+-- Every published shape is dispatchable, and only published shapes are.
+SELECT count(*) AS published_shapes FROM query_shapes();
+ published_shapes 
+------------------
+               14
+(1 row)
+
+SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FROM query_shapes();
+ exactly_two_topic2_shapes 
+---------------------------
+ t
+(1 row)
+
+DO $$
+BEGIN
+    PERFORM * FROM recall_intent('what does dog mean', word_id('dog'));
+    RAISE EXCEPTION 'recall_intent accepted an unpublished shape';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%unknown shape%' THEN RAISE; END IF;
+END $$;
 SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
  word 
 ------
@@ -262,7 +284,7 @@ SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
  is antonym of  | h    |         1
 (5 rows)
 
-SELECT reply FROM recall('antonyms of dog');
+SELECT reply FROM recall_intent('related', word_id('dog'), NULL, 'IS_ANTONYM_OF');
  reply 
 -------
  h
@@ -274,13 +296,13 @@ SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), rel
  h
 (1 row)
 
-SELECT reply FROM recall('is a dog a c?');
+SELECT reply FROM recall_intent('is_a', word_id('dog'), word_id('c'));
       reply       
 ------------------
  Yes — p —is a→ c
 (1 row)
 
-SELECT reply FROM recall('is h a c?');
+SELECT reply FROM recall_intent('is_a', word_id('h'), word_id('c'));
       reply       
 ------------------
  Yes — h —is a→ c
@@ -301,43 +323,58 @@ FROM walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_typ
           1
 (1 row)
 
-SELECT reply, eff_mu FROM recall('walk p');
+SELECT reply, eff_mu FROM recall_intent('walk', word_id('p'));
                  reply                  |  eff_mu  
 ----------------------------------------+----------
  p —is synonym of→ p —has definition→ G | 1530.000
 (1 row)
 
-SELECT reply, witnesses FROM recall_session('what does dog mean?', convert_to('s1', 'UTF8'));
- reply | witnesses 
--------+-----------
- G     |         2
+-- recall_session stays a text entry point because it carries session state, but
+-- it no longer routes on phrasing: a bare prompt gets the default shape, and the
+-- session carries the topic forward. Callers wanting a specific shape name it.
+SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
+                reply                 | witnesses 
+--------------------------------------+-----------
+ 01cdcce152940fce07b431bc4f3bc2d5…: G |         2
 (1 row)
 
-SELECT reply FROM recall_session('what about its synonyms?', convert_to('s1', 'UTF8'));
- reply 
--------
- p
+SELECT reply FROM recall_session('dog', convert_to('s1', 'UTF8'));
+                reply                 
+--------------------------------------
+ 01cdcce152940fce07b431bc4f3bc2d5…: G
 (1 row)
 
-SELECT reply, witnesses FROM recall_session('and its causes?', convert_to('s1', 'UTF8'));
- reply | witnesses 
--------+-----------
- h     |         2
+SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
+                reply                 | witnesses 
+--------------------------------------+-----------
+ 01cdcce152940fce07b431bc4f3bc2d5…: G |         2
 (1 row)
 
 SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
 FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
- ord |          prompt          | topic_is_dog 
------+--------------------------+--------------
-   1 | what does dog mean?      | t
-   2 | what about its synonyms? | t
-   3 | and its causes?          | t
+ ord | prompt | topic_is_dog 
+-----+--------+--------------
+   1 | dog    | t
+   2 | dog    | t
+   3 | dog    | t
 (3 rows)
 
 SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
  reason_plane  
 ---------------
  is synonym of
+(1 row)
+
+SELECT count(*) AS band_rows FROM relation_bands();
+ band_rows 
+-----------
+        13
+(1 row)
+
+SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM relation_bands();
+ bands_counted 
+---------------
+ t
 (1 row)
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
@@ -360,7 +397,7 @@ SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog
 (1 row)
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
-FROM recall('how are dog and h related');
+FROM recall_intent('reason', word_id('dog'), word_id('h'));
  related_reply_mentions_antonym 
 --------------------------------
  f
@@ -390,14 +427,14 @@ FROM isa_path(word_id('dog'), word_id('c'));
 (1 row)
 
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
-FROM recall('is a dog a c?');
+FROM recall_intent('is_a', word_id('dog'), word_id('c'));
  cascade_via_isa 
 -----------------
  t
 (1 row)
 
 SELECT count(*) >= 1 AS null_session_converse_runs
-FROM recall_session('what does dog mean?');
+FROM recall_session('dog');
  null_session_converse_runs 
 ----------------------------
  t
