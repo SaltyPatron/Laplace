@@ -142,6 +142,45 @@ public sealed class ChessStockfishEvalTests
     }
 
     [Fact]
+    public void EvalCache_RoundTrips_AndRejectsBudgetMismatch()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lpsf-test-{Guid.NewGuid():N}.bin");
+        try
+        {
+            var memo = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?>();
+            memo[Hash128.OfCanonical("p1")] = 42;
+            memo[Hash128.OfCanonical("p2")] = -310;
+            memo[Hash128.OfCanonical("p3")] = null; // engine-failed positions persist as null
+            StockfishEvalCache.Save(path, censusVersion: 1, depth: 10, nodes: 0, memo);
+
+            var back = StockfishEvalCache.Load(path, 1, 10, 0);
+            Assert.Equal(3, back.Count);
+            Assert.Equal(42, back[Hash128.OfCanonical("p1")]);
+            Assert.Equal(-310, back[Hash128.OfCanonical("p2")]);
+            Assert.Null(back[Hash128.OfCanonical("p3")]);
+
+            // Different budget or census version = different testimony = cold cache.
+            Assert.Empty(StockfishEvalCache.Load(path, 1, 12, 0));
+            Assert.Empty(StockfishEvalCache.Load(path, 1, 10, 80_000));
+            Assert.Empty(StockfishEvalCache.Load(path, 2, 10, 0));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void EvalCache_MissingOrCorrupt_YieldsEmpty_NeverThrows()
+    {
+        Assert.Empty(StockfishEvalCache.Load("/nonexistent/dir/nope.bin", 1, 10, 0));
+        var path = Path.Combine(Path.GetTempPath(), $"lpsf-corrupt-{Guid.NewGuid():N}.bin");
+        try
+        {
+            File.WriteAllBytes(path, [1, 2, 3]);
+            Assert.Empty(StockfishEvalCache.Load(path, 1, 10, 0));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void DeriveGame_EmitsOnlyDeclaredRelations()
     {
         // Same gate as ChessRelationGateTests, over the stockfish lane's emissions.

@@ -15,17 +15,26 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
     private readonly int _depth;
     private readonly long _nodes;
     private readonly StockfishEvaluatorPool _pool;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?> _evalMemo = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?> _evalMemo;
+    private readonly string _cachePath;
+    private int _memoAtLastSave;
 
     /// <summary>depth = stockfish search depth per position (default 10 — the budget the v1
     /// census testimony was recorded at; keep it until #508 REPLACE semantics let a budget
     /// change ride a version bump). nodes &gt; 0 switches to a node-capped search instead
     /// (bounded worst case; opt-in via --nodes). evaluatorFactory overrides for tests.</summary>
     public ChessStockfishEvalDecomposer(
-        int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null)
+        int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null,
+        string? evalCachePath = null)
     {
         _depth = depth;
         _nodes = nodes;
+        // Persistent memo (spec-33 derived blob): survives db-reset so the reseed
+        // re-census pays engine time only for positions never searched before.
+        _cachePath = evalCachePath ?? StockfishEvalCache.DefaultPath();
+        _evalMemo = StockfishEvalCache.Load(_cachePath, ChessStockfishEval.Version, _depth, _nodes);
+        _memoAtLastSave = _evalMemo.Count;
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => SaveCache();
         _pool = new StockfishEvaluatorPool(evaluatorFactory ?? (() =>
         {
             var sf = ChessLabPaths.Catalog["stockfish"];
@@ -77,7 +86,17 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
         var evaluator = _pool.Rent();
         try { ChessStockfishEval.DeriveGame(b, record.Game, evaluator, _evalMemo); }
         finally { _pool.Return(evaluator); }
+
+        // Checkpoint the cache every ~50k fresh searches: a killed run keeps its paid-for
+        // engine time. ProcessExit covers the normal end.
+        int grown = _evalMemo.Count - System.Threading.Volatile.Read(ref _memoAtLastSave);
+        if (grown >= 50_000
+            && System.Threading.Interlocked.Exchange(ref _memoAtLastSave, _evalMemo.Count) != _evalMemo.Count)
+            SaveCache();
     }
+
+    private void SaveCache()
+        => StockfishEvalCache.Save(_cachePath, ChessStockfishEval.Version, _depth, _nodes, _evalMemo);
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
