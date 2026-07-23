@@ -15,6 +15,7 @@
   ],
   "billing": null,
   "metadata": {
-    "generated_tokens": 3
+    "generated_tokens": 3,
+    "session": "<session>"
   }
 }

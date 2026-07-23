@@ -29,6 +29,11 @@ countable fact; prose docs cite it instead of embedding counts.
 - [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-19)
 - [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
 
+## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
+
+- [guides/chess.md](guides/chess.md) — guide — the chess modality reference: identity law, the three lanes, read surface, census, the closed loop, tracked gaps (2026-07-23)
+- [guides/chess-lab.md](guides/chess-lab.md) — guide — driving laplace-uci/cutechess, watching lab games live, chess read surface (2026-07-23)
+
 ## Logs and campaigns — `.scratchpad/` (historical, append-only)
 
 - [01_Initial_review.txt](../.scratchpad/01_Initial_review.txt) — log — first whole-repo review (2026-07-01)

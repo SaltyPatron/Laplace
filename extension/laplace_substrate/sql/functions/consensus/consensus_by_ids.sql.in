@@ -14,3 +14,20 @@ CREATE OR REPLACE FUNCTION consensus_by_ids(p_ids bytea[])
     FROM @extschema@.consensus c
     WHERE c.id = ANY(p_ids)
 $$;
+
+CREATE OR REPLACE FUNCTION consensus_by_ids(p_ids bytea[], p_type bytea)
+    RETURNS TABLE(id bytea, eff_mu double precision, rd double precision,
+                  witness_count double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Type-pruned batch lookup. consensus is LIST-partitioned by type_id, so the
+    -- 1-arg form above Append-scans every relation-type partition per call — on
+    -- the chess state-valuation path that is ~150 partition probes for ids that
+    -- are all OUTCOME- or MOVE-typed. Callers that know the edge type (they
+    -- built the ids via ConsensusKeys.EdgeId(subject, type, object)) pass it
+    -- here and the scan prunes to the one partition that can hold the rows.
+    SELECT c.id, @extschema@.eff_mu(c.rating, c.rd)::double precision,
+           c.rd::double precision, c.witness_count::double precision
+    FROM @extschema@.consensus c
+    WHERE c.id = ANY(p_ids)
+      AND c.type_id = p_type
+$$;

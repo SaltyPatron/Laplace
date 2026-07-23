@@ -115,17 +115,15 @@ export function ChatView() {
 
 
 
-    const history = useAppStore
-
-      .getState()
-
-      .messages.filter((m) => !m.streaming && !m.error)
-
-      .map((m) => ({ role: m.role, content: m.content }));
-
-
-
-    const payload = { model, stream: true, messages: history };
+    // Conversation state is substrate-resident (spec 34): only the new turn is
+    // sent, with the session key carrying continuity — history is never resent.
+    const session = useAppStore.getState().session;
+    const payload = {
+      model,
+      stream: true,
+      messages: [{ role: 'user', content: prompt }],
+      ...(session ? { session } : {}),
+    };
 
 
 
@@ -141,7 +139,10 @@ export function ChatView() {
 
       let pendingProvenance: ProvenanceEntry | null = null;
 
-      for await (const chunk of streamChat('/v1/chat/completions', payload, { tenant, quoteId }, ac.signal)) {
+      for await (const chunk of streamChat(
+        '/v1/chat/completions', payload, { tenant, quoteId }, ac.signal,
+        (key) => useAppStore.getState().setSession(key),
+      )) {
 
         const delta = chunk.choices?.[0]?.delta;
 
@@ -217,13 +218,11 @@ export function ChatView() {
 
   async function retryWithQuote() {
 
-    const history = messages
-
-      .filter((m) => !m.streaming && !m.error)
-
-      .map((m) => ({ role: m.role, content: m.content }));
-
-    if (!history.some((m) => m.role === 'user')) return;
+    // Same law as the live path: resend only the newest user turn + session key.
+    const lastUser = [...messages]
+      .reverse()
+      .find((m) => m.role === 'user' && !m.streaming && !m.error);
+    if (!lastUser) return;
 
     setBusy(true);
 
@@ -233,11 +232,17 @@ export function ChatView() {
 
     try {
 
+      const session = useAppStore.getState().session;
+
       const response = await apiPost<ChatCompletionResponse>(
 
         '/v1/chat/completions',
 
-        { model, messages: history },
+        {
+          model,
+          messages: [{ role: 'user', content: lastUser.content }],
+          ...(session ? { session } : {}),
+        },
 
         { tenant, quoteId },
 
@@ -246,6 +251,10 @@ export function ChatView() {
       const content = response.choices?.[0]?.message?.content ?? '';
 
       const provenance = provenanceFromMetadata(response.metadata?.laplace?.provenance ?? undefined);
+
+      const sessionKey = (response.metadata as { session?: string } | undefined)?.session;
+
+      if (sessionKey) useAppStore.getState().setSession(sessionKey);
 
       updateLastAssistant((m) => ({ ...m, content, provenance, streaming: false }));
 

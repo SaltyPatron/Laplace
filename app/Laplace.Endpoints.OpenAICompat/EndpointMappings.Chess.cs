@@ -24,6 +24,12 @@ internal static class ChessEndpoints
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct))).WithTags("chess");
 
+        // Opening explorer / player repertoire over the rated MOVE consensus.
+        // player is a display name ("Magnus Carlsen", "magnuscarlsen") — resolved
+        // through the same PlayerAlias canonicalization the ingest lanes use.
+        app.MapPost("/chess/explore", async (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
+            Results.Json(await svc.ExploreAsync(req.Fen, req.Player, req.Limit ?? 12, ct))).WithTags("chess");
+
         app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
             Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) }))
             .WithTags("chess");
@@ -85,7 +91,7 @@ internal static class ChessEndpoints
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
-                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", depth = "8" } },
+                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000" } },
                     new { kind = "lichess-fetch", label = "Fetch player PGN", @default = new { site = "lichess" } },
                 },
                 engines,
@@ -164,6 +170,7 @@ internal static class ChessEndpoints
     private sealed record FenRequest(string Fen);
     private sealed record MoveRequest(string Fen, string Uci, string[]? Moves);
     private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
+    private sealed record ExploreRequest(string Fen, string? Player, int? Limit);
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth, int? MaxConcurrent, bool? Substrate, string[]? Speeds);

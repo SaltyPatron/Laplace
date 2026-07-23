@@ -19,7 +19,13 @@ internal sealed class TurnWitness : BackgroundService
             FullMode = BoundedChannelFullMode.Wait
         });
 
-    private readonly record struct TurnItem(string Prompt, string? Reply);
+    /// <summary>
+    /// One conversational turn with its full provenance (spec 34): tenant → per-tenant
+    /// source identity, session → context entity on every evidence row, user → session
+    /// attribution. A turn without a tenant/session does not exist on this lane.
+    /// </summary>
+    private readonly record struct TurnItem(
+        string Tenant, string? UserKey, Hash128 SessionId, string Prompt, string? Reply);
 
     public bool IsOnline { get; private set; }
 
@@ -35,17 +41,19 @@ internal sealed class TurnWitness : BackgroundService
     }
 
     /// <summary>Record-or-fail: returns false when witness lane is offline (caller → 503).</summary>
-    public bool TryEnqueueTurn(string prompt, string? reply)
+    public bool TryEnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
-        if (!IsOnline || string.IsNullOrWhiteSpace(prompt))
+        if (!IsOnline || string.IsNullOrWhiteSpace(prompt) || sessionId == Hash128.Zero)
             return false;
-        return _queue.Writer.TryWrite(new TurnItem(prompt.Trim(),
+        if (!ConversationContent.IsValidIdentifier(tenant))
+            return false;
+        return _queue.Writer.TryWrite(new TurnItem(tenant, userKey, sessionId, prompt.Trim(),
             string.IsNullOrWhiteSpace(reply) ? null : reply.Trim()));
     }
 
-    public void EnqueueTurn(string prompt, string? reply)
+    public void EnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
-        if (!TryEnqueueTurn(prompt, reply))
+        if (!TryEnqueueTurn(tenant, userKey, sessionId, prompt, reply))
             _log.LogWarning("turn-witness rejected turn (lane offline or queue full)");
     }
 
@@ -68,8 +76,13 @@ internal sealed class TurnWitness : BackgroundService
         await using var acc = new ConsensusAccumulatingWriter(inner, _substrate.DataSource);
         var writer = (ISubstrateWriter)acc;
         bool floorPresent = false;
-        bool bootstrapped = false;
         int consecutiveFailures = 0;
+        // Per-process caches: bootstrap rows are idempotent, but testimony is not —
+        // registering a tenant's sources once per process bounds the refold to
+        // restarts (same class as every decomposer bootstrap). Session attribution
+        // is once per session per process for the same reason.
+        var scopes = new Dictionary<string, ConversationContent.TenantScope>(StringComparer.Ordinal);
+        var attributedSessions = new HashSet<Hash128>();
         IsOnline = true;
         _log.LogInformation("turn-witness online");
 
@@ -85,39 +98,40 @@ internal sealed class TurnWitness : BackgroundService
                     return;
                 }
 
-                if (!bootstrapped)
+                if (!scopes.TryGetValue(item.Tenant, out var scope))
                 {
-                    await writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
-                    await writer.ApplyAsync(ResponseContent.BuildBootstrapChange(), ct);
-                    bootstrapped = true;
+                    scope = ConversationContent.Resolve(item.Tenant);
+                    foreach (var change in ConversationContent.BuildTenantBootstrapChanges(scope))
+                        await writer.ApplyAsync(change, ct);
+                    scopes[item.Tenant] = scope;
+                    _log.LogInformation("tenant witness sources registered: {Tenant}", item.Tenant);
                 }
+
+                string? userKey = item.UserKey is not null && attributedSessions.Add(item.SessionId)
+                    ? item.UserKey
+                    : null;
 
                 // Every turn is a distinct witnessing event: rows dedup by content
                 // address, but the testimony folds again — a repeated utterance IS
                 // another witness (chess parity: every play of a move counts).
-                var promptRoot = Hash128.Zero;
-                if (UserPromptContent.TryBuildWitnessChange(
-                        Encoding.UTF8.GetBytes(item.Prompt), "turn/prompt",
-                        out var promptChange, out var pr))
+                // One turn = one change = one apply (the writer's φ-per-cell
+                // invariant; cross-tenant turns are never batched together).
+                if (!ConversationContent.TryBuildTurnChange(
+                        scope, item.SessionId,
+                        Encoding.UTF8.GetBytes(item.Prompt),
+                        item.Reply is { } r ? Encoding.UTF8.GetBytes(r) : null,
+                        userKey,
+                        out var turnChange, out var promptRoot, out var replyRoot))
                 {
-                    await writer.ApplyAsync(promptChange, ct);
-                    promptRoot = pr;
+                    _log.LogWarning("turn-witness could not decompose turn; dropped");
+                    continue;
                 }
 
-                if (item.Reply is { } reply &&
-                    ResponseContent.TryBuildWitnessChange(
-                        Encoding.UTF8.GetBytes(reply), "turn/reply",
-                        promptRoot == Hash128.Zero ? null : promptRoot,
-                        out var replyChange, out var replyRoot))
-                {
-                    await writer.ApplyAsync(replyChange, ct);
-                    _log.LogInformation("turn witnessed: prompt={PromptRoot} reply={ReplyRoot}",
-                        promptRoot, replyRoot);
-                }
-                else
-                {
-                    _log.LogInformation("turn witnessed: prompt={PromptRoot}", promptRoot);
-                }
+                await writer.ApplyAsync(turnChange, ct);
+                _log.LogInformation(
+                    "turn witnessed: tenant={Tenant} session={Session} prompt={PromptRoot} reply={ReplyRoot}",
+                    item.Tenant, item.SessionId, promptRoot,
+                    replyRoot == Hash128.Zero ? "(none)" : replyRoot);
                 consecutiveFailures = 0;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

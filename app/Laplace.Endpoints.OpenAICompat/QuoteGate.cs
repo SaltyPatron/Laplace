@@ -1,10 +1,8 @@
 using Laplace.Api.Contracts;
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Laplace.Endpoints.OpenAICompat;
-
-
-
-
 
 internal static class QuoteGate
 {
@@ -12,7 +10,9 @@ internal static class QuoteGate
         HttpRequest request, IBillingOrchestrator billing, string serviceId, CancellationToken ct)
     {
         var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-        return await billing.EnsureExecutableAsync(quoteId, serviceId, ct);
+        var resolver = request.HttpContext.RequestServices.GetRequiredService<ITenantResolver>();
+        var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+        return await billing.EnsureExecutableAsync(quoteId, tenant, serviceId, ct);
     }
 
     public static BillingReceipt MakeReceipt(BillingQuote quote) =>

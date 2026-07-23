@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "unknown_model",
+    "message": "Unknown model 'gpt-4o'. See GET /v1/models for the served catalog."
+  }
+}

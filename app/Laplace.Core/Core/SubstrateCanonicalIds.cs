@@ -37,6 +37,18 @@ public static class SubstrateCanonicalKeys
     }
 
     /// <summary>
+    /// Key for a conversation session — the conversational analogue of a chess game id.
+    /// Tenant is part of the key, so a session key can never resolve into another
+    /// tenant's session (spec 34).
+    /// </summary>
+    public static string ConversationSession(string tenant, string sessionKey)
+    {
+        Validate(tenant, nameof(tenant));
+        Validate(sessionKey, nameof(sessionKey));
+        return $"{Root}/conversation/session/{tenant}/{sessionKey}/v1";
+    }
+
+    /// <summary>
     /// Free-form key under the substrate root: <c>substrate/a/b/c</c>. Use when the
     /// family has no dedicated builder above; prefer adding a builder over spreading
     /// raw segment lists back through the codebase.
@@ -82,6 +94,9 @@ public static class SubstrateCanonicalIds
 
     public static Hash128 PosProbationary(string tagset, string tag) =>
         Hash128.OfCanonical(SubstrateCanonicalKeys.PosProbationary(tagset, tag));
+
+    public static Hash128 ConversationSession(string tenant, string sessionKey) =>
+        Hash128.OfCanonical(SubstrateCanonicalKeys.ConversationSession(tenant, sessionKey));
 
     public static Hash128 Of(params string[] segments) =>
         Hash128.OfCanonical(SubstrateCanonicalKeys.Of(segments));

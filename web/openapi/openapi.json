@@ -1895,6 +1895,183 @@
         }
       }
     },
+    "/v1/billing/keys/redeem": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyRedeemResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyRedeemResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyRedeemResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyRedeemResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/keys": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/keys/revoke": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/billing/operator/quotes/{quoteId}/approve": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorApproveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/operator/keys": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyIssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyIssueResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/operator/bootstrap": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingBootstrapResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chess/new": {
       "get": {
         "tags": [
@@ -1983,6 +2160,28 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BestMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/explore": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExploreRequest"
               }
             }
           },
@@ -2475,6 +2674,210 @@
   },
   "components": {
     "schemas": {
+      "ApiKeyIssueRequest": {
+        "required": [
+          "tenant",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApiKeyIssueResponse": {
+        "required": [
+          "api_key",
+          "key_prefix",
+          "tenant",
+          "label",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKeyListResponse": {
+        "required": [
+          "tenant",
+          "keys"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyView"
+            }
+          }
+        }
+      },
+      "ApiKeyRedeemRequest": {
+        "required": [
+          "session_id",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApiKeyRedeemResponse": {
+        "required": [
+          "redeemed",
+          "status",
+          "tenant",
+          "plan_id",
+          "api_key",
+          "key_prefix",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "redeemed": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "plan_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "api_key": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "key_prefix": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApiKeyRevokeRequest": {
+        "required": [
+          "tenant",
+          "key_prefix"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "key_prefix": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApiKeyView": {
+        "required": [
+          "key_prefix",
+          "tenant",
+          "label",
+          "created_at",
+          "revoked_at",
+          "last_used_at"
+        ],
+        "type": "object",
+        "properties": {
+          "key_prefix": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "AuditQuoteRequest": {
         "required": [
           "tenant"
@@ -2733,6 +3136,33 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "BillingBootstrapResponse": {
+        "required": [
+          "store_mode",
+          "stripe_configured",
+          "billing_enforced",
+          "catalog",
+          "webhook"
+        ],
+        "type": "object",
+        "properties": {
+          "store_mode": {
+            "type": "string"
+          },
+          "stripe_configured": {
+            "type": "boolean"
+          },
+          "billing_enforced": {
+            "type": "boolean"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/CatalogSyncResponse"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WebhookProvisionView"
           }
         }
       },
@@ -3269,6 +3699,24 @@
               "string"
             ],
             "format": "int32"
+          },
+          "user": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "session": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3322,6 +3770,12 @@
               "string"
             ],
             "format": "int32"
+          },
+          "session": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "laplace": {
             "oneOf": [
@@ -3571,6 +4025,18 @@
               "string"
             ],
             "format": "int32"
+          },
+          "user": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "session": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -5671,6 +6137,34 @@
           }
         }
       },
+      "ExploreRequest": {
+        "required": [
+          "fen",
+          "player",
+          "limit"
+        ],
+        "type": "object",
+        "properties": {
+          "fen": {
+            "type": "string"
+          },
+          "player": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "ExploreResolveResponse": {
         "required": [
           "id_hex",
@@ -6452,6 +6946,28 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "OperatorApproveResponse": {
+        "required": [
+          "approved",
+          "quote_id",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "quote_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -8418,6 +8934,31 @@
           },
           "next": {
             "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "WebhookProvisionView": {
+        "required": [
+          "status",
+          "endpoint_id",
+          "url"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "endpoint_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "url": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

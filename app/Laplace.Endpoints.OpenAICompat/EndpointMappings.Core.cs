@@ -22,15 +22,8 @@ internal static class CoreEndpoints
           .Produces<ReadinessResponse>()
           .Produces<ReadinessResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapGet("/v1/models", () => Results.Json(new ModelList("list",
-        [
-            new ModelInfo("laplace-converse-001", "model", 0, "laplace"),
-            new ModelInfo("laplace-completions-001", "model", 0, "laplace"),
-            new ModelInfo("laplace-code-001", "model", 0, "laplace"),
-
-            new ModelInfo("laplace-embed-form-001", "model", 0, "laplace"),
-            new ModelInfo("laplace-embed-meaning-001", "model", 0, "laplace")
-        ]))).WithTags("core").Produces<ModelList>();
+        app.MapGet("/v1/models", () => Results.Json(new ModelList("list", ModelCatalog.All)))
+            .WithTags("core").Produces<ModelList>();
 
         app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(
             ChatCompletions: new CapabilityStatus("live", Backend: "laplace.recall_session", Billing: "preflight_quote_required"),

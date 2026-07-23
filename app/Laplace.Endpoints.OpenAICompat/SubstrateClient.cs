@@ -25,53 +25,13 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
 
 
-    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(string prompt, byte[]? session, CancellationToken ct)
-        => await ConverseTurnsAsync([prompt], session, ct);
-
-
-
-
-
-
-
-    public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
+    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct)
     {
-
-
-
-
-
-
-
-
-
-
-
-        const string sql = """
-            SELECT reply, eff_mu, witnesses
-            FROM laplace.recall_session(@p, @session);
-            """;
         try
         {
-            var prompt = userTurns[^1];
-
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("p", prompt);
-            var sessionParam = cmd.Parameters.Add("session", NpgsqlDbType.Bytea);
-            sessionParam.Value = session is null ? DBNull.Value : session;
-
-            var rows = new List<ConverseRow>(8);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-                var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
-                var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
-                rows.Add(new ConverseRow(reply, mu, witnesses));
-            }
-            return rows;
+            return await RecallSessionAsync(conn, prompt, session, ct);
         }
         catch (PostgresException pg)
         {
@@ -83,6 +43,66 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             throw new SubstrateUnavailableException("Substrate is unreachable.", ex);
         }
+    }
+
+    /// <summary>
+    /// Tenant-isolated converse (spec 34, opt-in): re-fold the tenant's own witnessed
+    /// world via scoped_consensus into pg_temp.consensus, which shadows
+    /// laplace.consensus for every unqualified read on THIS connection (the Build-A-
+    /// Bear scoped-pour mechanism), then run the same session read. One connection
+    /// per request; Npgsql's pool reset (DISCARD ALL) drops the temp table on return.
+    /// </summary>
+    public async Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using (var scopeCmd = new NpgsqlCommand(
+                "CREATE TEMP TABLE consensus AS SELECT * FROM laplace.scoped_consensus(@sources)", conn))
+            {
+                scopeCmd.Parameters.AddWithValue("sources", scopeSources);
+                await scopeCmd.ExecuteNonQueryAsync(ct);
+            }
+            return await RecallSessionAsync(conn, prompt, session, ct);
+        }
+        catch (PostgresException pg)
+        {
+            throw new SubstrateQueryException(
+                $"scoped recall_session query failed [{pg.SqlState}] {pg.MessageText}"
+                + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Substrate is unreachable.", ex);
+        }
+    }
+
+    private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync(
+        NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct)
+    {
+        // One turn in, one read out. Conversation state is substrate-resident
+        // (session context + session_topics carry) — clients never resend history,
+        // and a resent history would be ignored here by construction (spec 34).
+        const string sql = """
+            SELECT reply, eff_mu, witnesses
+            FROM laplace.recall_session(@p, @session);
+            """;
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("p", prompt);
+        var sessionParam = cmd.Parameters.Add("session", NpgsqlDbType.Bytea);
+        sessionParam.Value = session is null ? DBNull.Value : session;
+
+        var rows = new List<ConverseRow>(8);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+            var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
+            rows.Add(new ConverseRow(reply, mu, witnesses));
+        }
+        return rows;
     }
 
 

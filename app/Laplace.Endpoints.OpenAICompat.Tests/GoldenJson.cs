@@ -24,6 +24,10 @@ internal static partial class GoldenJson
     [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")]
     private static partial Regex TimestampRegex();
 
+    // Server-minted conversation session keys (spec 34): "s-" + 32 hex.
+    [GeneratedRegex("^s-[0-9a-f]{32}$")]
+    private static partial Regex SessionKeyRegex();
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -114,6 +118,7 @@ internal static partial class GoldenJson
         if (ResponseIdRegex().IsMatch(s)) return "<id>";
         if (QuoteIdRegex().IsMatch(s)) return "<quote_id>";
         if (TimestampRegex().IsMatch(s)) return "<timestamp>";
+        if (SessionKeyRegex().IsMatch(s)) return "<session>";
         return s;
     }
 }

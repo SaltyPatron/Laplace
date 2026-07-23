@@ -31,6 +31,13 @@ public sealed record ChessTrainStatus(
     bool Running, long Games, int White, int Black, int Draws, int Adjudicated,
     string LastOutcome, double Temperature, double Weight, int MaxPlies);
 
+public sealed record ChessExploreMove(
+    string Uci, string San, double EffMu, double Rd, long Witnesses,
+    long PlayerGames, double? PlayerScore);
+
+public sealed record ChessExploreResponse(
+    string Fen, string? Player, IReadOnlyList<ChessExploreMove> Moves);
+
 public sealed record ChessPlayStart(Guid SessionId, string Fen, string Status = "ongoing", int Ply = 0);
 
 public sealed record ChessPlayMoveResult(
@@ -142,6 +149,87 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<IReadOnlyList<ChessMoveScore>> ScoreAsync(string fen, CancellationToken ct = default)
     {
         return (await LegalAsync(fen, ct)).Moves;
+    }
+
+    /// <summary>
+    /// Opening explorer over the rated MOVE web: every continuation consensus has witnessed
+    /// out of this position, ranked by eff_mu, optionally scoped to one player's own games
+    /// (a provenance read over MOVE evidence context → game → HAS_WHITE/HAS_BLACK). The
+    /// player's color is resolved from the position's side to move — moves out of a
+    /// white-to-move position are theirs only in games they played as White.
+    /// </summary>
+    public async Task<ChessExploreResponse> ExploreAsync(
+        string fen, string? player = null, int limit = 12, CancellationToken ct = default)
+    {
+        await EngineAsync(ct);
+        var state = _modality!.FromFen(fen);
+        var legal = _modality.LegalActions(state);
+
+        // Composed child ids → (uci, san): consensus returns next-position ids; the legal
+        // move set is the decoder ring back to human notation.
+        var byChild = new Dictionary<Hash128, (string Uci, string San)>(legal.Count);
+        Hash128 rootId;
+        lock (ChessCompose.Gate)
+        {
+            rootId = ChessCompose.PositionId(_modality.StateKey(state));
+            foreach (var mv in legal)
+            {
+                var next = _modality.Apply(state, mv);
+                var childId = ChessCompose.PositionId(_modality.StateKey(next));
+                byChild[childId] = (mv.ToUci(), San.ToSan(state.Board, mv));
+            }
+        }
+
+        var rows = new List<ChessExploreMove>(limit);
+        var playerStats = new Dictionary<Hash128, (long Games, double Score)>();
+        await using var conn = await _ds!.OpenConnectionAsync(ct);
+
+        if (!string.IsNullOrWhiteSpace(player))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT next_position, games, score FROM laplace.chess_player_moves($1, $2, $3, $4)";
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = rootId.ToBytes() });
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = ChessVocabulary.PlayerId(player).ToBytes() });
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Boolean, Value = state.Board.WhiteToMove });
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Integer, Value = Math.Max(limit, legal.Count) });
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+                playerStats[Hash128.FromBytes((byte[])r[0])] = (r.GetInt64(1), r.GetDouble(2));
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "SELECT next_position, eff_mu, rd, witness_count FROM laplace.chess_moves($1, $2)";
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = rootId.ToBytes() });
+            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Integer, Value = limit });
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var childId = Hash128.FromBytes((byte[])r[0]);
+                if (!byChild.TryGetValue(childId, out var mv)) continue;
+                var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
+                rows.Add(new ChessExploreMove(
+                    mv.Uci, mv.San,
+                    (r.GetDouble(1) - GlickoPriors.NeutralMu) / 1e9,
+                    r.GetDouble(2) / 1e9,
+                    r.GetInt64(3),
+                    ps.Games,
+                    ps.Games > 0 ? ps.Score : null));
+            }
+        }
+
+        // Player-scoped rows whose continuation fell outside the consensus read's LIMIT
+        // still belong in a repertoire answer.
+        var seen = new HashSet<string>(rows.Select(x => x.Uci));
+        foreach (var (childId, s) in playerStats)
+        {
+            if (!byChild.TryGetValue(childId, out var known) || !seen.Add(known.Uci)) continue;
+            rows.Add(new ChessExploreMove(known.Uci, known.San, 0d, 0d, 0, s.Games, s.Score));
+        }
+
+        return new ChessExploreResponse(fen, player, rows);
     }
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)

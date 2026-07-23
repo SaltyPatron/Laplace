@@ -10,8 +10,12 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 internal sealed class UnreachableSubstrateClient : ISubstrateClient
 {
-    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
@@ -113,12 +117,22 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
     private const string WordNetIdHex = "fedcba9876543210fedcba9876543210";
 
-    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ConverseRow>>(
+            prompt.Contains("unknown-topic", StringComparison.OrdinalIgnoreCase)
+                ? []
+                :
+                [
+                    new ConverseRow("A whale is a marine mammal.", 0.91m, 42),
+                    new ConverseRow("whale IS_A cetacean.", 0.84m, 17)
+                ]);
+
+    public Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<ConverseRow>>(
         [
-            new ConverseRow("A whale is a marine mammal.", 0.91m, 42),
-            new ConverseRow("whale IS_A cetacean.", 0.84m, 17)
+            new ConverseRow("tenant-scoped: my own witnessed answer.", 0.42m, 3)
         ]);
 
     public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(

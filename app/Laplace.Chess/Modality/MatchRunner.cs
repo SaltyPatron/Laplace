@@ -70,7 +70,7 @@ public static class MatchRunner
         ChessState? start = null, List<ChessMove>? record = null, CancellationToken ct = default,
         bool captureEdges = false,
         Hash128? substrateGameId = null,
-        Action<Hash128, int, string, string, int>? plyRecordSink = null)
+        Action<Hash128, int, string, string, int, string>? plyRecordSink = null)
     {
         var s = start ?? m.Initial();
         var subjects = captureEdges ? new List<string>() : null;
@@ -109,7 +109,7 @@ public static class MatchRunner
                 objects!.Add(m.StateKey(s));
                 plyNum++;
                 if (substrateGameId is { } gid && plyRecordSink is not null)
-                    plyRecordSink(gid, plyNum, subjects![^1], objects[^1], movers![^1]);
+                    plyRecordSink(gid, plyNum, subjects![^1], objects[^1], movers![^1], mv.ToUci());
             }
         }
     }
@@ -160,7 +160,8 @@ public static class MatchRunner
         CancellationToken ct = default,
         Action<RecordedEdge[], bool>? recordSink = null,
         ChessLiveGameHost? liveHost = null,
-        string? liveLearnContext = null)
+        string? liveLearnContext = null,
+        Action<int, int, string, string>? onPly = null)
     {
         bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0, done = 0;
@@ -180,7 +181,7 @@ public static class MatchRunner
             bool aWhite = (g % 2 == 0);
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var pgnMoves = pgnSink is not null ? new List<ChessMove>() : null;
-            Hash128? gameId = liveHost is not null
+            Hash128? gameId = liveHost is not null || onPly is not null
                 ? Hash128.OfCanonical($"{learnCtx}/{seed}/{g}")
                 : null;
             if (liveHost is not null && gameId is { } gidOpen)
@@ -188,12 +189,13 @@ public static class MatchRunner
 
             var played = PlayOneCore(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
                 book ? 0 : openingPlies, start, pgnMoves, ct,
-                captureEdges: recordSink is not null || liveHost is not null,
+                captureEdges: recordSink is not null || liveHost is not null || onPly is not null,
                 substrateGameId: gameId,
-                plyRecordSink: liveHost is null ? null : (gid, ply, sub, obj, mover) =>
+                plyRecordSink: liveHost is null && onPly is null ? null : (gid, ply, sub, obj, mover, uci) =>
                 {
-                    liveHost.RecordPlyAsync(gid, ply, sub, obj, "?", null, ct)
+                    liveHost?.RecordPlyAsync(gid, ply, sub, obj, "?", null, ct)
                         .GetAwaiter().GetResult();
+                    onPly?.Invoke(g, ply, uci, obj);
                 });
             int outcome = played.Outcome;
             if (recordSink is not null && played.Edges.Length > 0)

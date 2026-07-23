@@ -19,7 +19,10 @@ public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("topic_boost")] double? TopicBoost = null,
     [property: JsonPropertyName("stop")] JsonElement? Stop = null,
     [property: JsonPropertyName("web_search")] bool WebSearch = false,
-    [property: JsonPropertyName("web_search_results")] int? WebSearchResults = null);
+    [property: JsonPropertyName("web_search_results")] int? WebSearchResults = null,
+    [property: JsonPropertyName("user")] string? User = null,
+    [property: JsonPropertyName("session")] string? Session = null,
+    [property: JsonPropertyName("scope")] string? Scope = null);
 
 public sealed record ChatMessage(
     [property: JsonPropertyName("role")] string? Role,
@@ -37,7 +40,9 @@ public sealed record CompletionsRequest(
     [property: JsonPropertyName("topic_boost")] double? TopicBoost = null,
     [property: JsonPropertyName("stop")] JsonElement? Stop = null,
     [property: JsonPropertyName("echo")] bool Echo = false,
-    [property: JsonPropertyName("logprobs")] int? Logprobs = null);
+    [property: JsonPropertyName("logprobs")] int? Logprobs = null,
+    [property: JsonPropertyName("user")] string? User = null,
+    [property: JsonPropertyName("session")] string? Session = null);
 
 public sealed record EmbeddingsRequest(
     [property: JsonPropertyName("model")] string? Model,
@@ -59,6 +64,18 @@ public sealed record CreditConsumeRequest(
     [property: JsonPropertyName("tenant")] string? Tenant,
     [property: JsonPropertyName("service_id")] string? ServiceId,
     [property: JsonPropertyName("units")] int Units = 1);
+
+public sealed record ApiKeyIssueRequest(
+    [property: JsonPropertyName("tenant")] string? Tenant,
+    [property: JsonPropertyName("label")] string? Label);
+
+public sealed record ApiKeyRevokeRequest(
+    [property: JsonPropertyName("tenant")] string? Tenant,
+    [property: JsonPropertyName("key_prefix")] string? KeyPrefix);
+
+public sealed record ApiKeyRedeemRequest(
+    [property: JsonPropertyName("session_id")] string? SessionId,
+    [property: JsonPropertyName("label")] string? Label);
 
 public sealed record SynthesisQuoteRequest(
     [property: JsonPropertyName("tenant")] string? Tenant,

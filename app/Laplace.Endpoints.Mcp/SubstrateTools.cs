@@ -85,10 +85,9 @@ internal sealed class SubstrateTools
                 "recall" => Rows(_db,
                     """
                     SELECT reply, round(eff_mu, 1) AS eff_mu, witnesses
-                    FROM laplace.recall_session(@p,
-                        CASE WHEN @s IS NULL THEN NULL ELSE convert_to(@s, 'UTF8') END)
+                    FROM laplace.recall_session(@p, @s)
                     """,
-                    DefaultRowCap, ("p", Req(args, "prompt")), ("s", Opt(args, "session"))),
+                    DefaultRowCap, ("p", Req(args, "prompt")), ("s", SessionParam(Opt(args, "session")))),
                 "chat" => ChatTurn(args),
                 "bubble" => Rows(_dbReadOnly,
                     """
@@ -178,43 +177,57 @@ internal sealed class SubstrateTools
     }
 
     // One conversational turn: SQL chat() composes the reply (read-side), then the
-    // turn is deposited through the writer spine — full content mint + evidence +
-    // inline fold under the UserPrompt/Response trust classes. This is chat()'s
-    // OODA close; the SQL function itself stays read-only (session state aside).
+    // turn is deposited through the writer spine — full content mint + turn-level
+    // evidence + inline fold under the mcp-local tenant's sources, session as
+    // context on every row (spec 34). This is chat()'s OODA close; the SQL function
+    // itself stays read-only (session state aside).
+    private const string McpTenant = "mcp-local";
+    private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
     private ISubstrateWriter? _turnWriter;
+    private ConversationContent.TenantScope _turnScope;
     private bool _turnBootstrapped;
     private bool _turnDepositBroken;
+
+    /// <summary>
+    /// A tool session key resolves through the canonical mint — the same id law the
+    /// API surface uses, so an MCP session and an endpoint session with the same
+    /// tenant+key are the SAME context entity. Null stays null (recall.c's own
+    /// per-backend fallback applies).
+    /// </summary>
+    private static NpgsqlParameter SessionParam(string? sessionKey) =>
+        new("s", NpgsqlTypes.NpgsqlDbType.Bytea)
+        {
+            Value = sessionKey is null
+                ? DBNull.Value
+                : ConversationContent.SessionId(McpTenant, sessionKey).ToBytes()
+        };
 
     private (string, bool) ChatTurn(JsonObject? args)
     {
         var prompt = Req(args, "prompt");
-        var session = Opt(args, "session");
+        var sessionKey = Opt(args, "session") ?? _processSessionKey;
+        var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
 
         string? reply;
-        using (var cmd = _db.CreateCommand(
-            """
-            SELECT laplace.chat(@p,
-                CASE WHEN @s IS NULL THEN NULL ELSE convert_to(@s, 'UTF8') END)
-            """))
+        using (var cmd = _db.CreateCommand("SELECT laplace.chat(@p, @s)"))
         {
             cmd.Parameters.AddWithValue("p", prompt);
-            if (session is null)
-                cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Text) { Value = DBNull.Value });
-            else
-                cmd.Parameters.AddWithValue("s", session);
+            cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Bytea)
+                { Value = sessionId.ToBytes() });
             reply = cmd.ExecuteScalar() as string;
         }
 
-        DepositTurn(prompt, reply);
+        DepositTurn(prompt, reply, sessionId);
 
         var result = new JsonObject
         {
-            ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply })
+            ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply }),
+            ["session"] = sessionKey
         };
         return (result.ToJsonString(), false);
     }
 
-    private void DepositTurn(string prompt, string? reply)
+    private void DepositTurn(string prompt, string? reply, Hash128 sessionId)
     {
         if (_turnDepositBroken)
             return;
@@ -227,24 +240,20 @@ internal sealed class SubstrateTools
             }
             if (!_turnBootstrapped)
             {
-                _turnWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
-                _turnWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnScope = ConversationContent.Resolve(McpTenant);
+                foreach (var change in ConversationContent.BuildTenantBootstrapChanges(_turnScope))
+                    _turnWriter.ApplyAsync(change).GetAwaiter().GetResult();
                 _turnBootstrapped = true;
             }
 
-            var promptRoot = Hash128.Zero;
-            if (UserPromptContent.TryBuildWitnessChange(
-                    Encoding.UTF8.GetBytes(prompt), "turn/prompt", out var promptChange, out var pr))
+            if (ConversationContent.TryBuildTurnChange(
+                    _turnScope, sessionId,
+                    Encoding.UTF8.GetBytes(prompt),
+                    string.IsNullOrWhiteSpace(reply) ? null : Encoding.UTF8.GetBytes(reply),
+                    userKey: null,
+                    out var turnChange, out _, out _))
             {
-                _turnWriter.ApplyAsync(promptChange).GetAwaiter().GetResult();
-                promptRoot = pr;
-            }
-            if (!string.IsNullOrWhiteSpace(reply) &&
-                ResponseContent.TryBuildWitnessChange(
-                    Encoding.UTF8.GetBytes(reply), "turn/reply",
-                    promptRoot == Hash128.Zero ? null : promptRoot, out var replyChange, out _))
-            {
-                _turnWriter.ApplyAsync(replyChange).GetAwaiter().GetResult();
+                _turnWriter.ApplyAsync(turnChange).GetAwaiter().GetResult();
             }
         }
         catch (Exception ex)
@@ -263,7 +272,10 @@ internal sealed class SubstrateTools
         {
             // A null optional is always a text arg here; DBNull without a
             // declared type leaves the parameter untyped at the server (42P08).
-            if (value is null)
+            // A pre-typed NpgsqlParameter (bytea session ids) passes through.
+            if (value is NpgsqlParameter typed)
+                cmd.Parameters.Add(typed);
+            else if (value is null)
                 cmd.Parameters.Add(new NpgsqlParameter(pName, NpgsqlTypes.NpgsqlDbType.Text) { Value = DBNull.Value });
             else
                 cmd.Parameters.AddWithValue(pName, value);

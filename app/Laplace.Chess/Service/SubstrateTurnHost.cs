@@ -45,12 +45,21 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         await using (var conn = await _ds.OpenConnectionAsync(ct))
         await using (var cmd = conn.CreateCommand())
         {
+            // Edge ids arrive from ModalityEngine.ScoreMovesAsync, which builds them
+            // with ChessVocabulary.MoveType — thread that type so the partitioned
+            // consensus scan prunes to the MOVE partition instead of Append-scanning
+            // every relation type.
             cmd.CommandText =
-                "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1)";
+                "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1, $2)";
             cmd.Parameters.Add(new NpgsqlParameter
             {
                 NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 Value = raw,
+            });
+            cmd.Parameters.Add(new NpgsqlParameter
+            {
+                NpgsqlDbType = NpgsqlDbType.Bytea,
+                Value = ChessVocabulary.MoveType.ToBytes(),
             });
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))

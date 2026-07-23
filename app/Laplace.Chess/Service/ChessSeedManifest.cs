@@ -21,6 +21,11 @@ public static class ChessSeedManifest
         "HAS_TERMINATION", "HAS_RESULT", "GAME_AT", "GAME_AT_PLY", "HAS_EVAL", "MOVE_QUALITY",
         "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "GAME_HAS_OPENING", "GAME_HAS_ECO",
         "GAME_HAS_MOTIF", "EXPLAINS", "IS_EXAMPLE_OF", "HAS_DEFINITION",
+        // GH #577: emitted by ChessPgnDecomposer (CORRESPONDS_TO game↔lichess-id bridge) and
+        // ChessVocabulary.EmitPlayer (HAS_NAME_ALIAS). Both are family_roots, so family
+        // expansion never pulls them — an undeclared emit is the 0xC0000005 class, previously
+        // masked only by global foundation seeding.
+        "CORRESPONDS_TO", "HAS_NAME_ALIAS",
     ];
 
     public static ISourceManifest ForLane(Hash128 sourceId, string sourceName, Hash128 trustClass) =>

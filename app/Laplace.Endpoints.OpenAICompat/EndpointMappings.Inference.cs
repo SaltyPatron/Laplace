@@ -1,30 +1,33 @@
 using System.Text;
 using System.Text.Json;
 using Laplace.Api.Contracts;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class InferenceEndpoints
 {
+    public const string SessionHeader = "X-Laplace-Session";
+
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
             if (payload is null)
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Model))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'model' is required.");
+            if (!ModelCatalog.IsChatModel(payload.Model))
+                return EndpointJson.BadRequest("unknown_model",
+                    $"Unknown model '{payload.Model}'. See GET /v1/models for the served catalog.");
             if (payload.Messages is null || payload.Messages.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'messages' must contain at least one message.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-            var gate = await billing.EnsureExecutableAsync(quoteId, "chat.completions", ct);
-            if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
-                    ? new QuoteServiceDetail("chat.completions")
-                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
-
+            // Conversation state is substrate-resident: only the newest user turn is
+            // consumed; any resent history is ignored by construction (spec 34).
             var prompt = payload.Messages
                 .Where(m => !string.IsNullOrWhiteSpace(m.Content))
                 .Select(m => m.Content!.Trim())
@@ -32,16 +35,32 @@ internal static class InferenceEndpoints
             if (string.IsNullOrWhiteSpace(prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "At least one message must include non-empty 'content'.");
 
+            var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
+            if (scopeError is not null) return scopeError;
+
+            bool tenantScoped = string.Equals(payload.Scope, "tenant", StringComparison.Ordinal);
+            if (payload.Scope is not null && !tenantScoped)
+                return EndpointJson.BadRequest("invalid_scope",
+                    "Field 'scope' accepts only \"tenant\" (isolated read over this tenant's own witnessed world).");
+            if (tenantScoped && !ModelCatalog.IsConverse(payload.Model))
+                return EndpointJson.BadRequest("invalid_scope",
+                    "Tenant-scoped reads are only available on the converse model lane.");
+
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "chat.completions", ct);
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("chat.completions")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
+
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
             if (RequireTurnWitness(turnWitness) is { } chatWitnessErr) return chatWitnessErr;
 
+            // The session key travels back on every response shape so the client can
+            // continue the conversation without resending history.
+            request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
 
-
-
-
-
-            if (!payload.Model.Contains("converse", StringComparison.OrdinalIgnoreCase))
+            if (!ModelCatalog.IsConverse(payload.Model))
             {
                 int genSteps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
                 double genTemp = payload.Temperature ?? 0.6;
@@ -68,7 +87,8 @@ internal static class InferenceEndpoints
                                 [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
                                 Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
                         }
-                        turnWitness.EnqueueTurn(prompt, genStreamText.ToString().TrimStart());
+                        turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
+                            prompt, genStreamText.ToString().TrimStart());
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,
                             [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
@@ -87,7 +107,7 @@ internal static class InferenceEndpoints
                     genTokens.Add(token);
 
                 var genContent = string.Concat(genTokens.Select(t => t.Token)).TrimStart();
-                turnWitness.EnqueueTurn(prompt, genContent);
+                turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId, prompt, genContent);
 
                 return Results.Json(new ChatCompletionResponse(
                     Id: $"chatcmpl-{Guid.NewGuid():N}",
@@ -96,28 +116,22 @@ internal static class InferenceEndpoints
                     Model: payload.Model,
                     Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", genContent), "stop")],
                     Billing: null,
-                    Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count)));
+                    Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count, Session: scope.SessionKey)));
             }
 
+            // Default = act as a whole (global consensus). scope:"tenant" re-folds the
+            // tenant's own witnessed world and reads inside it (spec 34 isolation).
+            var tenantScope = ConversationContent.Resolve(scope.Tenant);
+            var rows = tenantScoped
+                ? await substrate.ConverseTenantScopedAsync(prompt, scope.SessionId.ToBytes(),
+                    [tenantScope.PromptSource.ToBytes(), tenantScope.ResponseSource.ToBytes()], ct)
+                : await substrate.ConverseAsync(prompt, scope.SessionId.ToBytes(), ct);
+            // Empty consensus is reported truthfully: empty content + reply_rows 0.
+            // The client renders the absence; the substrate never fakes prose.
+            var content = string.Join("\n", rows.Select(r => r.Reply));
 
-
-
-
-            var sessionId = DeriveSessionId(payload.Messages);
-            var userTurns = payload.Messages
-                .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
-                            && !string.IsNullOrWhiteSpace(m.Content))
-                .Select(m => m.Content!.Trim())
-                .ToList();
-            if (userTurns.Count == 0) userTurns.Add(prompt);
-            var rows = await substrate.ConverseTurnsAsync(userTurns, sessionId, ct);
-            var content = rows.Count == 0
-                ? "I hold no consensus about that yet."
-                : string.Join("\n", rows.Select(r => r.Reply));
-
-
-
-            turnWitness.EnqueueTurn(userTurns[^1], rows.Count > 0 ? content : null);
+            turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
+                prompt, rows.Count > 0 ? content : null);
 
             if (payload.Stream)
             {
@@ -129,7 +143,6 @@ internal static class InferenceEndpoints
                 await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                     completionId, "chat.completion.chunk", created, payload.Model,
                     [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
-
 
                 for (int i = 0; i < rows.Count; i++)
                 {
@@ -157,6 +170,7 @@ internal static class InferenceEndpoints
                 Metadata: new ChatMetadata(
                     Witnesses: rows.Sum(r => r.Witnesses),
                     ReplyRows: rows.Count,
+                    Session: scope.SessionKey,
                     Laplace: new LaplaceChatMetadata(
                         rows.Select(r => new ProvenanceLine(r.Reply, r.EffectiveMu, r.Witnesses)).ToArray()))));
         })
@@ -167,18 +181,23 @@ internal static class InferenceEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Model))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'model' is required.");
+            if (!ModelCatalog.IsCompletionsModel(payload.Model))
+                return EndpointJson.BadRequest("unknown_model",
+                    $"Unknown model '{payload.Model}'. See GET /v1/models for the served catalog.");
             if (string.IsNullOrWhiteSpace(payload.Prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-            var gate = await billing.EnsureExecutableAsync(quoteId, "completions", ct);
+            var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
+            if (scopeError is not null) return scopeError;
+
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "completions", ct);
             if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
                     ? new QuoteServiceDetail("completions")
@@ -187,6 +206,8 @@ internal static class InferenceEndpoints
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
             if (RequireTurnWitness(turnWitness) is { } witnessErr) return witnessErr;
+
+            request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
@@ -210,7 +231,8 @@ internal static class InferenceEndpoints
                             [new CompletionChoice(token.Token, 0, null,
                                 payload.Logprobs.HasValue ? new CompletionLogprobs([(double)token.Mu]) : null)]), ct);
                     }
-                    turnWitness.EnqueueTurn(payload.Prompt.Trim(), streamText.ToString().TrimStart());
+                    turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
+                        payload.Prompt.Trim(), streamText.ToString().TrimStart());
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -220,14 +242,13 @@ internal static class InferenceEndpoints
                 return Results.Empty;
             }
 
-
             var tokens = new List<GenerateToken>(steps);
             await foreach (var token in substrate.WalkTextStreamAsync(
                 payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 tokens.Add(token);
 
             var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
-            turnWitness.EnqueueTurn(payload.Prompt.Trim(), text);
+            turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId, payload.Prompt.Trim(), text);
             return Results.Json(new CompletionResponse(
                 Id: $"cmpl-{Guid.NewGuid():N}",
                 Object: "text_completion",
@@ -257,21 +278,19 @@ internal static class InferenceEndpoints
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Model))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'model' is required.");
+            if (!ModelCatalog.TryEmbeddingModel(payload.Model, out bool includeMeaning))
+                return EndpointJson.BadRequest("unknown_model",
+                    $"Unknown model '{payload.Model}'. See GET /v1/models for the served catalog.");
             var inputs = ReadEmbeddingInputs(payload.Input);
             if (inputs.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'input' must be a non-empty string or array of strings.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-            var gate = await billing.EnsureExecutableAsync(quoteId, "embeddings", ct);
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "embeddings", ct);
             if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
                     ? new QuoteServiceDetail("embeddings")
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
-
-
-
-            bool includeMeaning = !payload.Model.Contains("form", StringComparison.OrdinalIgnoreCase);
 
             // Resolve the batch with bounded fan-out instead of one serial
             // round trip per input — an OpenAI-style batch array's latency
@@ -323,18 +342,40 @@ internal static class InferenceEndpoints
         app.MapExploreEndpoints();
     }
 
+    /// <summary>
+    /// The turn's full provenance scope: tenant (resolved, validated), user-within-
+    /// tenant (OpenAI-standard 'user' field), and the session — client-supplied KEY
+    /// re-minted server-side into the canonical session id (never raw id bytes;
+    /// tenant-in-the-key makes cross-tenant session forgery structurally impossible).
+    /// Absent a client key the server mints a fresh one and returns it.
+    /// </summary>
+    internal readonly record struct TurnScope(
+        string Tenant, string? UserKey, string SessionKey, Hash128 SessionId);
 
-
-
-
-
-
-    private static byte[]? DeriveSessionId(IReadOnlyList<ChatMessage>? messages)
+    private static async ValueTask<(TurnScope Scope, IResult? Error)> ResolveTurnScopeAsync(
+        HttpRequest request, ITenantResolver tenantResolver,
+        string? bodySessionKey, string? userKey, CancellationToken ct)
     {
-        var anchor = messages?.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Content))?.Content;
-        if (string.IsNullOrWhiteSpace(anchor)) return null;
-        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(anchor));
-        return hash[..16];
+        var tenant = (await tenantResolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+        if (!ConversationContent.IsValidIdentifier(tenant))
+            return (default, EndpointJson.BadRequest("invalid_tenant",
+                "Tenant id must match [A-Za-z0-9._@-]{1,128}."));
+
+        var sessionKey = bodySessionKey;
+        if (string.IsNullOrWhiteSpace(sessionKey))
+            sessionKey = request.Headers[SessionHeader].ToString();
+        if (string.IsNullOrWhiteSpace(sessionKey))
+            sessionKey = $"s-{Guid.NewGuid():N}";
+        if (!ConversationContent.IsValidIdentifier(sessionKey))
+            return (default, EndpointJson.BadRequest("invalid_session",
+                "Session key must match [A-Za-z0-9._@-]{1,128}."));
+
+        if (userKey is not null && !ConversationContent.IsValidIdentifier(userKey))
+            return (default, EndpointJson.BadRequest("invalid_user",
+                "Field 'user' must match [A-Za-z0-9._@-]{1,128}."));
+
+        return (new TurnScope(tenant, userKey, sessionKey,
+            ConversationContent.SessionId(tenant, sessionKey)), null);
     }
 
     private static string[]? ReadStopSequences(JsonElement stop) =>

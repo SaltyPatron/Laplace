@@ -50,9 +50,15 @@ builder.Services.AddRateLimiter(options =>
                     QueueLimit = 0
                 });
 
-        var tenant = ctx.Request.Headers["X-Laplace-Tenant"].ToString();
-        if (string.IsNullOrWhiteSpace(tenant)) tenant = "local-dev";
-        return RateLimitPartition.GetSlidingWindowLimiter($"tenant:{tenant}",
+        // Partition by the presented API key when there is one (it IS the tenant
+        // credential); the spoofable header partition only remains for header mode.
+        var partition = Laplace.Endpoints.OpenAICompat.Auth.ApiKeyTenantResolver.PresentedKey(ctx.Request);
+        if (partition is null)
+        {
+            var tenant = ctx.Request.Headers["X-Laplace-Tenant"].ToString();
+            partition = string.IsNullOrWhiteSpace(tenant) ? "local-dev" : tenant;
+        }
+        return RateLimitPartition.GetSlidingWindowLimiter($"tenant:{partition}",
             _ => new SlidingWindowRateLimiterOptions
             {
                 PermitLimit = perTenantPerMinute,
@@ -84,6 +90,7 @@ app.UseForwardedHeaders(forwardedHeaders);
 app.UseRateLimiter();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionEnvelopeMiddleware>();
+app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
@@ -104,6 +111,7 @@ app.MapQueryEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
+app.MapBillingIdentityEndpoints();
 app.MapChessEndpoints();
 app.MapFeedbackEndpoints();
 

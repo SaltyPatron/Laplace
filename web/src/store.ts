@@ -26,10 +26,15 @@ interface AppState {
   tenant: string;
   quoteId: string;
   model: string;
+  /** Conversation session key (spec 34): server-minted on the first turn, resent on
+   *  every later turn so the substrate carries the conversation — history is never
+   *  resent. In-memory only; a new conversation starts a new session. */
+  session: string | null;
   messages: ChatMessage[];
   pendingQuote: QuoteGate | null;
   exploreSeedPrompt: string | null;
   setTenant: (tenant: string) => void;
+  setSession: (session: string | null) => void;
   setQuoteId: (quoteId: string) => void;
   setModel: (model: string) => void;
   pushMessage: (message: ChatMessage) => void;
@@ -43,13 +48,16 @@ export const useAppStore = create<AppState>((set) => ({
   tenant: localStorage.getItem('laplace.tenant') ?? 'local-dev',
   quoteId: '',
   model: 'laplace-converse-001',
+  session: null,
   messages: [],
   pendingQuote: null,
   exploreSeedPrompt: null,
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
-    set({ tenant });
+    // A tenant switch is a different witnessed world — never carry a session across.
+    set({ tenant, session: null });
   },
+  setSession: (session) => set({ session }),
   setQuoteId: (quoteId) => set({ quoteId }),
   setModel: (model) => set({ model }),
   pushMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
@@ -66,7 +74,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
   setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
-  clearConversation: () => set({ messages: [], pendingQuote: null }),
+  clearConversation: () => set({ messages: [], pendingQuote: null, session: null }),
 }));
 
 

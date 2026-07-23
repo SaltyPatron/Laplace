@@ -18,6 +18,8 @@ public abstract class BillingStoreContractTests
     private protected abstract IBillingEntitlementStore Entitlements { get; }
     private protected abstract IBillingWebhookEventStore WebhookEvents { get; }
     private protected abstract IStripePriceMap PriceMap { get; }
+    private protected abstract Auth.IApiKeyStore ApiKeys { get; }
+    private protected abstract IBillingConfigStore Config { get; }
 
 
     protected virtual bool Available => true;
@@ -178,6 +180,50 @@ public abstract class BillingStoreContractTests
         await PriceMap.SetAsync(key, "price_2", CancellationToken.None);
         Assert.Equal("price_2", await PriceMap.TryGetAsync(key, CancellationToken.None));
     }
+
+    [SkippableFact]
+    public async Task ApiKeys_PutGetRevokeAndLabelLookup()
+    {
+        RequireStore();
+        var tenant = $"t-{Guid.NewGuid():N}";
+        var label = $"session:{Guid.NewGuid():N}";
+        var record = new Auth.ApiKeyRecord(
+            KeyHash: $"hash_{Guid.NewGuid():N}",
+            KeyPrefix: "sk-laplace-abcd",
+            Tenant: tenant,
+            Label: label,
+            CreatedAt: DateTimeOffset.UtcNow,
+            RevokedAt: null,
+            LastUsedAt: null);
+        await ApiKeys.PutAsync(record, CancellationToken.None);
+
+        var fetched = await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None);
+        Assert.NotNull(fetched);
+        Assert.Equal(tenant, fetched!.Tenant);
+        Assert.Null(fetched.RevokedAt);
+
+        Assert.Single(await ApiKeys.GetByTenantAsync(tenant, CancellationToken.None));
+        Assert.Single(await ApiKeys.GetByLabelAsync(label, CancellationToken.None));
+
+        await ApiKeys.TouchAsync(record.KeyHash, DateTimeOffset.UtcNow, CancellationToken.None);
+        Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.LastUsedAt);
+
+        Assert.True(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
+        Assert.False(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
+        Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.RevokedAt);
+    }
+
+    [SkippableFact]
+    public async Task Config_SetOverwritesAndGets()
+    {
+        RequireStore();
+        var key = $"cfg_{Guid.NewGuid():N}";
+        Assert.Null(await Config.TryGetAsync(key, CancellationToken.None));
+        await Config.SetAsync(key, "one", CancellationToken.None);
+        Assert.Equal("one", await Config.TryGetAsync(key, CancellationToken.None));
+        await Config.SetAsync(key, "two", CancellationToken.None);
+        Assert.Equal("two", await Config.TryGetAsync(key, CancellationToken.None));
+    }
 }
 
 public sealed class InMemoryBillingStoreContractTests : BillingStoreContractTests
@@ -187,6 +233,8 @@ public sealed class InMemoryBillingStoreContractTests : BillingStoreContractTest
     private protected override IBillingEntitlementStore Entitlements { get; } = new InMemoryBillingEntitlementStore();
     private protected override IBillingWebhookEventStore WebhookEvents { get; } = new InMemoryBillingWebhookEventStore();
     private protected override IStripePriceMap PriceMap { get; } = new InMemoryStripePriceMap();
+    private protected override Auth.IApiKeyStore ApiKeys { get; } = new Auth.InMemoryApiKeyStore();
+    private protected override IBillingConfigStore Config { get; } = new InMemoryBillingConfigStore();
 }
 
 
@@ -223,4 +271,6 @@ public sealed class PostgresBillingStoreContractTests : BillingStoreContractTest
     private protected override IBillingEntitlementStore Entitlements => new BillingPostgres.PostgresBillingEntitlementStore(DataSource);
     private protected override IBillingWebhookEventStore WebhookEvents => new BillingPostgres.PostgresBillingWebhookEventStore(DataSource);
     private protected override IStripePriceMap PriceMap => new BillingPostgres.PostgresStripePriceMap(DataSource);
+    private protected override Auth.IApiKeyStore ApiKeys => new Auth.PostgresApiKeyStore(DataSource);
+    private protected override IBillingConfigStore Config => new PostgresBillingConfigStore(DataSource);
 }

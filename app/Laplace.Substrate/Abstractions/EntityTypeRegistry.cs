@@ -14,6 +14,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 CharacterEncoding = Id("CharacterEncoding");
     public static readonly Hash128 CodeConcept = Id("CodeConcept");
     public static readonly Hash128 Codepoint = Id("Codepoint");
+    public static readonly Hash128 ConversationSession = Id("Conversation_Session");
     public static readonly Hash128 Document = Id("Document");
     public static readonly Hash128 FrameNetCoreness = Id("FrameNet_Coreness");
     public static readonly Hash128 FrameNetFe = Id("FrameNet_FE");

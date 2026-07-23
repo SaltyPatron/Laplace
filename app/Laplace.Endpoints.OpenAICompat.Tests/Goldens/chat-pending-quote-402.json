@@ -2,7 +2,7 @@
   "error": {
     "type": "payment_required",
     "code": "payment_pending",
-    "message": "Stripe is not configured; quote is awaiting manual approval.",
+    "message": "Stripe is not configured; quote is awaiting manual approval (operator: POST /v1/billing/operator/quotes/{id}/approve).",
     "detail": {
       "quoteId": "<quote_id>",
       "status": "awaiting_manual_approval",

@@ -184,6 +184,66 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    public async Task Golden_Chat_UnknownModel()
+    {
+        // Exact-id routing (spec 34): unknown model is a 400, never a silent
+        // fallback lane. Rejected before the billing gate, so no quote needed.
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "gpt-4o",
+            messages = new[] { new { role = "user", content = "hello" } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        GoldenJson.Match("chat-unknown-model-400", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Golden_Chat_Converse_EmptyConsensus()
+    {
+        // Empty consensus is reported truthfully: empty content, reply_rows 0 —
+        // no canned assistant prose (spec 34).
+        var quoteId = await ApproveQuoteAsync("chat.completions", "golden-empty-tenant", "evt_golden_empty");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            session = "golden-empty-session",
+            messages = new[] { new { role = "user", content = "tell me about unknown-topic" } }
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        GoldenJson.Match("chat-converse-empty-200", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Chat_SessionKey_RoundTripsOnHeaderAndMetadata()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "golden-sess-tenant", "evt_golden_sess");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            session = "sess-continuation-1",
+            messages = new[] { new { role = "user", content = "what is a whale" } }
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("sess-continuation-1", Assert.Single(response.Headers.GetValues("X-Laplace-Session")));
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("sess-continuation-1", (string?)body["metadata"]?["session"]);
+    }
+
+    [Fact]
+    public async Task Chat_InvalidSessionKey_400()
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            session = "bad session!",
+            messages = new[] { new { role = "user", content = "hello" } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("invalid_session", (string?)body["error"]?["code"]);
+    }
+
+    [Fact]
     public async Task Golden_Chat_Generate_Sse()
     {
         var quoteId = await ApproveQuoteAsync("chat.completions", "golden-gen-sse-tenant", "evt_golden_gen_sse");
@@ -295,7 +355,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     {
         using var response = await _client.PostAsJsonAsync("/v1/embeddings", new
         {
-            model = "laplace-embeddings-pending"
+            model = "laplace-embed-form-001"
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         GoldenJson.Match("embeddings-missing-input-400", await response.Content.ReadAsStringAsync());

@@ -18,8 +18,7 @@ internal static class FoundryEndpoints
             if (string.IsNullOrWhiteSpace(payload.Recipe))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'recipe' is required.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-            var gate = await billing.EnsureExecutableAsync(quoteId, "recipe.compile", ct);
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "recipe.compile", ct);
             if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
                     ? new QuoteServiceDetail("recipe.compile")
@@ -69,8 +68,7 @@ internal static class FoundryEndpoints
                     "invalid_request_error",
                     "Provide 'recipe' JSON or 'recipe_id_prefix' with 'tokenizer_dir'.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
-            var gate = await billing.EnsureExecutableAsync(quoteId, "synthesis", ct);
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "synthesis", ct);
             if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
                     ? new QuoteServiceDetail("synthesis")

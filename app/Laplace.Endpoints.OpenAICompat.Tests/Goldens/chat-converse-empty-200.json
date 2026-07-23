@@ -1,0 +1,25 @@
+{
+  "id": "<id>",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "laplace-converse-001",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": ""
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "billing": null,
+  "metadata": {
+    "witnesses": 0,
+    "reply_rows": 0,
+    "session": "golden-empty-session",
+    "laplace": {
+      "provenance": []
+    }
+  }
+}

@@ -18,6 +18,7 @@ export type ProvenanceLine = Schemas['ProvenanceLine'];
 export interface ApiOptions {
   tenant?: string;
   quoteId?: string;
+  session?: string;
 }
 
 
@@ -37,6 +38,7 @@ export function laplaceHeaders(opts: ApiOptions): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.tenant) headers['X-Laplace-Tenant'] = opts.tenant;
   if (opts.quoteId) headers['X-Laplace-Quote-Id'] = opts.quoteId;
+  if (opts.session) headers['X-Laplace-Session'] = opts.session;
   return headers;
 }
 

@@ -144,4 +144,57 @@ public static class PositionContent
     }
 
     private static string Alg(int file, int rank) => $"{(char)('a' + file)}{(char)('1' + rank)}";
+
+    /// <summary>
+    /// Rebuild a FEN from a position surface (the exact string <see cref="Surface"/> writes).
+    /// The surface carries no move counters, so halfmove/fullmove come back as "0 1" — enough
+    /// to draw a board or seed an engine, not to adjudicate fifty-move claims. Returns false
+    /// on anything that doesn't parse as a surface.
+    /// </summary>
+    public static bool TryFenFromSurface(string surface, out string fen)
+    {
+        fen = "";
+        var tok = surface.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tok.Length < 3 || !tok[0].StartsWith("stm:") || !tok[1].StartsWith("cr:") || !tok[2].StartsWith("ep:"))
+            return false;
+
+        string stm = tok[0][4..];
+        string cr = tok[1][3..];
+        string ep = tok[2][3..];
+        if (stm is not ("w" or "b")) return false;
+
+        var board = new char[8, 8];
+        for (int i = 3; i < tok.Length; i++)
+        {
+            var t = tok[i];
+            if (t.StartsWith("wpawns:")) break; // trailing feature sections, no more pieces
+            if (t.Length != 3) return false;
+            char piece = t[0];
+            int file = t[1] - 'a', rank = t[2] - '1';
+            if ("PNBRQKpnbrqk".IndexOf(piece) < 0 || file is < 0 or > 7 || rank is < 0 or > 7)
+                return false;
+            board[rank, file] = piece;
+        }
+
+        var sb = new StringBuilder(80);
+        for (int rank = 7; rank >= 0; rank--)
+        {
+            int empty = 0;
+            for (int file = 0; file < 8; file++)
+            {
+                char p = board[rank, file];
+                if (p == '\0') { empty++; continue; }
+                if (empty > 0) { sb.Append(empty); empty = 0; }
+                sb.Append(p);
+            }
+            if (empty > 0) sb.Append(empty);
+            if (rank > 0) sb.Append('/');
+        }
+        sb.Append(' ').Append(stm)
+          .Append(' ').Append(string.IsNullOrEmpty(cr) ? "-" : cr)
+          .Append(' ').Append(string.IsNullOrEmpty(ep) ? "-" : ep)
+          .Append(" 0 1");
+        fen = sb.ToString();
+        return true;
+    }
 }
