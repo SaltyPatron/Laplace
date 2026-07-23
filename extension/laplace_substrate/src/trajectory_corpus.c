@@ -38,7 +38,13 @@ PG_FUNCTION_INFO_V1(pg_laplace_stream_reset);
 
 int laplace_corpus_max_rows = 0;
 int laplace_corpus_max_orphan_sentences = 0;
-static char *laplace_corpus_document_source = "UserPrompt";
+/* Geometry-native default. The 2026-07 ingest overhaul moved sequence truth
+ * into trajectory geometry and stopped writing document attestations from
+ * every witnessing lane (books, chat turns) — which made source-scoped corpus
+ * discovery ("UserPrompt") permanently EMPTY: the EXISTS(attestation) probe it
+ * relies on can never match again. '' = discover documents by what the lane
+ * actually mints (tier-4 entity + trajectory), the only satisfiable contract. */
+static char *laplace_corpus_document_source = "";
 
 void
 laplace_corpus_guc_init(void)
@@ -56,7 +62,7 @@ laplace_corpus_guc_init(void)
     DefineCustomStringVariable(
         "laplace_substrate.corpus_document_source",
         "Decomposer source name for tier-4 document roots in the generation corpus (e.g. UserPrompt).",
-        NULL, &laplace_corpus_document_source, "UserPrompt",
+        NULL, &laplace_corpus_document_source, "",
         PGC_SUSET, 0, NULL, NULL, NULL);
 }
 

@@ -80,10 +80,17 @@ BEGIN
         ) g
     ),
     toks AS (
+        -- WORD-tier tokens only (ctier = 2): a trajectory can carry grapheme/
+        -- codepoint constituents (UD interlinear glosses like "people.PL" are
+        -- single words whose points are letters) — walking those emitted
+        -- letter-by-letter output. With the tier filter, a one-word gloss
+        -- yields a single token and the cnt >= 2 guard drops it, falling
+        -- through to real multi-word sentences.
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
         CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+        WHERE u.ctier = 2
     ),
     ws AS MATERIALIZED (
         SELECT d.entity_id AS id,

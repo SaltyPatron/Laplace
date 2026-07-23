@@ -5,7 +5,10 @@ CREATE OR REPLACE FUNCTION trajectory_unpacked_points(p_entity bytea)
     SELECT u.entity_id,
            GREATEST(u.run_length, 1)::int AS run_length,
            COALESCE(
-               (SELECT e.tier FROM entities e WHERE e.id = u.entity_id),
+               -- tier is a FLOOR, not identity: one id may hold rows at several
+               -- tiers (UD mints single-word sentences), so a bare scalar lookup
+               -- multi-rows (21000). The floor IS min(tier).
+               (SELECT min(e.tier) FROM entities e WHERE e.id = u.entity_id),
                CASE WHEN @extschema@.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
            ) AS ctier
     FROM physicalities p,
