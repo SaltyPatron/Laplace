@@ -60,10 +60,11 @@ Chess:
 - `ChessOpeningsDecomposer`
 - `ChessPgnDecomposer`
 
-## SQL function families — 28 (`extension/laplace_substrate/sql/functions/`)
+## SQL function families — 29 (`extension/laplace_substrate/sql/functions/`)
 
 - `analysis`
 - `cascade`
+- `chess`
 - `consensus`
 - `contrast`
 - `converse`

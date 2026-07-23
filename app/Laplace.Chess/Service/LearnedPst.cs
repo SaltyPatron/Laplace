@@ -89,11 +89,16 @@ public static class LearnedPst
         using var conn = ds.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1)";
+            "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1, $2)";
         cmd.Parameters.Add(new NpgsqlParameter
         {
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             Value = raw,
+        });
+        cmd.Parameters.Add(new NpgsqlParameter
+        {
+            NpgsqlDbType = NpgsqlDbType.Bytea,
+            Value = ChessVocabulary.OutcomeType.ToBytes(),
         });
         using var r = cmd.ExecuteReader();
         while (r.Read())

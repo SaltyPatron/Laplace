@@ -110,6 +110,8 @@ functions/consensus/classify_circuit.sql.in
 functions/consensus/walk_branches.sql.in
 functions/consensus/walk_strongest.sql.in
 functions/consensus/consensus_stats.sql.in
+functions/chess/chess_moves.sql.in
+functions/chess/chess_player_moves.sql.in
 functions/consensus/consensus_stats_approx.sql.in
 functions/ops/relation_type_id.sql.in
 functions/ops/entity_type_id.sql.in

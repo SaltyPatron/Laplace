@@ -32,7 +32,7 @@ public static class ChessAnalyze
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
     internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
     {
-        var (gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens) = witnessed;
+        var (gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
 
         int mc = moves.Count;
         var clocks = clockTokens is not null
@@ -44,7 +44,8 @@ public static class ChessAnalyze
             : null;
 
         DeriveGame(b, gameId, result, moves, startFen, wp, bp,
-                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth);
+                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
+                   spentSeconds);
 
         b.AddEntity(ChessVocabulary.AnalysisMarkerId(gameId, Version), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, SourceId);
@@ -63,13 +64,16 @@ public static class ChessAnalyze
 
         int mc = moves.Count;
         var clockTokens = PgnClocks.ClockTokens(gameText, mc);
+        // cutechess dialect: no remaining-clock tokens, but per-move spent time (GH #494).
+        var spentSeconds = clockTokens is null ? PgnClocks.SpentSeconds(gameText, mc) : null;
         var evalTokens = PgnEvals.EvalTokens(gameText, mc);
         var qualityTokens = new string?[walk.Mainline.Count];
         for (int i = 0; i < walk.Mainline.Count; i++)
             qualityTokens[i] = MoveQuality.FromStream(walk.Mainline[i]);
 
         return new ChessWitnessedGame(
-            gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens);
+            gameId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
+            spentSeconds);
     }
 
     private static bool ValidName(string n) => !string.IsNullOrWhiteSpace(n) && n != "?";
@@ -91,7 +95,7 @@ public static class ChessAnalyze
         Hash128? whitePlayer, Hash128? blackPlayer,
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
-        int engineDepth = 0)
+        int engineDepth = 0, double[]? spentSeconds = null)
     {
         var m = new ChessModality();
         var (initial, standardStart) = InitialState(startFen, m);
@@ -100,7 +104,8 @@ public static class ChessAnalyze
         if (standardStart) ClassifyOpening(b, gameId, sans, m);
 
         AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, gameId,
-                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth);
+                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
+                   spentSeconds);
 
         // Watermark: this game is now derived at the current analysis version.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
@@ -133,9 +138,10 @@ public static class ChessAnalyze
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, Hash128 gameId,
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
-        int engineDepth)
+        int engineDepth, double[]? spentSeconds = null)
     {
         var src = SourceId;
+        double medianSpent = PgnClocks.MedianSpent(spentSeconds);
         bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0;
         int? winner = result.IsDraw ? null : result.Winner;
         // Reused across plies so the TT warms; only built when engine-eval is requested.
@@ -183,6 +189,13 @@ public static class ChessAnalyze
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
                     ChessGraph.AppendThinkClass(b, from.Position.Id, ChessCanonical.ThinkClass(tf), MetaWeight, src, gameId);
                 }
+            }
+            else if (spentSeconds is not null && medianSpent > 0)
+            {
+                // cutechess dialect (GH #494): per-move spent time is the think signal directly.
+                // No HAS_CLOCK deposit — the source never asserted a remaining clock.
+                double tf = PgnClocks.ThinkFactorFromSpent(spentSeconds, medianSpent, ply);
+                ChessGraph.AppendThinkClass(b, from.Position.Id, ChessCanonical.ThinkClass(tf), MetaWeight, src, gameId);
             }
 
             string? evTok = Tok(evalTokens, ply);

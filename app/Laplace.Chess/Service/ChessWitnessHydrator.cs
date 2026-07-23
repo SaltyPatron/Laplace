@@ -236,7 +236,10 @@ internal static class ChessWitnessHydrator
                 gameId, moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
-                startFen, clockTokens, evalTokens, qualityTokens));
+                startFen, clockTokens, evalTokens, qualityTokens,
+                // cutechess dialect (GH #494): spent-time comments survive in the verbatim
+                // movetext, so the readback path recovers them exactly like the parse path.
+                clockTokens is null ? PgnClocks.SpentSeconds(movetext, moves.Length) : null));
         }
         return outList;
     }

@@ -21,6 +21,11 @@ export interface LabEvent {
   black?: string;
   result?: string;
   pgnPath?: string;
+  // board (one ply of a live game — presence of `fen` marks it)
+  game?: number;
+  ply?: number;
+  uci?: string;
+  fen?: string;
   // done
   finalState?: string;
 }
