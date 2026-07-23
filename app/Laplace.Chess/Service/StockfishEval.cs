@@ -22,11 +22,16 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
 {
     private readonly Process _proc;
     private readonly int _depth;
+    private readonly long _nodes;
     private bool _broken;
 
-    public StockfishProcessEvaluator(string exePath, int depth)
+    /// <summary>nodes &gt; 0 switches to a node-capped search ("go nodes N") — bounded worst
+    /// case and reproducible testimony, where a depth budget has an unbounded tail on sharp
+    /// positions (measured: depth 12 cost 4x depth 10 on corpus middlegames).</summary>
+    public StockfishProcessEvaluator(string exePath, int depth, long nodes = 0)
     {
         _depth = Math.Clamp(depth, 1, 40);
+        _nodes = nodes;
         _proc = Process.Start(new ProcessStartInfo
         {
             FileName = exePath,
@@ -55,7 +60,7 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
         try
         {
             Send($"position fen {fen}");
-            Send($"go depth {_depth}");
+            Send(_nodes > 0 ? $"go nodes {_nodes}" : $"go depth {_depth}");
 
             int? last = null;
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);

@@ -38,7 +38,9 @@ public static class ChessStockfishEval
         _ => null,
     };
 
-    public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval)
+    public static void DeriveGame(
+        SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval,
+        System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?>? evalMemo = null)
     {
         var m = new ChessModality();
         var (state, _) = ChessAnalyze.InitialState(game.StartFen, m);
@@ -56,7 +58,22 @@ public static class ChessStockfishEval
             var node = carried ?? ChessGraph.EmitComposed(b, m.StateKey(cur), SourceId);
             composed[ply] = node;
             bool terminal = m.Terminal(cur) is not null;
-            evals[ply] = terminal ? null : eval.EvaluateCp(cur.Board.ToFen());
+            // Positions are content-addressed and shared across games (the start position
+            // recurs in every standard game) — a stockfish value is a pure function of the
+            // position, so the run-level memo searches each unique position ONCE and every
+            // repeat reads the cached cp. Deposits stay per-game (provenance unchanged).
+            if (terminal)
+                evals[ply] = null;
+            else if (evalMemo is not null && evalMemo.TryGetValue(node.Position.Id, out var cached))
+                evals[ply] = cached;
+            else
+            {
+                evals[ply] = eval.EvaluateCp(cur.Board.ToFen());
+                // Cap defends the bounded-cache law; middlegame positions rarely recur, so
+                // the high-value opening entries are long since resident when the cap hits.
+                if (evalMemo is not null && evalMemo.Count < 3_000_000)
+                    evalMemo[node.Position.Id] = evals[ply];
+            }
 
             if (evals[ply] is { } cp)
                 ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.GameId);
