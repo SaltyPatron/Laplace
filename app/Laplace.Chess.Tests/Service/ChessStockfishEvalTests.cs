@@ -109,6 +109,39 @@ public sealed class ChessStockfishEvalTests
     }
 
     [Fact]
+    public void DeriveGame_EvalMemo_SearchesSharedPositionsOnce()
+    {
+        // Two games sharing the first four plies (Italian vs Two Knights). With a shared
+        // memo, the second game must only ask the engine about positions the first game
+        // never reached — the shared opening rides the cache.
+        const string g1 =
+            "[Event \"A\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n[Result \"1-0\"]\n\n"
+            + "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 1-0\n";
+        const string g2 =
+            "[Event \"B\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.02\"]\n[Result \"0-1\"]\n\n"
+            + "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 0-1\n";
+
+        var memo = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?>();
+        var eval = new ScriptedEvaluator(Enumerable.Repeat((int?)10, 32).ToArray());
+
+        var w1 = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(g1)!);
+        var b1 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/memo");
+        ChessStockfishEval.DeriveGame(b1, w1, eval, memo);
+        int afterFirst = eval.Fens.Count;
+        Assert.Equal(7, afterFirst); // 7 positions in a 6-ply game (none terminal)
+
+        var w2 = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(g2)!);
+        var b2 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/memo");
+        ChessStockfishEval.DeriveGame(b2, w2, eval, memo);
+
+        // Game 2 shares positions 0..5 (through 3. Bc4); only its 6th (after Nf6) is new.
+        Assert.Equal(afterFirst + 1, eval.Fens.Count);
+        // Cached evals still deposit per game: both games carry HAS_EVAL rows.
+        Assert.Contains(b2.SetInputUnitsConsumed(1).Build().Attestations,
+            a => a.TypeId == ChessVocabulary.HasEvalType);
+    }
+
+    [Fact]
     public void DeriveGame_EmitsOnlyDeclaredRelations()
     {
         // Same gate as ChessRelationGateTests, over the stockfish lane's emissions.

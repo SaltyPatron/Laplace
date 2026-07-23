@@ -13,14 +13,19 @@ namespace Laplace.Chess.Service;
 public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockfishEvalRecord>
 {
     private readonly int _depth;
+    private readonly long _nodes;
     private readonly StockfishEvaluatorPool _pool;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?> _evalMemo = new();
 
-    /// <summary>depth = stockfish search depth per position (default 12: fast enough for a
-    /// corpus pass, strong enough to convict blitz blunders). evaluatorFactory overrides the
-    /// engine for tests.</summary>
-    public ChessStockfishEvalDecomposer(int depth = 12, Func<IPositionEvaluator>? evaluatorFactory = null)
+    /// <summary>depth = stockfish search depth per position (default 10 — the budget the v1
+    /// census testimony was recorded at; keep it until #508 REPLACE semantics let a budget
+    /// change ride a version bump). nodes &gt; 0 switches to a node-capped search instead
+    /// (bounded worst case; opt-in via --nodes). evaluatorFactory overrides for tests.</summary>
+    public ChessStockfishEvalDecomposer(
+        int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null)
     {
         _depth = depth;
+        _nodes = nodes;
         _pool = new StockfishEvaluatorPool(evaluatorFactory ?? (() =>
         {
             var sf = ChessLabPaths.Catalog["stockfish"];
@@ -28,7 +33,7 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
                 throw new InvalidOperationException(
                     "stockfish binary not found (env LAPLACE_STOCKFISH, build dir, or PATH) — "
                     + "the chess-eval pass needs it");
-            return new StockfishProcessEvaluator(sf.Path!, _depth);
+            return new StockfishProcessEvaluator(sf.Path!, _depth, _nodes);
         }));
     }
 
@@ -70,7 +75,7 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
     protected override void Compose(ChessStockfishEvalRecord record, SubstrateChangeBuilder b)
     {
         var evaluator = _pool.Rent();
-        try { ChessStockfishEval.DeriveGame(b, record.Game, evaluator); }
+        try { ChessStockfishEval.DeriveGame(b, record.Game, evaluator, _evalMemo); }
         finally { _pool.Return(evaluator); }
     }
 
