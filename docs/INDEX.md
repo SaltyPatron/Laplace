@@ -31,6 +31,7 @@ countable fact; prose docs cite it instead of embedding counts.
 
 ## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
 
+- [guides/chess.md](guides/chess.md) — guide — the chess modality reference: identity law, the three lanes, read surface, census, the closed loop, tracked gaps (2026-07-23)
 - [guides/chess-lab.md](guides/chess-lab.md) — guide — driving laplace-uci/cutechess, watching lab games live, chess read surface (2026-07-23)
 
 ## Logs and campaigns — `.scratchpad/` (historical, append-only)

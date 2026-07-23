@@ -2,8 +2,9 @@
 
 Operational how-to for the conventional chess stack (laplace-uci, cutechess,
 Stockfish, lichess) and the substrate read surface over the ingested chess
-graph. Written 2026-07-23; verify commands against `api('chess')` and
-`/chess/lab/catalog` if this drifts.
+graph. The full modality reference — identity law, the three lanes, the
+census, the closed loop — is [chess.md](chess.md). Written 2026-07-23; verify
+commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
 ## The UCI engine (`laplace-uci`)
 

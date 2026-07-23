@@ -78,8 +78,12 @@ data," and that applies to its README.
   residency is a derived artifact of which sources are seeded, not a progress mark;
   the design target is order 10⁸ and above), with forced-rerun idempotency proofs
   (re-ingest → 0 novel rows, exact observation-count doubling).
-- The chess lane end to end: ~10⁶ games, recorder/analyzer split, a UCI engine whose
-  play is a read of the consensus, live Lichess integration.
+- The chess lane end to end (reference: [docs/guides/chess.md](docs/guides/chess.md)):
+  recorder/analyzer split over a ~10⁴-game live corpus, a μ-ranked opening-explorer /
+  player-repertoire read surface, a full stockfish eval census (every position of every
+  recorded game; ~2.76M deposits, re-derivable as a seed step), a UCI engine whose root
+  ordering is a read of the consensus (full consensus-play is doc-21 open work), a
+  watchable self-play lab, and live Lichess integration.
 - The model lane's recorder and factor storage: bit-exact readback of deposited factor
   matrices; factors ~477× smaller than materialized pair tiles; the decoder ring names
   circuits with 17–32× enrichment over random control.
@@ -117,6 +121,8 @@ them.
 - Operating law, build/seed/deploy tables (Windows + Linux): [CLAUDE.md](CLAUDE.md)
 - Doc map: [docs/INDEX.md](docs/INDEX.md) · Invention catalog:
   [docs/INVENTIONS.md](docs/INVENTIONS.md) · Binding specs: `docs/specs/`
+- Guides (operational how-tos): [docs/guides/](docs/guides/) — the chess modality
+  reference and the chess-lab runbook live there
 - The schema introspects itself: `SELECT * FROM api('<substring>');`
 
 ## License
