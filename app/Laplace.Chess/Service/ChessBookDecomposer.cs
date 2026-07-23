@@ -30,7 +30,8 @@ namespace Laplace.Chess.Service;
 /// sentence already ingested as literature collides to the same id — the cross-modal mesh is a
 /// hash collision, never a resolution pass.
 /// </summary>
-public sealed partial class ChessBookDecomposer(bool recursive = false) : ComposeDecomposer<ChessBookRecord>
+public sealed partial class ChessBookDecomposer(bool recursive = false)
+    : ComposeDecomposer<ChessBookRecord>, IIngestInventoryProvider
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -444,6 +445,16 @@ public sealed partial class ChessBookDecomposer(bool recursive = false) : Compos
         int keep = 0;
         while (keep < words.Length && MoveWord().IsMatch(words[keep])) keep++;
         return string.Join(' ', words[..keep]);
+    }
+
+    // Pre-ingest inventory (GH #492): lines via newline estimate per matched file.
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
+        return Task.FromResult(paths.Count == 0
+            ? null
+            : IngestInventory.FromFiles("lines", paths, options.MaxInputUnits, ct));
     }
 
     private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)

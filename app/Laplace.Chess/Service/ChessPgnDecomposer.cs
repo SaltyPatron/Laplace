@@ -13,7 +13,8 @@ namespace Laplace.Chess.Service;
 // Non-recursive by default: pointing at Games\Chess must not silently swallow every nested
 // corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
 // (laplace ingest chess <dir> --recursive).
-public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecomposer<ChessGameRecord>
+public sealed class ChessPgnDecomposer(bool recursive = false)
+    : ComposeDecomposer<ChessGameRecord>, IIngestInventoryProvider
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -397,6 +398,36 @@ public sealed class ChessPgnDecomposer(bool recursive = false) : ComposeDecompos
             }
         }
         return games;
+    }
+
+    // Pre-ingest inventory (GH #492): unit = game, counted as "[Event " headers — the same
+    // boundary StreamGamesAsync splits on — so progress denominators match what actually flows.
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
+        if (paths.Count == 0) return null;
+        if (options.MaxInputUnits > 0)
+            return IngestInventory.FromFiles("games", paths, options.MaxInputUnits, ct);
+
+        var files = new List<IngestFileSpec>(paths.Count);
+        long total = 0;
+        foreach (var p in paths)
+        {
+            long n = await CountGamesAsync(p, ct).ConfigureAwait(false);
+            files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
+            total += n;
+        }
+        return new IngestInventory("games", total, files);
+    }
+
+    private static async Task<long> CountGamesAsync(string path, CancellationToken ct)
+    {
+        long n = 0;
+        using var reader = new StreamReader(path, Encoding.UTF8, true, 1 << 20);
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+            if (line.StartsWith("[Event ", StringComparison.Ordinal)) n++;
+        return n;
     }
 
     private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
