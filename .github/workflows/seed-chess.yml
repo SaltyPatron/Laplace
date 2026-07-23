@@ -5,7 +5,12 @@ name: Seed — chess
 #   chess        — PGN games: record (ChessPgn) + substrate analyze pass
 #   openings     — opening book (ChessOpenings)
 #   chess-books  — annotated chess books (ChessBook): record + derive in one pass
-# All take an explicit corpus dir (no DATA_ROOT default — the <path> is required).
+#   chess-eval   — stockfish eval census over recorded games (ChessStockfish): the
+#                  calculated eval layer is DERIVED STATE — this step is what makes it
+#                  survive a db-reset, exactly like every other seed re-derives its
+#                  layer. No path (the substrate is the source); marker-gated, so
+#                  re-runs skip already-evaluated games.
+# Corpus sources take an explicit corpus dir (no DATA_ROOT default); chess-eval takes none.
 # Delegates to _ingest.yml; chess is not in decomposer-gates.json, so run_gate:false.
 
 on:
@@ -15,11 +20,12 @@ on:
         description: "chess source (one per run)"
         type: choice
         required: true
-        options: [chess, openings, chess-books]
+        options: [chess, openings, chess-books, chess-eval]
       path:
-        description: "corpus dir (e.g. /vault/Data/Games/Chess) — required"
+        description: "corpus dir (e.g. /vault/Data/Games/Chess) — required for corpus sources, empty for chess-eval"
         type: string
-        required: true
+        required: false
+        default: ""
       database:
         description: "target DB (one database: laplace)"
         type: choice
