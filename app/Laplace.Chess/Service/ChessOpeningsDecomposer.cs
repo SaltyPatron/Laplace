@@ -10,7 +10,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessOpeningsDecomposer(bool recursive = false) : ComposeDecomposer<ChessOpeningRecord>
+public sealed class ChessOpeningsDecomposer(bool recursive = false)
+    : ComposeDecomposer<ChessOpeningRecord>, IIngestInventoryProvider
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -135,6 +136,16 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false) : ComposeDec
         while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
             if (ParseRow(line) is { } row)
                 yield return row;
+    }
+
+    // Pre-ingest inventory (GH #492): rows via newline estimate per matched file.
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
+        return Task.FromResult(paths.Count == 0
+            ? null
+            : IngestInventory.FromFiles("rows", paths, options.MaxInputUnits, ct));
     }
 
     private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
