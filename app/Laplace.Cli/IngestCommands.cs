@@ -411,12 +411,25 @@ internal static class IngestCommands
     private static string? ResolveRequiredIngestPath(string? cliPath)
         => string.IsNullOrWhiteSpace(cliPath) ? null : Path.GetFullPath(cliPath);
 
+    // code/repo/tabular/parquet are multi-invocation, path-parameterized sources —
+    // the CLI's own <path> argument means "run this again against something new"
+    // is the intended usage (validate one file, then ingest the full corpus; feed
+    // one repo today and another tomorrow). The default source-completion marker
+    // is for genuinely one-shot global corpora (wordnet, conceptnet, ...) where a
+    // second run over the SAME dataset would double-witness identical bootstrap
+    // testimony; it has no such meaning here, since content-addressing already
+    // makes re-running against different (or even the same) content safe. Without
+    // skipSourceCompletion: true, the FIRST successful run of any of these silently
+    // no-ops every later call regardless of path — measured 2026-07-23: a 19-repo
+    // batch ingest ran as 19 back-to-back 0-row short-circuits after the first.
+
     internal static async Task<int> IngestCodeAsync(IngestCliArgs cli)
     {
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest code <file-or-directory>");
-        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("code"), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("code"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     internal static async Task<int> IngestRepoAsync(IngestCliArgs cli)
@@ -424,7 +437,8 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest repo <repository-root>");
-        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("repo"), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("repo"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     internal static async Task<int> IngestTabularAsync(IngestCliArgs cli)
@@ -432,7 +446,8 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest tabular <file-or-directory>");
-        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     internal static async Task<int> IngestParquetAsync(IngestCliArgs cli)
@@ -440,7 +455,8 @@ internal static class IngestCommands
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest parquet <file-or-directory>");
-        return await IngestViaRunnerAsync(CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli);
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     private static IngestRunOptions BuildIngestOptions(
