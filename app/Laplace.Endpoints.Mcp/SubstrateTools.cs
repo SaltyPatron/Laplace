@@ -72,6 +72,17 @@ internal sealed class SubstrateTools
                    ("shape", "string", "optional read shape (see query_shapes())", false),
                    ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
                    ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false))),
+        Tool("witness",
+            "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
+            Schema(("text", "string", "the fact/note to witness (plain prose)", true),
+                   ("origin", "string", "provenance tag, default 'agent/note'", false))),
+        Tool("feedback",
+            "Confirm or refute a claim (the Gödel-engine feedback lane, same implementation as the CLI attest). Terms resolve at the SURFACE/word layer — use bubble first when the claim lives on a synset/hub (same text renders at three layers; feedback lands where you aim it). Triple mode: subject + relation (canonical, e.g. IS_A, RELATED_TO) + object — a confirm is a Glicko win for the edge, a refute is a loss that can drive it signed-negative until walks drop it. Chain mode: tokens (comma-separated, 2+) attest PRECEDES pairs. Folds immediately; returns consensus before/after so you can watch the rating move.",
+            Schema(("verdict", "string", "'confirm' or 'refute'", true),
+                   ("subject", "string", "triple mode: subject term", false),
+                   ("relation", "string", "triple mode: canonical relation type", false),
+                   ("object", "string", "triple mode: object term", false),
+                   ("tokens", "string", "chain mode: comma-separated tokens (2+)", false))),
         Tool("walk",
             "Beam-walk the consensus graph from a prompt (laplace.walk_branches) and realize each path as text. Optionally constrain to one relation type (canonical name, e.g. IS_A). Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text.",
             Schema(("prompt", "string", "starting content (omit if entity given)", false),
@@ -112,6 +123,8 @@ internal sealed class SubstrateTools
                     """,
                     DefaultRowCap, ("p", Req(args, "prompt")), ("s", Opt(args, "session"))),
                 "chat" => ChatTurn(args),
+                "witness" => WitnessFact(args),
+                "feedback" => Feedback(args),
                 "query" => Rows(_db,
                     """
                     SELECT reply, round(eff_mu, 1) AS eff_mu, witnesses
@@ -300,6 +313,147 @@ internal sealed class SubstrateTools
             ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply })
         };
         return (result.ToJsonString(), false);
+    }
+
+    // The agent write lane: mint a note as witnessed content and fold it, so the
+    // substrate is the shared memory between every agent on this repo. Same spine
+    // and trust class as a chat turn; the note is one outrankable voice, not truth.
+    private (string, bool) WitnessFact(JsonObject? args)
+    {
+        var text = Req(args, "text");
+        var origin = Opt(args, "origin") ?? "agent/note";
+
+        EnsureWriter();
+        if (_turnDepositBroken)
+            return ("witness lane offline (writer spine failed earlier in this session)", true);
+
+        if (!UserPromptContent.TryBuildWitnessChange(
+                Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
+            return ("text produced no witnessable content", true);
+
+        _turnWriter!.ApplyAsync(change).GetAwaiter().GetResult();
+
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["root"] = Convert.ToHexStringLower(root.ToBytes()),
+                ["origin"] = origin,
+                ["witnessed"] = true,
+            })
+        };
+        return (result.ToJsonString(), false);
+    }
+
+    // Confirm/refute through the one canonical implementation (FeedbackContent —
+    // the same lane as HTTP /v1/feedback and the CLI attest). Immediate fold;
+    // the next walk reads the moved rating.
+    private (string, bool) Feedback(JsonObject? args)
+    {
+        var verdict = Req(args, "verdict").Trim().ToLowerInvariant();
+        if (verdict is not ("confirm" or "refute"))
+            return ("verdict must be 'confirm' or 'refute'", true);
+        bool confirm = verdict == "confirm";
+
+        CodepointPerfcache.LoadDefault();
+        var subject = Opt(args, "subject");
+        var relation = Opt(args, "relation");
+        var obj = Opt(args, "object");
+        var tokensCsv = Opt(args, "tokens");
+
+        if (subject is not null || relation is not null || obj is not null)
+        {
+            if (subject is null || relation is null || obj is null)
+                return ("triple mode needs subject, relation and object", true);
+            if (!FeedbackContent.TryResolveRelation(relation, out var rel))
+                return ($"'{relation}' is not a canonical relation type", true);
+
+            var resolved = FeedbackContent.ResolveTokensAsync(_db, [subject, obj]).GetAwaiter().GetResult();
+            foreach (var t in resolved)
+                if (!t.Usable)
+                    return ($"'{t.Token}' has no substrate entity", true);
+            var subjectId = resolved[0].Id!.Value;
+            var objectId = resolved[1].Id!.Value;
+
+            var before = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+            var applied = FeedbackContent.ApplyAsync(
+                _db, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm)).GetAwaiter().GetResult();
+            var after = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+
+            static JsonObject? State(FeedbackContent.ConsensusState? s) => s is null ? null : new JsonObject
+            {
+                ["rating"] = s.Rating,
+                ["rd"] = s.Rd,
+                ["witnesses"] = s.WitnessCount,
+            };
+
+            var result = new JsonObject
+            {
+                ["rows"] = new JsonArray(new JsonObject
+                {
+                    ["mode"] = "triple",
+                    ["verdict"] = verdict,
+                    ["relation"] = rel.Canonical,
+                    ["attestations_inserted"] = applied.AttestationsInserted,
+                    ["consensus_updated"] = applied.ConsensusUpdated,
+                    ["before"] = State(before),
+                    ["after"] = State(after),
+                })
+            };
+            return (result.ToJsonString(), false);
+        }
+
+        if (string.IsNullOrWhiteSpace(tokensCsv))
+            return ("provide subject/relation/object, or tokens for chain mode", true);
+        var tokens = tokensCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length < 2)
+            return ("chain mode needs 2+ comma-separated tokens", true);
+
+        var chainResolved = FeedbackContent.ResolveTokensAsync(_db, tokens).GetAwaiter().GetResult();
+        var ids = chainResolved.Where(t => t.Usable).Select(t => t.Id!.Value).ToList();
+        if (ids.Count < 2)
+            return ($"need 2+ tokens with substrate entities (got {ids.Count})", true);
+
+        var chainApplied = FeedbackContent.ApplyAsync(
+            _db, FeedbackContent.BuildPrecedesChain(ids, confirm)).GetAwaiter().GetResult();
+
+        var chainResult = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["mode"] = "chain",
+                ["verdict"] = verdict,
+                ["relation"] = "PRECEDES",
+                ["pairs"] = ids.Count - 1,
+                ["attestations_inserted"] = chainApplied.AttestationsInserted,
+                ["consensus_updated"] = chainApplied.ConsensusUpdated,
+            })
+        };
+        return (chainResult.ToJsonString(), false);
+    }
+
+    private void EnsureWriter()
+    {
+        if (_turnDepositBroken || _turnWriter is not null && _turnBootstrapped) return;
+        try
+        {
+            if (_turnWriter is null)
+            {
+                CodepointPerfcache.LoadDefault();
+                _turnWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
+            }
+            if (!_turnBootstrapped)
+            {
+                _turnWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnBootstrapped = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _turnDepositBroken = true;
+            Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
+        }
     }
 
     private void DepositTurn(string prompt, string? reply)
