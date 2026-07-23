@@ -25,7 +25,7 @@ Test projects:
 - `Laplace.Endpoints.OpenAICompat.Tests`
 - `Laplace.Substrate.Tests`
 
-## Decomposers — 25 in `Laplace.Decomposers`, 4 in `Laplace.Chess`
+## Decomposers — 25 in `Laplace.Decomposers`, 5 in `Laplace.Chess`
 
 - `Atomic2020Decomposer`
 - `CILIDecomposer`
@@ -59,6 +59,7 @@ Chess:
 - `ChessBookDecomposer`
 - `ChessOpeningsDecomposer`
 - `ChessPgnDecomposer`
+- `ChessStockfishEvalDecomposer`
 
 ## SQL function families — 29 (`extension/laplace_substrate/sql/functions/`)
 
@@ -92,7 +93,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 25 (`extension/laplace_substrate/src/`)
+## Native extension sources — 24 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `consensus_fold_step.c`
@@ -100,7 +101,6 @@ Chess:
 - `content_resolve.c`
 - `descent_probe.c`
 - `explore_web.c`
-- `fold_route.c`
 - `foundry_crawl.c`
 - `generate_walk.c`
 - `geometry_successors.c`

@@ -93,6 +93,12 @@ internal static class IngestDispatchTable
             ["chess-analyze"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessAnalyzeDecomposer(cli.AnalyzeDepth), "",
                 skipLayerCheck: true, cli, skipSourceCompletion: true),
+            // Stockfish eval pass over recorded games (GH #573). --analyze-depth overrides the
+            // per-position search depth (default 12).
+            ["chess-eval"] = cli => IngestCommands.IngestViaRunnerAsync(
+                new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
+                    cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 12), "",
+                skipLayerCheck: true, cli, skipSourceCompletion: true),
             ["openings"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
                 skipLayerCheck: true, cli),

@@ -69,6 +69,20 @@ internal static class ChessWitnessHydrator
         int chunkSize,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        await foreach (var id in StreamUnanalyzedGameIdsAsync(
+            ds, reader, chunkSize, g => ChessVocabulary.AnalysisMarkerId(g, ChessAnalyze.Version), ct))
+            yield return id;
+    }
+
+    // markerId selects the per-game skip marker, so each calculated lane (ChessAnalyze,
+    // ChessStockfishEval, ...) gates its own versioned pass over the same witnessed games.
+    internal static async IAsyncEnumerable<Hash128> StreamUnanalyzedGameIdsAsync(
+        NpgsqlDataSource ds,
+        ISubstrateReader reader,
+        int chunkSize,
+        Func<Hash128, Hash128> markerId,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         chunkSize = Math.Max(1, chunkSize);
         byte[] lastId = Array.Empty<byte>();
         while (true)
@@ -86,7 +100,7 @@ internal static class ChessWitnessHydrator
                 var chunk = gameIds.GetRange(off, take);
                 var markers = new Hash128[take];
                 for (int i = 0; i < take; i++)
-                    markers[i] = ChessVocabulary.AnalysisMarkerId(chunk[i], ChessAnalyze.Version);
+                    markers[i] = markerId(chunk[i]);
 
                 byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
                 long bits = (long)bm.Length * 8;
@@ -105,9 +119,21 @@ internal static class ChessWitnessHydrator
         int chunkSize,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        await foreach (var g in StreamUnanalyzedFromSubstrateAsync(
+            ds, reader, chunkSize, gid => ChessVocabulary.AnalysisMarkerId(gid, ChessAnalyze.Version), ct))
+            yield return g;
+    }
+
+    internal static async IAsyncEnumerable<ChessWitnessedGame> StreamUnanalyzedFromSubstrateAsync(
+        NpgsqlDataSource ds,
+        ISubstrateReader reader,
+        int chunkSize,
+        Func<Hash128, Hash128> markerId,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         chunkSize = Math.Max(1, chunkSize);
         var idChunk = new List<Hash128>(chunkSize);
-        await foreach (var gameId in StreamUnanalyzedGameIdsAsync(ds, reader, chunkSize, ct))
+        await foreach (var gameId in StreamUnanalyzedGameIdsAsync(ds, reader, chunkSize, markerId, ct))
         {
             idChunk.Add(gameId);
             if (idChunk.Count < chunkSize) continue;
