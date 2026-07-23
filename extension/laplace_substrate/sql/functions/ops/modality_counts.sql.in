@@ -1,0 +1,22 @@
+-- Honest per-modality resident counts, by SOURCE FAMILY from the fast approx
+-- catalog (~200ms) — never the unbounded exact aggregate. Chess arrived as
+-- ChessAnalysis/ChessPgn/ChessOpenings; OMW meshes languages through the ILI
+-- hub and mints no HAS_TRANSLATION edges, so source presence is the residency
+-- signal. Models count on their plane relation until a checkpoint ingests.
+CREATE OR REPLACE FUNCTION modality_counts()
+    RETURNS TABLE(text_evidence bigint, chess bigint, models bigint, multilingual bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH s AS (SELECT source, evidence_approx FROM source_counts_approx()),
+    parts AS (
+      SELECT
+        COALESCE((SELECT sum(evidence_approx) FROM s), 0)::bigint AS total,
+        COALESCE((SELECT sum(evidence_approx) FROM s WHERE source ILIKE '%chess%'), 0)::bigint AS chess,
+        (SELECT count(*) FROM consensus c
+           WHERE c.type_id = relation_type_id('ATTENDS'))::bigint AS models,
+        COALESCE((SELECT sum(evidence_approx) FROM s
+           WHERE source ILIKE '%OMWDecomposer%' OR source ILIKE '%tatoeba%'), 0)::bigint AS multilingual)
+    SELECT greatest(0, p.total - p.chess - p.models - p.multilingual),
+           p.chess, p.models, p.multilingual
+    FROM parts p
+$$;

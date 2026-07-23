@@ -1,0 +1,15 @@
+-- Per-band leaderboards: the strongest consensus edges in each salience band,
+-- fully labeled — consensus_band_edges (native top-k by mu) with the labels
+-- applied only to the survivors.
+CREATE OR REPLACE FUNCTION band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5)
+    RETURNS TABLE(band int, subject_id bytea, subject text, relation text,
+                  object_id bytea, object text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT b.band, e.subject_id, label_or_hex(e.subject_id),
+           relation_canonical(e.type_id),
+           e.object_id, label_or_hex(e.object_id),
+           eff_mu_display(e.rating, e.rd), e.witness_count
+    FROM unnest(p_bands) AS b(band)
+    CROSS JOIN LATERAL consensus_band_edges(b.band, NULL, p_per) e
+$$;

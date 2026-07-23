@@ -22,7 +22,8 @@ CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     )
-    SELECT r.txt AS translation, label(a.lang) AS language, a.mu::numeric, a.witnesses
+    -- a.mu is fp1e9 (synset_members) — convert through the one display definition
+    SELECT r.txt AS translation, label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member

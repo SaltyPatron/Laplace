@@ -1,0 +1,17 @@
+-- A source's roster: a bounded SAMPLE of what this witness asserts, fully
+-- labeled. By id (the per-leaf source_id indexes make it ~1s cold); "top"
+-- would demand an unbounded sort over millions of rows — a sample is the
+-- honest bounded read.
+CREATE OR REPLACE FUNCTION source_roster(p_source bytea, p_limit int DEFAULT 40)
+    RETURNS TABLE(subject_id bytea, subject text, relation text,
+                  object_id bytea, object text, observations bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT a.subject_id, label_or_hex(a.subject_id),
+           relation_canonical(a.type_id),
+           a.object_id, label_or_hex(a.object_id),
+           a.observation_count
+    FROM attestations a
+    WHERE a.source_id = p_source
+    LIMIT p_limit
+$$;
