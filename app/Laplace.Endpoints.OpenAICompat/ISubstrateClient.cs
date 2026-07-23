@@ -26,6 +26,27 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct);
 
+    Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct);
+
+    Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct);
+
+    Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct);
+
+    Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct);
+
+    Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct);
+
+    Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct);
+
+    Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct);
+
+    Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct);
+
+    Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct);
+
+    Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
+
 
     IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,

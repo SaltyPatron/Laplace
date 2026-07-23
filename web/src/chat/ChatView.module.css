@@ -53,7 +53,10 @@
 
   .user {
     align-self: flex-end;
-    background: #20304f;
+    /* Accent-tinted so the user's turn reads distinct from assistant panels,
+       via tokens — was a raw #20304f, the one hex leak flagged in this file. */
+    background: color-mix(in srgb, var(--color-accent) 20%, var(--color-bg-panel-2));
+    border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-default));
   }
 
   .assistant {

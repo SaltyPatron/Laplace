@@ -43,13 +43,46 @@ internal sealed class SubstrateTools
             Schema(("query", "string", "SQL SELECT/WITH to execute", true),
                    ("max_rows", "integer", "row cap, default 200", false))),
         Tool("recall",
-            "Ask the substrate a question in natural language (laplace.recall_session): definitions, translations, relations, walks. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
-            Schema(("prompt", "string", "the question", true),
-                   ("session", "string", "session key for follow-up context (pronouns, possessives)", false))),
+            "Ask the substrate about a topic (laplace.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
+            Schema(("prompt", "string", "the topic (a word or phrase; phrasing is not parsed)", true),
+                   ("session", "string", "session key for topic carry across turns", false))),
+        Tool("query",
+            "A structural read (laplace.recall_intent): the caller names the SHAPE — define, what_is, describe, synonyms, translate, languages, examples, related, related_in, is_a, reason, walk, complete, fallback (SELECT * FROM laplace.query_shapes() for the live list). Language-agnostic by construction: nothing is inferred from phrasing. related/related_in need relation_type (canonical, e.g. HAS_PART); is_a/reason need topic2; translate accepts lang.",
+            Schema(("shape", "string", "the read shape (see query_shapes())", true),
+                   ("topic", "string", "the subject — word, phrase, or hex entity id", true),
+                   ("topic2", "string", "second topic for is_a / reason", false),
+                   ("relation_type", "string", "canonical relation for related / related_in", false),
+                   ("lang", "string", "target language for translate", false))),
+        Tool("taxonomy",
+            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from.",
+            Schema(("term", "string", "the topic (omit if entity given)", false),
+                   ("entity", "string", "hex entity id to root at", false))),
+        Tool("translate",
+            "Cross-lingual surfaces for a topic (laplace.translations): the ILI hub meshing languages — OMW multilingual lemmas converging on the same concept ids. Each row is a surface + its language, rated.",
+            Schema(("term", "string", "the topic", true),
+                   ("limit", "integer", "max rows, default 24", false))),
+        Tool("leaders",
+            "Per-band leaderboards (laplace.consensus_band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM laplace.relation_bands() for live counts.",
+            Schema(("bands", "string", "comma-separated band numbers, default '1,2,4,5'", false),
+                   ("per_band", "integer", "rows per band, default 5", false))),
         Tool("chat",
-            "One conversational turn against the substrate (laplace.chat): walk-driven prose composed from rated consensus. Closes the loop: the prompt and reply are deposited as witnessed content (UserPrompt/Response trust classes) and folded, so the turn is visible to the next walk.",
+            "One conversational turn against the substrate (laplace.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
             Schema(("prompt", "string", "the message", true),
-                   ("session", "string", "session key for continuity", false))),
+                   ("session", "string", "session key for continuity", false),
+                   ("shape", "string", "optional read shape (see query_shapes())", false),
+                   ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
+                   ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false))),
+        Tool("witness",
+            "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
+            Schema(("text", "string", "the fact/note to witness (plain prose)", true),
+                   ("origin", "string", "provenance tag, default 'agent/note'", false))),
+        Tool("feedback",
+            "Confirm or refute a claim (the Gödel-engine feedback lane, same implementation as the CLI attest). Terms resolve at the SURFACE/word layer — use bubble first when the claim lives on a synset/hub (same text renders at three layers; feedback lands where you aim it). Triple mode: subject + relation (canonical, e.g. IS_A, RELATED_TO) + object — a confirm is a Glicko win for the edge, a refute is a loss that can drive it signed-negative until walks drop it. Chain mode: tokens (comma-separated, 2+) attest PRECEDES pairs. Folds immediately; returns consensus before/after so you can watch the rating move.",
+            Schema(("verdict", "string", "'confirm' or 'refute'", true),
+                   ("subject", "string", "triple mode: subject term", false),
+                   ("relation", "string", "triple mode: canonical relation type", false),
+                   ("object", "string", "triple mode: object term", false),
+                   ("tokens", "string", "chain mode: comma-separated tokens (2+)", false))),
         Tool("walk",
             "Beam-walk the consensus graph from a prompt (laplace.walk_branches) and realize each path as text. Optionally constrain to one relation type (canonical name, e.g. IS_A). Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text.",
             Schema(("prompt", "string", "starting content (omit if entity given)", false),
@@ -89,6 +122,65 @@ internal sealed class SubstrateTools
                     """,
                     DefaultRowCap, ("p", Req(args, "prompt")), ("s", SessionParam(Opt(args, "session")))),
                 "chat" => ChatTurn(args),
+                "witness" => WitnessFact(args),
+                "feedback" => Feedback(args),
+                "query" => Rows(_db,
+                    """
+                    SELECT reply, round(eff_mu, 1) AS eff_mu, witnesses
+                    FROM laplace.recall_intent(@shape, laplace.resolve_ref(@topic),
+                        CASE WHEN @t2 IS NULL THEN NULL ELSE laplace.resolve_ref(@t2) END,
+                        @rt, @lang, NULL)
+                    """,
+                    DefaultRowCap,
+                    ("shape", Req(args, "shape")), ("topic", Req(args, "topic")),
+                    ("t2", Opt(args, "topic2")), ("rt", Opt(args, "relation_type")),
+                    ("lang", Opt(args, "lang"))),
+                "taxonomy" => Rows(_dbReadOnly,
+                    """
+                    WITH root AS MATERIALIZED (
+                        SELECT COALESCE(laplace.top_synset(r.id), r.id) AS id
+                        FROM (SELECT CASE WHEN @e IS NULL THEN laplace.resolve_ref(@term)
+                                          ELSE decode(@e, 'hex') END AS id) r)
+                    SELECT 'up' AS dir, w.step AS ord,
+                           encode(w.entity_id, 'hex') AS entity,
+                           laplace.label_or_hex(w.entity_id) AS label,
+                           round(w.eff_mu, 1) AS eff_mu
+                    FROM root, laplace.walk_strongest(root.id, laplace.relation_type_id('IS_A'), 10) w
+                    UNION ALL
+                    SELECT 'child',
+                           row_number() OVER (ORDER BY laplace.eff_mu_display(c.rating, c.rd) DESC)::int,
+                           encode(c.subject_id, 'hex'),
+                           laplace.label_or_hex(c.subject_id),
+                           round(laplace.eff_mu_display(c.rating, c.rd), 1)
+                    FROM root JOIN laplace.consensus c
+                      ON c.object_id = root.id AND c.type_id = laplace.relation_type_id('IS_A')
+                    ORDER BY dir DESC, ord
+                    LIMIT 40
+                    """,
+                    DefaultRowCap, ("term", NodeText(args, "term")), ("e", Opt(args, "entity"))),
+                "translate" => Rows(_db,
+                    """
+                    -- translations() emits eff_mu in RAW FIXED-POINT (an extension
+                    -- inconsistency; the display conversion lives in eff_mu_display and
+                    -- is not re-derived here). Column named honestly until the
+                    -- extension-side fix lands.
+                    SELECT t.translation, t.language, t.eff_mu AS eff_mu_fp, t.witnesses
+                    FROM laplace.translations(laplace.resolve_ref(@term), @limit) t
+                    """,
+                    DefaultRowCap, ("term", Req(args, "term")), ("limit", Int(args, "limit", 24))),
+                "leaders" => Rows(_dbReadOnly,
+                    """
+                    SELECT b.band,
+                           laplace.label_or_hex(e.subject_id) AS subject,
+                           laplace.relation_canonical(e.type_id) AS relation,
+                           laplace.label_or_hex(e.object_id) AS object,
+                           round(laplace.eff_mu_display(e.rating, e.rd), 1) AS eff_mu,
+                           e.witness_count
+                    FROM unnest(string_to_array(@bands, ',')::int[]) AS b(band)
+                    CROSS JOIN LATERAL laplace.consensus_band_edges(b.band, NULL, @per) e
+                    """,
+                    DefaultRowCap,
+                    ("bands", Opt(args, "bands") ?? "1,2,4,5"), ("per", Int(args, "per_band", 5))),
                 "bubble" => Rows(_dbReadOnly,
                     """
                     WITH b AS MATERIALIZED (
@@ -207,13 +299,24 @@ internal sealed class SubstrateTools
         var prompt = Req(args, "prompt");
         var sessionKey = Opt(args, "session") ?? _processSessionKey;
         var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
+        var shape = Opt(args, "shape");
+        var bands = Opt(args, "bands");
+        var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
 
         string? reply;
-        using (var cmd = _db.CreateCommand("SELECT laplace.chat(@p, @s)"))
+        using (var cmd = _db.CreateCommand(
+            """
+            SELECT laplace.chat(@p, @s, NULL, @shape,
+                CASE WHEN @bands IS NULL THEN NULL ELSE string_to_array(@bands, ',')::int[] END,
+                NULL, NULL, NULL, @elab)
+            """))
         {
             cmd.Parameters.AddWithValue("p", prompt);
             cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Bytea)
                 { Value = sessionId.ToBytes() });
+            cmd.Parameters.Add(new NpgsqlParameter("shape", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)shape ?? DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("bands", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)bands ?? DBNull.Value });
+            cmd.Parameters.AddWithValue("elab", elaborate);
             reply = cmd.ExecuteScalar() as string;
         }
 
@@ -225,6 +328,156 @@ internal sealed class SubstrateTools
             ["session"] = sessionKey
         };
         return (result.ToJsonString(), false);
+    }
+
+    // The agent write lane: mint a note as witnessed content and fold it, so the
+    // substrate is the shared memory between every agent on this repo. Same spine
+    // and trust class as a chat turn; the note is one outrankable voice, not truth.
+    // Plain (untenanted) UserPrompt/Response sources — the same path the CLI and
+    // OpenAICompat/TurnWitness.cs use — deliberately distinct from the tenant-scoped
+    // ConversationContent path a chat turn deposits through (spec 34): a standalone
+    // note has no session/tenant to scope, so it rides the shared base sources.
+    private (string, bool) WitnessFact(JsonObject? args)
+    {
+        var text = Req(args, "text");
+        var origin = Opt(args, "origin") ?? "agent/note";
+
+        EnsurePlainWriter();
+        if (_turnDepositBroken)
+            return ("witness lane offline (writer spine failed earlier in this session)", true);
+
+        if (!UserPromptContent.TryBuildWitnessChange(
+                Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
+            return ("text produced no witnessable content", true);
+
+        _turnWriter!.ApplyAsync(change).GetAwaiter().GetResult();
+
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["root"] = Convert.ToHexStringLower(root.ToBytes()),
+                ["origin"] = origin,
+                ["witnessed"] = true,
+            })
+        };
+        return (result.ToJsonString(), false);
+    }
+
+    // Confirm/refute through the one canonical implementation (FeedbackContent —
+    // the same lane as HTTP /v1/feedback and the CLI attest). Immediate fold;
+    // the next walk reads the moved rating.
+    private (string, bool) Feedback(JsonObject? args)
+    {
+        var verdict = Req(args, "verdict").Trim().ToLowerInvariant();
+        if (verdict is not ("confirm" or "refute"))
+            return ("verdict must be 'confirm' or 'refute'", true);
+        bool confirm = verdict == "confirm";
+
+        CodepointPerfcache.LoadDefault();
+        var subject = Opt(args, "subject");
+        var relation = Opt(args, "relation");
+        var obj = Opt(args, "object");
+        var tokensCsv = Opt(args, "tokens");
+
+        if (subject is not null || relation is not null || obj is not null)
+        {
+            if (subject is null || relation is null || obj is null)
+                return ("triple mode needs subject, relation and object", true);
+            if (!FeedbackContent.TryResolveRelation(relation, out var rel))
+                return ($"'{relation}' is not a canonical relation type", true);
+
+            var resolved = FeedbackContent.ResolveTokensAsync(_db, [subject, obj]).GetAwaiter().GetResult();
+            foreach (var t in resolved)
+                if (!t.Usable)
+                    return ($"'{t.Token}' has no substrate entity", true);
+            var subjectId = resolved[0].Id!.Value;
+            var objectId = resolved[1].Id!.Value;
+
+            var before = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+            var applied = FeedbackContent.ApplyAsync(
+                _db, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm)).GetAwaiter().GetResult();
+            var after = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+
+            static JsonObject? State(FeedbackContent.ConsensusState? s) => s is null ? null : new JsonObject
+            {
+                ["rating"] = s.Rating,
+                ["rd"] = s.Rd,
+                ["witnesses"] = s.WitnessCount,
+            };
+
+            var result = new JsonObject
+            {
+                ["rows"] = new JsonArray(new JsonObject
+                {
+                    ["mode"] = "triple",
+                    ["verdict"] = verdict,
+                    ["relation"] = rel.Canonical,
+                    ["attestations_inserted"] = applied.AttestationsInserted,
+                    ["consensus_updated"] = applied.ConsensusUpdated,
+                    ["before"] = State(before),
+                    ["after"] = State(after),
+                })
+            };
+            return (result.ToJsonString(), false);
+        }
+
+        if (string.IsNullOrWhiteSpace(tokensCsv))
+            return ("provide subject/relation/object, or tokens for chain mode", true);
+        var tokens = tokensCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length < 2)
+            return ("chain mode needs 2+ comma-separated tokens", true);
+
+        var chainResolved = FeedbackContent.ResolveTokensAsync(_db, tokens).GetAwaiter().GetResult();
+        var ids = chainResolved.Where(t => t.Usable).Select(t => t.Id!.Value).ToList();
+        if (ids.Count < 2)
+            return ($"need 2+ tokens with substrate entities (got {ids.Count})", true);
+
+        var chainApplied = FeedbackContent.ApplyAsync(
+            _db, FeedbackContent.BuildPrecedesChain(ids, confirm)).GetAwaiter().GetResult();
+
+        var chainResult = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["mode"] = "chain",
+                ["verdict"] = verdict,
+                ["relation"] = "PRECEDES",
+                ["pairs"] = ids.Count - 1,
+                ["attestations_inserted"] = chainApplied.AttestationsInserted,
+                ["consensus_updated"] = chainApplied.ConsensusUpdated,
+            })
+        };
+        return (chainResult.ToJsonString(), false);
+    }
+
+    // Bootstraps the plain (untenanted) UserPrompt/Response sources for the witness
+    // lane — a separate flag from the tenant-scoped turn bootstrap below, since the
+    // two register different sources and must not short-circuit each other.
+    private bool _plainBootstrapped;
+
+    private void EnsurePlainWriter()
+    {
+        if (_turnDepositBroken || _turnWriter is not null && _plainBootstrapped) return;
+        try
+        {
+            if (_turnWriter is null)
+            {
+                CodepointPerfcache.LoadDefault();
+                _turnWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
+            }
+            if (!_plainBootstrapped)
+            {
+                _turnWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _turnWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _plainBootstrapped = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _turnDepositBroken = true;
+            Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
+        }
     }
 
     private void DepositTurn(string prompt, string? reply, Hash128 sessionId)

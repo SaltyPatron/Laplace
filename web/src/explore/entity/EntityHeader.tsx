@@ -1,5 +1,7 @@
-import { Button, ConsensusBadge, Muted } from '@ui';
+import { Link as RouterLink } from 'react-router-dom';
+import { Button, Muted } from '@ui';
 import type { ExploreEntityPreviewResponse } from '../types';
+import { PlayerCard } from './PlayerCard';
 import styles from './EntityDetail.module.css';
 
 export function EntityHeader({
@@ -29,9 +31,12 @@ export function EntityHeader({
             {copied ? 'Copied' : 'Copy id'}
           </Button>
         </Muted>
-        <ConsensusBadge witnesses={preview.evidence_count} tone="explore" />
+        <PlayerCard preview={preview} />
       </div>
       <div className={styles.actions}>
+        <Button asChild>
+          <RouterLink to={`/explore/mesh/${preview.id_hex}`}>View in mesh</RouterLink>
+        </Button>
         <Button disabled={!unlocked || exportBusy} loading={exportBusy} onClick={onExport}>
           Export for training
         </Button>

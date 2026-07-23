@@ -111,7 +111,7 @@ internal sealed partial class SubstrateClient
             var liveByKey = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                await using var cmd = new NpgsqlCommand("SELECT source, evidence, content FROM laplace.source_counts();", conn);
+                await using var cmd = new NpgsqlCommand("SELECT source, evidence, content, encode(source_id, 'hex') FROM laplace.source_counts();", conn);
                 cmd.CommandTimeout = 10;
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
@@ -121,17 +121,42 @@ internal sealed partial class SubstrateClient
                         Key: key,
                         Evidence: reader.GetInt64(1),
                         Content: reader.GetInt64(2),
-                        Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, key),
+                        Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(key)),
                         Layer: null,
-                        Role: null);
+                        Role: null,
+                        IdHex: reader.IsDBNull(3) ? null : reader.GetString(3));
                     sources.Add(row);
                     liveByKey[key] = row;
                 }
             }
             catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
             {
+                // Exact source_counts() blew its budget (measured ~15s at 6.3M
+                // rows and growing). Fall back to the approx catalog — name, id
+                // and a partition-stats evidence estimate in ~200ms. Content
+                // count is unknown there and stays null: an estimate labelled,
+                // never a lying zero. The whole stage→source→roster tier hangs
+                // off this listing, so it must never come back empty.
                 sources.Clear();
                 liveByKey.Clear();
+                await using var approx = new NpgsqlCommand(
+                    "SELECT source, evidence_approx, encode(source_id, 'hex') FROM laplace.source_counts_approx();", conn);
+                approx.CommandTimeout = 10;
+                await using var reader = await approx.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var key = reader.GetString(0);
+                    var row = new ExploreSourceRow(
+                        Key: key,
+                        Evidence: reader.GetInt64(1),
+                        Content: null,
+                        Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(key)),
+                        Layer: null,
+                        Role: null,
+                        IdHex: reader.IsDBNull(2) ? null : reader.GetString(2));
+                    sources.Add(row);
+                    liveByKey[key] = row;
+                }
             }
 
             var stages = WitnessCatalog.BuildStages(liveByKey);

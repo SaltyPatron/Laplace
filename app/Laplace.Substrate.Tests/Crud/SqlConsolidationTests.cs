@@ -35,16 +35,20 @@ public class SqlConsolidationTests
             + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
         Assert.Equal('f', Assert.IsType<char>(kind));
 
-        // The body — not merely the name — installed: the identity-routed fold
-        // (per relation type -> runtime partition pruning -> bulk UPDATE existing
-        // + bulk INSERT novel) with the server-side native fold. This replaced
-        // the old un-prunable MERGE that fanned out across all 145 leaves.
+        // The installed form — not merely the name: consensus_upsert was promoted
+        // from the plpgsql per-type routing loop to a FULL NATIVE C function
+        // (extension src, 'pg_laplace_consensus_upsert'). This probe pinned the
+        // plpgsql body long after the promotion and failed against every correct
+        // install (GH #588). Pin the C form: language c, prosrc = the symbol.
+        var lang = await ScalarAsync(
+            "SELECT l.lanname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            + "JOIN pg_language l ON l.oid = p.prolang "
+            + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
+        Assert.Equal("c", Assert.IsType<string>(lang));
         var src = (string)(await ScalarAsync(
             "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
             + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'"))!;
-        Assert.DoesNotContain("MERGE INTO", src);              // routed, not MERGE
-        Assert.Contains("FOR v_type", src);                    // per-type routing loop
-        Assert.Contains("laplace_glicko2_accumulate_games", src); // native fold
+        Assert.Equal("pg_laplace_consensus_upsert", src.Trim());
     }
 
     // (Per-table stat/autovacuum tuning is NOT extension SQL — it moved to the db-scoped

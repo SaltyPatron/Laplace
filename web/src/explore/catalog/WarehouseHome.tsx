@@ -103,7 +103,7 @@ export function WarehouseHome() {
                 </Td>
                 <Td>{s.stage ?? '—'}</Td>
                 <Td>{s.evidence.toLocaleString()}</Td>
-                <Td>{s.content.toLocaleString()}</Td>
+                <Td>{s.content?.toLocaleString() ?? "—"}</Td>
               </tr>
             ))}
           </tbody>

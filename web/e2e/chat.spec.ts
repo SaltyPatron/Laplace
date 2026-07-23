@@ -1,13 +1,23 @@
 import { test, expect } from '@playwright/test';
 
-test('SPA loads with chat surface', async ({ page }) => {
+test('SPA loads with the Home landing', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('header h1')).toContainText('Laplace');
+  // The landing orients before it asks for input: the three mode cards.
+  await expect(page.getByRole('button', { name: /Start a conversation/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open the console/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Enter the warehouse/ })).toBeVisible();
+});
+
+test('home mode card reaches chat', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Start a conversation/ }).click();
   await expect(page.getByPlaceholder('Ask about anything the witnesses attest to…')).toBeVisible();
 });
 
 test('chat happy path returns a grounded reply', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
   const input = page.getByPlaceholder('Ask about anything the witnesses attest to…');
   await input.fill('define whale');
   await page.getByRole('button', { name: 'Send' }).click();
@@ -24,6 +34,7 @@ test('chat happy path returns a grounded reply', async ({ page }) => {
 
 test('evidence lookup renders receipts', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
   const panel = page.getByRole('heading', { name: 'Evidence' }).locator('..');
   await panel.getByPlaceholder('word or entity id').fill('whale');
   await panel.getByRole('button', { name: 'Look up' }).click();
@@ -34,6 +45,15 @@ test('evidence lookup renders receipts', async ({ page }) => {
   await expect(
     panel.getByRole('heading', { level: 3 }).or(panel.locator('[role="alert"]')).first(),
   ).toBeVisible({ timeout: 35_000 });
+});
+
+test('home example opens the topic page showing everything', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /What does "entropy" mean\?/ }).click();
+  // A bare-topic read lands on the topic page — every section at once, no
+  // shape dropdown to pick first.
+  await expect(page).toHaveURL(/\/topic\/entropy/, { timeout: 15_000 });
+  await expect(page.getByText('Taxonomy — the IS_A tree')).toBeVisible({ timeout: 20_000 });
 });
 
 test('billing page lists the three plans', async ({ page }) => {

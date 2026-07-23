@@ -6,6 +6,8 @@ import { SourceBrowse } from './browse/SourceBrowse';
 import { EntityDetail, ResolveRedirect } from './entity/EntityDetail';
 import { NotFoundExplorer } from './entity/NotFoundExplorer';
 import { ConstellationView } from './glome/ConstellationView';
+import { MatchupView } from './matchup/MatchupView';
+import { MeshView } from './mesh/MeshView';
 import { WalkPanel } from './walk/WalkPanel';
 import { Breadcrumb } from './components/Breadcrumb';
 import { useExploreStore } from './store';
@@ -40,11 +42,12 @@ export function ExploreView() {
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
         <nav className={styles.nav}>
+          <Link className={styles.navLink} to="/explore/mesh">Mesh</Link>
           <Link className={styles.navLink} to="/explore">Warehouse</Link>
+          <Link className={styles.navLink} to="/explore/matchup">Matchup</Link>
           <Link className={styles.navLink} to="/explore/constellation">Constellation</Link>
           <Link className={styles.navLink} to="/explore/walk">Walk</Link>
           <Link className={styles.navLink} to="/explore/audit">Audit</Link>
-          <Link className={styles.navLink} to="/">← App</Link>
         </nav>
       </aside>
       <div className={styles.content}>
@@ -58,6 +61,10 @@ export function ExploreView() {
           <Route path="notfound/:ref" element={<NotFoundExplorer />} />
           <Route path="resolve/:ref" element={<ResolveRedirect />} />
           <Route path="walk" element={<WalkPanel />} />
+          <Route path="mesh" element={<MeshView />} />
+          <Route path="mesh/:id" element={<MeshView />} />
+          <Route path="matchup" element={<MatchupView />} />
+          <Route path="matchup/:x/:y" element={<MatchupView />} />
           <Route path="audit" element={<AuditPanel />} />
           <Route path="*" element={<Navigate to="/explore" replace />} />
         </Routes>

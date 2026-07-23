@@ -72,6 +72,64 @@
         }
       }
     },
+    "/v1/pulse": {
+      "get": {
+        "tags": [
+          "core"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PulseResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/modalities": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModalitiesResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "tags": [
@@ -132,6 +190,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RelationBandsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/query/leaders": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "parameters": [
+          {
+            "name": "bands",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -566,6 +684,344 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/mesh": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeshResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/sources/{idHex}/roster": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRosterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/taxonomy": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/record": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityRecordResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/matchup": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "x",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "y",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchupResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/matchup/verdict": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "x",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "y",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchupVerdictResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3091,6 +3547,33 @@
           }
         }
       },
+      "BandLeaders": {
+        "required": [
+          "band",
+          "name",
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "band": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            }
+          }
+        }
+      },
       "BestMoveRequest": {
         "required": [
           "fen",
@@ -4574,6 +5057,57 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "EntityRecordResponse": {
+        "required": [
+          "object",
+          "id",
+          "confirmed",
+          "contested",
+          "refuted",
+          "thin"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "confirmed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "contested": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "refuted": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "thin": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -6257,6 +6791,7 @@
           "content": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6275,6 +6810,12 @@
             ]
           },
           "role": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id_hex": {
             "type": [
               "null",
               "string"
@@ -6345,6 +6886,21 @@
               "null",
               "string"
             ]
+          },
+          "source_key": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "evidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -6795,6 +7351,69 @@
           }
         }
       },
+      "LeaderRow": {
+        "required": [
+          "subject_id",
+          "subject",
+          "relation",
+          "object_id",
+          "object",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "subject_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "LeadersResponse": {
+        "required": [
+          "object",
+          "bands"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BandLeaders"
+            }
+          }
+        }
+      },
       "LichessStartRequest": {
         "required": [
           "depth",
@@ -6839,6 +7458,120 @@
           }
         }
       },
+      "MatchupResponse": {
+        "required": [
+          "object",
+          "x",
+          "y",
+          "tape"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "x": {
+            "$ref": "#/components/schemas/MatchupSide"
+          },
+          "y": {
+            "$ref": "#/components/schemas/MatchupSide"
+          },
+          "tape": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TapeRow"
+            }
+          }
+        }
+      },
+      "MatchupSide": {
+        "required": [
+          "id",
+          "label",
+          "record",
+          "top_facts"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "record": {
+            "$ref": "#/components/schemas/EntityRecordResponse"
+          },
+          "top_facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SalientFactRow"
+            }
+          }
+        }
+      },
+      "MatchupVerdictResponse": {
+        "required": [
+          "object",
+          "relation",
+          "plane",
+          "eff_mu",
+          "usage",
+          "geodesic",
+          "verdict"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "relation": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "plane": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "usage": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "geodesic": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "verdict": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "MeaningNeighborView": {
         "required": [
           "relation",
@@ -6863,6 +7596,138 @@
             "format": "double"
           },
           "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "MeshLink": {
+        "required": [
+          "id",
+          "label",
+          "relation",
+          "hub_type",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "hub_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "MeshResponse": {
+        "required": [
+          "object",
+          "id",
+          "label",
+          "hub_type",
+          "belongs_to",
+          "roster"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "hub_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "belongs_to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshLink"
+            }
+          },
+          "roster": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeshLink"
+            }
+          }
+        }
+      },
+      "ModalitiesResponse": {
+        "required": [
+          "object",
+          "text",
+          "chess",
+          "models",
+          "multilingual"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "text": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "chess": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "models": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "multilingual": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "integer",
@@ -7442,6 +8307,85 @@
               "string"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "PulseResponse": {
+        "required": [
+          "object",
+          "at",
+          "entities",
+          "attestations",
+          "consensus",
+          "physicalities",
+          "last_flush_at",
+          "flushes_last_min",
+          "folding"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "at": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "entities": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "attestations": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consensus": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "physicalities": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "last_flush_at": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "flushes_last_min": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "folding": {
+            "type": "boolean"
           }
         }
       },
@@ -8159,6 +9103,64 @@
           }
         }
       },
+      "SourceRosterResponse": {
+        "required": [
+          "object",
+          "id",
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceRosterRow"
+            }
+          }
+        }
+      },
+      "SourceRosterRow": {
+        "required": [
+          "subject_id",
+          "subject",
+          "relation",
+          "object_id",
+          "object",
+          "observations"
+        ],
+        "type": "object",
+        "properties": {
+          "subject_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "observations": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "SubstrateAuditReport": {
         "required": [
           "counts",
@@ -8485,6 +9487,93 @@
           },
           "next": {
             "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "TapeRow": {
+        "required": [
+          "holder",
+          "type",
+          "fact",
+          "eff_mu"
+        ],
+        "type": "object",
+        "properties": {
+          "holder": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "fact": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TaxonomyNode": {
+        "required": [
+          "id",
+          "label",
+          "eff_mu"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TaxonomyResponse": {
+        "required": [
+          "object",
+          "root_id",
+          "root_label",
+          "up",
+          "children"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "root_id": {
+            "type": "string"
+          },
+          "root_label": {
+            "type": "string"
+          },
+          "up": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
           }
         }
       },
@@ -9034,6 +10123,9 @@
       "name": "core"
     },
     {
+      "name": "explore"
+    },
+    {
       "name": "query"
     },
     {
@@ -9041,9 +10133,6 @@
     },
     {
       "name": "reports"
-    },
-    {
-      "name": "explore"
     },
     {
       "name": "foundry"

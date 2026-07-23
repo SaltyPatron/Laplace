@@ -18,6 +18,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt, int steps = 32, int maxOrder = 5, double temperature = 0.7, int topK = 10,
         CancellationToken ct = default) =>
@@ -108,6 +112,33 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
         byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -133,6 +164,13 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         Task.FromResult<IReadOnlyList<ConverseRow>>(
         [
             new ConverseRow("tenant-scoped: my own witnessed answer.", 0.42m, 3)
+        ]);
+
+    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ConverseRow>>(
+        [
+            new ConverseRow("A whale is a marine mammal.", 0.91m, 42)
         ]);
 
     public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
@@ -391,6 +429,76 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             new QueryRow("whale IS_A cetacean.", 0.91m, 42),
             new QueryRow("A whale is a marine mammal.", 0.84m, 17),
         ]);
+
+    public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
+        Task.FromResult(new PulseResponse("pulse", nowUnix, 4_440_000, 6_300_000, 5_700_000,
+            4_337_000, nowUnix - 3, 120, true));
+
+    public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
+        Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0));
+
+    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
+    {
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<TaxonomyResponse?>(null);
+        return Task.FromResult<TaxonomyResponse?>(new TaxonomyResponse("taxonomy",
+            WhaleIdHex, "whale",
+            [ new TaxonomyNode(CetaceanIdHex, "cetacean", 1325.09m), new TaxonomyNode(IsAIdHex, "mammal", 1319.14m) ],
+            [ new TaxonomyNode(WordNetIdHex, "sperm whale", 1325.09m) ]));
+    }
+
+    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SourceRosterRow>>(
+        [
+            new SourceRosterRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 42),
+        ]);
+
+    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
+    {
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<MeshResponse?>(null);
+        return Task.FromResult<MeshResponse?>(new MeshResponse("mesh", idHex.ToLowerInvariant(), "whale",
+            "WordNet_Synset",
+            [ new MeshLink(CetaceanIdHex, "cetacean", "is a", "WordNet_Synset", 0.91m, 42) ],
+            [ new MeshLink(WhaleIdHex, "whale", "sense", null, 1.0m, 12),
+              new MeshLink(CetaceanIdHex, "orca", "sense", null, 0.8m, 5) ]));
+    }
+
+    public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<BandLeaders>>(
+            bands.Select(b => new BandLeaders(b, b == 2 ? "taxonomic" : $"band {b}",
+            [
+                new LeaderRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 1325.09m, 42),
+            ])).ToList());
+
+    public Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
+    {
+        // Honor the real contract: a non-32-hex id resolves to null (→ 404).
+        if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
+            return Task.FromResult<EntityRecordResponse?>(null);
+        return Task.FromResult<EntityRecordResponse?>(
+            new EntityRecordResponse("entity.record", idHex.ToLowerInvariant(), 34, 2, 1, 12));
+    }
+
+    public Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct)
+    {
+        if (xRef is "unknown-word" || yRef is "unknown-word")
+            return Task.FromResult<MatchupResponse?>(null);
+        var record = new EntityRecordResponse("entity.record", WhaleIdHex, 34, 2, 1, 12);
+        var facts = new[] { new SalientFactRow("is a", "cetacean", 1325.09m, 42) };
+        return Task.FromResult<MatchupResponse?>(new MatchupResponse("matchup",
+            new MatchupSide(WhaleIdHex, "whale", record, facts),
+            new MatchupSide(CetaceanIdHex, "cetacean", record, facts),
+            [
+                new TapeRow("both", "is a", "aquatic mammal", 1325.09m),
+                new TapeRow("x-only", "is a", "baleen whale", 1201.44m),
+            ]));
+    }
+
+    public Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct) =>
+        Task.FromResult<MatchupVerdictResponse?>(new MatchupVerdictResponse(
+            "matchup.verdict", "whale —is a→ cetacean", "taxonomy", 1325.09m, 42, 0.12,
+            "related via taxonomy; strong shared usage (42)"));
 
     private static ExploreEntityResponse SampleEntity(string idHex) => new(
         idHex, "whale", 2, "Word", true, 42,

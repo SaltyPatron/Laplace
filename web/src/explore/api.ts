@@ -141,3 +141,17 @@ export async function preflight(serviceId: string, tenant: string, units = 1) {
     { tenant },
   );
 }
+
+export function exploreMesh(idHex: string, opts?: ApiOptions) {
+  return apiGet<import('./mesh/types').MeshResponse>(`/v1/explore/entities/${idHex}/mesh`, opts);
+}
+
+export function exploreModalities(opts?: ApiOptions) {
+  return apiGet<{ text: number; chess: number; models: number; multilingual: number }>(
+    '/v1/explore/modalities', opts);
+}
+
+export function exploreSourceRoster(idHex: string, limit = 40, opts?: ApiOptions) {
+  return apiGet<{ rows: import('./types').SourceRosterRow[] }>(
+    `/v1/explore/sources/${idHex}/roster?limit=${limit}`, opts);
+}

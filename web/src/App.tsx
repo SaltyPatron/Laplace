@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { BrowserRouter, Link as RouterLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, NavTabs, TenantField } from '@ui';
 import { ChatView } from './chat/ChatView';
+import { HomeView } from './home/HomeView';
 import { QueryConsole } from './query/QueryConsole';
+import { TopicView } from './topic/TopicView';
 import { BillingView } from './billing/BillingView';
 import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
@@ -11,66 +12,64 @@ import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import styles from './App.module.css';
 
-type Tab = 'chat' | 'query' | 'billing' | 'chess-play' | 'chess-lab';
+/**
+ * One shell, one nav, for every surface. Previously the app ran two shells — a
+ * tab-state MainShell and a separate ExploreShell whose header showed only two
+ * destinations, so entering Explore hid Home/Query/Play/Lab/Billing and stranded
+ * you there. Everything is a route now: the header is identical everywhere,
+ * every surface has a URL (deep-link, refresh, back button), and no page can
+ * hide another.
+ */
+const TABS: { id: string; label: string; path: string }[] = [
+  { id: 'home', label: 'Home', path: '/' },
+  { id: 'chat', label: 'Chat', path: '/chat' },
+  { id: 'query', label: 'Query', path: '/query' },
+  { id: 'explore', label: 'Explore', path: '/explore' },
+  { id: 'play', label: 'Play', path: '/play' },
+  { id: 'lab', label: 'Lab', path: '/lab' },
+  { id: 'billing', label: 'Billing', path: '/billing' },
+];
 
-function MainShell() {
-  const [tab, setTab] = useState<Tab>('chat');
+function isActive(pathname: string, tabPath: string): boolean {
+  if (tabPath === '/') return pathname === '/';
+  return pathname === tabPath || pathname.startsWith(`${tabPath}/`);
+}
+
+function Shell() {
   const { tenant, setTenant } = useAppStore();
   const nav = useNavigate();
+  const { pathname } = useLocation();
 
   return (
     <div className={styles.shell}>
       <AppHeader
-        title="Laplace"
+        title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>}
         tagline="witnessed consensus, not weights"
         nav={
           <NavTabs
-            tabs={[
-              { id: 'chat', label: 'Chat', active: tab === 'chat', onClick: () => setTab('chat') },
-              { id: 'query', label: 'Query', active: tab === 'query', onClick: () => setTab('query') },
-              { id: 'explore', label: 'Explore', onClick: () => nav('/explore') },
-              { id: 'play', label: 'Play', active: tab === 'chess-play', onClick: () => setTab('chess-play') },
-              { id: 'lab', label: 'Lab', active: tab === 'chess-lab', onClick: () => setTab('chess-lab') },
-              { id: 'billing', label: 'Billing', active: tab === 'billing', onClick: () => setTab('billing') },
-            ]}
+            tabs={TABS.map((t) => ({
+              id: t.id,
+              label: t.label,
+              active: isActive(pathname, t.path),
+              onClick: () => nav(t.path),
+            }))}
           />
         }
         tenant={<TenantField value={tenant} onChange={setTenant} />}
       />
       <SubstrateStatusBanner />
       <main className={styles.main}>
-        {tab === 'chat' ? <ChatView />
-          : tab === 'query' ? <QueryConsole />
-          : tab === 'chess-play' ? <ChessView />
-          : tab === 'chess-lab' ? <ChessLabView />
-          : <BillingView />}
-      </main>
-    </div>
-  );
-}
-
-function ExploreShell() {
-  const { tenant, setTenant } = useAppStore();
-  const nav = useNavigate();
-
-  return (
-    <div className={styles.shell}>
-      <AppHeader
-        title={<RouterLink to="/explore" className={styles.exploreTitle}>Laplace Explore</RouterLink>}
-        tagline="warehouse · inspect · export"
-        nav={
-          <NavTabs
-            tabs={[
-              { id: 'chat', label: 'Chat', onClick: () => nav('/') },
-              { id: 'explore', label: 'Explore', active: true, onClick: () => {} },
-            ]}
-          />
-        }
-        tenant={<TenantField id="tenant-explore" value={tenant} onChange={setTenant} />}
-      />
-      <SubstrateStatusBanner />
-      <main className={styles.main}>
-        <ExploreView />
+        <Routes>
+          <Route path="/" element={<HomeView onGoto={(t) => nav(`/${t}`)} />} />
+          <Route path="/chat" element={<ChatView />} />
+          <Route path="/query" element={<QueryConsole />} />
+          <Route path="/topic" element={<TopicView />} />
+          <Route path="/topic/:ref" element={<TopicView />} />
+          <Route path="/explore/*" element={<ExploreView />} />
+          <Route path="/play" element={<ChessView />} />
+          <Route path="/lab" element={<ChessLabView />} />
+          <Route path="/billing" element={<BillingView />} />
+        </Routes>
       </main>
     </div>
   );
@@ -79,10 +78,7 @@ function ExploreShell() {
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/explore/*" element={<ExploreShell />} />
-        <Route path="/*" element={<MainShell />} />
-      </Routes>
+      <Shell />
     </BrowserRouter>
   );
 }

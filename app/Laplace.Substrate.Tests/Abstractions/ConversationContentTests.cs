@@ -17,7 +17,7 @@ public class ConversationContentIdTests
     public void SessionId_IsCanonicalKeyWithTenantInside()
     {
         var id = ConversationContent.SessionId("acme", "sess-1");
-        Assert.Equal(Hash128.OfCanonical("substrate/conversation/session/acme/sess-1/v1"), id);
+        Assert.Equal(Hash128.OfCanonical(SubstrateCanonicalKeys.ConversationSession("acme", "sess-1")), id);
         // Tenant is part of the key: the same client key can never resolve into
         // another tenant's session.
         Assert.NotEqual(ConversationContent.SessionId("rival", "sess-1"), id);

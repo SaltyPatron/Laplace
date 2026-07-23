@@ -6,6 +6,8 @@ internal static class ExploreEndpoints
 {
     public static void MapExploreEndpoints(this WebApplication app)
     {
+        MapMatchupEndpoints(app);
+
         app.MapGet("/v1/explore/catalog", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
             try
@@ -429,6 +431,130 @@ internal static class ExploreEndpoints
             (prev, cur) = (cur, prev);
         }
         return prev[b.Length];
+    }
+
+    private static void MapMatchupEndpoints(WebApplication app)
+    {
+        // The entity's verdict record — confirmed/contested/refuted/thin counts
+        // from the canonical epistemic_status logic. Preview-class information,
+        // served ungated like the entity preview.
+        app.MapGet("/v1/explore/entities/{idHex}/mesh", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var mesh = await substrate.MeshAsync(idHex, ct);
+                return mesh is null
+                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                    : Results.Json(mesh);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<MeshResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/sources/{idHex}/roster", async (string idHex, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            byte[] sid;
+            try { sid = Convert.FromHexString(idHex); }
+            catch (FormatException) { return EndpointJson.NotFound("source_not_found", $"'{idHex}' is not a hex source id."); }
+            try
+            {
+                var rows = await substrate.SourceRosterAsync(sid, Math.Clamp(limit ?? 40, 1, 200), ct);
+                return Results.Json(new SourceRosterResponse("source.roster", idHex.ToLowerInvariant(), rows));
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<SourceRosterResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/entities/{idHex}/taxonomy", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var tax = await substrate.TaxonomyAsync(idHex, ct);
+                return tax is null
+                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                    : Results.Json(tax);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<TaxonomyResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/entities/{idHex}/record", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var record = await substrate.EntityRecordAsync(idHex, ct);
+                return record is null
+                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                    : Results.Json(record);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Produces<EntityRecordResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        // Head-to-head, fast half: both cards + the tale of the tape. Gated as
+        // an inspect-class read.
+        app.MapGet("/v1/explore/matchup", async (string? x, string? y, HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            {
+                var matchup = await substrate.MatchupAsync(x.Trim(), y.Trim(), ct);
+                return matchup is null
+                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
+                    : Results.Json(matchup);
+            });
+        })
+        .WithTags("explore")
+        .Produces<MatchupResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        // Head-to-head, slow half: the witnessed path and the verdict.
+        // relation_summary runs a deep path search (measured 6-14s under an
+        // active seed) — a separate fetch so the tape never waits on it.
+        app.MapGet("/v1/explore/matchup/verdict", async (string? x, string? y, HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            {
+                var verdict = await substrate.MatchupVerdictAsync(x.Trim(), y.Trim(), ct);
+                return verdict is null
+                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
+                    : Results.Json(verdict);
+            });
+        })
+        .WithTags("explore")
+        .Produces<MatchupVerdictResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<IResult> RunGatedExploreAsync(

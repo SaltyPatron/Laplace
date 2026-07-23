@@ -83,7 +83,11 @@
   }
 
   .experimentCardBlocked {
-    opacity: 0.72;
+    /* Blocked is signaled by the warning badge and the "engine ✗" chip, not by
+       dimming the whole card — a 0.72 opacity dragged the muted tagline under
+       4.5:1 (axe serious). Desaturate the surface instead, leaving text legible. */
+    background: var(--color-bg-surface);
+    border-style: dashed;
   }
 
   .experimentTitle {

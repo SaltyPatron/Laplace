@@ -14,10 +14,27 @@ public sealed record ExploreCatalogResponse(
 public sealed record ExploreSourceRow(
     [property: JsonPropertyName("key")] string Key,
     [property: JsonPropertyName("evidence")] long Evidence,
-    [property: JsonPropertyName("content")] long Content,
+    [property: JsonPropertyName("content")] long? Content,
     [property: JsonPropertyName("stage")] string? Stage,
     [property: JsonPropertyName("layer")] string? Layer,
-    [property: JsonPropertyName("role")] string? Role);
+    [property: JsonPropertyName("role")] string? Role,
+    // The franchise id: attestations key their witness by this, so the roster
+    // endpoint drills by id without re-running the source_counts aggregate.
+    [property: JsonPropertyName("id_hex")] string? IdHex = null);
+
+/// <summary>One witnessed assertion on a source's roster — a sampled play.</summary>
+public sealed record SourceRosterRow(
+    [property: JsonPropertyName("subject_id")] string SubjectId,
+    [property: JsonPropertyName("subject")] string Subject,
+    [property: JsonPropertyName("relation")] string Relation,
+    [property: JsonPropertyName("object_id")] string ObjectId,
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("observations")] long Observations);
+
+public sealed record SourceRosterResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("id")] string IdHex,
+    [property: JsonPropertyName("rows")] IReadOnlyList<SourceRosterRow> Rows);
 
 public sealed record ExploreStageRow(
     [property: JsonPropertyName("stage")] string Stage,
@@ -29,7 +46,11 @@ public sealed record ExploreStageSourceRow(
     [property: JsonPropertyName("cli")] string Cli,
     [property: JsonPropertyName("layer")] string? Layer,
     [property: JsonPropertyName("role")] string? Role,
-    [property: JsonPropertyName("links")] string? Links);
+    [property: JsonPropertyName("links")] string? Links,
+    // The live source this manifest entry resolved to — the drill-down target.
+    // Null = declared in the cadence but not yet ingested (shown honestly).
+    [property: JsonPropertyName("source_key")] string? SourceKey = null,
+    [property: JsonPropertyName("evidence")] long? Evidence = null);
 
 public sealed record ExploreResolveResponse(
     [property: JsonPropertyName("id_hex")] string IdHex,

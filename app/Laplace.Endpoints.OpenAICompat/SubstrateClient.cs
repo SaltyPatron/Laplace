@@ -78,6 +78,15 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
+    /// <summary>
+    /// Multi-turn call shape kept for interface parity with older stateless clients;
+    /// session state is substrate-resident here (spec 34), so only the newest turn
+    /// is consumed — same rule RecallSessionAsync's comment documents.
+    /// </summary>
+    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
+        ConverseAsync(userTurns.Count > 0 ? userTurns[^1] : "", session, ct);
+
     private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync(
         NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct)
     {

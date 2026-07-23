@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   Button,
@@ -46,6 +46,7 @@ export function QueryConsole() {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoRun = useRef(false);
 
   useEffect(() => {
     const opts = { tenant, quoteId };
@@ -56,6 +57,30 @@ export function QueryConsole() {
       })
       .catch((e) => setCatalogError(e instanceof Error ? e.message : String(e)));
   }, [tenant, quoteId]);
+
+  // A Home example arrives as a seed: apply it to the controls and run it once,
+  // so the console opens showing a real answer instead of an empty form.
+  const querySeed = useAppStore((s) => s.querySeed);
+  const setQuerySeed = useAppStore((s) => s.setQuerySeed);
+  useEffect(() => {
+    if (!querySeed) return;
+    setTopic(querySeed.topic);
+    setTopic2(querySeed.topic2 ?? '');
+    setShape(querySeed.shape ?? 'describe');
+    setRelationType(querySeed.relationType ?? '');
+    setSelectedBands(querySeed.bands ?? []);
+    setQuerySeed(null);
+    autoRun.current = true;
+  }, [querySeed, setQuerySeed]);
+
+  useEffect(() => {
+    if (!autoRun.current || !topic.trim()) return;
+    autoRun.current = false;
+    void run();
+    // run() closes over the freshly committed state; deps keep this effect
+    // firing on the seed's own state updates, and the ref gates it to once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topic, shape, topic2, relationType, selectedBands]);
 
   const active = useMemo(() => shapes.find((s) => s.shape === shape), [shapes, shape]);
   const needsTopic2 = active?.needs_topic2 || shape === 'path';

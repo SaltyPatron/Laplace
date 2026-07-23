@@ -67,3 +67,56 @@ export const SHAPE_DIALS: Record<string, (keyof QueryDials)[]> = {
   walk: ['depth'],
   complete: ['depth', 'breadth'],
 };
+
+export interface LeaderRow {
+  subject_id: string;
+  subject: string;
+  relation: string;
+  object_id: string;
+  object: string;
+  eff_mu: number;
+  witnesses: number;
+}
+
+export interface BandLeaders {
+  band: number;
+  name: string;
+  rows: LeaderRow[];
+}
+
+export interface EntityRecord {
+  id: string;
+  confirmed: number;
+  contested: number;
+  refuted: number;
+  thin: number;
+}
+
+export interface TapeRow {
+  holder: 'both' | 'x-only' | 'y-only' | string;
+  type: string;
+  fact: string;
+  eff_mu?: number | null;
+}
+
+export interface MatchupSide {
+  id: string;
+  label: string;
+  record: EntityRecord;
+  top_facts: { type: string; fact: string; eff_mu: number; witnesses: number }[];
+}
+
+export interface Matchup {
+  x: MatchupSide;
+  y: MatchupSide;
+  tape: TapeRow[];
+}
+
+export interface MatchupVerdict {
+  relation?: string | null;
+  plane?: string | null;
+  eff_mu?: number | null;
+  usage?: number | null;
+  geodesic?: number | null;
+  verdict?: string | null;
+}

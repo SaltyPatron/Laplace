@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Linq;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -69,9 +70,25 @@ public sealed class ConversationProvenanceGateTests
     [Fact]
     public void McpDepositTurn_UsesConversationProvenance()
     {
+        // Scoped to the DepositTurn method itself: the MCP surface also has a
+        // standalone `witness` tool (a note with no session to scope) that
+        // legitimately deposits through the plain UserPrompt/Response sources —
+        // only a conversational turn's deposit must carry tenant/session provenance.
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
-        Assert.Contains("ConversationContent.TryBuildTurnChange", text);
-        Assert.DoesNotContain("UserPromptContent.BuildBootstrapChange", text);
+        var depositTurn = ExtractMethod(text, "private void DepositTurn");
+        Assert.Contains("ConversationContent.TryBuildTurnChange", depositTurn);
+        Assert.DoesNotContain("UserPromptContent.BuildBootstrapChange", depositTurn);
+    }
+
+    private static string ExtractMethod(string text, string signaturePrefix)
+    {
+        var start = text.IndexOf(signaturePrefix, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"'{signaturePrefix}' not found");
+        var nextMethod = text.IndexOf("\n    private ", start + signaturePrefix.Length, StringComparison.Ordinal);
+        var nextPublic = text.IndexOf("\n    public ", start + signaturePrefix.Length, StringComparison.Ordinal);
+        var candidates = new[] { nextMethod, nextPublic }.Where(i => i > 0);
+        var end = candidates.Any() ? candidates.Min() : text.Length;
+        return text[start..end];
     }
 
     [Fact]

@@ -22,13 +22,13 @@
     min-width: 0;
   }
 
-  .exploreTitle {
+  .title {
     color: inherit;
     text-decoration: none;
     font-weight: inherit;
   }
 
-  .exploreTitle:hover {
+  .title:hover {
     color: var(--color-accent);
   }
 }

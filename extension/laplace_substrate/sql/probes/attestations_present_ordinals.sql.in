@@ -36,7 +36,16 @@ DROP FUNCTION IF EXISTS attestations_present_ordinals(bytea[]);
 CREATE OR REPLACE FUNCTION attestations_present_ordinals(
     p_ids bytea[], p_type_ids bytea[], p_subject_ids bytea[])
     RETURNS TABLE(idx int)
-    LANGUAGE plpgsql STABLE
+    -- VOLATILE, not STABLE: the body runs CREATE TEMP TABLE ... AS, and PostgreSQL
+    -- forbids CREATE TABLE AS in any non-volatile function -- a STABLE marking
+    -- throws 0A000 "CREATE TABLE AS is not allowed in a non-volatile function" on
+    -- the FIRST call, at execution, not definition (which is why pg_regress, that
+    -- only loads the SQL, never caught it). The siblings that use the same
+    -- unnest-once-into-temp idiom (consensus_upsert, attestation_merge) are
+    -- VOLATILE for exactly this reason. This function reads no state that a
+    -- caller could depend on being stable across the statement, so VOLATILE costs
+    -- nothing here -- it is a scan of committed rows, called once per probe chunk.
+    LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
     v_type bytea;

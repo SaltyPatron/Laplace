@@ -273,12 +273,13 @@ internal sealed partial class SubstrateClient
 
     private async Task<IReadOnlyList<T>> ReadRowsAsync<T>(
         string sql, Func<NpgsqlDataReader, T> map, Action<NpgsqlCommand> bind,
-        string label, CancellationToken ct)
+        string label, CancellationToken ct, int timeoutSeconds = 0)
     {
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             await using var cmd = new NpgsqlCommand(sql, conn);
+            if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind(cmd);
 
             var rows = new List<T>(16);
