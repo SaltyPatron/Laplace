@@ -93,7 +93,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 24 (`extension/laplace_substrate/src/`)
+## Native extension sources — 25 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `consensus_fold_step.c`
@@ -101,6 +101,7 @@ Chess:
 - `content_resolve.c`
 - `descent_probe.c`
 - `explore_web.c`
+- `fold_route.c`
 - `foundry_crawl.c`
 - `generate_walk.c`
 - `geometry_successors.c`
