@@ -14,7 +14,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books chess-eval safetensors" >&2
     exit 2
 fi
 
@@ -100,9 +100,20 @@ case "$source" in
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
+    chess-eval)
+        # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —
+        # the substrate is the source. Part of the seed ladder so a db-reset + reseed
+        # re-derives the census like every other calculated layer; per-game markers make
+        # re-runs skip-complete. Needs a stockfish binary (env, chess-lab bootstrap, PATH).
+        build_cli
+        if [[ -z "${LAPLACE_STOCKFISH:-}" && -x /usr/games/stockfish ]]; then
+            export LAPLACE_STOCKFISH=/usr/games/stockfish
+        fi
+        ingest chess-eval
+        ;;
     *)
         echo "Unknown source: $source" >&2
-        echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} chess openings all safetensors" >&2
+        echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} chess openings chess-eval all safetensors" >&2
         exit 2
         ;;
 esac
