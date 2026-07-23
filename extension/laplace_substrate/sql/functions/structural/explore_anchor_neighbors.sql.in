@@ -64,7 +64,7 @@ BEGIN
            n.entity_id,
            COALESCE(NULLIF(render_text_fast(n.entity_id, 8), ''),
                     label_or_hex(n.entity_id)),
-           (SELECT e.tier FROM entities e WHERE e.id = n.entity_id),
+           (SELECT min(e.tier) FROM entities e WHERE e.id = n.entity_id),
            n.geo,
            NULL::float8
     FROM nearest n
