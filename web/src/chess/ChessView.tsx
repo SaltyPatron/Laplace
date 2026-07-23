@@ -18,6 +18,8 @@ import { GameControls } from './play/GameControls';
 
 import { Sidebar } from './play/Sidebar';
 
+import { ExplorePanel } from './play/ExplorePanel';
+
 import { formatPositionEval, terminalWhiteCp, whiteCpToBarFraction } from './evalDisplay';
 
 import {
@@ -854,6 +856,14 @@ export function ChessView() {
           searchDepth={searchDepth}
 
           searchPickUci={hintMove}
+
+        />
+
+        <ExplorePanel
+
+          fen={fen}
+
+          onPlayMove={!reviewing && !over ? (uci) => void applyUci(uci) : undefined}
 
         />
 

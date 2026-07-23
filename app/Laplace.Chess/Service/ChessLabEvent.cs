@@ -18,6 +18,19 @@ public sealed record ChessLabGameEvent(
 
 public sealed record ChessLabMetricEvent(string Name, double Value, string? Unit = null) : ChessLabEvent;
 
+/// <summary>
+/// One ply of a live game, enough to draw a board: emitted by the cutechess
+/// runner (parsed from -debug UCI traffic) and by in-process self-play (via the
+/// MatchRunner onPly tap). Game numbers disambiguate interleaved parallel games.
+/// </summary>
+public sealed record ChessLabBoardEvent(
+    int Game,
+    int Ply,
+    string Uci,
+    string Fen,
+    string? White = null,
+    string? Black = null) : ChessLabEvent;
+
 public sealed record ChessLabTableEvent(
     string Title,
     IReadOnlyList<string> Columns,

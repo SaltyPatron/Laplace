@@ -53,7 +53,8 @@ public static class ChessLabRunners
             guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
             openingFens: book, pgnSink: pgnSink, progress: progress, ct: ct,
             liveHost: recorder.Host,
-            liveLearnContext: $"chess/lab/substrate-test/{slot.Job.Id}"), ct);
+            liveLearnContext: $"chess/lab/substrate-test/{slot.Job.Id}",
+            onPly: LiveBoardPublisher(lab, slot, "Laplace-guided", "Laplace-pure")), ct);
 
         var pgnPath = Path.Combine(workDir, "games.pgn");
         ChessPgnWriter.WriteFile(pgnPath, pgnSink, white: "Laplace-guided", black: "Laplace-pure",
@@ -128,7 +129,8 @@ public static class ChessLabRunners
                 var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm,
                     pgnSink: pgnSink, progress: progress, ct: ct,
                     liveHost: recorder.Host,
-                    liveLearnContext: $"chess/lab/ladder/{slot.Job.Id}");
+                    liveLearnContext: $"chess/lab/ladder/{slot.Job.Id}",
+                    onPly: LiveBoardPublisher(lab, slot, "Laplace-full", $"minus-{term}"));
                 string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
                 rows[ti] = [term.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo];
                 lab.Publish(slot, new ChessLabLogEvent("info", $"{term}: {r.AWins}-{r.Draws}-{r.BWins} Elo {elo}"));
@@ -192,9 +194,15 @@ public static class ChessLabRunners
         Directory.CreateDirectory(dir);
         var pgnOut = Path.Combine(dir, "games.pgn");
         int rounds = int.Parse(Config(slot.Job.Config, "rounds", "10"));
-        int depth = int.Parse(Config(slot.Job.Config, "depth", "8"));
+        // Watchable by default: 1s/move via cutechess st. depth>0 switches to the old
+        // tc=inf/depth mode, where a deep search may sit on one move for minutes.
+        int depth = int.Parse(Config(slot.Job.Config, "depth", "0"));
+        double st = double.Parse(Config(slot.Job.Config, "st", "1"),
+            System.Globalization.CultureInfo.InvariantCulture);
+        int elo = int.Parse(Config(slot.Job.Config, "elo", "2000"));
+        if (depth > 0) st = 0;
 
-        await foreach (var evt in CutechessRunner.RunAsync(rounds, depth, pgnOut, ct))
+        await foreach (var evt in CutechessRunner.RunAsync(rounds, depth, st, elo, pgnOut, ct))
         {
             switch (evt)
             {
@@ -283,6 +291,28 @@ public static class ChessLabRunners
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string def)
         => cfg.TryGetValue(key, out var v) ? v : def;
+
+    // Live-board tap for in-process self-play: convert the recorded ply's position surface
+    // to a FEN and publish it as a board event. Parallel games at shallow depth emit plies
+    // every few ms, so throttle per game (first ply always passes; then min 250ms apart)
+    // — the viewer needs a watchable stream, not every node.
+    private static Action<int, int, string, string> LiveBoardPublisher(
+        ChessLabService lab, ChessLabService.JobSlot slot, string nameA, string nameB)
+    {
+        var lastEmit = new ConcurrentDictionary<int, long>();
+        return (game, ply, uci, toKey) =>
+        {
+            long now = Environment.TickCount64;
+            if (ply > 1 && lastEmit.TryGetValue(game, out var last) && now - last < 250)
+                return;
+            lastEmit[game] = now;
+            if (!Laplace.Modality.Chess.PositionContent.TryFenFromSurface(toKey, out var fen))
+                return;
+            bool aWhite = game % 2 == 0; // MatchRunner alternates colors per game index
+            lab.Publish(slot, new ChessLabBoardEvent(
+                game, ply, uci, fen, aWhite ? nameA : nameB, aWhite ? nameB : nameA));
+        };
+    }
 
     private static int ResolveConcurrency(IReadOnlyDictionary<string, string> cfg, string key = "concurrency")
     {

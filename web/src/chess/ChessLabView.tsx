@@ -23,6 +23,7 @@ import {
   type LabExperiment,
 } from './lab/experiments';
 import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './lab/sse';
+import { LiveBoard, type LabBoardState } from './lab/LiveBoard';
 import { LichessPanel } from './LichessPanel';
 import styles from './ChessLabView.module.css';
 
@@ -101,6 +102,8 @@ export function ChessLabView() {
   const [jobs, setJobs] = useState<LabJob[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [events, setEvents] = useState<LabEvent[]>([]);
+  const [boards, setBoards] = useState<Record<number, LabBoardState>>({});
+  const [lastGame, setLastGame] = useState<number | null>(null);
   const [kind, setKind] = useState('substrate-test');
   const [params, setParams] = useState<Record<string, string>>(() => paramsFor('substrate-test', undefined));
   const [starting, setStarting] = useState(false);
@@ -147,12 +150,24 @@ export function ChessLabView() {
   const openJob = useCallback((job: LabJob) => {
     setActiveId(job.id);
     setEvents([]);
+    setBoards({});
+    setLastGame(null);
     esRef.current?.abort();
     const ac = new AbortController();
     esRef.current = ac;
     void (async () => {
       try {
         for await (const evt of streamLabEvents(job.id, ac.signal)) {
+          if (evt.fen !== undefined && evt.game !== undefined) {
+            // Board frames arrive at ~4/s/game — route them to the live board, not the log feed.
+            const b: LabBoardState = {
+              game: evt.game, ply: evt.ply ?? 0, uci: evt.uci ?? '',
+              fen: evt.fen, white: evt.white, black: evt.black,
+            };
+            setBoards((prev) => ({ ...prev, [b.game]: b }));
+            setLastGame(b.game);
+            continue;
+          }
           setEvents((prev) => [...prev.slice(-200), evt]);
           if (evt.done !== undefined && evt.total !== undefined) {
             setJobs((prev) => prev.map((j) =>
@@ -343,6 +358,12 @@ export function ChessLabView() {
               )}
             </div>
           )}
+        </Panel>
+      )}
+
+      {lastGame !== null && (
+        <Panel title="Live board">
+          <LiveBoard boards={boards} lastGame={lastGame} />
         </Panel>
       )}
 

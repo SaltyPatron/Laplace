@@ -1,0 +1,29 @@
+CREATE OR REPLACE FUNCTION chess_player_moves(
+        p_position bytea, p_player bytea, p_as_white boolean,
+        p_limit integer DEFAULT 12)
+    RETURNS TABLE(next_position bytea, games bigint, score double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Player-scoped repertoire: a PROVENANCE read over evidence, not a fold.
+    -- MOVE evidence rows carry context_id = the game they were played in; games
+    -- carry HAS_WHITE/HAS_BLACK header edges to player entities. The caller
+    -- resolves which color the player held from the position's side to move
+    -- (moves out of a white-to-move position in his games are his only when he
+    -- is White). score is the mover's net outcome in [0,1], weighted by
+    -- observation_count (outcome is the net CLASS on the folded evidence row).
+    SELECT a.object_id,
+           sum(a.observation_count)::bigint AS games,
+           (sum(a.outcome::double precision * a.observation_count)
+                / (2.0 * sum(a.observation_count)))::double precision AS score
+    FROM @extschema@.attestations a
+    WHERE a.subject_id = p_position
+      AND a.type_id = @extschema@.relation_type_id('MOVE')
+      AND a.context_id IN (
+            SELECT g.subject_id
+            FROM @extschema@.attestations g
+            WHERE g.type_id = @extschema@.relation_type_id(
+                      CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
+              AND g.object_id = p_player)
+    GROUP BY a.object_id
+    ORDER BY games DESC
+    LIMIT p_limit
+$$;
