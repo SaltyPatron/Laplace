@@ -149,6 +149,32 @@ internal sealed partial class SubstrateClient
         return rows.Count == 0 ? new MatchupVerdictResponse("matchup.verdict", null, null, null, null, null, null) : rows[0];
     }
 
+    /// <summary>
+    /// A source's roster: a bounded sample of what it witnessed, fully labeled.
+    /// By id (from the catalog row) so the hot path never re-runs the
+    /// source_counts aggregate; the per-leaf source_id indexes make the sampled
+    /// scan ~1s cold. A sample is the honest bounded read — "top" would demand
+    /// an unbounded sort over millions of rows.
+    /// </summary>
+    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
+        ReadRowsAsync("""
+            SELECT encode(a.subject_id, 'hex'), laplace.label_or_hex(a.subject_id),
+                   laplace.relation_canonical(a.type_id),
+                   encode(a.object_id, 'hex'), laplace.label_or_hex(a.object_id),
+                   a.observation_count
+            FROM laplace.attestations a
+            WHERE a.source_id = @sid
+            LIMIT @lim
+            """,
+            static r => new SourceRosterRow(
+                r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1), r.GetString(2),
+                r.GetString(3), r.IsDBNull(4) ? "" : r.GetString(4), r.GetInt64(5)),
+            cmd =>
+            {
+                cmd.Parameters.Add("sid", NpgsqlDbType.Bytea).Value = sourceId;
+                cmd.Parameters.AddWithValue("lim", limit);
+            }, "source_roster", ct, timeoutSeconds: 30);
+
     private static bool TryParseHex(string idHex, out byte[] id)
     {
         id = [];

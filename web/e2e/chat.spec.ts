@@ -47,12 +47,13 @@ test('evidence lookup renders receipts', async ({ page }) => {
   ).toBeVisible({ timeout: 35_000 });
 });
 
-test('home example seeds and runs a structural read', async ({ page }) => {
+test('home example opens the topic page showing everything', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /What does "entropy" mean\?/ }).click();
-  // Lands on the Query console with the seed applied and auto-run.
-  await expect(page.locator('#query-topic')).toHaveValue('entropy');
-  await expect(page.getByRole('button', { name: 'Run query' })).toBeVisible({ timeout: 20_000 });
+  // A bare-topic read lands on the topic page — every section at once, no
+  // shape dropdown to pick first.
+  await expect(page).toHaveURL(/\/topic\/entropy/, { timeout: 15_000 });
+  await expect(page.getByText('Taxonomy — the IS_A tree')).toBeVisible({ timeout: 20_000 });
 });
 
 test('billing page lists the three plans', async ({ page }) => {

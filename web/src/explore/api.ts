@@ -150,3 +150,8 @@ export function exploreModalities(opts?: ApiOptions) {
   return apiGet<{ text: number; chess: number; models: number; multilingual: number }>(
     '/v1/explore/modalities', opts);
 }
+
+export function exploreSourceRoster(idHex: string, limit = 40, opts?: ApiOptions) {
+  return apiGet<{ rows: import('./types').SourceRosterRow[] }>(
+    `/v1/explore/sources/${idHex}/roster?limit=${limit}`, opts);
+}

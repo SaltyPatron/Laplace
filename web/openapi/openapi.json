@@ -750,6 +750,116 @@
         }
       }
     },
+    "/v1/explore/sources/{idHex}/roster": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRosterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explore/entities/{idHex}/taxonomy": {
+      "get": {
+        "tags": [
+          "explore"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/explore/entities/{idHex}/record": {
       "get": {
         "tags": [
@@ -6187,6 +6297,7 @@
           "content": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
+              "null",
               "integer",
               "string"
             ],
@@ -6205,6 +6316,12 @@
             ]
           },
           "role": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id_hex": {
             "type": [
               "null",
               "string"
@@ -6275,6 +6392,21 @@
               "null",
               "string"
             ]
+          },
+          "source_key": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "evidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -8455,6 +8587,64 @@
           }
         }
       },
+      "SourceRosterResponse": {
+        "required": [
+          "object",
+          "id",
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceRosterRow"
+            }
+          }
+        }
+      },
+      "SourceRosterRow": {
+        "required": [
+          "subject_id",
+          "subject",
+          "relation",
+          "object_id",
+          "object",
+          "observations"
+        ],
+        "type": "object",
+        "properties": {
+          "subject_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "observations": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "SubstrateAuditReport": {
         "required": [
           "counts",
@@ -8810,6 +9000,64 @@
               "string"
             ],
             "format": "double"
+          }
+        }
+      },
+      "TaxonomyNode": {
+        "required": [
+          "id",
+          "label",
+          "eff_mu"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TaxonomyResponse": {
+        "required": [
+          "object",
+          "root_id",
+          "root_label",
+          "up",
+          "children"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "root_id": {
+            "type": "string"
+          },
+          "root_label": {
+            "type": "string"
+          },
+          "up": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyNode"
+            }
           }
         }
       },

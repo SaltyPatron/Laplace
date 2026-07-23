@@ -49,3 +49,12 @@ export function exploreMatchupVerdict(x: string, y: string, opts?: ApiOptions) {
   return apiGet<import('./types').MatchupVerdict>(
     `/v1/explore/matchup/verdict?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, opts);
 }
+
+export interface TaxonomyNode { id: string; label: string; eff_mu?: number | null }
+export interface TaxonomyResponse {
+  root_id: string; root_label: string;
+  up: TaxonomyNode[]; children: TaxonomyNode[];
+}
+export function entityTaxonomy(idHex: string, opts?: ApiOptions) {
+  return apiGet<TaxonomyResponse>(`/v1/explore/entities/${idHex}/taxonomy`, opts);
+}

@@ -48,8 +48,29 @@ internal sealed class WitnessCatalog
 
     public IReadOnlyList<string> FeaturedRefsList() => FeaturedRefs;
 
+    /// <summary>
+    /// The cli↔source-key bridge. Live sources are keyed by decomposer name
+    /// ("substrate/source/WordNetDecomposer/v1"); the cadence manifest speaks
+    /// cli names ("wordnet"). Strip the path, the Decomposer suffix and the
+    /// version, lowercase — this was missing, so the stage→source drill never
+    /// matched a live source and stages rendered with zero live data.
+    /// </summary>
+    public static string CliForSourceKey(string key)
+    {
+        var seg = key.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(x => x.EndsWith("Decomposer", StringComparison.OrdinalIgnoreCase));
+        seg ??= key.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => !x.StartsWith('v')) ?? key;
+        if (seg.EndsWith("Decomposer", StringComparison.OrdinalIgnoreCase))
+            seg = seg[..^"Decomposer".Length];
+        return seg.ToLowerInvariant();
+    }
+
     public IReadOnlyList<ExploreStageRow> BuildStages(IReadOnlyDictionary<string, ExploreSourceRow> liveByKey)
     {
+        var liveByCli = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in liveByKey.Values)
+            liveByCli[CliForSourceKey(row.Key)] = row;
+
         var output = new List<ExploreStageRow>(_root.Cadence.Count);
         foreach (var stage in _root.Cadence.OrderBy(s => s.Order))
         {
@@ -57,12 +78,14 @@ internal sealed class WitnessCatalog
             foreach (var src in stage.Sources)
             {
                 var cli = src.Cli ?? "";
-                liveByKey.TryGetValue(cli, out var live);
+                liveByCli.TryGetValue(cli, out var live);
                 sources.Add(new ExploreStageSourceRow(
                     Cli: cli,
                     Layer: src.Layer ?? live?.Layer,
                     Role: src.Role ?? src.Links ?? live?.Role,
-                    Links: src.Links));
+                    Links: src.Links,
+                    SourceKey: live?.Key,
+                    Evidence: live?.Evidence));
             }
 
             output.Add(new ExploreStageRow(

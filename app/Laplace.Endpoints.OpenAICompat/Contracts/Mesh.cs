@@ -25,3 +25,22 @@ public sealed record MeshResponse(
     [property: JsonPropertyName("hub_type")] string? HubType,
     [property: JsonPropertyName("belongs_to")] IReadOnlyList<MeshLink> BelongsTo,
     [property: JsonPropertyName("roster")] IReadOnlyList<MeshLink> Roster);
+
+/// <summary>One rung of the taxonomy: an IS_A neighbor with its rating.</summary>
+public sealed record TaxonomyNode(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("eff_mu")] decimal? EffMu);
+
+/// <summary>
+/// The IS_A tree around a topic: the chain of parents climbing to the root
+/// (the ladder), and the strongest children (the branches). Rooted at the
+/// topic's top synset when the topic itself is a bare surface — taxonomy lives
+/// on concepts, not spellings.
+/// </summary>
+public sealed record TaxonomyResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("root_id")] string RootId,
+    [property: JsonPropertyName("root_label")] string RootLabel,
+    [property: JsonPropertyName("up")] IReadOnlyList<TaxonomyNode> Up,
+    [property: JsonPropertyName("children")] IReadOnlyList<TaxonomyNode> Children);
