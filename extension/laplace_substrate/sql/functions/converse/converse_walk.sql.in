@@ -119,8 +119,15 @@ BEGIN
     )
     SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
            (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
-           (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
-             WHERE k.is_core AND k.rn = 1),
+           -- Core starts when the gloss survives; otherwise the fall-through
+           -- the toks comment promises: a one-word gloss (an OMW/Wiktionary
+           -- translation like "roi") leaves no core rows, and the walk seeds
+           -- from the on-topic tier-3 usage sentences instead of going dark.
+           COALESCE(
+               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                 WHERE k.is_core AND k.rn = 1),
+               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                 WHERE k.rn = 1)),
            (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
              WHERE k.is_core AND k.gid = (
                  SELECT k2.gid FROM kept k2 WHERE k2.is_core
