@@ -518,9 +518,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // construction, and consensus_upsert's per-type loop still gives
             // every call runtime-pruned, type-major-ordered writes. Each chunk
             // commits its own transaction.
+            // Segment size FANS OUT to the connection budget instead of a fixed
+            // 65,536 (2026-07-23). The fixed chunk was sized for huge deltas
+            // (documents, models) and silently degraded single-type-dominated,
+            // file-grain workloads to ONE connection: a chess-eval census whose
+            // deltas were ~90% HAS_EVAL folded at ~1.5k cells/s while eleven
+            // connections idled — measured 14-20x under the 21-36k cells/s this
+            // same fold recorded on OMW's multi-type deltas. Safety is unchanged
+            // and was never the chunk boundary's job: cells are client-deduped,
+            // so ANY chunking is row-disjoint. The 2,048 floor keeps a tiny run
+            // from paying twelve transactions for a few hundred cells.
+            int segLen = Math.Clamp(
+                (run.Len + FoldConnections - 1) / FoldConnections, 2_048, UpsertChunkCells);
             var segments = new List<(int Off, int Len)>();
-            for (int s = run.Off; s < run.Off + run.Len; s += UpsertChunkCells)
-                segments.Add((s, Math.Min(UpsertChunkCells, run.Off + run.Len - s)));
+            for (int s = run.Off; s < run.Off + run.Len; s += segLen)
+                segments.Add((s, Math.Min(segLen, run.Off + run.Len - s)));
 
             await Parallel.ForEachAsync(segments,
                 new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
