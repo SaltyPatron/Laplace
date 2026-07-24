@@ -1,59 +1,101 @@
-name: Seed — foundation ladder
+name: Seed — foundation
 
-# The floor + core-lexical ladder as a single dispatchable phase:
-#   unicode → iso639 → cili → wordnet → verbnet → propbank
-#           → framenet → mapnet → wordframenet → semlink
-# Ordered and idempotent — each rung no-ops when its layer is already complete
-# (ensure-foundation.sh checks HasLayerCompleted per decomposer). This is the one
-# phase that is a multi-source ladder rather than a single ingest, so it drives
-# ensure-foundation.sh directly instead of the _ingest.yml single-source core.
+# The floor + core-lexical sources, each an individually-triggerable source
+# (one per run) — the dropdown IS the per-source selector, exactly like
+# seed-knowledge.yml:
+#   unicode · iso639 · cili · wordnet · verbnet · propbank
+#   · framenet · mapnet · wordframenet · semlink
+# All carry an IngestDataPaths default and a decomposer-gates.json entry, so
+# the consensus gate runs. Single-source runs delegate to _ingest.yml and are
+# marker-gated (IngestRunner short-circuits on HasLayerCompleted for the
+# source), so a re-dispatch of a completed source is a fast no-op.
 #
-# THIS is the fresh-full-build campaign: a single job that COPYs the whole floor +
-# core-lexical ladder in one serialized pass. On a `force` (fresh_db) run it is the
-# one place the index-cycle fast-path is worth turning on — drop the plain secondary
-# indexes ONCE up front (the physicality coord GiST maintains at ~77k rows/s per-row
-# = 4× slow), let every rung COPY into index-free heaps under LAPLACE_INDEX_CYCLE_DEFER
-# (so no rung auto-rebuilds), then rebuild all of them ONCE at the end with the
-# terminal `recover-indexes`. It is deliberately NOT wired into _ingest.yml: a lone
-# per-source re-dispatch is an increment, where dropping + rebuilding the whole index
-# is pure loss.
+# `ladder` is the one remaining bucket, kept ONLY for the fresh-full-build
+# campaign: unicode → iso639 → cili → wordnet → verbnet → propbank → framenet
+# → mapnet → wordframenet → semlink in one serialized pass via
+# ensure-foundation.sh (each rung no-ops when its layer is complete). On a
+# `force` run it is the one place the index-cycle fast-path is worth turning
+# on — drop the plain secondary indexes ONCE up front (the physicality coord
+# GiST maintains at ~77k rows/s per-row = 4× slow), let every rung COPY into
+# index-free heaps under LAPLACE_INDEX_CYCLE_DEFER (so no rung auto-rebuilds),
+# then rebuild all of them ONCE at the end with the terminal
+# `recover-indexes`. The index bracket is deliberately NOT available to a
+# single-source dispatch: a lone re-dispatch is an increment, where dropping +
+# rebuilding the whole index is pure loss.
 
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "foundation source (one per run) — or 'ladder' for the full ordered fresh-build campaign"
+        type: choice
+        required: true
+        options:
+          - unicode
+          - iso639
+          - cili
+          - wordnet
+          - verbnet
+          - propbank
+          - framenet
+          - mapnet
+          - wordframenet
+          - semlink
+          - ladder
+      path:
+        description: "single-source only: optional <path> — single file, bare dir, or corpus root (blank = DATA_ROOT default)"
+        type: string
+        default: ""
       database:
         description: "target DB (one database: laplace)"
         type: choice
         options: [laplace]
         default: laplace
+      run_idempotency:
+        description: "single-source only: re-ingest and prove no double-count"
+        type: boolean
+        default: false
       force:
-        description: "re-ingest every rung even if its layer is already complete"
+        description: "ladder only: re-ingest every rung even if its layer is already complete"
         type: boolean
         default: false
       index_cycle:
-        description: "fresh build only: drop plain secondary indexes once, COPY index-free, rebuild once at the end"
+        description: "ladder fresh build only: drop plain secondary indexes once, COPY index-free, rebuild once at the end"
         type: boolean
         default: true
-
-concurrency:
-  group: laplace-ingest-${{ inputs.database }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
-env:
-  LAPLACE_DATA_ROOT: /vault/Data
-  PGDATABASE: ${{ inputs.database }}
-  LAPLACE_DBNAME: ${{ inputs.database }}
-  # Build-if-needed CLI runner (the up-front drop precedes the ladder's own build).
-  CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --"
-
 jobs:
-  foundation:
+
+  seed:
+    # One foundation source, same contract as every other seed-*.yml phase.
+    if: inputs.source != 'ladder'
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
+
+  ladder:
+    # The fresh-full-build campaign — the ordered multi-source pass.
     name: "foundation ladder → ${{ inputs.database }}"
+    if: inputs.source == 'ladder'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 480
+    concurrency:
+      group: laplace-ingest-${{ inputs.database }}
+      cancel-in-progress: false
+    env:
+      LAPLACE_DATA_ROOT: /vault/Data
+      PGDATABASE: ${{ inputs.database }}
+      LAPLACE_DBNAME: ${{ inputs.database }}
+      # Build-if-needed CLI runner (the up-front drop precedes the ladder's own build).
+      CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --"
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
