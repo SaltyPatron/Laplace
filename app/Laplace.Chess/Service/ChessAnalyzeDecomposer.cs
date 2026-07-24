@@ -6,8 +6,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED pass: scan witnessed Chess_Game rows in Postgres (HAS_MOVETEXT under ChessPgn),
-// hydrate via content roundtrip, derive geometry/consensus, stamp AnalysisMarker.
+// CALCULATED pass, BACKFILL role: scan witnessed Chess_Game rows in Postgres (HAS_MOVETEXT
+// under ChessPgn) that carry no current-version ANALYSIS marker, hydrate via content roundtrip,
+// derive geometry/consensus, stamp AnalysisMarker. Since GH #600, `laplace ingest chess` derives
+// inline in the recording pass (ChessPgnDecomposer.Compose -> DeriveFromParsed), so a fresh
+// ingest never needs this pass; it exists to (a) analyze games recorded before the fusion landed
+// and (b) re-derive at a bumped ChessAnalyze.Version without re-recording.
 // Run: `laplace ingest chess-analyze`  (no path — substrate is the source of truth)
 public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecord>
 {

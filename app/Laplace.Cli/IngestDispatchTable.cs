@@ -113,18 +113,14 @@ internal static class IngestDispatchTable
             ["omw-probe"] = cli => IngestCommands.OmwProbeAsync(cli),
         };
 
-    private static async Task<int> IngestChessRecordAndAnalyzeAsync(IngestCommands.IngestCliArgs cli)
-    {
-        int rc = await IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessPgnDecomposer(cli.Recursive), cli.Path ?? "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true);
-        if (rc != 0 || cli.NoAnalyze) return rc;
-
-        Console.WriteLine("chess record complete — running substrate analyze pass on witnessed games…");
-        return await IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessAnalyzeDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true);
-    }
+    // GH #600: `chess` records AND derives the calculated layer in ONE fused Compose pass
+    // (ChessPgnDecomposer -> DeriveFromParsed, reusing the in-memory parse) — no second
+    // Postgres hydrate + re-parse. `--no-analyze` records game-grain only and leaves
+    // derivation to a later `chess-analyze` backfill (the pre-fusion two-step, opt-in now).
+    private static Task<int> IngestChessRecordAndAnalyzeAsync(IngestCommands.IngestCliArgs cli)
+        => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessPgnDecomposer(cli.Recursive, analyzeInline: !cli.NoAnalyze),
+            cli.Path ?? "", skipLayerCheck: true, cli, skipSourceCompletion: true);
 
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {

@@ -13,11 +13,17 @@ namespace Laplace.Chess.Service;
 // Non-recursive by default: pointing at Games\Chess must not silently swallow every nested
 // corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
 // (laplace ingest chess <dir> --recursive).
-public sealed class ChessPgnDecomposer(bool recursive = false)
+public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInline = true)
     : ComposeDecomposer<ChessGameRecord>, IIngestInventoryProvider
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
+    // GH #600: derive the calculated layer in the same Compose pass as the witnessed record,
+    // reusing the in-memory parse. false (via `chess --no-analyze`) records game-grain only and
+    // defers derivation to a later `chess-analyze` backfill — the pre-fusion two-step, kept as an
+    // opt-out for fast record-only ingest.
+    private readonly bool _analyzeInline = analyzeInline;
 
     public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
     public override string SourceName => "ChessPgn";
@@ -47,7 +53,28 @@ public sealed class ChessPgnDecomposer(bool recursive = false)
             yield return game;
     }
 
-    protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b) => RecordGame(record, b);
+    // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
+    // deterministic calculated derivation (positions, move/eval edges, motifs, opening —
+    // ChessAnalysis source, via DeriveFromParsed) from the SAME in-memory parse. record.Walk
+    // is the tree-sitter parse TryParseGame already produced; the standalone chess-analyze
+    // pass used to re-read HAS_MOVETEXT out of Postgres and re-parse it — a full DB round-trip
+    // plus a second tree-sitter parse of a game we already hold parsed in hand. SAN replay
+    // under chess's fixed rules is deterministic parsing, not a versioned judgment, so it
+    // belongs in the recording pass (matches ChessBookDecomposer.ComposeEmbeddedGame).
+    // DeriveFromParsed stamps ANALYZED_AT, so the standalone analyzer scan permanently skips
+    // games ingested through this fused path; that scan now backfills only games recorded
+    // before this fusion landed.
+    protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b)
+        => ComposeGame(record, b, _analyzeInline);
+
+    // The fused pass (GH #600), factored out so the fusion contract is directly testable
+    // (the class is sealed and Compose is protected). analyzeInline=false reproduces the
+    // pre-fusion game-grain-only record.
+    internal static void ComposeGame(ChessGameRecord record, SubstrateChangeBuilder b, bool analyzeInline)
+    {
+        RecordGame(record, b);
+        if (analyzeInline) ChessAnalyze.DeriveFromParsed(b, record);
+    }
 
     private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(
         string ecosystemPath, SearchOption scope, ISubstrateReader? reader, int chunkSize,
@@ -147,7 +174,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false)
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
     // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
     // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
-    // (ChessAnalyze), run later off this witnessed layer. See docs/specs/08_Record_vs_Calculate_Spec.txt.
+    // (ChessAnalyze). This method stays pure — Compose runs DeriveFromParsed alongside it so
+    // the derivation shares this pass's in-memory parse (GH #600); the standalone chess-analyze
+    // pass backfills games recorded before that fusion. See docs/specs/08_Record_vs_Calculate_Spec.txt.
     // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
     // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
     //
