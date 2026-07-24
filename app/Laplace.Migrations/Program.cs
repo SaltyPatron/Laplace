@@ -14,7 +14,7 @@ internal static class Program
         var connectionString = ResolveConnectionString(args);
 
         Console.WriteLine($"Laplace.Migrations: command={command}");
-        Console.WriteLine($"Target database connection: {Mask(connectionString)}");
+        Console.WriteLine($"Target database connection: {LaplaceInstall.RedactConnectionString(connectionString)}");
 
         try
         {
@@ -226,20 +226,6 @@ internal static class Program
             if (parts.Length > 1) b.Password = Uri.UnescapeDataString(parts[1]);
         }
         return b.ConnectionString;
-    }
-
-    private static string Mask(string connectionString)
-    {
-        try
-        {
-            var b = new NpgsqlConnectionStringBuilder(connectionString);
-            if (!string.IsNullOrEmpty(b.Password)) b.Password = "***";
-            return b.ConnectionString;
-        }
-        catch
-        {
-            return "<unparseable connection string>";
-        }
     }
 
     private static int Usage()

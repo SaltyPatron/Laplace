@@ -104,7 +104,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
             await RegisterCanonicalsAsync(ds, canonicalNames, ct);
             _ds = ds; _writer = writer; _host = host; _modality = modality; _engine = engine;
-            _log.LogInformation("chess engine initialized against {Conn}", Redact(_connString));
+            _log.LogInformation("chess engine initialized against {Conn}", LaplaceInstall.RedactConnectionString(_connString));
             return engine;
         }
         finally { _initGate.Release(); }
@@ -629,9 +629,6 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     private static string Describe(GameOutcome o) =>
         o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
-
-    private static string Redact(string conn) =>
-        System.Text.RegularExpressions.Regex.Replace(conn, "(?i)password=[^;]*", "password=***");
 
     public async ValueTask DisposeAsync()
     {
