@@ -33,9 +33,13 @@ tax_find(const hash128_t *ids, int n, const hash128_t *key)
 }
 
 /*
- * consensus_taxonomy_edges is prepared once (static) and re-executed per
- * dequeued node instead of re-planning on every SPI_execute_with_args call.
- * The query, its two arguments, and the rows read back are unchanged.
+ * The frontier is expanded ONE SPI round trip per BFS level, not one per
+ * dequeued node: the walk was 19.7k sequential SPI calls for a hub word
+ * (emperor's depth-7 closure = 8,225 nodes) and dominated the ~14s matchup
+ * tape. unnest WITH ORDINALITY + ORDER BY u.ord makes the batched rows arrive
+ * in exactly the per-node order the old loop produced, so parent assignment,
+ * dedup, and output order are unchanged. consensus_taxonomy_edges stays the
+ * single owner of the edge truth table.
  */
 static SPIPlanPtr tax_edges_plan = NULL;
 
@@ -44,10 +48,12 @@ ensure_tax_edges_plan(void)
 {
     if (tax_edges_plan == NULL)
     {
-        Oid        argtypes[2] = { BYTEAOID, BYTEAARRAYOID };
+        Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT object_id, type_id, rating, rd "
-            "FROM laplace.consensus_taxonomy_edges($1, $2)",
+            "SELECT u.ord, e.object_id, e.type_id, e.rating, e.rd "
+            "FROM unnest($1) WITH ORDINALITY AS u(id, ord) "
+            "CROSS JOIN LATERAL laplace.consensus_taxonomy_edges(u.id, $2) e "
+            "ORDER BY u.ord",
             2, argtypes);
         if (plan == NULL)
             elog(ERROR, "tax_bfs_up: SPI_prepare failed: %s",
@@ -120,14 +126,12 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
            const hash128_t *up_types, int up_type_n,
            TaxNode **nodes_out)
 {
-    int    head = 0;
     int    tail = 0;
     int    n = 0;
     int    node_cap = TAX_WALK_INITIAL;
     int    queue_cap = TAX_WALK_INITIAL;
     TaxNode *nodes = (TaxNode *) palloc(sizeof(TaxNode) * node_cap);
     int   *queue = (int *) palloc(sizeof(int) * queue_cap);
-    bytea *nodebuf = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
     Datum  args[2];
     int    rc;
     Datum *type_datums;
@@ -149,8 +153,6 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
     ctl.entrysize = sizeof(TaxIdxEntry);
     idmap = hash_create("tax_bfs_up idmap", TAX_WALK_INITIAL, &ctl,
                         HASH_ELEM | HASH_BLOBS);
-
-    SET_VARSIZE(nodebuf, VARHDRSZ + sizeof(hash128_t));
 
     for (int s = 0; s < seed_n; s++)
     {
@@ -176,89 +178,112 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
         queue[tail++] = n++;
     }
 
-    while (head < tail)
+    /* Level-synchronous BFS: FIFO order already visits nodes in
+     * non-decreasing depth, so expanding a whole level in one batched query —
+     * rows ordered by frontier position — replays exactly the per-node
+     * sequence the old loop produced. One SPI round trip per depth level
+     * (≤ max_depth total) instead of one per node. */
     {
-        int cur = queue[head++];
-        TaxNode *u = &nodes[cur];
+        int level_begin = 0;
+        int level_end = tail;
 
-        if (u->depth >= max_depth)
-            continue;
-
-        memcpy(VARDATA(nodebuf), &u->id, sizeof(hash128_t));
-
-        args[0] = PointerGetDatum(nodebuf);
-        args[1] = types_arr_datum;
-
-        rc = SPI_execute_plan(tax_edges_plan, args, NULL, true, 0);
-
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "graph_geometry_reads: tax walk query failed: %s",
-                 SPI_result_code_string(rc));
-
-        for (uint64 r = 0; r < SPI_processed; r++)
+        for (int depth = 0; depth < max_depth && level_begin < level_end; depth++)
         {
-            HeapTuple tup = SPI_tuptable->vals[r];
-            TupleDesc td  = SPI_tuptable->tupdesc;
-            bool      isnull;
-            Datum     obj_d;
-            hash128_t obj_h;
-            int       walk_depth;
-            int       pi;
+            int        frontier_n = level_end - level_begin;
+            int        walk_depth = depth + 1;
+            Datum     *frontier_ids = (Datum *) palloc(sizeof(Datum) * frontier_n);
+            ArrayType *frontier_arr;
 
-            obj_d = SPI_getbinval(tup, td, 1, &isnull);
-            if (isnull)
-                continue;
-            obj_h = datum_to_hash128(obj_d);
-            walk_depth = u->depth + 1;
+            for (int i = 0; i < frontier_n; i++)
+                frontier_ids[i] = hash128_to_datum(&nodes[queue[level_begin + i]].id);
+            frontier_arr = construct_array(frontier_ids, frontier_n,
+                                           BYTEAOID, -1, false, TYPALIGN_INT);
 
-            if (in_ancestor_chain(nodes, cur, &obj_h))
-                continue;
+            args[0] = PointerGetDatum(frontier_arr);
+            args[1] = types_arr_datum;
 
-            pi = tax_idx_find(idmap, &obj_h);
-            if (pi >= 0)
+            rc = SPI_execute_plan(tax_edges_plan, args, NULL, true, 0);
+
+            if (rc != SPI_OK_SELECT)
+                elog(ERROR, "graph_geometry_reads: tax walk query failed: %s",
+                     SPI_result_code_string(rc));
+
+            for (uint64 r = 0; r < SPI_processed; r++)
             {
-                if (nodes[pi].depth <= walk_depth)
+                HeapTuple tup = SPI_tuptable->vals[r];
+                TupleDesc td  = SPI_tuptable->tupdesc;
+                bool      isnull;
+                int64     ord;
+                int       cur;
+                Datum     obj_d;
+                hash128_t obj_h;
+                int       pi;
+
+                ord = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
+                if (isnull || ord < 1 || ord > frontier_n)
                     continue;
-                nodes[pi].depth = walk_depth;
-                nodes[pi].parent = cur;
-                nodes[pi].via_type = datum_to_hash128(
-                    SPI_getbinval(tup, td, 2, &isnull));
-                nodes[pi].rating = DatumGetInt64(
-                    SPI_getbinval(tup, td, 3, &isnull));
-                nodes[pi].rd = DatumGetInt64(
-                    SPI_getbinval(tup, td, 4, &isnull));
+                cur = queue[level_begin + (int) ord - 1];
+
+                obj_d = SPI_getbinval(tup, td, 2, &isnull);
+                if (isnull)
+                    continue;
+                obj_h = datum_to_hash128(obj_d);
+
+                if (in_ancestor_chain(nodes, cur, &obj_h))
+                    continue;
+
+                pi = tax_idx_find(idmap, &obj_h);
+                if (pi >= 0)
+                {
+                    /* Level order makes a shallower rediscovery impossible;
+                     * kept for the truth table's sake. */
+                    if (nodes[pi].depth <= walk_depth)
+                        continue;
+                    nodes[pi].depth = walk_depth;
+                    nodes[pi].parent = cur;
+                    nodes[pi].via_type = datum_to_hash128(
+                        SPI_getbinval(tup, td, 3, &isnull));
+                    nodes[pi].rating = DatumGetInt64(
+                        SPI_getbinval(tup, td, 4, &isnull));
+                    nodes[pi].rd = DatumGetInt64(
+                        SPI_getbinval(tup, td, 5, &isnull));
+                    if (tail >= queue_cap)
+                    {
+                        queue_cap *= 2;
+                        queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
+                    }
+                    queue[tail++] = pi;
+                    continue;
+                }
+
+                if (n >= node_cap)
+                {
+                    node_cap *= 2;
+                    nodes = (TaxNode *) repalloc(nodes, sizeof(TaxNode) * node_cap);
+                }
                 if (tail >= queue_cap)
                 {
                     queue_cap *= 2;
                     queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
                 }
-                queue[tail++] = pi;
-                continue;
+
+                nodes[n].id = obj_h;
+                nodes[n].depth = walk_depth;
+                nodes[n].parent = cur;
+                nodes[n].via_type = datum_to_hash128(
+                    SPI_getbinval(tup, td, 3, &isnull));
+                nodes[n].rating = DatumGetInt64(
+                    SPI_getbinval(tup, td, 4, &isnull));
+                nodes[n].rd = DatumGetInt64(
+                    SPI_getbinval(tup, td, 5, &isnull));
+                tax_idx_add(idmap, &nodes[n].id, n);
+                queue[tail++] = n++;
             }
 
-            if (n >= node_cap)
-            {
-                node_cap *= 2;
-                nodes = (TaxNode *) repalloc(nodes, sizeof(TaxNode) * node_cap);
-                u = &nodes[cur];    /* the repalloc may have moved the array */
-            }
-            if (tail >= queue_cap)
-            {
-                queue_cap *= 2;
-                queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
-            }
-
-            nodes[n].id = obj_h;
-            nodes[n].depth = walk_depth;
-            nodes[n].parent = cur;
-            nodes[n].via_type = datum_to_hash128(
-                SPI_getbinval(tup, td, 2, &isnull));
-            nodes[n].rating = DatumGetInt64(
-                SPI_getbinval(tup, td, 3, &isnull));
-            nodes[n].rd = DatumGetInt64(
-                SPI_getbinval(tup, td, 4, &isnull));
-            tax_idx_add(idmap, &nodes[n].id, n);
-            queue[tail++] = n++;
+            pfree(frontier_arr);
+            pfree(frontier_ids);
+            level_begin = level_end;
+            level_end = tail;
         }
     }
 
@@ -266,7 +291,6 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
     pfree(DatumGetPointer(types_arr_datum));
     pfree(type_datums);
     pfree(queue);
-    pfree(nodebuf);
     *nodes_out = nodes;
     return n;
 }
