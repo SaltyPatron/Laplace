@@ -1,14 +1,16 @@
+-- No SET search_path so it inlines into callers (#617) — graph_cascade
+-- executes this once per step; non-inlined, each step paid a full function
+-- execution.
 CREATE OR REPLACE FUNCTION consensus_step_edge(
     p_from bytea,
     p_to   bytea)
     RETURNS TABLE(type_id bytea, subject_id bytea, rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
-    FROM v_consensus_unrefuted c
+    FROM @extschema@.v_consensus_unrefuted c
     WHERE (
           (c.subject_id = p_from AND c.object_id = p_to)
           OR (c.subject_id = p_to AND c.object_id = p_from))
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
     LIMIT 1
 $$;

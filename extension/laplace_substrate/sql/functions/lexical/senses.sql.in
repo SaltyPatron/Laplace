@@ -1,10 +1,12 @@
 -- senses: HAS_SENSE-family read (R2). Prefer bubble_up for top-k + domain;
 -- this keeps the classic (sense, synset, eff_mu, witnesses) shape for define().
+-- No SET search_path and no STRICT so it inlines into callers (both block
+-- inlining; #617). NULL-safety is preserved without STRICT: bubble_up(NULL)
+-- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
 CREATE OR REPLACE FUNCTION senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
-    FROM bubble_up(p_word, NULL::bytea[], 64) b
+    FROM @extschema@.bubble_up(p_word, NULL::bytea[], 64) b
     ORDER BY b.score DESC
 $$;

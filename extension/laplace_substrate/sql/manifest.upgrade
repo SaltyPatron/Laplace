@@ -131,6 +131,7 @@ functions/ops/api.sql.in
 functions/relation/relation_type_resolve.sql.in
 functions/relation/relation_type_in_family.sql.in
 functions/relation/relation_in_family.sql.in
+functions/relation/relation_family_members.sql.in
 functions/relation/relation_rank.sql.in
 functions/relation/relation_canonical.sql.in
 functions/relation/relation_rank_resolved.sql.in
