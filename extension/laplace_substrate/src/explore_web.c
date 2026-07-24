@@ -64,20 +64,6 @@ cand_cmp_desc(const void *a, const void *b)
 	return 0;
 }
 
-static double
-edge_strength(int64 rating, int64 rd)
-{
-	double eff = (double) laplace_effective_mu_fp(rating, rd);
-	double diff = (eff - (double) LAPLACE_GLICKO2_NEUTRAL_MU_FP) / 1.0e9;
-	double s = 0.5 + diff / 800.0;
-
-	if (s < 0.05)
-		s = 0.05;
-	if (s > 1.0)
-		s = 1.0;
-	return s;
-}
-
 static void
 emit_edge(ReturnSetInfo *rsinfo, const EdgeOut *e)
 {
@@ -248,7 +234,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 					cands[n_cands].rd = rd;
 					cands[n_cands].witnesses = wit;
 					cands[n_cands].outbound = outbound;
-					cands[n_cands].strength = edge_strength(rating, rd);
+					cands[n_cands].strength = laplace_edge_strength(rating, rd);
 					n_cands++;
 				}
 			}

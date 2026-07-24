@@ -111,6 +111,20 @@ eff_mu_display_fp(int64 rating, int64 rd)
            / INT64CONST(1000000) * INT64CONST(1000000);
 }
 
+/* Edge strength in [0.05, 1.0]: a logistic on eff_mu relative to the neutral
+ * rating. This is the ONE foundry/explore edge-weight formula -- the foundry
+ * crawl and the web-explore path both read it from here so they cannot drift. */
+static inline double
+laplace_edge_strength(int64 rating, int64 rd)
+{
+    double eff  = (double) laplace_effective_mu_fp(rating, rd);
+    double diff = (eff - (double) LAPLACE_GLICKO2_NEUTRAL_MU_FP) / 1.0e9;
+    double s    = 0.5 + diff / 800.0;
+    if (s < 0.05) s = 0.05;
+    if (s > 1.0)  s = 1.0;
+    return s;
+}
+
 /* Convert an int64 fp value (multiple of 1e6 from eff_mu_display_fp sums)
  * to the same 3-dscale numeric eff_mu_display_numeric-derived sums had. */
 static inline Datum

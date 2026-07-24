@@ -468,11 +468,9 @@ int laplace_attestation_aggregated_build(
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
 
-    int64_t net_half = games * kScoreHalfFp;
     int16_t outcome;
-    if (sum_score_fp1e9 > net_half) outcome = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
-    else if (sum_score_fp1e9 < net_half) outcome = LAPLACE_ATTESTATION_OUTCOME_REFUTE;
-    else outcome = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+    if (laplace_attestation_outcome_from_totals_fp(games, sum_score_fp1e9, &outcome) != 0)
+        return -1;
 
     int64_t score_fp = sum_score_fp1e9 / games;
 
@@ -522,11 +520,9 @@ int laplace_attestation_aggregated_batch_build(
                 return -1;
         }
 
-        const int64_t net_half = c->games * kScoreHalfFp;
         int16_t outcome;
-        if (c->sum_score_fp1e9 > net_half)      outcome = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
-        else if (c->sum_score_fp1e9 < net_half) outcome = LAPLACE_ATTESTATION_OUTCOME_REFUTE;
-        else                                    outcome = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+        if (laplace_attestation_outcome_from_totals_fp(c->games, c->sum_score_fp1e9, &outcome) != 0)
+            return -1;
 
         laplace_attestation_staged_t* o = &out[i];
         o->subject_id = subj;
