@@ -1,9 +1,11 @@
+-- No SET search_path and no STRICT so it inlines into callers (#617; the
+-- consensus_by_ids precedent). NULL-safety without STRICT: subject_id = NULL
+-- matches no rows.
 CREATE OR REPLACE FUNCTION consensus_subject_edges(p_subject bytea)
     RETURNS TABLE(type_id bytea, object_id bytea, rating bigint, rd bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT c.type_id, c.object_id, c.rating, c.rd
-    FROM v_consensus_unrefuted c
+    FROM @extschema@.v_consensus_unrefuted c
     WHERE c.subject_id = p_subject
       AND c.object_id IS NOT NULL
 $$;

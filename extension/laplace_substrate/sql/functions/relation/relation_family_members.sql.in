@@ -1,0 +1,23 @@
+-- relation_family_members: enumerate the STATIC governed members of a relation
+-- family — the set-returning companion to relation_type_in_family (which can
+-- only answer membership one id at a time). Callers that filtered big scans
+-- with `relation_type_in_family(c.type_id, 'X')` per row could never use the
+-- (subject_id, type_id) indexes; joining against this set makes the same
+-- predicate sargable. Membership truth stays with the C check — this just
+-- applies it over the RelationType entity roster (hundreds of rows) instead
+-- of per consensus row (millions).
+--
+-- STATIC members only, exactly like relation_type_in_family. Callers that
+-- also want dynamic children (IS_A -> family root) keep using
+-- relation_in_family or the feat_dynamic CTE pattern.
+--
+-- No SET search_path so it inlines into the caller's FROM (the
+-- consensus_by_ids precedent).
+CREATE OR REPLACE FUNCTION relation_family_members(p_family text)
+    RETURNS TABLE(id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT et.id
+    FROM @extschema@.entities et
+    WHERE et.type_id = @extschema@.entity_type_id('RelationType')
+      AND @extschema@.relation_type_in_family(et.id, p_family)
+$$;
