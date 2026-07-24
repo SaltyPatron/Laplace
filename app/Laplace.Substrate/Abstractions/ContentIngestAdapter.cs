@@ -3,10 +3,13 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-// Pillar 0: SourceId is the per-file FILE-ENTITY provenance (content DAG ⊕ metadata DAG, see
+// Pillar 0: SourceId is the per-file FILE-ENTITY provenance (content DAG root, see
 // FileEntity) when the producing stream computed it; default(Hash128) means "fall back to the
 // decomposer's static config source" for streams not yet converted to per-file provenance.
-public readonly record struct ContentIngestRecord(byte[] CanonicalUtf8, int Sequence = 0, Hash128 SourceId = default);
+// Metadata carries the file's own facts (name/path/size/mtime) for the metadata DAG the
+// handler hangs off the trunk — provenance payload only, never part of identity.
+public readonly record struct ContentIngestRecord(
+    byte[] CanonicalUtf8, int Sequence = 0, Hash128 SourceId = default, FileMetadata? Metadata = null);
 
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
