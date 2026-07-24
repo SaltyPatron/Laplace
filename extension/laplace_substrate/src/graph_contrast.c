@@ -99,6 +99,27 @@ contrast_add_fact(ContrastRow **rows_io, int *n, int *cap,
         rows[idx].mu = mu;
 }
 
+/* left(encode(id,'hex'),16) — the display convention every other read surface
+ * uses as the genuine last resort, so every claim still shows even when
+ * realize_batch/type_label cannot produce a label. The serving contract is
+ * non-null type/fact (SubstrateClient.TapeAsync reads them unguarded). */
+static Datum
+hash128_hex16_text(const hash128_t *h)
+{
+    bytea *b = DatumGetByteaP(hash128_to_datum(h));
+    const unsigned char *d = (const unsigned char *) VARDATA(b);
+    static const char digits[] = "0123456789abcdef";
+    char hex[17];
+
+    for (int i = 0; i < 8; i++)
+    {
+        hex[i * 2]     = digits[d[i] >> 4];
+        hex[i * 2 + 1] = digits[d[i] & 0xf];
+    }
+    hex[16] = '\0';
+    return CStringGetTextDatum(hex);
+}
+
 static bool
 contrast_type_allowed(const hash128_t *type_id, const hash128_t *feat_types, int feat_n)
 {
@@ -317,11 +338,11 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             if (type_lbls != NULL && i < n_type_lbls && !type_lbl_nulls[i])
                 values[1] = type_lbls[i];
             else
-                nulls[1] = true;
+                values[1] = hash128_hex16_text(&rows[i].type_id);
             if (facts != NULL && i < n_facts && !fact_nulls[i])
                 values[2] = facts[i];
             else
-                nulls[2] = true;
+                values[2] = hash128_hex16_text(&rows[i].object_id);
             if (rows[i].mu == (Datum) 0)
                 nulls[3] = true;
             else
