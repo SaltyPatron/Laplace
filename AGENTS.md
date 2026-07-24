@@ -8,10 +8,12 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
 
 - **Scoped instructions** ([.github/instructions/](.github/instructions)): auto-apply by
   glob — decomposers, engine-native, sql-substrate, tests, scripts-win, scratchpad-docs.
-- **MCP**: `laplace-db` — read-only (restricted) Postgres server over the `laplace` DB,
-  configured for Claude Code ([.mcp.json](.mcp.json)) and Cursor
-  ([.cursor/mcp.json](.cursor/mcp.json)). Prefer it for exploration; it cannot write,
-  which is the point.
+- **MCP**: `laplace` — the substrate MCP server (`scripts/laplace-mcp`), configured for
+  Claude Code ([.mcp.json](.mcp.json)) and Cursor ([.cursor/mcp.json](.cursor/mcp.json)).
+  Read tools (recall/query/sql/facts/taxonomy/walk/…) plus a governed write lane —
+  `witness`, `feedback`, `ingest` (PRs #580/#598) — so agents are citizens of the loop.
+  It is NOT a read-only mirror anymore; the one-ingest-at-a-time rule applies to its
+  `ingest` tool exactly as it does to the CLI.
 - **No skills or guard hooks are wired up.** There is no `.claude/skills/` and no
   `.claude/settings.json` → `.claude/hooks/` guard. The `cmd /c` wrapping rule and the
   one-ingest-at-a-time rule below are enforced by you reading them, not by a hook.

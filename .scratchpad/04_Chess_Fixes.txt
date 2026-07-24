@@ -1,4 +1,8 @@
 LAPLACE — CHESS FIXES SESSION STATUS (04)
+CORRECTION 2026-07-23: FIX 1's "highway_mask NULL on every attestation (count=0),
+write path broken" is STALE — fixed via the 02 Issue-01 chain; live substrate now
+carries 131,477,403/133,550,085 attestations with a non-null mask (93.0M nonzero).
+Read everything below as a 2026-07-10 snapshot, not current state.
 Status/session-log only. Not the architecture doc — see 03_Chess.txt for how the chess
 subsystem ought to work per the invention; this file is strictly "what was done this session
 and the exact evidence for each claim." Every line below either cites the exact command/query

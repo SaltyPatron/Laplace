@@ -1,3 +1,6 @@
+<!-- CORRECTION 2026-07-23: the KNOWN DEBT section's "witness_precedes_chain is
+     still a per-bigram plpgsql loop" is STALE — it was rewritten to one batched
+     consensus_upsert deposit through the ingest spine (GH #428, CLOSED). -->
 <!-- DRAINED 2026-07-20 — this doc is no longer a tracker.
      Phases A-F map 1:1 onto GitHub issues: A done+verified; B #358; C #359;
      D #360; E blocked on B (#358) with its highway half re-verified live

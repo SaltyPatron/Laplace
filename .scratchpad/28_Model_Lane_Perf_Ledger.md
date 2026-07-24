@@ -1,5 +1,11 @@
 # 28 — Model-Lane Performance Ledger
 
+> **STALE 2026-07-23:** "mask refresh dominates 60–90% of fold wall" no longer
+> holds — PR #559 moved mask refresh out of the fold into the UNLOGGED
+> `highway_mask_dirty` queue drained by `highway_mask_drain()`. This ledger is
+> also missing baselines for PR #587 (fold fan-out to the connection budget) and
+> #586 (chess eval cache) — re-baseline per this file's own standing law below.
+
 Standing law: every model-lane stage gets a measured baseline BEFORE optimization
 (CLAUDE.md: profile before optimizing — VTune is installed), and every gate run
 records wall-clock. Perf gates are Tier 1 invariants like exactness: a regression

@@ -93,7 +93,9 @@ vocabularies that accreted around these inventions without ever being consolidat
     (Code, Repo, Stack, TinyCodes), Tabular, Unicode itself, ISO-639, the chess
     lanes, AI models. Every modality reduced to the same 5-tuple.
     [Superseded 2026-07-20: "27 decomposers (count verified 2026-07-10)" —
-    docs/INVENTORY.md:28 says 25 in Laplace.Decomposers + 4 in Laplace.Chess.
+    docs/INVENTORY.md:28 says 25 in Laplace.Decomposers + 4 in Laplace.Chess.]
+    [Updated 2026-07-23: Laplace.Chess is now 5 — ChessStockfishEvalDecomposer
+    added by PR #582; INVENTORY.md is the authority.
     PredicateMatrix is not a decomposer class: it rides SemLink's lane
     (app/Laplace.Decomposers/SemLink/PredicateMatrixIngest.cs). Document is not in the
     counted assembly: DocumentDecomposer.cs lives in
@@ -214,7 +216,8 @@ vocabularies that accreted around these inventions without ever being consolidat
 39. THE ONE QUERY SURFACE. The native SQL function families (count and roster:
     docs/INVENTORY.md § SQL function families) plus api() — a schema that introspects
     itself. [Superseded 2026-07-20: "27 native SQL function families" — INVENTORY.md:63
-    says 28.]
+    says 28.] [Updated 2026-07-23: 29 families; stop chasing the number here —
+    INVENTORY.md § SQL function families is the authority.]
 40. THE SUBSTRATE SERVED AS AN LLM. Laplace.Endpoints.OpenAICompat —
     OpenAI-compatible chat/completions over the walk engine, SSE streaming, plus
     endpoints incumbents structurally cannot offer: evidence receipts,

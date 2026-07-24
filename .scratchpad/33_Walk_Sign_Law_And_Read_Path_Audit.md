@@ -1,6 +1,12 @@
 # 33 — Walk sign law, mask queue, and read-path audit
 
 Session date: 2026-07-21. Substrate: hart-server `laplace`.
+
+> **STATUS 2026-07-23:** §1–§2 MERGED as PR #559. The voice PRs #597/#599
+> (trajectory_corpus.c + trajectory_unpacked_points) work exactly O8's territory
+> ("generate() returns empty with 96M points resident") and part of O4 — re-verify
+> those two before actioning. O2 (`lower()` sites in converse/chat/converse_walk)
+> and O10 (WeightTensorETL refuse block) confirmed STILL OPEN as of this date.
 Status key: **FIXED** (in tree, tested) · **OPEN** (evidenced, unstarted) · **CORRECTION** (a
 belief that was wrong and must not be re-imported).
 

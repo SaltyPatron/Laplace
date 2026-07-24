@@ -12,6 +12,13 @@ freshly-seeded database, and issue statuses — several items below have since m
 highway_mask gap) turned out to be worse than initially scoped, and two real bugs were found
 and fixed in scripts/win/ that aren't mentioned below because they postdate this document.
 
+HISTORICAL 2026-07-23: this is the 2026-07-01 static-reading pass; many Part 3/4 "flaws"
+have since been resolved — verify against code/GH before acting. Known-false today:
+3.2 "zero README/CLAUDE.md" (README.md, CLAUDE.md, AGENTS.md, docs/ all exist);
+3.1 "55 .NET projects" (now 9 + 5 test projects, per docs/INVENTORY.md);
+3.3 "39_highway.sql.in is 0 bytes" (file retired, replaced by functions/highway/*);
+3.3 "astar h = 0.0" (opt-in admissible heuristic shipped, GH #397 closed).
+
 ================================================================================
 PART 1 — THE INVENTION (as best reconstructed)
 ================================================================================

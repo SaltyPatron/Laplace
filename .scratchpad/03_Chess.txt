@@ -5,6 +5,8 @@ Still open: C01 #494, C04 #489 + #528 (path traversal), C07/C08/C09 #447, C13 #4
 C14 #449, C15 #492, C16 #493, C18 #450, PART 4 Q1 #529, PART 5 perfcache #490.
 RETAINED as a record: the self-verified evidence (real cutechess build, real perft, real
 PGN) and the PART 5 rationale.
+UPDATE 2026-07-23: of the header's "still open" set, #494 (C01), #450 (C18), and #528
+(the C04 path-traversal half) are now CLOSED; GitHub remains the authority.
 ================================================================================
 
 LAPLACE — CHESS SUBSYSTEM AUDIT (03)

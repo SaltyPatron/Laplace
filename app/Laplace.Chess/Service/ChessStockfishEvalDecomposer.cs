@@ -9,7 +9,7 @@ namespace Laplace.Chess.Service;
 // CALCULATED stockfish pass (GH #573): scan witnessed Chess_Game rows lacking the
 // ChessStockfishEval marker, hydrate via content roundtrip, evaluate every position with
 // stockfish, attest HAS_EVAL + eval-delta MOVE_QUALITY under the ChessStockfish source.
-// Run: `laplace ingest chess-eval [--analyze-depth N]`  (no path — substrate is the source)
+// Run: `laplace ingest chess-eval [--depth N | --nodes N]`  (no path — substrate is the source)
 public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockfishEvalRecord>
 {
     private readonly int _depth;

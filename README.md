@@ -74,7 +74,7 @@ data," and that applies to its README.
 
 - Content-addressed identity with lossless byte-exact reconstruction from ids alone.
 - The three-layer substrate, exercised end to end on the current partial seed
-  (measured 2026-07-20: 6.28M attestations, 5.66M consensus cells, 4.34M entities —
+  (measured 2026-07-23: 133.6M attestations, 110.0M consensus cells, 47.3M entities —
   residency is a derived artifact of which sources are seeded, not a progress mark;
   the design target is order 10⁸ and above), with forced-rerun idempotency proofs
   (re-ingest → 0 novel rows, exact observation-count doubling).

@@ -1,3 +1,6 @@
+<!-- CORRECTION 2026-07-23: the "#524" cite below is a TYPO — the highway-blob
+     BLAKE3-CRC / input-fingerprint item is GH #525; #524 is an unrelated
+     read-side word→synset projection issue. #503 is cited correctly. -->
 <!-- DRAINED 2026-07-20 — checklist superseded by GitHub issues.
      Steps landed: CMake DEPENDS rewire (engine/core/CMakeLists.txt:139-155),
      gitignored blobs (.gitignore:414-418), --scope full.
