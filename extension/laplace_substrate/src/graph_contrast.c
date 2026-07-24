@@ -18,7 +18,10 @@
 #include "spi_nested.h"
 #include "graph_taxonomy.h"
 
-#define CONTRAST_FEAT_CAP 512
+/* Initial sizing only — the fact table grows as needed. The old fixed cap
+ * hard-errored ("contrast row cap exceeded") once hub words' ancestor sets
+ * outgrew it at live scale. */
+#define CONTRAST_FEAT_INITIAL 512
 
 PG_FUNCTION_INFO_V1(pg_laplace_contrast);
 
@@ -66,14 +69,19 @@ contrast_row_find(ContrastRow *rows, int n, const hash128_t *tid, const hash128_
 }
 
 static void
-contrast_add_fact(ContrastRow *rows, int *n, int cap,
+contrast_add_fact(ContrastRow **rows_io, int *n, int *cap,
                   const hash128_t *tid, const hash128_t *oid, Datum mu, bool from_x)
 {
+    ContrastRow *rows = *rows_io;
     int idx = contrast_row_find(rows, *n, tid, oid);
     if (idx < 0)
     {
-        if (*n >= cap)
-            ereport(ERROR, (errmsg("graph_geometry_reads: contrast row cap exceeded")));
+        if (*n >= *cap)
+        {
+            *cap *= 2;
+            rows = (ContrastRow *) repalloc(rows, sizeof(ContrastRow) * *cap);
+            *rows_io = rows;
+        }
         rows[*n].type_id = *tid;
         rows[*n].object_id = *oid;
         rows[*n].mu = mu;
@@ -144,9 +152,6 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     feat_types[7] = rel_type_id("IS_SIMILAR_TO");
     feat_types[8] = rel_type_id("PERTAINS_TO");
 
-    ax = (TaxNode *) palloc0(sizeof(TaxNode) * TAX_WALK_CAP);
-    ay = (TaxNode *) palloc0(sizeof(TaxNode) * TAX_WALK_CAP);
-
     {
         hash128_t seeds_x[32], seeds_y[32];
         int nx = 0, ny = 0;
@@ -166,23 +171,24 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
         {
             Datum up_d[2] = { hash128_to_datum(&up_types[0]), hash128_to_datum(&up_types[1]) };
-            n_ax = tax_bfs_up(seeds_x, nx, 7, up_types, 2, ax, TAX_WALK_CAP);
-            n_ay = tax_bfs_up(seeds_y, ny, 7, up_types, 2, ay, TAX_WALK_CAP);
+            n_ax = tax_bfs_up(seeds_x, nx, 7, up_types, 2, &ax);
+            n_ay = tax_bfs_up(seeds_y, ny, 7, up_types, 2, &ay);
             pfree(DatumGetPointer(up_d[0]));
             pfree(DatumGetPointer(up_d[1]));
         }
     }
 
-    rows = (ContrastRow *) palloc0(sizeof(ContrastRow) * CONTRAST_FEAT_CAP);
+    int rows_cap = CONTRAST_FEAT_INITIAL;
+    rows = (ContrastRow *) palloc0(sizeof(ContrastRow) * rows_cap);
   {
     hash128_t isa_tid = up_types[0];
     for (int i = 0; i < n_ax; i++)
         if (ax[i].depth > 0)
-            contrast_add_fact(rows, &n_rows, CONTRAST_FEAT_CAP,
+            contrast_add_fact(&rows, &n_rows, &rows_cap,
                               &isa_tid, &ax[i].id, (Datum) 0, true);
     for (int i = 0; i < n_ay; i++)
         if (ay[i].depth > 0)
-            contrast_add_fact(rows, &n_rows, CONTRAST_FEAT_CAP,
+            contrast_add_fact(&rows, &n_rows, &rows_cap,
                               &isa_tid, &ay[i].id, (Datum) 0, false);
   }
 
@@ -225,7 +231,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
                     if (!contrast_type_allowed(&tid, feat_types, feat_n))
                         continue;
                     mu = eff_mu_display_numeric(rating, rd);
-                    contrast_add_fact(rows, &n_rows, CONTRAST_FEAT_CAP, &tid, &oid, mu, from_x);
+                    contrast_add_fact(&rows, &n_rows, &rows_cap, &tid, &oid, mu, from_x);
                 }
             }
         }

@@ -8,7 +8,12 @@
 
 #include "laplace/core/hash128.h"
 
-#define TAX_WALK_CAP 2048
+/* Initial buffer sizing only — the walk grows its buffers as needed. A fixed
+ * 2048-node cap used to hard-error here ("taxonomy walk node cap exceeded"):
+ * at live scale ordinary words exceed it (emperor's depth-7 IS_A closure =
+ * 8,225 nodes, measured 2026-07-24). The walk is finitely bounded by depth ×
+ * the deduped closure, never by an invented cap. */
+#define TAX_WALK_INITIAL 2048
 
 
 
@@ -26,8 +31,10 @@ typedef struct {
 
 
 
+/* Allocates and grows *nodes_out internally (palloc/repalloc in the caller's
+ * memory context); returns the node count. */
 extern int tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
                       const hash128_t *up_types, int up_type_n,
-                      TaxNode *nodes, int cap);
+                      TaxNode **nodes_out);
 
 #endif                          
