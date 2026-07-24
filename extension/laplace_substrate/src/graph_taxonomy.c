@@ -118,12 +118,15 @@ in_ancestor_chain(TaxNode *nodes, int cur, const hash128_t *target)
 int
 tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
            const hash128_t *up_types, int up_type_n,
-           TaxNode *nodes, int cap)
+           TaxNode **nodes_out)
 {
     int    head = 0;
     int    tail = 0;
     int    n = 0;
-    int   *queue = (int *) palloc(sizeof(int) * cap);
+    int    node_cap = TAX_WALK_INITIAL;
+    int    queue_cap = TAX_WALK_INITIAL;
+    TaxNode *nodes = (TaxNode *) palloc(sizeof(TaxNode) * node_cap);
+    int   *queue = (int *) palloc(sizeof(int) * queue_cap);
     bytea *nodebuf = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
     Datum  args[2];
     int    rc;
@@ -144,13 +147,23 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
     ctl.entrysize = sizeof(TaxIdxEntry);
-    idmap = hash_create("tax_bfs_up idmap", (cap > 16 ? cap : 16), &ctl,
+    idmap = hash_create("tax_bfs_up idmap", TAX_WALK_INITIAL, &ctl,
                         HASH_ELEM | HASH_BLOBS);
 
     SET_VARSIZE(nodebuf, VARHDRSZ + sizeof(hash128_t));
 
-    for (int s = 0; s < seed_n && n < cap; s++)
+    for (int s = 0; s < seed_n; s++)
     {
+        if (n >= node_cap)
+        {
+            node_cap *= 2;
+            nodes = (TaxNode *) repalloc(nodes, sizeof(TaxNode) * node_cap);
+        }
+        if (tail >= queue_cap)
+        {
+            queue_cap *= 2;
+            queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
+        }
         if (tax_idx_find(idmap, &seeds[s]) >= 0)
             continue;
         nodes[n].id = seeds[s];
@@ -214,12 +227,26 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
                     SPI_getbinval(tup, td, 3, &isnull));
                 nodes[pi].rd = DatumGetInt64(
                     SPI_getbinval(tup, td, 4, &isnull));
+                if (tail >= queue_cap)
+                {
+                    queue_cap *= 2;
+                    queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
+                }
                 queue[tail++] = pi;
                 continue;
             }
 
-            if (n >= cap)
-                ereport(ERROR, (errmsg("graph_geometry_reads: taxonomy walk node cap exceeded")));
+            if (n >= node_cap)
+            {
+                node_cap *= 2;
+                nodes = (TaxNode *) repalloc(nodes, sizeof(TaxNode) * node_cap);
+                u = &nodes[cur];    /* the repalloc may have moved the array */
+            }
+            if (tail >= queue_cap)
+            {
+                queue_cap *= 2;
+                queue = (int *) repalloc(queue, sizeof(int) * queue_cap);
+            }
 
             nodes[n].id = obj_h;
             nodes[n].depth = walk_depth;
@@ -240,6 +267,7 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
     pfree(type_datums);
     pfree(queue);
     pfree(nodebuf);
+    *nodes_out = nodes;
     return n;
 }
 
@@ -307,16 +335,15 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
     up_types[0] = rel_type_id("IS_A");
     up_types[1] = rel_type_id("IS_INSTANCE_OF");
 
-    nodes = (TaxNode *) palloc0(sizeof(TaxNode) * TAX_WALK_CAP);
     {
         hash128_t seed = datum_to_hash128(start);
-        n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, 2, nodes, TAX_WALK_CAP);
+        n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, 2, &nodes);
     }
 
     /* Batch the label + gloss resolution: the per-node spi_realize +
      * spi_gloss_for pair was 2 unprepared parse/plan/execute round trips per
-     * emitted node (up to TAX_WALK_CAP=2048). realize_batch resolves every id
-     * in 6 fixed round trips; the gloss set-query is one more. */
+     * emitted node. realize_batch resolves every id in 6 fixed round trips;
+     * the gloss set-query is one more. */
     {
         int    n_emit = 0;
         int   *emit_idx = (int *) palloc(sizeof(int) * (n_nodes > 0 ? n_nodes : 1));
@@ -429,32 +456,50 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
 
     up_types[0] = rel_type_id("IS_A");
 
-    targets = (hash128_t *) palloc(sizeof(hash128_t) * (TAX_WALK_CAP + 64));
-    targets[n_targets++] = datum_to_hash128(x);
-
+    /* Grown as appended: translation_sources is unbounded, and the old fixed
+     * TAX_WALK_CAP+64 sizing was a latent overflow waiting on a well-attested
+     * word. */
     {
-        Datum *synsets;
-        int    ns;
-        spi_fetch_synset_ids(y, &synsets, &ns);
-        for (int i = 0; i < ns; i++)
-            targets[n_targets++] = datum_to_hash128(synsets[i]);
-        targets[n_targets++] = datum_to_hash128(y);
+        int targets_cap = 64;
+        targets = (hash128_t *) palloc(sizeof(hash128_t) * targets_cap);
+
+#define ISA_PATH_TARGET_PUSH(h) \
+        do { \
+            if (n_targets >= targets_cap) \
+            { \
+                targets_cap *= 2; \
+                targets = (hash128_t *) repalloc(targets, sizeof(hash128_t) * targets_cap); \
+            } \
+            targets[n_targets++] = (h); \
+        } while (0)
+
+        ISA_PATH_TARGET_PUSH(datum_to_hash128(x));
 
         {
-            Oid       argtypes[1] = { BYTEAOID };
-            Datum     args[1] = { y };
-            int       rc = SPI_execute_with_args(
-                "SELECT subject_id FROM laplace.translation_sources($1)",
-                1, argtypes, args, NULL, true, 0);
-            if (rc != SPI_OK_SELECT)
-                elog(ERROR, "isa_path: translation targets query failed");
-            for (uint64 r = 0; r < SPI_processed; r++)
+            Datum *synsets;
+            int    ns;
+            spi_fetch_synset_ids(y, &synsets, &ns);
+            for (int i = 0; i < ns; i++)
+                ISA_PATH_TARGET_PUSH(datum_to_hash128(synsets[i]));
+            ISA_PATH_TARGET_PUSH(datum_to_hash128(y));
+
             {
-                bool isnull;
-                targets[n_targets++] = datum_to_hash128(
-                    SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull));
+                Oid       argtypes[1] = { BYTEAOID };
+                Datum     args[1] = { y };
+                int       rc = SPI_execute_with_args(
+                    "SELECT subject_id FROM laplace.translation_sources($1)",
+                    1, argtypes, args, NULL, true, 0);
+                if (rc != SPI_OK_SELECT)
+                    elog(ERROR, "isa_path: translation targets query failed");
+                for (uint64 r = 0; r < SPI_processed; r++)
+                {
+                    bool isnull;
+                    ISA_PATH_TARGET_PUSH(datum_to_hash128(
+                        SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull)));
+                }
             }
         }
+#undef ISA_PATH_TARGET_PUSH
     }
 
     {
@@ -469,9 +514,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         for (int i = 0; i < ns; i++)
             starts[n_starts++] = datum_to_hash128(synsets[i]);
 
-        nodes = (TaxNode *) palloc0(sizeof(TaxNode) * TAX_WALK_CAP);
-        n_nodes = tax_bfs_up(starts, n_starts, max_depth, up_types, 1,
-                             nodes, TAX_WALK_CAP);
+        n_nodes = tax_bfs_up(starts, n_starts, max_depth, up_types, 1, &nodes);
         pfree(starts);
     }
 
