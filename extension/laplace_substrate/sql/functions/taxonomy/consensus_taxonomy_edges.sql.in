@@ -1,13 +1,21 @@
 CREATE OR REPLACE FUNCTION consensus_taxonomy_edges(p_subject bytea, p_types bytea[])
     RETURNS TABLE(object_id bytea, type_id bytea, rating bigint, rd bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- No SET search_path so it inlines into the caller's FROM (the
+    -- consensus_by_ids precedent). This is the edge truth table under the
+    -- level-batched taxonomy walk: non-inlined, each LATERAL row paid a full
+    -- function execution (~16k per hub matchup ≈ 10s); inlined, a whole
+    -- frontier level plans as one join. Verified live 2026-07-24: the inlined
+    -- shape returns emperor's 8,225-node closure instantly with an identical
+    -- node set, and completes run's 11,924-node closure where the non-inlined
+    -- form timed out.
     SELECT c.object_id, c.type_id, c.rating, c.rd
-    FROM v_consensus_unrefuted c
+    FROM @extschema@.v_consensus_unrefuted c
     WHERE c.subject_id = p_subject
       AND c.type_id = ANY (p_types)
       AND c.object_id IS NOT NULL
       AND NOT EXISTS (
-          SELECT 1 FROM entities et
-          WHERE et.id = c.object_id AND et.type_id = entity_type_id('RelationType'))
+          SELECT 1 FROM @extschema@.entities et
+          WHERE et.id = c.object_id
+            AND et.type_id = @extschema@.entity_type_id('RelationType'))
 $$;
