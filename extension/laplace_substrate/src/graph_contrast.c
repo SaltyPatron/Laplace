@@ -59,21 +59,47 @@ typedef struct {
     bool      from_y;
 } ContrastRow;
 
-static int
-contrast_row_find(ContrastRow *rows, int n, const hash128_t *tid, const hash128_t *oid)
+/* (type_id, object_id) -> row-index map, replacing the O(n) linear scan that
+ * turned hub-word fact accumulation (10^4 rows post-cap-removal) into an
+ * O(n^2) pass. Same first-wins index the scan returned; output unchanged. */
+typedef struct ContrastIdxEntry
 {
-    for (int i = 0; i < n; i++)
-        if (hash128_eq(&rows[i].type_id, tid) && hash128_eq(&rows[i].object_id, oid))
-            return i;
-    return -1;
+    char key[32];
+    int  idx;
+} ContrastIdxEntry;
+
+static int
+contrast_idx_find(HTAB *map, const hash128_t *tid, const hash128_t *oid)
+{
+    char key[32];
+    bool found;
+    ContrastIdxEntry *e;
+
+    memcpy(key, tid, 16);
+    memcpy(key + 16, oid, 16);
+    e = (ContrastIdxEntry *) hash_search(map, key, HASH_FIND, &found);
+    return found ? e->idx : -1;
 }
 
 static void
-contrast_add_fact(ContrastRow **rows_io, int *n, int *cap,
+contrast_idx_add(HTAB *map, const hash128_t *tid, const hash128_t *oid, int idx)
+{
+    char key[32];
+    bool found;
+    ContrastIdxEntry *e;
+
+    memcpy(key, tid, 16);
+    memcpy(key + 16, oid, 16);
+    e = (ContrastIdxEntry *) hash_search(map, key, HASH_ENTER, &found);
+    e->idx = idx;
+}
+
+static void
+contrast_add_fact(HTAB *rowmap, ContrastRow **rows_io, int *n, int *cap,
                   const hash128_t *tid, const hash128_t *oid, Datum mu, bool from_x)
 {
     ContrastRow *rows = *rows_io;
-    int idx = contrast_row_find(rows, *n, tid, oid);
+    int idx = contrast_idx_find(rowmap, tid, oid);
     if (idx < 0)
     {
         if (*n >= *cap)
@@ -87,6 +113,7 @@ contrast_add_fact(ContrastRow **rows_io, int *n, int *cap,
         rows[*n].mu = mu;
         rows[*n].from_x = from_x;
         rows[*n].from_y = !from_x;
+        contrast_idx_add(rowmap, tid, oid, *n);
         (*n)++;
         return;
     }
@@ -201,15 +228,24 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
     int rows_cap = CONTRAST_FEAT_INITIAL;
     rows = (ContrastRow *) palloc0(sizeof(ContrastRow) * rows_cap);
+    HTAB *rowmap;
+    {
+        HASHCTL rctl;
+        memset(&rctl, 0, sizeof(rctl));
+        rctl.keysize = 32;
+        rctl.entrysize = sizeof(ContrastIdxEntry);
+        rowmap = hash_create("contrast rowmap", CONTRAST_FEAT_INITIAL, &rctl,
+                             HASH_ELEM | HASH_BLOBS);
+    }
   {
     hash128_t isa_tid = up_types[0];
     for (int i = 0; i < n_ax; i++)
         if (ax[i].depth > 0)
-            contrast_add_fact(&rows, &n_rows, &rows_cap,
+            contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap,
                               &isa_tid, &ax[i].id, (Datum) 0, true);
     for (int i = 0; i < n_ay; i++)
         if (ay[i].depth > 0)
-            contrast_add_fact(&rows, &n_rows, &rows_cap,
+            contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap,
                               &isa_tid, &ay[i].id, (Datum) 0, false);
   }
 
@@ -252,7 +288,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
                     if (!contrast_type_allowed(&tid, feat_types, feat_n))
                         continue;
                     mu = eff_mu_display_numeric(rating, rd);
-                    contrast_add_fact(&rows, &n_rows, &rows_cap, &tid, &oid, mu, from_x);
+                    contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap, &tid, &oid, mu, from_x);
                 }
             }
         }
@@ -353,6 +389,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         }
     }
 
+    hash_destroy(rowmap);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
