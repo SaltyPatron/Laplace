@@ -191,6 +191,9 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual int EstimatedComposeUnitsPerRecord => 1;
 
+    /// <summary>See <see cref="IDecomposer.PerFileCompletion"/>.</summary>
+    public virtual bool PerFileCompletion => false;
+
     // Virtual on the class, not just the interface default: interface mapping is
     // computed at the class that lists IDecomposer, so a derived class declaring
     // this property WITHOUT override would shadow it — invisible through
@@ -299,6 +302,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
                            label => ConfigForFile(label, context.Reader, options),
                            maxTotalUnits: options.MaxInputUnits,
                            fileWorkers: IngestTopology.Current.FileWorkers,
+                           isolateFileFailures: PerFileCompletion,
                            ct: ct))
             yield return change;
     }

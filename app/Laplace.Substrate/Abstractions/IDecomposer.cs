@@ -31,6 +31,15 @@ public interface IDecomposer : IAsyncDisposable
     /// <summary>Tier-tree compose units staged per input record (relation triples = 2).</summary>
     int EstimatedComposeUnitsPerRecord => 1;
 
+    /// <summary>
+    /// True when this source's completion is tracked PER FILE (Pillar 0: file-entity
+    /// provenance + per-file completion markers). The runner then skips the run-start
+    /// source-level marker guard (per-file markers already make re-ingest a no-op and
+    /// let new files into a completed directory) and the multi-file driver isolates
+    /// per-file failures instead of aborting the whole run.
+    /// </summary>
+    bool PerFileCompletion => false;
+
     IngestSourceProfile SizingProfile =>
         new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
 

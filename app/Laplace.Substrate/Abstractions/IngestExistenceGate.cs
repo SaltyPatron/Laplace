@@ -37,12 +37,31 @@ internal static class IngestExistenceGate
         var rootIndex = new int[records.Count];
         Array.Fill(rootIndex, -1);
 
+        // Per-file provenance lane (Pillar 0): a present ROOT is not a finished FILE.
+        // The file is done only when its completion marker attests it — so a present
+        // root either true-skips (marker present: zero rows, zero testimony, no merge)
+        // or COMPOSES (marker absent: content emission no-ops under the bitmap and
+        // WalkWitness deposits the marker + metadata). --force (ReObservePresent)
+        // bypasses the marker skip and re-observes.
+        var perFile = handler as DocumentIngestHandler;
+
         for (int i = 0; i < records.Count; i++)
         {
             if (!TryResolveRoot(records[i], handler, out var rootId)) continue;
 
             if (reader.IsProvenPresent(rootId))
             {
+                if (perFile is not null)
+                {
+                    if (!perFile.IgnoreCompletedFiles
+                        && await reader.HasSourceCompletedAsync(rootId, perFile.LayerOrder, ct)
+                            .ConfigureAwait(false))
+                    {
+                        shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
+                        rootIndex[i] = -2;
+                    }
+                    continue; // marker absent (or forced): compose for the marker deposit
+                }
                 ApplyWitness(records[i], rootId, handler, builder);
                 reader.MarkProven([rootId]);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
@@ -76,6 +95,18 @@ internal static class IngestExistenceGate
                     continue;
                 }
                 int i = roots[k].Index;
+                if (perFile is not null)
+                {
+                    reader.MarkProven([roots[k].RootId]);
+                    if (!perFile.IgnoreCompletedFiles
+                        && await reader.HasSourceCompletedAsync(roots[k].RootId, perFile.LayerOrder, ct)
+                            .ConfigureAwait(false))
+                    {
+                        shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
+                        rootIndex[i] = -2;
+                    }
+                    continue; // marker absent (or forced): compose for the marker deposit
+                }
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
                 reader.MarkProven([roots[k].RootId]);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
@@ -207,6 +238,13 @@ internal static class IngestExistenceGate
                 gr.LineUtf8, gr.Ast, grammar.ModalityId, out rootId, out _);
         if (record is ContentIngestRecord cr && handler is ContentIngestHandler or DocumentIngestHandler)
         {
+            // Per-file provenance streams already resolved the root as the record's
+            // source id — reuse it instead of recomputing over the whole content.
+            if (cr.SourceId != default)
+            {
+                rootId = cr.SourceId;
+                return true;
+            }
             Hash128? id = TextDecomposer.ContentRootId(cr.CanonicalUtf8);
             if (id is null) return false;
             rootId = id.Value;
@@ -229,14 +267,21 @@ internal static class IngestExistenceGate
             handler.WalkWitness(record, rootId, builder, PresentRootDeferredUnit.Instance);
     }
 
-    private sealed class PresentRootDeferredUnit : IIngestDeferredUnit
-    {
-        internal static readonly PresentRootDeferredUnit Instance = new();
-        public TierTree? TreeForBatchProbe => null;
-        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
-            Task.FromResult<byte[]?>(null);
-        public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap) =>
-            default;
-        public void Dispose() { }
-    }
+}
+
+/// <summary>
+/// Sentinel unit handed to <c>WalkWitness</c> when the existence gate short-circuits an
+/// already-present root — the discriminator handlers use to tell the present path from a
+/// real compose (do NOT infer it from <c>TreeForBatchProbe == null</c>, which other unit
+/// shapes legitimately return).
+/// </summary>
+internal sealed class PresentRootDeferredUnit : IIngestDeferredUnit
+{
+    internal static readonly PresentRootDeferredUnit Instance = new();
+    public TierTree? TreeForBatchProbe => null;
+    public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
+        Task.FromResult<byte[]?>(null);
+    public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap) =>
+        default;
+    public void Dispose() { }
 }
