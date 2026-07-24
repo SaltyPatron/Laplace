@@ -218,11 +218,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             seeds_y[ny++] = datum_to_hash128(synsets_y[i]);
 
         {
-            Datum up_d[2] = { hash128_to_datum(&up_types[0]), hash128_to_datum(&up_types[1]) };
             n_ax = tax_bfs_up(seeds_x, nx, 7, up_types, 2, &ax);
             n_ay = tax_bfs_up(seeds_y, ny, 7, up_types, 2, &ay);
-            pfree(DatumGetPointer(up_d[0]));
-            pfree(DatumGetPointer(up_d[1]));
         }
     }
 

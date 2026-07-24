@@ -281,20 +281,6 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
 
     std::vector<uint64_t> tensor_offsets(w->tensors.size());
     {
-        size_t tensor_info_bytes = 0;
-        for (const TensorEntry& te : w->tensors) {
-            tensor_info_bytes += 8 + te.name.size();
-            tensor_info_bytes += 4;
-            tensor_info_bytes += te.dims.size() * 8;
-            tensor_info_bytes += 4;
-            tensor_info_bytes += 8;
-        }
-
-        const size_t header_kv_end = header.size();
-        const size_t data_section_start =
-            align_up(header_kv_end + tensor_info_bytes, 32);
-        (void)data_section_start;
-
         uint64_t cur_offset = 0;
         for (size_t i = 0; i < w->tensors.size(); ++i) {
             tensor_offsets[i] = cur_offset;
