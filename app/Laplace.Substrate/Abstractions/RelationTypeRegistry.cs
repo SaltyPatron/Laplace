@@ -96,24 +96,6 @@ public static class RelationTypeRegistry
         return prefix + norm;
     }
 
-    public static AttestationRow AttestDeprel(
-        Hash128 dependent, string deprel, Hash128 head, Hash128 sourceId, double sourceTrust,
-        long observationCount = 1)
-    {
-        var r = ResolveDeprel(deprel);
-        return NativeAttestation.CategoricalResolved(
-            dependent, r.Id, head, sourceId, null, r.Rank * sourceTrust, observationCount: observationCount);
-    }
-
-    public static AttestationRow AttestEnhancedDeprel(
-        Hash128 dependent, string deprel, Hash128 head, Hash128 sourceId, double sourceTrust,
-        long observationCount = 1)
-    {
-        var r = ResolveEnhancedDeprel(deprel);
-        return NativeAttestation.CategoricalResolved(
-            dependent, r.Id, head, sourceId, null, r.Rank * sourceTrust, observationCount: observationCount);
-    }
-
     public static RelationTypeResolution ResolveEnhancedDeprel(string deprel)
     {
         ArgumentException.ThrowIfNullOrEmpty(deprel);
@@ -172,15 +154,6 @@ public static class RelationTypeRegistry
             NativeInterop.RelationResolveFeature(featureName, &typeId, &rank, &symmetry, &flip, &parentId);
             return DynamicResolution(featureName, "FEAT_", typeId, parentId, rank, symmetry, flip);
         }
-    }
-
-    public static AttestationRow AttestFeature(
-        Hash128 subject, string featureName, Hash128 valueEntity, Hash128 sourceId, double sourceTrust,
-        long observationCount = 1)
-    {
-        var r = ResolveFeature(featureName);
-        return NativeAttestation.CategoricalResolved(
-            subject, r.Id, valueEntity, sourceId, null, r.Rank * sourceTrust, observationCount: observationCount);
     }
 
     public static IEnumerable<RelationTypeResolution> AllCanonical()

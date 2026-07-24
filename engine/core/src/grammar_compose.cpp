@@ -38,25 +38,6 @@ static int codepoint_resolver(uint32_t atom, void* ,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-static void physicality_id_compute(hash128_t entity_id,
-                                   double coord[4], const double* traj, size_t traj_n,
-                                   hash128_t* out) {
-    size_t traj_bytes = traj_n * sizeof(double);
-    size_t total = 16 + 2 + 32 + traj_bytes;
-    uint8_t* buf = (uint8_t*)malloc(total);
-    if (!buf) { hash128_zero(out); return; }
-    size_t o = 0;
-    memcpy(buf + o, &entity_id, 16); o += 16;
-    int16_t physicality_type = 1;
-    memcpy(buf + o, &physicality_type, 2); o += 2;
-    memcpy(buf + o, coord, 32); o += 32;
-    if (traj_n > 0) {
-        memcpy(buf + o, traj, traj_bytes);
-        o += traj_bytes;
-    }
-    hash128_blake3(buf, o, out);
-    free(buf);
-}
 
 typedef struct {
     hash128_t* comp_id;
@@ -516,7 +497,9 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
         return -3;
     }
     hash128_t phys_id;
-    physicality_id_compute(entity_id, coord, traj, m * 4, &phys_id);
+    /* Identity is (entity_id, physicality_type) ONLY -- the coord/trajectory built
+     * above are payload, never part of the id (see laplace_physicality_id_compute). */
+    laplace_physicality_id_compute(entity_id, 1, &phys_id);
 
     laplace_compose_physicality_t* n = (laplace_compose_physicality_t*)realloc(
         r->physicalities, (r->phys_count + 1) * sizeof(*n));

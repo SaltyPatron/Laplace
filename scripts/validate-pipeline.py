@@ -347,7 +347,7 @@ def validate_type_identity_law() -> list[str]:
         (ROOT / "scripts", (".py", ".sql", ".sh")),
     ]
     skip_dirs = {"audit-2026-06-26", "node_modules", "bin", "obj"}
-    skip_files = {"migrate-seed-type-paths.py"}
+    skip_files: set[str] = set()
 
     for root, suffixes in scan_roots:
         if not root.is_dir():

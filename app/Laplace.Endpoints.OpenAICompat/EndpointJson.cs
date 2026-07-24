@@ -30,11 +30,6 @@ internal static class EndpointJson
             new ErrorResponse(new ErrorBody("not_found", code, message)),
             statusCode: StatusCodes.Status404NotFound);
 
-    public static IResult NotImplemented(string endpoint, string reason) =>
-        Results.Json(
-            new NotImplementedResponse(new NotImplementedBody("not_implemented", "stream_e_pending", endpoint, reason)),
-            statusCode: StatusCodes.Status501NotImplemented);
-
     public static IResult ServiceUnavailable(string code, string message) =>
         Results.Json(
             new ErrorResponse(new ErrorBody("service_unavailable", code, message)),

@@ -138,6 +138,17 @@ public static class LaplaceInstall
         return s;
     }
 
+    /// <summary>
+    /// Mask the password in a connection string for safe logging. The one shared
+    /// redactor -- CLI, chess service, and migrations all call this instead of each
+    /// keeping their own copy. Covers both the `Password=` and `Pwd=` spellings.
+    /// </summary>
+    public static string RedactConnectionString(string conn) =>
+        string.IsNullOrEmpty(conn)
+            ? conn
+            : System.Text.RegularExpressions.Regex.Replace(
+                conn, "(?i)(password|pwd)=[^;]*", "$1=***");
+
     public static string ResolveT0Perfcache()
     {
         var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");

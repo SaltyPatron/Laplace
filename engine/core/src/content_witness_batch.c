@@ -64,8 +64,8 @@ static int codepoint_resolver(uint32_t atom, void* ctx,
  * trajectory-float-divergent rows). This also makes the old length-1-trajectory
  * gate moot for identity: a single-child composition now yields the same id as
  * the atomic seed automatically, because neither hashes the trajectory. */
-static void physicality_id_compute(hash128_t entity_id, int16_t physicality_type,
-                                   hash128_t* out) {
+void laplace_physicality_id_compute(hash128_t entity_id, int16_t physicality_type,
+                                    hash128_t* out) {
     uint8_t buf[18];
     memcpy(buf, &entity_id, 16);
     memcpy(buf + 16, &physicality_type, 2);
@@ -328,7 +328,7 @@ static int emit_node(
     hash128_t phys_id;
     /* Content-derived identity: (entity_id, physicality_type=Content). The coord
      * and trajectory below are still stored as payload, but no longer forge the id. */
-    physicality_id_compute(node.id, 1, &phys_id);
+    laplace_physicality_id_compute(node.id, 1, &phys_id);
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,

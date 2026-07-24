@@ -45,12 +45,12 @@ public class TypeIdLawTests
             + string.Join("\n", violations));
     }
 
-    [Fact]
+    [SkippableFact]
     public void CliProgram_HasNoRecursiveGenerateCte()
     {
         var repoRoot = FindRepoRoot();
         var program = Path.Combine(repoRoot, "app", "Laplace.Cli", "Program.cs");
-        if (!File.Exists(program)) return;
+        Skip.IfNot(File.Exists(program), "Cli/Program.cs not present (packaged test run)");
 
         var text = File.ReadAllText(program);
         Assert.DoesNotContain("WITH RECURSIVE", text, StringComparison.Ordinal);

@@ -59,17 +59,6 @@ word_cmp_desc(const void *a, const void *b)
 
 
 
-static double
-edge_strength(int64 rating, int64 rd)
-{
-    double eff  = (double) laplace_effective_mu_fp(rating, rd);
-    double diff = (eff - (double) LAPLACE_GLICKO2_NEUTRAL_MU_FP) / 1.0e9; 
-    double s    = 0.5 + diff / 800.0;
-    if (s < 0.05) s = 0.05;
-    if (s > 1.0)  s = 1.0;
-    return s;
-}
-
 Datum
 pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
 {
@@ -241,7 +230,7 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
             rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
             rd     = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
 
-            child_rel = u_rel * edge_strength(rating, rd);
+            child_rel = u_rel * laplace_edge_strength(rating, rd);
 
             oe = (CrawlEntry *) hash_search(seen, &oh, HASH_ENTER, &ofound);
             if (!ofound)

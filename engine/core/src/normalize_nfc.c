@@ -105,30 +105,35 @@ static int hangul_compose(uint32_t a, uint32_t b, uint32_t* out) {
     return 0;
 }
 
-static void decompose_into(uint32_t cp, uint32_t** buf, size_t* len, size_t* cap) {
+/* Returns 0 on success, -1 on allocation failure. A dropped codepoint would
+ * silently truncate the NFC result on an identity-bearing path, so OOM must
+ * propagate to the caller (which surfaces it as the length-0 error signal). */
+static int decompose_into(uint32_t cp, uint32_t** buf, size_t* len, size_t* cap) {
     uint32_t hg[3];
     size_t hg_len;
     if (hangul_decompose(cp, hg, &hg_len)) {
-        for (size_t i = 0; i < hg_len; ++i) decompose_into(hg[i], buf, len, cap);
-        return;
+        for (size_t i = 0; i < hg_len; ++i)
+            if (decompose_into(hg[i], buf, len, cap) != 0) return -1;
+        return 0;
     }
     const uint32_t* seq = NULL;
     uint32_t length = 0;
     if (codepoint_table_decompose(cp, &seq, &length) && length > 0) {
         for (uint32_t i = 0; i < length; ++i) {
-            decompose_into(seq[i], buf, len, cap);
+            if (decompose_into(seq[i], buf, len, cap) != 0) return -1;
         }
-        return;
+        return 0;
     }
     if (*len >= *cap) {
         size_t new_cap = (*cap) * 2;
         if (new_cap == 0) new_cap = 16;
         uint32_t* nb = (uint32_t*)realloc(*buf, new_cap * sizeof(uint32_t));
-        if (!nb) return;
+        if (!nb) return -1;
         *buf = nb;
         *cap = new_cap;
     }
     (*buf)[(*len)++] = cp;
+    return 0;
 }
 
 static void canonical_reorder(uint32_t* buf, size_t len) {
@@ -216,7 +221,9 @@ size_t laplace_normalize_nfc(
     size_t len = 0;
     uint32_t* buf = (uint32_t*)malloc(cap * sizeof(uint32_t));
     if (!buf) return 0;
-    for (size_t i = 0; i < in_len; ++i) decompose_into(in[i], &buf, &len, &cap);
+    for (size_t i = 0; i < in_len; ++i) {
+        if (decompose_into(in[i], &buf, &len, &cap) != 0) { free(buf); return 0; }
+    }
 
     canonical_reorder(buf, len);
 

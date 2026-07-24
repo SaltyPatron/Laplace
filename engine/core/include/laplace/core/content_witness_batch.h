@@ -50,6 +50,17 @@ int laplace_content_root_id(
     size_t         len,
     hash128_t*     out_root_id);
 
+/* Physicality identity is (entity_id, physicality_type) ONLY. The centroid coord
+ * and trajectory are DERIVED, non-exact geometry (centroids collide, e.g.
+ * cat/act) and MUST NOT enter the id -- hashing the float geometry forged
+ * spurious duplicate physicalities (observed: 319 chess-move rows with identical
+ * coords but float-divergent trajectories). Every compose path shares this one
+ * definition; do not reimplement it. */
+void laplace_physicality_id_compute(
+    hash128_t  entity_id,
+    int16_t    physicality_type,
+    hash128_t* out);
+
 typedef void (*laplace_word_emit_fn)(void* ctx, uint32_t ordinal,
                                      const uint8_t* word_utf8, uint32_t word_len,
                                      const hash128_t* id);

@@ -109,7 +109,16 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
                    ORDER BY edge_rank(rk.type_id, rk.mu_raw) DESC,
                             rk.witness_count DESC) AS ord
         FROM ranked rk
-    ), labels AS (
+    ), labels AS MATERIALIZED (
+        -- MATERIALIZED is load-bearing: this is a single-row realize_batch over
+        -- the whole `ordered` window. Un-fenced, PG inlines it into the final
+        -- `labeled` join, and because the labels array is subscripted by o.ord
+        -- the planner re-evaluates the entire array_agg + realize_batch ONCE PER
+        -- OUTPUT ROW (128 loops × ~160ms = 20s for the "run" hub; measured
+        -- 2026-07-24 — the exact regression that reappeared after an upstream
+        -- cardinality-estimate shift flipped the inlining decision). Fenced, it
+        -- runs exactly once. Output is byte-identical (proven run/emperor/king,
+        -- both EXCEPT directions empty).
         -- Full-mesh labels via ONE realize_batch (was: a shorter hand-rolled
         -- synset-lemma -> render -> HEX ladder per row). Gains the
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine

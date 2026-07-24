@@ -1385,9 +1385,14 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             iargs[1] = CStringGetTextDatum(prompt);
             iargs[2] = bind.topic;
 
-            SPI_execute_with_args(
+            /* This deposits the prompt as a conversational-provenance witness;
+             * a silent failure would drop the turn from the record. */
+            int rec_rc = SPI_execute_with_args(
                 "SELECT laplace.session_record_prompt($1, $2, $3)",
                 3, itypes, iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
+            if (rec_rc != SPI_OK_SELECT)
+                elog(ERROR, "recall_session: session_record_prompt failed (SPI rc %d)",
+                     rec_rc);
 
             /* Reuse the topic just resolved for session_record_prompt instead
              * of resolving again inside respond_impl — respond_routed takes

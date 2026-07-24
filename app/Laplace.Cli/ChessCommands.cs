@@ -1,5 +1,6 @@
 using global::Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -91,7 +92,7 @@ internal static class ChessCommands
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
         Console.WriteLine($"  depth {depth}, {games} games, maxPlies {maxPlies}, concurrency {concurrency}, "
-            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, record={record}, db={Redact(ChessEngineService.ResolveConnString())}");
+            + $"openings {(seedOpenings ? $"suite({book!.Count})" : "random")}, record={record}, db={LaplaceInstall.RedactConnectionString(ChessEngineService.ResolveConnString())}");
         string pgnOut = ArgStr(args, "--pgn-out", "");
         var sink = string.IsNullOrEmpty(pgnOut)
             ? null
@@ -168,7 +169,7 @@ internal static class ChessCommands
         string pieces = ArgStr(args, "--piece", LearnedPst.WhitePieces).ToUpperInvariant();
         await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
         var learned = LearnedPst.ReadWhite(ds);
-        Console.WriteLine($"learned piece-square values (rating-point deviation from a draw; >0 = good for the mover), db={Redact(ChessEngineService.ResolveConnString())}");
+        Console.WriteLine($"learned piece-square values (rating-point deviation from a draw; >0 = good for the mover), db={LaplaceInstall.RedactConnectionString(ChessEngineService.ResolveConnString())}");
 
         foreach (char pc in pieces)
         {
@@ -291,9 +292,6 @@ internal static class ChessCommands
         Console.WriteLine("  (positive Elo = removing that overlay WEAKENS the engine, i.e. the overlay helps)");
         return 0;
     }
-
-    private static string Redact(string conn) =>
-        System.Text.RegularExpressions.Regex.Replace(conn, "(?i)password=[^;]*", "password=***");
 
     private static async Task<int> SelfPlayAsync(string[] args)
     {

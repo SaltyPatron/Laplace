@@ -117,11 +117,11 @@ public sealed class ChessBookDecomposerTests
         Assert.All(records, r => Assert.Equal("A Tiny Chess Book", r.BookTitle));
     }
 
-    [Fact]
+    [SkippableFact]
     public void RealBooks_ExtractionSmoke()
     {
         string blueBook = Path.Combine(BooksDir, "the-blue-book-of-chess.txt");
-        if (!File.Exists(blueBook)) return;
+        Skip.IfNot(File.Exists(blueBook), "Blue Book corpus not present");
 
         var text = File.ReadAllText(blueBook);
         var (blocks, _) = ChessBookDecomposer.SplitEmbeddedPgn(text);
@@ -132,11 +132,11 @@ public sealed class ChessBookDecomposerTests
             $"only {parsable}/{blocks.Count} embedded games parsed");
     }
 
-    [Fact]
+    [SkippableFact]
     public void RealBooks_DescriptiveProseSmoke()
     {
         string strategy = Path.Combine(BooksDir, "chess-strategy.txt");
-        if (!File.Exists(strategy)) return;
+        Skip.IfNot(File.Exists(strategy), "chess-strategy corpus not present");
 
         int grounded = ChessBookDecomposer
             .ExtractFromText(File.ReadAllText(strategy), "Chess Strategy")

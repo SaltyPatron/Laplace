@@ -362,7 +362,7 @@ views/v_consensus_resolved.sql.in
 views/v_consensus_edges.sql.in
 views/v_entities_highway.sql.in
 views/v_consensus_unrefuted.sql.in
-functions/analysis/laplace_eff_mu.sql.in
+functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in

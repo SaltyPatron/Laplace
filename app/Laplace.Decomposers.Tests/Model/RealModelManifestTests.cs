@@ -47,12 +47,12 @@ public class RealModelManifestTests
         return TensorRoleClassifier.Build(headers, cfg, name);
     }
 
-    [Theory]
+    [SkippableTheory]
     [MemberData(nameof(Models))]
     public void Manifest_MatchesRealModel(Expect e)
     {
         string? dir = ResolveSnapshot(e.HubDir);
-        if (dir is null) return;
+        if (dir is null) throw new SkipException($"model snapshot not present: {e.HubDir}");
 
         var cfgResult = ModelConfigReader.Read(Path.Combine(dir, "config.json"));
         var headers = SafetensorsContainerParser.ParseModel(dir);
@@ -116,7 +116,7 @@ public class RealModelManifestTests
 
 
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("DETR-ResNet-101")]
     [InlineData("RT-DETR-v1-R101")]
     [InlineData("Conditional-DETR-R50")]
@@ -124,7 +124,7 @@ public class RealModelManifestTests
     public void VisionDetection_NeverRunsTextPlanes(string hubDir)
     {
         string? dir = ResolveSnapshot(hubDir);
-        if (dir is null) return;
+        if (dir is null) throw new SkipException($"model snapshot not present: {hubDir}");
         var m = Parse(dir, hubDir);
         Assert.False(m.TextPlanesRunnable,
             $"{hubDir} (type={m.Config.ModelType}, modality={m.Modality}, coverage={m.Coverage}) must not run text planes");
@@ -132,7 +132,7 @@ public class RealModelManifestTests
 
 
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("models--sentence-transformers--all-MiniLM-L6-v2")]
     [InlineData("Florence-2-base")]
     [InlineData("models--Qwen--Qwen3-VL-Embedding-2B")]
@@ -142,7 +142,7 @@ public class RealModelManifestTests
     public void AnyFormat_ParsesWithoutCrashing(string hubDir)
     {
         string? dir = ResolveSnapshot(hubDir);
-        if (dir is null) return;
+        if (dir is null) throw new SkipException($"model snapshot not present: {hubDir}");
         var ex = Record.Exception(() =>
         {
             var m = Parse(dir, hubDir);

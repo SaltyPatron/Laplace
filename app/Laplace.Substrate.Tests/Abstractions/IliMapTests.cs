@@ -21,13 +21,13 @@ public class IliMapTests
         return File.Exists(Path.Combine(dir, IliMap.MapFileName)) ? dir : null;
     }
 
-    [Fact]
+    [SkippableFact]
     public void LoadsFullMapAndResolvesSynsetToIli()
     {
-        if (CiliDir() is not { } dir) return;
+        if (CiliDir() is not { } dir) throw new SkipException("CILI map not present");
 
         var map = IliMap.Load(dir);
-        if (map.Count < 100_000) return; // stub/minimal CILI tree — full map required
+        Skip.If(map.Count < 100_000, "stub/minimal CILI tree — full map required");
 
         Assert.Equal(117659, map.Count);
 
@@ -41,13 +41,13 @@ public class IliMapTests
         Assert.Null(map.Resolve(999999999, 'n'));
     }
 
-    [Fact]
+    [SkippableFact]
     public void SatellitePosIsDistinctFromHeadAdjective()
     {
-        if (CiliDir() is not { } dir) return;
+        if (CiliDir() is not { } dir) throw new SkipException("CILI map not present");
 
         var map = IliMap.Load(dir);
-        if (map.Count < 100_000) return;
+        Skip.If(map.Count < 100_000, "stub/minimal CILI tree — full map required");
 
         int satellites = 0;
         foreach (var line in File.ReadLines(Path.Combine(dir, IliMap.MapFileName)))

@@ -14,7 +14,7 @@ internal sealed partial class SubstrateClient
 {
     public async Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
     {
-        if (!TryParseHex(idHex, out var id)) return null;
+        if (TryParseIdHex(idHex) is not { } id) return null;
 
         var rows = await ReadRowsAsync("""
             SELECT dir, encode(id, 'hex'), label, relation, hub_type, eff_mu, witnesses
@@ -44,7 +44,7 @@ internal sealed partial class SubstrateClient
 
     public async Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
     {
-        if (!TryParseHex(idHex, out var id)) return null;
+        if (TryParseIdHex(idHex) is not { } id) return null;
 
         var rows = await ReadRowsAsync("""
             SELECT dir, ord, encode(id, 'hex'), label, eff_mu
