@@ -7,12 +7,19 @@ name: Laplace — build, deploy, test
 #
 #   policy ─┐
 #           ├─> build -> unit-test -> deploy -> db-ops -> integration-test
-#   deps ───┘                                                    │
-#                              restore-api <── smoke <── publish <── seed
+#   deps ───┘                              (seed: dispatch-only)   │
+#                              restore-api <── smoke <── publish <─┘
 #
-# Seed precedes publish: seeding writes to PG through the CLI (no API
-# dependency), and publish gates on /health/ready — which requires a seeded
-# substrate. This order keeps that gate valid on the fresh_db path too.
+# Seeds NEVER run on push (operator decision 2026-07-24): a push deploys code
+# (install/db-ops legitimately bounce PG — that IS the deployment unit), but
+# seed ladders are long, data-touching, and belong to the operator. They run
+# only on workflow_dispatch (seed=true, or forced by fresh_db) or via the
+# dedicated seed-*.yml workflows. Rebuilds therefore preempt seeds by design —
+# seed steps are required to be idempotent/resumable (content-addressing +
+# completion markers), so a preempted seed loses nothing and re-runs cleanly.
+# publish still gates on /health/ready: on push the standing substrate is
+# already seeded, so the gate holds; on a fresh_db dispatch, seed is forced
+# and precedes publish exactly as before.
 
 on:
   # Main only — PRs must not burn the self-hosted runner. Manual re-runs via
@@ -31,6 +38,10 @@ on:
         default: false
       fresh_db:
         description: "nuke + re-migrate + force-reseed foundation (destructive schema changes only)"
+        type: boolean
+        default: false
+      seed:
+        description: "run the foundation seed ladder (seeds never run on push; fresh_db forces this)"
         type: boolean
         default: false
       serial_tests:
@@ -336,7 +347,13 @@ jobs:
 
   integration-test:
     name: Integration tests — pg_regress || dotnet (parallel)
-    needs: seed
+    # Seed is dispatch-only; on push it skips instantly and tests run against
+    # the standing (already seeded) substrate with the freshly installed
+    # extension — the layer the tests are supposed to validate.
+    needs: [db-ops, seed]
+    if: >-
+      !cancelled() && needs.db-ops.result == 'success' &&
+      (needs.seed.result == 'success' || needs.seed.result == 'skipped')
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -373,8 +390,11 @@ jobs:
           done
 
   seed:
-    name: Seed — foundation ladder (idempotent, no-op when present)
+    name: Seed — foundation ladder (dispatch-only; idempotent, no-op when present)
     needs: db-ops
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.seed == true || inputs.fresh_db == true)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 240
     steps:
