@@ -65,15 +65,6 @@ public sealed record ErrorBody(
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("message")] string Message);
 
-public sealed record NotImplementedResponse(
-    [property: JsonPropertyName("error")] NotImplementedBody Error);
-
-public sealed record NotImplementedBody(
-    [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("endpoint")] string Endpoint,
-    [property: JsonPropertyName("message")] string Message);
-
 public sealed record PaymentRequiredResponse(
     [property: JsonPropertyName("error")] PaymentRequiredBody Error);
 
