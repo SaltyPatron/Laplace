@@ -1,6 +1,7 @@
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/perfcache_format.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/utf8.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -285,35 +286,6 @@ int laplace_codepoint_is_whitespace(uint32_t cp) {
     return cp == 0x0009u || cp == 0x00A0u || cp == 0x2007u || cp == 0x202Fu;
 }
 
-static int laplace_ws_utf8_decode(const uint8_t* p, size_t remaining,
-                                  uint32_t* out_cp, size_t* out_consumed) {
-    if (remaining == 0) return -1;
-    uint8_t b0 = p[0];
-    if (b0 < 0x80) { *out_cp = b0; *out_consumed = 1; return 0; }
-    if ((b0 & 0xE0) == 0xC0) {
-        if (remaining < 2 || (p[1] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (p[1] & 0x3F);
-        if (cp < 0x80) return -1;
-        *out_cp = cp; *out_consumed = 2; return 0;
-    }
-    if ((b0 & 0xF0) == 0xE0) {
-        if (remaining < 3 || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12)
-                    | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
-        if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return -1;
-        *out_cp = cp; *out_consumed = 3; return 0;
-    }
-    if ((b0 & 0xF8) == 0xF0) {
-        if (remaining < 4 || (p[1] & 0xC0) != 0x80
-            || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((uint32_t)(b0 & 0x07) << 18)
-                    | ((uint32_t)(p[1] & 0x3F) << 12)
-                    | ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
-        if (cp < 0x10000 || cp > 0x10FFFF) return -1;
-        *out_cp = cp; *out_consumed = 4; return 0;
-    }
-    return -1;
-}
 
 int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {
     if (utf8 == NULL || len == 0) return 0;
@@ -321,7 +293,7 @@ int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {
     while (off < len) {
         uint32_t cp;
         size_t   consumed;
-        if (laplace_ws_utf8_decode(utf8 + off, len - off, &cp, &consumed) != 0)
+        if (laplace_utf8_decode(utf8 + off, len - off, &cp, &consumed) != 0)
             return 0;
         if (!laplace_codepoint_is_whitespace(cp))
             return 0;

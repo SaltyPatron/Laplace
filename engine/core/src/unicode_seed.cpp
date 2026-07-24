@@ -15,6 +15,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/ucd_xml.h"
+#include "laplace/core/utf8.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/super_fibonacci.h"
 #include "laplace/core/perfcache_format.h"
@@ -186,13 +187,6 @@ int parse_ducet(const char* path, DucetKeys& dk) {
     return 0;
 }
 
-size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
-    if (cp < 0x80) { o[0]=(uint8_t)cp; return 1; }
-    if (cp < 0x800) { o[0]=0xC0|(cp>>6); o[1]=0x80|(cp&0x3F); return 2; }
-    if (cp < 0x10000) { o[0]=0xE0|(cp>>12); o[1]=0x80|((cp>>6)&0x3F); o[2]=0x80|(cp&0x3F); return 3; }
-    o[0]=0xF0|(cp>>18); o[1]=0x80|((cp>>12)&0x3F); o[2]=0x80|((cp>>6)&0x3F); o[3]=0x80|(cp&0x3F); return 4;
-}
-
 }
 
 /* Read the single entry of a ZIP archive in-process: locate it via the End Of
@@ -319,7 +313,7 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
         uint32_t rank = uca_rank[cp];
         double coord[4] = { sf[4ull*rank+0], sf[4ull*rank+1], sf[4ull*rank+2], sf[4ull*rank+3] };
         hilbert128_t hb; hilbert4d_encode(coord, &hb);
-        uint8_t u8[4]; size_t n = utf8_encode(cp, u8);
+        uint8_t u8[4]; size_t n = laplace_utf8_encode(cp, u8);
         hash128_t h; hash128_blake3(u8, n, &h);
         uint32_t flags = laplace_pc_pack_flags(d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp]);
 

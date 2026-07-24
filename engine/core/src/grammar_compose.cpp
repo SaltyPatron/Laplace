@@ -7,6 +7,7 @@
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/utf8.h"
 #include "laplace/core/grapheme_floor.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hash_composer.h"
@@ -65,29 +66,6 @@ static int json_hex_digit(uint8_t c) {
     return -1;
 }
 
-static size_t utf8_encode_codepoint(uint32_t cp, uint8_t* out) {
-    if (cp <= 0x7Fu) {
-        out[0] = (uint8_t)cp;
-        return 1;
-    }
-    if (cp <= 0x7FFu) {
-        out[0] = (uint8_t)(0xC0u | (cp >> 6));
-        out[1] = (uint8_t)(0x80u | (cp & 0x3Fu));
-        return 2;
-    }
-    if (cp <= 0xFFFFu) {
-        out[0] = (uint8_t)(0xE0u | (cp >> 12));
-        out[1] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
-        out[2] = (uint8_t)(0x80u | (cp & 0x3Fu));
-        return 3;
-    }
-    out[0] = (uint8_t)(0xF0u | (cp >> 18));
-    out[1] = (uint8_t)(0x80u | ((cp >> 12) & 0x3Fu));
-    out[2] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
-    out[3] = (uint8_t)(0x80u | (cp & 0x3Fu));
-    return 4;
-}
-
 static int json_span_has_escapes(const uint8_t* span, size_t span_len) {
     for (size_t i = 0; i < span_len; ++i)
         if (span[i] == (uint8_t)'\\') return 1;
@@ -131,7 +109,7 @@ static int json_unescape_utf8(const uint8_t* span, size_t span_len,
                     uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
                     i += 4;
                     uint8_t tmp[4];
-                    size_t n = utf8_encode_codepoint(cp, tmp);
+                    size_t n = laplace_utf8_encode(cp, tmp);
                     if (w + n > span_len) {
                         uint8_t* grown = (uint8_t*)realloc(buf, w + n + span_len);
                         if (!grown) { free(buf); return -3; }
