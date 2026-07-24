@@ -93,7 +93,25 @@ def check_source(
             # physicalities + trajectory geometry — and ZERO distributional attestations (sequence
             # is the trajectory geometry, containment is containers_of; PRECEDES is a MODEL relation).
             # Assert exactly that, rather than the KB-source ">0 attestations" expectation.
-            record("attestations", att == 0, f"{att:,} attestations (content-only: expect 0)", count=att)
+            # The source-level HasLayerCompleted marker is ops metadata, not a distributional
+            # attestation — exclude it (per-file markers live under file-root sources, not here).
+            markers = int(
+                psql(
+                    dbname,
+                    "SELECT COALESCE(sum(laplace.evidence_count("
+                    "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || l || '/v1'), "
+                    f"p_source => laplace.source_id('{decomposer}'))), 0) FROM generate_series(0, 8) l;",
+                    host=host,
+                    user=user,
+                )
+            )
+            content_att = att - markers
+            record(
+                "attestations",
+                content_att == 0,
+                f"{content_att:,} non-marker attestations (content-only: expect 0; {markers:,} completion markers)",
+                count=content_att,
+            )
         else:
             record("attestations", att > 0, f"{att:,} attestations", count=att)
     except Exception as e:
