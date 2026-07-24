@@ -15,11 +15,11 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 [Collection("GrammarPerfcache")]
 public class ConceptAnchorTests
 {
-    [Fact]
+    [SkippableFact]
     public void EmitSynset_Runs_AndProducesDecomposedAnchorPlusIsA()
     {
         string cili = TestPathHelpers.CiliOrFallback();
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        Skip.IfNot(File.Exists(Path.Combine(cili, IliMap.MapFileName)), "CILI map not present");
 
         CodepointPerfcache.LoadDefault();
 
@@ -51,13 +51,13 @@ public class ConceptAnchorTests
 
 
 
-    [Fact]
+    [SkippableFact]
     public void Satellite_ResolvesUnderBothPos_AsCollapseDoesNotDrop()
     {
         string cili = TestPathHelpers.CiliOrFallback();
         string mapPath = Path.Combine(cili, IliMap.MapFileName);
-        if (!File.Exists(mapPath)) return;
-        if (IliMap.Load(cili).Count < 100_000) return;
+        Skip.IfNot(File.Exists(mapPath), "CILI map not present");
+        Skip.If(IliMap.Load(cili).Count < 100_000, "stub/minimal CILI tree — full map required");
 
         CodepointPerfcache.LoadDefault();
 

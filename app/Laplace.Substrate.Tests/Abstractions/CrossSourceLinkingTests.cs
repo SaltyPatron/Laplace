@@ -57,11 +57,11 @@ public sealed class CrossSourceLinkingTests
         Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id(fromMapNetField));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ConceptAnchor_SynsetId_Requires_Cili_Map()
     {
         string cili = TestPathHelpers.CiliOrFallback();
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        Skip.IfNot(File.Exists(Path.Combine(cili, IliMap.MapFileName)), "CILI map not present");
 
         CodepointPerfcache.LoadDefault();
         Hash128? iliAnchor = ConceptAnchor.SynsetId(10676319, 'n');

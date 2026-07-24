@@ -53,10 +53,10 @@ public sealed class ChessOpeningsDecomposerTests
             Replay(sans));
     }
 
-    [Fact]
+    [SkippableFact]
     public void RealOpeningsBook_AllLinesResolve()
     {
-        if (!Directory.Exists(OpeningsDir)) return;
+        Skip.IfNot(Directory.Exists(OpeningsDir), "openings book directory not present");
 
         int total = 0, resolved = 0;
         var failures = new List<string>();
