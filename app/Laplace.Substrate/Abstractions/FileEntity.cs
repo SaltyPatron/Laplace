@@ -60,7 +60,7 @@ public static class FileEntity
     /// <c>HasLayerCompleted</c>: minted inline with its meta-type entity, never in
     /// relation_types.toml, never a highway bit, excluded from the consensus fold.</summary>
     public static readonly Hash128 MetadataRelationTypeId =
-        SubstrateCanonicalIds.OfVersioned("substrate", "type", "HasFileMetadata");
+        SubstrateCanonicalIds.OfVersioned("type", "HasFileMetadata");
 
     /// <summary>
     /// Deposit the file's metadata DAG: the canonical metadata text becomes its own
