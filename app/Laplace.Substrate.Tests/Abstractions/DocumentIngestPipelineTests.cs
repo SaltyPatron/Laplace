@@ -30,7 +30,7 @@ public sealed class DocumentIngestPipelineTests
         };
 
         await foreach (var _ in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new DocumentIngestHandler(), config))
+            new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2), config))
         { }
 
         Assert.Equal(0, reader.LegacyContentDescentCalls);
@@ -47,7 +47,7 @@ public sealed class DocumentIngestPipelineTests
 
         var baseline = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new DocumentIngestHandler(),
+            new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2),
             DocumentIngestSupport.PipelineConfig("document/base", null, batchSize: 6)))
             baseline.Add(c);
         Assert.True(ContentEntityCount(baseline) > 0);
@@ -65,7 +65,7 @@ public sealed class DocumentIngestPipelineTests
             ContainmentReader = reader,
         };
         await foreach (var c in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new DocumentIngestHandler(), config))
+            new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2), config))
             changes.Add(c);
 
         Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present documents");
@@ -73,7 +73,101 @@ public sealed class DocumentIngestPipelineTests
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline));
         // Pillar-3a: the re-witness grind is gone — documents emit ZERO distributional
         // attestations, on present trees or otherwise (sequence = trajectory geometry).
+        // Present content WITHOUT a per-file completion marker still deposits the marker
+        // (Pillar 0: the file's trunk-grain witness) — that is provenance, not re-witness.
+        Assert.Equal(0, NonMarkerAttestationCount(changes));
+        Assert.Equal(records.Count, MarkerAttestationCount(changes));
+    }
+
+    [Fact]
+    public async Task DocumentPipeline_MarkerComplete_TrueSkipsBeforeCompose()
+    {
+        var records = Enumerable.Range(1, 5)
+            .Select(i => ContentRecord($"completed document {i}"))
+            .ToList();
+
+        // Root entities present AND per-file completion markers present: the existence
+        // gate must skip every file before compose — zero rows, zero testimony, no merge.
+        var reader = new ProbeTrackingReader(present: true) { SourceCompleted = (_, _) => true };
+        var changes = new List<SubstrateChange>();
+        await foreach (var c in IngestBatchPipeline.RunAsync(
+            new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2),
+            DefaultDocumentConfig(reader)))
+            changes.Add(c);
+
+        Assert.Equal(0, ContentEntityCount(changes));
         Assert.Equal(0, AttestationCount(changes));
+    }
+
+    [Fact]
+    public async Task DocumentPipeline_ForceReObserve_BypassesMarkerSkip()
+    {
+        var records = Enumerable.Range(1, 3)
+            .Select(i => ContentRecord($"forced document {i}"))
+            .ToList();
+
+        var reader = new ProbeTrackingReader(present: true) { SourceCompleted = (_, _) => true };
+        var changes = new List<SubstrateChange>();
+        await foreach (var c in IngestBatchPipeline.RunAsync(
+            new ListContentStream(records),
+            new DocumentIngestHandler(layerOrder: 2) { IgnoreCompletedFiles = true },
+            DefaultDocumentConfig(reader)))
+            changes.Add(c);
+
+        // --force re-observes: files compose (content no-ops under the present bitmap)
+        // and re-deposit their markers.
+        Assert.Equal(records.Count, MarkerAttestationCount(changes));
+    }
+
+    [Fact]
+    public async Task DocumentPipeline_PerFileRecord_DepositsMarkerAndMetadata()
+    {
+        byte[] content = System.Text.Encoding.UTF8.GetBytes("a per-file provenance document.");
+        Hash128 fileRoot = ContentTierSpine.ResolveRoot(content)!.Value;
+        var metadata = new FileMetadata(
+            "a.txt", "docs/a.txt", content.Length, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        var records = new List<ContentIngestRecord>
+        {
+            new(content, SourceId: fileRoot, Metadata: metadata),
+        };
+
+        var reader = new ProbeTrackingReader(present: false);
+        var changes = new List<SubstrateChange>();
+        await foreach (var c in IngestBatchPipeline.RunAsync(
+            new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2),
+            DefaultDocumentConfig(reader)))
+            changes.Add(c);
+
+        var managed = changes.SelectMany(c => c.Attestations).ToList();
+        var markerType = Laplace.Ingestion.LayerCompletion.RelationTypeId(2);
+
+        var marker = Assert.Single(managed, a => a.TypeId == markerType);
+        Assert.Equal(fileRoot, marker.SubjectId);
+        Assert.Equal(fileRoot, marker.SourceId);
+
+        var meta = Assert.Single(managed, a => a.TypeId == FileEntity.MetadataRelationTypeId);
+        Assert.Equal(fileRoot, meta.SubjectId);
+        Assert.Equal(fileRoot, meta.SourceId);
+        Assert.Equal(ContentTierSpine.ResolveRoot(metadata.CanonicalUtf8()), meta.ObjectId);
+
+        // The file's content DAG landed under the file's own source id, and nothing
+        // besides marker + metadata was attested (Pillar 3a).
+        Assert.True(ContentEntityCount(changes) > 0);
+        Assert.Equal(0, NonMarkerAttestationCount(changes));
+    }
+
+    private static IngestBatchConfig DefaultDocumentConfig(ProbeTrackingReader reader)
+    {
+        var config = DocumentIngestSupport.PipelineConfig("document/test", reader, batchSize: 8);
+        return new IngestBatchConfig
+        {
+            SourceId = config.SourceId,
+            BatchLabelPrefix = config.BatchLabelPrefix,
+            BatchSize = config.BatchSize,
+            ProbeChunkSize = 8,
+            WitnessWeight = config.WitnessWeight,
+            ContainmentReader = reader,
+        };
     }
 
     [Fact]

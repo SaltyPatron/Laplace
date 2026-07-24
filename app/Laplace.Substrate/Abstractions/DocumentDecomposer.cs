@@ -11,17 +11,27 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public override Hash128 TrustClassId => UserPromptContent.TrustClass;
     protected override double SourceTrust => UserPromptContent.WitnessWeight;
 
+    // Pillar 0 live: every file is its own provenance unit (source = content-DAG root,
+    // completion marker + metadata DAG per file), so completion is per-file, not the
+    // all-or-nothing source-level marker — new files in a completed directory just work.
+    public override bool PerFileCompletion => true;
+
+    private bool _reObservePresent;
+
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
     // Each document is its own content DAG — no cross-file state, single phase (the default),
     // fully parallel across the file-worker pool.
     protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options) =>
-        new DocumentMultiFileStream(ecosystemPath);
+        string ecosystemPath, DecomposerOptions options)
+    {
+        _reObservePresent = options.ReObservePresent;
+        return new DocumentMultiFileStream(ecosystemPath);
+    }
 
     protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(string fileLabel) =>
-        new DocumentIngestHandler();
+        new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = _reObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)

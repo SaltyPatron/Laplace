@@ -301,7 +301,8 @@ internal static class IngestCommands
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader, loggerFactory);
+        var runner = new IngestRunner(writer, reader, loggerFactory,
+            new NpgsqlIngestObservability(ds, persistEvidenceResolved));
         Console.WriteLine("mode: safetensor snapshot apply (anti-join merge; consensus accumulates at ingest)");
 
         Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
@@ -375,12 +376,15 @@ internal static class IngestCommands
         if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
             return Fail($"ingest document: path not found: {cli.Path}");
 
+        // Pillar 0: the document lane's completion is PER FILE (PerFileCompletion), so the
+        // runner's source-level guard is skipped by capability, not by flag — and the
+        // terminal source-level marker now mints, satisfying layer ordering.
         return await IngestViaRunnerAsync(
             CliRuntime.Decomposers.Resolve("document"),
             Path.GetFullPath(cli.Path),
             skipLayerCheck: true,
             cli,
-            skipSourceCompletion: true);
+            skipSourceCompletion: false);
     }
 
     internal static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
@@ -547,7 +551,8 @@ internal static class IngestCommands
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader, loggerFactory);
+        var runner = new IngestRunner(writer, reader, loggerFactory,
+            new NpgsqlIngestObservability(ds, persistEvidence));
 
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));

@@ -35,6 +35,30 @@ public sealed class IngestRunner
     {
         ArgumentNullException.ThrowIfNull(decomposer);
         ArgumentNullException.ThrowIfNull(options);
+        // Abnormal exits still journal a terminal status: a run cut off by cancellation or
+        // a fatal error must be distinguishable from one that never ran (the run-journal
+        // row would otherwise sit at 'running' forever with no explanation attached).
+        try
+        {
+            return await RunCoreAsync(decomposer, options, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            _obs.OnRunFailed(decomposer.SourceName, "cancelled", "run cancelled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _obs.OnRunFailed(decomposer.SourceName, "failed", $"[{ex.GetType().Name}] {ex.Message}");
+            throw;
+        }
+    }
+
+    private async Task<IngestRunResult> RunCoreAsync(
+        IDecomposer decomposer,
+        IngestRunOptions options,
+        CancellationToken ct)
+    {
 
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
@@ -50,7 +74,11 @@ public sealed class IngestRunner
 
 
 
+        // Per-file-completion sources skip the SOURCE-level guard: their idempotency is
+        // per-file (marker-complete files true-skip in the existence gate before compose),
+        // so a re-run is cheap AND new files in a completed directory still ingest.
         if (!options.SkipSourceCompletion
+            && !decomposer.PerFileCompletion
             && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
         {
             log.LogInformation(
@@ -58,6 +86,7 @@ public sealed class IngestRunner
                 + "a re-ingest would double-count testimony into consensus. "
                 + "To re-run: per-source eviction first.",
                 decomposer.SourceName);
+            _obs.OnRunSkipped(decomposer.SourceName, decomposer.LayerOrder);
             sw.Stop();
             return new IngestRunResult(
                 decomposer.SourceId, decomposer.SourceName,
@@ -417,7 +446,13 @@ public sealed class IngestRunner
         long declaredInput = inventory?.TotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
-        string status = result.UnitsFailed > 0 ? "failed" : (emptySourceNoOp ? "empty-noop" : "ok");
+        // 'capped' = a MaxInputUnits smoke run: it succeeded but deliberately did not
+        // ingest the whole source, which is also why it never mints a completion marker —
+        // the run journal must not let it masquerade as a full 'ok'.
+        string status = result.UnitsFailed > 0 ? "failed"
+            : emptySourceNoOp ? "empty-noop"
+            : options.DecomposerOptions.MaxInputUnits > 0 ? "capped"
+            : "ok";
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
@@ -431,7 +466,7 @@ public sealed class IngestRunner
             result.WallClock.TotalSeconds, result.UnitsFailed, status,
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
-        _obs.OnRunFinished(decomposer.SourceName, result);
+        _obs.OnRunFinished(decomposer.SourceName, result, status);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "
@@ -471,10 +506,12 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
 
-                TrackIntent(counters, intent);
+                TrackIntent(counters, intent, failures);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
-                options.Progress?.Report(MakeProgress(counters));
+                var progress = MakeProgress(counters);
+                _obs.OnProgress(progress);
+                options.Progress?.Report(progress);
                 Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
@@ -565,7 +602,7 @@ public sealed class IngestRunner
                 long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
                 foreach (var intent in batch)
-                    TrackIntent(counters, intent);
+                    TrackIntent(counters, intent, failures);
 
                 log.LogInformation(
                     "INGEST_BATCH source={Source} intents={Intents} rows={Rows} "
@@ -575,7 +612,9 @@ public sealed class IngestRunner
                     apply.WallClock.TotalMilliseconds, batchRows / secs, apply.RoundTrips);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
-                options.Progress?.Report(MakeProgress(counters));
+                var progress = MakeProgress(counters);
+                _obs.OnProgress(progress);
+                options.Progress?.Report(progress);
                 Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
@@ -692,9 +731,31 @@ public sealed class IngestRunner
             ? inv with { TotalInputUnits = cap }
             : inv;
 
-    private static void TrackIntent(RunCounters c, SubstrateChange intent)
+    private void TrackIntent(RunCounters c, SubstrateChange intent, List<IngestFailure> failures)
     {
         string unit = intent.Metadata.SourceContentUnitName;
+
+        // Per-file failure marker (file-failure isolation): the file's read/parse/compose
+        // threw but the rest of the run continued. Count it as a failed unit WITH its
+        // reason — it blocks the completion marker and drives run status to 'failed';
+        // the file itself has no per-file marker, so a re-run retries exactly it.
+        const string fileFailed = IngestBatchPipeline.FileFailedUnitPrefix;
+        if (unit.StartsWith(fileFailed, StringComparison.Ordinal))
+        {
+            Interlocked.Increment(ref c._unitsFailed);
+            var failure = new IngestFailure(
+                intent.Metadata.IntentId,
+                unit,
+                "FileIngestFailure",
+                unit[fileFailed.Length..],
+                WasTransient: false,
+                RetryAttempts: 0,
+                OccurredAt: DateTimeOffset.UtcNow);
+            lock (failures) failures.Add(failure);
+            _obs.OnIntentFailed(c.SourceName ?? "", failure);
+            return;
+        }
+
         const string periodBoundary = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
         if (unit.StartsWith(periodBoundary, StringComparison.Ordinal))
         {

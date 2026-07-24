@@ -4,6 +4,7 @@ schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
+schema/tables/ingest_run_journal.sql.in
 schema/tables/constituent_edges.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
@@ -339,6 +340,7 @@ functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/relation_highway.sql.in
 functions/highway/consensus_band_edges.sql.in
 functions/ops/substrate_pulse.sql.in
+functions/ops/ingest_runs.sql.in
 functions/ops/modality_counts.sql.in
 functions/ops/source_roster.sql.in
 functions/ops/mesh_position.sql.in

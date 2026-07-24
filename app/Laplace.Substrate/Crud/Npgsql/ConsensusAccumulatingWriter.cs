@@ -297,6 +297,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private static Dictionary<(Hash128, Hash128, Hash128?), Delta> NewDeltaMap(int hint) =>
         new(Math.Clamp(hint, 16, 1 << 20));
 
+    /// <summary>
+    /// Ops-marker relation types that never fold into consensus: per-file completion
+    /// markers and file-metadata edges ride inside ordinary working-set changes (unlike
+    /// the source-level marker, whose whole change is skipped by unit-name prefix in
+    /// BuildDelta), so they must be excluded row-by-row. They are recording metadata,
+    /// not testimony — folding them would also mix marker φ with content φ in one batch.
+    /// </summary>
+    private static readonly HashSet<Hash128> OpsMarkerTypeIds = BuildOpsMarkerTypeIds();
+
+    private static HashSet<Hash128> BuildOpsMarkerTypeIds()
+    {
+        var set = new HashSet<Hash128> { Laplace.Decomposers.Abstractions.FileEntity.MetadataRelationTypeId };
+        for (int layer = 0; layer <= Laplace.Ingestion.LayerCompletion.MaxMarkedLayer; layer++)
+            set.Add(Laplace.Ingestion.LayerCompletion.RelationTypeId(layer));
+        return set;
+    }
+
     /// <summary>Merges attestations [start, end) of the flattened block space into
     /// <paramref name="map"/>; returns the observation count it consumed.</summary>
     private static long MergeRange(
@@ -316,6 +333,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             for (int i = from; i < to; i++)
             {
                 var a = atts[i];
+                if (OpsMarkerTypeIds.Contains(a.TypeId)) continue;
                 var key = (a.SubjectId, a.TypeId, a.ObjectId);
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out bool existed);
                 if (!existed)
