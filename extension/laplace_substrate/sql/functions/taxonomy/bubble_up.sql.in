@@ -2,6 +2,13 @@
 -- Ranks HAS_SENSE-family edges by base eff_mu × domain co-occurrence.
 -- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
 -- open set. Abstain = zero rows (queue empty), never fabricate.
+--
+-- No SET search_path so it inlines into callers (#617); family membership is
+-- joined against relation_family_members('HAS_SENSE') (fenced once) instead
+-- of calling relation_type_in_family() per consensus row — the same static
+-- truth table, but sargable through the (subject_id, type_id) indexes.
+-- Row-set equivalence of the sargable family_out proven live 2026-07-24
+-- ("run": 345 = 345 rows, both EXCEPT directions empty).
 CREATE OR REPLACE FUNCTION bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,
@@ -16,21 +23,23 @@ RETURNS TABLE(
     domain_hits bigint,
     witnesses bigint
 )
-LANGUAGE sql STABLE PARALLEL SAFE
-SET search_path = @extschema@, public AS $$
-WITH peers AS (
-    SELECT unnest(lexical_peers(p_term)) AS id
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
+WITH fam AS MATERIALIZED (
+    SELECT id FROM @extschema@.relation_family_members('HAS_SENSE')
+),
+peers AS (
+    SELECT unnest(@extschema@.lexical_peers(p_term)) AS id
 ),
 family_out AS (
     SELECT c.object_id AS target_id,
-           relation_canonical(c.type_id) AS via_relation,
-           eff_mu_display(c.rating, c.rd) AS base_eff_mu,
+           @extschema@.relation_canonical(c.type_id) AS via_relation,
+           @extschema@.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
            c.witness_count AS witnesses,
            c.rating,
            c.rd
     FROM peers p
-    JOIN consensus c ON c.subject_id = p.id
-    WHERE relation_type_in_family(c.type_id, 'HAS_SENSE')
+    JOIN @extschema@.consensus c ON c.subject_id = p.id
+    WHERE c.type_id IN (SELECT id FROM fam)
 ),
 resolved AS (
     /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
@@ -42,10 +51,10 @@ resolved AS (
            fo.rating,
            fo.rd
     FROM family_out fo
-    LEFT JOIN consensus ss
+    LEFT JOIN @extschema@.consensus ss
       ON ss.subject_id = fo.target_id
-     AND relation_type_in_family(ss.type_id, 'HAS_SENSE')
-     AND relation_canonical(ss.type_id) = 'IS_SENSE_OF'
+     AND ss.type_id IN (SELECT id FROM fam)
+     AND @extschema@.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
       AND ss.object_id IS NOT NULL
 
@@ -94,15 +103,15 @@ members AS (
     SELECT r.synset_id,
            m.object_id AS member_id
     FROM resolved r
-    JOIN consensus m ON m.subject_id = r.synset_id
-    WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+    JOIN @extschema@.consensus m ON m.subject_id = r.synset_id
+    WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
     UNION
     SELECT r.synset_id,
            m.subject_id AS member_id
     FROM resolved r
-    JOIN consensus m ON m.object_id = r.synset_id
-    WHERE relation_type_in_family(m.type_id, 'HAS_SENSE')
+    JOIN @extschema@.consensus m ON m.object_id = r.synset_id
+    WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
 ),
 domain_scores AS (
@@ -115,7 +124,7 @@ domain_scores AS (
     -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
     FROM members m
     JOIN domain d ON true
-    JOIN LATERAL geometry_neighbours(m.member_id, 200, 8) gn
+    JOIN LATERAL @extschema@.geometry_neighbours(m.member_id, 200, 8) gn
       ON gn.neighbour_id = d.id
     GROUP BY m.synset_id
 ),
@@ -128,10 +137,10 @@ ranked AS (
            COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
            r.witnesses,
            (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
-           eff_mu(r.rating, r.rd) AS rank_key
+           @extschema@.eff_mu(r.rating, r.rd) AS rank_key
     FROM resolved r
     LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
-    ORDER BY r.synset_id, eff_mu(r.rating, r.rd) DESC
+    ORDER BY r.synset_id, @extschema@.eff_mu(r.rating, r.rd) DESC
 )
 SELECT sense_id,
        synset_id,

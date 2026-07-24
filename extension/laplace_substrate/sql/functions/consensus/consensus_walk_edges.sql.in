@@ -1,21 +1,24 @@
+-- No SET search_path so it inlines into callers (#617) — walk_strongest
+-- executes this once per walk step (generate_walk.c edge_plan); non-inlined,
+-- each step paid a full function execution. walk_branches batches natively
+-- and does not use this function.
 CREATE OR REPLACE FUNCTION consensus_walk_edges(
     p_subject  bytea,
     p_type     bytea DEFAULT NULL,
     p_limit    int   DEFAULT 40,
     p_exclude  bytea[] DEFAULT '{}')
     RETURNS TABLE(object_id bytea, type_id bytea, rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT c.object_id, c.type_id, c.rating, c.rd, c.witness_count
-    FROM v_consensus_unrefuted c
-    LEFT JOIN entities et
+    FROM @extschema@.v_consensus_unrefuted c
+    LEFT JOIN @extschema@.entities et
            ON et.id = c.object_id
-          AND et.type_id = entity_type_id('RelationType')
+          AND et.type_id = @extschema@.entity_type_id('RelationType')
     WHERE c.subject_id = p_subject
       AND c.object_id IS NOT NULL
       AND (p_type IS NULL OR c.type_id = p_type)
       AND NOT (c.object_id = ANY (COALESCE(p_exclude, '{}'::bytea[])))
       AND et.id IS NULL
-    ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC
+    ORDER BY @extschema@.edge_rank(c.type_id, @extschema@.eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
 $$;
