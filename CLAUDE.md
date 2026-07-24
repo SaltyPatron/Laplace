@@ -152,8 +152,8 @@ reseed — regenerate, never backfill.
 ## The SQL surface and the extension
 
 `laplace_substrate` carries the read/serve side natively: the SQL function families
-and native sources are enumerated in the generated `docs/INVENTORY.md` (28 families
-incl. `model` as of 2026-07-18; the inventory is the authority). Native C hot paths
+and native sources are enumerated in the generated `docs/INVENTORY.md` (29 families
+incl. `model` as of 2026-07-23; the inventory is the authority). Native C hot paths
 include: `recall.c` (intent-routed serving), `generate_walk.c`
 (batched beam frontier; `walk_branches` ranks by the Glicko-complete signed weight —
 `relation_rank × eff_mu × exp(−κ·rd) × witness-saturation`, refuted edges negative,
@@ -324,5 +324,6 @@ tracker, migration map in its header); `docs/INVENTIONS.md` is the invention cat
 (`docs/specs/`): 05 substrate invariants, 06 engineering rules, 08 record-vs-calculate,
 09 substrate-LM thesis, 11 three-layer provenance/consensus + chess ladder, 12
 Mold-A-Model map, 14 foundry working doc, 15 Gödel/OODA loop, 16 tier-correct
-attestation, 18 typed strata + mesh, 19 factor storage; `.scratchpad/17` decomposer
-audit.
+attestation, 18 typed strata + mesh, 19 factor storage, 33 perfcache blob law,
+34 conversational provenance (tenant→source, session→context); `.scratchpad/17`
+decomposer audit.

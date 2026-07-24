@@ -1,5 +1,11 @@
 # 32 — Patent Portfolio Audit (code-grounded)
 
+> **STALE 2026-07-23:** the HONESTY LEDGER's "model decomposer never run
+> end-to-end / no model ingested" is out of date — MiniLM was ingested end-to-end
+> 2026-07-15 with bit-exact factor readback gates green (docs 26/28) and the lm
+> completion plane landed (c1b1325). Claim #7 (model-as-witness) is now reduced
+> to practice.
+
 Date: 2026-07-11. Produced by a seven-way parallel audit of the ACTUAL SOURCE
 (C, C++, C#, SQL) — not doc 21, not comments. Each subsystem auditor extracted
 distinct patentable inventions with file:line grounding, independent-vs-dependent

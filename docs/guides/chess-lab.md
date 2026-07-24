@@ -86,8 +86,8 @@ HAS_WHITE/HAS_BLACK. The same panel lives in the web play view ("Explore").
 - `cli chess fetch <user> [--site chesscom|lichess]` → monthly-archive PGN →
   `cli ingest chess <file>` (records witnessed headers/movetext, then the
   analyzer derives positions, MOVE/OUTCOME edges, motifs, openings, clocks).
-- `cli ingest chess-eval [--analyze-depth N]` — stockfish eval pass over
-  recorded games (default depth 12): HAS_EVAL per position + eval-delta
+- `cli ingest chess-eval [--depth N | --nodes N]` — stockfish eval pass over
+  recorded games (default depth 10, the v1 census budget): HAS_EVAL per position + eval-delta
   MOVE_QUALITY (blunder/mistake/inaccuracy) under the ChessStockfish source.
   Marker-gated per game/version; `LAPLACE_INGEST_MAX_UNITS=N` bounds a smoke.
 - Books: `cli ingest chess-books <dir>` (plaintext only today).

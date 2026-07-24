@@ -1,5 +1,10 @@
 # 31 — Repo-wide waste/repetition audit (2026-07-17)
 
+> **UPDATE 2026-07-23:** two Tier-2 body findings have since landed —
+> witness_precedes_chain is now one batched consensus_upsert deposit (GH #428
+> CLOSED), and ChessAnalyze no longer re-stages the same position ~7× per ply
+> (StateKey/compose carried forward; merged chess-perf work #584).
+
 > **Status (2026-07-17, PR #337):** Tier 1 — all nine implemented. Tier 2 —
 > implemented except: chat band-mass → highway_mask (ranking-semantics product
 > decision, deliberately left), trajectory_pairs_ensure incremental fold

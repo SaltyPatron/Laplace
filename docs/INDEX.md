@@ -9,10 +9,10 @@ countable fact; prose docs cite it instead of embedding counts.
 
 ## Entry points
 
-- [README.md](../README.md) — what Laplace is, the epistemic map (2026-07-18)
+- [README.md](../README.md) — what Laplace is, the epistemic map (2026-07-23)
 - [CLAUDE.md](../CLAUDE.md) — the operating law: architecture, binding rules, build/seed tables
 - [AGENTS.md](../AGENTS.md) — agent conduct + PG service law + binding-doc pointers
-- [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; mechanism count per [INVENTORY.md](INVENTORY.md) (2026-07-19)
+- [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
 
 ## Specs — `docs/specs/` (binding, annotate-on-supersede)
 
@@ -23,11 +23,12 @@ countable fact; prose docs cite it instead of embedding counts.
 - [11_Chess_Provenance_Consensus_Spec.txt](specs/11_Chess_Provenance_Consensus_Spec.txt) — spec — three-layer provenance/consensus + the chess board ladder (2026-07-04)
 - [12_Mold_A_Model_Synthesis_Map.txt](specs/12_Mold_A_Model_Synthesis_Map.txt) — spec — substrate primitive → transformer slot bijection (2026-07-10)
 - [14_Foundry_Root_Cause_and_Research.txt](specs/14_Foundry_Root_Cause_and_Research.txt) — spec — foundry working doc: mechanisms M1–M5, prescriptions P1–P10 (2026-07-19)
-- [15_Godel_Engine_OODA_Loop.txt](specs/15_Godel_Engine_OODA_Loop.txt) — spec — the closed loop: walk/deposit/feedback/fold; §3C richer forward pass (2026-07-18)
+- [15_Godel_Engine_OODA_Loop.txt](specs/15_Godel_Engine_OODA_Loop.txt) — spec — the closed loop: walk/deposit/feedback/fold; §3C richer forward pass (2026-07-23)
 - [16_tier_correct_attestation_and_hub_unification.md](specs/16_tier_correct_attestation_and_hub_unification.md) — spec — tier-correct attestation; ILI hub mesh fixes P1–P7 (2026-07-19)
 - [18_Typed_Residual_Stream_and_Mesh.md](specs/18_Typed_Residual_Stream_and_Mesh.md) — spec — typed strata replacing the anonymous residual; mesh factorization (2026-07-19)
 - [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-19)
 - [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
+- [34_Conversational_Provenance.md](specs/34_Conversational_Provenance.md) — spec — conversational provenance: tenant→source, session→context, attribution on every turn; ConversationContent is the authority (2026-07-23)
 
 ## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
 
@@ -59,6 +60,8 @@ countable fact; prose docs cite it instead of embedding counts.
 - [30_Git_Object_Witnessing_Repo_Decomposer.md](../.scratchpad/30_Git_Object_Witnessing_Repo_Decomposer.md) — log — DRAINED to GH 2026-07-20 (#452, #504; §6 folded into #452) (2026-07-17)
 - [31_Waste_Audit_Repo_Wide.md](../.scratchpad/31_Waste_Audit_Repo_Wide.md) — log — five-auditor waste audit, tiered findings + status (2026-07-17)
 - [32_Patent_Portfolio_Audit.md](../.scratchpad/32_Patent_Portfolio_Audit.md) — log — patent portfolio audit (2026-07-11; renumbered from 22 to fix collision)
+- [33_Walk_Sign_Law_And_Read_Path_Audit.md](../.scratchpad/33_Walk_Sign_Law_And_Read_Path_Audit.md) — log — walk sign law + read-path audit; fix merged via fix/walk-sign-law-and-mask-queue (2026-07-21)
+- [34_Ops_Logging_CLI_Chess_Tooling_Campaign.md](../.scratchpad/34_Ops_Logging_CLI_Chess_Tooling_Campaign.md) — log — ops logging / CLI foundation / chess pipeline-fusion campaign; workstreams drained to GH 2026-07-23; #590 correction block in-file (2026-07-23)
 - [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)

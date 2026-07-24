@@ -8,7 +8,8 @@ land. Spec-class: binding, annotate-on-supersede.
 Serving keeps migrating hot read paths out of Postgres into mmap'd deterministic
 blobs: tier-0 geometry/segmentation (`laplace_t0_perfcache.bin`), the highway relation
 law (`laplace_highway_perfcache.bin`), with the factor blob (model-lane read path,
-`.scratchpad/26` item B / docs/specs/19 candidate b) and the GenCorpus blob
+`.scratchpad/26` item B / docs/specs/19 candidate b — tracked as GH #526 since the
+2026-07-20 scratchpad drain) and the GenCorpus blob
 (generation lane, GH #409) designed. That is a de facto two-tier storage
 architecture. It stayed implicit, and the authority question already bit once: an
 implementation seeded the DATABASE from the t0 blob — inverting the derivation — and
@@ -49,7 +50,7 @@ inherits it instead of re-fighting it.
 |---|---|---|---|
 | `laplace_t0_perfcache.bin` | raw UCD (UnicodeDecomposer single origin) | tier-0 geometry/segmentation, native + app | live |
 | `laplace_highway_perfcache.bin` | relation manifest codegen | highway mask bit ops, zero-SQL gating | live |
-| factor blob (name TBD at build) | deposited factor trajectories (DB) | model-lane pair scoring / row top-k / forward walk (pointer arithmetic instead of varlena SPI fetches) | designed — `.scratchpad/26` item B |
+| factor blob (name TBD at build) | deposited factor trajectories (DB) | model-lane pair scoring / row top-k / forward walk (pointer arithmetic instead of varlena SPI fetches) | designed — GH #526 (was `.scratchpad/26` item B, drained 2026-07-20) |
 | GenCorpus blob (name TBD at build) | generation corpus (DB) | `walk_text` / generation lane (kills the >240 s cold build) | prescribed — GH #409 |
 
 ## Rule of engagement for new blobs
