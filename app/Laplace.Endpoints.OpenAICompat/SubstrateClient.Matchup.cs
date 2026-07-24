@@ -49,7 +49,7 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
     {
-        if (!TryParseHex(idHex, out var id)) return null;
+        if (TryParseIdHex(idHex) is not { } id) return null;
         const string sql = "SELECT confirmed, contested, refuted, thin FROM laplace.entity_record(@id)";
         var rows = await ReadRowsAsync(sql,
             static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
@@ -159,11 +159,4 @@ internal sealed partial class SubstrateClient
                 cmd.Parameters.AddWithValue("lim", limit);
             }, "source_roster", ct, timeoutSeconds: 30);
 
-    private static bool TryParseHex(string idHex, out byte[] id)
-    {
-        id = [];
-        if (idHex.Length != 32) return false;
-        try { id = Convert.FromHexString(idHex); return true; }
-        catch (FormatException) { return false; }
-    }
 }
