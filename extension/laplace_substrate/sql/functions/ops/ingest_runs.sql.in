@@ -1,0 +1,13 @@
+-- Ingest run history, newest first: the answer to "did that ingest finish,
+-- and if not, how far did it get?". A 'running' row whose process is gone is
+-- a cut-off run; seed verification passes on the latest row for a source
+-- being ok/skipped-complete with evidence persisted.
+CREATE OR REPLACE FUNCTION ingest_runs(p_limit int DEFAULT 20)
+    RETURNS SETOF ingest_run_journal
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT *
+    FROM ingest_run_journal
+    ORDER BY started_at DESC
+    LIMIT greatest(p_limit, 1)
+$$;

@@ -20,6 +20,23 @@ internal static class IngestPipelineTestHelpers
         changes.Sum(c => (long)c.Attestations.Length +
             (c.IntentStages.IsDefaultOrEmpty ? 0L : c.IntentStages.Sum(s => (long)s.AttestationCount)));
 
+    /// <summary>Per-file completion markers + file-metadata edges are ops provenance, not
+    /// distributional attestations — the Pillar-3a "zero attestations" gate excludes them.</summary>
+    internal static bool IsOpsMarker(Hash128 typeId)
+    {
+        if (typeId == FileEntity.MetadataRelationTypeId) return true;
+        for (int layer = 0; layer <= Laplace.Ingestion.LayerCompletion.MaxMarkedLayer; layer++)
+            if (typeId == Laplace.Ingestion.LayerCompletion.RelationTypeId(layer)) return true;
+        return false;
+    }
+
+    internal static long NonMarkerAttestationCount(IEnumerable<SubstrateChange> changes) =>
+        changes.Sum(c => (long)c.Attestations.Count(a => !IsOpsMarker(a.TypeId)) +
+            (c.IntentStages.IsDefaultOrEmpty ? 0L : c.IntentStages.Sum(s => (long)s.AttestationCount)));
+
+    internal static long MarkerAttestationCount(IEnumerable<SubstrateChange> changes) =>
+        changes.Sum(c => (long)c.Attestations.Count(a => IsOpsMarker(a.TypeId)));
+
     internal static int ExpectedExistenceRoundChunks(int rowCount, int probeChunkSize) =>
         rowCount == 0 ? 0 : (rowCount + probeChunkSize - 1) / probeChunkSize;
 
@@ -56,11 +73,15 @@ internal static class IngestPipelineTestHelpers
 
         public ProbeTrackingReader(bool present) => _present = present;
 
+        /// <summary>Per-root completion answer for the per-file marker check
+        /// (IngestExistenceGate × DocumentIngestHandler); null = never completed.</summary>
+        public Func<Hash128, int, bool>? SourceCompleted;
+
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
 
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(false);
+            => Task.FromResult(SourceCompleted?.Invoke(sourceId, layerOrder) ?? false);
 
         public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
             => Task.FromResult(0L);

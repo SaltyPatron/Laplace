@@ -171,6 +171,12 @@ public static class IngestBatchPipeline
 {
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
 
+    /// <summary>Per-file failure marker (see IngestRunner.TrackIntent): emitted INSTEAD of the
+    /// file's period boundary when file-failure isolation is on and that file's read/parse/
+    /// compose threw. Zero rows, CountsAsUnit=false — it exists purely so the runner counts
+    /// the failure with its reason and the file is neither counted done nor marked complete.</summary>
+    public const string FileFailedUnitPrefix = "file-failed/";
+
     /// <summary>Ingest file-progress marker (see IngestRunner.TrackIntent). The fold is inline
     /// per batch (ConsensusAccumulatingWriter → consensus_upsert) — this marker carries no fold
     /// semantics; the writer skips it as an empty change.</summary>
@@ -183,6 +189,13 @@ public static class IngestBatchPipeline
             sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
     }
+
+    public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
+        new SubstrateChangeBuilder(
+            sourceId, $"{FileFailedUnitPrefix}{fileLabel}: [{ex.GetType().Name}] {ex.Message}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
+        .Build() with
+        { CountsAsUnit = false };
 
     internal sealed class AllAbsentSubstrateReader : ISubstrateReader
     {
@@ -341,12 +354,15 @@ public static class IngestBatchPipeline
         Func<string, IngestBatchConfig> configFactory,
         long maxTotalUnits = 0,
         int fileWorkers = 0,
+        bool isolateFileFailures = false,
         CancellationToken ct = default)
     {
         int workers = maxTotalUnits > 0 ? 1 : Math.Max(1, fileWorkers);
         return workers <= 1
-            ? RunMultiFileSequentialAsync(stream, handlerFactory, configFactory, maxTotalUnits, ct)
-            : RunMultiFileParallelAsync(stream, handlerFactory, configFactory, workers, ct);
+            ? RunMultiFileSequentialAsync(
+                stream, handlerFactory, configFactory, maxTotalUnits, isolateFileFailures, ct)
+            : RunMultiFileParallelAsync(
+                stream, handlerFactory, configFactory, workers, isolateFileFailures, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> RunMultiFileSequentialAsync<TRecord>(
@@ -354,6 +370,7 @@ public static class IngestBatchPipeline
         Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
         Func<string, IngestBatchConfig> configFactory,
         long maxTotalUnits,
+        bool isolateFileFailures,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long unitsConsumed = 0;
@@ -369,19 +386,45 @@ public static class IngestBatchPipeline
             var runConfig = fileCap > 0 ? config.WithMaxInputUnits(fileCap) : config;
             bool hitCap = false;
 
-            await foreach (var change in RunAsync(
-                new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)), handler, runConfig, ct))
+            var changes = RunAsync(
+                new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)), handler, runConfig, ct);
+            var enumerator = changes.GetAsyncEnumerator(ct);
+            SubstrateChange? fileFailure = null;
+            try
             {
-                unitsConsumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+                while (true)
                 {
-                    hitCap = true;
-                    break;
+                    SubstrateChange change;
+                    try
+                    {
+                        if (!await enumerator.MoveNextAsync()) break;
+                        change = enumerator.Current;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) when (isolateFileFailures)
+                    {
+                        Console.Error.WriteLine(
+                            $"INGEST_FILE_FAILED file={label} error=[{ex.GetType().Name}] {ex.Message}");
+                        fileFailure = BuildFileFailure(config.SourceId, label, ex);
+                        break;
+                    }
+                    unitsConsumed += change.Metadata.InputUnitsConsumed;
+                    yield return change;
+                    if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
+                    {
+                        hitCap = true;
+                        break;
+                    }
                 }
             }
+            finally
+            {
+                await enumerator.DisposeAsync();
+            }
 
-            yield return BuildPeriodBoundary(config.SourceId, label);
+            // A failed file emits its failure marker INSTEAD of a boundary: it is
+            // neither counted done nor marked complete, so a re-run retries exactly it.
+            yield return fileFailure ?? BuildPeriodBoundary(config.SourceId, label);
 
             if (hitCap)
                 yield break;
@@ -393,6 +436,7 @@ public static class IngestBatchPipeline
         Func<string, IIngestRecordHandler<TRecord>> handlerFactory,
         Func<string, IngestBatchConfig> configFactory,
         int workers,
+        bool isolateFileFailures,
         [EnumeratorCancellation] CancellationToken ct)
     {
         // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
@@ -486,12 +530,30 @@ public static class IngestBatchPipeline
                         : RunAsync(records, handlerFactory(source.FileLabel), config, ct);
 
                     long fileUnits = 0;
-                    await foreach (var change in changes)
+                    SubstrateChange? fileFailure = null;
+                    try
                     {
-                        fileUnits += change.Metadata.InputUnitsConsumed;
-                        await outCh.Writer.WriteAsync(change, ct);
+                        await foreach (var change in changes)
+                        {
+                            fileUnits += change.Metadata.InputUnitsConsumed;
+                            await outCh.Writer.WriteAsync(change, ct);
+                        }
                     }
-                    await outCh.Writer.WriteAsync(BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) when (isolateFileFailures)
+                    {
+                        // One broken file must not sink the other N-1: surface it as a
+                        // counted failure (marker below) and keep the pool draining.
+                        Console.Error.WriteLine(
+                            $"INGEST_FILE_FAILED file={source.FileLabel} worker={workerId} "
+                            + $"error=[{ex.GetType().Name}] {ex.Message}");
+                        fileFailure = BuildFileFailure(config.SourceId, source.FileLabel, ex);
+                    }
+                    // Failure marker replaces the boundary: the file is neither counted
+                    // done nor marked complete, so a re-run retries exactly it.
+                    await outCh.Writer.WriteAsync(
+                        fileFailure ?? BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
+                    if (fileFailure is not null) continue;
 
                     double secs = Math.Max(1e-3, fileSw.Elapsed.TotalSeconds);
                     Console.Error.WriteLine(

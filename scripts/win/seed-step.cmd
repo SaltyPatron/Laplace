@@ -210,14 +210,23 @@ if not defined STEP_SOURCE (
   if defined LAPLACE_SKIP_VERIFY exit /b 0
   exit /b 3
 )
+rem The pass condition is the RUN JOURNAL, not bare evidence presence: evidence_count>0
+rem is satisfied by a run killed after its first committed batch, but only a run that
+rem REACHED a clean terminal status (ok, or skipped-complete on an already-done source)
+rem with evidence persisted proves the step finished. evidence_count stays informational.
+set "STEP_STATUS="
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT status || '/' || evidence_persisted FROM laplace.ingest_run_journal WHERE source_name = '%STEP_SOURCE%' ORDER BY started_at DESC LIMIT 1;"`) do set "STEP_STATUS=%%v"
+if not defined STEP_STATUS goto verify_fail
 set "STEP_EVIDENCE="
 for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
-if not defined STEP_EVIDENCE goto verify_fail
-if "%STEP_EVIDENCE%"=="0" goto verify_fail
-echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====
+if "%STEP_STATUS%"=="ok/t" goto verify_ok
+if "%STEP_STATUS%"=="skipped-complete/t" goto verify_ok
+goto verify_fail
+:verify_ok
+echo ==== seed-step verify: %STEP_SOURCE% run_status=%STEP_STATUS% evidence_count=%STEP_EVIDENCE% ====
 exit /b 0
 :verify_fail
-echo ERROR: post-step verification failed — evidence_count for %STEP_SOURCE% returned '%STEP_EVIDENCE%' (db=%LAPLACE_DBNAME% @ %LAPLACE_PGHOST%)
+echo ERROR: post-step verification failed — latest ingest_run_journal status for %STEP_SOURCE% is '%STEP_STATUS%' (need ok or skipped-complete with evidence persisted; evidence_count=%STEP_EVIDENCE%; db=%LAPLACE_DBNAME% @ %LAPLACE_PGHOST%)
 exit /b 3
 
 rem A model's source id is a content hash over its config+weights (ModelDecomposer

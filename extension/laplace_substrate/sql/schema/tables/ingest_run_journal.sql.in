@@ -1,0 +1,34 @@
+-- Persistent per-run ingest ledger. One row per IngestRunner run, inserted as
+-- 'running' at run start and driven to a terminal status on every exit path
+-- (ok / failed / empty-noop / capped / cancelled), plus 'skipped-complete' for
+-- runs short-circuited by a completion marker. A row still 'running' with no
+-- live ingest process is the diagnosable signature of a cut-off run — the
+-- counts and files_done say how far it got. Ops metadata, not substrate
+-- content: rows are never folded, never walked, and (flush-journal precedent)
+-- not preserved across dump/restore.
+CREATE TABLE IF NOT EXISTS ingest_run_journal (
+    run_id             uuid         PRIMARY KEY,
+    source_name        text         NOT NULL,
+    source_id          bytea        CHECK (source_id IS NULL OR octet_length(source_id) = 16),
+    layer              int          NOT NULL,
+    status             text         NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running','ok','failed','empty-noop','capped',
+                          'cancelled','skipped-complete')),
+    started_at         timestamptz  NOT NULL DEFAULT now(),
+    ended_at           timestamptz,
+    units_attempted    bigint       NOT NULL DEFAULT 0,
+    units_applied      bigint       NOT NULL DEFAULT 0,
+    units_failed       bigint       NOT NULL DEFAULT 0,
+    entities           bigint       NOT NULL DEFAULT 0,
+    physicalities      bigint       NOT NULL DEFAULT 0,
+    attestations       bigint       NOT NULL DEFAULT 0,
+    files_done         bigint       NOT NULL DEFAULT 0,
+    files_total        bigint       NOT NULL DEFAULT 0,
+    input_units_done   bigint       NOT NULL DEFAULT 0,
+    input_units_total  bigint       NOT NULL DEFAULT 0,
+    evidence_persisted boolean      NOT NULL DEFAULT true,
+    error              text
+);
+
+CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
+    ON ingest_run_journal (source_name, started_at DESC);

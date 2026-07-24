@@ -1,5 +1,6 @@
 using System.Text;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -45,10 +46,41 @@ public readonly record struct FileMetadata(
 ///     attestation identities collide → no-op, no <c>observation_count</c> mass-UPDATE, no marker;
 ///   • provenance/audit — <c>source_id</c> is now a walkable entity with its own metadata DAG,
 ///     reachable by <c>containers_of</c> from any content point (name / license / origin lineage).
-/// See <c>~/.claude/plans/quirky-moseying-cray.md</c> Pillar 0.
+///
+/// LIVE in the document lane: <c>DocumentMultiFileStream</c> stamps each record with this
+/// per-file source id, <c>DocumentIngestHandler.WalkWitness</c> deposits the completion
+/// marker (<c>LayerCompletion.EmitFileMarker</c>) and the metadata DAG
+/// (<see cref="EmitMetadata"/>), and <c>IngestExistenceGate</c> skips a marker-complete
+/// file before compose. Other lanes still ride static sources — their conversion is the
+/// tracked Pillar-0 follow-up campaign.
 /// </summary>
 public static class FileEntity
 {
+    /// <summary>Meta relation hanging a file's metadata DAG off its trunk. Same class as
+    /// <c>HasLayerCompleted</c>: minted inline with its meta-type entity, never in
+    /// relation_types.toml, never a highway bit, excluded from the consensus fold.</summary>
+    public static readonly Hash128 MetadataRelationTypeId =
+        SubstrateCanonicalIds.OfVersioned("type", "HasFileMetadata");
+
+    /// <summary>
+    /// Deposit the file's metadata DAG: the canonical metadata text becomes its own
+    /// content DAG (identical metadata meshes to one node across files) attested onto the
+    /// file trunk under the file's own provenance. Fetched at provenance-query time; never
+    /// hashed into identity (that would fork the source per-name and destroy the collision
+    /// that makes corroboration and dedup free).
+    /// </summary>
+    public static void EmitMetadata(
+        SubstrateChangeBuilder builder, Hash128 fileRoot, in FileMetadata metadata)
+    {
+        if (ContentEmitter.Emit(builder, metadata.CanonicalUtf8(), fileRoot) is not { } metaRoot)
+            return;
+        builder
+            .AddEntity(MetadataRelationTypeId, EntityTier.Word,
+                BootstrapIntentBuilder.RelationTypeMetaTypeId, fileRoot)
+            .AddAttestation(NativeAttestation.CategoricalResolved(
+                fileRoot, MetadataRelationTypeId, metaRoot, fileRoot, contextId: null,
+                SourceTrust.SubstrateMandate));
+    }
     /// <summary>
     /// The file-entity <c>source_id</c> IS the file's content-DAG root — its trunk node. Nothing
     /// else: <c>same content = same file = same source</c>, by construction. Re-ingesting the same
