@@ -1,0 +1,37 @@
+-- non_kin_assoc_types(): the relation types that ride the ASSOCIATIVE salience band
+-- but do not mean "semantically related to".
+--
+-- Bands rank IMPORTANCE; families say what a relation MEANS. Conversational
+-- rendering needs the second, and reading the band raw conflates them. After the
+-- wiktionary seed the associative band carries etymology, usage examples, register
+-- labels and lexicographer categories next to genuine kin, which rendered:
+--
+--   "Hound is related to trace and hound and hounden and *hund and *hundaz
+--    and archaic and hund."
+--
+-- `*hund` / `*hundaz` are reconstructed proto-Germanic forms and `archaic` is a
+-- register label. Etymology is DESCENT, an example is USAGE, a register is a
+-- USAGE CONDITION, a lexfile is a CATALOGUE BUCKET -- none of them is kinship.
+--
+-- Whole families are excluded, not individual types: HAS_ETYMOLOGY is a family_root
+-- whose children (ETYMOLOGICALLY_DERIVED_FROM, ETYMOLOGICALLY_RELATED_TO) must go
+-- with it, and per the decomposer law declaring a family member pulls its ancestors.
+-- Naming the roots keeps this correct when a new child is added to the manifest --
+-- the exclusion follows automatically instead of silently regressing.
+--
+-- Resolved through relation_family_members(), so an unknown or not-yet-seeded name
+-- contributes nothing rather than raising. Returns ids only: this is consumed inside
+-- WHERE clauses in hash space, never rendered.
+CREATE OR REPLACE FUNCTION non_kin_assoc_types()
+    RETURNS TABLE(id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT DISTINCT m.id
+    FROM unnest(ARRAY[
+             'HAS_ETYMOLOGY',        -- + ETYMOLOGICALLY_DERIVED_FROM / _RELATED_TO
+             'HAS_EXAMPLE',          -- usage, surfaced by the examples shape instead
+             'HAS_USAGE_REGISTER',   -- "archaic", "colloquial"
+             'HAS_LEX_CATEGORY'      -- "noun.object", a catalogue bucket
+         ]) AS fam(name)
+    CROSS JOIN LATERAL relation_family_members(fam.name) AS m(id)
+$$;

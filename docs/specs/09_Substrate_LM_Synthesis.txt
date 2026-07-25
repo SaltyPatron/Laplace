@@ -207,6 +207,13 @@ never enshrine the plpgsql-no-CTE floor.
 
 REDUCED RESIDUE (what actually remains after every objection collapsed)
 ----------------------------------------------------------------------
+[SUPERSEDED AS A GATE 2026-07-25 -> docs/specs/36 SS6. The question below is a MEASUREMENT
+ TAKEN AFTER THE ROUTING STAGE EXISTS, not a prerequisite for building it. Routing quality
+ has never been measurable because the routing stage (36 SS3, S7: re-rank sequence-layer
+ candidates by the LIVE walk frontier, per emitted token) has never been written -- the
+ retrieval half (walk_branches) and the generation half (steered_walk/trajectory_generate)
+ run as two unconnected programs and nothing composes them. Build S7, then measure. Citing
+ this paragraph as an open research risk is a stall, not a status.]
 ONE measurable question: does consensus x geometry x trajectory ROUTE as well as trained
 attention, at depth, to produce fluent generation? Floor = a conventional LLM (softmax never
 zero => graceful degradation, no cliff, no empty). Ceiling = exact/grounded retrieval where the

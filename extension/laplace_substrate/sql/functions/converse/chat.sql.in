@@ -55,18 +55,74 @@ BEGIN
     IF p_topic IS NOT NULL THEN
         topic := p_topic;
     ELSE
-        SELECT array_agg(y.syn ORDER BY y.exact_hit DESC NULLS LAST,
-                                        y.band_mass DESC,
-                                        char_length(y.surface) DESC)
+        -- HASH SPACE ONLY. The previous ranking's primary sort key was
+        -- `lower(realize(x.syn)) = x.surface` -- it RENDERED each candidate synset
+        -- to text mid-query and compared strings, so orientation was decided by a
+        -- surface-form match. That is three defects in one expression: it renders
+        -- before the operation is finished (render/label belong at the END, once a
+        -- result is in hand); it calls an expensive STABLE function per row, which
+        -- defeats the indexes; and a string equality test is English-shaped in a
+        -- substrate whose identity law is language-agnostic -- a synset whose
+        -- canonical label differs from the prompt's surface (car -> "auto") scored
+        -- FALSE and lost to an incidental token. Measured: "What are the parts of a
+        -- car?" oriented onto `parts` ("the local environment"), not `car`.
+        --
+        -- Replaced by the fold's own signal, entirely in ids: how strongly this
+        -- token DENOTES this synset (the sense edge's eff_mu, from senses()) times
+        -- how much content-band mass the synset carries. Both are consensus reads;
+        -- no rendering, no string compare, no language assumption.
+        -- The secondary signal is the HIGHWAY MASK, not a consensus scan. The old
+        -- band_mass was a correlated `count(*)` over consensus PER CANDIDATE --
+        -- measured 29.6s for one candidate on the seeded corpus. entities.highway_mask
+        -- is a plain column populated at fold-write time, and laplace_highway_popcount
+        -- is native: the same orientation signal off one column read, ~3s including
+        -- topic resolution, and it scales with candidates instead of with edges.
+        --
+        -- popcount is BREADTH (how many distinct relation types this concept
+        -- participates in), not edge count -- deliberately. For "which prompt token is
+        -- the topic", a concept wired into many kinds of relation is the better
+        -- answer than one with many edges of a single type, and the primary key
+        -- (denote_mu) already carries strength. Not a cheaper approximation of the
+        -- old number: a better-shaped one that happens to be cheap.
+        --
+        -- No bytea &/| in Postgres and no popcount-of-intersection is published, so
+        -- this counts the whole mask rather than masking to the content bands first.
+        -- If that intersection is wanted, it belongs in C next to
+        -- laplace_highway_popcount, not rebuilt as a consensus scan here.
+        -- NULL mask (entity folded but not yet drained) sorts last via NULLS LAST
+        -- rather than being treated as zero-breadth.
+        -- BREADTH FIRST, denote_mu only as the tiebreak. Measured on
+        -- "What are the parts of a car?" (2026-07-25, seeded corpus):
+        --
+        --   token  denote_mu  breadth  band_mass
+        --   a         1747.8        8         11
+        --   are       1631.1        8         17
+        --   car       1456.1       25         74
+        --   of        1311.4       10          9
+        --
+        -- denote_mu is how strongly a surface DENOTES a sense, and function words
+        -- denote their senses very strongly -- "a" is an unambiguous article. Ranking
+        -- on it puts articles and copulas first: with denote_mu primary this function
+        -- answered "What is a dog?" with "A is the 1st letter of the Roman alphabet."
+        -- Breadth (distinct relation types the concept participates in) separates
+        -- content from function words cleanly and without a stoplist -- content words
+        -- are wired into many KINDS of relation, function words into few, in any
+        -- language. denote_mu still decides WHICH sense of the winning concept.
+        SELECT array_agg(y.syn ORDER BY y.breadth DESC NULLS LAST,
+                                        y.denote_mu DESC NULLS LAST,
+                                        y.syn)
           INTO cands
         FROM (
-            SELECT x.syn, x.surface,
-                   (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
-                   (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                      AND relation_highway_band(c.type_id) IN (1,2,4,7)) AS band_mass
-            FROM (SELECT DISTINCT top_synset(p.id) syn, lower(render_text(p.id,32)) surface
-                  FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-            WHERE x.syn IS NOT NULL
+            SELECT DISTINCT ON (x.syn)
+                   x.syn,
+                   x.denote_mu,
+                   laplace_highway_popcount(e.highway_mask) AS breadth
+            FROM (SELECT s.synset_id AS syn, s.eff_mu AS denote_mu
+                  FROM prompt_state(p_prompt) p
+                  CROSS JOIN LATERAL senses(p.id) s
+                  WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL) x
+            LEFT JOIN entities e ON e.id = x.syn
+            ORDER BY x.syn, x.denote_mu DESC
         ) y;
         topic := cands[1];
         -- Nothing in this turn resolved: carry the session's standing topic.

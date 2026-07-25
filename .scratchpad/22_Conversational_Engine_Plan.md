@@ -10,6 +10,14 @@
      starved free-form walk #361 + reseed #413.
      Open work lives in GitHub issues. Keep this file for the design rationale only. -->
 
+<!-- SUPERSEDED 2026-07-25 by docs/specs/36 (The Laplace Forward Pass). Phases B/C/F of this
+     doc are stages S1-S3 and S6-S8 of the canonical ladder in 36 §3, with named entry points
+     and a defined contract — they are WORK, not open research phases. "Phase F remains fully
+     open / needs deeper C" is a scope statement, not a blocker; do not cite it as one.
+     Live isolation of what actually breaks conversation is 36 §4 (verified 2026-07-25):
+     no intent inference, degenerate topic argmax, no sense disambiguation, converse_walk
+     unreachable from chat(), and 93 PRECEDES edges substrate-wide. -->
+
 # 22 — Conversational Engine: remaining architecture plan
 
 Goal: the substrate converses like a human — deterministic, grounded, language-agnostic —
