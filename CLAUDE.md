@@ -190,8 +190,10 @@ monotonically. Scoped pours (filter attestations by source/context → re-fold �
 are the custom-molding product mechanism. Export spine: `engine/synthesis`
 (gguf_writer, tensor_decompose, qk kernels) + `engine/dynamics` (eigenmaps,
 gram_schmidt, procrustes) + `FoundryCommands`. Every exported weight decomposes back to
-its witnesses. The one open research question (doc 09): does consensus × geometry ×
-trajectory ROUTE as well as trained attention at depth.
+its witnesses. Whether consensus × geometry × trajectory routes as well as trained
+attention at depth is a MEASUREMENT taken after the routing stage exists, not an open
+research question gating the build — the stage is specified with named entry points in
+`docs/specs/36` §3 (S7). Build, then measure.
 
 ## Inference — the Gödel/OODA engine
 
@@ -206,6 +208,14 @@ immediate fold), and the next walk reads the updated consensus. **Evaluation IS
 ingestion.** Self-signals are outranked by design (Response/UserFeedback/AiModelProbe
 trust classes) — one voice among many. This closed self-improving loop is what makes it
 a mind and not a lookup.
+
+**The forward pass has ONE canonical order of operations — `docs/specs/36` §3 (S0→S10).**
+`chat()` is the only conversational entry point and runs the full ladder; `converse`,
+`converse_about`, `converse_walk`, `converse_facts` are internal STAGES of it, never
+sibling entry points. No stage may be skipped silently: a stage that cannot run degrades
+explicitly and says so in the response envelope. Template prose (`converse_facts`) is the
+S9 FALLBACK when the sequence layer is starved — never the success path. Every shape
+published by `query_shapes()` must be reachable and must differ from `describe`.
 
 ## Binding engineering laws
 

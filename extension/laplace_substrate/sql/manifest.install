@@ -169,6 +169,7 @@ functions/converse/relation_bands.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
 functions/converse/witness_precedes_chain.sql.in
+functions/converse/non_kin_assoc_types.sql.in
 functions/converse/converse_facts.sql.in
 functions/converse/converse_about.sql.in
 functions/converse/converse.sql.in
@@ -385,5 +386,6 @@ functions/chess/chess_game.sql.in
 functions/chess/chess_time_pressure_outcome.sql.in
 functions/chess/chess_ranked.sql.in
 functions/chess/chess_head_to_head.sql.in
+functions/chess/chess_game_plies.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
 functions/readback/drop_retired_constituent_edges.sql.in

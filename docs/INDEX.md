@@ -29,6 +29,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-19)
 - [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
 - [34_Conversational_Provenance.md](specs/34_Conversational_Provenance.md) — spec — conversational provenance: tenant→source, session→context, attribution on every turn; ConversationContent is the authority (2026-07-23)
+- [36_Laplace_Forward_Pass.md](specs/36_Laplace_Forward_Pass.md) — spec — the canonical forward pass S0→S10 paired stage-for-stage against the transformer; ingestion-vs-gradient-descent map; live isolation of the conversational gap; standardization contract (2026-07-25)
 
 ## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
 
