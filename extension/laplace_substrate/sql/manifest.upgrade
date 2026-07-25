@@ -384,5 +384,6 @@ functions/chess/chess_game.sql.in
 functions/chess/chess_time_pressure_outcome.sql.in
 functions/chess/chess_ranked.sql.in
 functions/chess/chess_head_to_head.sql.in
+functions/chess/chess_game_plies.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
 functions/readback/drop_retired_constituent_edges.sql.in

@@ -112,6 +112,11 @@ DECLARE
     r_junk  bytea := laplace_hash128_blake3('test/chess2/unparseable_result');
     elo     bytea := laplace_hash128_blake3('test/chess2/elo_tag');
     pos_probe bytea := laplace_hash128_blake3('test/chess2/position_probe');
+    pl_p0   bytea := laplace_hash128_blake3('t2/plies/p0');
+    pl_p1   bytea := laplace_hash128_blake3('t2/plies/p1');
+    pl_p2   bytea := laplace_hash128_blake3('t2/plies/p2');
+    pl_game bytea := laplace_hash128_blake3('t2/plies/game');
+    ids_got bytea[];
     n       bigint;
     w       bigint;
     d       bigint;
@@ -308,6 +313,57 @@ BEGIN
     IF n <> 28 THEN RAISE EXCEPTION 'FAIL: head-to-head should carry 28 witnesses, got %', n; END IF;
     SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
+
+    -- chess_game_plies: a game read back as LOOKUPS. The line is built with the SAME native
+    -- packer the compose path uses (laplace_trajectory_build, now bound to SQL), so this
+    -- fixture is byte-identical to a real deposit rather than a hand-rolled imitation.
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (pl_p0, 0, type_t, src), (pl_p1, 0, type_t, src), (pl_p2, 0, type_t, src),
+        (pl_game, 0, type_t, src);
+    INSERT INTO physicalities (id, entity_id, type, coord, trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('t2/plies/phys'), pl_game, 1,
+            'SRID=0;POINT ZM (0 0 0 0)'::geometry,
+            laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]), 3, now());
+
+    -- the packer/decoder round-trip: the ids come back, in order
+    SELECT array_agg(entity_id ORDER BY ordinal) INTO ids_got
+    FROM laplace_trajectory_constituents(
+             laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]));
+    IF ids_got <> ARRAY[pl_p0, pl_p1, pl_p2] THEN
+        RAISE EXCEPTION 'FAIL: trajectory build/decode round-trip lost the sequence';
+    END IF;
+
+    INSERT INTO attestations
+        (id, subject_id, type_id, object_id, source_id, context_id,
+         outcome, last_observed_at, observation_count)
+    VALUES
+        (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
+             r_white, src, pl_game, 2, now(), 1),
+        (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
+             r_draw, src, pl_game, 2, now(), 1),
+        -- another game's ply on the SAME shared position: context_id must exclude it
+        (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
+             r_black, src, g1, 2, now(), 1);
+
+    SELECT count(*) INTO n FROM chess_game_plies(pl_game);
+    IF n <> 3 THEN
+        RAISE EXCEPTION 'FAIL: chess_game_plies expected 3 vertices, got %', n;
+    END IF;
+
+    -- vertex 1 is the starting position; the SAN on a vertex is the move that LEFT it,
+    -- and the OTHER game's SAN on the same shared position must not appear
+    SELECT position_id INTO got FROM chess_game_plies(pl_game) WHERE ply = 1;
+    IF got <> pl_p0 THEN RAISE EXCEPTION 'FAIL: vertex 1 is not the start position'; END IF;
+    SELECT count(*) INTO n FROM chess_game_plies(pl_game) WHERE san IS NOT NULL;
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL: expected 2 SANs scoped to this game, got % (context leak?)', n;
+    END IF;
+
+    -- a game with no trajectory returns nothing rather than guessing an order
+    SELECT count(*) INTO n FROM chess_game_plies(g1);
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL: a game with no trajectory returned % rows instead of abstaining', n;
+    END IF;
 
     RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu';
 END $$;
