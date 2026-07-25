@@ -426,6 +426,11 @@ jobs:
       !cancelled() && needs.integration-test.result == 'success'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
+    outputs:
+      # Whether the deployed API came up READY (substrate has data), as opposed to
+      # deployed-but-unseeded. Smoke exercises live reads and can only mean anything
+      # against a seeded substrate.
+      seeded: ${{ steps.readiness.outputs.seeded }}
     # Runtime credentials: repository Secrets (encrypted), not machine secrets.env.
     # Non-secret knobs stay in vars / workflow env above.
     env:
@@ -442,6 +447,7 @@ jobs:
         run: bash scripts/pipeline.sh publish
 
       - name: Restart API + readiness gate
+        id: readiness
         # Gate on /health/ready, not /health: /health is liveness only (a
         # hard-coded "ok" that proves the process started). Readiness proves
         # the service can reach the substrate AND the T0 perfcache is loaded
@@ -464,13 +470,32 @@ jobs:
             sleep 2
             if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
               echo "laplace-api ready"
+              echo "seeded=true" >> "$GITHUB_OUTPUT"
               bash scripts/pipeline.sh publish-stamp
               exit 0
             fi
           done
-          echo "::error::laplace-api not ready 60s after restart — readiness detail:"
-          curl -sS http://127.0.0.1:5187/health/ready || true
-          echo
+
+          # Not ready. "Deployed wrong" and "database is empty" are different
+          # states and only one is this job's business. Seeds are dispatch-only
+          # (operator decision), so after a manual drop NO push can ever satisfy
+          # a data-presence gate — every merge would go red on a condition the
+          # push is forbidden to fix. The readiness payload already separates
+          # them: reachable + perfcache loaded + zero consensus is a correctly
+          # deployed API against an unseeded substrate, which is exactly the
+          # state a fresh box is supposed to be in before its seed dispatch.
+          detail=$(curl -sS http://127.0.0.1:5187/health/ready || true)
+          echo "$detail"
+          if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
+          then
+            echo "::warning::API deployed and reachable, substrate is UNSEEDED — not a deploy failure. Dispatch the seed workflow to make it ready."
+            echo "seeded=false" >> "$GITHUB_OUTPUT"
+            # Deliberately NOT stamped: readiness never passed, so the next push
+            # re-deploys and re-checks rather than trusting a skip.
+            exit 0
+          fi
+
+          echo "::error::laplace-api not ready 60s after restart — readiness detail above"
           # journalctl needs no root when the runner is in systemd-journal;
           # sudo -n (never prompts) systemctl status is the granted fallback.
           journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
@@ -484,7 +509,8 @@ jobs:
     # CAUGHT a stale deploy, and it was skipped by the very condition that caused
     # one. It must state its own requirement.
     if: >-
-      !cancelled() && needs.publish.result == 'success'
+      !cancelled() && needs.publish.result == 'success' &&
+      needs.publish.outputs.seeded == 'true'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     steps:
