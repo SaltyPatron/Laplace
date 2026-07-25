@@ -1,0 +1,33 @@
+-- Retired: laplace.constituent_edges (table), constituent_edges_rebuild(int) (procedure),
+-- and constituents_closure_edges(bytea[], int) (the closure that read the table).
+--
+-- The whole subsystem was a second copy of a fact the substrate already stores exactly.
+-- physicalities.trajectory IS the constituent sequence -- Trajectory.Build packs the ordered
+-- child ids into the linestring mantissa and laplace_trajectory_constituents unpacks them
+-- losslessly. constituents() and constituents_closure() read that trajectory directly, and
+-- so does the live render path. constituent_edges held a decode of the same bytes in a
+-- different shape, and its own rebuild header said so: "it only unpacks what
+-- physicalities.trajectory already encodes."
+--
+-- It could never be trusted, because nothing maintained it. Ingest did not write it; the
+-- only writer was a manual TRUNCATE-and-rebuild procedure invoked by CALL. On a fully
+-- seeded database it held ZERO rows, which is the failure mode of derived-but-hand-refreshed
+-- state: silently empty, and anything reading it silently returns nothing. The rebuild
+-- comment anticipated a "(separately validated) cutover" that never landed, so after the
+-- cutover never happened the only consumer left was its own regress test asserting that the
+-- edges-based closure agrees with the trajectory-based one it was meant to replace.
+--
+-- The access pattern it was reaching for -- child->parent, or "which parents start with this
+-- child" -- is real. The answer to a new access path over authoritative data is an INDEX,
+-- which Postgres maintains on write, transactionally, always correct. It is not a copy of
+-- the data that a human has to remember to regenerate. That distinction is the whole reason
+-- this is being deleted rather than repaired: derived-and-auto-maintained is a read; derived
+-- and-hand-maintained is a cache, and a cache over the substrate's own content is a bandaid
+-- over the absence of the right index.
+--
+-- Order matters: the closure function references the table, so it goes first. The table was
+-- registered with pg_extension_config_dump, so dropping it also removes it from the
+-- extension's dump set -- intended, since there is nothing left to restore.
+DROP FUNCTION IF EXISTS constituents_closure_edges(bytea[], integer);
+DROP PROCEDURE IF EXISTS constituent_edges_rebuild(integer);
+DROP TABLE IF EXISTS constituent_edges;
