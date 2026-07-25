@@ -1,0 +1,85 @@
+CREATE OR REPLACE FUNCTION chess_game_plies(p_game bytea)
+    RETURNS TABLE(ply integer, position_id bytea, san text, clock text,
+                  eval_token text, think_class text, move_quality text)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- A game read back as LOOKUPS. Every per-ply fact is already an attestation keyed by
+    -- context_id = the game -- MOVE, HAS_SAN, HAS_CLOCK, HAS_EVAL_TOKEN, HAS_THINK_CLASS,
+    -- MOVE_QUALITY -- and the ordered line of boards is the game's own trajectory. So the
+    -- whole thing is one trajectory decode plus one indexed pass per relation, joined on the
+    -- position each fact hangs from.
+    --
+    -- It was previously reconstructed by replaying the verbatim movetext through the chess
+    -- engine on every request: parsing SAN, applying moves, re-deriving boards the analyzer
+    -- had already composed and deposited. That recomputed at query time what ingest had
+    -- already written -- the same mistake as aggregating a record that the fold had folded.
+    -- Nothing here parses chess.
+    --
+    -- ORDER comes from the trajectory, which is the authority for the sequence: the game's
+    -- physicality packs its position ids into the linestring mantissa, and
+    -- trajectory_unpacked_points decodes them back in order, losslessly. Vertex 1 is the
+    -- starting position, so ply N is vertex N+1 and the SAN hanging off vertex N is the move
+    -- that LEFT it -- which is why san/clock join on the from-position, not the to-position.
+    --
+    -- A game with no trajectory returns nothing rather than guessing an order. That is the
+    -- honest answer for a game recorded before the analyzer ran; the caller replays the
+    -- movetext for those.
+    WITH line AS MATERIALIZED (
+        SELECT u.ordinal, u.entity_id AS pos
+        FROM @extschema@.trajectory_unpacked_points(p_game) u
+    ),
+    facts AS MATERIALIZED (
+        -- One indexed pass over this game's per-ply evidence. context_id IS the game, so
+        -- this is the provenance edge doing exactly the job it was deposited for.
+        SELECT a.subject_id AS pos, a.type_id, a.object_id
+        FROM @extschema@.attestations a
+        WHERE a.context_id = p_game
+          AND a.type_id IN (@extschema@.relation_type_id('HAS_SAN'),
+                            @extschema@.relation_type_id('HAS_CLOCK'),
+                            @extschema@.relation_type_id('HAS_EVAL_TOKEN'),
+                            @extschema@.relation_type_id('HAS_THINK_CLASS'),
+                            @extschema@.relation_type_id('MOVE_QUALITY'))
+    ),
+    per_pos AS MATERIALIZED (
+        SELECT f.pos,
+               max(f.object_id) FILTER (
+                   WHERE f.type_id = @extschema@.relation_type_id('HAS_SAN')) AS san_id,
+               max(f.object_id) FILTER (
+                   WHERE f.type_id = @extschema@.relation_type_id('HAS_CLOCK')) AS clock_id,
+               max(f.object_id) FILTER (
+                   WHERE f.type_id = @extschema@.relation_type_id('HAS_EVAL_TOKEN')) AS eval_id,
+               max(f.object_id) FILTER (
+                   WHERE f.type_id = @extschema@.relation_type_id('HAS_THINK_CLASS')) AS think_id,
+               max(f.object_id) FILTER (
+                   WHERE f.type_id = @extschema@.relation_type_id('MOVE_QUALITY')) AS quality_id
+        FROM facts f
+        GROUP BY f.pos
+    ),
+    surface_batch AS MATERIALIZED (
+        -- Every surface this game needs, resolved in ONE realize_batch. Per-row label() over
+        -- a 200-ply game is what made the old path slow enough to look like it needed an
+        -- engine.
+        SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+        FROM per_pos p,
+             LATERAL (VALUES (p.san_id), (p.clock_id), (p.eval_id),
+                             (p.think_id), (p.quality_id)) v(s)
+        WHERE s IS NOT NULL
+    ),
+    surface_text AS MATERIALIZED (
+        SELECT q.id, t.txt
+        FROM surface_batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE q.i = t.j
+    )
+    SELECT l.ordinal::integer,
+           l.pos,
+           sn.txt, ck.txt, ev.txt, th.txt, mq.txt
+    FROM line l
+    LEFT JOIN per_pos p       ON p.pos = l.pos
+    LEFT JOIN surface_text sn ON sn.id = p.san_id
+    LEFT JOIN surface_text ck ON ck.id = p.clock_id
+    LEFT JOIN surface_text ev ON ev.id = p.eval_id
+    LEFT JOIN surface_text th ON th.id = p.think_id
+    LEFT JOIN surface_text mq ON mq.id = p.quality_id
+    ORDER BY l.ordinal
+$$;

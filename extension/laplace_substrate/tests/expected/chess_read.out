@@ -308,6 +308,19 @@ BEGIN
     SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
 
+    -- chess_game_plies: reads a game's line from its TRAJECTORY, so ordering comes from
+    -- the packed geometry rather than from a replay. The packer is native (Trajectory.Build)
+    -- and has no SQL-side builder, so a synthetic line cannot be fabricated here without
+    -- reimplementing the mantissa packing -- a second implementation of a fact, which is
+    -- exactly what is not wanted. What regress CAN pin is the contract that matters most:
+    -- a game with no stored line returns nothing rather than guessing an order. The full
+    -- decode is exercised against real games (ChessGameTrajectoryTests pins that a composed
+    -- trajectory inverts to the exact position sequence).
+    SELECT count(*) INTO n FROM chess_game_plies(g1);
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL: a game with no trajectory returned % rows instead of abstaining', n;
+    END IF;
+
     RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu';
 END $$;
 NOTICE:  ✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu
