@@ -3104,6 +3104,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "initial",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

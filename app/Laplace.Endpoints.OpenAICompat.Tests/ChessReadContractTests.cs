@@ -245,4 +245,37 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
             "/v1/chess/games/00000000000000000000000000000000");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Players_BrowseByInitial_ReachesPlayersByFirstLetter()
+    {
+        // Browse exists at all — before this the only way to find a player was to spell
+        // his name exactly as the source recorded it.
+        using var response = await _client.GetAsync("/v1/chess/players?initial=T&limit=10");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.NotEmpty(body!.Players);
+        Assert.All(body.Players, p => Assert.StartsWith("T", p.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Players_BrowseByInitial_RanksByStrengthWithinTheLetter()
+    {
+        using var response = await _client.GetAsync("/v1/chess/players?initial=T&limit=10");
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        var mus = body!.Players.Select(p => p.EffMu).ToList();
+        Assert.Equal(mus.OrderByDescending(m => m), mus);
+    }
+
+    [Fact]
+    public async Task Players_BrowseByInitial_EmptyLetterIsNotAnError()
+    {
+        using var response = await _client.GetAsync("/v1/chess/players?initial=Q&limit=10");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.Empty(body!.Players);
+    }
 }

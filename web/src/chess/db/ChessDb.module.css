@@ -330,3 +330,34 @@
     opacity: 0.7;
   }
 }
+
+@layer components {
+  .alphabet {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem;
+    margin-top: 0.75rem;
+  }
+
+  .letter {
+    min-width: 1.75rem;
+    padding: 0.2rem 0.35rem;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+
+  .letter:hover {
+    border-color: var(--color-border-default);
+  }
+
+  .letter[data-active='true'] {
+    background: var(--color-accent);
+    color: var(--color-bg-panel);
+    font-weight: 600;
+  }
+}

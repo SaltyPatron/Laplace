@@ -1,0 +1,14 @@
+-- The FIRST constituent id of a packed trajectory. Exists to be INDEXED: an
+-- expression index over this turns "which entities begin with this child" into a
+-- range scan on the authoritative geometry -- no side table, no rebuild, no
+-- staleness, because Postgres maintains an expression index on write.
+--
+-- For text the first constituent is the first codepoint, so it is how a
+-- first-letter index gets built without rendering a single string.
+--
+-- IMMUTABLE STRICT is required for expression-index legality, and honest here:
+-- it reads one vertex and unpacks it.
+CREATE FUNCTION @extschema@.laplace_trajectory_first_id(traj geometry)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_first_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

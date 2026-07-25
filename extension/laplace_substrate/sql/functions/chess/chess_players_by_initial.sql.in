@@ -1,0 +1,73 @@
+CREATE OR REPLACE FUNCTION chess_players_by_initial(
+        p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
+    RETURNS TABLE(player_id bytea, name text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Browse the roster by first letter, WITHOUT rendering a single name.
+    --
+    -- A player's name is content, and composed content packs its constituent ids into the
+    -- trajectory mantissa -- so the first codepoint of a name is vertex 1 of that name's
+    -- trajectory, and word_id('T') IS that codepoint's tier-0 entity. Matching them is an
+    -- equality test on an indexed expression over the authoritative geometry
+    -- (physicalities_traj_first_id_btree), not a scan and not a string comparison.
+    --
+    -- This is the access path constituent_edges was reaching for, done as an INDEX instead
+    -- of a hand-refreshed side table: Postgres maintains an expression index on write, so
+    -- there is nothing to regenerate and nothing that can go silently empty.
+    --
+    -- Ordered by eff_mu within the letter, for the same reason the roster is: strength is
+    -- what the fold knows, and a thin record sinks on its own RD rather than surfacing just
+    -- because it sorts early. Names are resolved ONCE for the page, batched.
+    WITH target AS MATERIALIZED (
+        -- The tier-0 codepoint for the requested initial. Single-character content IS its
+        -- codepoint entity, so this needs no separate lookup table.
+        SELECT @extschema@.word_id(left(btrim(p_initial), 1)) AS cp
+    ),
+    named AS MATERIALIZED (
+        -- Name entities whose FIRST constituent is that codepoint -- index range scan.
+        SELECT ph.entity_id AS name_id
+        FROM @extschema@.physicalities ph, target t
+        WHERE ph.trajectory IS NOT NULL
+          AND ph.type = 1
+          AND public.laplace_trajectory_first_id(ph.trajectory) = t.cp
+    ),
+    players AS MATERIALIZED (
+        -- Back to the players those names belong to. HAS_NAME_ALIAS is the edge the chess
+        -- decomposer writes; the join is on the consensus cell, so an unnamed or refuted
+        -- alias never surfaces a player.
+        SELECT DISTINCT c.subject_id AS player
+        FROM @extschema@.consensus c
+        JOIN named n ON n.name_id = c.object_id
+        WHERE c.type_id = @extschema@.relation_type_id('HAS_NAME_ALIAS')
+    ),
+    rated AS MATERIALIZED (
+        -- Only players the fold has actually rated, ranked by the conservative estimate.
+        SELECT p.player, o.witness_count AS games, o.rating, o.rd
+        FROM players p
+        JOIN @extschema@.consensus o
+          ON o.subject_id = p.player
+         AND o.type_id = @extschema@.relation_type_id('OUTCOME')
+        ORDER BY @extschema@.eff_mu(o.rating, o.rd) DESC, p.player
+        LIMIT p_limit OFFSET p_offset
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(rated.player ORDER BY rated.player), '{}'::bytea[]) AS ids
+        FROM rated
+    ),
+    surfaced AS (
+        SELECT q.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE q.i = t.j
+    )
+    SELECT rated.player,
+           COALESCE(NULLIF(s.txt, ''), encode(rated.player, 'hex')),
+           rated.games,
+           rated.rating::double precision,
+           rated.rd::double precision,
+           @extschema@.eff_mu(rated.rating, rated.rd)::double precision
+    FROM rated
+    LEFT JOIN surfaced s ON s.id = rated.player
+    ORDER BY @extschema@.eff_mu(rated.rating, rated.rd) DESC, rated.player
+$$;

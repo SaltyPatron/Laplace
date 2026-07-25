@@ -7,6 +7,8 @@ import styles from './ChessDb.module.css';
 
 const PAGE = 50;
 
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
 /**
  * The roster — everyone the corpus has ever witnessed at a board, ranked by how
  * much of them it witnessed. There is no minimum-games floor and no rating cut:
@@ -19,6 +21,7 @@ const PAGE = 50;
 export function PlayersIndex() {
   const [params, setParams] = useSearchParams();
   const search = params.get('q') ?? '';
+  const initial = params.get('initial') ?? '';
   const offset = Number(params.get('offset') ?? 0);
 
   const [draft, setDraft] = useState(search);
@@ -31,11 +34,11 @@ export function PlayersIndex() {
     let stale = false;
     setData(null);
     setErr(null);
-    chessPlayers({ limit: PAGE, offset, search: search || undefined })
+    chessPlayers({ limit: PAGE, offset, search: search || undefined, initial: initial || undefined })
       .then((d) => { if (!stale) setData(d); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { stale = true; };
-  }, [search, offset]);
+  }, [search, initial, offset]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +55,24 @@ export function PlayersIndex() {
           percentage: beating stronger opponents counts for more, and a thin record sinks
           on its own uncertainty rather than flattering itself.
         </Muted>
+        {/*
+          Browse by first letter. A name's first codepoint is vertex 1 of its trajectory,
+          so this is an indexed range scan over the authoritative geometry — it reaches
+          every player in the corpus, not just the ones a ranked page happened to include.
+        */}
+        <nav className={styles.alphabet} aria-label="Browse players by first letter">
+          {ALPHABET.map((ch) => (
+            <button
+              key={ch}
+              type="button"
+              data-active={initial === ch}
+              className={styles.letter}
+              onClick={() => setParams(initial === ch ? {} : { initial: ch })}
+            >
+              {ch}
+            </button>
+          ))}
+        </nav>
         <form className={styles.searchRow} onSubmit={submit}>
           <Input
             value={draft}
@@ -66,12 +87,18 @@ export function PlayersIndex() {
         </form>
       </header>
 
-      <Panel title={search ? `Search — “${search}”` : 'Most-witnessed players'}>
+      <Panel title={
+        search ? `Search — “${search}”`
+        : initial ? `Players — ${initial}`
+        : 'Strongest players'
+      }>
         {err ? <ErrorText>{err}</ErrorText> : null}
         {!err && data === null ? <LoadingText>Counting careers…</LoadingText> : null}
         {data && data.players.length === 0 ? (
           <Muted>
-            {search ? (
+            {initial ? (
+              <>No player whose name begins with “{initial}” has been witnessed.</>
+            ) : search ? (
               <>
                 No player named “{search}” has been witnessed. Names resolve by content
                 address, so spell it the way the source records it — “Tal, Mikhail” or

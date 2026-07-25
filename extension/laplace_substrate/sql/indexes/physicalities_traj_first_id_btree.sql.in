@@ -1,0 +1,15 @@
+-- First-constituent index over the AUTHORITATIVE trajectory geometry.
+--
+-- Answers "which composed entities begin with this child" as a range scan. For text
+-- the first constituent is the first codepoint, so this is what makes a first-letter
+-- browse possible without rendering a single name -- the access path that
+-- constituent_edges was reaching for, done as an index instead of a hand-refreshed
+-- copy. Postgres maintains it on write, transactionally; there is nothing to
+-- regenerate and no state that can go stale or silently empty.
+--
+-- Scoped to type = 1 (content physicalities, the canonical row a composed entity's
+-- constituents are decoded from) and to rows that actually carry a trajectory, so
+-- the index covers only what it can answer for.
+CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree
+    ON physicalities (public.laplace_trajectory_first_id(trajectory))
+    WHERE trajectory IS NOT NULL AND type = 1;
