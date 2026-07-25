@@ -25,10 +25,11 @@ builder.WebHost.ConfigureKestrel(options =>
             ? devPort
             : LaplaceInstall.EndpointPort));
 
-// Shared ops logging (GH #602/#635): stderr console + the CSV sink read back as ops.app_log's
+// Shared ops logging (GH #602/#635): stdout console (consoleToStdErr:false — the build-time
+// OpenAPI generator fails on any stderr from the host) + the CSV sink read back as ops.app_log's
 // 'api' role (laplace-api.csv). Same foundation the console deployables use.
 builder.Host.UseSerilog((_, lc) =>
-    lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true));
+    lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true, consoleToStdErr: false));
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddOpenApi();

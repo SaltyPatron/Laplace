@@ -32,9 +32,11 @@ public static class LaplaceLogging
 
     private static ILoggerFactory Factory(string role, bool console, LogEventLevel min)
     {
+        // The console deployables put their command output on stdout, so their diagnostics
+        // ride stderr (consoleToStdErr: true) — the same channel the old StderrLoggerProvider used.
         var logger = new LoggerConfiguration()
             .MinimumLevel.Is(min)
-            .ApplyLaplaceSinks(role, console)
+            .ApplyLaplaceSinks(role, console, consoleToStdErr: true)
             .CreateLogger();
         return new SerilogLoggerFactory(logger, dispose: true);
     }
@@ -42,10 +44,16 @@ public static class LaplaceLogging
     /// <summary>
     /// Attach the shared ops sinks to any LoggerConfiguration — used by the console factories
     /// above and by the OpenAICompat host's UseSerilog so the API writes laplace-api.csv too.
-    /// Console (when enabled) goes to STDERR, never stdout, so a wire-protocol stdout stays clean.
+    /// The CSV file sink is always present; the console sink is optional.
+    ///
+    /// consoleToStdErr routes the console to STDERR — correct for the console apps, whose stdout
+    /// carries command output. The web host passes FALSE (stdout): the build-time OpenAPI generator
+    /// (dotnet-getdocument) runs the app and treats ANY stderr output as a build failure, so a host
+    /// that logs its startup to stderr breaks `dotnet build`. stdout matches the host's prior
+    /// WriteTo.Console() and is journald-captured all the same.
     /// </summary>
     public static LoggerConfiguration ApplyLaplaceSinks(
-        this LoggerConfiguration config, string role, bool console)
+        this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true)
     {
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
         var path = Path.Combine(LaplaceInstall.OpsLogDirectory, $"laplace-{role}.csv");
@@ -54,9 +62,12 @@ public static class LaplaceLogging
             .WriteTo.File(new OpsLogCsvTextFormatter(role), path, shared: true);
 
         if (console)
-            config = config.WriteTo.Console(
-                standardErrorFromLevel: LogEventLevel.Verbose,
-                outputTemplate: "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}");
+        {
+            const string tmpl = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+            config = consoleToStdErr
+                ? config.WriteTo.Console(standardErrorFromLevel: LogEventLevel.Verbose, outputTemplate: tmpl)
+                : config.WriteTo.Console(outputTemplate: tmpl);
+        }
 
         return config;
     }
