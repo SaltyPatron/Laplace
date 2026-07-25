@@ -13,13 +13,14 @@ import type {
  * on the same content-addressed player or on nothing at all.
  */
 export function chessPlayers(
-  params: { limit?: number; offset?: number; search?: string } = {},
+  params: { limit?: number; offset?: number; search?: string; initial?: string } = {},
   opts: ApiOptions = {},
 ) {
   const q = new URLSearchParams();
   if (params.limit != null) q.set('limit', String(params.limit));
   if (params.offset != null) q.set('offset', String(params.offset));
   if (params.search) q.set('search', params.search);
+  if (params.initial) q.set('initial', params.initial);
   return apiGet<ChessPlayersResponse>(`/v1/chess/players?${q}`, opts);
 }
 

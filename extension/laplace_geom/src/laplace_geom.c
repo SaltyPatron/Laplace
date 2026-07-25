@@ -550,6 +550,58 @@ pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
  * the array unwrap. Round-trip contract: laplace_trajectory_constituents() over
  * the result returns the input ids, in order.
  */
+/*
+ * laplace_trajectory_first_id(geometry) -> bytea
+ *
+ * The FIRST constituent id of a packed trajectory, unpacked. Exists to be
+ * INDEXED: a composed entity's first child is a stable, pure function of its
+ * geometry, so
+ *
+ *     CREATE INDEX ... ON physicalities (laplace_trajectory_first_id(trajectory))
+ *
+ * turns "which entities begin with this child" into an index range scan over the
+ * AUTHORITATIVE data. That is the whole point, and the reason this is a function
+ * rather than a table: an expression index is derived data Postgres maintains on
+ * write, transactionally, always correct. A rebuilt side table is derived data a
+ * human has to remember to regenerate -- which is how constituent_edges ended up
+ * empty on a seeded database, and why it was deleted rather than repaired.
+ *
+ * For text, the first constituent is the first codepoint, so this is how a
+ * first-letter index is built without rendering a single string.
+ *
+ * IMMUTABLE and STRICT: it reads one vertex and unpacks it, touching nothing else.
+ * Both are required for an expression index to be legal.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_first_id);
+
+Datum
+pg_laplace_trajectory_first_id(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g;
+    LWGEOM      *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    size_t  n = 0;
+    double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_first_id", &n);
+
+    if (n == 0)
+    {
+        pfree(xyzm);
+        lwgeom_free(l);
+        PG_RETURN_NULL();
+    }
+
+    mantissa_payload_t payload;
+    mantissa_unpack(&xyzm[0], &payload);
+
+    bytea *out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
+    memcpy(VARDATA(out), &payload.entity_id, sizeof(hash128_t));
+
+    pfree(xyzm);
+    lwgeom_free(l);
+    PG_RETURN_BYTEA_P(out);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_build);
 
 Datum

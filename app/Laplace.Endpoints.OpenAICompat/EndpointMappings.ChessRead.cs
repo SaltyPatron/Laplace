@@ -18,13 +18,13 @@ internal static class ChessReadEndpoints
     public static void MapChessReadEndpoints(this WebApplication app)
     {
         app.MapGet("/v1/chess/players", async (
-            int? limit, int? offset, string? search,
+            int? limit, int? offset, string? search, string? initial,
             ISubstrateClient substrate, CancellationToken ct) =>
         {
             try
             {
                 return Results.Json(await substrate.ChessPlayersAsync(
-                    limit ?? 50, offset ?? 0, search, ct));
+                    limit ?? 50, offset ?? 0, search, initial, ct));
             }
             catch (SubstrateUnavailableException ex)
             {

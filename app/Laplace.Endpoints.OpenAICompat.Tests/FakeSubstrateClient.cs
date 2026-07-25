@@ -146,6 +146,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, string? initial, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -573,9 +576,25 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             [.. all.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))]);
     }
 
-    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+    public Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
+        => ChessPlayersAsync(limit, offset, search, null, ct);
+
+    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial, CancellationToken ct)
     {
+        if (!string.IsNullOrWhiteSpace(initial))
+        {
+            // First-codepoint bucketing: reaches every player, not a warm window.
+            var all = await ChessRosterAsync(200, 0, ct);
+            var hits = all
+                .Where(p => p.Name.StartsWith(initial.Trim(), StringComparison.OrdinalIgnoreCase))
+                .Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))
+                .Select((p, i) => p with { Rank = offset + i + 1 })
+                .ToList();
+            return new ChessPlayersResponse("chess.players", hits.Count, Math.Max(0, offset), hits);
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             // Content-address lookup: an exactly-spelled name or nothing.

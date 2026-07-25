@@ -48,6 +48,36 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
+    /// Players whose name begins with a given letter, ranked by strength within it.
+    ///
+    /// Not a rendered sort and not a cached window: a name's first codepoint is vertex 1 of
+    /// its trajectory, so this is an equality test on an indexed expression over the
+    /// authoritative geometry. Browsing reaches every player in the corpus, not just the
+    /// ones a warm list happened to hold.
+    /// </summary>
+    public async Task<IReadOnlyList<ChessPlayerRow>> ChessPlayersByInitialAsync(
+        string initial, int limit, int offset, CancellationToken ct)
+    {
+        const string sql = """
+            SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
+            FROM laplace.chess_players_by_initial(@initial, @limit, @offset)
+            """;
+        var rows = await ReadRowsAsync(sql,
+            static r => new ChessPlayerRow(0, r.GetString(0), r.GetString(1),
+                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("initial", initial);
+                cmd.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                cmd.Parameters.AddWithValue("offset", Math.Max(0, offset));
+            },
+            "chess_players_by_initial", ct, timeoutSeconds: 60);
+
+        // Rank is positional within the letter; the fold's ordering already decided it.
+        return [.. rows.Select((r, i) => r with { Rank = offset + i + 1 })];
+    }
+
+    /// <summary>
     /// A page of the roster, or — when a name is supplied — the player it names.
     ///
     /// The partial-name pass that used to run over the cached ranking went with the cache.
@@ -58,7 +88,18 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
+        => await ChessPlayersAsync(limit, offset, search, null, ct);
+
+    /// <inheritdoc cref="ChessPlayersAsync(int,int,string?,CancellationToken)"/>
+    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial, CancellationToken ct)
     {
+        if (!string.IsNullOrWhiteSpace(initial))
+        {
+            var letter = await ChessPlayersByInitialAsync(initial, limit, offset, ct);
+            return new ChessPlayersResponse("chess.players", letter.Count, Math.Max(0, offset), letter);
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             var hit = await ChessFindPlayerAsync(search.Trim(), ct);

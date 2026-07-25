@@ -17,6 +17,7 @@ indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
 indexes/physicalities_traj_probe.sql.in
+indexes/physicalities_traj_first_id_btree.sql.in
 indexes/physicalities_constituents_gin.sql.in
 indexes/attestations_type_btree.sql.in
 indexes/attestations_object_btree.sql.in
@@ -385,6 +386,7 @@ functions/chess/chess_player_games.sql.in
 functions/chess/chess_game.sql.in
 functions/chess/chess_time_pressure_outcome.sql.in
 functions/chess/chess_ranked.sql.in
+functions/chess/chess_players_by_initial.sql.in
 functions/chess/chess_head_to_head.sql.in
 functions/chess/chess_game_plies.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
