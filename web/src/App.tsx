@@ -7,6 +7,7 @@ import { TopicView } from './topic/TopicView';
 import { BillingView } from './billing/BillingView';
 import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
+import { ChessDbView } from './chess/db/ChessDbView';
 import { ExploreView } from './explore/ExploreView';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
@@ -25,6 +26,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'chat', label: 'Chat', path: '/chat' },
   { id: 'query', label: 'Query', path: '/query' },
   { id: 'explore', label: 'Explore', path: '/explore' },
+  { id: 'chess', label: 'Chess', path: '/chess' },
   { id: 'play', label: 'Play', path: '/play' },
   { id: 'lab', label: 'Lab', path: '/lab' },
   { id: 'billing', label: 'Billing', path: '/billing' },
@@ -66,6 +68,7 @@ function Shell() {
           <Route path="/topic" element={<TopicView />} />
           <Route path="/topic/:ref" element={<TopicView />} />
           <Route path="/explore/*" element={<ExploreView />} />
+          <Route path="/chess/*" element={<ChessDbView />} />
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab" element={<ChessLabView />} />
           <Route path="/billing" element={<BillingView />} />

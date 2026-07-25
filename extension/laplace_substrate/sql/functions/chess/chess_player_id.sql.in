@@ -1,0 +1,25 @@
+CREATE OR REPLACE FUNCTION chess_player_id(p_name text)
+    RETURNS bytea
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    -- Name -> player entity id, O(1), no scan. The chess decomposer mints a
+    -- player as canonical_id('chess/player/' || PlayerAlias.Canonical(name)):
+    -- "Last, First" is flipped to "First Last", lowercased, punctuation folded
+    -- to spaces, runs of whitespace collapsed. This is that same normalisation,
+    -- so a typed name resolves to the identical content-addressed id the
+    -- ingest wrote -- an entity lookup, never an entity-resolution pass.
+    --
+    -- The C# original folds [^\p{L}\p{N}\s]+; POSIX [:alnum:] is the collation's
+    -- letter/number class, which agrees with \p{L}\p{N} on every accented Latin
+    -- name in the corpus (pinned by chess_read regress).
+    SELECT @extschema@.canonical_id('chess/player/' || btrim(regexp_replace(
+        regexp_replace(
+            lower(CASE
+                WHEN strpos(btrim(p_name), ',') > 0
+                    THEN btrim(substr(btrim(p_name), strpos(btrim(p_name), ',') + 1))
+                         || ' ' ||
+                         btrim(substr(btrim(p_name), 1, strpos(btrim(p_name), ',') - 1))
+                ELSE btrim(p_name)
+            END),
+            '[^[:alnum:][:space:]]+', ' ', 'g'),
+        '[[:space:]]+', ' ', 'g')))
+$$;

@@ -1,0 +1,70 @@
+CREATE OR REPLACE FUNCTION chess_opponents(p_player bytea, p_limit integer DEFAULT 25)
+    RETURNS TABLE(opponent_id bytea, opponent text, games bigint, wins bigint,
+                  draws bigint, losses bigint, unscored bigint,
+                  score double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Head-to-head: who this player actually faced, and how it went. The rivalry
+    -- list a career page is built around, and the same evidence chess_player_record
+    -- totals -- regrouped by the opponent on the far side of each game instead of
+    -- by colour, so the two can never disagree.
+    --
+    -- Scoped to one player's games throughout: the colour edge finds his games by
+    -- object_id, the opposite colour edge on the same game names the opponent.
+    -- Nothing scans the corpus.
+    WITH mine AS MATERIALIZED (
+        SELECT a.subject_id AS game,
+               (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
+        FROM @extschema@.attestations a
+        WHERE a.object_id = p_player
+          AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
+                            @extschema@.relation_type_id('HAS_BLACK'))
+    ),
+    faced AS MATERIALIZED (
+        SELECT m.game, m.white, o.object_id AS opponent
+        FROM mine m
+        JOIN @extschema@.attestations o
+          ON o.subject_id = m.game
+         AND o.type_id = CASE WHEN m.white
+                 THEN @extschema@.relation_type_id('HAS_BLACK')
+                 ELSE @extschema@.relation_type_id('HAS_WHITE') END
+    ),
+    scored AS MATERIALIZED (
+        SELECT f.opponent,
+               @extschema@.chess_outcome(f.white, r.object_id) AS outcome
+        FROM faced f
+        LEFT JOIN @extschema@.attestations r
+               ON r.subject_id = f.game
+              AND r.type_id = @extschema@.relation_type_id('HAS_RESULT')
+    ),
+    rec AS MATERIALIZED (
+        SELECT sc.opponent,
+               count(*)::bigint AS games,
+               count(*) FILTER (WHERE sc.outcome = 2)::bigint AS wins,
+               count(*) FILTER (WHERE sc.outcome = 1)::bigint AS draws,
+               count(*) FILTER (WHERE sc.outcome = 0)::bigint AS losses,
+               count(*) FILTER (WHERE sc.outcome IS NULL)::bigint AS unscored
+        FROM scored sc
+        GROUP BY sc.opponent
+        ORDER BY 2 DESC, 1
+        LIMIT p_limit
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(rec.opponent ORDER BY rec.games DESC, rec.opponent),
+                        '{}'::bytea[]) AS ids
+        FROM rec
+    ),
+    named AS (
+        SELECT p.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT rec.opponent,
+           COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),
+           rec.games, rec.wins, rec.draws, rec.losses, rec.unscored,
+           (rec.wins + rec.draws / 2.0) / NULLIF(rec.games - rec.unscored, 0)
+    FROM rec
+    LEFT JOIN named n ON n.id = rec.opponent
+    ORDER BY rec.games DESC, rec.opponent
+$$;

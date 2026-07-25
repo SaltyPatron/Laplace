@@ -377,3 +377,11 @@ functions/inference/laplace_distill.sql.in
 functions/inference/laplace_prune.sql.in
 functions/inference/laplace_witness.sql.in
 functions/inference/laplace_decay.sql.in
+functions/chess/chess_outcome.sql.in
+functions/chess/chess_player_id.sql.in
+functions/chess/chess_player_record.sql.in
+functions/chess/chess_player_ratings.sql.in
+functions/chess/chess_player_games.sql.in
+functions/chess/chess_opponents.sql.in
+functions/chess/chess_leaderboard.sql.in
+functions/chess/chess_game.sql.in

@@ -118,6 +118,7 @@ app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
 app.MapBillingIdentityEndpoints();
 app.MapChessEndpoints();
+app.MapChessReadEndpoints();
 app.MapFeedbackEndpoints();
 
 app.MapFallback("/v1/{*path}", () => Results.Json(

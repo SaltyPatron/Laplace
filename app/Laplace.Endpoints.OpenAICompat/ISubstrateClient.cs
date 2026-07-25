@@ -44,6 +44,16 @@ internal interface ISubstrateClient
 
     Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct);
 
+    Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(CancellationToken ct);
+
+    Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, CancellationToken ct);
+
+    Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct);
+
+    Task<ChessGamesResponse?> ChessPlayerGamesAsync(string idHex, int limit, int offset, CancellationToken ct);
+
+    Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct);
+
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 

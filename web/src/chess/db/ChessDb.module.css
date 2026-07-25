@@ -1,0 +1,197 @@
+@layer components {
+  .hero h2 {
+    margin: 0 0 var(--space-2);
+  }
+
+  .crumbs {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .crumbs a {
+    color: var(--color-text-muted);
+  }
+
+  .crumbs a:hover {
+    color: var(--color-accent);
+  }
+
+  .searchRow {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .searchRow > :first-child {
+    flex: 1 1 22rem;
+    min-width: 0;
+  }
+
+  .statGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 0.75rem;
+  }
+
+  .playerLink {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+
+  .playerLink:hover {
+    text-decoration: underline;
+  }
+
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  /* --- record bar --- */
+  .recordCell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 7rem;
+  }
+
+  .recordNums {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .bar {
+    display: flex;
+    height: 0.4rem;
+    width: 100%;
+    min-width: 5rem;
+    border-radius: 99px;
+    overflow: hidden;
+    background: var(--color-bg-panel-2);
+  }
+
+  .barWin {
+    background: var(--color-success, #3fb950);
+  }
+
+  .barDraw {
+    background: var(--color-text-muted);
+  }
+
+  .barLoss {
+    background: var(--color-danger, #f85149);
+  }
+
+  .barUnscored {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--color-border-default),
+      var(--color-border-default) 2px,
+      transparent 2px,
+      transparent 4px
+    );
+  }
+
+  /* --- per-game outcome --- */
+  .outcomeWin,
+  .outcomeDraw,
+  .outcomeLoss,
+  .outcomeNone {
+    display: inline-block;
+    min-width: 1.25rem;
+    text-align: center;
+    font-weight: 600;
+    font-size: var(--text-sm);
+    border-radius: var(--radius-sm);
+    padding: 0 0.25rem;
+  }
+
+  .outcomeWin {
+    color: var(--color-success, #3fb950);
+  }
+
+  .outcomeDraw {
+    color: var(--color-text-muted);
+  }
+
+  .outcomeLoss {
+    color: var(--color-danger, #f85149);
+  }
+
+  .outcomeNone {
+    color: var(--color-text-muted);
+  }
+
+  .resultToken {
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+  }
+
+  /* --- game page --- */
+  .matchup {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .versus {
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    padding: 0.1rem 0.5rem;
+  }
+
+  .headerGrid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1rem;
+    margin: 0;
+  }
+
+  .headerGrid dt {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .headerGrid dd {
+    margin: 0;
+  }
+
+  .missing {
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .note {
+    margin-top: 0.75rem;
+    font-size: var(--text-sm);
+  }
+
+  .movetext {
+    margin: 0;
+    padding: 0.75rem;
+    background: var(--color-bg-panel-2);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+    max-height: 30rem;
+    overflow: auto;
+  }
+}
