@@ -262,6 +262,29 @@ internal sealed partial class SubstrateClient
             Math.Max(0, offset), games);
     }
 
+    /// <summary>
+    /// The game as a board sequence. The movetext comes back from the substrate verbatim
+    /// and is replayed through the chess engine — San.Resolve against the engine's own
+    /// legal moves, the same call the analyzer makes — so SAN is never parsed a second
+    /// time, and never in the browser.
+    ///
+    /// Each ply's board is hashed to the position id the analyzer already deposited, which
+    /// is what keeps this a substrate read rather than a PGN viewer: the ply sequence is
+    /// reconstructed, but the positions it lands on are the resident ones, shared with
+    /// every other game that ever reached the same board.
+    /// </summary>
+    public async Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct)
+    {
+        var game = await ChessGameAsync(idHex, ct);
+        if (game is null) return null;
+
+        var replay = Laplace.Chess.Service.ChessReplay.Replay(game.Movetext);
+        return new ChessGamePliesResponse("chess.game.plies", idHex.ToLowerInvariant(),
+            replay.StartFen, replay.HasClocks, replay.Truncated,
+            [.. replay.Plies.Select(p => new ChessPlyRow(
+                p.Ply, p.San, p.Uci, p.Fen, p.WhiteMoved, p.ClockSeconds, p.PositionId))]);
+    }
+
     /// <summary>One game: its headers and the movetext its own content hash rebuilds.</summary>
     public async Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct)
     {

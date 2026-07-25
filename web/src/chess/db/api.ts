@@ -1,5 +1,6 @@
 import { apiGet, type ApiOptions } from '../../api/client';
 import type {
+  ChessGamePliesResponse,
   ChessGameResponse,
   ChessGamesResponse,
   ChessPlayerResponse,
@@ -39,4 +40,9 @@ export function chessPlayerGames(
 
 export function chessGame(idHex: string, opts: ApiOptions = {}) {
   return apiGet<ChessGameResponse>(`/v1/chess/games/${idHex}`, opts);
+}
+
+/** The game replayed into its board sequence, by the same engine that plays live chess. */
+export function chessGamePlies(idHex: string, opts: ApiOptions = {}) {
+  return apiGet<ChessGamePliesResponse>(`/v1/chess/games/${idHex}/plies`, opts);
 }

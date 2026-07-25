@@ -195,3 +195,138 @@
     overflow: auto;
   }
 }
+
+@layer components {
+  /* --- replay --- */
+  .replay {
+    display: grid;
+    grid-template-columns: minmax(18rem, 32rem) minmax(12rem, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  @media (max-width: 52rem) {
+    .replay {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .boardCol {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .clockRow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .sideName {
+    font-weight: 600;
+  }
+
+  .clock {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 1.1rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+  }
+
+  .transport {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .scrub {
+    width: 100%;
+    accent-color: var(--color-accent);
+  }
+
+  .speedRow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .speedNote {
+    font-size: var(--text-sm);
+  }
+
+  .movesCol {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .movesHead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: var(--text-sm);
+  }
+
+  .moveList {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.3rem;
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem;
+    max-height: 26rem;
+    overflow-y: auto;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-panel-2);
+  }
+
+  .moveList li {
+    display: contents;
+  }
+
+  .moveNo {
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    padding-left: 0.35rem;
+  }
+
+  .moveBtn {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    padding: 0.05rem 0.3rem;
+    cursor: pointer;
+  }
+
+  .moveBtn:hover {
+    border-color: var(--color-border-default);
+  }
+
+  .moveBtn[data-active='true'] {
+    background: var(--color-accent);
+    color: var(--color-bg-panel);
+    font-weight: 600;
+  }
+
+  .moveClock {
+    font-size: 0.75em;
+    opacity: 0.7;
+  }
+}

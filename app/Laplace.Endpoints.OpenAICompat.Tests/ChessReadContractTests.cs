@@ -196,6 +196,57 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task GamePlies_ReplayCarriesBoardsAndPositionIds()
+    {
+        using var log = await _client.GetAsync($"/v1/chess/players/{TalIdHex}/games?limit=1");
+        var games = await log.Content.ReadFromJsonAsync<ChessGamesResponse>();
+        var gameId = games!.Games[0].IdHex;
+
+        using var response = await _client.GetAsync($"/v1/chess/games/{gameId}/plies");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessGamePliesResponse>();
+        Assert.NotNull(body);
+        Assert.NotEmpty(body!.Plies);
+        Assert.Contains(" w ", body.StartFen);
+
+        // Plies are 1-based and consecutive, and colours alternate — the sequence has to
+        // be a real game, not a bag of moves.
+        for (int i = 0; i < body.Plies.Count; i++)
+        {
+            Assert.Equal(i + 1, body.Plies[i].Ply);
+            Assert.Equal(i % 2 == 0, body.Plies[i].WhiteMoved);
+        }
+
+        // Every board is addressable as a substrate entity — that is what makes this a
+        // walk into the graph rather than a private replay.
+        Assert.All(body.Plies, p => Assert.Equal(32, p.PositionId.Length));
+        Assert.All(body.Plies, p => Assert.NotEmpty(p.Fen));
+        Assert.All(body.Plies, p => Assert.Equal(4, p.Uci.Length));
+    }
+
+    [Fact]
+    public async Task GamePlies_ClockedGameReportsClocksThatOnlyFall()
+    {
+        using var log = await _client.GetAsync($"/v1/chess/players/{TalIdHex}/games?limit=1");
+        var games = await log.Content.ReadFromJsonAsync<ChessGamesResponse>();
+        using var response = await _client.GetAsync($"/v1/chess/games/{games!.Games[0].IdHex}/plies");
+        var body = await response.Content.ReadFromJsonAsync<ChessGamePliesResponse>();
+        Assert.NotNull(body);
+        Assert.True(body!.HasClocks);
+        // A clock series is present for EVERY ply or reported absent — never partial,
+        // because a gap would be a reading the source never made.
+        Assert.All(body.Plies, p => Assert.NotNull(p.ClockSeconds));
+    }
+
+    [Fact]
+    public async Task GamePlies_UnknownId_Is404()
+    {
+        using var response = await _client.GetAsync(
+            "/v1/chess/games/00000000000000000000000000000000/plies");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Game_UnknownId_Is404()
     {
         using var response = await _client.GetAsync(

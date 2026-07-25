@@ -98,3 +98,29 @@ export interface ChessGameResponse {
   tc_class: string | null;
   movetext: string | null;
 }
+
+/**
+ * One ply of a replayed game. `position_id` is the content address of the board AFTER the
+ * move — a real Chess_Position entity shared with every other game that reached the same
+ * board — so any ply opens into the rated web around it. `clock_seconds` is what the
+ * source recorded, present only when it recorded a reading for every ply.
+ */
+export interface ChessPlyRow {
+  ply: number;
+  san: string;
+  uci: string;
+  fen: string;
+  white_moved: boolean;
+  clock_seconds: number | null;
+  position_id: string;
+}
+
+export interface ChessGamePliesResponse {
+  object: string;
+  game_id: string;
+  start_fen: string;
+  has_clocks: boolean;
+  /** Non-null when a token would not resolve: the walk stops rather than inventing boards. */
+  truncated: string | null;
+  plies: ChessPlyRow[];
+}

@@ -76,6 +76,27 @@ internal static class ChessReadEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/chess/games/{idHex}/plies", async (
+            string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            try
+            {
+                var plies = await substrate.ChessGamePliesAsync(idHex, ct);
+                return plies is null
+                    ? EndpointJson.NotFound("game_not_found",
+                        $"'{idHex}' is not a game the substrate has witnessed.")
+                    : Results.Json(plies);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("chess")
+        .Produces<ChessGamePliesResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/chess/games/{idHex}", async (
             string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {

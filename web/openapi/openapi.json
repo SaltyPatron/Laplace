@@ -3264,6 +3264,55 @@
         }
       }
     },
+    "/v1/chess/games/{idHex}/plies": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "parameters": [
+          {
+            "name": "idHex",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChessGamePliesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chess/games/{idHex}": {
       "get": {
         "tags": [
@@ -4532,6 +4581,43 @@
           }
         }
       },
+      "ChessGamePliesResponse": {
+        "required": [
+          "object",
+          "game_id",
+          "start_fen",
+          "has_clocks",
+          "truncated",
+          "plies"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "game_id": {
+            "type": "string"
+          },
+          "start_fen": {
+            "type": "string"
+          },
+          "has_clocks": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "plies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChessPlyRow"
+            }
+          }
+        }
+      },
       "ChessGameResponse": {
         "required": [
           "object",
@@ -4864,6 +4950,52 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ChessPlyRow": {
+        "required": [
+          "ply",
+          "san",
+          "uci",
+          "fen",
+          "white_moved",
+          "clock_seconds",
+          "position_id"
+        ],
+        "type": "object",
+        "properties": {
+          "ply": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "san": {
+            "type": "string"
+          },
+          "uci": {
+            "type": "string"
+          },
+          "fen": {
+            "type": "string"
+          },
+          "white_moved": {
+            "type": "boolean"
+          },
+          "clock_seconds": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "position_id": {
+            "type": "string"
           }
         }
       },
