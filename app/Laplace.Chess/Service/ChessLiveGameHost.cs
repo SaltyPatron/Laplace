@@ -207,11 +207,19 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
     public NpgsqlDataSource DataSource => _ds;
 
-    public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session")
+    public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session",
+        string tenantId = "public", string? userId = null)
     {
+        // Same identifier guard the conversational lane uses (spec 34): tenant and user become
+        // canonical-key segments, so the charset is load-bearing even while values are stubbed.
+        if (!Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(tenantId))
+            throw new ArgumentException($"tenant '{tenantId}' is not a valid identifier", nameof(tenantId));
+        if (userId is not null && !Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(userId))
+            throw new ArgumentException($"user '{userId}' is not a valid identifier", nameof(userId));
+
         var id = Guid.NewGuid();
         var gameId = Hash128.OfCanonical($"{learnContext}/{id:N}");
-        _playSessions[id] = new PlaySession(gameId, learnContext, recordToSubstrate);
+        _playSessions[id] = new PlaySession(gameId, learnContext, recordToSubstrate, tenantId, userId);
         if (recordToSubstrate)
             _ = OpenGameAsync(gameId, learnContext);
         return id;
@@ -310,11 +318,19 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private readonly record struct RecordedPly(string FromKey, string ToKey, int MoverSide);
 }
 
-public sealed class PlaySession(Hash128 gameId, string learnContext, bool recordToSubstrate)
+public sealed class PlaySession(Hash128 gameId, string learnContext, bool recordToSubstrate,
+    string tenantId = "public", string? userId = null)
 {
     public Hash128 GameId { get; } = gameId;
     public string LearnContext { get; } = learnContext;
     public bool RecordToSubstrate { get; } = recordToSubstrate;
+
+    // Spec-34 identity threaded from the play entry point, stubbed until auth: the tenant scopes
+    // the witness source, the user is the within-tenant attribution (a tenant owns many users).
+    // Held on the session now; emitted as provenance (tenant→source, user→HAS_ATTRIBUTION) once
+    // real values arrive and the chess source declares HAS_ATTRIBUTION.
+    public string TenantId { get; } = tenantId;
+    public string? UserId { get; } = userId;
     public int PlyCount { get; set; }
 
     /// <summary>

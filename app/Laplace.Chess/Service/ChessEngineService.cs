@@ -38,7 +38,8 @@ public sealed record ChessExploreMove(
 public sealed record ChessExploreResponse(
     string Fen, string? Player, IReadOnlyList<ChessExploreMove> Moves);
 
-public sealed record ChessPlayStart(Guid SessionId, string Fen, string Status = "ongoing", int Ply = 0);
+public sealed record ChessPlayStart(Guid SessionId, string Fen, string Status = "ongoing", int Ply = 0,
+    string TenantId = "public", string? UserId = null, string GameId = "");
 
 public sealed record ChessPlayMoveResult(
     string Fen, bool Terminal, string Status, bool Legal, int Ply,
@@ -396,10 +397,11 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     public ChessPlayStart StartPlaySession(
-        bool recordToSubstrate = true, IReadOnlyList<string>? moves = null)
+        bool recordToSubstrate = true, IReadOnlyList<string>? moves = null,
+        string tenantId = "public", string? userId = null)
     {
         EnsureModality();
-        var id = _liveHost.StartPlaySession(recordToSubstrate);
+        var id = _liveHost.StartPlaySession(recordToSubstrate, tenantId: tenantId, userId: userId);
         var session = _liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 
@@ -417,7 +419,9 @@ public sealed class ChessEngineService : IAsyncDisposable
         session.State = state;
         session.PlyCount = session.Moves.Count;
         var status = _modality.Terminal(state) is { } t ? Describe(t) : "ongoing";
-        return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount);
+        return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
+            session.TenantId, session.UserId,
+            Convert.ToHexString(session.GameId.ToBytes()).ToLowerInvariant());
     }
 
     private void EnsureModality()

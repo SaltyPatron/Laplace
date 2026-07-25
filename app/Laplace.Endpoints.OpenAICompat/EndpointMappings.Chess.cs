@@ -44,7 +44,10 @@ internal static class ChessEndpoints
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
         app.MapPost("/chess/play/start", (PlayStartRequest req, ChessEngineService svc) =>
-            Results.Json(svc.StartPlaySession(req.Record ?? true, req.Moves))).WithTags("chess");
+            // tenant/user are spec-34 provenance for the play session (stubbed until auth):
+            // tenant defaults to the shared "public" world, user is optional attribution.
+            Results.Json(svc.StartPlaySession(req.Record ?? true, req.Moves,
+                req.Tenant ?? "public", req.User))).WithTags("chess");
 
         app.MapPost("/chess/play/move", async (PlayMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))).WithTags("chess");
@@ -174,7 +177,7 @@ internal static class ChessEndpoints
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth, int? MaxConcurrent, bool? Substrate, string[]? Speeds);
-    private sealed record PlayStartRequest(bool? Record, string[]? Moves);
+    private sealed record PlayStartRequest(bool? Record, string[]? Moves, string? Tenant, string? User);
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);
