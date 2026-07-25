@@ -135,10 +135,7 @@ BEGIN
         ORDER BY (c.rating - 2*c.rd) DESC
         LIMIT 8
     ) x
-    WHERE x.lbl IS NOT NULL
-      AND x.lbl !~ '^[0-9]{6,}-[nvasr]$'
-      AND x.lbl !~ '^(noun|verb|adj|adv|adjs)\.'
-      AND x.lbl !~ ' '
+    WHERE label_is_content(x.lbl)
     HAVING count(*) > 0;
 
     -- web: the strongest chain across ALL relations -- the explicit
