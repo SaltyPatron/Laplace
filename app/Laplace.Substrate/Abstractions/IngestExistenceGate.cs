@@ -47,7 +47,15 @@ internal static class IngestExistenceGate
 
         for (int i = 0; i < records.Count; i++)
         {
-            if (!TryResolveRoot(records[i], handler, out var rootId)) continue;
+            if (!TryResolveRoot(records[i], handler, out var rootId, out var unresolvable))
+            {
+                // Permanently bad content (not just "this record type doesn't apply
+                // here") — exclude from novel too, or the compose path downstream hits
+                // the exact same throw on retry. Reuses the shortcircuit exclusion
+                // marker; this record is neither present nor composed, just dropped.
+                if (unresolvable) rootIndex[i] = -2;
+                continue;
+            }
 
             if (reader.IsProvenPresent(rootId))
             {
@@ -231,8 +239,20 @@ internal static class IngestExistenceGate
 
     private static bool TryResolveRoot<TRecord>(
         TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId)
+        => TryResolveRoot(record, handler, out rootId, out _);
+
+    /// <summary>
+    /// <paramref name="unresolvable"/> distinguishes "this record type doesn't apply
+    /// here, let it flow to the normal compose path" (false) from "this exact content
+    /// will never resolve, drop it now" (true) — a record content-hashing threw is not
+    /// recoverable by retrying downstream, so the caller must exclude it from
+    /// <c>novel</c> too, not just from the present-root short-circuit.
+    /// </summary>
+    private static bool TryResolveRoot<TRecord>(
+        TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId, out bool unresolvable)
     {
         rootId = default;
+        unresolvable = false;
         if (record is GrammarIngestRecord gr && handler is GrammarIngestHandler grammar)
             return GrammarRowComposer.TryProbeRowRoot(
                 gr.LineUtf8, gr.Ast, grammar.ModalityId, out rootId, out _);
@@ -245,9 +265,36 @@ internal static class IngestExistenceGate
                 rootId = cr.SourceId;
                 return true;
             }
-            Hash128? id = TextDecomposer.ContentRootId(cr.CanonicalUtf8);
+            Hash128? id;
+            try
+            {
+                id = TextDecomposer.ContentRootId(cr.CanonicalUtf8);
+            }
+            // Malformed content (bad encoding, etc.) — skip this one record rather than
+            // crash the whole batch, matching the RelationTripleRecord branch above and
+            // CodeDecomposer's own unreadable-file handling. A single bad file among
+            // hundreds must not take down an otherwise-good run. Marked unresolvable so
+            // the caller drops it outright — the same bytes would throw the same way if
+            // retried through the normal compose path downstream.
+            catch (InvalidOperationException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "IngestExistenceGate: skipping record with unresolvable content root: {0}", ex.Message);
+                unresolvable = true;
+                return false;
+            }
             if (id is null) return false;
             rootId = id.Value;
+            return true;
+        }
+        if (record is GrammarComposeRecord gcr)
+        {
+            // SourceId is opt-in per caller (GH #592): only RepoDecomposer computes it
+            // today (a repo file's content hash). CodeDecomposer/TinyCodesDecomposer
+            // records leave it null and fall through unchanged — no existence-gate
+            // short-circuit for them, same behavior as before this case existed.
+            if (gcr.SourceId is not { } id || id == default) return false;
+            rootId = id;
             return true;
         }
         if (record is ITrunkRootRecord trunk)

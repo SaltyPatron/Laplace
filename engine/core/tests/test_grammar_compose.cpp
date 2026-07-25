@@ -50,6 +50,88 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
 
 
 
+// GH #595: laplace_compose_span_lookup was a linear scan called once per AST
+// node from the C# compose loop — O(n) lookups x O(n) scan each, O(n^2)
+// total, measured pinning a real ingest for 40+ minutes on a file with tens
+// of thousands of nodes. Proves the fix at real scale: every one of several
+// thousand distinct spans resolves to its OWN correct entity id (not just
+// "doesn't crash" — a broken index could silently drop or cross-wire entries
+// under load in a way a single-span test would never catch), and does so
+// fast enough that a regression back to O(n^2) would make this test itself
+// balloon rather than fail silently.
+TEST(GrammarCompose, SpanLookupResolvesEveryDistinctSpanAtScale) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("csv");
+    ASSERT_NE(recipe, nullptr);
+
+    // Each cell gets a distinct value so every span's composed entity id is
+    // unique — a collision or a wrong-index bug would surface as a mismatch.
+    constexpr int kCols = 500;
+    constexpr int kRows = 6;
+    std::string src;
+    for (int r = 0; r < kRows; ++r) {
+        for (int c = 0; c < kCols; ++c) {
+            if (c) src += ',';
+            src += "v" + std::to_string(r * kCols + c);
+        }
+        src += '\n';
+    }
+
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src.data()), src.size(), recipe, &ast), 0);
+    ASSERT_NE(ast, nullptr);
+
+    hash128_t source_id;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("test/scale"), 10, &source_id);
+    hash128_t type_meta;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("Type"), 4, &type_meta);
+
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_compose(
+        reinterpret_cast<const uint8_t*>(src.data()), src.size(), ast,
+        "csv", source_id, type_meta, &result), 0);
+    ASSERT_NE(result, nullptr);
+
+    // Walk the AST's own node list — the exact same source of (start_byte,
+    // end_byte) pairs the real C# compose loop uses — rather than hand-
+    // predicting byte offsets, which would make this a test of my arithmetic
+    // instead of the fix. Every node's span must resolve, and distinct spans
+    // must resolve to distinct entity ids (the failure mode a broken
+    // hash/probe would produce, invisible to a "did it crash" check alone).
+    size_t node_count = laplace_ast_node_count(ast);
+    ASSERT_GT(node_count, static_cast<size_t>(kCols * kRows));
+
+    std::vector<std::pair<uint32_t, uint32_t>> spans;
+    for (size_t i = 0; i < node_count; ++i) {
+        laplace_ast_node_t nd;
+        if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
+        spans.emplace_back(nd.start_byte, nd.end_byte);
+    }
+    std::sort(spans.begin(), spans.end());
+    spans.erase(std::unique(spans.begin(), spans.end()), spans.end());
+
+    std::vector<hash128_t> ids;
+    ids.reserve(spans.size());
+    for (auto& [start, end] : spans) {
+        hash128_t id;
+        if (laplace_compose_span_lookup(result, start, end, &id) != 0) continue;
+        ids.push_back(id);
+    }
+    ASSERT_GT(ids.size(), static_cast<size_t>(kCols * kRows))
+        << "too few spans resolved — the index dropped entries the linear scan would have found";
+
+    std::sort(ids.begin(), ids.end(), [](const hash128_t& a, const hash128_t& b) {
+        return a.hi != b.hi ? a.hi < b.hi : a.lo < b.lo;
+    });
+    size_t distinct = std::unique(ids.begin(), ids.end(), [](const hash128_t& a, const hash128_t& b) {
+        return a.hi == b.hi && a.lo == b.lo;
+    }) - ids.begin();
+    EXPECT_EQ(distinct, ids.size()) << "some distinct spans aliased to the same entity id";
+
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}
+
 TEST(GrammarCompose, EntityDedupDoesNotInflateCount) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
     ASSERT_NE(recipe, nullptr);

@@ -729,6 +729,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
     compose_state_t st{};
     size_t n = 0;
+    size_t span_cap = 0;
     hash128_t* emitted_entity = NULL;
     hash128_t* emitted_type   = NULL;
     size_t emitted_entity_n = 0, emitted_entity_cap = 0;
@@ -786,6 +787,18 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     if (rc != 0) goto fail_st;
 
     n = st.n;
+
+    /* Span-lookup index (GH #595): sized upfront relative to n, same idiom as
+     * the PRECEDES dedup table below — span_count can never exceed n (one
+     * span per successfully-composed node), so this never needs to grow. */
+    {
+        size_t idx_cap = 64;
+        while (idx_cap < (n ? n : 1) * 2) idx_cap <<= 1;
+        r->span_index = (uint32_t*)malloc(idx_cap * sizeof(uint32_t));
+        if (!r->span_index) { rc = -3; goto fail_emit; }
+        memset(r->span_index, 0xFF, idx_cap * sizeof(uint32_t));
+        r->span_index_cap = idx_cap;
+    }
 
     /* Node->children adjacency, built ONCE and reused by the emit loop below.
        The loop used to rescan all n nodes twice per node to re-derive each
@@ -892,13 +905,27 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         free(child_ids);
         free(child_flags);
 
-        laplace_compose_span_t* sp = (laplace_compose_span_t*)realloc(
-            r->spans, (r->span_count + 1) * sizeof(*sp));
-        if (!sp) { rc = -3; goto fail_emit; }
-        r->spans = sp;
+        if (r->span_count == span_cap) {
+            size_t ncap = span_cap ? span_cap * 2 : 64;
+            laplace_compose_span_t* sp = (laplace_compose_span_t*)realloc(
+                r->spans, ncap * sizeof(*sp));
+            if (!sp) { rc = -3; goto fail_emit; }
+            r->spans = sp;
+            span_cap = ncap;
+        }
         r->spans[r->span_count].start_byte = node.start_byte;
         r->spans[r->span_count].end_byte   = node.end_byte;
         r->spans[r->span_count].entity_id  = id;
+
+        /* Index insertion, open addressing — mirrors the PRECEDES table
+         * below exactly (same hash-mix, same linear-probe shape). */
+        {
+            uint64_t key = ((uint64_t)node.start_byte << 32) | (uint64_t)node.end_byte;
+            uint64_t h = key * 0x9E3779B97F4A7C15ULL;
+            size_t s = (size_t)(h >> 32) & (r->span_index_cap - 1);
+            while (r->span_index[s] != UINT32_MAX) s = (s + 1) & (r->span_index_cap - 1);
+            r->span_index[s] = (uint32_t)r->span_count;
+        }
         r->span_count++;
     }
 
@@ -1042,6 +1069,24 @@ int laplace_compose_span_lookup(const laplace_compose_result_t* r,
                                 uint32_t start_byte, uint32_t end_byte,
                                 hash128_t* out_id) {
     if (!r || !out_id) return -1;
+    /* GH #595: O(1) amortized via the index built during compose. Falls back
+     * to the old linear scan only if the index wasn't built (e.g. a result
+     * from a code path predating this fix, or n==0) — never wrong, just slow
+     * in that case, same as before this fix existed. */
+    if (r->span_index && r->span_index_cap > 0) {
+        uint64_t key = ((uint64_t)start_byte << 32) | (uint64_t)end_byte;
+        uint64_t h = key * 0x9E3779B97F4A7C15ULL;
+        size_t s = (size_t)(h >> 32) & (r->span_index_cap - 1);
+        for (;;) {
+            uint32_t idx = r->span_index[s];
+            if (idx == UINT32_MAX) return -1;
+            if (r->spans[idx].start_byte == start_byte && r->spans[idx].end_byte == end_byte) {
+                *out_id = r->spans[idx].entity_id;
+                return 0;
+            }
+            s = (s + 1) & (r->span_index_cap - 1);
+        }
+    }
     for (size_t i = 0; i < r->span_count; ++i) {
         if (r->spans[i].start_byte == start_byte && r->spans[i].end_byte == end_byte) {
             *out_id = r->spans[i].entity_id;
@@ -1224,6 +1269,7 @@ void laplace_compose_result_free(laplace_compose_result_t* r) {
     free(r->physicalities);
     free(r->precedes);
     free(r->spans);
+    free(r->span_index);
     tier_tree_free(r->tree);
     free(r);
 }

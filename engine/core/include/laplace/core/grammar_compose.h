@@ -51,6 +51,15 @@ typedef struct {
     size_t                           precedes_count;
     laplace_compose_span_t*          spans;
     size_t                           span_count;
+    /* Open-addressing index over spans[], keyed by (start_byte,end_byte),
+     * built once during compose (GH #595) so laplace_compose_span_lookup is
+     * O(1) amortized instead of an O(span_count) linear scan called once per
+     * AST node from the C# entity-compose loop — O(n) lookups x O(n) scan
+     * each was O(n^2), measured pinning a single ingest for 40+ minutes on a
+     * file with tens of thousands of nodes. UINT32_MAX is the empty sentinel;
+     * NULL/0 (the calloc default) falls back to the old linear scan. */
+    uint32_t*                        span_index;
+    size_t                           span_index_cap;
     hash128_t                        root_id;
     tier_tree_t*                     tree;
 } laplace_compose_result_t;
