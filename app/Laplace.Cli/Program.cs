@@ -1,38 +1,9 @@
-using System.Buffers.Binary;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
-using global::Npgsql;
-using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Atomic2020;
-using Laplace.Decomposers.Code;
-using Laplace.Decomposers.ConceptNet;
-using Laplace.Decomposers.ISO;
-using Laplace.Decomposers.Model;
-using Laplace.Decomposers.OMW;
-using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.UD;
-using Laplace.Decomposers.Wiktionary;
-using Laplace.Decomposers.FrameNet;
-using Laplace.Decomposers.OpenSubtitles;
-using Laplace.Decomposers.VerbNet;
-using Laplace.Decomposers.PropBank;
-using Laplace.Decomposers.SemLink;
-using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.WordNet;
+using Laplace.Cli.Spectre;
 using Laplace.Engine.Core;
-using Laplace.Engine.Synthesis;
-using Laplace.Ingestion;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Engine.Core.Ops;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Laplace.Engine.Dynamics;
-using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
-using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
-using static Laplace.Cli.CliRuntime;
+using Spectre.Console.Cli;
 
 namespace Laplace.Cli;
 
@@ -40,6 +11,9 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        // Native runtime init before any command touches the engine — unchanged from the
+        // pre-Spectre entrypoint, and still keyed off the ORIGINAL args[0] so cpu-topology
+        // (which may run before MKL is available) stays exempt.
         if (args.Length == 0 || args[0] != "cpu-topology")
         {
             NativeRuntimeEnv.ApplyFromTopology();
@@ -47,66 +21,85 @@ internal static class Program
             Laplace.Engine.Synthesis.MklAvailability.EnsureOrThrow();
         }
 
-        if (args.Length == 0)
+        CliRuntime.InitializeServices();
+
+        if (args.Length == 0 || args[0] is "-h" or "--help")
+            CliBanner.Render();
+
+        var app = BuildApp();
+
+        // SAFE ROUTING: Spectre routes on the command token, but the real arguments are handed
+        // to the existing command parsers verbatim via ctx.Remaining.Raw — so a `--` is injected
+        // after the command token for execution. Help requests are passed through unchanged so
+        // Spectre renders its own (banner/usage) help.
+        return await app.RunAsync(ForExecution(args));
+    }
+
+    // Insert `--` after the command token so every real argument reaches ctx.Remaining.Raw
+    // untouched (Spectre otherwise binds/drops interleaved flags). Left alone: an empty line,
+    // a top-level help/version request, and per-command help (`laplace <cmd> --help`), so
+    // Spectre's own help still renders.
+    private static string[] ForExecution(string[] args)
+    {
+        if (args.Length == 0) return args;
+        if (args[0] is "-h" or "--help" or "--version") return args;
+        if (args.Length >= 2 && args[1] is "-h" or "--help") return args;
+
+        var injected = new string[args.Length + 1];
+        injected[0] = args[0];
+        injected[1] = "--";
+        Array.Copy(args, 1, injected, 2, args.Length - 1);
+        return injected;
+    }
+
+    private static CommandApp BuildApp()
+    {
+        var services = new ServiceCollection();
+        // The DI bridge (GH #603): the shared ops logging factory is available to any command
+        // that wants a constructor-injected ILogger; the existing static composition root
+        // (CliRuntime.Services) remains for the seed decomposer resolver.
+        services.AddSingleton<ILoggerFactory>(_ => LaplaceLogging.ConsoleAndFile("cli"));
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+
+        var app = new CommandApp(new DiTypeRegistrar(services));
+        app.Configure(config =>
         {
-            Console.Error.WriteLine(
-                "usage: laplace <command> [args]\n"
-                + "  ingest <source> [path]            (unicode | iso639 | wordnet | omw | ud | model)\n"
-                + "  document <recipe.json> [out-dir]  extract provenance.json (the canonical source material)\n"
-                + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
-                + "  decompose <text>\n"
-                + "  inspect <text>\n"
-                + "  converse [prompt]                 (no prompt: REPL — one connection, one session)\n"
-                + "  neighbors <word>                  (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
-                + "  walk [prompt]                     (n-gram stride backoff over witnessed trajectories; no prompt: REPL)\n"
-                + "  attest <confirm|refute> <tok1> [tok2...]   (OODA feedback: deposit PRECEDES witness for a token sequence)\n"
-                + "  attest <confirm|refute> <subj> <RELATION_TYPE> <obj>   (OODA feedback: confirm/refute one consensus triple, e.g. dog IS_A animal)\n"
-                + "  roundtrip <file> [out]\n"
-                + "  db-roundtrip <file>\n"
-                + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
-                + "  model-bench [model-dir]              (run the whole-model FFN/relation ETL on a real model; no DB)\n"
-                + "  eval ingest-fidelity [relation] [ground-truth] [n]   (AUC of a model plane vs seed relations)\n"
-                + "  stats\n"
-                + "  cpu-topology [--p-cores | --cpu-bound-workers [headroom] | --io-bound-workers]");
-            return 2;
-        }
-        try
-        {
-            CliRuntime.InitializeServices();
-            return args[0] switch
+            config.SetApplicationName("laplace");
+
+            // Preserve the pre-Spectre contract: a failure prints "error: <Type>: <message>"
+            // (plus inner chain) to stderr and exits 1, rather than a raw stack dump. Covers
+            // both parse errors (unknown command / bad flag) and runtime command exceptions.
+            config.SetExceptionHandler((ex, _) =>
             {
-                "ingest" => await IngestCommands.IngestAsync(args[1..]),
-                "document" => await DocumentCommands.RunAsync(args[1..]),
-                "synthesize" => await FoundryCommands.SynthesizeAsync(args[1..]),
-                "decompose" => DecompositionCommands.Decompose(string.Join(' ', args[1..])),
-                "inspect" => await QueryCommands.InspectAsync(string.Join(' ', args[1..])),
-                "converse" => await QueryCommands.ConverseAsync(string.Join(' ', args[1..])),
-                "recall" => await QueryCommands.RecallAsync(string.Join(' ', args[1..])),
-                "neighbors" => await QueryCommands.NeighborsAsync(string.Join(' ', args[1..])),
-                "walk" => await QueryCommands.WalkAsync(args[1..]),
-                "chat" => await QueryCommands.ChatAsync(args[1..]),
-                "attest" => await QueryCommands.AttestAsync(args[1..]),
-                "chess" => await ChessCommands.RunAsync(args[1..]),
-                "roundtrip" => DecompositionCommands.Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
-                "db-roundtrip" => await DecompositionCommands.DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
-                "eval" => await EvalCommands.RunAsync(args[1..]),
-                "stats" => await IngestCommands.StatsAsync(),
-                "rebuild-phys-indexes" => await IngestCommands.RebuildPhysIndexesAsync(),
-                "drop-indexes" => await IngestCommands.DropCoreIndexesAsync(),
-                "recover-indexes" => await IngestCommands.RecoverCycledIndexesAsync(),
-                "cpu-topology" => CpuTopologyCommands.Run(args[1..]),
-                "svd-exact-bench" => BenchCommands.SvdExactBenchCmd(args[1..]),
-                "model-bench" => await BenchCommands.ModelBenchCmd(args[1..]),
-                _ => Fail($"unknown command '{args[0]}'"),
-            };
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
-            for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
-                Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
-            return 1;
-        }
+                Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
+                for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+                    Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");
+                return 1;
+            });
+
+            config.AddCommand<IngestCommand>("ingest");
+            config.AddCommand<DocumentCommand>("document");
+            config.AddCommand<SynthesizeCommand>("synthesize");
+            config.AddCommand<DecomposeCommand>("decompose");
+            config.AddCommand<InspectCommand>("inspect");
+            config.AddCommand<ConverseCommand>("converse");
+            config.AddCommand<RecallCommand>("recall");
+            config.AddCommand<NeighborsCommand>("neighbors");
+            config.AddCommand<WalkCommand>("walk");
+            config.AddCommand<ChatCommand>("chat");
+            config.AddCommand<AttestCommand>("attest");
+            config.AddCommand<ChessCommand>("chess");
+            config.AddCommand<RoundtripCommand>("roundtrip");
+            config.AddCommand<DbRoundtripCommand>("db-roundtrip");
+            config.AddCommand<EvalCommand>("eval");
+            config.AddCommand<StatsCommand>("stats");
+            config.AddCommand<RebuildPhysIndexesCommand>("rebuild-phys-indexes");
+            config.AddCommand<DropIndexesCommand>("drop-indexes");
+            config.AddCommand<RecoverIndexesCommand>("recover-indexes");
+            config.AddCommand<CpuTopologyCommand>("cpu-topology");
+            config.AddCommand<SvdExactBenchCommand>("svd-exact-bench");
+            config.AddCommand<ModelBenchCommand>("model-bench");
+        });
+        return app;
     }
 }

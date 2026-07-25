@@ -4,41 +4,105 @@ using DbUp.Engine;
 using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Spectre.Console.Cli;
 
 namespace Laplace.Migrations;
 
 internal static class Program
 {
+    // Spectre.Console.Cli entrypoint (GH #603), same shape as Laplace.Cli but proportionally
+    // smaller: no banner, four verbs. The DbUp helpers (RunUp/RunStatus/RunReset/RunNuke,
+    // ResolveConnectionString, Confirmed) are unchanged — the commands just route to them, and
+    // the connection string is still resolved from the raw process args (so --database /
+    // --connection-string / --yes behave exactly as before, independent of Spectre parsing).
+    // A registrar-less CommandApp is deliberate: no command constructor-injects anything (ops
+    // logging is written directly via LaplaceLogging), so a DI bridge here would be unused.
     public static int Main(string[] args)
     {
-        var command = args.Length > 0 ? args[0].ToLowerInvariant() : "up";
-        var connectionString = ResolveConnectionString(args);
+        var app = new CommandApp<UpCommand>();
+        app.Configure(config =>
+        {
+            config.SetApplicationName("laplace-migrate");
+            config.AddCommand<UpCommand>("up");
+            config.AddCommand<StatusCommand>("status");
+            config.AddCommand<ResetCommand>("reset");
+            config.AddCommand<NukeCommand>("nuke");
+            config.SetExceptionHandler((ex, _) =>
+            {
+                if (ex is NpgsqlException nex)
+                {
+                    Console.Error.WriteLine($"[NpgsqlException] {nex.Message}");
+                    return 2;
+                }
+                Console.Error.WriteLine($"[error] {ex.GetType().Name}: {ex.Message}");
+                return 1;
+            });
+        });
+        return app.Run(Rewrite(args));
+    }
 
+    // Route on the verb, hand the raw arguments to the existing resolver untouched. A leading
+    // flag (no verb) means the default 'up' — Spectre needs the explicit token for that. `--`
+    // keeps Spectre from binding --database/--connection-string it does not model.
+    private static readonly string[] Verbs = { "up", "status", "reset", "nuke" };
+    private static string[] Rewrite(string[] args)
+    {
+        if (args.Length == 0) return new[] { "up" };
+        if (args[0] is "-h" or "--help" or "--version") return args;
+        string verb = Verbs.Contains(args[0].ToLowerInvariant()) ? args[0].ToLowerInvariant() : "up";
+        int skip = verb == args[0].ToLowerInvariant() ? 1 : 0;
+        var rest = args.Skip(skip);
+        return new[] { verb, "--" }.Concat(rest).ToArray();
+    }
+
+    // The connection string is resolved from the ORIGINAL process args (exe stripped), exactly
+    // as the pre-Spectre Main did — Spectre routing does not touch it.
+    private static int Dispatch(string command, Func<string, int> run)
+    {
+        var raw = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        var connectionString = ResolveConnectionString(raw);
         Console.WriteLine($"Laplace.Migrations: command={command}");
         Console.WriteLine($"Target database connection: {LaplaceInstall.RedactConnectionString(connectionString)}");
+        return run(connectionString);
+    }
 
-        try
-        {
-            return command switch
-            {
-                "up" => RunUp(connectionString),
-                "status" => RunStatus(connectionString),
-                "reset" => RunReset(connectionString),
-                "nuke" => RunNuke(connectionString),
-                _ => Usage()
-            };
-        }
-        catch (NpgsqlException ex)
-        {
-            Console.Error.WriteLine($"[NpgsqlException] {ex.Message}");
-            return 2;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[error] {ex.GetType().Name}: {ex.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
-            return 1;
-        }
+    internal sealed class MigrateSettings : CommandSettings
+    {
+        [CommandOption("--database <NAME>")]
+        [System.ComponentModel.Description("Target database name (default: the canonical laplace database).")]
+        public string? Database { get; init; }
+
+        [CommandOption("--connection-string <CONN>")]
+        [System.ComponentModel.Description("Full Npgsql connection string (overrides --database and DATABASE_URL).")]
+        public string? ConnectionString { get; init; }
+
+        [CommandOption("--yes")]
+        [System.ComponentModel.Description("Skip the confirmation prompt for destructive commands (reset/nuke).")]
+        public bool Yes { get; init; }
+    }
+
+    [System.ComponentModel.Description("EnsureDatabase + apply all pending migrations (default).")]
+    internal sealed class UpCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("up", RunUp);
+    }
+
+    [System.ComponentModel.Description("Show applied vs pending migrations.")]
+    internal sealed class StatusCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("status", RunStatus);
+    }
+
+    [System.ComponentModel.Description("Drop SchemaVersions (re-applies migrations; preserves DB data).")]
+    internal sealed class ResetCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("reset", RunReset);
+    }
+
+    [System.ComponentModel.Description("DROP DATABASE + re-create empty (full Layer-1 wipe).")]
+    internal sealed class NukeCommand : Command<MigrateSettings>
+    {
+        protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("nuke", RunNuke);
     }
 
     private static int RunUp(string connectionString)
@@ -71,7 +135,7 @@ internal static class Program
             Console.WriteLine($"[migrate up] Applied {applied.Count} migration(s):");
             foreach (var script in applied)
             {
-                Console.WriteLine($"  ✓ {script.Name}");
+                Spectre.Console.AnsiConsole.MarkupLine($"  [green]✓[/] {Spectre.Console.Markup.Escape(script.Name)}");
                 log.LogInformation("applied migration {Migration}", script.Name);
             }
         }
@@ -89,13 +153,15 @@ internal static class Program
         if (applied.Count > 0)
         {
             Console.WriteLine("Applied:");
-            foreach (var name in applied) Console.WriteLine($"  ✓ {name}");
+            foreach (var name in applied)
+                Spectre.Console.AnsiConsole.MarkupLine($"  [green]✓[/] {Spectre.Console.Markup.Escape(name)}");
             Console.WriteLine();
         }
         if (pending.Count > 0)
         {
             Console.WriteLine("Pending:");
-            foreach (var script in pending) Console.WriteLine($"  · {script.Name}");
+            foreach (var script in pending)
+                Spectre.Console.AnsiConsole.MarkupLine($"  [grey]·[/] {Spectre.Console.Markup.Escape(script.Name)}");
         }
         return 0;
     }
@@ -235,28 +301,5 @@ internal static class Program
             if (parts.Length > 1) b.Password = Uri.UnescapeDataString(parts[1]);
         }
         return b.ConnectionString;
-    }
-
-    private static int Usage()
-    {
-        Console.WriteLine("""
-            Laplace.Migrations — DbUp runner (Layer 1 — extension lifecycle)
-
-            Usage:
-              dotnet run --project app/Laplace.Migrations -- [command]
-
-            Commands:
-              up        EnsureDatabase + apply all pending migrations (default)
-              status    Show applied vs pending migrations
-              reset     Drop SchemaVersions (re-applies migrations; preserves DB)
-              nuke      DROP DATABASE + re-create empty (full Layer-1 wipe)
-
-            Connection (priority order):
-              --connection-string <value>
-              DATABASE_URL env var
-              PG_* env vars (PGHOST, PGUSER, PGDATABASE, PGPORT, PGPASSWORD)
-              Default: peer auth → laplace_admin on /var/run/postgresql, db=laplace
-            """);
-        return 64;
     }
 }
