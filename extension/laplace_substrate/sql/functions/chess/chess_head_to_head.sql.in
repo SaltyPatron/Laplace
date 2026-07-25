@@ -1,0 +1,50 @@
+CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DEFAULT 25)
+    RETURNS TABLE(opponent_id bytea, opponent text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Head-to-head as a READ. chess_opponents() answers the same question by walking every
+    -- game this player appeared in, joining each to its result and regrouping by the opposite
+    -- colour edge. That work was already done at ingest: each game folds its result onto the
+    -- (player, PLAYED_BY, opponent) cell, so two players who met 28 times are ONE cell with 28
+    -- witnesses, and this is a single index range over that player's subject rows.
+    --
+    -- PLAYED_BY sat in the manifest with zero rows for as long as the aggregate existed. It was
+    -- removed at PLY grain, correctly -- one near-unique row per ply can never corroborate. At
+    -- PAIRING grain it is the opposite: every repeat meeting lands on the same cell. Grain is
+    -- what decides whether an edge accumulates.
+    --
+    -- Ranked by eff_mu rather than games so the rivalries a career is actually defined by come
+    -- first: a long even series against a strong opponent outranks a short lopsided one.
+    WITH rec AS MATERIALIZED (
+        SELECT c.object_id AS opponent,
+               c.witness_count AS games,
+               c.rating,
+               c.rd
+        FROM @extschema@.consensus c
+        WHERE c.subject_id = p_player
+          AND c.type_id = @extschema@.relation_type_id('PLAYED_BY')
+          AND c.object_id IS NOT NULL
+        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
+        LIMIT p_limit
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(rec.opponent ORDER BY rec.opponent), '{}'::bytea[]) AS ids
+        FROM rec
+    ),
+    named AS (
+        SELECT p.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT rec.opponent,
+           COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),
+           rec.games,
+           rec.rating::double precision,
+           rec.rd::double precision,
+           @extschema@.eff_mu(rec.rating, rec.rd)::double precision
+    FROM rec
+    LEFT JOIN named n ON n.id = rec.opponent
+    ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
+$$;
