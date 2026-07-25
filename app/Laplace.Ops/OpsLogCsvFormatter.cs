@@ -1,20 +1,20 @@
 using System.Globalization;
 using System.Text;
 
-namespace Laplace.Engine.Core.Ops;
+namespace Laplace.Ops;
 
 /// <summary>
-/// Formats one diagnostic record as a single RFC 4180 CSV line for the ops.app_log sink.
-///
-/// The column set is a deliberate SUBSET of ops.pg_log's (GH #601) so the two log surfaces
-/// read the same way in SQL:
+/// The RFC 4180 CSV shape for the ops.app_log sink — a deliberate SUBSET of ops.pg_log's
+/// columns (GH #601) so the two log surfaces read the same way in SQL:
 ///
 ///   log_time, application_name, error_severity, category, message, detail
 ///
 /// log_time / application_name / error_severity / message are shared-shape with ops.pg_log;
 /// category (the logger category) and detail (exception text) are the app-side columns. A
 /// file_fdw foreign table over the sink declares exactly these six columns in this order.
-/// No header row is written (csvlog convention; file_fdw reads header 'false').
+/// No header row (file_fdw reads header 'false'). This static core is what the Serilog
+/// <see cref="OpsLogCsvTextFormatter"/> writes per event, kept separate so the exact CSV
+/// contract stays unit-testable without a LogEvent.
 /// </summary>
 public static class OpsLogCsvFormatter
 {
@@ -27,6 +27,14 @@ public static class OpsLogCsvFormatter
         string category, string message, string? detail)
     {
         var sb = new StringBuilder(128);
+        Write(sb, when, applicationName, severity, category, message, detail);
+        return sb.ToString();
+    }
+
+    internal static void Write(
+        StringBuilder sb, DateTimeOffset when, string applicationName, string severity,
+        string category, string message, string? detail)
+    {
         Field(sb, when.ToString("yyyy-MM-dd HH:mm:ss.fffzzz", CultureInfo.InvariantCulture));
         sb.Append(',');
         Field(sb, applicationName);
@@ -39,7 +47,6 @@ public static class OpsLogCsvFormatter
         sb.Append(',');
         Field(sb, detail ?? string.Empty);
         sb.Append('\n');
-        return sb.ToString();
     }
 
     // RFC 4180: quote a field when it holds a comma, quote, CR or LF; escape embedded quotes

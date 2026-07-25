@@ -4,11 +4,11 @@ using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Microsoft.AspNetCore.HttpOverrides;
 using Laplace.Endpoints.OpenAICompat;
+using Laplace.Ops;
 using Npgsql;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
-using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -25,11 +25,10 @@ builder.WebHost.ConfigureKestrel(options =>
             ? devPort
             : LaplaceInstall.EndpointPort));
 
+// Shared ops logging (GH #602/#635): stderr console + the CSV sink read back as ops.app_log's
+// 'api' role (laplace-api.csv). Same foundation the console deployables use.
 builder.Host.UseSerilog((_, lc) =>
-{
-    lc.MinimumLevel.Information().Enrich.FromLogContext();
-    lc.WriteTo.Console();
-});
+    lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true));
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddOpenApi();

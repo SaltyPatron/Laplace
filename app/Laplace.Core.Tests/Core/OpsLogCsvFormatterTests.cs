@@ -1,5 +1,5 @@
 using System;
-using Laplace.Engine.Core.Ops;
+using Laplace.Ops;
 using Xunit;
 
 namespace Laplace.Engine.Core.Tests;

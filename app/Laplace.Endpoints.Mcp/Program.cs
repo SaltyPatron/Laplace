@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Laplace.Endpoints.Mcp;
-using Laplace.Engine.Core.Ops;
+using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
 // MCP stdio server over the substrate's SQL surface. Same shape as

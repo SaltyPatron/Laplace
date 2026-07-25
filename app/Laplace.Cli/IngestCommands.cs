@@ -287,7 +287,7 @@ internal static class IngestCommands
             }
         }
 
-        var loggerFactory = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli");
+        var loggerFactory = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli");
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
 
@@ -541,7 +541,7 @@ internal static class IngestCommands
         var topo = IngestTopology.EnsureReady();
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var loggerFactory = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli");
+        var loggerFactory = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli");
         bool force = cli?.Force ?? false;
         var innerWriter = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
@@ -620,7 +620,7 @@ internal static class IngestCommands
         }
 
         Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
-        var log = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
+        var log = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
         var sw = Stopwatch.StartNew();
         // Force the rebuild even under LAPLACE_INDEX_CYCLE_DEFER: this verb IS the deliberate
         // campaign-end rebuild the defer flag was holding for (RecoverAsync no-ops when deferred).
@@ -653,7 +653,7 @@ internal static class IngestCommands
     public static async Task<int> DropCoreIndexesAsync()
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var log = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
+        var log = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
         string[] tables = ["entities", "physicalities", "attestations", "consensus"];
         Console.WriteLine($"campaign index-drop across {tables.Length} core table(s) — journaled for one rebuild ...");
         var sw = Stopwatch.StartNew();

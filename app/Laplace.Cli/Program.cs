@@ -1,6 +1,6 @@
 using Laplace.Cli.Spectre;
 using Laplace.Engine.Core;
-using Laplace.Engine.Core.Ops;
+using Laplace.Ops;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Spectre.Console.Cli;

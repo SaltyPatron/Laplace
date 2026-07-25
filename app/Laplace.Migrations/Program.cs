@@ -110,7 +110,7 @@ internal static class Program
         // FileOnly (not ConsoleAndFile): the human-facing report already goes to stdout
         // below; this is the queryable audit trail (which migration applied, when) in the
         // shared ops sink — ops.app_log, GH #602. Console output stays as-is.
-        using var loggerFactory = Laplace.Engine.Core.Ops.LaplaceLogging.FileOnly("migrations");
+        using var loggerFactory = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
         var log = loggerFactory.CreateLogger("up");
 
         EnsureDatabase.For.PostgresqlDatabase(connectionString);
