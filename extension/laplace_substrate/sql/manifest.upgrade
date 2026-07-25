@@ -5,7 +5,6 @@ schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
-schema/tables/constituent_edges.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
 indexes/drop_entities_tier_btree.sql.in
@@ -81,7 +80,6 @@ functions/readback/codepoint_for_id.sql.in
 functions/readback/is_all_whitespace.sql.in
 functions/readback/constituents.sql.in
 functions/readback/constituents_closure.sql.in
-functions/readback/constituents_closure_edges.sql.in
 functions/readback/vertex_atom.sql.in
 functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
@@ -356,7 +354,6 @@ functions/highway/highway_mask_drain.sql.in
 functions/highway/highway_mask_deposit.sql.in
 functions/model/model_factor.sql.in
 functions/ops/highway_mask_rebuild.sql.in
-functions/ops/constituent_edges_rebuild.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
 views/v_consensus_resolved.sql.in
@@ -388,3 +385,4 @@ functions/chess/chess_time_pressure_outcome.sql.in
 functions/chess/chess_ranked.sql.in
 functions/chess/chess_head_to_head.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
+functions/readback/drop_retired_constituent_edges.sql.in
