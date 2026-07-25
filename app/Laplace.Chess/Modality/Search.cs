@@ -37,6 +37,16 @@ public sealed class Search
     private readonly ChessMove[,] _killers = new ChessMove[MaxPly, 2];
     private readonly List<ulong> _path = new(MaxPly);
 
+    // Per-ply reusable move buffers — the fix for the allocation-bound hot path
+    // (GH #607: MoveGen.Legal allocated 2 lists per node, ~484 bytes/node,
+    // ~35GB per bench). Each ply owns its own pseudo+legal list so a node's move
+    // list survives while it recurses into ply+1. Sized past MaxPly because
+    // quiescence recurses deeper than the main search; the LegalAt guard falls
+    // back to an allocating gen for the rare node beyond the buffer range.
+    private const int MaxBufPly = 256;
+    private readonly List<ChessMove>[] _pseudoBuf;
+    private readonly List<ChessMove>[] _legalBuf;
+
     private long _nodes, _maxNodes, _deadlineMs;
     private bool _aborted;
     private ChessMove _rootBestMove;
@@ -76,6 +86,26 @@ public sealed class Search
         TtBits = bits;
         _tt = new TtEntry[1 << bits];
         _ttMask = (1UL << bits) - 1;
+        _pseudoBuf = new List<ChessMove>[MaxBufPly];
+        _legalBuf = new List<ChessMove>[MaxBufPly];
+        for (int i = 0; i < MaxBufPly; i++)
+        {
+            _pseudoBuf[i] = new List<ChessMove>(64);
+            _legalBuf[i] = new List<ChessMove>(48);
+        }
+    }
+
+    // Buffered legal-move generation for the search hot path: fills and returns
+    // this ply's reusable buffer (no allocation). Falls back to an allocating
+    // gen only for quiescence nodes beyond MaxBufPly (rare). The returned list
+    // is owned by this ply and valid until this ply generates again.
+    private List<ChessMove> LegalAt(Board b, int ply)
+    {
+        if ((uint)ply >= MaxBufPly)
+            return MoveGen.Legal(b);
+        var legal = _legalBuf[ply];
+        MoveGen.Legal(b, _pseudoBuf[ply], legal);
+        return legal;
     }
 
     public int TtBits { get; }
@@ -174,7 +204,7 @@ public sealed class Search
 
         if (depth <= 0) return Quiesce(b, alpha, beta, ply);
 
-        var moves = MoveGen.Legal(b);
+        var moves = LegalAt(b, ply);
         if (moves.Count == 0)
             return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0;
 
@@ -230,7 +260,7 @@ public sealed class Search
             if (standPat > alpha) alpha = standPat;
         }
 
-        var moves = MoveGen.Legal(b);
+        var moves = LegalAt(b, ply);
         if (moves.Count == 0) return inCheck ? -(Mate - ply) : 0;
 
         // In-place, order-preserving compaction — Quiesce runs at every
