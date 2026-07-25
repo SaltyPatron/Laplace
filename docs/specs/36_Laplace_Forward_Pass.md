@@ -97,8 +97,61 @@ research unknown; it is an unwritten loop body with a defined contract (§3, sta
 
 ## 3. The canonical Laplace forward pass
 
-This is the standard. One spine, one order. Every conversational entry point runs *this*,
-not a private subset.
+**This ladder is ONE PROGRAM, not the machine.** Writing it as *the* pipeline was the
+template mistake one level up: a template hardcodes an output, a hardcoded pipeline
+hardcodes an execution order. "Answer a question" is one program; translate, summarize,
+tell a story, play a move, describe an image are others — different instruction orders
+over the same primitives. §3.2 states the instruction set the ladder is written in.
+
+Every conversational entry point runs this program in this order, and no entry point
+invents a private subset — that part is binding. What is not binding is the claim that
+this is the only order that exists.
+
+### 3.1 Concepts are emitted; surfaces are selected
+
+An ILI is an **equivalence class of surfaces** — `dog`, `domestic dog`,
+`Canis familiaris`, `chien`, `狗`, `Hund` are one node with many realizations, each with
+its own eff_mu, register (`HAS_USAGE_REGISTER`), POS and language (`HAS_LANGUAGE`). That
+makes generation two stages, not one, and conflating them is what produces templates:
+
+- **WHAT to say** — the walk emits a sequence of CONCEPTS. Language-free, hash space,
+  no surface touched. Steering belongs here (S7).
+- **HOW to say it** — realization selects a family member per concept, under language,
+  register and sequential fit (trajectory/n-gram evidence). Sampling belongs here (S8/S9).
+
+Consequences that follow directly, each verified or specified elsewhere in this doc:
+fluency is a *selection* problem, not a corpus-imitation problem; novelty is structural
+(same concept sequence, different surface selection, still fully grounded, deposited at
+`Response` trust 0.20); and family members may be multi-word, so realization emits at
+whatever tier the member sits — the tier-polymorphism of §2.1 arriving from the other
+direction.
+
+It also explains the live Bulgarian result (2026-07-25): `converse_walk('dog')` on an
+English prompt realized from the Bulgarian member of the family, because nothing pinned
+the language. The mechanism was right and the stage was unconstrained.
+
+### 3.2 The instruction set
+
+The primitives are modality- and tier-independent, because every fact is the same 5-tuple
+over the same ladder: `RESOLVE` (content→id), `DECOMPOSE`, `COMPOSE`, `ATTEND`/`WALK`
+(id + relation mask → ranked frontier), `FOLD`, `RANK` (→ eff_mu order), `SAMPLE`
+(RD as temperature), `REALIZE` (id→surface), `WITNESS` (assertion→evidence).
+
+**ROM is the per-modality decomposer + realizer pair** plus that modality's deterministic
+primitive table. Text's already exists and is literally firmware-versioned:
+`laplace_t0_perfcache_17.0.0.bin` — tier-0 codepoints pinned on S³ by UCA order, mmap'd,
+CRC'd, postmaster-prewarmed. `laplace_highway_perfcache.bin` is the second. Decomposers
+exist for the text family, code and models; chess has its own ladder; image/audio/video
+have none.
+
+**Opcodes should be content ids, not English mnemonics.** `query_shapes()` publishing 14
+English strings, and `chat()` requiring the caller to pass `p_shape`, is the same defect
+the retired English intent regex had — moved up a level. "tell me a story" IS the
+instruction and should resolve to an operation concept exactly as `dog` resolves to a
+synset, through the same hash, in any language. The executor then reads its own
+instruction out of the prompt: spans resolve to concepts, some concepts are operations
+and some are operands, and the expected output tier/modality falls out of the operation.
+That resolver and sequencer are unbuilt.
 
 ```
 S0  DECOMPOSE   prompt → content ids                         [prompt_state]
@@ -110,9 +163,8 @@ S4  RETRIEVE    beam-walk the consensus graph under the       [walk_branches]
                 intent mask → the semantic frontier
 S5  COMPOSE     frontier → typed strata, carried across hops  [partial]
 --- per emitted token, loop S6→S8 ---
-S6  PROPOSE     next-CONTENT candidates AT WHATEVER TIER      [steered_walk /
-                carries the evidence — word, phrase, or a      trajectory_generate]
-                whole attested sentence. Ordered constituents
+S6  PROPOSE     next CONCEPT candidates at whatever tier      [walk_continuations /
+                carries the evidence. Ordered constituents      steered_walk]
                 come from physicalities.trajectory (CONTAINS/
                 PRECEDES are views of it, never its source).
 S7  STEER       re-rank candidates by the LIVE frontier (S4)  [MISSING — the loop body]
@@ -137,6 +189,18 @@ machinery: the sentence tier was right there, carrying a third of the graph, unu
 (Prior draft error, recorded: "gloss sentences have zero outgoing relations" was true of
 glosses — which are `HAS_DEFINITION` *objects* — and was wrongly generalized to tier 3 as a
 whole. One shape was sampled, a tier was concluded about.)
+
+**Self-generated content is evidence, at low trust.** The trust ladder already encodes it:
+`SubstrateMandate 1.00` → `AcademicCurated 0.85` → `StructuredCorpus 0.70` →
+`AiModelProbe 0.50` → `UserPrompt 0.30` → `Response 0.20` → `Adversarial 0.00`
+(`WitnessConstants.cs`). Because identity is content-addressed, a composed claim and a
+later external assertion of the same triple land on the SAME consensus cell — the system
+does not hold "what it believes" apart from "what is witnessed"; one address, many
+witnesses, the fold adjudicates. State the property precisely: trust enters as opponent
+RD, so low-trust evidence is DAMPED, not inert — enough self-witnesses do move a rating.
+The structural win over training on synthetic output is that the movement stays
+attributable and refutable, not that it cannot happen. Generation and evaluation are the
+same write, and both belong in S10.
 
 **S7 is the invention's actual forward pass** and it is the one stage nobody has written.
 "Sequence proposes, meaning steers" is already written in `converse_walk`'s header comment
