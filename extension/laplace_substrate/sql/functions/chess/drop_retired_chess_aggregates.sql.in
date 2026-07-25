@@ -1,0 +1,25 @@
+-- Retired: chess_leaderboard(integer) and chess_opponents(bytea, integer).
+--
+-- Both answered "what is this player's record" by AGGREGATING evidence at query time:
+-- chess_leaderboard grouped every colour-header row in the corpus (~400k rows for ~200k
+-- games, ~10s) and chess_opponents regrouped one player's whole career by opponent. They
+-- were correct, and they were the wrong shape. A record that takes ten seconds has to be
+-- cached to be usable, and the cache then has to be kept fresh -- state standing in for a
+-- fold the substrate exists to have already done.
+--
+-- Each game now carries its result onto the player in the aggregating lane at ingest, so
+-- the same two questions are reads of consensus cells: chess_ranked() orders by eff_mu
+-- over one relation partition, chess_head_to_head() reads one folded cell per pairing.
+-- witness_count IS games played. Nothing is recomputed and nothing is cached.
+--
+-- Dropped rather than left in place: two implementations of one fact is the duplication
+-- the engineering rules forbid without a documented reason, and the surviving pair is
+-- strictly better (Glicko-2 weighs WHO you beat; a win ratio cannot). The install SQL is
+-- CREATE-OR-REPLACE and never drops, so on the UPGRADE path these catalog rows would
+-- linger while a fresh CREATE EXTENSION would not have them; this DROP makes the two match.
+--
+-- chess_player_record() is NOT retired. The fold yields strength, not the W/D/L split, and
+-- that split is a genuinely different question -- answered by index lookups on ONE player
+-- (74ms measured over a 1341-game career), which is a read, not an aggregate.
+DROP FUNCTION IF EXISTS chess_leaderboard(integer);
+DROP FUNCTION IF EXISTS chess_opponents(bytea, integer);

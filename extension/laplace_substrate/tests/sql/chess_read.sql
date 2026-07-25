@@ -240,20 +240,6 @@ BEGIN
     SELECT count(*) INTO n FROM chess_player_games(tal, 25, 4);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: paging past the end got % rows', n; END IF;
 
-    -- chess_opponents: the same four games regrouped by who was opposite. The
-    -- totals must equal the career total, or the two views disagree about one man.
-    SELECT sum(games) INTO n FROM chess_opponents(tal, 25);
-    IF n <> 4 THEN RAISE EXCEPTION 'FAIL: head-to-head totals % games, career has 4', n; END IF;
-    SELECT games, wins, draws, losses, unscored INTO n, w, d, l, u
-      FROM chess_opponents(tal, 25) WHERE opponent_id = botv;
-    IF n <> 3 OR w <> 1 OR d <> 0 OR l <> 1 OR u <> 1 THEN
-        RAISE EXCEPTION 'FAIL: Tal v Botvinnik expected 3/1w/0d/1l/1u, got %/%/%/%/%', n, w, d, l, u;
-    END IF;
-    SELECT games, draws INTO n, d FROM chess_opponents(tal, 25) WHERE opponent_id = spas;
-    IF n <> 1 OR d <> 1 THEN
-        RAISE EXCEPTION 'FAIL: Tal v Spassky expected one drawn game, got %/%', n, d;
-    END IF;
-
     -- chess_game: the headers, both sides followable back to their careers
     SELECT white_id INTO got FROM chess_game(g1);
     IF got <> tal THEN RAISE EXCEPTION 'FAIL: g1 White should be Tal'; END IF;
@@ -266,20 +252,6 @@ BEGIN
     -- unreadable witness and is SKIPPED, never coerced to a number.
     SELECT count(*) INTO n FROM chess_player_ratings(tal);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unparseable rating tag was coerced, got % rows', n; END IF;
-
-    -- chess_leaderboard: ranked by games witnessed, no floors — Spassky's single
-    -- game keeps him on the board, just last.
-    SELECT player_id INTO got FROM chess_leaderboard(10) WHERE rank = 1;
-    IF got <> tal THEN RAISE EXCEPTION 'FAIL: leaderboard rank 1 should be Tal (4 games)'; END IF;
-    SELECT games INTO n FROM chess_leaderboard(10) WHERE player_id = spas;
-    IF n <> 1 THEN RAISE EXCEPTION 'FAIL: a one-game player must still appear, got %', n; END IF;
-    SELECT count(*) INTO n FROM chess_leaderboard(2);
-    IF n <> 2 THEN RAISE EXCEPTION 'FAIL: chess_leaderboard LIMIT 2 got % rows', n; END IF;
-    -- names abstain to hex rather than coming back blank
-    SELECT name INTO txt FROM chess_leaderboard(10) WHERE rank = 1;
-    IF txt IS NULL OR txt = '' THEN
-        RAISE EXCEPTION 'FAIL: nameless player rendered blank instead of falling back to hex';
-    END IF;
 
     -- chess_ranked / chess_head_to_head: the FOLDED reads. Same three players, but rated
     -- through the aggregating lane instead of counted by a GROUP BY. Tal is given a strong
@@ -337,7 +309,7 @@ BEGIN
     SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
 
-    RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career/log/head-to-head/leaderboard all reconcile';
+    RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu';
 END $$;
 
 ROLLBACK;
