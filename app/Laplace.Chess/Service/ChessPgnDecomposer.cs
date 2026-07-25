@@ -225,14 +225,76 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     // Witness the VERBATIM PGN movetext (clocks, evals, comments, NAGs, result token — the
-    // bytes the source asserted) as one content edge on the game. This is the lossless
-    // record: every per-ply token is reconstructible from it (MovetextTokens.Parse).
+    // bytes the source asserted) as one content edge on the game.
+    //
+    // Composed from the movetext's OWN units, not from prose. Handing the raw string to the
+    // shared text spine applied UAX #29 sentence segmentation, and PGN's move-number separator
+    // is '.', so it split into fragments like "Nd2 Nf6 4. e5 Nfd7 5. " — measured at 82.5%
+    // single-use over 3,000 games (81,373 constituents, 67,108 distinct). Content addressing
+    // pays off by COLLIDING; prose segmentation of a non-prose format collides almost never,
+    // and fills tier-3 content space with fragments that can corroborate with nothing.
+    //
+    // Ply tokens are shared content: there are only a few thousand distinct SAN tokens in all
+    // of chess, so "Nf6" is ONE entity witnessed across millions of games. The movetext is the
+    // Merkle over its ordered tokens — the same composition positions use (ChessCompose), with
+    // the trajectory carrying the sequence, so the record stays lossless and reconstructible
+    // while every unit it is built from is one the corpus actually reuses.
     private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
     {
         string movetext = MovetextSection(gameText);
         if (movetext.Length == 0) return;
-        if (ContentEmitter.Emit(b, movetext, src) is { } mtId)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
+
+        var tokens = MovetextTokens.Parse(movetext);
+        if (tokens.Count == 0) return;
+
+        // Each token through the shared content path: they are words, which is exactly what
+        // that path is for, and they dedup across the entire corpus.
+        var childIds = new List<Hash128>(tokens.Count);
+        foreach (var tok in tokens)
+            if (ContentEmitter.Emit(b, tok, src) is { } tid) childIds.Add(tid);
+        if (childIds.Count == 0) return;
+
+        var ids = childIds.ToArray();
+        var mtId = MovetextId(ids);
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+
+        b.AddEntity(mtId, EntityTier.Document, ChessVocabulary.MovetextType, src);
+        b.AddPhysicality(new PhysicalityRow(
+            Id: PhysicalityId.Compute(mtId, PhysicalityType.Content),
+            EntityId: mtId,
+            SourceId: src,
+            Type: PhysicalityType.Content,
+            CoordX: 0, CoordY: 0, CoordZ: 0, CoordM: 0,
+            HilbertIndex: default,
+            TrajectoryXyzm: Trajectory.Build(ids),
+            NConstituents: ids.Length,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: nowUs));
+
+        b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
+    }
+
+    // Document tier: a movetext is a whole document made of ply tokens.
+    private const byte MovetextTier = 4;
+
+    /// <summary>
+    /// The composed id of a movetext, from its ordered token ids. ONE definition — the
+    /// decomposer writes through it and any caller that needs to name a movetext resolves
+    /// through it, so the two can never drift.
+    /// </summary>
+    internal static Hash128 MovetextId(ReadOnlySpan<Hash128> tokenIds)
+        => Hash128.Merkle(MovetextTier, tokenIds);
+
+    /// <summary>The composed id of a movetext surface, tokenized the source's way.</summary>
+    internal static Hash128? MovetextId(string movetext)
+    {
+        var tokens = MovetextTokens.Parse(movetext);
+        if (tokens.Count == 0) return null;
+        var ids = new List<Hash128>(tokens.Count);
+        foreach (var tok in tokens)
+            if (ContentEmitter.RootId(tok) is { } tid) ids.Add(tid);
+        return ids.Count == 0 ? null : MovetextId(ids.ToArray());
     }
 
     // The movetext section verbatim: everything after the header-tag block. Header lines start
