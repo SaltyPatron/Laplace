@@ -104,13 +104,7 @@ internal static class FoundryExport
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            row.Sort((a, b) =>
-            {
-                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
-                return c != 0 ? c : a.Col.CompareTo(b.Col);
-            });
-            if (row.Count > degreeCap)
-                row.RemoveRange(degreeCap, row.Count - degreeCap);
+            TrimRowToTopK(row, degreeCap);
             kept += row.Count;
         }
 
@@ -174,12 +168,7 @@ internal static class FoundryExport
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            row.Sort((a, b) =>
-            {
-                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
-                return c != 0 ? c : a.Col.CompareTo(b.Col);
-            });
-            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            TrimRowToTopK(row, degreeCap);
             kept += row.Count;
         }
         var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
@@ -245,12 +234,7 @@ internal static class FoundryExport
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            row.Sort((a, b) =>
-            {
-                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
-                return c != 0 ? c : a.Col.CompareTo(b.Col);
-            });
-            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            TrimRowToTopK(row, degreeCap);
             kept += row.Count;
         }
         var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
@@ -312,12 +296,7 @@ internal static class FoundryExport
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            row.Sort((a, b) =>
-            {
-                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
-                return c != 0 ? c : a.Col.CompareTo(b.Col);
-            });
-            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            TrimRowToTopK(row, degreeCap);
             kept += row.Count;
         }
         var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
@@ -451,6 +430,12 @@ internal static class FoundryExport
                     double muB = wordMu.GetValueOrDefault(b, 1.0);
                     double w = Math.Sqrt(muA * muB);
                     row.Add((b, w));
+                    // Bound the row as we go: a dense co-category is otherwise the
+                    // full N*(N-1) clique resident before CooFromAdj caps it (a large
+                    // POS category is hundreds of millions of tuples). Trimming to the
+                    // top-degreeCap periodically is output-identical (top-k merges).
+                    if (degreeCap > 0 && row.Count >= degreeCap * 2)
+                        TrimRowToTopK(row, degreeCap);
                 }
             }
         }
@@ -1050,17 +1035,26 @@ internal static class FoundryExport
 
 
 
+    // Trim a row to its top-degreeCap edges by |weight| desc, Col asc as the
+    // deterministic tie-break — the one ordering every plane reader applies. Top-k
+    // is mergeable, so a caller may trim periodically during accumulation (see the
+    // co-category clique) to bound memory without changing the final set.
+    private static void TrimRowToTopK(List<(int Col, double W)> row, int degreeCap)
+    {
+        row.Sort((a, b) =>
+        {
+            int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
+            return c != 0 ? c : a.Col.CompareTo(b.Col);
+        });
+        if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+    }
+
     private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
     {
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            row.Sort((a, b) =>
-            {
-                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
-                return c != 0 ? c : a.Col.CompareTo(b.Col);
-            });
-            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            TrimRowToTopK(row, degreeCap);
             kept += row.Count;
         }
         var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
