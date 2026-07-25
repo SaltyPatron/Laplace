@@ -26,12 +26,31 @@ internal static class ChessCommands
             "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
             "tactics" => await TacticsAsync(args[1..]),
             "lichess" => await LichessAsync(args[1..]),
+            "match" => await MatchAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
 
+    // Engine-vs-engine match with a live terminal board (GH #604): drives the ChessLabService
+    // cutechess job and renders its event stream. Games stream into the substrate through the
+    // job's own re-ingestion (--no-ingest opts out, matching the lab's ingest=false).
+    private static async Task<int> MatchAsync(string[] args)
+    {
+        var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["rounds"] = ArgInt(args, "--rounds", 10).ToString(),
+            ["depth"] = ArgInt(args, "--depth", 0).ToString(),
+            ["st"] = ArgDouble(args, "--st", 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["elo"] = ArgInt(args, "--elo", 2000).ToString(),
+            ["ingest"] = HasFlag(args, "--no-ingest") ? "false" : "true",
+        };
+        using var cts = new CancellationTokenSource();
+        return await ChessMatchDashboard.RunAsync(config, cts.Token);
+    }
+
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match>\n"
+        + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
         + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"

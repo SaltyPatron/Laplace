@@ -139,7 +139,7 @@ internal sealed class AttestCommand : ForwardCommand<TailSettings>
 
 // ---- chess (self-dispatching subcommands, unchanged) ----------------------------------------
 
-[Description("Chess lab. Subcommands: selfplay, move, fetch, substrate-test, ladder, review, learned-pst, learned-eval-test, tactics, lichess. Run 'chess' for the full flag reference.")]
+[Description("Chess lab. Subcommands: match (engine-vs-engine, live terminal board), selfplay, move, fetch, substrate-test, ladder, review, learned-pst, learned-eval-test, tactics, lichess. Run 'chess' for the full flag reference.")]
 internal sealed class ChessCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
