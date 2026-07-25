@@ -336,6 +336,47 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
     respond_routed(prompt, context, ctx_null, &route, &bind, buf);
 }
 
+/* Intents whose reply is the uniform single-argument shape:
+ * recall_<intent>_response(topic), with a label fallback when the substrate has
+ * witnessed nothing. One table + one helper instead of N copy-pasted if-arms
+ * that each re-typed the same Oid/args/forward/fallback boilerplate. */
+static const struct {
+    const char *intent;
+    const char *sql;
+    const char *fallback;
+} kSingleArgIntents[] = {
+    { "languages",
+      "SELECT reply, eff_mu, witnesses FROM laplace.recall_languages_response($1)",
+      "no cross-language consensus yet." },
+    { "synonyms",
+      "SELECT reply, eff_mu, witnesses FROM laplace.recall_synonyms_response($1)",
+      "no synonym consensus yet." },
+    { "examples",
+      "SELECT reply, eff_mu, witnesses FROM laplace.recall_examples_response($1)",
+      "no example consensus yet." },
+    { "describe",
+      "SELECT reply, eff_mu, witnesses FROM laplace.recall_describe_response($1)",
+      "no relation consensus to describe yet." },
+};
+
+/* Returns true if intent matched a single-arg shape and was answered. */
+static bool
+respond_single_arg_intent(ReplyBuf *buf, const char *intent, Datum topic)
+{
+    for (size_t i = 0; i < lengthof(kSingleArgIntents); i++)
+    {
+        if (strcmp(intent, kSingleArgIntents[i].intent) != 0)
+            continue;
+        Oid   types[1] = { BYTEAOID };
+        Datum args[1]  = { topic };
+        int   n = spi_forward_replies(buf, kSingleArgIntents[i].sql, 1, types, args, NULL);
+        if (n == 0)
+            emit_label_fallback(buf, topic, kSingleArgIntents[i].fallback);
+        return true;
+    }
+    return false;
+}
+
 /* The routed body: takes an intent plus already-resolved ids. recall_session
  * shares it so session_record_prompt and the reply resolve the topic once.
  * Owns route: frees it on every path. */
@@ -350,6 +391,12 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
     if (topic == (Datum) 0)
     {
         emit_no_topic_msg(buf, prompt, &route);
+        route_free(&route);
+        return;
+    }
+
+    if (route.intent && respond_single_arg_intent(buf, route.intent, topic))
+    {
         route_free(&route);
         return;
     }
@@ -414,50 +461,6 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
             else
                 emit_label_fallback(buf, topic, "no translation consensus yet.");
         }
-    }
-    else if (route.intent && strcmp(route.intent, "languages") == 0)
-    {
-        Oid   types[1] = { BYTEAOID };
-        Datum args[1] = { topic };
-        n = spi_forward_replies(buf,
-            "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_languages_response($1)",
-            1, types, args, NULL);
-        if (n == 0)
-            emit_label_fallback(buf, topic, "no cross-language consensus yet.");
-    }
-    else if (route.intent && strcmp(route.intent, "synonyms") == 0)
-    {
-        Oid   types[1] = { BYTEAOID };
-        Datum args[1] = { topic };
-        n = spi_forward_replies(buf,
-            "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_synonyms_response($1)",
-            1, types, args, NULL);
-        if (n == 0)
-            emit_label_fallback(buf, topic, "no synonym consensus yet.");
-    }
-    else if (route.intent && strcmp(route.intent, "examples") == 0)
-    {
-        Oid   types[1] = { BYTEAOID };
-        Datum args[1] = { topic };
-        n = spi_forward_replies(buf,
-            "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_examples_response($1)",
-            1, types, args, NULL);
-        if (n == 0)
-            emit_label_fallback(buf, topic, "no example consensus yet.");
-    }
-    else if (route.intent && strcmp(route.intent, "describe") == 0)
-    {
-        Oid   types[1] = { BYTEAOID };
-        Datum args[1] = { topic };
-        n = spi_forward_replies(buf,
-            "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_describe_response($1)",
-            1, types, args, NULL);
-        if (n == 0)
-            emit_label_fallback(buf, topic, "no relation consensus to describe yet.");
     }
     else if (route.intent && strcmp(route.intent, "related") == 0)
     {
