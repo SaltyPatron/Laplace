@@ -137,4 +137,65 @@ public sealed class ChessGameTrajectoryTests
         var gameEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
         Assert.DoesNotContain(change.Physicalities, p => p.EntityId == gameEntity.Id);
     }
+
+    // --- the backfill pass -------------------------------------------------
+    // Reaching the games recorded before trajectories existed must NOT go through a
+    // ChessAnalyze.Version bump: attestation merge ACCUMULATES observation_count, so
+    // re-deriving the standing corpus would double every witness count in the calculated
+    // layer. The backfill therefore writes geometry ONLY. These pin that.
+
+    private static SubstrateChange ComposeBackfill()
+    {
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+        var witnessed = new ChessWitnessedGame(
+            GameId: ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
+                ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]),
+            Moves: ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"],
+            Result: GameOutcome.WonBy(0),
+            WhitePlayer: null, BlackPlayer: null, StartFen: null,
+            ClockTokens: null, EvalTokens: null, QualityTokens: null);
+
+        var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/trajectory");
+        ChessTrajectoryDecomposer.Deposit(b, witnessed, ChessVocabulary.AnalysisSourceId);
+        return b.SetInputUnitsConsumed(1).Build();
+    }
+
+    [Fact]
+    public void Backfill_DepositsNoTestimony()
+    {
+        // The whole safety argument in one assertion: not one attestation, so nothing can
+        // double-count no matter how many times this runs over the standing corpus.
+        Assert.Empty(ComposeBackfill().Attestations);
+    }
+
+    [Fact]
+    public void Backfill_DepositsTheTrajectoryAndItsOwnMarker()
+    {
+        var change = ComposeBackfill();
+        var gameId = ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
+            ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]);
+
+        var traj = Assert.Single(change.Physicalities, p => p.EntityId == gameId);
+        Assert.Equal(8, traj.NConstituents);
+        Assert.Equal(ExpectedLine(), Trajectory.Constituents(traj.TrajectoryXyzm!));
+
+        // Marker is versioned independently of ChessAnalyze.Version so a geometry backfill
+        // and a testimony re-derive can never be mistaken for one another.
+        Assert.Contains(change.Entities, e => e.Id == ChessTrajectoryDecomposer.MarkerId(gameId));
+        Assert.NotEqual(ChessTrajectoryDecomposer.MarkerId(gameId),
+                        ChessVocabulary.AnalysisMarkerId(gameId, ChessAnalyze.Version));
+    }
+
+    [Fact]
+    public void Backfill_MatchesWhatTheInlineAnalyzerDeposits()
+    {
+        // Two roads to the same geometry: a fresh ingest derives it inline, the backfill
+        // derives it from the hydrated record. They must agree exactly, or a game's geometry
+        // would depend on which path reached it.
+        var inline = GameTrajectory(Compose());
+        var backfilled = Assert.Single(ComposeBackfill().Physicalities, p => p.EntityId == inline.EntityId);
+        Assert.Equal(inline.TrajectoryXyzm, backfilled.TrajectoryXyzm);
+        Assert.Equal(inline.Id, backfilled.Id);
+        Assert.Equal(inline.NConstituents, backfilled.NConstituents);
+    }
 }

@@ -93,6 +93,13 @@ internal static class IngestDispatchTable
             ["chess-analyze"] = cli => IngestCommands.IngestViaRunnerAsync(
                 new Laplace.Chess.Service.ChessAnalyzeDecomposer(cli.AnalyzeDepth), "",
                 skipLayerCheck: true, cli, skipSourceCompletion: true),
+            // Geometry-only backfill: deposits the game trajectory (spec 11 §2) onto games
+            // recorded before it existed. Deliberately NOT a ChessAnalyze.Version bump — that
+            // would re-derive ~29M attestations and double every observation_count, since
+            // merge accumulates. A physicality is an upsert, so this is safe to re-run.
+            ["chess-trajectory"] = cli => IngestCommands.IngestViaRunnerAsync(
+                new Laplace.Chess.Service.ChessTrajectoryDecomposer(), "",
+                skipLayerCheck: true, cli, skipSourceCompletion: true),
             // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
             // search depth (default 10 — the v1 census budget); --nodes N switches to a
             // node-capped search (bounded worst case). A run-level memo searches each unique
