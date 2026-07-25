@@ -383,9 +383,8 @@ functions/chess/chess_player_id.sql.in
 functions/chess/chess_player_record.sql.in
 functions/chess/chess_player_ratings.sql.in
 functions/chess/chess_player_games.sql.in
-functions/chess/chess_opponents.sql.in
-functions/chess/chess_leaderboard.sql.in
 functions/chess/chess_game.sql.in
 functions/chess/chess_time_pressure_outcome.sql.in
 functions/chess/chess_ranked.sql.in
 functions/chess/chess_head_to_head.sql.in
+functions/chess/drop_retired_chess_aggregates.sql.in
