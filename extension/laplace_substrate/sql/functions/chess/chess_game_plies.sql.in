@@ -24,8 +24,13 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_game bytea)
     -- honest answer for a game recorded before the analyzer ran; the caller replays the
     -- movetext for those.
     WITH line AS MATERIALIZED (
-        SELECT u.ordinal, u.entity_id AS pos
-        FROM @extschema@.trajectory_unpacked_points(p_game) u
+        -- trajectory_unpacked_points returns (entity_id, run_length, ctier) and NO ordinal:
+        -- the sequence is the ROW ORDER of the decode, so WITH ORDINALITY is what names it.
+        -- Reading a column that does not exist was a runtime resolution failure, invisible to
+        -- a build and to a regress case that only exercised the no-trajectory branch.
+        SELECT u.ord AS ordinal, u.entity_id AS pos
+        FROM @extschema@.trajectory_unpacked_points(p_game)
+             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
     facts AS MATERIALIZED (
         -- One indexed pass over this game's per-ply evidence. context_id IS the game, so
