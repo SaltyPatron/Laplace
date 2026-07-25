@@ -69,7 +69,12 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (!Directory.Exists(path)) yield break;
 
+        // Share the ONE VendoredPathFilter (Laplace.Core) that Code/RepoDecomposer
+        // use — otherwise vendored .txt (OMW's core-*.txt shipped inside an
+        // ecosystem/external tree, generated dumps, >2MB blobs) get enumerated for
+        // document ingest under the corpus's identity (GH #608).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
+                                         .Where(f => !VendoredPathFilter.IsVendoredOrBuildPath(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }
