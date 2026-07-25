@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel, Stack, Table, Td, Th } from '@ui';
 import { chessPlayers } from './api';
-import { RecordCell, scoreText } from './RecordBar';
 import type { ChessPlayersResponse } from './types';
 import styles from './ChessDb.module.css';
 
@@ -13,11 +12,9 @@ const PAGE = 50;
  * much of them it witnessed. There is no minimum-games floor and no rating cut:
  * a one-game player is a real witness with a one-game record, just further down.
  *
- * Search runs two ways at once. A fully spelled name is a content-address
- * lookup — the server folds it the way the decomposer did and hashes it — so it
- * hits one player directly however deep in the corpus he sits. A fragment is
- * matched against the ranked list instead, which is why an empty result names
- * the depth it searched rather than claiming nobody by that name exists.
+ * Nothing here is cached. The ranking is a read of consensus cells the fold already
+ * wrote, so paging is an OFFSET over an index and search is a content-address lookup.
+ * There is no warm window, no TTL, and no depth beyond which the roster stops knowing.
  */
 export function PlayersIndex() {
   const [params, setParams] = useSearchParams();
@@ -50,8 +47,10 @@ export function PlayersIndex() {
       <header className={styles.hero}>
         <h2>Players</h2>
         <Muted>
-          Every player the substrate has witnessed at a board, ranked by games recorded.
-          Records are counted off the game headers themselves — nothing is inferred.
+          Every player the substrate has witnessed at a board, ranked by the conservative
+          Glicko-2 estimate — rating − 2·RD, folded from his games at ingest. Not a win
+          percentage: beating stronger opponents counts for more, and a thin record sinks
+          on its own uncertainty rather than flattering itself.
         </Muted>
         <form className={styles.searchRow} onSubmit={submit}>
           <Input
@@ -74,10 +73,9 @@ export function PlayersIndex() {
           <Muted>
             {search ? (
               <>
-                Nothing matching “{search}”. Partial names are matched against the top{' '}
-                {data.ranked_depth.toLocaleString()} players by games recorded — for anyone
-                below that, spell the name the way the source records it (e.g. “Tal, Mikhail”)
-                and it resolves directly, however deep in the corpus he sits.
+                No player named “{search}” has been witnessed. Names resolve by content
+                address, so spell it the way the source records it — “Tal, Mikhail” or
+                “mikhail tal” both land on the same player, however deep in the corpus he sits.
               </>
             ) : (
               'No games have been ingested yet.'
@@ -93,8 +91,8 @@ export function PlayersIndex() {
                   <Th>#</Th>
                   <Th>Player</Th>
                   <Th>Games</Th>
-                  <Th>W–L–D</Th>
-                  <Th>Score</Th>
+                  <Th>Rating</Th>
+                  <Th>±RD</Th>
                 </tr>
               </thead>
               <tbody>
@@ -104,9 +102,11 @@ export function PlayersIndex() {
                     <Td>
                       <Link className={styles.playerLink} to={`/chess/players/${p.id}`}>{p.name}</Link>
                     </Td>
-                    <Td>{p.record.games.toLocaleString()}</Td>
-                    <Td><RecordCell record={p.record} /></Td>
-                    <Td>{scoreText(p.record)}</Td>
+                    <Td>{p.games.toLocaleString()}</Td>
+                    <Td title={`eff_mu ${p.eff_mu.toFixed(0)} = rating − 2·RD`}>
+                      {p.eff_mu.toFixed(0)}
+                    </Td>
+                    <Td>±{p.rd.toFixed(0)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -121,12 +121,10 @@ export function PlayersIndex() {
                 >
                   ‹ Previous
                 </Button>
-                <Muted>
-                  {offset + 1}–{offset + data.players.length} of {data.total.toLocaleString()} ranked
-                </Muted>
+                <Muted>{offset + 1}–{offset + data.players.length}</Muted>
                 <Button
                   variant="ghost"
-                  disabled={offset + data.players.length >= data.total}
+                  disabled={data.players.length < PAGE}
                   onClick={() => setParams({ offset: String(offset + PAGE) })}
                 >
                   Next ›

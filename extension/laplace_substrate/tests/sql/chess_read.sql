@@ -111,6 +111,7 @@ DECLARE
     r_draw  bytea := word_id('1/2-1/2');
     r_junk  bytea := laplace_hash128_blake3('test/chess2/unparseable_result');
     elo     bytea := laplace_hash128_blake3('test/chess2/elo_tag');
+    pos_probe bytea := laplace_hash128_blake3('test/chess2/position_probe');
     n       bigint;
     w       bigint;
     d       bigint;
@@ -159,7 +160,7 @@ BEGIN
         (g1, 0, type_t, src), (g2, 0, type_t, src),
         (g3, 0, type_t, src), (g4, 0, type_t, src),
         (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
-        (elo, 0, type_t, src);
+        (elo, 0, type_t, src), (pos_probe, 0, type_t, src);
 
     -- g1 Tal(W) beat Botvinnik   g2 Botvinnik(W) beat Tal
     -- g3 Tal(W) drew Spassky     g4 Tal(W) v Botvinnik, never scored
@@ -279,6 +280,62 @@ BEGIN
     IF txt IS NULL OR txt = '' THEN
         RAISE EXCEPTION 'FAIL: nameless player rendered blank instead of falling back to hex';
     END IF;
+
+    -- chess_ranked / chess_head_to_head: the FOLDED reads. Same three players, but rated
+    -- through the aggregating lane instead of counted by a GROUP BY. Tal is given a strong
+    -- cell, Spassky a thin one, so the conservative estimate has to order them by strength
+    -- rather than by games -- the thing a win percentage cannot express.
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
+    ON CONFLICT DO NOTHING;
+    UPDATE entities SET type_id = entity_type_id('Chess_Player')
+     WHERE id IN (tal, botv, spas);
+
+    INSERT INTO consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
+        -- eff_mu = rating - 2*rd: tal 1800e9, botv 1500e9, spas 1100e9 (thin, wide RD)
+        (laplace_hash128_blake3('t2/c_tal'),  tal,  relation_type_id('OUTCOME'),
+             entity_type_id('Chess_Result'), 1900000000000, 50000000000, 60000000, 40, now()),
+        (laplace_hash128_blake3('t2/c_botv'), botv, relation_type_id('OUTCOME'),
+             entity_type_id('Chess_Result'), 1600000000000, 50000000000, 60000000, 30, now()),
+        (laplace_hash128_blake3('t2/c_spas'), spas, relation_type_id('OUTCOME'),
+             entity_type_id('Chess_Result'), 1500000000000, 200000000000, 60000000, 1, now()),
+        (laplace_hash128_blake3('t2/h2h'),    tal,  relation_type_id('PLAYED_BY'),
+             botv, 1700000000000, 60000000000, 60000000, 28, now());
+
+    SELECT player_id INTO got FROM chess_ranked(10) WHERE rank = 1;
+    IF got <> tal THEN RAISE EXCEPTION 'FAIL: chess_ranked rank 1 should be Tal (highest eff_mu)'; END IF;
+
+    -- witness_count IS games played: the fold carries the count, nothing recomputes it.
+    SELECT games INTO n FROM chess_ranked(10) WHERE player_id = tal;
+    IF n <> 40 THEN RAISE EXCEPTION 'FAIL: chess_ranked games should be witness_count (40), got %', n; END IF;
+
+    -- The thin one-game record sinks on RD rather than flattering itself -- no floor needed,
+    -- and no floor used: he is still on the board, just last.
+    SELECT count(*) INTO n FROM chess_ranked(10);
+    IF n <> 3 THEN RAISE EXCEPTION 'FAIL: chess_ranked expected 3 players, got %', n; END IF;
+    SELECT rank INTO n FROM chess_ranked(10) WHERE player_id = spas;
+    IF n <> 3 THEN RAISE EXCEPTION 'FAIL: the thin record should rank last on RD, got rank %', n; END IF;
+
+    -- Positions carry the IDENTICAL (OUTCOME, Chess_Result) cell shape; the subject's entity
+    -- type is what separates them, so a position must never appear in a player ranking.
+    INSERT INTO consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (laplace_hash128_blake3('t2/c_pos'), pos_probe, relation_type_id('OUTCOME'),
+            entity_type_id('Chess_Result'), 9900000000000, 1000000000, 60000000, 999, now());
+    SELECT count(*) INTO n FROM chess_ranked(10) WHERE player_id = pos_probe;
+    IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a position leaked into the player ranking'; END IF;
+
+    -- Paging is over the ranking, not a re-aggregate.
+    SELECT player_id INTO got FROM chess_ranked(1, 1);
+    IF got <> botv THEN RAISE EXCEPTION 'FAIL: chess_ranked OFFSET 1 should be Botvinnik'; END IF;
+
+    -- Head to head is ONE folded cell per pairing: 28 meetings, 28 witnesses, no regroup.
+    SELECT games INTO n FROM chess_head_to_head(tal, 10) WHERE opponent_id = botv;
+    IF n <> 28 THEN RAISE EXCEPTION 'FAIL: head-to-head should carry 28 witnesses, got %', n; END IF;
+    SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
+    IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
 
     RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career/log/head-to-head/leaderboard all reconcile';
 END $$;

@@ -1,0 +1,66 @@
+CREATE OR REPLACE FUNCTION chess_ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
+    RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- The roster as a READ of already-folded cells, not an aggregate.
+    --
+    -- chess_leaderboard() answers the same question by GROUP BY over every colour-header row
+    -- in the corpus (~400k rows, ~10s) and has to be cached to be usable. That is a cache
+    -- standing in for a fold. Each game now carries its result onto the player himself in the
+    -- aggregating lane, so the record is one consensus cell: witness_count IS games played,
+    -- rating IS the Glicko-2 strength, rd IS how sure the corpus is. Ranking is then an ORDER
+    -- BY over a single relation partition with nothing to keep warm.
+    --
+    -- The subject's ENTITY TYPE is the discriminator, deliberately. OUTCOME is the universal
+    -- aggregating edge -- positions carry it too, on the identical (OUTCOME, Chess_Result)
+    -- shape -- because "how did this thing fare" is one fact whatever is being rated. What
+    -- separates a player from a position is what it IS, which the substrate already records.
+    -- Minting a player-only outcome object to make the query easier would duplicate a fact the
+    -- entity type already states.
+    --
+    -- eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
+    -- grandmasters outranks 68% against beginners instead of tying it, and a thin record sinks
+    -- on RD rather than flattering itself. A raw ratio can express neither.
+    --
+    -- LIMIT/OFFSET are the only cuts. No minimum-games floor: a one-game player is a real
+    -- witness with a wide RD, and the conservative estimate places him accordingly.
+    WITH rec AS MATERIALIZED (
+        SELECT c.subject_id AS player,
+               c.witness_count AS games,
+               c.rating,
+               c.rd
+        FROM @extschema@.entities e
+        JOIN @extschema@.consensus c
+          ON c.subject_id = e.id
+         AND c.type_id = @extschema@.relation_type_id('OUTCOME')
+        WHERE e.type_id = @extschema@.entity_type_id('Chess_Player')
+        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.subject_id
+        LIMIT p_limit OFFSET p_offset
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(
+                   array_agg(rec.player ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player),
+                   '{}'::bytea[]) AS ids
+        FROM rec
+    ),
+    named AS (
+        -- Batched name resolution, never per-row label(): resolving names one at a time is
+        -- ~45ms each and would dominate a read that is otherwise an index scan.
+        SELECT p.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT row_number() OVER (ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player)
+               + p_offset,
+           rec.player,
+           COALESCE(NULLIF(n.txt, ''), encode(rec.player, 'hex')),
+           rec.games,
+           rec.rating::double precision,
+           rec.rd::double precision,
+           @extschema@.eff_mu(rec.rating, rec.rd)::double precision
+    FROM rec
+    LEFT JOIN named n ON n.id = rec.player
+    ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player
+$$;

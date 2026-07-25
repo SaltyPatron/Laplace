@@ -157,15 +157,17 @@ export function PlayerPage() {
       {player.opponents.length > 0 ? (
         <Panel title="Head to head">
           <Muted style={{ marginBottom: '0.5rem' }}>
-            The same games, regrouped by who was on the other side.
+            One folded cell per pairing — every meeting between the two lands on the same
+            cell, so the games count IS its witness count. Ranked by eff_mu, so a long even
+            series against a strong rival outranks a short lopsided one.
           </Muted>
           <Table>
             <thead>
               <tr>
                 <Th>Opponent</Th>
                 <Th>Games</Th>
-                <Th>W–L–D</Th>
-                <Th>Score</Th>
+                <Th>Rating</Th>
+                <Th>±RD</Th>
               </tr>
             </thead>
             <tbody>
@@ -174,9 +176,11 @@ export function PlayerPage() {
                   <Td>
                     <Link className={styles.playerLink} to={`/chess/players/${o.id}`}>{o.name}</Link>
                   </Td>
-                  <Td>{o.record.games.toLocaleString()}</Td>
-                  <Td><RecordCell record={o.record} /></Td>
-                  <Td>{scoreText(o.record)}</Td>
+                  <Td>{o.games.toLocaleString()}</Td>
+                  <Td title={`eff_mu ${o.eff_mu.toFixed(0)} = rating − 2·RD`}>
+                    {o.eff_mu.toFixed(0)}
+                  </Td>
+                  <Td>±{o.rd.toFixed(0)}</Td>
                 </tr>
               ))}
             </tbody>

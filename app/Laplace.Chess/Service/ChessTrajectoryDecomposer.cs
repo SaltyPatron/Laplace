@@ -27,7 +27,20 @@ namespace Laplace.Chess.Service;
 /// The marker is versioned independently of ChessAnalyze.Version so this backfill and a future
 /// analysis re-derive can never be mistaken for one another.
 ///
+/// COMMIT CADENCE — read this before running it over a large corpus. In working-set mode the
+/// runner's only flush trigger is accumulated apply bytes reaching the flush envelope (RAM/64,
+/// ceiling 512 MiB). These records are unusually small — two rows plus one linestring, ~2.9 KB
+/// for an 80-ply game — so the envelope is not reached until roughly 176,000 games. A full run
+/// over a 200k corpus therefore commits ONCE, near the end: it is idempotent across completed
+/// runs, but a run killed before that first flush loses everything it composed. Marker-based
+/// skipping resumes across runs, not within one.
+///
+/// Set LAPLACE_WS_FLUSH_MB to commit sooner — e.g. 32 flushes about every 11,000 games, which
+/// makes an interrupted run resumable at that granularity. Nothing about correctness changes
+/// either way; only how much work an interruption costs.
+///
 /// Run: `laplace ingest chess-trajectory` (no path — the substrate is the source of truth)
+///      `LAPLACE_WS_FLUSH_MB=32 laplace ingest chess-trajectory`  (frequent commits)
 /// </summary>
 public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajectoryRecord>
 {
@@ -69,9 +82,10 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        // Same hydrate path the analyzer uses, gated on THIS pass's marker: a game already
-        // carrying its trajectory is skipped before compose, so the backfill is resumable and
-        // a second run costs a bitmap probe per game rather than a replay.
+        // Same hydrate path the analyzer uses, gated on THIS pass's marker: a game whose
+        // trajectory has already been COMMITTED is skipped before compose, so a second run
+        // costs a bitmap probe per game rather than a replay. Composed-but-uncommitted work is
+        // not skipped — see the commit-cadence note above.
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedFromSubstrateAsync(
                            ds, ContainmentReader!, ws.Batch, MarkerId, ct))
             yield return new ChessTrajectoryRecord(witnessed);
