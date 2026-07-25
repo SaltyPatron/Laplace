@@ -274,6 +274,46 @@ public static class ChessGraph
             ObservedAtUnixUs: nowUs));
     }
 
+    /// <summary>
+    /// Rate a PLAYER on the result of one game — the aggregating lane for the one subject the
+    /// rating math was literally invented for.
+    ///
+    /// A player's record was being computed as a query-time GROUP BY over every colour-header
+    /// row in the corpus (~400k rows, ~10s), then cached with a TTL and a prewarm. That is a
+    /// cache standing in for a missing fold: the consensus layer exists precisely so a strength
+    /// estimate is READ, not recomputed. With this edge the record is one already-folded cell —
+    /// witness_count is games played, eff_mu is the conservative strength — so the leaderboard
+    /// is an indexed ORDER BY over a single relation partition and there is nothing to keep warm.
+    ///
+    /// It is also a strictly better number than the win percentage it replaces. Glicko-2 weighs
+    /// who you beat, so a 68% score against 1960s grandmasters stops ranking level with 68%
+    /// against beginners — and RD says how sure the corpus is, which a raw ratio cannot.
+    ///
+    /// Two edges, both aggregating, both deduped by content address:
+    ///   (player, OUTCOME, Chess_Result)  — his overall strength, one cell per player
+    ///   (player, PLAYED_BY, opponent)    — the head-to-head cell, folded per pairing
+    /// contextId carries the game, so provenance stays per-game on the evidence rows while the
+    /// consensus cells aggregate. PLAYED_BY was declared in the manifest and never emitted; this
+    /// is the edge it was reserved for.
+    /// </summary>
+    public static void AppendPlayerResult(
+        SubstrateChangeBuilder b, Hash128 player, Hash128? opponent, PlyOutcome outcome,
+        double witnessWeight, Hash128 src, Hash128 gameId)
+    {
+        long sum = ScoreFp1e9(outcome);
+        b.AddAttestation(Outcome(player, games: 1, sum, witnessWeight, src, gameId));
+        if (opponent is { } opp)
+            b.AddAttestation(NativeAttestation.Aggregated(
+                subject: player,
+                typeId: ChessVocabulary.PlayedByType,
+                obj: opp,
+                sourceId: src,
+                contextId: gameId,
+                games: 1,
+                sumScoreFp1e9: sum,
+                witnessWeight: witnessWeight));
+    }
+
     private static AttestationRow Outcome(
         Hash128 subject, long games, long sum, double witnessWeight, Hash128 src, Hash128? contextId = null) =>
         NativeAttestation.Aggregated(

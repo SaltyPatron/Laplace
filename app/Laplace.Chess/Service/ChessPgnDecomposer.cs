@@ -317,6 +317,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));
 
+        // The colour headers above are the RECORD: who sat where, one row per game.
+        // These are the AGGREGATING lane — the same game result carried into the Glicko fold
+        // on the player himself, so his record is a consensus cell to be read rather than a
+        // 400k-row GROUP BY to be recomputed and cached. Both lanes, always, per the ply law.
+        if (whitePlayer is { } w2)
+            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, gameId);
+        if (blackPlayer is { } b2)
+            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, gameId);
+
         Meta(b, gameId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src);
         Meta(b, gameId, "ON_DATE", date, src);
         Meta(b, gameId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src);
