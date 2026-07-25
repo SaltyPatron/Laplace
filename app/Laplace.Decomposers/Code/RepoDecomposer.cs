@@ -38,6 +38,8 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) return;
 
+        ThrowIfNestedRepos(root);
+
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.TryAdd(repoCanonical, 0);
         _repoId = Hash128.OfCanonical(repoCanonical);
@@ -73,6 +75,23 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
             }
             if (bytes.Length == 0) continue;
 
+            // Content-DAG root of the file's own bytes (GH #592): lets the existence
+            // gate true-skip a file whose content is already witnessed anywhere,
+            // before tree-sitter ever parses it. Malformed encoding (a non-UTF8 file
+            // matching a recognized extension — real corpora have these) is skipped
+            // here rather than crashing the batch, same posture as GH #596.
+            Hash128? sourceId;
+            try
+            {
+                sourceId = FileEntity.SourceId(bytes);
+            }
+            catch (InvalidOperationException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "RepoDecomposer: skipping '{File}' — unresolvable content root: {Message}", file, ex.Message);
+                continue;
+            }
+
             string relPath = Path.GetRelativePath(ecosystemPath, file).Replace('\\', '/');
             var filename = Path.GetFileNameWithoutExtension(file);
             var segments = new List<string>();
@@ -90,7 +109,8 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
                 ExampleSegments: segments.Count > 0 ? segments : null,
                 ConceptAnchorKey: relPath,
                 ConceptCategoryTypeId: FileTypeId,
-                ParentContainerId: _repoId);
+                ParentContainerId: _repoId,
+                SourceId: sourceId);
         }
     }
 
@@ -115,6 +135,39 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
                 TrajectoryXyzm: null, NConstituents: 0,
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
         }
+    }
+
+    /// <summary>
+    /// RepoDecomposer mints exactly one repo-root identity per invocation and fans
+    /// every file's containment out to it — correct for one repo, silently wrong for
+    /// a directory holding several independent ones (a snapshot/backup dump of
+    /// "everything on this drive" is not hypothetical; it is how this gets hit).
+    /// Detecting the ambiguity and failing loudly is the safe first cut: the caller
+    /// re-runs `ingest repo` once per discovered root instead of getting one
+    /// repo identity silently covering unrelated projects.
+    /// </summary>
+    internal static void ThrowIfNestedRepos(string root)
+    {
+        var nested = new List<string>();
+        foreach (var dir in Directory.EnumerateDirectories(root, ".git", SearchOption.AllDirectories))
+        {
+            // The root's own .git (root/.git) is the normal, expected case — only
+            // a .git found strictly BENEATH that (or beneath a sibling subtree) means
+            // more than one repo is nested under this path.
+            if (string.Equals(
+                    Path.GetFullPath(Path.GetDirectoryName(dir) ?? ""),
+                    Path.GetFullPath(root),
+                    StringComparison.Ordinal))
+                continue;
+            nested.Add(dir);
+        }
+        if (nested.Count == 0) return;
+
+        throw new InvalidOperationException(
+            $"RepoDecomposer: '{root}' contains {nested.Count} nested git repositor{(nested.Count == 1 ? "y" : "ies")} " +
+            $"beyond its own root ({string.Join(", ", nested.Take(5).Select(Path.GetDirectoryName))}" +
+            $"{(nested.Count > 5 ? ", ..." : "")}) — ingesting this path would flatten multiple independent " +
+            "repos into one repo-root identity. Run 'ingest repo <path>' once per discovered repo root instead.");
     }
 
     private static IEnumerable<(string File, string Modality)> EnumerateRepoFiles(string root)

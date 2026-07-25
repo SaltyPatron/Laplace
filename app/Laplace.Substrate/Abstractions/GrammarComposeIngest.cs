@@ -15,7 +15,15 @@ public readonly record struct GrammarComposeRecord(
     string? ConceptAnchorKey = null,
     Hash128? ConceptCategoryTypeId = null,
     IReadOnlyList<string>? KeywordExamples = null,
-    Hash128? ParentContainerId = null);
+    Hash128? ParentContainerId = null,
+    // Content-DAG root of the file's own bytes (FileEntity.SourceId), when the caller
+    // already knows it (RepoDecomposer does, per GH #592) — lets IngestExistenceGate
+    // true-skip a file whose content is already witnessed anywhere, BEFORE paying the
+    // tree-sitter parse cost, while WalkWitness still re-emits the caller-specific
+    // facts (repo CONTAINS, concept-anchor links) that don't dedup away with the
+    // content: two repos containing the identical file are two distinct CONTAINS
+    // edges on the same content node, never one collapsed into the other.
+    Hash128? SourceId = null);
 
 /// <summary>
 /// Single handler for whole-file grammar compose lanes. CreateDeferredUnit runs
@@ -44,8 +52,41 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     public IIngestDeferredUnit CreateDeferredUnit(GrammarComposeRecord record) =>
         new Unit(record, _sourceId, _trust, _reader);
 
+    /// <summary>
+    /// Runs for BOTH a fresh compose (unit is the real <see cref="Unit"/>, root came
+    /// from decomposing this call) and a content-already-known short-circuit (unit is
+    /// <see cref="PresentRootDeferredUnit"/>, IngestExistenceGate resolved root from
+    /// record.SourceId without ever parsing the file — see GH #592). The concept-anchor
+    /// links (repo CONTAINS this file, file HAS_DEFINITION this concept) are re-emitted
+    /// either way: they are per-CALLER facts, not per-CONTENT facts, so two repos
+    /// containing byte-identical content still get two distinct CONTAINS edges on the
+    /// one content node, never one silently dropped because the bytes were seen before.
+    /// </summary>
     public void WalkWitness(
-        GrammarComposeRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
+        GrammarComposeRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+    {
+        if (root == default) return;
+        EmitConceptLinks(builder, record, root, _sourceId, _trust);
+    }
+
+    private static void EmitConceptLinks(
+        SubstrateChangeBuilder builder, GrammarComposeRecord record, Hash128 rootId, Hash128 sourceId, double trust)
+    {
+        if (record.ConceptAnchorKey is not { Length: > 0 }
+            || record.ConceptCategoryTypeId is not { } ctype || ctype == default
+            || CategoryAnchor.Emit(builder, record.ConceptAnchorKey, ctype, sourceId, trust) is not { } conceptId)
+            return;
+
+        if (record.ParentContainerId is { } parent && parent != default)
+        {
+            builder.AddAttestation(NativeAttestation.Categorical(
+                parent, "CONTAINS", conceptId, sourceId, trust));
+        }
+        builder.AddAttestation(NativeAttestation.Categorical(
+            conceptId, "HAS_EXAMPLE", rootId, sourceId, trust));
+        builder.AddAttestation(NativeAttestation.Categorical(
+            rootId, "HAS_DEFINITION", conceptId, sourceId, trust));
+    }
 
     private sealed class Unit : IIngestDeferredUnit
     {
@@ -91,21 +132,12 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 }
             }
 
-            if (_rootId != default
-                && _record.ConceptAnchorKey is { Length: > 0 }
-                && _record.ConceptCategoryTypeId is { } ctype && ctype != default
-                && CategoryAnchor.Emit(builder, _record.ConceptAnchorKey, ctype, _sourceId, _trust) is { } conceptId)
-            {
-                if (_record.ParentContainerId is { } parent && parent != default)
-                {
-                    builder.AddAttestation(NativeAttestation.Categorical(
-                        parent, "CONTAINS", conceptId, _sourceId, _trust));
-                }
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    conceptId, "HAS_EXAMPLE", _rootId, _sourceId, _trust));
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    _rootId, "HAS_DEFINITION", conceptId, _sourceId, _trust));
-            }
+            // Concept-anchor links (repo CONTAINS this file, file HAS_DEFINITION this
+            // concept) moved to WalkWitness — the pipeline calls handler.WalkWitness
+            // right after DrainInto on every novel record (IngestDescentFlush.cs) AND
+            // on every content-already-known short-circuit (IngestExistenceGate.cs), so
+            // emitting them there instead of here covers both paths from one call site
+            // instead of duplicating the block (GH #592).
 
             if (_rootId != default && _record.KeywordExamples is { Count: > 0 })
             {
