@@ -30,6 +30,13 @@ export interface ChessPlayersResponse {
   total: number;
   offset: number;
   players: ChessPlayerRow[];
+  /**
+   * How far the ranked list goes — the reach of a partial-name search. An exactly
+   * spelled name resolves by content address at any depth; substring matching runs
+   * over the ranked list, so an empty result means "not in the top N by games",
+   * not "never witnessed".
+   */
+  ranked_depth: number;
 }
 
 export interface ChessRatingRow {

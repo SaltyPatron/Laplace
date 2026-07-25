@@ -23,11 +23,19 @@ public sealed record ChessPlayerRow(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("record")] ChessRecord Record);
 
+/// <summary>
+/// A page of the roster, or the hits for a search. <c>RankedDepth</c> is how far the
+/// ranked list goes — the reach of a partial-name search, since substring matching
+/// runs over that list while an exactly-spelled name resolves by content address at
+/// any depth. Surfacing it lets the UI state the limit instead of implying an empty
+/// result means nobody by that name was ever witnessed.
+/// </summary>
 public sealed record ChessPlayersResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("total")] int Total,
     [property: JsonPropertyName("offset")] int Offset,
-    [property: JsonPropertyName("players")] IReadOnlyList<ChessPlayerRow> Players);
+    [property: JsonPropertyName("players")] IReadOnlyList<ChessPlayerRow> Players,
+    [property: JsonPropertyName("ranked_depth")] int RankedDepth);
 
 /// <summary>An Elo the source tagged this player with, and how many games carried it.</summary>
 public sealed record ChessRatingRow(

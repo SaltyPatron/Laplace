@@ -13,9 +13,11 @@ const PAGE = 50;
  * much of them it witnessed. There is no minimum-games floor and no rating cut:
  * a one-game player is a real witness with a one-game record, just further down.
  *
- * Search is a content-address lookup, not a filter over this page: the server
- * folds the typed name the way the decomposer did and hashes it, so a name hits
- * one player directly however deep in the corpus he sits.
+ * Search runs two ways at once. A fully spelled name is a content-address
+ * lookup — the server folds it the way the decomposer did and hashes it — so it
+ * hits one player directly however deep in the corpus he sits. A fragment is
+ * matched against the ranked list instead, which is why an empty result names
+ * the depth it searched rather than claiming nobody by that name exists.
  */
 export function PlayersIndex() {
   const [params, setParams] = useSearchParams();
@@ -55,7 +57,7 @@ export function PlayersIndex() {
           <Input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Find a player — “Tal, Mikhail” or “mikhail tal”"
+            placeholder="Find a player — “Tal, Mikhail”, “mikhail tal”, or just “tal”"
             aria-label="Find a player by name"
           />
           <Button type="submit">Find</Button>
@@ -70,10 +72,16 @@ export function PlayersIndex() {
         {!err && data === null ? <LoadingText>Counting careers…</LoadingText> : null}
         {data && data.players.length === 0 ? (
           <Muted>
-            {search
-              ? `No player named “${search}” has been witnessed. Names resolve exactly — try the
-                 form the source records, e.g. “Tal, Mikhail”.`
-              : 'No games have been ingested yet.'}
+            {search ? (
+              <>
+                Nothing matching “{search}”. Partial names are matched against the top{' '}
+                {data.ranked_depth.toLocaleString()} players by games recorded — for anyone
+                below that, spell the name the way the source records it (e.g. “Tal, Mikhail”)
+                and it resolves directly, however deep in the corpus he sits.
+              </>
+            ) : (
+              'No games have been ingested yet.'
+            )}
           </Muted>
         ) : null}
 

@@ -19,9 +19,11 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// for the TTL, and a stale hit serves immediately while refreshing behind. It only
 /// changes when a new PGN lands.
 ///
-/// Searching for one player never touches that aggregate: chess_player_id() folds a
-/// typed name the same way the decomposer did and hashes it, so a name resolves to
-/// an id in one round trip. Finding a player is a content-address lookup, not a scan.
+/// Searching never re-runs that aggregate either. A fully-spelled name resolves by
+/// content address — chess_player_id() folds it the way the decomposer did and hashes
+/// it — so finding a player is a lookup, not a scan, at any depth in the corpus. A
+/// partial name falls back to a substring pass over the cached roster already in
+/// memory. Neither path adds a query.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
@@ -99,22 +101,50 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// A page of the roster, or — when a name is supplied — that one player, resolved
-    /// by content address rather than searched for.
+    /// A page of the roster, or — when a name is supplied — the players it names.
+    ///
+    /// Two lookups, in that order of authority. The EXACT one is a content-address
+    /// resolve: the typed name folded the decomposer's way and hashed, which finds
+    /// the right man anywhere in the corpus, at any depth, in one round trip. It
+    /// cannot be beaten for precision and it is put first for that reason.
+    ///
+    /// But it only fires on a name spelled the way the source spelled it, and a
+    /// person typing "carls" is not wrong, just partial. So it is unioned with a
+    /// substring pass over the ranked roster — which is already in memory, already
+    /// carries resolved names, and costs nothing. No index, no scan, no new
+    /// storage: the same cache the landing page pages through.
+    ///
+    /// The seam is honest rather than hidden. Substring reach ends where the cache
+    /// does, so a partial that matches nobody ranked returns nothing even though an
+    /// exact name would have found him — which is why the endpoint tells the caller
+    /// how deep the ranked list goes, and the UI says so when a search comes up empty.
     /// </summary>
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
     {
+        var roster = await ChessRosterAsync(ct);
+
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var hit = await ChessFindPlayerAsync(search, ct);
-            return new ChessPlayersResponse("chess.players", hit is null ? 0 : 1, 0,
-                hit is null ? [] : [hit]);
+            var needle = search.Trim();
+            var exact = await ChessFindPlayerAsync(needle, ct);
+
+            IEnumerable<ChessPlayerRow> matches = roster
+                .Where(p => p.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                .Where(p => exact is null || !string.Equals(p.IdHex, exact.IdHex,
+                                                StringComparison.OrdinalIgnoreCase));
+
+            // The exact resolve leads: it is the one hit we know is the right entity
+            // rather than a name that merely reads alike.
+            if (exact is not null) matches = matches.Prepend(exact);
+
+            var hits = matches.Take(Math.Clamp(limit, 1, 200)).ToList();
+            return new ChessPlayersResponse("chess.players", hits.Count, 0, hits, roster.Count);
         }
 
-        var roster = await ChessRosterAsync(ct);
         var page = roster.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200)).ToList();
-        return new ChessPlayersResponse("chess.players", roster.Count, Math.Max(0, offset), page);
+        return new ChessPlayersResponse("chess.players", roster.Count, Math.Max(0, offset), page,
+            roster.Count);
     }
 
     /// <summary>

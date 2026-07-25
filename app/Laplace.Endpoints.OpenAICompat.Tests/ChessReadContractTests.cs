@@ -66,6 +66,41 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task Players_SearchByPartialName_StillFinds()
+    {
+        // A person typing a fragment is not wrong, just partial — "tal" has to
+        // reach Tal without the caller knowing the source's exact spelling.
+        using var response = await _client.GetAsync("/v1/chess/players?search=tal");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.Contains(body!.Players, p => p.IdHex == TalIdHex);
+    }
+
+    [Fact]
+    public async Task Players_SearchIsCaseInsensitive()
+    {
+        using var response = await _client.GetAsync("/v1/chess/players?search=BOTVINNIK");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.NotEmpty(body!.Players);
+        Assert.Contains("Botvinnik", body.Players[0].Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Players_ReportsHowDeepTheRankedListGoes()
+    {
+        // Substring reach ends where the cached ranking does. The response has to
+        // say how far that is, or an empty result reads as "never witnessed".
+        using var response = await _client.GetAsync("/v1/chess/players?search=zzz-nobody");
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.Empty(body!.Players);
+        Assert.True(body.RankedDepth > 0);
+    }
+
+    [Fact]
     public async Task Players_SearchForNobody_IsEmptyNotAnError()
     {
         using var response = await _client.GetAsync("/v1/chess/players?search=no%20such%20person");
