@@ -1,0 +1,184 @@
+-- converse_compose(prompt, steps, lang, seed): S7 -- the walk frontier steers emission.
+--
+-- THE STAGE THIS ADDS. converse_walk already does "sequence proposes, meaning
+-- steers", but its steer is a CONSTANT: every token of the topic's own gloss gets
+-- weight 50, every token of a containing sentence gets 40, forever. That is a
+-- provenance weight (which source did this token come from), not a semantic one --
+-- it says nothing about whether a token is on-topic for THIS turn. The walker is
+-- therefore unsteered in the only sense that matters, and the result is retrieval:
+-- measured 2026-07-25, converse_walk('dog') returned the same byte-identical
+-- sequence for seeds 7 and 991, i.e. it replays one attested sentence rather than
+-- recombining. That constant IS the missing forward pass, and it is one array.
+--
+-- Here the weight vector is derived from the SEMANTIC FRONTIER instead: walk the
+-- topic's consensus neighbourhood, and weight each stream token by how strongly the
+-- concept it belongs to sits in that frontier. Sequence still proposes (the native
+-- trigram->bigram backoff is untouched); meaning now actually steers, per emitted
+-- step, against evidence computed for this turn.
+--
+-- WHY A SEPARATE FUNCTION. converse_walk stays exactly as it is. This is additive so
+-- it can be measured against the incumbent on the same prompts and seeds before
+-- anything is rewired. Editing the live path first is what shipped a regression
+-- earlier in this session; the lesson is cheap to apply.
+--
+-- CONCEPT vs SURFACE (spec 36 §3.1). The frontier is concept-level and language-free.
+-- Realization picks surfaces at the very end, honouring p_lang -- an ILI is an
+-- equivalence class spanning every language that witnesses it, so nothing but the
+-- final render decides which member is emitted.
+--
+-- SCALING. eff_mu arrives in the fold's internal units (~1e12) and steered_walk_raw
+-- wants an int8 weight multiplied by a 0..100000 hash. The /1e10 below is a UNITS
+-- CONVERSION chosen so frontier salience lands in the same order of magnitude as the
+-- existing provenance weights (40-50), not a tuning knob and not a floor -- it
+-- rescales every candidate identically and changes no ordering. Non-frontier tokens
+-- keep their provenance weight and stay eligible: weight 0 would exclude them
+-- outright, since the native score is multiplicative.
+--
+-- NOT YET MEASURED. Written against the same stream/weights contract converse_walk
+-- uses, but its output has NOT been compared to the incumbent. The gate is: does it
+-- produce DIFFERENT text for different seeds (recombination rather than replay), and
+-- does that text stay on topic. Do not wire this into chat() until that run exists.
+CREATE OR REPLACE FUNCTION converse_compose(p_prompt text,
+                                            p_steps int DEFAULT 40,
+                                            p_lang bytea DEFAULT NULL,
+                                            p_seed bigint DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    b_def  int := 1;
+    SENT   bytea := '\x00';
+    MINLEN int := 5;
+    syn    bytea;
+    topic_word bytea;
+    stream bytea[];
+    w      bigint[];
+    starts bytea[];
+    core_seq bytea[];
+    n      int;
+    rng    bigint;
+    out_ids bytea[];
+BEGIN
+    -- ORIENT. Same hash-space signal chat() uses: how strongly the token denotes the
+    -- sense, then highway-mask breadth. No realize(), no surface comparison.
+    SELECT y.tok, y.syn INTO topic_word, syn
+    FROM (
+        SELECT x.tok, x.syn, x.denote_mu,
+               laplace_highway_popcount(e.highway_mask) AS breadth
+        FROM (SELECT DISTINCT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu
+              FROM prompt_state(p_prompt) p
+              CROSS JOIN LATERAL senses(p.id) s
+              WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL) x
+        LEFT JOIN entities e ON e.id = x.syn
+    ) y
+    ORDER BY y.breadth DESC NULLS LAST, y.denote_mu DESC NULLS LAST, y.syn
+    LIMIT 1;
+    IF syn IS NULL THEN RETURN NULL; END IF;
+
+    WITH
+    -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
+    -- content bands. This is the turn's semantic plan -- concept-level, language-free.
+    frontier AS MATERIALIZED (
+        SELECT c.object_id AS cid, eff_mu(c.rating, c.rd) AS mu
+        FROM consensus c
+        WHERE c.subject_id = syn AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        UNION ALL
+        SELECT c.subject_id, eff_mu(c.rating, c.rd)
+        FROM consensus c
+        WHERE c.object_id = syn AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        UNION ALL
+        SELECT syn, (SELECT max(eff_mu(c2.rating, c2.rd)) FROM consensus c2
+                     WHERE c2.subject_id = syn)
+    ),
+    -- The frontier is concepts; the stream is word tokens. Project it down to the
+    -- SURFACE members of each frontier concept so a token can be matched directly:
+    -- one indexed join instead of top_synset() per distinct stream token.
+    frontier_words AS MATERIALIZED (
+        SELECT s.subject_id AS wid, max(f.mu) AS mu
+        FROM frontier f
+        JOIN consensus ss ON ss.object_id = f.cid
+                         AND ss.type_id = relation_type_id('IS_SENSE_OF')
+        JOIN consensus s ON s.object_id = ss.subject_id
+                        AND s.type_id = relation_type_id('HAS_SENSE')
+        GROUP BY s.subject_id
+    ),
+    gids AS (
+        SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
+            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core
+            FROM consensus c
+            WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
+            UNION ALL
+            SELECT co.entity_id, 40, false
+            FROM containers_of(topic_word, 1, 400) co
+            WHERE co.tier = 3
+            ORDER BY is_core DESC, gid
+            LIMIT 160
+        ) g
+    ),
+    toks AS (
+        SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
+        FROM gids g
+        CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
+             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+        WHERE u.ctier = 2
+    ),
+    ws AS MATERIALIZED (
+        SELECT d.entity_id AS id,
+               COALESCE(render_text(d.entity_id, 64), ' ') ~ '^\s*$' AS is_ws
+        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
+    ),
+    kept AS MATERIALIZED (
+        SELECT q.* FROM (
+            SELECT t.gid, t.wt, t.is_core, t.entity_id,
+                   row_number() OVER (PARTITION BY t.gid ORDER BY t.ord) AS rn,
+                   count(*)    OVER (PARTITION BY t.gid) AS cnt
+            FROM toks t JOIN ws ON ws.id = t.entity_id
+            WHERE NOT ws.is_ws
+        ) q WHERE q.cnt >= 2
+    ),
+    seq AS MATERIALIZED (
+        -- THE STEER. Provenance weight (which source) PLUS frontier salience (how
+        -- on-topic this turn), so an off-frontier token stays eligible but a token
+        -- whose concept the walk actually reached pulls harder.
+        SELECT k.gid, k.is_core,
+               k.wt + COALESCE((fw.mu / 1e10)::bigint, 0) AS wt,
+               k.entity_id AS id, k.rn
+        FROM kept k
+        LEFT JOIN frontier_words fw ON fw.wid = k.entity_id
+        UNION ALL
+        SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
+        FROM kept k
+    )
+    SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
+           (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
+           COALESCE(
+               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                 WHERE k.is_core AND k.rn = 1),
+               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
+                 WHERE k.rn = 1)),
+           (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
+             WHERE k.is_core AND k.gid = (
+                 SELECT k2.gid FROM kept k2 WHERE k2.is_core
+                 GROUP BY k2.gid ORDER BY max(k2.cnt) DESC, k2.gid LIMIT 1))
+    INTO stream, w, starts, core_seq;
+
+    n := COALESCE(array_length(stream,1), 0);
+    IF n < 3 OR starts IS NULL THEN RETURN NULL; END IF;
+
+    rng := abs(COALESCE(p_seed, ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647;
+
+    out_ids := steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
+                                starts, p_steps, MINLEN, rng);
+    IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
+    IF array_length(out_ids,1) = 1 THEN RETURN render_text(out_ids[1], 64); END IF;
+
+    -- REALIZE last, and only here. p_lang selects which member of each concept's
+    -- surface family is emitted; everything above ran in ids.
+    RETURN btrim(regexp_replace(
+        regexp_replace(
+            (SELECT string_agg(COALESCE(realize(t, p_lang), render_text(t,64), ''), ' ')
+             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)),
+            '\s*[();:]\s*', ' ', 'g'),
+        '\s+', ' ', 'g'));
+END;
+$$;
