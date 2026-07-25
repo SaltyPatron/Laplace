@@ -31,6 +31,23 @@ public static class LaplaceInstall
 
     public static string WebRoot => Path.Combine(InstallRoot, "wwwroot");
 
+    /// <summary>
+    /// Where the console apps write their CSV diagnostic logs (read back as SQL through
+    /// ops.app_log / file_fdw — see db/migrations ops_logs, GH #601/#602). Env
+    /// LAPLACE_OPS_LOG_DIR overrides; default is $InstallRoot/logs, the directory
+    /// bootstrap-host.sh already provisions. Created on first use by the file sink.
+    /// </summary>
+    public static string OpsLogDirectory
+    {
+        get
+        {
+            var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_OPS_LOG_DIR");
+            return !string.IsNullOrWhiteSpace(fromEnv)
+                ? Path.GetFullPath(fromEnv.Trim())
+                : Path.Combine(InstallRoot, "logs");
+        }
+    }
+
     public static string EndpointBaseUrl => $"http://127.0.0.1:{EndpointPort}";
 
     public static bool TryRepoRoot(out string root)

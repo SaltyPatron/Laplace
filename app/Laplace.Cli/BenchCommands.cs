@@ -30,7 +30,7 @@ internal static class BenchCommands
 
     public static async Task<int> ModelBenchCmd(string[] rest)
     {
-        var log = ConsoleLoggerProvider.Factory().CreateLogger("model-bench");
+        var log = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("model-bench");
         var arg = rest.Length > 0 ? rest[0] : null;
 
         List<string> models;

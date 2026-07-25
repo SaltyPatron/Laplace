@@ -2,6 +2,7 @@ using System.Linq;
 using DbUp;
 using DbUp.Engine;
 using Laplace.Engine.Core;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Laplace.Migrations;
@@ -42,6 +43,12 @@ internal static class Program
 
     private static int RunUp(string connectionString)
     {
+        // FileOnly (not ConsoleAndFile): the human-facing report already goes to stdout
+        // below; this is the queryable audit trail (which migration applied, when) in the
+        // shared ops sink — ops.app_log, GH #602. Console output stays as-is.
+        using var loggerFactory = Laplace.Engine.Core.Ops.LaplaceLogging.FileOnly("migrations");
+        var log = loggerFactory.CreateLogger("up");
+
         EnsureDatabase.For.PostgresqlDatabase(connectionString);
 
         var engine = BuildEngine(connectionString);
@@ -50,6 +57,7 @@ internal static class Program
         if (!result.Successful)
         {
             Console.Error.WriteLine($"[migrate up FAILED] {result.Error?.Message}");
+            log.LogError(result.Error, "migration upgrade failed");
             return 1;
         }
 
@@ -64,6 +72,7 @@ internal static class Program
             foreach (var script in applied)
             {
                 Console.WriteLine($"  ✓ {script.Name}");
+                log.LogInformation("applied migration {Migration}", script.Name);
             }
         }
         return 0;

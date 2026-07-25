@@ -44,7 +44,7 @@ internal static class DecompositionCommands
             return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var loggerFactory = ConsoleLoggerProvider.Factory();
+        var loggerFactory = Laplace.Engine.Core.Ops.LaplaceLogging.ConsoleAndFile("cli");
         var inner = new NpgsqlSubstrateWriter(ds);
         await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
