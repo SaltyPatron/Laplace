@@ -1,0 +1,16 @@
+-- The mantissa PACKER, bound to SQL. The decoder has always been callable from
+-- SQL; the builder was reachable only from managed code, so anything in SQL that
+-- needed a trajectory -- a regress fixture, a repair, an ad-hoc probe -- had no way
+-- to make one except to reimplement the packing, which would be a second
+-- implementation of the identity encoding.
+--
+-- This calls trajectory_build() from engine/core, the same function the compose
+-- path calls, so a trajectory produced here is byte-identical to one produced at
+-- ingest. Same code, one more binding. The engine is already resident in the
+-- backend, so it is a direct call into loaded memory.
+--
+-- IMMUTABLE: the packing is a pure function of the ordered ids.
+CREATE FUNCTION @extschema@.laplace_trajectory_build(ids bytea[])
+    RETURNS geometry
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_build'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

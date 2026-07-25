@@ -13,6 +13,7 @@
 #include "laplace/core/math4d.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/trajectory.h"
 
 #include "liblwgeom.h"
 
@@ -527,6 +528,90 @@ pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
 
 
 
+
+/*
+ * laplace_trajectory_build(bytea[]) -> geometry
+ *
+ * The mantissa PACKER, bound to SQL. The decoder
+ * (laplace_trajectory_constituents) has always been callable from SQL; the
+ * builder was reachable only from managed code, so anything in SQL that needed a
+ * trajectory -- a regress fixture, a repair, an ad-hoc probe -- had no way to make
+ * one except to reimplement the packing, which would be a second implementation
+ * of the identity encoding and is exactly what must never exist.
+ *
+ * This is not a second implementation: it calls trajectory_build() from
+ * engine/core, the same function the compose path calls, so a trajectory produced
+ * here is byte-identical to one produced during ingest. Same code, one more
+ * binding.
+ *
+ * Cheap by construction: the engine is already resident in the backend (this
+ * extension links it and mantissa_unpack runs on every decode), so this is a
+ * direct call into loaded memory -- no process boundary, no serialization beyond
+ * the array unwrap. Round-trip contract: laplace_trajectory_constituents() over
+ * the result returns the input ids, in order.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_build);
+
+Datum
+pg_laplace_trajectory_build(PG_FUNCTION_ARGS)
+{
+    ArrayType *arr = PG_GETARG_ARRAYTYPE_P(0);
+
+    if (ARR_HASNULL(arr))
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("laplace_trajectory_build: id array must not contain NULLs")));
+
+    Datum *elems;
+    int    n;
+    deconstruct_array(arr, BYTEAOID, -1, false, TYPALIGN_INT, &elems, NULL, &n);
+
+    if (n <= 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("laplace_trajectory_build: need at least one id")));
+
+    hash128_t *ids = (hash128_t *) palloc(sizeof(hash128_t) * (Size) n);
+    for (int i = 0; i < n; ++i)
+    {
+        bytea *b = DatumGetByteaPP(elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != sizeof(hash128_t))
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("laplace_trajectory_build: id %d is %d bytes, expected %d",
+                            i, (int) VARSIZE_ANY_EXHDR(b), (int) sizeof(hash128_t))));
+        memcpy(&ids[i], VARDATA_ANY(b), sizeof(hash128_t));
+    }
+
+    double *xyzm = (double *) palloc(sizeof(double) * 4 * (Size) n);
+    if (trajectory_build(ids, (size_t) n, xyzm) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("laplace_trajectory_build: packer rejected %d id(s)", n)));
+
+    /* ZM linestring: the same shape physicalities.trajectory carries. */
+    POINTARRAY *pa = ptarray_construct(1 /*hasz*/, 1 /*hasm*/, (uint32_t) n);
+    for (int i = 0; i < n; ++i)
+    {
+        POINT4D pt;
+        pt.x = xyzm[i * 4 + 0];
+        pt.y = xyzm[i * 4 + 1];
+        pt.z = xyzm[i * 4 + 2];
+        pt.m = xyzm[i * 4 + 3];
+        ptarray_set_point4d(pa, (uint32_t) i, &pt);
+    }
+
+    LWLINE      *line = lwline_construct(0 /*srid*/, NULL, pa);
+    size_t       sz   = 0;
+    GSERIALIZED *out  = gserialized_from_lwgeom((LWGEOM *) line, &sz);
+
+    lwline_free(line);
+    pfree(xyzm);
+    pfree(ids);
+    pfree(elems);
+
+    PG_RETURN_POINTER(out);
+}
 
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituents);
 
