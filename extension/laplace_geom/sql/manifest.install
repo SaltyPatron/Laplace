@@ -6,7 +6,6 @@ functions/laplace_hilbert_decode.sql.in
 functions/laplace_mantissa_pack.sql.in
 functions/laplace_mantissa_unpack.sql.in
 functions/laplace_trajectory_build.sql.in
-functions/laplace_trajectory_first_id.sql.in
 functions/laplace_trajectory_constituents.sql.in
 functions/laplace_trajectory_constituent_ids.sql.in
 functions/laplace_vertex_atom.sql.in

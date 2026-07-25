@@ -1,15 +1,21 @@
 -- First-constituent index over the AUTHORITATIVE trajectory geometry.
 --
--- Answers "which composed entities begin with this child" as a range scan. For text
--- the first constituent is the first codepoint, so this is what makes a first-letter
--- browse possible without rendering a single name -- the access path that
--- constituent_edges was reaching for, done as an index instead of a hand-refreshed
--- copy. Postgres maintains it on write, transactionally; there is nothing to
--- regenerate and no state that can go stale or silently empty.
+-- Answers "which composed entities begin with this child" as a range scan. For text the
+-- first constituent is the first codepoint, so this is what makes a first-letter browse
+-- possible without rendering a single name -- the access path constituent_edges was
+-- reaching for, done as an index instead of a hand-refreshed copy. Postgres maintains it
+-- on write, transactionally; there is nothing to regenerate and nothing that can go stale.
 --
--- Scoped to type = 1 (content physicalities, the canonical row a composed entity's
--- constituents are decoded from) and to rows that actually carry a trajectory, so
--- the index covers only what it can answer for.
+-- Built on laplace_trajectory_constituent_ids, which has shipped in laplace_geom since the
+-- beginning and is IMMUTABLE. That matters for more than convenience: laplace_geom is
+-- pinned at its project version with no upgrade script, so a function ADDED to it never
+-- reaches an already-installed database -- and an index expression is evaluated immediately
+-- at CREATE INDEX, so it hard-fails rather than degrading. Depending only on what geom
+-- already exports keeps this substrate upgrade self-contained.
+--
+-- Scoped to type = 1 (the canonical content physicality a composed entity's constituents
+-- are decoded from) and to rows that carry a trajectory, so the index covers only what it
+-- can answer for.
 CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree
-    ON physicalities (public.laplace_trajectory_first_id(trajectory))
+    ON physicalities (((public.laplace_trajectory_constituent_ids(trajectory))[1]))
     WHERE trajectory IS NOT NULL AND type = 1;
