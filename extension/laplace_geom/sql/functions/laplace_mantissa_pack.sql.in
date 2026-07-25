@@ -1,4 +1,4 @@
-CREATE FUNCTION @extschema@.laplace_mantissa_pack(
+CREATE OR REPLACE FUNCTION @extschema@.laplace_mantissa_pack(
         entity_id  bytea,
         ordinal    integer,
         run_length integer,

@@ -30,7 +30,9 @@ public sealed class ChessFusedIngestTests
 
         // Witnessed layer intact: the game entity and its verbatim movetext.
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        var movetextId = ContentEmitter.RootId(ChessPgnDecomposer.MovetextSection(Game));
+        // The movetext composes from its OWN ply tokens, not prose fragments — resolved
+        // through the decomposer's own definition so test and writer cannot drift.
+        var movetextId = ChessPgnDecomposer.MovetextId(ChessPgnDecomposer.MovetextSection(Game));
         Assert.Contains(change.Attestations, a =>
             a.ObjectId == movetextId && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
 
@@ -49,9 +51,16 @@ public sealed class ChessFusedIngestTests
         var change = Compose(analyzeInline: false);
 
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        // No board replay: no positions, no geometry, no version watermark.
+        // No board replay: no positions and no ANALYZED_AT watermark.
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
-        Assert.True(change.Physicalities.IsDefaultOrEmpty || change.Physicalities.Length == 0);
+
+        // The movetext DOES carry geometry even here, and that is the record layer, not the
+        // calculated one: its trajectory is the order of the source's own tokens. What
+        // --no-analyze withholds is the replay, so the only physicality is the movetext's.
+        var movetextGeometry = change.Physicalities
+            .Count(p => change.Entities.Any(e => e.Id == p.EntityId
+                                              && e.TypeId == ChessVocabulary.MovetextType));
+        Assert.Equal(change.Physicalities.Length, movetextGeometry);
         Assert.DoesNotContain(change.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("ANALYZED_AT"));
     }

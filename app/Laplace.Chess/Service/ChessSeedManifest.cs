@@ -9,7 +9,7 @@ public static class ChessSeedManifest
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
-        "Chess_Game", "Chess_Ply", "Chess_AnalysisMarker", "Chess_Eval",
+        "Chess_Game", "Chess_Movetext", "Chess_Ply", "Chess_AnalysisMarker", "Chess_Eval",
         "Chess_Concept", "Chess_BookLine",
     ];
 

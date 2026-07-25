@@ -62,6 +62,8 @@ public static class ChessVocabulary
     // deterministic id (game+ply) the analyzer can reconstruct without a reverse lookup.
     public static readonly Hash128 PlyType = EntityTypeRegistry.Id("Chess_Ply");
     public static readonly Hash128 HasMovetextType = EntityTypeRegistry.Id("HAS_MOVETEXT");
+    /// <summary>Entity type of a composed movetext document — a game's verbatim token sequence.</summary>
+    public static readonly Hash128 MovetextType = EntityTypeRegistry.Id("Chess_Movetext");
     public static readonly Hash128 HasPlyType = EntityTypeRegistry.Id("HAS_PLY");
     public static readonly Hash128 HasSanType = EntityTypeRegistry.Id("HAS_SAN");
     public static readonly Hash128 HasCommentType = EntityTypeRegistry.Id("HAS_COMMENT");

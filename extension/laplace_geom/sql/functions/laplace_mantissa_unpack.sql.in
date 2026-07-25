@@ -1,4 +1,4 @@
-CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
+CREATE OR REPLACE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
         OUT entity_id  bytea,
         OUT ordinal    integer,
         OUT run_length integer,
