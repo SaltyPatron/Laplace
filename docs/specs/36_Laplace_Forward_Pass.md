@@ -110,9 +110,8 @@ S4  RETRIEVE    beam-walk the consensus graph under the       [walk_branches]
                 intent mask → the semantic frontier
 S5  COMPOSE     frontier → typed strata, carried across hops  [partial]
 --- per emitted token, loop S6→S8 ---
-S6  PROPOSE     next-CONTENT candidates AT WHATEVER TIER      [steered_walk /
-                carries the evidence — word, phrase, or a      trajectory_generate]
-                whole attested sentence. Ordered constituents
+S6  PROPOSE     next CONCEPT candidates at whatever tier      [walk_continuations /
+                carries the evidence. Ordered constituents      steered_walk]
                 come from physicalities.trajectory (CONTAINS/
                 PRECEDES are views of it, never its source).
 S7  STEER       re-rank candidates by the LIVE frontier (S4)  [MISSING — the loop body]

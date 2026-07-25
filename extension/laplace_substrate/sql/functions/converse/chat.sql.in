@@ -43,9 +43,51 @@ DECLARE
     layers text[]; s text;
     resolved bytea;
     shape text := NULLIF(btrim(COALESCE(p_shape, '')), '');
+    lang  bytea := p_lang;   -- realization language; inferred below when absent
     out   text := '';
 BEGIN
     IF p_session IS NOT NULL THEN ctx := session_last_resolved(p_session); END IF;
+
+    -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
+    -- spanning every language that witnesses it, and realize(id, NULL) is free to
+    -- pick any member -- so with no language pinned, an English prompt can be
+    -- answered from a Bulgarian surface. Observed 2026-07-25: converse_walk('dog')
+    -- returned a fluent Bulgarian description of a dog. The mesh working exactly as
+    -- designed, surfacing at the wrong moment.
+    --
+    -- Language is NOT a property of the knowledge -- the knowledge sits at concept
+    -- addresses and has no language. It is a property of the REQUEST, so it is
+    -- resolved from the prompt and threaded to every realize() call, and the caller's
+    -- explicit p_lang always wins (that is a reader asking for a translation).
+    --
+    -- Inference is a WEIGHTED TALLY over every HAS_LANGUAGE attestation carried by
+    -- the prompt's entities, at every tier that has one -- the language with the
+    -- most evidence behind it wins. Deliberately NOT word_language() per token:
+    -- that is LIMIT 1, one language per word, which discards the distribution and
+    -- makes a token shared across languages ("chat" in English and French, "die" in
+    -- English and German) look monolingual. Summing eff_mu over all of them lets a
+    -- prompt's genuinely ambiguous tokens contribute to both tallies and be settled
+    -- by the tokens that are decisive, which is how a reader disambiguates too.
+    --
+    -- Tier-agnostic by construction: it tallies whatever the prompt resolved to, so
+    -- a sentence-root HAS_LANGUAGE (the tier a corpus actually asserts language at,
+    -- per the attestation law) counts alongside word-tier evidence rather than being
+    -- invisible to a word-only scan. Nothing here assumes which tier answered.
+    --
+    -- No floors and no minimum margin: the fold already carries confidence, ties
+    -- break on the id for determinism, and a prompt with no language evidence at all
+    -- leaves lang NULL -- today's behaviour, and the honest answer when the prompt
+    -- genuinely does not say.
+    IF lang IS NULL THEN
+        SELECT c.object_id INTO lang
+        FROM prompt_state(p_prompt) p
+        JOIN consensus c ON c.subject_id = p.id
+                        AND c.type_id = relation_type_id('HAS_LANGUAGE')
+        WHERE p.id IS NOT NULL AND c.object_id IS NOT NULL
+        GROUP BY c.object_id
+        ORDER BY sum(eff_mu(c.rating, c.rd)) DESC, c.object_id
+        LIMIT 1;
+    END IF;
 
     -- TOPIC = the prompt token whose SYNSET carries the most content-band mass.
     -- Content-band mass ranks the real topic above incidental tokens by counting
@@ -132,7 +174,7 @@ BEGIN
     IF topic IS NULL THEN
         out := converse(p_prompt);
     ELSE
-        resolved := topic;  xl := realize(topic, p_lang);
+        resolved := topic;  xl := realize(topic, lang);
         topic2 := p_topic2;
 
         -- Second topic for the two-topic shapes: the caller's, else the next
@@ -150,17 +192,17 @@ BEGIN
             -- ELABORATE: advance through NON-EMPTY fact layers by prior mentions.
             layers := ARRAY[]::text[];
             SELECT initcap(xl)||' has parts such as '||string_agg(l,', ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
+              INTO s FROM (SELECT realize(c.object_id,lang) l,(c.rating-2*c.rd) m
                 FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=4
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
             SELECT 'Kinds of '||xl||' include '||string_agg(l,', ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.subject_id,p_lang) l,(c.rating-2*c.rd) m
+              INTO s FROM (SELECT realize(c.subject_id,lang) l,(c.rating-2*c.rd) m
                 FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=2
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
             SELECT initcap(xl)||' is related to '||string_agg(l,' and ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
+              INTO s FROM (SELECT realize(c.object_id,lang) l,(c.rating-2*c.rd) m
                 FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=7
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z
                WHERE label_is_content(l) LIMIT 3;
@@ -180,14 +222,14 @@ BEGIN
                        max(z.m) AS top_m
                 FROM (
                     SELECT relation_highway_band(c.type_id) AS band,
-                           realize(c.object_id, p_lang) AS l,
+                           realize(c.object_id, lang) AS l,
                            (c.rating - 2*c.rd) AS m
                     FROM consensus c
                     WHERE c.subject_id = topic
                       AND relation_highway_band(c.type_id) = ANY(p_bands)
                     UNION ALL
                     SELECT relation_highway_band(c.type_id),
-                           realize(c.subject_id, p_lang),
+                           realize(c.subject_id, lang),
                            (c.rating - 2*c.rd)
                     FROM consensus c
                     WHERE c.object_id = topic
@@ -221,12 +263,12 @@ BEGIN
         ELSE
             -- describe / what_is / walk / fallback and the no-shape default:
             -- the free-form fused walk over the topic already in hand.
-            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic)
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
                         ELSE converse(p_prompt) END;
         END IF;
 
         IF out IS NULL OR out = '' THEN
-            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic)
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
                         ELSE converse(p_prompt) END;
         END IF;
     END IF;
