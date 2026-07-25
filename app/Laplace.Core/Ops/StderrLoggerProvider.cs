@@ -1,35 +1,30 @@
 using Microsoft.Extensions.Logging;
 
-namespace Laplace.Cli;
+namespace Laplace.Engine.Core.Ops;
 
-public sealed class ConsoleLoggerProvider : ILoggerProvider
+/// <summary>
+/// Plain-text diagnostics to <see cref="Console.Error"/> — never stdout, so a process whose
+/// stdout is a wire protocol (Endpoints.Mcp JSON-RPC, Chess.Uci) can still carry a console
+/// sink without corrupting its output. Shared by every console deployable via
+/// <see cref="LaplaceLogging"/>; formerly hand-rolled per-project (GH #602).
+/// </summary>
+public sealed class StderrLoggerProvider : ILoggerProvider
 {
     private readonly LogLevel _min;
-    public ConsoleLoggerProvider(LogLevel min) => _min = min;
-    public ILogger CreateLogger(string categoryName) => new ConsoleLogger(categoryName, _min);
+    public StderrLoggerProvider(LogLevel min = LogLevel.Information) => _min = min;
+    public ILogger CreateLogger(string categoryName) => new StderrLogger(categoryName, _min);
     public void Dispose() { }
 
-    public static ILoggerFactory Factory(LogLevel min = LogLevel.Information) =>
-        new SimpleFactory(min);
-
-    private sealed class SimpleFactory : ILoggerFactory
-    {
-        private readonly LogLevel _min;
-        public SimpleFactory(LogLevel min) => _min = min;
-        public ILogger CreateLogger(string categoryName) => new ConsoleLogger(categoryName, _min);
-        public void AddProvider(ILoggerProvider provider) { }
-        public void Dispose() { }
-    }
-
-    private sealed class ConsoleLogger : ILogger
+    private sealed class StderrLogger : ILogger
     {
         private static readonly object Gate = new();
         private readonly string _category;
         private readonly LogLevel _min;
-        public ConsoleLogger(string category, LogLevel min)
+
+        public StderrLogger(string category, LogLevel min)
         {
-            int colon = category.IndexOf(':');
-            _category = colon >= 0 ? category[(colon + 1)..] : category;
+            int dot = category.LastIndexOf('.');
+            _category = dot >= 0 ? category[(dot + 1)..] : category;
             _min = min;
         }
 
@@ -48,7 +43,7 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
                 LogLevel.Warning => "WRN",
                 LogLevel.Error => "ERR",
                 LogLevel.Critical => "CRT",
-                _ => "???"
+                _ => "???",
             };
             string msg = formatter(state, ex);
             string line = $"[{DateTime.Now:HH:mm:ss.fff}] {lvl} {_category}: {msg}"
