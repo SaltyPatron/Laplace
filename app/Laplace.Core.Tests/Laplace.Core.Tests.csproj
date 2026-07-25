@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Laplace.Core/Laplace.Core.csproj" />
+  <Project Path="Laplace.Ops/Laplace.Ops.csproj" />
   <Project Path="Laplace.Core.Tests/Laplace.Core.Tests.csproj" />
   <Project Path="Laplace.Substrate/Laplace.Substrate.csproj" />
   <Project Path="Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" />

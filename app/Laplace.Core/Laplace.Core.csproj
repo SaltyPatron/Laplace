@@ -7,12 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The only Core package dependency: the logging ABSTRACTIONS (near-BCL, no
-         implementation weight) for the shared ops-logging foundation (GH #602). -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="Laplace.Substrate" />
     <InternalsVisibleTo Include="Laplace.Core.Tests" />
     <InternalsVisibleTo Include="Laplace.Substrate.Tests" />

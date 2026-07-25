@@ -1,5 +1,5 @@
 using Laplace.Chess.Uci;
-using Laplace.Engine.Core.Ops;
+using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
 // stdout is the UCI wire protocol — diagnostics go to the CSV ops sink ONLY (FileOnly),
