@@ -54,6 +54,8 @@ internal interface ISubstrateClient
 
     Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct);
 
+    Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct);
+
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 

@@ -154,6 +154,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
     public Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -623,4 +626,21 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     Eco: "B44", Termination: "Normal", TimeControl: "40/9000",
                     TcClass: "classical",
                     Movetext: "1. e4 c5 2. Nf3 Nc6 3. d4 cxd4 4. Nxd4 e6 1-0"));
+
+    public Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct) =>
+        Task.FromResult<ChessGamePliesResponse?>(
+            !string.Equals(idHex, GameIdHex, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : new ChessGamePliesResponse("chess.game.plies", GameIdHex,
+                    StartFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                    HasClocks: true, Truncated: null,
+                    Plies:
+                    [
+                        new ChessPlyRow(1, "e4", "e2e4",
+                            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+                            true, 179.0, "b8152a19a309000000000000000000aa"),
+                        new ChessPlyRow(2, "c5", "c7c5",
+                            "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+                            false, 178.5, "b8152a19a309000000000000000000bb"),
+                    ]));
 }

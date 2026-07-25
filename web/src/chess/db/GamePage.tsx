@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ErrorText, LoadingText, Muted, Panel, Stack } from '@ui';
-import { chessGame } from './api';
-import type { ChessGameResponse } from './types';
+import { chessGame, chessGamePlies } from './api';
+import { GameBoard } from './GameBoard';
+import type { ChessGamePliesResponse, ChessGameResponse } from './types';
 import styles from './ChessDb.module.css';
 
 /**
@@ -19,15 +20,24 @@ export function GamePage() {
   const { idHex } = useParams();
   const [game, setGame] = useState<ChessGameResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [plies, setPlies] = useState<ChessGamePliesResponse | null>(null);
+  const [pliesErr, setPliesErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!idHex) return;
     let stale = false;
     setGame(null);
     setErr(null);
+    setPlies(null);
+    setPliesErr(null);
     chessGame(idHex)
       .then((g) => { if (!stale) setGame(g); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
+    // The replay is a second read on purpose: the headers paint immediately while the
+    // engine walks the movetext, so a 200-ply game never delays the page.
+    chessGamePlies(idHex)
+      .then((p) => { if (!stale) setPlies(p); })
+      .catch((e) => { if (!stale) setPliesErr(e instanceof Error ? e.message : String(e)); });
     return () => { stale = true; };
   }, [idHex]);
 
@@ -67,7 +77,17 @@ export function GamePage() {
         </Muted>
       </Panel>
 
-      <Panel title="Moves">
+      <Panel title="Replay">
+        {pliesErr ? <ErrorText>{pliesErr}</ErrorText> : null}
+        {!pliesErr && plies === null ? <LoadingText>Replaying the game…</LoadingText> : null}
+        {plies ? <GameBoard data={plies} white={game.white} black={game.black} /> : null}
+      </Panel>
+
+      <Panel title="Movetext as recorded">
+        <Muted style={{ marginBottom: '0.5rem' }}>
+          The source's own bytes, rebuilt from this game's content hash — not a
+          re-serialisation of the replay above. The board is driven from this.
+        </Muted>
         {game.movetext ? (
           <pre className={styles.movetext}>{game.movetext}</pre>
         ) : (

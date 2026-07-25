@@ -86,6 +86,34 @@ public sealed record ChessGamesResponse(
     [property: JsonPropertyName("offset")] int Offset,
     [property: JsonPropertyName("games")] IReadOnlyList<ChessGameRow> Games);
 
+/// <summary>
+/// One ply of a replayed game. <c>PositionId</c> is the composed content address of the
+/// board AFTER the move — a real Chess_Position entity, not a client-side artefact — so
+/// every ply is a door into the rated MOVE web around that board. <c>ClockSeconds</c> is
+/// the clock reading the source recorded, present only when it recorded one for every ply.
+/// </summary>
+public sealed record ChessPlyRow(
+    [property: JsonPropertyName("ply")] int Ply,
+    [property: JsonPropertyName("san")] string San,
+    [property: JsonPropertyName("uci")] string Uci,
+    [property: JsonPropertyName("fen")] string Fen,
+    [property: JsonPropertyName("white_moved")] bool WhiteMoved,
+    [property: JsonPropertyName("clock_seconds")] double? ClockSeconds,
+    [property: JsonPropertyName("position_id")] string PositionId);
+
+/// <summary>
+/// A recorded game replayed into the board sequence it describes. <c>Truncated</c> is
+/// non-null when a token would not resolve: the walk stops there rather than skipping it,
+/// because boards after an unplayable move are fiction.
+/// </summary>
+public sealed record ChessGamePliesResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("game_id")] string GameId,
+    [property: JsonPropertyName("start_fen")] string StartFen,
+    [property: JsonPropertyName("has_clocks")] bool HasClocks,
+    [property: JsonPropertyName("truncated")] string? Truncated,
+    [property: JsonPropertyName("plies")] IReadOnlyList<ChessPlyRow> Plies);
+
 /// <summary>One game exactly as its source recorded it — headers plus verbatim movetext.</summary>
 public sealed record ChessGameResponse(
     [property: JsonPropertyName("object")] string Object,
