@@ -433,6 +433,15 @@ phase_sync_extension() {
 # UPGRADE bridge binds; it cannot see rows already in the catalog. This closes
 # that gap: EVERY laplace C-bound function must resolve its symbol in the loaded
 # image, or the phase fails loudly here instead of at some user's first call.
+#
+# Scoped by probin, not by schema. The schema is where a function is NAMED; the
+# probin is which image it is supposed to resolve in, and that is what this gate
+# is actually asserting. Another extension installed into the laplace schema —
+# file_fdw, which the ops log surface needs (#601) — has its own .so and its own
+# symbols, and checking its functions against laplace_substrate.so declared them
+# orphaned when nothing was wrong: two false failures that took the whole
+# deploy down and blocked publish. Any extension we host in this schema hits the
+# same wall, so the fix belongs here rather than in a per-extension exclusion.
 verify_c_symbols() {
   local so sym missing=0
   so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
@@ -447,7 +456,8 @@ verify_c_symbols() {
     fi
   done < <(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
       "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace \
-       WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c')")
+       WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
+         AND p.probin = '\$libdir/laplace_substrate'")
   if [[ "$missing" -gt 0 ]]; then
     echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
     return 1
