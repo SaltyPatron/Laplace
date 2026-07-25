@@ -107,7 +107,7 @@ BEGIN
               INTO s FROM (SELECT realize(c.object_id,p_lang) l,(c.rating-2*c.rd) m
                 FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=7
                 ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z
-               WHERE l IS NOT NULL AND l !~ '^[0-9]{6,}-[nvasr]$' AND l !~ '^(noun|verb|adj|adv)\.' AND l !~ ' ' LIMIT 3;
+               WHERE label_is_content(l) LIMIT 3;
             IF s IS NOT NULL THEN layers := layers||s; END IF;
             SELECT count(*) INTO depth FROM session_topics t
               WHERE t.session_id=p_session AND t.resolved_id=topic;
