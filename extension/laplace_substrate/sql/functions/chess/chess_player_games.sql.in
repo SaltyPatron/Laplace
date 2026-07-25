@@ -1,0 +1,105 @@
+CREATE OR REPLACE FUNCTION chess_player_games(
+        p_player bytea, p_limit integer DEFAULT 25, p_offset integer DEFAULT 0)
+    RETURNS TABLE(game_id bytea, played_on text, event text, eco text,
+                  as_white boolean, opponent_id bytea, opponent text,
+                  result text, outcome smallint)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- A player's game log: the detail list behind chess_player_record, most
+    -- recent first. Every field is a header the PGN decomposer transcribed
+    -- verbatim (ON_DATE / HAS_EVENT / HAS_ECO / HAS_RESULT) plus the opposite
+    -- colour edge for the opponent -- witnessed record only, nothing derived.
+    --
+    -- Ordering is by the game's own asserted date, which means the career's
+    -- dates must be resolved before the page can be cut. That stays cheap
+    -- because dates are shared content: every game played on 1960.03.15 carries
+    -- the SAME date entity, so a 9k-game career resolves a few thousand distinct
+    -- ids in one realize_batch, not 9k renders. Games the source never dated
+    -- sort last rather than being dropped.
+    --
+    -- Everything else renders once, for the page only: opponent, event, eco and
+    -- result ids go into a single array and come back through one realize_batch.
+    -- Per-row label() here is what made a 1300-game career take 18s.
+    WITH mine AS MATERIALIZED (
+        SELECT a.subject_id AS game,
+               (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
+        FROM @extschema@.attestations a
+        WHERE a.object_id = p_player
+          AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
+                            @extschema@.relation_type_id('HAS_BLACK'))
+    ),
+    dated AS MATERIALIZED (
+        SELECT m.game, m.white, d.object_id AS date_id
+        FROM mine m
+        LEFT JOIN @extschema@.attestations d
+               ON d.subject_id = m.game
+              AND d.type_id = @extschema@.relation_type_id('ON_DATE')
+    ),
+    date_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT date_id), '{}'::bytea[]) AS ids
+        FROM dated WHERE date_id IS NOT NULL
+    ),
+    date_text AS MATERIALIZED (
+        SELECT p.id, t.txt
+        FROM date_batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    ),
+    page AS MATERIALIZED (
+        SELECT d.game, d.white, dt.txt AS played_on
+        FROM dated d
+        LEFT JOIN date_text dt ON dt.id = d.date_id
+        ORDER BY dt.txt DESC NULLS LAST, d.game
+        LIMIT p_limit OFFSET p_offset
+    ),
+    facts AS MATERIALIZED (
+        SELECT pg.game, pg.white, pg.played_on,
+               max(h.object_id) FILTER (
+                   WHERE h.type_id = @extschema@.relation_type_id('HAS_EVENT')) AS event_id,
+               max(h.object_id) FILTER (
+                   WHERE h.type_id = @extschema@.relation_type_id('HAS_ECO')) AS eco_id,
+               max(h.object_id) FILTER (
+                   WHERE h.type_id = @extschema@.relation_type_id('HAS_RESULT')) AS result_id,
+               max(h.object_id) FILTER (
+                   WHERE h.type_id = CASE WHEN pg.white
+                       THEN @extschema@.relation_type_id('HAS_BLACK')
+                       ELSE @extschema@.relation_type_id('HAS_WHITE') END) AS opponent_id
+        FROM page pg
+        LEFT JOIN @extschema@.attestations h
+               ON h.subject_id = pg.game
+              AND h.type_id IN (@extschema@.relation_type_id('HAS_EVENT'),
+                                @extschema@.relation_type_id('HAS_ECO'),
+                                @extschema@.relation_type_id('HAS_RESULT'),
+                                @extschema@.relation_type_id('HAS_WHITE'),
+                                @extschema@.relation_type_id('HAS_BLACK'))
+        GROUP BY pg.game, pg.white, pg.played_on
+    ),
+    surface_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+        FROM facts f,
+             LATERAL (VALUES (f.event_id), (f.eco_id), (f.result_id), (f.opponent_id)) v(s)
+        WHERE s IS NOT NULL
+    ),
+    surface_text AS MATERIALIZED (
+        SELECT p.id, t.txt
+        FROM surface_batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT f.game,
+           f.played_on,
+           ev.txt,
+           ec.txt,
+           f.white,
+           f.opponent_id,
+           COALESCE(NULLIF(op.txt, ''), encode(f.opponent_id, 'hex')),
+           rs.txt,
+           @extschema@.chess_outcome(f.white, f.result_id)
+    FROM facts f
+    LEFT JOIN surface_text ev ON ev.id = f.event_id
+    LEFT JOIN surface_text ec ON ec.id = f.eco_id
+    LEFT JOIN surface_text rs ON rs.id = f.result_id
+    LEFT JOIN surface_text op ON op.id = f.opponent_id
+    ORDER BY f.played_on DESC NULLS LAST, f.game
+$$;

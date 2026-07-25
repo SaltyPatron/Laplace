@@ -139,6 +139,21 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
     public Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessGamesResponse?> ChessPlayerGamesAsync(string idHex, int limit, int offset, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 }
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
@@ -530,4 +545,80 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         ContextIdHex: null,
         Outcome: 2,
         ObservationCount: 12);
+
+    // --- chess read surface -------------------------------------------------
+    // Two players and the one game between them, wired so the drill the UI walks
+    // is walkable end to end: roster -> player -> his games -> that game -> the
+    // opponent's page. TalIdHex is the live content address of "Tal, Mikhail"
+    // (canonical_id('chess/player/mikhail tal')), so a fixture id and a real id
+    // are the same kind of thing here, as they are in the substrate.
+    private const string TalIdHex = "b422a7d40dec7948426e7c8ae40810d5";
+    private const string BotvinnikIdHex = "aa11bb22cc33dd44ee55ff6677889900";
+    private const string GameIdHex = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+
+    private static readonly ChessPlayerRow TalRow = new(
+        1, TalIdHex, "Tal, Mikhail", new ChessRecord(1341, 669, 489, 183, 0, 0.6811));
+
+    public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ChessPlayerRow>>(
+        [
+            TalRow,
+            new ChessPlayerRow(2, BotvinnikIdHex, "Botvinnik, Mikhail",
+                new ChessRecord(2, 0, 1, 1, 0, 0.25)),
+        ]);
+
+    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var hit = search.Contains("tal", StringComparison.OrdinalIgnoreCase);
+            return new ChessPlayersResponse("chess.players", hit ? 1 : 0, 0,
+                hit ? [TalRow] : []);
+        }
+        var roster = await ChessRosterAsync(ct);
+        return new ChessPlayersResponse("chess.players", roster.Count, offset,
+            [.. roster.Skip(offset).Take(limit)]);
+    }
+
+    public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
+        Task.FromResult<ChessPlayerResponse?>(
+            !string.Equals(idHex, TalIdHex, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : new ChessPlayerResponse("chess.player", TalIdHex, "Tal, Mikhail",
+                    Overall: new ChessRecord(1341, 669, 489, 183, 0, 0.6811),
+                    AsWhite: new ChessRecord(726, 420, 223, 83, 0, 0.7327),
+                    AsBlack: new ChessRecord(615, 249, 266, 100, 0, 0.6203),
+                    PeakRating: 2705,
+                    Ratings: [new ChessRatingRow(2705, 12), new ChessRatingRow(2645, 30)],
+                    Opponents:
+                    [
+                        new ChessOpponentRow(BotvinnikIdHex, "Botvinnik, Mikhail",
+                            new ChessRecord(2, 1, 1, 0, 0, 0.75)),
+                    ]));
+
+    public Task<ChessGamesResponse?> ChessPlayerGamesAsync(
+        string idHex, int limit, int offset, CancellationToken ct) =>
+        Task.FromResult<ChessGamesResponse?>(
+            idHex.Length != 32
+                ? null
+                : new ChessGamesResponse("chess.games", idHex, offset,
+                    offset > 0
+                        ? []
+                        :
+                        [
+                            new ChessGameRow(GameIdHex, "1960.03.15", "World Championship", "B44",
+                                AsWhite: true, BotvinnikIdHex, "Botvinnik, Mikhail", "1-0", 2),
+                        ]));
+
+    public Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct) =>
+        Task.FromResult<ChessGameResponse?>(
+            !string.Equals(idHex, GameIdHex, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : new ChessGameResponse("chess.game", GameIdHex,
+                    TalIdHex, "Tal, Mikhail", BotvinnikIdHex, "Botvinnik, Mikhail",
+                    Result: "1-0", PlayedOn: "1960.03.15", Event: "World Championship",
+                    Eco: "B44", Termination: "Normal", TimeControl: "40/9000",
+                    TcClass: "classical",
+                    Movetext: "1. e4 c5 2. Nf3 Nc6 3. d4 cxd4 4. Nxd4 e6 1-0"));
 }

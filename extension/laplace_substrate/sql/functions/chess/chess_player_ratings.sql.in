@@ -1,0 +1,38 @@
+CREATE OR REPLACE FUNCTION chess_player_ratings(p_player bytea)
+    RETURNS TABLE(rating integer, games bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Every Elo this player has been witnessed at, and how many games carried
+    -- it. HAS_RATING is a per-game assertion -- context_id is the game the tag
+    -- came from -- so a career is a distribution, not a single number, and the
+    -- caller can take the peak, the mode, or plot the lot.
+    --
+    -- This is the SOURCE's Elo, transcribed: a number some federation or server
+    -- computed elsewhere and the PGN carried. It is not the substrate's own
+    -- rating of the player, which is the Glicko-2 fold over his attested edges
+    -- and lives in consensus. Two different claims by two different raters,
+    -- deliberately kept apart.
+    --
+    -- Non-numeric rating tags are skipped rather than coerced: a malformed tag is
+    -- an unreadable witness, not a zero.
+    WITH raw AS MATERIALIZED (
+        SELECT a.object_id AS rating_id, count(*)::bigint AS games
+        FROM @extschema@.attestations a
+        WHERE a.subject_id = p_player
+          AND a.type_id = @extschema@.relation_type_id('HAS_RATING')
+        GROUP BY a.object_id
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(rating_id ORDER BY rating_id), '{}'::bytea[]) AS ids FROM raw
+    ),
+    named AS (
+        SELECT p.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT n.txt::integer, raw.games
+    FROM raw JOIN named n ON n.id = raw.rating_id
+    WHERE n.txt ~ '^[0-9]{1,5}$'
+    ORDER BY 1 DESC
+$$;

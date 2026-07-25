@@ -83,6 +83,13 @@ export function HomeView({ onGoto }: Props) {
           cta="Enter the warehouse"
           onClick={() => nav('/explore')}
         />
+        <ModeCard
+          name="Chess"
+          tagline="Read the proving domain."
+          body="Chess is where the rating math can be checked against objective ground truth. Browse the players the substrate has witnessed, their careers, their head-to-head records, and every game down to the move — each number counted off the headers it came from."
+          cta="Open the players"
+          onClick={() => nav('/chess')}
+        />
       </section>
 
       <section className={styles.examples} aria-label="Things you can ask">

@@ -1,0 +1,46 @@
+CREATE OR REPLACE FUNCTION chess_player_record(p_player bytea)
+    RETURNS TABLE(as_white boolean, games bigint, wins bigint, draws bigint,
+                  losses bigint, unscored bigint, score double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- One player's record, straight off the witnessed game headers. Rides
+    -- attestations_rdefault_object_id_idx to find the games he appears in (as
+    -- HAS_WHITE or HAS_BLACK), then the (subject_id, type_id, object_id) index
+    -- to pick up each game's HAS_RESULT -- both index lookups, so this stays
+    -- interactive for a 9k-game career.
+    --
+    -- GROUPING SETS emits three rows: as_white = true, false, and NULL for the
+    -- career total, so every number on a player page comes from one pass over
+    -- the same evidence and the splits can never disagree with the total.
+    --
+    -- score is the chess convention -- (wins + draws/2) / scored games -- over
+    -- games the source actually scored; `unscored` reports the abstentions
+    -- separately rather than silently folding them in as losses.
+    WITH sides AS (
+        SELECT a.subject_id AS game,
+               (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
+        FROM @extschema@.attestations a
+        WHERE a.object_id = p_player
+          AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
+                            @extschema@.relation_type_id('HAS_BLACK'))
+    ),
+    scored AS (
+        SELECT s.white,
+               @extschema@.chess_outcome(s.white, r.object_id) AS outcome
+        FROM sides s
+        LEFT JOIN @extschema@.attestations r
+               ON r.subject_id = s.game
+              AND r.type_id = @extschema@.relation_type_id('HAS_RESULT')
+    )
+    SELECT sc.white,
+           count(*)::bigint,
+           count(*) FILTER (WHERE sc.outcome = 2)::bigint,
+           count(*) FILTER (WHERE sc.outcome = 1)::bigint,
+           count(*) FILTER (WHERE sc.outcome = 0)::bigint,
+           count(*) FILTER (WHERE sc.outcome IS NULL)::bigint,
+           (count(*) FILTER (WHERE sc.outcome = 2)
+            + count(*) FILTER (WHERE sc.outcome = 1) / 2.0)
+           / NULLIF(count(*) FILTER (WHERE sc.outcome IS NOT NULL), 0)
+    FROM scored sc
+    GROUP BY GROUPING SETS ((sc.white), ())
+    ORDER BY sc.white NULLS FIRST
+$$;
