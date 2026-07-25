@@ -8978,7 +8978,9 @@
       "PlayStartRequest": {
         "required": [
           "record",
-          "moves"
+          "moves",
+          "tenant",
+          "user"
         ],
         "type": "object",
         "properties": {
@@ -8996,6 +8998,18 @@
             "items": {
               "type": "string"
             }
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "user": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
