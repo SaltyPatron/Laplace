@@ -372,9 +372,45 @@ phase_migrate() {
   dotnet "$mig" up
 }
 
+# Bridge one extension from its installed version to the built one. The install SQL
+# is a fresh-CREATE script; ALTER EXTENSION UPDATE needs a --<old>--<new>.sql file,
+# which is just the upgrade body under the name PG looks for.
+sync_one_extension() {
+  local ext="$1" avail installed share bridge
+  avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX \
+    -c "SELECT default_version FROM pg_available_extensions WHERE name='$ext'" | tr -d '[:space:]')
+  installed=$(psql -d "$PGDATABASE" -U laplace_admin -tAX \
+    -c "SELECT extversion FROM pg_extension WHERE extname='$ext'" | tr -d '[:space:]')
+  echo "$ext: installed='$installed' available='$avail'"
+  test -n "$avail" || { echo "::error::$ext missing from pg_available_extensions"; exit 1; }
+
+  if [[ -z "$installed" ]]; then
+    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+      -c "CREATE EXTENSION IF NOT EXISTS $ext CASCADE"
+    return 0
+  fi
+  [[ "$installed" == "$avail" ]] && { echo "OK $ext already at $avail"; return 0; }
+
+  share=$(dirname "$(find "$LAPLACE_INSTALL_PREFIX" -name "$ext.control" -not -path '*/build*' 2>/dev/null | head -1)")
+  test -n "$share" || { echo "::error::could not locate $ext.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
+  bridge="$share/$ext--${installed}--${avail}.sql"
+  install -m 664 "$share/${ext}_upgrade.sql" "$bridge"
+  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+    -c "ALTER EXTENSION $ext UPDATE TO '$avail'"
+  echo "OK upgraded $ext $installed -> $avail in place"
+}
+
 phase_sync_extension() {
   echo "===== PHASE — SYNC EXTENSION SQL ====="
   local avail installed share
+
+  # laplace_geom FIRST. Substrate SQL — including index expressions, which are
+  # evaluated immediately at CREATE INDEX and hard-fail rather than degrading —
+  # can reference geom functions, so geom must already carry them. This ordering
+  # is the fix for the class of failure where a substrate upgrade referenced a
+  # geom function that existed in the build tree but not in the database.
+  sync_one_extension laplace_geom
+
   avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX \
     -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" \
     | tr -d '[:space:]')

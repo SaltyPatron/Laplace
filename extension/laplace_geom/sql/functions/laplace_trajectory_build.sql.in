@@ -10,7 +10,7 @@
 -- backend, so it is a direct call into loaded memory.
 --
 -- IMMUTABLE: the packing is a pure function of the ordered ids.
-CREATE FUNCTION @extschema@.laplace_trajectory_build(ids bytea[])
+CREATE OR REPLACE FUNCTION @extschema@.laplace_trajectory_build(ids bytea[])
     RETURNS geometry
     AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_build'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

@@ -1,0 +1,2 @@
+#include "sqldefines.h"
+#include "generated/upgrade_chain.sql.in"
