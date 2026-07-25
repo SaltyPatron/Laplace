@@ -387,3 +387,4 @@ functions/chess/chess_player_games.sql.in
 functions/chess/chess_opponents.sql.in
 functions/chess/chess_leaderboard.sql.in
 functions/chess/chess_game.sql.in
+functions/chess/chess_time_pressure_outcome.sql.in
