@@ -15,6 +15,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_intent_stage.cpp
     test_merkle_dedup.cpp
     test_hash_composer.cpp
+    test_physicality_id.cpp
     test_grapheme_break.cpp
     test_word_break.cpp
     test_sentence_break.cpp
