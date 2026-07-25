@@ -36,15 +36,16 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         Assert.Equal(1, top.Rank);
         Assert.Equal(32, top.IdHex.Length);
         Assert.NotEmpty(top.Name);
-        // The record has to add up: every game is a win, a draw, a loss, or
-        // explicitly unscored. Nothing may vanish between the columns.
-        Assert.Equal(top.Record.Games,
-            top.Record.Wins + top.Record.Draws + top.Record.Losses + top.Record.Unscored);
+        // Games is the fold's own witness count, not a recomputed total.
+        Assert.True(top.Games > 0);
+        // eff_mu IS rating - 2*rd — the conservative estimate, never the raw rating.
+        Assert.Equal(top.Rating - 2 * top.Rd, top.EffMu, 3);
     }
 
     [Fact]
     public async Task Players_Paginate()
     {
+        // OFFSET over an index — no cached ranking to page within, so there is no depth limit.
         using var response = await _client.GetAsync("/v1/chess/players?limit=1&offset=1");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
@@ -52,6 +53,17 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         Assert.Equal(1, body!.Offset);
         Assert.Single(body.Players);
         Assert.Equal(2, body.Players[0].Rank);
+    }
+
+    [Fact]
+    public async Task Players_RankedByConservativeEstimate_NotRawRating()
+    {
+        using var response = await _client.GetAsync("/v1/chess/players?limit=10");
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        // Descending eff_mu, so a thin record sinks on RD rather than flattering itself.
+        var mus = body!.Players.Select(p => p.EffMu).ToList();
+        Assert.Equal(mus.OrderByDescending(m => m), mus);
     }
 
     [Fact]
@@ -66,38 +78,18 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
-    public async Task Players_SearchByPartialName_StillFinds()
+    public async Task Players_SearchResolvesEitherSpellingToTheSameId()
     {
-        // A person typing a fragment is not wrong, just partial — "tal" has to
-        // reach Tal without the caller knowing the source's exact spelling.
-        using var response = await _client.GetAsync("/v1/chess/players?search=tal");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
-        Assert.NotNull(body);
-        Assert.Contains(body!.Players, p => p.IdHex == TalIdHex);
-    }
-
-    [Fact]
-    public async Task Players_SearchIsCaseInsensitive()
-    {
-        using var response = await _client.GetAsync("/v1/chess/players?search=BOTVINNIK");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
-        Assert.NotNull(body);
-        Assert.NotEmpty(body!.Players);
-        Assert.Contains("Botvinnik", body.Players[0].Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task Players_ReportsHowDeepTheRankedListGoes()
-    {
-        // Substring reach ends where the cached ranking does. The response has to
-        // say how far that is, or an empty result reads as "never witnessed".
-        using var response = await _client.GetAsync("/v1/chess/players?search=zzz-nobody");
-        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
-        Assert.NotNull(body);
-        Assert.Empty(body!.Players);
-        Assert.True(body.RankedDepth > 0);
+        // Both forms fold to the same canonical key and therefore the same content
+        // address — this is a lookup, not a match.
+        foreach (var q in new[] { "Tal,%20Mikhail", "mikhail%20tal" })
+        {
+            using var response = await _client.GetAsync($"/v1/chess/players?search={q}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+            Assert.NotNull(body);
+            Assert.Equal(TalIdHex, Assert.Single(body!.Players).IdHex);
+        }
     }
 
     [Fact]

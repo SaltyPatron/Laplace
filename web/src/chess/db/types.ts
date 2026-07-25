@@ -18,11 +18,19 @@ export interface ChessRecord {
   score: number | null;
 }
 
+/**
+ * A player as the rated competitor he is. `games` is the fold's own witness count;
+ * `eff_mu` (rating − 2·rd) is the conservative estimate everything ranks by. Not a win
+ * percentage: Glicko-2 weighs who you beat, and rd says how sure the corpus is.
+ */
 export interface ChessPlayerRow {
   rank: number;
   id: string;
   name: string;
-  record: ChessRecord;
+  games: number;
+  rating: number;
+  rd: number;
+  eff_mu: number;
 }
 
 export interface ChessPlayersResponse {
@@ -30,13 +38,6 @@ export interface ChessPlayersResponse {
   total: number;
   offset: number;
   players: ChessPlayerRow[];
-  /**
-   * How far the ranked list goes — the reach of a partial-name search. An exactly
-   * spelled name resolves by content address at any depth; substring matching runs
-   * over the ranked list, so an empty result means "not in the top N by games",
-   * not "never witnessed".
-   */
-  ranked_depth: number;
 }
 
 export interface ChessRatingRow {
@@ -44,10 +45,14 @@ export interface ChessRatingRow {
   games: number;
 }
 
+/** A head-to-head line read from the folded pairing cell: `games` is its witness count. */
 export interface ChessOpponentRow {
   id: string;
   name: string;
-  record: ChessRecord;
+  games: number;
+  rating: number;
+  rd: number;
+  eff_mu: number;
 }
 
 export interface ChessPlayerResponse {

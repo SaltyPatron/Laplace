@@ -44,7 +44,7 @@ internal interface ISubstrateClient
 
     Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct);
 
-    Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(CancellationToken ct);
+    Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct);
 
     Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, CancellationToken ct);
 

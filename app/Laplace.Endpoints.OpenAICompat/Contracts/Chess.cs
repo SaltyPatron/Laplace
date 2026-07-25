@@ -16,37 +16,51 @@ public sealed record ChessRecord(
     [property: JsonPropertyName("unscored")] long Unscored,
     [property: JsonPropertyName("score")] double? Score);
 
-/// <summary>One row of the roster: a player, ranked by how much of him was witnessed.</summary>
+/// <summary>
+/// One row of the roster: a player as the rated competitor he is. <c>Games</c> is the fold's
+/// own witness count, <c>Rating</c>/<c>Rd</c> the Glicko-2 pair, <c>EffMu</c> the conservative
+/// estimate everything ranks by. Not a win percentage — Glicko-2 weighs who you beat, and RD
+/// says how sure the corpus is, neither of which a ratio can express. The W/D/L split is a
+/// different question and lives on the career page.
+/// </summary>
 public sealed record ChessPlayerRow(
     [property: JsonPropertyName("rank")] long Rank,
     [property: JsonPropertyName("id")] string IdHex,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("record")] ChessRecord Record);
+    [property: JsonPropertyName("games")] long Games,
+    [property: JsonPropertyName("rating")] double Rating,
+    [property: JsonPropertyName("rd")] double Rd,
+    [property: JsonPropertyName("eff_mu")] double EffMu);
 
 /// <summary>
-/// A page of the roster, or the hits for a search. <c>RankedDepth</c> is how far the
-/// ranked list goes — the reach of a partial-name search, since substring matching
-/// runs over that list while an exactly-spelled name resolves by content address at
-/// any depth. Surfacing it lets the UI state the limit instead of implying an empty
-/// result means nobody by that name was ever witnessed.
+/// A page of the roster, or the hits for a search. The roster is a read of folded cells
+/// ordered by eff_mu, so paging is a plain OFFSET over an index — there is no cached ranking
+/// to bound, and therefore no depth to disclose.
 /// </summary>
 public sealed record ChessPlayersResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("total")] int Total,
     [property: JsonPropertyName("offset")] int Offset,
-    [property: JsonPropertyName("players")] IReadOnlyList<ChessPlayerRow> Players,
-    [property: JsonPropertyName("ranked_depth")] int RankedDepth);
+    [property: JsonPropertyName("players")] IReadOnlyList<ChessPlayerRow> Players);
 
 /// <summary>An Elo the source tagged this player with, and how many games carried it.</summary>
 public sealed record ChessRatingRow(
     [property: JsonPropertyName("rating")] int Rating,
     [property: JsonPropertyName("games")] long Games);
 
-/// <summary>A head-to-head line: one opponent, and the record against him.</summary>
+/// <summary>
+/// A head-to-head line, read from the folded pairing cell: every meeting between two players
+/// lands on one cell, so <c>Games</c> is its witness count and <c>EffMu</c> how that rivalry
+/// actually went. Ranked by eff_mu so a long even series against a strong opponent outranks a
+/// short lopsided one.
+/// </summary>
 public sealed record ChessOpponentRow(
     [property: JsonPropertyName("id")] string IdHex,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("record")] ChessRecord Record);
+    [property: JsonPropertyName("games")] long Games,
+    [property: JsonPropertyName("rating")] double Rating,
+    [property: JsonPropertyName("rd")] double Rd,
+    [property: JsonPropertyName("eff_mu")] double EffMu);
 
 /// <summary>
 /// The career page. <c>Overall</c>, <c>AsWhite</c> and <c>AsBlack</c> come from one

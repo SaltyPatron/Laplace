@@ -4810,7 +4810,10 @@
         "required": [
           "id",
           "name",
-          "record"
+          "games",
+          "rating",
+          "rd",
+          "eff_mu"
         ],
         "type": "object",
         "properties": {
@@ -4820,8 +4823,37 @@
           "name": {
             "type": "string"
           },
-          "record": {
-            "$ref": "#/components/schemas/ChessRecord"
+          "games": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "rating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "rd": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },
@@ -4885,7 +4917,10 @@
           "rank",
           "id",
           "name",
-          "record"
+          "games",
+          "rating",
+          "rd",
+          "eff_mu"
         ],
         "type": "object",
         "properties": {
@@ -4903,8 +4938,37 @@
           "name": {
             "type": "string"
           },
-          "record": {
-            "$ref": "#/components/schemas/ChessRecord"
+          "games": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "rating": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "rd": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },
@@ -4913,8 +4977,7 @@
           "object",
           "total",
           "offset",
-          "players",
-          "ranked_depth"
+          "players"
         ],
         "type": "object",
         "properties": {
@@ -4942,14 +5005,6 @@
             "items": {
               "$ref": "#/components/schemas/ChessPlayerRow"
             }
-          },
-          "ranked_depth": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "integer",
-              "string"
-            ],
-            "format": "int32"
           }
         }
       },

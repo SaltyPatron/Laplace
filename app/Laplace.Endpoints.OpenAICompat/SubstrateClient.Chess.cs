@@ -12,164 +12,88 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// games it came from, and every game against the movetext its own content hash
 /// rebuilds.
 ///
-/// The split mirrors the cost. A player's own page is index lookups off his colour
-/// edges and stays interactive at 9,000 games. The ROSTER is a corpus-wide aggregate
-/// over every game header there is (~400k rows for ~200k games, ~10s cold), so it is
-/// cached exactly like the explore catalog: one flight fills it, everyone reads it
-/// for the TTL, and a stale hit serves immediately while refreshing behind. It only
-/// changes when a new PGN lands.
+/// NOTHING HERE IS CACHED, and that is the point. The roster used to be a corpus-wide
+/// GROUP BY over every game header (~400k rows, ~10s) hidden behind a TTL cache and a
+/// startup prewarm — a cache standing in for a fold. Each game now carries its result
+/// onto the player in the aggregating lane at ingest, so a record is one consensus
+/// cell: witness_count IS games played, eff_mu IS the conservative strength. Ranking
+/// is an ORDER BY over a single relation partition. No TTL, no prewarm, no stale
+/// window, nothing to repopulate.
 ///
-/// Searching never re-runs that aggregate either. A fully-spelled name resolves by
-/// content address — chess_player_id() folds it the way the decomposer did and hashes
-/// it — so finding a player is a lookup, not a scan, at any depth in the corpus. A
-/// partial name falls back to a substring pass over the cached roster already in
-/// memory. Neither path adds a query.
+/// Search is a content-address lookup: chess_player_id() folds a typed name the way
+/// the decomposer did and hashes it, so a fully-spelled name resolves in one round
+/// trip at any depth in the corpus.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
-    private const int RosterDepth = 1000;
-    private static readonly TimeSpan RosterTtl = TimeSpan.FromMinutes(10);
-    private readonly SemaphoreSlim _rosterGate = new(1, 1);
-    private IReadOnlyList<ChessPlayerRow>? _rosterCache;
-    private DateTimeOffset _rosterCachedAt;
-
-    /// <summary>The ranked roster, cached. Callers page it; they never re-aggregate.</summary>
-    public async Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(CancellationToken ct)
-    {
-        var cached = _rosterCache;
-        if (cached is not null && DateTimeOffset.UtcNow - _rosterCachedAt < RosterTtl)
-            return cached;
-
-        if (cached is not null)
-        {
-            // Stale: serve it now, refresh once behind. No page load should wait on
-            // a ten-second corpus aggregate when last minute's ranking is on hand.
-            if (_rosterGate.Wait(0))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        _rosterCache = await LoadRosterAsync(CancellationToken.None);
-                        _rosterCachedAt = DateTimeOffset.UtcNow;
-                    }
-                    catch
-                    {
-                        // keep serving stale; the next expiry retries
-                    }
-                    finally
-                    {
-                        _rosterGate.Release();
-                    }
-                });
-            }
-
-            return cached;
-        }
-
-        await _rosterGate.WaitAsync(ct);
-        try
-        {
-            if (_rosterCache is { } refilled && DateTimeOffset.UtcNow - _rosterCachedAt < RosterTtl)
-                return refilled;
-
-            var rows = await LoadRosterAsync(ct);
-            _rosterCache = rows;
-            _rosterCachedAt = DateTimeOffset.UtcNow;
-            return rows;
-        }
-        finally
-        {
-            _rosterGate.Release();
-        }
-    }
-
-    private async Task<IReadOnlyList<ChessPlayerRow>> LoadRosterAsync(CancellationToken ct)
+    /// <summary>
+    /// The ranked roster, straight off the folded cells. Paging is an OFFSET over an index.
+    /// </summary>
+    public async Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct)
     {
         const string sql = """
-            SELECT rank, encode(player_id, 'hex'), name,
-                   games, wins, draws, losses, unscored, score
-            FROM laplace.chess_leaderboard(@depth)
+            SELECT rank, encode(player_id, 'hex'), name, games, rating, rd, eff_mu
+            FROM laplace.chess_ranked(@limit, @offset)
             """;
         return await ReadRowsAsync(sql,
             static r => new ChessPlayerRow(
                 r.GetInt64(0), r.GetString(1), r.GetString(2),
-                new ChessRecord(r.GetInt64(3), r.GetInt64(4), r.GetInt64(5), r.GetInt64(6),
-                    r.GetInt64(7), r.IsDBNull(8) ? null : r.GetDouble(8))),
-            cmd => cmd.Parameters.AddWithValue("depth", RosterDepth),
-            "chess_leaderboard", ct, timeoutSeconds: 120);
+                r.GetInt64(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)),
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                cmd.Parameters.AddWithValue("offset", Math.Max(0, offset));
+            },
+            "chess_ranked", ct);
     }
 
     /// <summary>
-    /// A page of the roster, or — when a name is supplied — the players it names.
+    /// A page of the roster, or — when a name is supplied — the player it names.
     ///
-    /// Two lookups, in that order of authority. The EXACT one is a content-address
-    /// resolve: the typed name folded the decomposer's way and hashed, which finds
-    /// the right man anywhere in the corpus, at any depth, in one round trip. It
-    /// cannot be beaten for precision and it is put first for that reason.
-    ///
-    /// But it only fires on a name spelled the way the source spelled it, and a
-    /// person typing "carls" is not wrong, just partial. So it is unioned with a
-    /// substring pass over the ranked roster — which is already in memory, already
-    /// carries resolved names, and costs nothing. No index, no scan, no new
-    /// storage: the same cache the landing page pages through.
-    ///
-    /// The seam is honest rather than hidden. Substring reach ends where the cache
-    /// does, so a partial that matches nobody ranked returns nothing even though an
-    /// exact name would have found him — which is why the endpoint tells the caller
-    /// how deep the ranked list goes, and the UI says so when a search comes up empty.
+    /// The partial-name pass that used to run over the cached ranking went with the cache.
+    /// It was only ever a substring scan of the top N held in memory: it could not see past
+    /// that window, and it existed because the window existed. A name resolves by content
+    /// address instead, which has no window — it finds the right man at any depth in one
+    /// round trip, or honestly finds nobody.
     /// </summary>
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
     {
-        var roster = await ChessRosterAsync(ct);
-
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var needle = search.Trim();
-            var exact = await ChessFindPlayerAsync(needle, ct);
-
-            IEnumerable<ChessPlayerRow> matches = roster
-                .Where(p => p.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                .Where(p => exact is null || !string.Equals(p.IdHex, exact.IdHex,
-                                                StringComparison.OrdinalIgnoreCase));
-
-            // The exact resolve leads: it is the one hit we know is the right entity
-            // rather than a name that merely reads alike.
-            if (exact is not null) matches = matches.Prepend(exact);
-
-            var hits = matches.Take(Math.Clamp(limit, 1, 200)).ToList();
-            return new ChessPlayersResponse("chess.players", hits.Count, 0, hits, roster.Count);
+            var hit = await ChessFindPlayerAsync(search.Trim(), ct);
+            return new ChessPlayersResponse("chess.players", hit is null ? 0 : 1, 0,
+                hit is null ? [] : [hit]);
         }
 
-        var page = roster.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200)).ToList();
-        return new ChessPlayersResponse("chess.players", roster.Count, Math.Max(0, offset), page,
-            roster.Count);
+        var page = await ChessRosterAsync(limit, offset, ct);
+        return new ChessPlayersResponse("chess.players", page.Count, Math.Max(0, offset), page);
     }
 
     /// <summary>
-    /// Name to player, in one round trip. chess_player_id() reproduces the
-    /// decomposer's own name folding ("Tal, Mikhail" -> "mikhail tal") and hashes
-    /// the canonical key, so the typed name lands on the identical id the ingest
-    /// wrote — or on nothing. A record with no games means no such player.
+    /// Name to player, in one round trip. chess_player_id() reproduces the decomposer's own
+    /// name folding ("Tal, Mikhail" -> "mikhail tal") and hashes the canonical key, so the
+    /// typed name lands on the identical id the ingest wrote — or on nothing. The rating comes
+    /// from his folded cell; no cell means the substrate has never witnessed him at a board.
     /// </summary>
     public async Task<ChessPlayerRow?> ChessFindPlayerAsync(string name, CancellationToken ct)
     {
         const string sql = """
             WITH p AS (SELECT laplace.chess_player_id(@name) AS id)
             SELECT encode(p.id, 'hex'), laplace.label_or_hex(p.id),
-                   r.games, r.wins, r.draws, r.losses, r.unscored, r.score
-            FROM p, LATERAL laplace.chess_player_record(p.id) r
-            WHERE r.as_white IS NULL
+                   c.witness_count, c.rating::double precision, c.rd::double precision,
+                   laplace.eff_mu(c.rating, c.rd)::double precision
+            FROM p
+            JOIN laplace.consensus c
+              ON c.subject_id = p.id
+             AND c.type_id = laplace.relation_type_id('OUTCOME')
             """;
         var rows = await ReadRowsAsync(sql,
             static r => new ChessPlayerRow(0, r.GetString(0), r.GetString(1),
-                new ChessRecord(r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt64(5),
-                    r.GetInt64(6), r.IsDBNull(7) ? null : r.GetDouble(7))),
+                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             cmd => cmd.Parameters.AddWithValue("name", name),
             "chess_player_id", ct);
-        var hit = rows.Count == 0 ? null : rows[0];
-        return hit is { Record.Games: > 0 } ? hit : null;
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
@@ -199,20 +123,18 @@ internal sealed partial class SubstrateClient
             "chess_player_ratings", ct);
 
         const string oppSql = """
-            SELECT encode(opponent_id, 'hex'), opponent,
-                   games, wins, draws, losses, unscored, score
-            FROM laplace.chess_opponents(@id, @limit)
+            SELECT encode(opponent_id, 'hex'), opponent, games, rating, rd, eff_mu
+            FROM laplace.chess_head_to_head(@id, @limit)
             """;
         var opponents = await ReadRowsAsync(oppSql,
             static r => new ChessOpponentRow(r.GetString(0), r.GetString(1),
-                new ChessRecord(r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt64(5),
-                    r.GetInt64(6), r.IsDBNull(7) ? null : r.GetDouble(7))),
+                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             cmd =>
             {
                 cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id;
                 cmd.Parameters.AddWithValue("limit", Math.Clamp(opponentLimit, 1, 200));
             },
-            "chess_opponents", ct);
+            "chess_head_to_head", ct);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var name = await ReadLabelAsync(conn, id, ct) ?? idHex;
