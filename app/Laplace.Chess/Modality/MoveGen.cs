@@ -145,24 +145,47 @@ public static class MoveGen
         return result;
     }
 
+    // Allocating wrappers — kept for the many callers that want a fresh list
+    // (Perft, San, ChessTactics, PositionContent, MatchRunner, ExtractPv). They
+    // delegate to the buffered impls below, so those single sources of truth are
+    // exercised by the perft suite that gates correctness.
     public static List<ChessMove> Legal(Board b)
     {
-        var pseudo = Pseudo(b);
-        var legal = new List<ChessMove>(pseudo.Count);
-        bool mover = b.WhiteToMove;
-        foreach (var m in pseudo)
-        {
-            var undo = MoveApply.MakeWithUndo(b, m);
-            if (!InCheck(b, mover))
-                legal.Add(m);
-            MoveApply.Unmake(b, m, undo);
-        }
+        var pseudo = new List<ChessMove>(64);
+        var legal = new List<ChessMove>(48);
+        Legal(b, pseudo, legal);
         return legal;
     }
 
     public static List<ChessMove> Pseudo(Board b)
     {
         var moves = new List<ChessMove>(64);
+        Pseudo(b, moves);
+        return moves;
+    }
+
+    // Buffered: fill caller-provided lists, zero allocation. The Search hot path
+    // reuses per-ply buffers here — the engine was allocation-bound at ~484
+    // bytes/node (2 lists/node × 77M nodes = ~35GB/bench), profiled via
+    // `chess bench` (GH #607). Same moves as the allocating form (perft-gated).
+    public static void Legal(Board b, List<ChessMove> pseudoBuf, List<ChessMove> legalBuf)
+    {
+        Pseudo(b, pseudoBuf);
+        legalBuf.Clear();
+        bool mover = b.WhiteToMove;
+        for (int i = 0; i < pseudoBuf.Count; i++)
+        {
+            var m = pseudoBuf[i];
+            var undo = MoveApply.MakeWithUndo(b, m);
+            if (!InCheck(b, mover))
+                legalBuf.Add(m);
+            MoveApply.Unmake(b, m, undo);
+        }
+    }
+
+    public static void Pseudo(Board b, List<ChessMove> moves)
+    {
+        moves.Clear();
         bool white = b.WhiteToMove;
 
         for (int sq = 0; sq < 128; sq++)
@@ -182,7 +205,6 @@ public static class MoveGen
                 case Piece.WKing: GenLeaper(b, sq, white, KingDeltas, moves); GenCastle(b, sq, white, moves); break;
             }
         }
-        return moves;
     }
 
     private static void GenLeaper(Board b, int from, bool white, int[] deltas, List<ChessMove> moves)
