@@ -27,6 +27,7 @@ internal static class ChessCommands
             "tactics" => await TacticsAsync(args[1..]),
             "lichess" => await LichessAsync(args[1..]),
             "match" => await MatchAsync(args[1..]),
+            "bench" => Bench(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
@@ -64,9 +65,58 @@ internal static class ChessCommands
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
         + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
         + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)\n"
+        + "  bench [--depth D]   (reproducible engine benchmark: fixed-depth Search over a standard\n"
+        + "      position set; reports nodes, nodes/sec, and bytes allocated — the profile-before-\n"
+        + "      optimizing baseline, deterministic node counts at a given depth)\n"
         + "  tactics [epd-file] [--depth D]   (solve-rate over an EPD suite; built-in mate suite if no file)\n"
         + "  lichess [--token T] [--depth D] [--max-concurrent N] [--substrate] [--speed bullet|blitz|rapid|classical]\n"
         + "      stream account events + play rated standard games (token from LICHESS_API env or deploy\\secrets\\lichess.env)";
+
+    // Reproducible engine benchmark — the "profile before optimizing" baseline for the
+    // Search hot path (GH #607). Fixed-depth search over a fixed position set: node counts
+    // are deterministic at a given depth, so nodes/sec and bytes-allocated are the signal.
+    // A representative spread: opening, tactical middlegames, and endgames (where the
+    // 32MB TT clear per Think — see .scratchpad/31 — dominates the shortest searches).
+    private static readonly string[] BenchPositions =
+    [
+        ChessModality.StartFen,
+        "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",   // Ruy Lopez
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", // Kiwipete (tactical)
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",                            // endgame, sparse
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", // symmetric middlegame
+        "8/8/8/8/8/8/6k1/4K2R w K - 0 1",                                       // KR vs K endgame
+        "rnbq1rk1/pp2bppp/4pn2/2pp4/3P4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 8",     // QGD middlegame
+        "2rq1rk1/pp1bppbp/2np1np1/8/2BNP3/2N1BP2/PPPQ2PP/2KR3R w - - 0 11",     // sharp attack
+    ];
+
+    private static int Bench(string[] args)
+    {
+        int depth = ArgInt(args, "--depth", 8);
+        Console.WriteLine($"chess bench — {BenchPositions.Length} positions @ depth {depth} (deterministic node counts)");
+        long totalNodes = 0, totalMs = 0;
+        long allocStart = GC.GetTotalAllocatedBytes(precise: true);
+        // Warm the JIT so the reported numbers are steady-state, not first-call compilation.
+        _ = new Search().Think(Board.FromFen(ChessModality.StartFen), new Search.Limits(MaxDepth: 4));
+        long allocAfterWarm = GC.GetTotalAllocatedBytes(precise: true);
+        for (int i = 0; i < BenchPositions.Length; i++)
+        {
+            var b = Board.FromFen(BenchPositions[i]);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = new Search().Think(b, new Search.Limits(MaxDepth: depth));
+            sw.Stop();
+            totalNodes += r.Nodes;
+            totalMs += sw.ElapsedMilliseconds;
+            long nps = sw.ElapsedMilliseconds > 0 ? r.Nodes * 1000 / sw.ElapsedMilliseconds : 0;
+            Console.WriteLine($"  [{i + 1,2}] nodes={r.Nodes,12:N0}  {sw.ElapsedMilliseconds,6} ms  {nps,10:N0} nps");
+        }
+        long allocBytes = GC.GetTotalAllocatedBytes(precise: true) - allocAfterWarm;
+        long totalNps = totalMs > 0 ? totalNodes * 1000 / totalMs : 0;
+        Console.WriteLine(new string('-', 52));
+        Console.WriteLine($"  total nodes = {totalNodes:N0}   time = {totalMs:N0} ms   {totalNps:N0} nps");
+        Console.WriteLine($"  allocated   = {allocBytes / (1024.0 * 1024.0):N1} MB  ({allocBytes / Math.Max(1, totalNodes)} bytes/node)");
+        Console.WriteLine($"  (warm-up alloc excluded: {(allocAfterWarm - allocStart) / (1024.0 * 1024.0):N1} MB)");
+        return 0;
+    }
 
     private static async Task<int> SubstrateTestAsync(string[] args)
     {
