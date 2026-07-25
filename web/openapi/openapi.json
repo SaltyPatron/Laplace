@@ -4827,7 +4827,8 @@
           "object",
           "total",
           "offset",
-          "players"
+          "players",
+          "ranked_depth"
         ],
         "type": "object",
         "properties": {
@@ -4855,6 +4856,14 @@
             "items": {
               "$ref": "#/components/schemas/ChessPlayerRow"
             }
+          },
+          "ranked_depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },

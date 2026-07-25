@@ -570,15 +570,17 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
     {
+        var roster = await ChessRosterAsync(ct);
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var hit = search.Contains("tal", StringComparison.OrdinalIgnoreCase);
-            return new ChessPlayersResponse("chess.players", hit ? 1 : 0, 0,
-                hit ? [TalRow] : []);
+            var hits = roster
+                .Where(p => p.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))
+                .Take(limit)
+                .ToList();
+            return new ChessPlayersResponse("chess.players", hits.Count, 0, hits, roster.Count);
         }
-        var roster = await ChessRosterAsync(ct);
         return new ChessPlayersResponse("chess.players", roster.Count, offset,
-            [.. roster.Skip(offset).Take(limit)]);
+            [.. roster.Skip(offset).Take(limit)], roster.Count);
     }
 
     public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
