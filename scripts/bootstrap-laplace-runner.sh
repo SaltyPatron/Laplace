@@ -501,6 +501,7 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*unix_socket_directories[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*extension_control_path[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*log_destination[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*logging_collector[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_directory[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_filename[[:space:]]*=/d' \
@@ -520,6 +521,10 @@ logging_collector = on
 log_directory = '$LAPLACE_PG_PREFIX/log'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_file_mode = 0640
+# csvlog runs ALONGSIDE stderr so DB-down still degrades to "read the .log file"; the
+# .csv sibling is what ops.pg_log (file_fdw) reads back as SQL. See db/migrations ops_logs
+# and GH #601. log_filename ending in .log makes csvlog write the matching .csv name.
+log_destination = 'stderr,csvlog'
 hba_file = '$PG_HBA_FILE'
 ident_file = '$PG_IDENT_FILE'
 $marker_end
