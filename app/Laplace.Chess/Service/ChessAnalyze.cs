@@ -152,6 +152,10 @@ public static class ChessAnalyze
         // so re-staging in every Append* helper was pure waste). This ply's `to` nodes carry
         // forward as the next ply's `from`, so its StateKey/compose is never redone either.
         ChessComposed? carried = null;
+        // The game's own line, collected as we walk it: start position then one vertex per ply.
+        // Free — these are the nodes the loop already composed — and it becomes the game
+        // trajectory below.
+        var line = new List<ChessNode>(sans.Count + 1);
         for (int ply = 0; ply < sans.Count; ply++)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), sans[ply]);
@@ -160,6 +164,8 @@ public static class ChessAnalyze
             var next = m.Apply(state, mv.Value);
             var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
             var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
+            if (line.Count == 0) line.Add(from.Position);
+            line.Add(to.Position);
 
             // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
             // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
@@ -215,6 +221,11 @@ public static class ChessAnalyze
             state = next;
             carried = to;
         }
+
+        // One linestring per game, deposited once the whole line is known. A game whose SAN
+        // failed to resolve returned early above and deposits nothing — a partial line would
+        // be a path the game never took.
+        ChessGraph.AppendGameTrajectory(b, gameId, line, src, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L);
     }
 
     private static string? Tok(string?[]? arr, int i)

@@ -205,6 +205,58 @@ public static class ChessGraph
         return c;
     }
 
+    /// <summary>
+    /// The GAME TRAJECTORY (spec 11 §2): one GeometryZM linestring on the game entity whose
+    /// vertices are the positions it passed through, in order, with the position ids bit-packed
+    /// into the mantissa channel. Chess-trajectory parity with the model lane — a game deposits
+    /// its whole move sequence as ONE geometric object, exactly as a circuit deposits its whole
+    /// relational assertion as one testimony-packed linestring.
+    ///
+    /// This is what the ply sequence was missing. Positions were already resident and geometric,
+    /// and every game's line could be reconstructed by replaying its movetext — but the line
+    /// itself was not an object, so "games near this line", maneuver search and transposition
+    /// detection had nothing to index. With it they are GiST-backed spatial queries.
+    ///
+    /// Calculated layer, deliberately: this is deposited under the analyzer's source, versioned
+    /// and evictable, never confused with the verbatim movetext the recorder transcribes. And it
+    /// is a PHYSICALITY, never part of the game's id — geometry is identity and reconstruction,
+    /// not semantics, and coord/hilbert equality is not identity above tier 0.
+    /// </summary>
+    public static void AppendGameTrajectory(
+        SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<ChessNode> line, Hash128 src, long nowUs)
+    {
+        if (line.Count == 0) return;
+
+        var ids = new Hash128[line.Count];
+        var coords = new double[(long)line.Count * 4];
+        for (int i = 0; i < line.Count; i++)
+        {
+            ids[i] = line[i].Id;
+            coords[i * 4 + 0] = line[i].Coord[0];
+            coords[i * 4 + 1] = line[i].Coord[1];
+            coords[i * 4 + 2] = line[i].Coord[2];
+            coords[i * 4 + 3] = line[i].Coord[3];
+        }
+
+        // Same primitives the position tier composes with — one implementation of "pack an
+        // ordered id sequence into a trajectory", not a chess-specific second one.
+        double[] traj = Trajectory.Build(ids);
+        double[] centroid = Math4d.Centroid(coords);
+
+        b.AddPhysicality(new PhysicalityRow(
+            Id: PhysicalityId.Compute(gameId, PhysicalityType.Content),
+            EntityId: gameId,
+            SourceId: src,
+            Type: PhysicalityType.Content,
+            CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
+            HilbertIndex: Hilbert128.Encode(centroid),
+            TrajectoryXyzm: traj,
+            NConstituents: line.Count,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: nowUs));
+    }
+
     private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
         b.AddEntity(n.Id, n.Tier, typeId, src);
