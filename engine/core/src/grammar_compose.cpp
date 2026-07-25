@@ -7,6 +7,7 @@
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/utf8.h"
 #include "laplace/core/grapheme_floor.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hash_composer.h"
@@ -18,9 +19,6 @@
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/trajectory.h"
 
-static void hash_canonical(const char* s, hash128_t* out) {
-    hash128_blake3(reinterpret_cast<const uint8_t*>(s), strlen(s), out);
-}
 
 static void node_type_entity_id(const char* modality, const char* node_type, hash128_t* out) {
     char buf[256];
@@ -29,7 +27,7 @@ static void node_type_entity_id(const char* modality, const char* node_type, has
         hash128_zero(out);
         return;
     }
-    hash_canonical(buf, out);
+    hash128_blake3_str(buf, out);
 }
 
 static int codepoint_resolver(uint32_t atom, void* ,
@@ -63,29 +61,6 @@ static int json_hex_digit(uint8_t c) {
     if (c >= 'a' && c <= 'f') return (int)(c - 'a' + 10);
     if (c >= 'A' && c <= 'F') return (int)(c - 'A' + 10);
     return -1;
-}
-
-static size_t utf8_encode_codepoint(uint32_t cp, uint8_t* out) {
-    if (cp <= 0x7Fu) {
-        out[0] = (uint8_t)cp;
-        return 1;
-    }
-    if (cp <= 0x7FFu) {
-        out[0] = (uint8_t)(0xC0u | (cp >> 6));
-        out[1] = (uint8_t)(0x80u | (cp & 0x3Fu));
-        return 2;
-    }
-    if (cp <= 0xFFFFu) {
-        out[0] = (uint8_t)(0xE0u | (cp >> 12));
-        out[1] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
-        out[2] = (uint8_t)(0x80u | (cp & 0x3Fu));
-        return 3;
-    }
-    out[0] = (uint8_t)(0xF0u | (cp >> 18));
-    out[1] = (uint8_t)(0x80u | ((cp >> 12) & 0x3Fu));
-    out[2] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
-    out[3] = (uint8_t)(0x80u | (cp & 0x3Fu));
-    return 4;
 }
 
 static int json_span_has_escapes(const uint8_t* span, size_t span_len) {
@@ -131,7 +106,7 @@ static int json_unescape_utf8(const uint8_t* span, size_t span_len,
                     uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
                     i += 4;
                     uint8_t tmp[4];
-                    size_t n = utf8_encode_codepoint(cp, tmp);
+                    size_t n = laplace_utf8_encode(cp, tmp);
                     if (w + n > span_len) {
                         uint8_t* grown = (uint8_t*)realloc(buf, w + n + span_len);
                         if (!grown) { free(buf); return -3; }
@@ -156,7 +131,7 @@ static int emit_grapheme_floor_entities(
     tier_tree_t* tree, const laplace_grapheme_floor_t* floor,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap) {
     hash128_t grapheme_type;
-    hash_canonical("Grapheme", &grapheme_type);
+    hash128_blake3_str("Grapheme", &grapheme_type);
     size_t g_first = laplace_grapheme_floor_graph_first_idx(floor);
     size_t g_count = laplace_grapheme_floor_graph_count(floor);
     for (size_t g = 0; g < g_count; ++g) {
@@ -783,7 +758,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         }
 
         hash128_t grapheme_type;
-        hash_canonical("Grapheme", &grapheme_type);
+        hash128_blake3_str("Grapheme", &grapheme_type);
 
         size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
         size_t g_count = laplace_grapheme_floor_graph_count(&floor);
