@@ -413,6 +413,17 @@ jobs:
   publish:
     name: Publish — API + SPA, restart service
     needs: integration-test
+    # A job with no `if` defaults to success(), and success() is evaluated over the
+    # WHOLE transitive needs graph — not just the direct parent. `seed` is
+    # dispatch-only, so on every push it is skipped, and that skip propagates down
+    # through integration-test (which survives it only because it declares its own
+    # `if`) into publish and smoke, which did not. Push-to-main therefore installed
+    # the extension and ran the tests but never shipped the API or SPA, while
+    # restore-api (`if: always()`) faithfully restarted the OLD binaries — so the
+    # box looked healthy and served stale code. State what this job actually
+    # requires instead of inheriting a condition about a job it does not use.
+    if: >-
+      !cancelled() && needs.integration-test.result == 'success'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     # Runtime credentials: repository Secrets (encrypted), not machine secrets.env.
@@ -469,6 +480,11 @@ jobs:
   smoke:
     name: Smoke — live endpoint + substrate counts
     needs: publish
+    # Same transitive-skip trap as publish: smoke is the gate that would have
+    # CAUGHT a stale deploy, and it was skipped by the very condition that caused
+    # one. It must state its own requirement.
+    if: >-
+      !cancelled() && needs.publish.result == 'success'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     steps:
