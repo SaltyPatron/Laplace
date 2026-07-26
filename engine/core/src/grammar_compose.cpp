@@ -1238,22 +1238,38 @@ int laplace_compose_drain_into_stage(
         intent_stage_witness_record(stage, &ph->id);
     }
 
-    hash128_t precedes_type;
-    if (laplace_relation_resolve("PRECEDES", &precedes_type) != 0) {
-        free_emit_filter(&filter);
-        return -1;
-    }
-
-    for (size_t i = 0; i < r->precedes_count; ++i) {
-        const laplace_compose_precedes_t* pr = &r->precedes[i];
-        int64_t sum_score = pr->games * LAPLACE_GLICKO2_FP_SCALE;
-        if (laplace_attestation_aggregated_add(
-                stage, &pr->subject_id, &precedes_type, &pr->object_id, 0,
-                source_id, NULL, 1, witness_weight, pr->games, sum_score, now_unix_us) != 0) {
-            free_emit_filter(&filter);
-            return -1;
-        }
-    }
+    /* Text word-adjacency PRECEDES is NOT drained. Sequence is already carried by
+     * the physicality trajectory above -- the exactly-invertible ordered constituent
+     * sequence -- and read back by geometry_successors / containers_of /
+     * laplace_trajectory_constituents. Materializing it as attestations stores a
+     * second copy of a fact the geometry already holds losslessly.
+     *
+     * This is the drain half of a deletion the rest of the system already made.
+     * TextEntityBuilder.TryDecompose dropped its emission ("Jamming word->word
+     * PRECEDES + CONTAINS onto text was the error that produced millions of
+     * redundant attestations (the re-witness grind) ... Deleted."), and Pillar 5 on
+     * 2026-07-20 completed the read side: continuation_conditional_plane and
+     * pos_transition_plane dropped their PRECEDES-consensus legs, while
+     * foundry_vocab, foundry_vocab_crawl, collocates and usage_overlap moved to
+     * trajectory constituents and geometry_successors -- whose own header states it
+     * plainly: "the same knowledge PRECEDES materialized ... needed by neither: the
+     * trajectory already holds the ordered sequence."
+     *
+     * This drain was missed, and it is the one every grammar-lane source actually
+     * runs through: GrammarIngestAdapter -> GrammarDeferredUnit ->
+     * GrammarRowComposer.DrainInto -> here. On the 2026-07-26 seed it had written
+     * 13,497,079 rows -- 34% of all attestations -- that no read path consumes, and
+     * every one of them arrives at the working-set apply as a present row.
+     *
+     * PRECEDES the RELATION stays: it is a MODEL relation (token couplings, read by
+     * model_factor, scoped there as "PRECEDES attestations whose CONTEXT is the
+     * coordinate") and the conversational feedback lane's own edge
+     * (witness_precedes_chain). Neither is text word-adjacency; neither drains here.
+     *
+     * r->precedes is still COMPUTED by the compose and freed in
+     * laplace_compose_result_free. That is wasted work rather than wrong output, and
+     * removing it means changing what the compose builds -- a separate change.
+     */
 
     free_emit_filter(&filter);
     return 0;
