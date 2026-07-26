@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Laplace.Decomposers.Composition;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Laplace.Cli;
@@ -25,7 +26,14 @@ internal static class CliRuntime
         _services = sc.BuildServiceProvider();
     }
 
-    public static string ConnString => LaplaceInstall.PostgresConnectionString();
+    /// <summary>
+    /// The CLI is an ingest path: hours-long COPY and fold statements are legitimate, so
+    /// the timeout stays unbounded and auto-prepare stays off. Byte-identical to the bare
+    /// install string it replaced — routed through the shared policy so there is one place
+    /// the choice is made rather than four.
+    /// </summary>
+    public static string ConnString
+        => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 
     public static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
 
