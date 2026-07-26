@@ -88,6 +88,54 @@ public class PgTuningParityTests
     }
 
     /// <summary>
+    /// The formula parity above only covers five memory GUCs. The costlier divergence was
+    /// in the SET of knobs each side emitted at all: CpuTopologyCommands.EmitPgTuning wrote
+    /// max_connections, hash_mem_multiplier, autovacuum_work_mem and temp_buffers; the shell
+    /// wrote none of them, so the Linux cluster silently kept PG defaults that multiply the
+    /// memory budget (hash_mem_multiplier 2.0 doubles work_mem per hash node;
+    /// autovacuum_work_mem = -1 gives every autovacuum worker the full maintenance_work_mem).
+    /// The bootstrap fallback must therefore cover every GUC the emitter sets.
+    /// </summary>
+    [Fact]
+    public void ShellFallback_CoversEveryGucTheEmitterSets()
+    {
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var emitter = File.ReadAllText(Path.Combine(root, "app", "Laplace.Cli", "CpuTopologyCommands.cs"));
+        var shell = TuningScript();
+
+        var emitted = new HashSet<string>(
+            Regex.Matches(emitter, @"ALTER SYSTEM SET (?<g>[a-z_]+)")
+                 .Select(m => m.Groups["g"].Value),
+            StringComparer.Ordinal);
+        var shellSet = new HashSet<string>(
+            Regex.Matches(shell, @"ALTER SYSTEM SET (?<g>[a-z_]+)")
+                 .Select(m => m.Groups["g"].Value),
+            StringComparer.Ordinal);
+
+        Assert.NotEmpty(emitted);
+
+        var missing = emitted.Except(shellSet).OrderBy(g => g, StringComparer.Ordinal).ToList();
+        Assert.True(missing.Count == 0,
+            "scripts/pg-machine-tuning.sh's bootstrap fallback does not set: "
+            + string.Join(", ", missing)
+            + ". A GUC the emitter sets but the fallback omits is a cluster running a PG "
+            + "default nobody chose — that is how hash_mem_multiplier=2.0 and "
+            + "autovacuum_work_mem=-1 reached the seed host.");
+    }
+
+    /// <summary>
+    /// The shell must prefer the emitter, not re-derive. If this call disappears the two
+    /// implementations are live again and only the weaker formula gate stands behind them.
+    /// </summary>
+    [Fact]
+    public void ShellPrefersTheAuthoritativeEmitter()
+    {
+        var shell = TuningScript();
+        Assert.Contains("cpu-topology --pg-tuning", shell, StringComparison.Ordinal);
+        Assert.Matches(@"pg_apply_machine_tuning\(\)\s*\{[^}]*cpu-topology --pg-tuning", shell);
+    }
+
+    /// <summary>
     /// effective_cache_size is a percentage, not a divisor — check its shape separately.
     /// </summary>
     [Fact]
