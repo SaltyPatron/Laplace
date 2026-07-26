@@ -37,12 +37,14 @@
 -- floors, no top-k beyond query LIMITs, no stoplist, no surface compare, no
 -- language assumption: units are chosen by rating and by graph adjacency.
 --
--- STATUS: unit selection and ranking are VERIFIED against the live substrate
--- (topic = pawn, 2026-07-26) -- the six top-weighted units are real definitional
--- clauses and the HAS_SYNSET_KEY objects sink to rank 7 on band rank alone. The
--- FUNCTION has never been executed: the extension is uninstalled and an ingest
--- holds the DB. Not wired into chat() until a run exists, the same gate
--- converse_compose is held to.
+-- STATUS: RUN on the deployed extension, 2026-07-26, topic = pawn:
+--   "it can be promoted to a more powerful piece if it reaches the 8th rank.
+--    change a pawn for a better piece by advancing it to the eighth row, or
+--    change a checker piece for a more valuable piece by moving it to the row
+--    closest to your opponent. (chess) the least powerful piece."
+-- Four separately-witnessed clauses, stepped by concept adjacency, on topic.
+-- Wired into chat() on the strength of that run. Two defects it exposed are
+-- fixed below: subsumed-unit repetition and missing clause termination.
 --
 -- KNOWN GAP (data, not code): gloss sentences carry NO HAS_LANGUAGE attestation
 -- -- verified, including the Romanian gloss of `pawn` -- so units cannot be
@@ -148,6 +150,18 @@ BEGIN
 
         -- STEP: the unit whose concepts carry the most rated consensus mass to
         -- what has already been said. Ties break on unit weight, then id.
+        --
+        -- SUBSUMED UNITS ARE SKIPPED. A unit whose concepts are ALREADY all in
+        -- `seen` contributes no new meaning -- it is the same assertion at a
+        -- different granularity, which this corpus is full of: WordNet stores
+        -- "(chess) the least powerful piece" AND "the least powerful piece" AND
+        -- the full semicolon-joined gloss as three separate tier-3 entities, so
+        -- an unguarded walk emitted "...the least powerful piece the least
+        -- powerful piece" (observed on the first live run). This is not a
+        -- floor or a top-k: nothing is ranked out, and a unit carrying even one
+        -- unsaid concept stays eligible. It is the walk declining to re-say what
+        -- it just said, which is what the anti-repeat guard does at the n-gram
+        -- pivot in steered_walk.c -- here at the sentence pivot instead.
         SELECT n.unit INTO cur
         FROM (
             SELECT k.unit,
@@ -159,6 +173,8 @@ BEGIN
               ON (c.subject_id = k.concept AND c.object_id = sc.id)
               OR (c.subject_id = sc.id AND c.object_id = k.concept)
             WHERE NOT (k.unit = ANY(said))
+              AND EXISTS (SELECT 1 FROM _ct_concept nk
+                           WHERE nk.unit = k.unit AND NOT (nk.concept = ANY(seen)))
             GROUP BY k.unit
         ) n
         JOIN _ct_unit u ON u.id = n.unit
@@ -168,9 +184,18 @@ BEGIN
 
     -- REALIZE verbatim, in walk order. render_text runs once per chosen unit --
     -- a handful of calls, not one per token (label-per-row is ~40x realize_batch).
+    -- Units are clauses, not sentences -- a gloss is witnessed without terminal
+    -- punctuation -- so run-on output ("...8th rank change a pawn for...",
+    -- observed live) is a RENDER defect, not a walk defect. Terminate each unit
+    -- that does not already end in punctuation. Nothing is added to the content:
+    -- the witnessed bytes are unchanged and still reconstruct, this only marks
+    -- the seam between two separately-witnessed clauses.
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
         s := btrim(COALESCE(realize(said[i], p_lang), render_text(said[i], 512)));
-        IF s IS NOT NULL AND s <> '' THEN parts := parts || s; END IF;
+        IF s IS NOT NULL AND s <> '' THEN
+            IF s !~ '[.!?;:,]$' THEN s := s || '.'; END IF;
+            parts := parts || s;
+        END IF;
     END LOOP;
 
     IF array_length(parts, 1) IS NULL THEN RETURN NULL; END IF;
