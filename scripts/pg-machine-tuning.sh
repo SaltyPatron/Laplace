@@ -25,12 +25,26 @@ pg_compute_machine_tuning() {
   pdeg=$(( (pcores + 1) / 2 ))
   mwp=$(( pcores + pdeg + 8 ))
   avw=$(( cores / 4 )); (( avw < 3 )) && avw=3; (( avw > 6 )) && avw=6
-  mwm=$(( mem_kb / 32 / 1024 )); (( mwm < 256 )) && mwm=256; (( mwm > 4096 )) && mwm=4096
-  wm=$(( mem_kb / 256 / 1024 )); (( wm < 32 )) && wm=32; (( wm > 512 )) && wm=512
+  # These MUST stay bytes-equal with MemoryTopology.cs (SharedBuffersBytes,
+  # EffectiveCacheSizeBytes, MaintenanceWorkMemBytes, WorkMemBytes, WalBuffersBytes) —
+  # that file carries the 2026-07-15 / doc-28 incident hardening and this script is what
+  # actually issues the ALTER SYSTEM. The two drifted: C# was fixed to RAM/1536-cap-64MB
+  # work_mem, RAM/48-cap-1GB maintenance_work_mem and a 16GB shared_buffers cap, while
+  # this file kept the pre-incident RAM/256-cap-512MB, RAM/32-cap-4GB and an UNCAPPED
+  # shared_buffers. On the 125GB seed host that applied work_mem=502MB,
+  # maintenance_work_mem=3.9GB, shared_buffers=31.4GB and drove 12.5GB into swap during
+  # the wiktionary ingest (26 live backends x ~work_mem of anonymous memory sitting on
+  # top of pinned huge-page shared_buffers). Change both sides together or not at all.
+  mwm=$(( mem_kb / 48 / 1024 )); (( mwm < 256 )) && mwm=256; (( mwm > 1024 )) && mwm=1024
+  wm=$(( mem_kb / 1536 / 1024 )); (( wm < 16 )) && wm=16; (( wm > 64 )) && wm=64
   wb=$(( mem_kb / 512 / 1024 )); (( wb < 16 )) && wb=16; (( wb > 1024 )) && wb=1024
 
-  PG_TUNE_SB=$(( mem_kb / 4 / 1024 ))MB
-  PG_TUNE_ECS=$(( mem_kb * 65 / 100 / 1024 ))MB
+  local sb ecs
+  sb=$(( mem_kb / 4 / 1024 )); (( sb < 128 )) && sb=128; (( sb > 16384 )) && sb=16384
+  ecs=$(( mem_kb * 65 / 100 / 1024 )); (( ecs < 512 )) && ecs=512; (( ecs > 98304 )) && ecs=98304
+
+  PG_TUNE_SB=${sb}MB
+  PG_TUNE_ECS=${ecs}MB
   PG_TUNE_MWM=${mwm}MB
   PG_TUNE_WM=${wm}MB
   PG_TUNE_WB=${wb}MB
