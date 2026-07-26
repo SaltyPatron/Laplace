@@ -1,0 +1,179 @@
+-- converse_tiered(topic, lang, steps): compose a reply by walking the SENTENCE
+-- tier, steered by the Glicko tuple. The replacement for word-level n-grams.
+--
+-- WHAT WAS WRONG WITH THE OLD PATH. converse_walk gathers <=160 sentences, then
+-- at converse_walk.sql.in:93 filters `u.ctier = 2` -- every trajectory is
+-- flattened to word tokens -- concatenates them into `stream bytea[]` plus a
+-- scalar `w bigint[]` (topic weight 50/40/0), and hands both to
+-- steered_walk_raw for trigram->bigram backoff. Once you are inside those two
+-- flat arrays there is no relation type, no eff_mu/rd/witness_count, no highway
+-- band, no tier, no geometry and no provenance. That is a Markov chain using
+-- the substrate as a word list; the tier ladder and the rating math -- the whole
+-- invention -- are discarded before the walk begins.
+--
+-- WHAT THIS DOES INSTEAD. The tier ladder says a word's usage lives in the tier
+-- above it. So walk THERE:
+--
+--   UNITS    tier-3/4 sentences the topic is actually attested in -- its gloss
+--            (definitional band), its HAS_EXAMPLE usages, and the corpus
+--            sentences that contain it (containers_of). Each unit carries the
+--            full signed weight the walker ranks by everywhere else:
+--            relation_rank x (eff_mu - neutral) x witness saturation. A refuted
+--            edge goes negative and drops out on its own -- no floor.
+--   CONCEPTS each unit's tier-2 constituents lifted to their synsets. The tier
+--            ladder is USED here (3 -> 2 -> concept), not collapsed to 2.
+--   STEER    the next unit is the one whose concepts carry the most rated
+--            consensus mass to the concepts already said. The graph does the
+--            sequencing, at sentence grain, through the same eff_mu the rest of
+--            the engine reads. This is "sequence proposes, meaning steers" with
+--            the steering actually live per step rather than computed once.
+--   REALIZE  each chosen unit renders VERBATIM. It is attested content and the
+--            trajectory is exactly invertible, so a composed reply is a sequence
+--            of things witnesses actually said -- every clause traceable to its
+--            witnesses, which is what makes the reply explainable rather than
+--            merely fluent.
+--
+-- Recombination happens at the sentence pivot instead of the trigram pivot. No
+-- floors, no top-k beyond query LIMITs, no stoplist, no surface compare, no
+-- language assumption: units are chosen by rating and by graph adjacency.
+--
+-- STATUS: unit selection and ranking are VERIFIED against the live substrate
+-- (topic = pawn, 2026-07-26) -- the six top-weighted units are real definitional
+-- clauses and the HAS_SYNSET_KEY objects sink to rank 7 on band rank alone. The
+-- FUNCTION has never been executed: the extension is uninstalled and an ingest
+-- holds the DB. Not wired into chat() until a run exists, the same gate
+-- converse_compose is held to.
+--
+-- KNOWN GAP (data, not code): gloss sentences carry NO HAS_LANGUAGE attestation
+-- -- verified, including the Romanian gloss of `pawn` -- so units cannot be
+-- language-gated here and a multilingual topic can mix languages in one reply.
+-- The attestation law says a corpus asserts a sentence's language at the
+-- sentence root; the gloss lane does not. That is a decomposer fix, and until it
+-- lands no amount of read-side work can filter what was never witnessed.
+CREATE OR REPLACE FUNCTION converse_tiered(p_topic bytea,
+                                           p_lang  bytea DEFAULT NULL,
+                                           p_steps int DEFAULT 4,
+                                           p_pool  int DEFAULT 48)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+-- NO NEUTRAL SUBTRACTION. consensus_adjacency's export weight uses
+-- (eff_mu - neutral) so refuted edges sign-flip, and copying that here was a bug
+-- caught before it shipped: eff_mu arrives in the fold's INTERNAL units (~1e12,
+-- so Glicko 1500 is 1.5e12), and eff_mu = rating - 2*rd puts every honestly
+-- weakly-witnessed edge BELOW neutral. Measured on pawn: the whole gloss family
+-- sits at 1.17e12-1.37e12, i.e. Glicko 1170-1370. Subtracting neutral and
+-- keeping w > 0 would have dropped every unit and fallen back to template prose
+-- forever, silently. Rank by the walker's own formula instead --
+-- relation_rank x eff_mu x witness-saturation -- which keeps everything the fold
+-- kept and lets a genuinely refuted edge go negative on its own rating. eff_mu
+-- already carries the rd penalty (rating - 2*rd), so no separate exp(-k*rd).
+DECLARE
+    said     bytea[] := ARRAY[]::bytea[];   -- units already emitted, in order
+    seen     bytea[] := ARRAY[]::bytea[];   -- concepts already said
+    cur      bytea;
+    parts    text[]  := ARRAY[]::text[];
+    s        text;
+    i        int;
+BEGIN
+    IF p_topic IS NULL THEN RETURN NULL; END IF;
+
+    -- UNITS + their weight. The topic's own attested sentences, both the ones it
+    -- points at (gloss, examples) and the ones that contain its surface.
+    CREATE TEMP TABLE IF NOT EXISTS _ct_unit (
+        id bytea PRIMARY KEY, w double precision) ON COMMIT DROP;
+    DELETE FROM _ct_unit;
+
+    INSERT INTO _ct_unit (id, w)
+    SELECT u.id, max(u.w)
+    FROM (
+        -- Sentences the topic ASSERTS: gloss (band 1) and usages (HAS_EXAMPLE).
+        -- Weight is the Glicko-complete signed weight, not a hand-set constant.
+        -- Band governance does the filtering, not a regex: HAS_SYNSET_KEY
+        -- objects are tier-3 content too ("03901750-n") and outrank the gloss on
+        -- raw eff_mu, but relation_rank demotes band 7 (0.36) under band 1
+        -- (0.97) and the definitions win. Measured on pawn: gloss 8.5e11 vs
+        -- synset key 3.7e11.
+        SELECT c.object_id AS id,
+               relation_rank_resolved(c.type_id)
+                 * eff_mu(c.rating, c.rd)::float8
+                 * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
+        FROM consensus c
+        JOIN entities e ON e.id = c.object_id AND e.tier >= 3
+        WHERE c.subject_id = p_topic
+        UNION ALL
+        -- Sentences the topic APPEARS IN: real usage from the corpus. Ranked by
+        -- how strongly the surface denotes this concept, so a homograph's
+        -- sentences sink without being excluded.
+        SELECT co.entity_id,
+               sn.eff_mu::float8
+                 * (sn.witnesses::float8 / (1.0 + sn.witnesses))
+        FROM consensus sc
+        JOIN LATERAL senses(sc.subject_id) sn ON sn.synset_id = p_topic
+        CROSS JOIN LATERAL containers_of(sc.subject_id, 1, 200) co
+        WHERE sc.object_id = p_topic
+          AND relation_in_family(sc.type_id, 'HAS_SENSE')
+          AND co.tier = 3
+    ) u
+    WHERE u.w > 0            -- refuted/neutral edges fall out by sign, not a floor
+    GROUP BY u.id;
+
+    -- CONCEPTS per unit: tier-2 constituents lifted to synsets. This is the tier
+    -- ladder in use -- sentence -> word -> concept -- rather than flattened.
+    CREATE TEMP TABLE IF NOT EXISTS _ct_concept (
+        unit bytea, concept bytea) ON COMMIT DROP;
+    DELETE FROM _ct_concept;
+
+    INSERT INTO _ct_concept (unit, concept)
+    SELECT DISTINCT q.id, top_synset(q.entity_id)
+    FROM (
+        SELECT p.id, tp.entity_id
+        FROM (SELECT id, w FROM _ct_unit ORDER BY w DESC LIMIT p_pool) p
+        CROSS JOIN LATERAL trajectory_unpacked_points(p.id) tp
+        WHERE tp.ctier = 2
+    ) q
+    WHERE top_synset(q.entity_id) IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
+
+    -- OPEN on the best-rated unit: the topic's own strongest assertion about
+    -- itself, which is the gloss whenever one is attested.
+    SELECT id INTO cur FROM _ct_unit ORDER BY w DESC, id LIMIT 1;
+    IF cur IS NULL THEN RETURN NULL; END IF;
+
+    FOR i IN 1..GREATEST(p_steps, 1) LOOP
+        EXIT WHEN cur IS NULL;
+        said := said || cur;
+        seen := seen || ARRAY(SELECT concept FROM _ct_concept WHERE unit = cur);
+
+        -- STEP: the unit whose concepts carry the most rated consensus mass to
+        -- what has already been said. Ties break on unit weight, then id.
+        SELECT n.unit INTO cur
+        FROM (
+            SELECT k.unit,
+                   sum(relation_rank_resolved(c.type_id)
+                       * eff_mu(c.rating, c.rd)::float8) AS pull
+            FROM _ct_concept k
+            JOIN unnest(seen) AS sc(id) ON true
+            JOIN consensus c
+              ON (c.subject_id = k.concept AND c.object_id = sc.id)
+              OR (c.subject_id = sc.id AND c.object_id = k.concept)
+            WHERE NOT (k.unit = ANY(said))
+            GROUP BY k.unit
+        ) n
+        JOIN _ct_unit u ON u.id = n.unit
+        ORDER BY n.pull DESC, u.w DESC, n.unit
+        LIMIT 1;
+    END LOOP;
+
+    -- REALIZE verbatim, in walk order. render_text runs once per chosen unit --
+    -- a handful of calls, not one per token (label-per-row is ~40x realize_batch).
+    FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
+        s := btrim(COALESCE(realize(said[i], p_lang), render_text(said[i], 512)));
+        IF s IS NOT NULL AND s <> '' THEN parts := parts || s; END IF;
+    END LOOP;
+
+    IF array_length(parts, 1) IS NULL THEN RETURN NULL; END IF;
+    RETURN btrim(regexp_replace(array_to_string(parts, ' '), '\s+', ' ', 'g'));
+END;
+$$;

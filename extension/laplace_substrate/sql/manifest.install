@@ -179,6 +179,7 @@ functions/converse/converse.sql.in
 functions/converse/steered_walk_raw.sql.in
 functions/converse/converse_walk.sql.in
 functions/converse/converse_compose.sql.in
+functions/converse/converse_tiered.sql.in
 functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
 functions/converse/recall_session.sql.in

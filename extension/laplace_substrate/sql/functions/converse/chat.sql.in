@@ -286,6 +286,15 @@ BEGIN
         ELSE
             -- describe / what_is / walk / fallback and the no-shape default:
             -- the free-form fused walk over the topic already in hand.
+            --
+            -- converse_tiered() is the intended replacement here (sentence-tier
+            -- composition steered by rated consensus, vs converse_about's
+            -- template prose, which is the S9 FALLBACK and must not be the
+            -- success path). NOT WIRED YET: its unit selection and ranking are
+            -- verified against live data, but the function itself has never been
+            -- executed -- the extension is uninstalled and an ingest holds the
+            -- DB. Same gate converse_compose is held to. Wire it once a run
+            -- exists showing it stays on topic and beats the template.
             out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
                         ELSE converse(p_prompt) END;
         END IF;
