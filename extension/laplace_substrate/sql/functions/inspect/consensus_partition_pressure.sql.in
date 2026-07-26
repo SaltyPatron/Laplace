@@ -1,0 +1,57 @@
+-- Roster staleness detector for the highway-axis partition layout.
+--
+-- consensus/attestations are LIST-partitioned on type_id; only relations flagged
+-- `hot = true` in engine/manifest/relation_types.toml get dedicated HASH(subject_id)
+-- x8 partitions, and everything else shares ONE default heap+btree. That roster is
+-- a human judgement about traffic, and it goes stale silently: a new decomposer can
+-- become the single largest writer in the database while every one of its rows piles
+-- into the default, and nothing says so. That is exactly how Tatoeba's
+-- HAS_EXTERNAL_ID / IS_TRANSLATION_OF reached 4.8M rows in consensus_rdefault
+-- (5.2 GB, the largest consensus table) — discovered only by watching an ingest's
+-- input rate decay from 8,190 to 5,093 rec/s under LWLock.BufferContent contention.
+--
+-- This names the offenders in the substrate's own vocabulary so promotion is a
+-- measurement, not a memory. Rows come back worst-first; anything with a material
+-- `rows` count is owed a `hot = true` in the manifest plus a codegen run — the
+-- partition seed adopts it in place, no reseed.
+--
+-- Not part of substrate_health(): that function gates IDENTITY law. This is
+-- physical layout, a different claim on a different layer.
+CREATE OR REPLACE FUNCTION consensus_partition_pressure(min_rows bigint DEFAULT 100000)
+RETURNS TABLE(
+    tbl         text,
+    relation    text,
+    type_id     bytea,
+    rows        bigint,
+    pct_of_default numeric
+)
+LANGUAGE sql
+STABLE
+SET search_path = @extschema@, public
+AS $$
+    WITH d AS (
+        SELECT 'consensus'::text AS tbl, c.type_id
+          FROM @extschema@.consensus_rdefault c
+        UNION ALL
+        SELECT 'attestations'::text, a.type_id
+          FROM @extschema@.attestations_rdefault a
+    ),
+    agg AS (
+        SELECT d.tbl, d.type_id, count(*) AS rows
+          FROM d
+         GROUP BY d.tbl, d.type_id
+    ),
+    tot AS (
+        SELECT agg.tbl, sum(agg.rows) AS total FROM agg GROUP BY agg.tbl
+    )
+    SELECT
+        agg.tbl,
+        @extschema@.label(agg.type_id) AS relation,
+        agg.type_id,
+        agg.rows,
+        round(100.0 * agg.rows / NULLIF(tot.total, 0), 2) AS pct_of_default
+      FROM agg
+      JOIN tot ON tot.tbl = agg.tbl
+     WHERE agg.rows >= min_rows
+     ORDER BY agg.rows DESC;
+$$;

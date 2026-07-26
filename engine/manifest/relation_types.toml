@@ -425,8 +425,14 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_EXAMPLE"
 
+# HOT: one per source-numbered record, from every corpus that carries an external
+# id (Tatoeba sentence ids, OMW/CILI keys, model recipe ids). Tatoeba alone owes
+# ~41M — it was the #1 writer into consensus_rdefault (2.56M rows and climbing at
+# ~1 per record) before this flag. Low RANK, high VOLUME: partition capacity
+# follows traffic, not salience.
 [[relation]]
 canonical = "HAS_EXTERNAL_ID"
+hot = true
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -817,8 +823,12 @@ symmetry = "symmetric"
 parent = "HAS_SENSE"
 family_root = "HAS_SENSE"
 
+# HOT: the bulk of Tatoeba is links.csv — one row per translation pair, tens of
+# millions of them, and OMW/Wiktionary add more. Second-largest writer into
+# consensus_rdefault (2.27M) at the time it was promoted.
 [[relation]]
 canonical = "IS_TRANSLATION_OF"
+hot = true
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"

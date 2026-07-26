@@ -37,7 +37,17 @@ PG_FUNCTION_INFO_V1(pg_laplace_stream_reset);
 
 
 int laplace_corpus_max_rows = 0;
-int laplace_corpus_max_orphan_sentences = 0;
+/* UNCAPPED by default (-1). A single-sentence source cannot mint a tier-4 root:
+ * the tier-is-a-floor collapse (TierTree.CollapseIndex / collapse_idx() in
+ * content_witness_batch.c) folds a span-identical single-child wrapper into its
+ * child, so Tatoeba rows, WordNet glosses and HAS_EXAMPLE usages are ALL tier-3
+ * orphans by construction. The former 0 ("book-only") therefore excluded the
+ * entire single-sentence corpus from the one enumeration that feeds
+ * walk_continuations, cooccurrence_scan, trajectory_pairs and the foundry's
+ * conditional floor -- the sequence layer starved on a default, not on missing
+ * data. A cap on which sentences may be witnessed is also the operator-invented
+ * floor the substrate law forbids; it survives only as an explicit opt-in. */
+int laplace_corpus_max_orphan_sentences = -1;
 /* Geometry-native default. The 2026-07 ingest overhaul moved sequence truth
  * into trajectory geometry and stopped writing document attestations from
  * every witnessing lane (books, chat turns) — which made source-scoped corpus
@@ -56,8 +66,8 @@ laplace_corpus_guc_init(void)
         PGC_SUSET, 0, NULL, NULL, NULL);
     DefineCustomIntVariable(
         "laplace_substrate.corpus_max_orphan_sentences",
-        "Cap tier-3 orphan sentences in the generation corpus (tier-4 documents and their sentence constituents are always included; 0 = book-only corpus).",
-        NULL, &laplace_corpus_max_orphan_sentences, 0, 0, INT_MAX,
+        "Cap tier-3 orphan sentences in the generation corpus (tier-4 documents and their sentence constituents are always included; -1 = uncapped, 0 = book-only corpus).",
+        NULL, &laplace_corpus_max_orphan_sentences, -1, -1, INT_MAX,
         PGC_SUSET, 0, NULL, NULL, NULL);
     DefineCustomStringVariable(
         "laplace_substrate.corpus_document_source",

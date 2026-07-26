@@ -147,6 +147,7 @@ functions/converse/word_segment.sql.in
 functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
 functions/converse/label_is_content.sql.in
+functions/inspect/consensus_partition_pressure.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/word_language.sql.in
 inference/synonyms.sql.in
@@ -158,6 +159,7 @@ functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
 functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
+functions/converse/prompt_coherence.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path_with_dirs.sql.in
 functions/converse/realize_path.sql.in
@@ -177,6 +179,7 @@ functions/converse/converse.sql.in
 functions/converse/steered_walk_raw.sql.in
 functions/converse/converse_walk.sql.in
 functions/converse/converse_compose.sql.in
+functions/converse/converse_tiered.sql.in
 functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
 functions/converse/recall_session.sql.in
