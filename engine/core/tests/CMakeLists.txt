@@ -13,6 +13,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_trajectory.cpp
     test_tier_tree.cpp
     test_intent_stage.cpp
+    test_absence_filter.cpp
     test_merkle_dedup.cpp
     test_hash_composer.cpp
     test_physicality_id.cpp

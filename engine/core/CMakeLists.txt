@@ -47,6 +47,7 @@ set(LAPLACE_CORE_SOURCES
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c
+    src/absence_filter.c
     src/merkle_dedup.c
     src/hash_composer.c
     src/grapheme_floor.c
