@@ -10,9 +10,20 @@
 -- observed_at (a new doc may reference old sentences); dedup against sequences the
 -- corpus already streams is the C side's job (parent-id hash set in
 -- trajectory_corpus.c corpus_refresh).
+--
+-- p_max_orphans: < 0 = UNCAPPED (every tier-3 sentence participates), 0 = book-only,
+-- > 0 = the N most recently observed orphans. Uncapped is the default because a
+-- ONE-SENTENCE source can never mint a tier-4 root: TierTree.cs CollapseIndex ("tier
+-- is a FLOOR: a single-child, span-identical wrapper IS its child") collapses the
+-- wrapper into the sentence, so Tatoeba/WordNet-gloss/HAS_EXAMPLE sentences are all
+-- tier-3 orphans by construction. A book-only corpus therefore excluded the entire
+-- single-sentence corpus -- and with it walk_continuations, cooccurrence_scan,
+-- trajectory_pairs and the foundry's conditional floor, which all read this one
+-- enumeration. Capping which sentences may be witnessed is also the operator-invented
+-- floor the substrate law forbids; the cap survives only as an explicit opt-in.
 CREATE OR REPLACE FUNCTION corpus_sentence_constituents_since(
         p_document_source text DEFAULT '',
-        p_max_orphans int DEFAULT 0,
+        p_max_orphans int DEFAULT -1,
         p_since timestamptz DEFAULT '-infinity')
     RETURNS TABLE(parent_id bytea, child_id bytea, run_length int)
     LANGUAGE sql STABLE PARALLEL RESTRICTED
@@ -34,21 +45,36 @@ CREATE OR REPLACE FUNCTION corpus_sentence_constituents_since(
         JOIN physicalities pd
           ON pd.entity_id = d.id AND pd.type = 1 AND pd.trajectory IS NOT NULL
         CROSS JOIN LATERAL laplace_trajectory_constituents(pd.trajectory) tc
-    ), orphan_sent AS (
+    ), orphan_capped AS (
+        -- Explicit cap (p_max_orphans > 0): the N most recently observed. The
+        -- constant-false guard prunes this arm entirely when uncapped, so the
+        -- observed_at sort is never planned on the whole-corpus path.
         SELECT e.id
         FROM entities e
         JOIN physicalities ps
           ON ps.entity_id = e.id AND ps.type = 1 AND ps.trajectory IS NOT NULL
          AND ps.observed_at >= p_since
-        WHERE e.tier = 3
+        WHERE p_max_orphans > 0
+          AND e.tier = 3
           AND NOT EXISTS (SELECT 1 FROM book_sent bs WHERE bs.id = e.id)
         ORDER BY ps.observed_at DESC
         LIMIT GREATEST(p_max_orphans, 0)
+    ), orphan_all AS (
+        -- Uncapped: no ORDER BY, no LIMIT -- every tier-3 sentence is a witness.
+        SELECT e.id
+        FROM entities e
+        JOIN physicalities ps
+          ON ps.entity_id = e.id AND ps.type = 1 AND ps.trajectory IS NOT NULL
+         AND ps.observed_at >= p_since
+        WHERE p_max_orphans < 0
+          AND e.tier = 3
+          AND NOT EXISTS (SELECT 1 FROM book_sent bs WHERE bs.id = e.id)
     ), s AS (
         SELECT id FROM book_sent
         UNION ALL
-        SELECT id FROM orphan_sent
-        WHERE p_max_orphans > 0
+        SELECT id FROM orphan_capped
+        UNION ALL
+        SELECT id FROM orphan_all
     )
     SELECT pp.entity_id AS parent_id,
            u.entity_id AS child_id,
