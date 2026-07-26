@@ -111,30 +111,6 @@ public static class ChessGraph
             observationCount: games));
     }
 
-    /// <summary>
-    /// The move's NOTATION, attested on the position it was played from, with the game as
-    /// context: (from_position, HAS_SAN, "Nf6"). HAS_SAN was declared in the manifest and
-    /// never emitted, so notation was the one part of a game that could not be looked up —
-    /// which is why reading a game back meant replaying its whole movetext through the
-    /// engine to recover strings the source had already stated. Everything else about a ply
-    /// (the MOVE edge, the clock, the eval, the think class, the quality) was already an
-    /// attestation keyed by context_id; this closes the gap so a replay is purely lookups.
-    ///
-    /// Provenance, not aggregation: contextId is the game, and the same SAN from the same
-    /// position in a different game is a different evidence row under a different context.
-    /// The position it hangs on is shared content, so the notation rides the dedup like
-    /// every other per-ply fact.
-    /// </summary>
-    internal static void AppendSan(
-    SubstrateChangeBuilder b, Hash128 positionId, string san, double witnessWeight,
-    Hash128 sourceId, Hash128 contextId)
-    {
-        if (string.IsNullOrWhiteSpace(san)) return;
-        if (ContentEmitter.Emit(b, san, sourceId) is not { } sid) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            positionId, "HAS_SAN", sid, sourceId, contextId, witnessWeight));
-    }
-
     public static void AppendClock(
     SubstrateChangeBuilder b, string fromKey, string canonicalClock, double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
