@@ -107,6 +107,8 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
         _persistedEntityIds = new HashSet<Hash128>();
         _persistedPhysIds = new HashSet<Hash128>();
+        // Content roots proven present feed the spine's pre-derivation ladder skip.
+        Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin();
         _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
         if (_tier0LayerComplete)
             _log.LogInformation(
@@ -120,6 +122,7 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = null;
         _persistedEntityIds = null;
         _persistedPhysIds = null;
+        Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
         if (cycle is not null)
             await cycle.FinishAsync(ct);
@@ -732,6 +735,23 @@ public sealed partial class NpgsqlSubstrateWriter
                 foreach (var id in novelEntIds) persistedEnt.Add(id);
             if (persistedPhys is not null && novelPhysIds is not null)
                 foreach (var id in novelPhysIds) persistedPhys.Add(id);
+
+            // Same commit boundary, same reason: a root may only answer "ladder already
+            // deposited" once it is durably in the target.
+            //
+            // The feed is what THIS APPLY STAGED (probeEntityIds), not everything found
+            // present. Presence alone would let one source's earlier deposit suppress the
+            // next source's FIRST witnessing of the same surface — WordNet minting "casa"
+            // would silence OMW's own attestation of it, and provenance is never mashed.
+            // The ledger is armed per bulk run, and a bulk run is one source, so a root
+            // enters only after this source has staged it and that stage has committed.
+            // What the skip then suppresses is strictly the 2nd..Nth re-emission within
+            // the run — the batch-boundary artifact, nothing a source asserts.
+            //
+            // Ids withheld from the probe are consistent with that: cache-skipped ids are
+            // already ledgered from the apply that committed them, and tier-0 gated ids
+            // are single codepoints with no ladder below them to re-walk.
+            Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(probeEntityIds);
         }
         catch
         {

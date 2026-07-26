@@ -114,6 +114,24 @@ public static class ContentTierSpine
     {
         rootId = default;
         if (canonicalUtf8.IsEmpty) return false;
+
+        // Ask whether this surface's ladder is already deposited BEFORE deriving it.
+        // TryAddContentWitness -> content_witness_batch_add builds the whole tier tree
+        // and only then checks intent_stage_witness_seen (content_witness_batch.c:364),
+        // against a seen-set that lives one record batch — so a surface recurring across
+        // batches is re-derived AND re-emitted, and the re-emitted nodes land in the
+        // apply's merge lane because they already exist. ResolveRoot is the cheap half
+        // (native fast path, memoized); the ledger holds only roots proven present by a
+        // committed apply, so a hit is proof the ladder is there and a miss just costs
+        // what today already costs. See ContentLadderLedger for the measurement.
+        if (ContentLadderLedger.Armed
+            && ResolveRoot(canonicalUtf8) is { } known
+            && ContentLadderLedger.IsPersisted(known))
+        {
+            rootId = known;
+            return true;
+        }
+
         if (builder.DeferredContent is { } cb)
             return cb.Append(canonicalUtf8, sourceId, out rootId);
         return builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId);

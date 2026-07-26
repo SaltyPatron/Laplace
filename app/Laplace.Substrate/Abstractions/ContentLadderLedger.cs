@@ -1,0 +1,98 @@
+using System.Collections.Concurrent;
+using Laplace.Engine.Core;
+
+namespace Laplace.Decomposers.Abstractions;
+
+/// <summary>
+/// Run-scoped record of content roots whose tier ladder is proven durably present in
+/// the target substrate. Consulted by <see cref="ContentTierSpine.TryStageIntoBuilder"/>
+/// to answer "has this surface's ladder already been deposited?" BEFORE the ladder is
+/// derived.
+///
+/// The defect this closes: <c>content_witness_batch_add</c> builds the entire ladder
+/// (decompose to codepoints, walk the grapheme ladder, Merkle-hash every node) and only
+/// THEN asks whether it has been seen — <c>content_witness_batch.c:364</c>, and it asks
+/// an <c>intent_stage_t</c>, whose seen-set lives exactly one record batch. Across a
+/// corpus the same surface is therefore re-derived AND RE-EMITTED once per batch it
+/// appears in. The re-emitted nodes already exist, so they arrive at the working-set
+/// apply as PRESENT rows and pour into the merge lane instead of the COPY lane.
+///
+/// MEASURED on the 2026-07-26 OMW seed (1226 language files over a shared Latin
+/// alphabet — a near-total repeat class): merge applies of 149,247 and 242,563 present
+/// rows, PRECEDES carrying 4,955,844 observations across 785,637 rows with a single
+/// codepoint-adjacency edge at observation_count 290,320, and PRECEDES alone accounting
+/// for more than half of all attestation UPDATEs on the run.
+///
+/// Those counts were never testimony. <c>intent_stage_witness_seen</c> already suppresses
+/// the second emission WITHIN a batch, so the recorded count is a function of where the
+/// batch boundaries fell — not of the corpus. Re-deriving a surface's ladder observes
+/// nothing new: the decomposition of content into its codepoints is identity, owned by
+/// the spine, not evidence about the world. Attest each fact once, at the tier and
+/// provenance the source asserts it.
+///
+/// Membership must have NO false positives — a wrongly-skipped ladder is a dropped
+/// entity, not a slow one. Ids enter only from <c>presentEntities</c>: probed present in
+/// the target, or written by an apply of this run that has COMMITTED. A miss is always
+/// safe and merely costs the derivation that happens today.
+///
+/// Root presence proves ladder presence — the same premise
+/// <c>merkle_dedup_trunk_shortcircuit</c> already runs on: a present trunk short-circuits
+/// its whole subtree. This ledger reaches that conclusion one step earlier, before the
+/// subtree is built.
+/// </summary>
+public static class ContentLadderLedger
+{
+    /// <summary>
+    /// Bounded by DISTINCT content roots deposited on a run, which is the same order as
+    /// the apply's own persisted-id caches (tens of millions on a full seed). The cap is
+    /// a backstop against an unbounded id space (a model ingest mints roots per tensor
+    /// row); past it the ledger stops accreting and callers fall back to deriving, which
+    /// loses reuse and never correctness.
+    /// </summary>
+    private const int Cap = 1 << 24;
+
+    private static ConcurrentDictionary<Hash128, bool>? _persisted;
+    private static int _count;
+
+    /// <summary>Arms the ledger for a bulk run. Idempotent; a second call keeps the set.</summary>
+    public static void Begin()
+    {
+        if (_persisted is null)
+        {
+            _persisted = new ConcurrentDictionary<Hash128, bool>();
+            Volatile.Write(ref _count, 0);
+        }
+    }
+
+    /// <summary>Disarms the ledger. Outside a bulk run every probe misses and nothing is skipped.</summary>
+    public static void End()
+    {
+        _persisted = null;
+        Volatile.Write(ref _count, 0);
+    }
+
+    /// <summary>True while a bulk run has armed the ledger. Outside one, never skip.</summary>
+    public static bool Armed => _persisted is not null;
+
+    /// <summary>True iff this root's ladder is proven present in the target substrate.</summary>
+    public static bool IsPersisted(Hash128 root)
+    {
+        var map = _persisted;
+        return map is not null && map.ContainsKey(root);
+    }
+
+    /// <summary>
+    /// Records roots proven present. Callers MUST only pass ids that are durably in the
+    /// target — probed present, or written by an apply that has committed.
+    /// </summary>
+    public static void MarkPersisted(IEnumerable<Hash128> roots)
+    {
+        var map = _persisted;
+        if (map is null) return;
+        foreach (var id in roots)
+        {
+            if (Volatile.Read(ref _count) >= Cap) return;
+            if (map.TryAdd(id, true)) Interlocked.Increment(ref _count);
+        }
+    }
+}
