@@ -61,17 +61,27 @@ DECLARE
 BEGIN
     -- ORIENT. Same hash-space signal chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize(), no surface comparison.
+    -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
+    -- Ranking every (token, sense) pair by breadth selects obscure/slang senses that
+    -- happen to be wired into more relation types -- it resolved `dog` to SIRE, which
+    -- made this function seed from the wrong gloss entirely and rendered the whole
+    -- steer comparison meaningless. Mirrors chat()'s orientation exactly.
     SELECT y.tok, y.syn INTO topic_word, syn
     FROM (
-        SELECT x.tok, x.syn, x.denote_mu,
-               laplace_highway_popcount(e.highway_mask) AS breadth
-        FROM (SELECT DISTINCT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu
-              FROM prompt_state(p_prompt) p
-              CROSS JOIN LATERAL senses(p.id) s
-              WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL) x
-        LEFT JOIN entities e ON e.id = x.syn
+        SELECT DISTINCT ON (x.tok)
+               x.tok, x.syn, x.denote_mu, x.tok_breadth
+        FROM (
+            SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
+                   max(laplace_highway_popcount(e.highway_mask))
+                       OVER (PARTITION BY p.id) AS tok_breadth
+            FROM prompt_state(p_prompt) p
+            CROSS JOIN LATERAL senses(p.id) s
+            LEFT JOIN entities e ON e.id = s.synset_id
+            WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
+        ) x
+        ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
     ) y
-    ORDER BY y.breadth DESC NULLS LAST, y.denote_mu DESC NULLS LAST, y.syn
+    ORDER BY y.tok_breadth DESC NULLS LAST, y.denote_mu DESC NULLS LAST, y.syn
     LIMIT 1;
     IF syn IS NULL THEN RETURN NULL; END IF;
 
