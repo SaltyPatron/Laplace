@@ -150,21 +150,42 @@ BEGIN
         -- content from function words cleanly and without a stoplist -- content words
         -- are wired into many KINDS of relation, function words into few, in any
         -- language. denote_mu still decides WHICH sense of the winning concept.
-        SELECT array_agg(y.syn ORDER BY y.breadth DESC NULLS LAST,
+        -- TWO LEVELS, TWO DIFFERENT QUESTIONS. Flattening every (token, sense) pair
+        -- into one breadth-ordered list conflated them and shipped a live regression:
+        -- "What is a dog?" answered about SIRE ("a male animal that has fathered a
+        -- particular offspring... a kind of horse") and "What are the parts of a car?"
+        -- answered about WHIP (the lash; `whip` is attested slang for car). Breadth
+        -- ranks how many KINDS of relation a concept participates in, and an obscure
+        -- or slang sense can be wired into more of them than the ordinary one, so used
+        -- as the outer sort it selects exactly the wrong sense.
+        --
+        --   WHICH TOKEN is the topic  -> breadth. Content words are wired into many
+        --       relation types, function words into few, in any language and with no
+        --       stoplist. Measured: car 24, are 24, a 20, of 19, parts 8.
+        --   WHICH SENSE of that token -> denote_mu, how strongly the surface denotes
+        --       the sense. Never breadth: that is what picked sire and whip.
+        --
+        -- So collapse to the best sense PER TOKEN first (DISTINCT ON the token,
+        -- ordered by denote_mu), carry that token's breadth as a window aggregate, and
+        -- only then rank tokens. denote_mu breaks breadth ties, which is what separates
+        -- car (24, denote 1458.9) from are (24, denote 1169.7).
+        SELECT array_agg(y.syn ORDER BY y.tok_breadth DESC NULLS LAST,
                                         y.denote_mu DESC NULLS LAST,
                                         y.syn)
           INTO cands
         FROM (
-            SELECT DISTINCT ON (x.syn)
-                   x.syn,
-                   x.denote_mu,
-                   laplace_highway_popcount(e.highway_mask) AS breadth
-            FROM (SELECT s.synset_id AS syn, s.eff_mu AS denote_mu
-                  FROM prompt_state(p_prompt) p
-                  CROSS JOIN LATERAL senses(p.id) s
-                  WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL) x
-            LEFT JOIN entities e ON e.id = x.syn
-            ORDER BY x.syn, x.denote_mu DESC
+            SELECT DISTINCT ON (x.tok)
+                   x.tok, x.syn, x.denote_mu, x.tok_breadth
+            FROM (
+                SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
+                       max(laplace_highway_popcount(e.highway_mask))
+                           OVER (PARTITION BY p.id) AS tok_breadth
+                FROM prompt_state(p_prompt) p
+                CROSS JOIN LATERAL senses(p.id) s
+                LEFT JOIN entities e ON e.id = s.synset_id
+                WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
+            ) x
+            ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
         ) y;
         topic := cands[1];
         -- Nothing in this turn resolved: carry the session's standing topic.
