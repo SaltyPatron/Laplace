@@ -115,6 +115,16 @@ DECLARE
     pl_p1   bytea := laplace_hash128_blake3('t2/plies/p1');
     pl_p2   bytea := laplace_hash128_blake3('t2/plies/p2');
     pl_game bytea := laplace_hash128_blake3('t2/plies/game');
+    -- SAN surfaces for the ply fixture. SINGLE CODEPOINTS on purpose: chess_game_plies
+    -- returns the REALIZED san text, and a tier-0 codepoint renders straight from the
+    -- perfcache with no constituents deposited. A multi-codepoint word_id (the result
+    -- tokens '1-0'/'1/2-1/2' this fixture used to reuse here) is a composed entity whose
+    -- surface needs its constituent chain, which this fixture never deposits -- so it
+    -- realized to NULL and `WHERE san IS NOT NULL` counted 0. Same trick converse.sql
+    -- uses for word_id('p').
+    pl_sa   bytea := word_id('a');
+    pl_sb   bytea := word_id('b');
+    pl_sc   bytea := word_id('c');
     ids_got bytea[];
     n       bigint;
     w       bigint;
@@ -318,7 +328,8 @@ BEGIN
     -- fixture is byte-identical to a real deposit rather than a hand-rolled imitation.
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (pl_p0, 0, type_t, src), (pl_p1, 0, type_t, src), (pl_p2, 0, type_t, src),
-        (pl_game, 0, type_t, src);
+        (pl_game, 0, type_t, src), (pl_sa, 0, type_t, src), (pl_sb, 0, type_t, src),
+        (pl_sc, 0, type_t, src);
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('t2/plies/phys'), pl_game, 1,
@@ -338,12 +349,12 @@ BEGIN
          outcome, last_observed_at, observation_count)
     VALUES
         (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
-             r_white, src, pl_game, 2, now(), 1),
+             pl_sa, src, pl_game, 2, now(), 1),
         (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
-             r_draw, src, pl_game, 2, now(), 1),
+             pl_sb, src, pl_game, 2, now(), 1),
         -- another game's ply on the SAME shared position: context_id must exclude it
         (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
-             r_black, src, g1, 2, now(), 1);
+             pl_sc, src, g1, 2, now(), 1);
 
     SELECT count(*) INTO n FROM chess_game_plies(pl_game);
     IF n <> 3 THEN
