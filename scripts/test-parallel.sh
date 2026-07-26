@@ -72,8 +72,15 @@ run_ctest_engine() {
     return 0
   fi
   echo "==== ctest (excl. regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress
-  fp_record test-engine "$fp"
+  # rc must be captured and returned: a bare ctest followed by fp_record makes
+  # fp_record the last command, so the function returns ITS status and a failing
+  # suite reports success. Recording only on success matters just as much -- a
+  # stamp written after a failure makes the next run fp_check-skip the suite
+  # entirely, caching the failure as a pass.
+  local rc=0
+  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress || rc=$?
+  if [[ "$rc" -eq 0 ]]; then fp_record test-engine "$fp"; fi
+  return "$rc"
 }
 
 run_ctest_regress() {
@@ -87,8 +94,13 @@ run_ctest_regress() {
     return 0
   fi
   echo "==== ctest (regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress
-  fp_record test-regress "$fp"
+  # Same capture-and-return as run_ctest_engine. Observed live: chess_read failed,
+  # ctest printed "1 of 16 tests failed" and "Errors while running CTest", and the
+  # layer still reported ctest-regress_rc=0.
+  local rc=0
+  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress || rc=$?
+  if [[ "$rc" -eq 0 ]]; then fp_record test-regress "$fp"; fi
+  return "$rc"
 }
 
 run_dotnet() {
@@ -121,10 +133,16 @@ run_dotnet() {
   mapfile -t projs <<<"$plan_out"
   if (( ${#projs[@]} > 6 )); then
     echo "==== dotnet test (${#projs[@]} affected — full solution, $DOTNET_FILTER) ===="
+    # `return 0` here discarded the result outright -- the full-solution path could
+    # not fail. The per-project path below already does this correctly (tracks rc,
+    # records only what passed); this now matches it.
+    local rc=0
     ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
-        --filter "$DOTNET_FILTER" )
-    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns test --salt "$salt"
-    return 0
+        --filter "$DOTNET_FILTER" ) || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns test --salt "$salt"
+    fi
+    return "$rc"
   fi
 
   echo "==== dotnet test (${#projs[@]} affected project(s), $DOTNET_FILTER) ===="
