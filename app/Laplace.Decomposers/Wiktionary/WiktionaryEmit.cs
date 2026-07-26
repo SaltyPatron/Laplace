@@ -203,8 +203,7 @@ internal static class WiktionaryEmit
     {
         id = default;
         if (string.IsNullOrEmpty(surface)) return false;
-        return ContentTierSpine.TryStageIntoBuilder(
-            b, Encoding.UTF8.GetBytes(surface), WiktionaryDecomposer.Source, out id);
+        return WiktionarySurfaceTrees.TryStage(b, surface, WiktionaryDecomposer.Source, out id);
     }
 
     private static void Attest(
