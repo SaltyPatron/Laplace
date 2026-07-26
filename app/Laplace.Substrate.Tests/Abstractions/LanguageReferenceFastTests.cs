@@ -7,7 +7,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 [CollectionDefinition("LanguageReference")]
 public sealed class LanguageReferenceCollection { }
 
-[Collection("LanguageReference")]
+[Collection("GrammarPerfcache")]
 [Trait("Tier", "fast")]
 public sealed class LanguageReferenceFastTests : IDisposable
 {
@@ -37,7 +37,19 @@ public sealed class LanguageReferenceFastTests : IDisposable
 
     public void Dispose()
     {
+        // LanguageReference.Load REPLACES a process-global map, and this class loads a
+        // synthetic 3-language table. Leaving it installed makes every later reader of
+        // the real ISO 639-3 set (7,930 rows) see 3 — the CI-only failure
+        // "LanguageFilter: unresolvable language(s) in 'abq'". Restore the real table so
+        // no other class inherits the fixture.
         try { Directory.Delete(_dir, recursive: true); } catch { }
+        try
+        {
+            string real = TestPathHelpers.Iso639OrFallback();
+            if (File.Exists(Path.Combine(real, "iso-639-3.tab")))
+                LanguageReference.Load(real);
+        }
+        catch { }
     }
 
     [Fact]
