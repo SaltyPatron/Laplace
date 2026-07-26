@@ -7,6 +7,10 @@ namespace Laplace.SubstrateCRUD;
 public readonly record struct CircuitRelation(
     Hash128 Subject, Hash128 Object, Hash128 TypeId, double EffMu, long Witnesses);
 
+/// <summary>One relation crowding the consensus/attestations DEFAULT partition — a
+/// relation carrying real traffic that the manifest never flagged <c>hot = true</c>.</summary>
+public readonly record struct PartitionPressure(string Relation, long Rows, double PctOfDefault);
+
 public interface ISubstrateReader
 {
     Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default);
@@ -101,4 +105,16 @@ public interface ISubstrateReader
     Task<IReadOnlyList<double>> GetEdgeStrengthsAsync(
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, Hash128 typeId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<double>>(Array.Empty<double>());
+
+    /// <summary>
+    /// Relations crowding the DEFAULT partition of consensus, worst first. The hot roster in
+    /// <c>engine/manifest/relation_types.toml</c> is a human judgement about traffic, and it goes
+    /// stale in silence: a decomposer can become the single largest writer in the database with
+    /// every one of its rows piling into one shared heap and btree, and nothing says so. Reported
+    /// at the end of every ingest run so the source that causes it is the source that names it.
+    /// Defaults to empty for readers/installs without the diagnostic.
+    /// </summary>
+    Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
+        long minRows, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<PartitionPressure>>(Array.Empty<PartitionPressure>());
 }

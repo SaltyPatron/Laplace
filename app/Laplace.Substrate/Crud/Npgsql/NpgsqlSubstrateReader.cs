@@ -298,4 +298,29 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         while (await rdr.ReadAsync(ct)) outv.Add(rdr.GetDouble(0));
         return outv;
     }
+
+    public async Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
+        long minRows, CancellationToken ct = default)
+    {
+        // The scan lives in consensus_partition_pressure() — one implementation of the
+        // fact, on the layer that owns partition layout. An install predating the
+        // function degrades to "nothing to report" rather than sinking a finished run.
+        await using var cmd = _ds.CreateCommand(
+            "SELECT relation, rows, pct_of_default FROM laplace.consensus_partition_pressure($1) "
+            + "WHERE tbl = 'consensus' ORDER BY rows DESC");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bigint, minRows);
+        try
+        {
+            var outv = new List<PartitionPressure>();
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            while (await rdr.ReadAsync(ct))
+                outv.Add(new PartitionPressure(
+                    rdr.GetString(0), rdr.GetInt64(1), (double)rdr.GetDecimal(2)));
+            return outv;
+        }
+        catch (PostgresException)
+        {
+            return Array.Empty<PartitionPressure>();
+        }
+    }
 }

@@ -467,12 +467,53 @@ public sealed class IngestRunner
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
         _obs.OnRunFinished(decomposer.SourceName, result, status);
+        await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "
                 + "but ingested 0 — grammar/format mismatch (silent no-op). Failing instead of reporting success. "
                 + "Check the decomposer's modality/grammar matches the actual file format.");
         return result;
+    }
+
+    /// <summary>
+    /// Names any relation crowding the consensus DEFAULT partition, at the end of every run.
+    ///
+    /// WHY THIS IS A RUN-TIME REPORT AND NOT A CI GATE: the hot roster is a judgement about
+    /// TRAFFIC, and traffic only exists on a populated database. CI can and does recreate
+    /// laplace empty, so a fixture-backed gate would pass while the real box degrades. The
+    /// ingest that generates the traffic is the only thing that reliably knows — so it is the
+    /// thing that reports. MEASURED cost of not doing this: Tatoeba's HAS_EXTERNAL_ID and
+    /// IS_TRANSLATION_OF reached 69% of consensus_rdefault (5.2 GB, one heap, one btree)
+    /// before anyone noticed, and the only symptom was an ingest getting slower.
+    ///
+    /// It warns, it does not throw: a layout problem must not fail an otherwise-clean
+    /// multi-hour ingest whose rows are all correctly recorded. Promotion is a manifest
+    /// edit plus a codegen run — the partition seed adopts it in place, no reseed.
+    /// </summary>
+    private async Task ReportPartitionPressureAsync(ILogger log, CancellationToken ct)
+    {
+        // Floor, not a fraction: below this a relation cannot meaningfully crowd anything,
+        // and a small/empty substrate reports nothing rather than noise.
+        const long MinRows = 1_000_000;
+        IReadOnlyList<PartitionPressure> pressure;
+        try
+        {
+            pressure = await _reader.PartitionPressureAsync(MinRows, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return;  // a diagnostic must never be the reason a finished run reports failure
+        }
+
+        foreach (var p in pressure)
+            log.LogWarning(
+                "INGEST_PARTITION_PRESSURE relation={Relation} rows={Rows} pct_of_default={Pct:F1} "
+                + "action=promote-to-hot detail=\"{Relation} rides consensus_rdefault, a single "
+                + "shared heap+btree. Add `hot = true` to its [[relation]] block in "
+                + "engine/manifest/relation_types.toml and run scripts/codegen-attestation-law.py; "
+                + "the partition seed adopts the existing rows in place.\"",
+                p.Relation, p.Rows, p.PctOfDefault, p.Relation);
     }
 
     private async Task ProcessOneIntentAsync(
