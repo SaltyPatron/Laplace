@@ -140,6 +140,29 @@ fi
 if [ "$(id -u)" -eq 0 ]; then
   install -d -m 2775 -o "$RUN_AS" -g "$RUN_AS" "$(dirname "$BUILD")" "$BUILD" 2>/dev/null \
     || mkdir -p "$BUILD"
+  # install -d only owns dirs it CREATES. Everything a developer left here under their
+  # own uid stays theirs, and the build below drops root to $RUN_AS (see run_as). A
+  # process can then write those files through the setgid group bit but does not OWN
+  # them — and cmake's configure_file copies permissions onto its destination, so it
+  # chmod()s a file owned by someone else and gets EPERM: "Operation not permitted".
+  # The setgid group-writable tree hides this until the fingerprint changes and forces
+  # the first reconfigure in weeks, which is when it detonates (2026-07-26: deps tree
+  # from a Jul-17 `ahart` run, six ExternalProject_Add configure_file failures).
+  # Normalise ownership while we still hold root. Idempotent, and it keeps the human
+  # out of `sudo rm -rf /opt/laplace/build`.
+  if id -u "$RUN_AS" >/dev/null 2>&1 && [ -d "$BUILD" ]; then
+    foreign="$(find "$BUILD" ! -user "$RUN_AS" -print -quit 2>/dev/null || true)"
+    if [ -n "$foreign" ]; then
+      yellow "  build tree has entries not owned by $RUN_AS — normalising (configure_file would EPERM)"
+      find "$BUILD" ! -user "$RUN_AS" -exec chown -h "$RUN_AS:$RUN_AS" {} + 2>/dev/null || true
+      still="$(find "$BUILD" ! -user "$RUN_AS" -print -quit 2>/dev/null || true)"
+      if [ -n "$still" ]; then
+        red "  could not normalise ownership under $BUILD (first offender: $still)"
+        exit 1
+      fi
+      green "✓ $BUILD ownership normalised to $RUN_AS"
+    fi
+  fi
 else
   mkdir -p "$BUILD"
 fi
