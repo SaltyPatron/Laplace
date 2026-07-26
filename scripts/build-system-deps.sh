@@ -95,6 +95,33 @@ run_as_builder() {
   fi
 }
 
+# ONE build identity per tree. The root path above builds as $RUN_AS; the non-root path
+# builds as whoever invoked it. Both write /opt/laplace/build/deps, which is setgid 2775
+# group $RUN_AS — so a developer in that group writes there successfully and leaves files
+# owned by THEMSELVES. Nothing complains, because the group model makes ownership look
+# irrelevant. It is not: cmake's configure_file copies permissions onto its destination,
+# so the next $RUN_AS build chmod()s a file it does not own and gets EPERM, "Operation
+# not permitted". That is a mine armed by one run and detonated by another, weeks later,
+# on the first reconfigure (2026-07-26, six ExternalProject_Add failures against a tree
+# seeded Jul-17).
+#
+# The group bit is not the fix and neither is chown-on-every-run — it would fight the
+# group model and re-break on the next developer build. Refuse the second identity
+# instead: if you are not root and not $RUN_AS, use the sanctioned root entry point.
+assert_single_build_identity() {
+  [ "$(id -u)" -eq 0 ] && return 0
+  [ "$(id -un)" = "$RUN_AS" ] && return 0
+  id -u "$RUN_AS" >/dev/null 2>&1 || return 0   # no such user: single-identity by default
+
+  red "refusing to build deps as '$(id -un)' — this tree builds as '$RUN_AS'"
+  red "  $BUILD is setgid group $RUN_AS, so your write WOULD succeed and leave files"
+  red "  owned by you. The next '$RUN_AS' build then fails in configure_file with"
+  red "  'Operation not permitted' and the cause is ten days upstream of the symptom."
+  red "  Use the sanctioned entry point:  sudo bash scripts/setup-host.sh"
+  red "  Deliberate override (you accept the mixed tree): LAPLACE_DEPS_USER=$(id -un)"
+  exit 1
+}
+
 invalidate_ep_stamps() {
   # Drop ExternalProject step stamps so a pin change re-enters configure/build/install.
   # Keep object trees where possible — cmake/make still incremental inside BINARY_DIR.
@@ -137,6 +164,8 @@ if ! grep -q 'USES_TERMINAL_BUILD' "$ROOT/external/CMakeLists.txt"; then
   exit 1
 fi
 
+assert_single_build_identity
+
 if [ "$(id -u)" -eq 0 ]; then
   install -d -m 2775 -o "$RUN_AS" -g "$RUN_AS" "$(dirname "$BUILD")" "$BUILD" 2>/dev/null \
     || mkdir -p "$BUILD"
@@ -148,8 +177,10 @@ if [ "$(id -u)" -eq 0 ]; then
   # The setgid group-writable tree hides this until the fingerprint changes and forces
   # the first reconfigure in weeks, which is when it detonates (2026-07-26: deps tree
   # from a Jul-17 `ahart` run, six ExternalProject_Add configure_file failures).
-  # Normalise ownership while we still hold root. Idempotent, and it keeps the human
-  # out of `sudo rm -rf /opt/laplace/build`.
+  # One-time REPAIR of trees already poisoned before assert_single_build_identity
+  # existed. Prevention is that guard; this only clears the historical damage, because
+  # without it the very next $RUN_AS build still EPERMs on the old files. Idempotent,
+  # and it keeps the human out of `sudo rm -rf /opt/laplace/build`.
   if id -u "$RUN_AS" >/dev/null 2>&1 && [ -d "$BUILD" ]; then
     foreign="$(find "$BUILD" ! -user "$RUN_AS" -print -quit 2>/dev/null || true)"
     if [ -n "$foreign" ]; then
