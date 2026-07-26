@@ -673,7 +673,24 @@ public sealed partial class NpgsqlSubstrateWriter
                     await using (var guc = mconn.CreateCommand())
                     {
                         guc.Transaction = mtx;
-                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off";
+                        // enable_mergejoin/hashjoin off is not a hint, it is the shape of
+                        // this statement. attestation_merge drives a BOUNDED array (<=
+                        // mergeChunk rows) into a PRIMARY KEY — the nested loop is right
+                        // at every size, and a plan that sorts or hashes the target
+                        // relation never is.
+                        //
+                        // The UPDATE pins type_id (the LIST key) as a literal, but
+                        // subject_id — the HASH key — arrives from the join, so hash
+                        // pruning cannot happen at plan time and all 8 children stay in
+                        // the plan. That leaves two plans within 20% of each other
+                        // (Merge Append over the whole relation at 64,489 vs nested-loop
+                        // PK probes at ~77,000), and the planner picks the O(relation)
+                        // one as soon as the relation is big enough. MEASURED on the
+                        // 2026-07-26 OMW seed, consecutive applies: 165,806 rows at
+                        // 71,829 rows/s, then 242,563 rows at 156 rows/s — a 450x cliff
+                        // crossed with no code change, purely from the table growing.
+                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; "
+                            + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
                         await guc.ExecuteNonQueryAsync(token);
                     }
                     foreach (var (spanOff, spanLen) in bins[g])

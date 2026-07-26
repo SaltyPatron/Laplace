@@ -562,6 +562,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 {
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 await using var tx = await conn.BeginTransactionAsync(token);
+                // consensus_upsert's UPDATE arm is the same shape as attestation_merge's
+                // and carries the same landmine: type_id pinned as a literal, subject_id
+                // (the HASH key) arriving from the join so it cannot prune, and a bounded
+                // array driven into a primary key. The nested loop is right at every size;
+                // a Merge Append or hash over the whole relation never is. Pinned here
+                // before the fold grows into the cliff the merge lane already fell off.
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.Transaction = tx;
+                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
+                    await guc.ExecuteNonQueryAsync(token);
+                }
                 long segFolded = 0;
                 for (int off = seg.Off; off < seg.Off + seg.Len; off += UpsertChunkCells)
                 {
