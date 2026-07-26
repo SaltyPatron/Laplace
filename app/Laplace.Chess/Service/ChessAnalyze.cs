@@ -192,10 +192,6 @@ public static class ChessAnalyze
                 sourceId: src,
                 contextId: gameId);
 
-            // The notation the source wrote, on the board it was played from. Without this
-            // the only way to name a move was to replay the movetext, which is why the
-            // read path had an engine in it at all.
-            ChessGraph.AppendSan(b, from.Position.Id, sans[ply], MetaWeight, src, gameId);
 
             foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
                 ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
