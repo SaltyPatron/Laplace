@@ -1,3 +1,4 @@
+using System.Linq;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -26,11 +27,27 @@ public sealed class ChessRecorderTests
     public void RecordGame_EmitsNoGeometry()
     {
         var change = Record(GameWithComment);
-        // The single hard invariant of the split: recording never composes a position.
-        Assert.True(change.Physicalities.IsDefaultOrEmpty || change.Physicalities.Length == 0,
-            "recorder must emit no physicalities (no geometry)");
+        // The single hard invariant of the split: recording never composes a POSITION.
+        // "no geometry" in the chess law means no BOARD geometry -- replay, positions,
+        // substructures, motifs. It does not mean no physicality of any kind: since the
+        // movetext is composed from its own ply tokens rather than handed to the text
+        // spine as prose (2545f89), the movetext is an ordinary composed CONTENT entity
+        // and carries its constituent trajectory exactly as any composed text does.
+        // RepoDecomposer, UnicodeDecomposer and TextEntityBuilder all emit content
+        // physicalities the same way.
+        //
+        // The blanket `Physicalities is empty` assertion was broader than the invariant
+        // this test declares one line above it, and it is what went red on the ply
+        // composition. Assert the actual law instead: every physicality the recorder
+        // emits is content geometry, and no board entity is composed at all.
+        Assert.All(change.Physicalities, ph =>
+            Assert.Equal(PhysicalityType.Content, ph.Type));
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
+        Assert.DoesNotContain(change.Physicalities, ph =>
+            change.Entities.Any(e => e.Id == ph.EntityId
+                && (e.TypeId == ChessVocabulary.PositionType
+                    || e.TypeId == ChessVocabulary.SubstructureType)));
     }
 
     // GAME GRAIN: one verbatim HAS_MOVETEXT edge carries the whole record. Per-ply record
@@ -45,8 +62,19 @@ public sealed class ChessRecorderTests
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PlyType);
 
         var movetext = ChessPgnDecomposer.MovetextSection(GameWithComment);
+        // Still verbatim: the SECTION is the raw movetext, clocks/comments/NAGs intact.
         Assert.Equal("1. e4 { sharp } e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0", movetext);
-        var movetextId = ContentEmitter.RootId(movetext);
+        // But its ID is composed from the movetext's OWN ply tokens, not from prose --
+        // handing raw PGN to the text spine ran UAX #29 sentence segmentation, which
+        // splits on PGN's move-number '.' and produced tier-3 fragments like
+        // "Nd2 Nf6 4. e5 Nfd7 5. " sitting beside real sentences (2545f89).
+        //
+        // Resolve through MovetextId, whose own doc comment says: "ONE definition -- the
+        // decomposer writes through it and any caller that needs to name a movetext
+        // resolves through it, so the two can never drift." This test hand-rolled
+        // ContentEmitter.RootId(movetext) instead, which is precisely that drift, and is
+        // why it went red rather than catching a real defect.
+        var movetextId = ChessPgnDecomposer.MovetextId(movetext);
         Assert.NotNull(movetextId);
         Assert.Contains(change.Attestations, a =>
             a.ObjectId == movetextId && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
