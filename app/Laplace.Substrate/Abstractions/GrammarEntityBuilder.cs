@@ -282,17 +282,28 @@ public sealed class GrammarEntityBuilder
                     ObservedAtUnixUs: nowUs));
             }
 
+            // Text word-adjacency PRECEDES is NOT emitted. Sequence lives in
+            // physicalities.trajectory — the exactly-invertible ordered constituent
+            // sequence — and is read back by geometry_successors / containers_of /
+            // laplace_trajectory_constituents. Materializing it as attestations stores a
+            // second copy of a fact the geometry already holds losslessly.
+            //
+            // This is the same deletion TextEntityBuilder.TryDecompose already made
+            // ("Jamming word->word PRECEDES + CONTAINS onto text was the error that
+            // produced millions of redundant attestations (the re-witness grind) and
+            // duplicated what the geometry already holds losslessly. Deleted."), and the
+            // same one the read path completed under Pillar 5 on 2026-07-20:
+            // continuation_conditional_plane and pos_transition_plane dropped their
+            // PRECEDES-consensus legs, foundry_vocab/foundry_vocab_crawl/collocates/
+            // usage_overlap moved to trajectory constituents and geometry_successors.
+            // The grammar path was missed, so it kept manufacturing rows nothing reads —
+            // 785,637 of them carrying 4,955,844 observations on the 2026-07-26 seed,
+            // more attestation UPDATEs than every other relation type combined.
+            //
+            // PRECEDES the RELATION stays: it is a MODEL relation (token couplings,
+            // model_factor) and the conversational feedback lane's own edge
+            // (witness_precedes_chain). Neither is text word-adjacency.
             var attestations = ImmutableArray.CreateBuilder<AttestationRow>();
-            nuint nPrec = NativeInterop.ComposePrecedesCount(composeResult);
-            for (nuint i = 0; i < nPrec; i++)
-            {
-                NativeInterop.ComposePrecedesNative pr;
-                NativeInterop.ComposeGetPrecedes(composeResult, i, &pr);
-                long sumScore = checked(pr.Games * Glicko2.FpScale);
-                attestations.Add(NativeAttestation.Aggregated(
-                    pr.SubjectId, PrecedesTypeId, pr.ObjectId, _sourceId, contextId: null,
-                    games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
-            }
 
             var nodes = new LaplaceAstNode[n];
             var compId = new Hash128[n];
@@ -323,35 +334,10 @@ public sealed class GrammarEntityBuilder
 
 
 
-    private ImmutableArray<AttestationRow> BuildSequenceAttestations(
-        List<int>?[] childrenOf, Hash128[] compId, bool[] compValid, double witnessWeight)
-    {
-        var precedes = new Dictionary<(Hash128 A, Hash128 B), long>();
-        for (int p = 0; p < childrenOf.Length; p++)
-        {
-            var kids = childrenOf[p];
-            if (kids is null || kids.Count < 2) continue;
-            for (int i = 1; i < kids.Count; i++)
-            {
-                int a = kids[i - 1], b = kids[i];
-                if (!compValid[a] || !compValid[b]) continue;
-                var key = (compId[a], compId[b]);
-                precedes.TryGetValue(key, out long c);
-                precedes[key] = c + 1;
-            }
-        }
-        if (precedes.Count == 0) return ImmutableArray<AttestationRow>.Empty;
-
-        var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
-        foreach (var (pair, count) in precedes)
-        {
-            long sumScore = checked(count * Glicko2.FpScale);
-            rows.Add(NativeAttestation.Aggregated(
-                pair.A, PrecedesTypeId, pair.B, _sourceId, contextId: null,
-                games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
-        }
-        return rows.ToImmutable();
-    }
+    // BuildSequenceAttestations (child-order PRECEDES bigrams over the AST) was already
+    // unreferenced — the emission it existed for went through the native compose loop
+    // above. Removed with it rather than left as a live-looking template for the same
+    // mistake.
 
 
 
