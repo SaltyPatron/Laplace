@@ -63,6 +63,9 @@ countable fact; prose docs cite it instead of embedding counts.
 - [32_Patent_Portfolio_Audit.md](../.scratchpad/32_Patent_Portfolio_Audit.md) — log — patent portfolio audit (2026-07-11; renumbered from 22 to fix collision)
 - [33_Walk_Sign_Law_And_Read_Path_Audit.md](../.scratchpad/33_Walk_Sign_Law_And_Read_Path_Audit.md) — log — walk sign law + read-path audit; fix merged via fix/walk-sign-law-and-mask-queue (2026-07-21)
 - [34_Ops_Logging_CLI_Chess_Tooling_Campaign.md](../.scratchpad/34_Ops_Logging_CLI_Chess_Tooling_Campaign.md) — log — ops logging / CLI foundation / chess pipeline-fusion campaign; workstreams drained to GH 2026-07-23; #590 correction block in-file (2026-07-23)
+- [35_Tech_Debt_Refactor_Campaign_2026-07-24.md](../.scratchpad/35_Tech_Debt_Refactor_Campaign_2026-07-24.md) — log — tech-debt/refactor campaign; 9 PRs across #620–#627, three documented mirages, remainder is research/profile-gated (2026-07-25)
+- [36_LSP_Semantic_Decomposer_Design_GH593.md](../.scratchpad/36_LSP_Semantic_Decomposer_Design_GH593.md) — log — design proposal for the LSP-backed semantic decomposer (#593) (2026-07-25)
+- [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — whole-project audit: live state, spec-36 ladder re-measured, 200-issue triage, P0–P5 prioritization, proposed definition of finished-v1 (2026-07-26)
 - [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)
