@@ -104,6 +104,53 @@ public sealed class IngestThroughputProbe(ITestOutputHelper o)
         o.WriteLine($"=> row building      : {100*(tFull-swCompose.Elapsed.TotalSeconds)/tFull,5:F1}% of full");
     }
 
+    // Inside position composition: how much is the tier-1 chess vocabulary (a FINITE,
+    // deterministic set — 12 pieces x 64 squares, plus stm/castling/ep — i.e. exactly the
+    // shape the tier-0 codepoint perfcache exists for), and how much is the per-position
+    // ComposeOver that no cache can ever hold?
+    [SkippableFact]
+    public void VocabularyVersusPositionCompose()
+    {
+        Skip.IfNot(File.Exists(Corpus), "corpus absent");
+        CodepointPerfcache.LoadDefault();
+
+        var m = new Laplace.Modality.Chess.ChessModality();
+        var surfaces = new List<string>(20000);
+        foreach (var g in Games(300))
+        {
+            if (ChessPgnDecomposer.TryParseGame(g) is not { } parsed) continue;
+            var st = m.Initial();
+            surfaces.Add(m.StateKey(st));
+            foreach (var san in parsed.Moves)
+            {
+                var mv = Laplace.Modality.Chess.San.Resolve(st.Board, m.LegalActions(st), san);
+                if (mv is null) break;
+                st = m.Apply(st, mv.Value);
+                surfaces.Add(m.StateKey(st));
+            }
+        }
+
+        lock (ChessCompose.Gate) { foreach (var sf in surfaces.Take(500)) ChessCompose.Position(sf); }
+
+        // Token resolution only: split the surface and hit the memo, no ComposeOver.
+        var swTok = Stopwatch.StartNew();
+        long toks = 0;
+        foreach (var sf in surfaces)
+            foreach (var t in sf.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            { toks++; ChessCompose.TokenNode(t); }
+        swTok.Stop();
+
+        // Full position composition, memo bypassed so every one pays ComposeOver.
+        var swPos = Stopwatch.StartNew();
+        lock (ChessCompose.Gate) { foreach (var sf in surfaces) ChessCompose.ComposeUncached(sf); }
+        swPos.Stop();
+
+        o.WriteLine($"positions {surfaces.Count}, tokens {toks} ({toks / (double)surfaces.Count:F1}/position)");
+        o.WriteLine($"tier-1 vocabulary lookup : {swTok.Elapsed.TotalMilliseconds,8:F0} ms  <- what a chess perfcache removes");
+        o.WriteLine($"full position compose    : {swPos.Elapsed.TotalMilliseconds,8:F0} ms");
+        o.WriteLine($"vocabulary share         : {100 * swTok.Elapsed.TotalSeconds / swPos.Elapsed.TotalSeconds,7:F1}%");
+    }
+
     [SkippableFact]
     public void ComposeThroughput()
     {

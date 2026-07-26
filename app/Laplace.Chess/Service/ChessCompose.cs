@@ -51,7 +51,11 @@ public static class ChessCompose
         var coords = new double[(long)tokens.Length * 4];
         for (int i = 0; i < tokens.Length; i++)
         {
-            var s = TokenMemo.GetOrAdd(tokens[i], ComposeToken);
+            // Finite tier-1 alphabet first: structural index, no hashing, no allocation.
+            // Everything else (the pawn-structure aggregates) falls through to the memo.
+            var s = ChessVocabularyCache.TryGet(tokens[i], ComposeToken, out var vocab)
+                ? vocab
+                : TokenMemo.GetOrAdd(tokens[i], ComposeToken);
             subs[i] = s;
             ids[i] = s.Id;
             coords[i * 4 + 0] = s.Coord[0]; coords[i * 4 + 1] = s.Coord[1];
@@ -64,15 +68,44 @@ public static class ChessCompose
         return composed;
     }
 
+    /// <summary>Tier-1 vocabulary resolution alone (memoized), for attribution probes.</summary>
+    internal static ChessNode TokenNode(string token)
+        => ChessVocabularyCache.TryGet(token, ComposeToken, out var v) ? v : TokenMemo.GetOrAdd(token, ComposeToken);
+
+    /// <summary>Position composition with the memo bypassed, for attribution probes.</summary>
+    internal static ChessComposed ComposeUncached(string surface)
+    {
+        EnsureLoaded();
+        var tokens = surface.Split(Sep, StringSplitOptions.RemoveEmptyEntries);
+        var subs = new ChessNode[tokens.Length];
+        var ids = new Hash128[tokens.Length];
+        var coords = new double[(long)tokens.Length * 4];
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            var s = ChessVocabularyCache.TryGet(tokens[i], ComposeToken, out var v)
+                ? v : TokenMemo.GetOrAdd(tokens[i], ComposeToken);
+            subs[i] = s; ids[i] = s.Id;
+            coords[i * 4 + 0] = s.Coord[0]; coords[i * 4 + 1] = s.Coord[1];
+            coords[i * 4 + 2] = s.Coord[2]; coords[i * 4 + 3] = s.Coord[3];
+        }
+        return new ChessComposed(ComposeOver(ids, coords, tokens.Length, PositionTier), subs);
+    }
+
     public static Hash128 PositionId(string surface)
     {
         EnsureLoaded();
         var tokens = surface.Split(Sep, StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) throw new ArgumentException("empty position surface", nameof(surface));
         var ids = new Hash128[tokens.Length];
-        for (int i = 0; i < tokens.Length; i++) ids[i] = TokenMemo.GetOrAdd(tokens[i], ComposeToken).Id;
+        for (int i = 0; i < tokens.Length; i++)
+            ids[i] = ChessVocabularyCache.TryGet(tokens[i], ComposeToken, out var v)
+                ? v.Id
+                : TokenMemo.GetOrAdd(tokens[i], ComposeToken).Id;
         return Hash128.Merkle(PositionTier, ids);
     }
+
+    /// <summary>The general composition path, exposed so tests can pin identity against it.</summary>
+    internal static ChessNode ComposeTokenForProbe(string token) => ComposeToken(token);
 
     private static ChessNode ComposeToken(string token)
     {
