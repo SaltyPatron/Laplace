@@ -23,6 +23,21 @@ BUILD="${LAPLACE_DEPS_BUILD:-/opt/laplace/build/deps}"
 PREFIX="${LAPLACE_DEPS_PREFIX:-/opt/laplace}"
 ISA="${LAPLACE_TARGET_ISA:-AVX2}"
 RUN_AS="${LAPLACE_DEPS_USER:-laplace-runner}"
+
+# PIN the generator. It was unset, so cmake picked whatever the ambient
+# environment yielded — Ninja under CI, Unix Makefiles from a bare shell — and
+# the same tree got configured two different ways depending on who ran it.
+# ExternalProject sub-builds inherit the parent generator but keep their own
+# caches, so the flip surfaces as "Does not match the generator used previously".
+# Ninja to match pipeline.sh's engine configure (-G Ninja) and the sub-caches
+# already on disk; Unix Makefiles only where ninja is genuinely absent.
+if [ -n "${LAPLACE_DEPS_GENERATOR:-}" ]; then
+  DEPS_GENERATOR="$LAPLACE_DEPS_GENERATOR"
+elif command -v ninja >/dev/null 2>&1; then
+  DEPS_GENERATOR="Ninja"
+else
+  DEPS_GENERATOR="Unix Makefiles"
+fi
 STAMP_DIR="$BUILD"
 STAMP_FILE="$STAMP_DIR/.laplace-deps.fingerprint"
 FORCE="${LAPLACE_FORCE_DEPS:-0}"
@@ -143,11 +158,37 @@ scrub_cmake_cache_if_source_moved() {
   if [ -d "$src" ]; then
     src="$(cd "$src" && pwd -P)"
   fi
-  if [ "$src" != "$want" ]; then
-    yellow "cmake source moved: cache=$src want=$want — scrubbing CMakeCache (+ CMakeFiles)"
-    rm -f "$cache"
-    rm -rf "$BUILD/CMakeFiles"
+  local gen reason=""
+  gen="$(grep -E '^CMAKE_GENERATOR:' "$cache" | head -n1 | cut -d= -f2- || true)"
+
+  [ "$src" != "$want" ] && reason="source moved: cache=$src want=$want"
+  if [ -n "$gen" ] && [ "$gen" != "$DEPS_GENERATOR" ]; then
+    [ -n "$reason" ] && reason="$reason; "
+    reason="${reason}generator changed: cache=$gen want=$DEPS_GENERATOR"
   fi
+  [ -n "$reason" ] || return 0
+
+  # Scrub the SUB-BUILDS too, not just the top level. ExternalProject_Add binary
+  # dirs (proj-build, geos-build, gdal-build) each carry their own CMakeCache and
+  # inherit the parent's generator at build time. Dropping only $BUILD/CMakeCache
+  # leaves them pinned to the OLD generator, and the next build dies with
+  #   "generator : Unix Makefiles / Does not match the generator used previously: Ninja"
+  # which reads like a cmake bug and is really a half-finished scrub. Observed
+  # 2026-07-26: a developer configure from a personal checkout rewrote the parent
+  # cache (different source path AND, with no -G pinned, a different generator);
+  # the next CI run scrubbed the parent, kept Ninja sub-caches, and geos/proj
+  # failed while tree-sitter and postgresql — which use no nested cmake — sailed
+  # through, making it look source-specific rather than tree-wide.
+  yellow "cmake $reason — scrubbing $BUILD caches (parent + ExternalProject sub-builds)"
+  rm -f "$cache"
+  rm -rf "$BUILD/CMakeFiles"
+  local sub
+  while IFS= read -r sub; do
+    [ -n "$sub" ] || continue
+    yellow "  scrubbing sub-build cache: ${sub%/CMakeCache.txt}"
+    rm -f "$sub"
+    rm -rf "${sub%/CMakeCache.txt}/CMakeFiles"
+  done < <(find "$BUILD" -mindepth 2 -name CMakeCache.txt 2>/dev/null)
 }
 
 # --- main ---
@@ -239,7 +280,7 @@ scrub_cmake_cache_if_source_moved
 
 echo "==== cmake configure $BUILD (LAPLACE_EXTERNAL=$EXT) ===="
 # Fail loud: do not swallow cmake configure/build errors (set -e already; keep explicit).
-if ! run_as_builder "cmake -B '$BUILD' -S '$ROOT/external' -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL='$EXT' -DLAPLACE_DEPS_PREFIX='$PREFIX'"; then
+if ! run_as_builder "cmake -B '$BUILD' -S '$ROOT/external' -G '$DEPS_GENERATOR' -ULAPLACE_EXTERNAL -DLAPLACE_EXTERNAL='$EXT' -DLAPLACE_DEPS_PREFIX='$PREFIX'"; then
   red "cmake configure failed for $BUILD (source=$ROOT/external)"
   exit 1
 fi
