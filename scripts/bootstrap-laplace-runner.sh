@@ -16,6 +16,18 @@ LAPLACE_PG_PREFIX="/opt/laplace/pgsql-18"
 # Tatoeba seed filled pg_wal and recovery itself ENOSPC-crash-looped).
 LAPLACE_PG_MOUNT="/opt/laplace/pgdata"
 LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
+# WAL goes on a DIFFERENT SPINDLE from the heap. Moving the cluster to its own
+# volume (above) fixed the 2026-07-15 capacity incident but left pg_wal sharing
+# one consumer NVMe with the data files, and the two workloads fight: the
+# 2026-07-26 wiktionary seed ran vg-data's device at 100% util with aqu-sz ~36
+# serving 13k random read IOPS (the id-probe against 229M attestations, whose
+# btrees no longer fit shared_buffers) against 8.6k WAL write IOPS, while the
+# RAID pair sat at 0.00% util. Every apply stage degraded ~5x in lockstep
+# (verify 25s->117s, fold 39k->5k cells/s) purely from queueing. Splitting WAL
+# onto the idle spindle removes the fsync stream from the read path.
+# The capacity lesson still binds: max_wal_size (32GB) must stay small relative
+# to the WAL volume's free space, which is asserted before initdb/relocation.
+LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/opt/laplace/pg_wal}"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
@@ -450,6 +462,83 @@ bootstrap_disable_system_postgresql() {
     fi
 }
 
+# Device id of the filesystem holding $1 (or its nearest existing ancestor).
+pg_device_of() {
+    local p="$1"
+    while [ ! -e "$p" ] && [ "$p" != "/" ]; do p="$(dirname "$p")"; done
+    stat -c '%d' "$p" 2>/dev/null
+}
+
+# Free MB on the filesystem holding $1 (or its nearest existing ancestor).
+pg_free_mb_of() {
+    local p="$1"
+    while [ ! -e "$p" ] && [ "$p" != "/" ]; do p="$(dirname "$p")"; done
+    df -BM --output=avail "$p" 2>/dev/null | tail -1 | tr -dc '0-9'
+}
+
+# Assert the WAL target is a real split from the heap and has room for max_wal_size.
+# Keeps BOTH invariants: different spindle (the 2026-07-26 I/O contention) and
+# ample free space (the 2026-07-15 ENOSPC crash-loop).
+pg_prepare_waldir() {
+    local want_free=$(( LAPLACE_PG_MAX_WAL_GB * LAPLACE_PG_WAL_HEADROOM ))
+    local data_dev wal_dev free_mb
+
+    install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_WAL"
+
+    data_dev="$(pg_device_of "$LAPLACE_PG_MOUNT")"
+    wal_dev="$(pg_device_of "$LAPLACE_PG_WAL")"
+    if [ -n "$data_dev" ] && [ "$data_dev" = "$wal_dev" ]; then
+        red "✗ LAPLACE_PG_WAL ($LAPLACE_PG_WAL) is on the SAME filesystem as the heap"
+        red "  ($LAPLACE_PG_MOUNT). That is the configuration whose queueing pinned the"
+        red "  data device at 100% util during the wiktionary seed. Point LAPLACE_PG_WAL"
+        red "  at a volume on a different spindle and rerun."
+        return 1
+    fi
+
+    free_mb="$(pg_free_mb_of "$LAPLACE_PG_WAL")"
+    if [ -n "$free_mb" ] && [ "$free_mb" -lt $(( want_free * 1024 )) ]; then
+        red "✗ $LAPLACE_PG_WAL has ${free_mb}MB free; want >= ${want_free}GB"
+        red "  (${LAPLACE_PG_WAL_HEADROOM}x max_wal_size=${LAPLACE_PG_MAX_WAL_GB}GB). A WAL volume that can"
+        red "  fill is how the 2026-07-15 seed put recovery into an ENOSPC crash-loop."
+        return 1
+    fi
+
+    green "✓ WAL volume $LAPLACE_PG_WAL — separate spindle, $(( free_mb / 1024 ))GB free"
+}
+
+# Move an existing cluster's pg_wal onto $LAPLACE_PG_WAL. Refuses on a running
+# cluster: relocating WAL under a live postmaster corrupts it, and this host runs
+# multi-hour ingests that must not be torn down implicitly by a bootstrap rerun.
+pg_relocate_waldir() {
+    local live="$LAPLACE_PG_DATA/pg_wal"
+
+    if [ -L "$live" ]; then
+        green "✓ pg_wal already relocated → $(readlink -f "$live")"
+        return 0
+    fi
+    if [ ! -d "$live" ]; then
+        yellow "  $live absent — skipping WAL relocation"
+        return 0
+    fi
+
+    if systemctl is-active --quiet "$LAPLACE_PG_SERVICE"; then
+        yellow "  pg_wal is still inside $LAPLACE_PG_DATA (same spindle as the heap) but the"
+        yellow "  cluster is RUNNING — not touching it. An ingest may be mid-flight."
+        yellow "  When the cluster is idle, rerun this script (it relocates automatically)"
+        yellow "  or do it by hand:"
+        yellow "    systemctl stop $LAPLACE_PG_SERVICE"
+        yellow "    mv $live $LAPLACE_PG_WAL/pg_wal && ln -s $LAPLACE_PG_WAL/pg_wal $live"
+        yellow "    systemctl start $LAPLACE_PG_SERVICE"
+        return 0
+    fi
+
+    mv "$live" "$LAPLACE_PG_WAL/pg_wal"
+    ln -s "$LAPLACE_PG_WAL/pg_wal" "$live"
+    chown -h "$RUNNER_USER:$RUNNER_GROUP" "$live"
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" "$LAPLACE_PG_WAL/pg_wal"
+    green "✓ Relocated pg_wal → $LAPLACE_PG_WAL/pg_wal (heap and WAL now on separate spindles)"
+}
+
 bootstrap_laplace_pg_cluster() {
     say "Provision /opt/laplace/pgsql-18 cluster (substrate runtime PG)"
 
@@ -468,6 +557,8 @@ bootstrap_laplace_pg_cluster() {
         yellow "  can never fill the substrate volume."
         return 1
     fi
+    pg_prepare_waldir || return 1
+
     if [ ! -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
         if [ -d "$LAPLACE_PG_DATA" ] && [ -n "$(ls -A "$LAPLACE_PG_DATA" 2>/dev/null)" ]; then
             yellow "  $LAPLACE_PG_DATA exists + non-empty but no PG_VERSION — bailing rather than wipe"
@@ -477,13 +568,15 @@ bootstrap_laplace_pg_cluster() {
         install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_DATA"
         sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/initdb" \
             -D "$LAPLACE_PG_DATA" \
+            --waldir "$LAPLACE_PG_WAL" \
             --auth-host=trust --auth-local=peer \
             --username=laplace_admin \
             --no-locale --encoding=UTF8 \
             >/dev/null
-        green "✓ initdb'd $LAPLACE_PG_DATA"
+        green "✓ initdb'd $LAPLACE_PG_DATA (WAL on $LAPLACE_PG_WAL)"
     else
         green "✓ Cluster already initialized at $LAPLACE_PG_DATA"
+        pg_relocate_waldir || return 1
     fi
 
     chown -R "$RUNNER_USER:$RUNNER_GROUP" "$LAPLACE_PG_DATA"

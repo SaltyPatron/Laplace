@@ -57,6 +57,13 @@ pg_compute_machine_tuning() {
   PG_TUNE_MIN_WAL=4GB
   PG_TUNE_IO_CONC=256
   PG_TUNE_CHECKPOINT=30min
+  # Policy knobs the shell used to omit entirely, letting the cluster keep PG
+  # defaults that silently multiply the memory budget: hash_mem_multiplier 2.0
+  # doubles work_mem on every hash node, and autovacuum_work_mem = -1 makes each
+  # autovacuum worker inherit maintenance_work_mem. Values mirror EmitPgTuning.
+  PG_TUNE_MAXCONN=60
+  PG_TUNE_AVWM=256MB
+  PG_TUNE_TEMPB=32MB
 }
 
 pg_tune_psql() {
@@ -67,9 +74,52 @@ pg_tune_psql() {
   fi
 }
 
+# Locate the CLI that owns the GUC set (CpuTopologyCommands.EmitPgTuning). Honour an
+# explicit LAPLACE_CLI_DLL, else the standard Release publish under the repo root.
+pg_tune_cli_dll() {
+  if [ -n "${LAPLACE_CLI_DLL:-}" ] && [ -f "$LAPLACE_CLI_DLL" ]; then
+    printf '%s' "$LAPLACE_CLI_DLL"; return 0
+  fi
+  local root dll
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  dll="$root/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+  [ -f "$dll" ] || return 1
+  command -v dotnet >/dev/null 2>&1 || return 1
+  printf '%s' "$dll"
+}
+
+# ONE implementation of the GUC set: CpuTopologyCommands.EmitPgTuning, which
+# tune-pg.cmd already pipes to psql on Windows. Linux used to re-derive it in bash,
+# and the two silently diverged on TEN settings — the shell never emitted
+# max_connections, hash_mem_multiplier, autovacuum_work_mem or temp_buffers at all,
+# so the seed host ran hash nodes at 2x work_mem and let every autovacuum worker
+# inherit maintenance_work_mem (3.9GB) instead of the intended 256MB. Prefer the
+# emitter; the bash formulas below survive ONLY as the bare-host bootstrap fallback
+# (setup-host tunes the cluster before the app is ever built) and are pinned
+# bytes-equal to MemoryTopology by PgTuningParityTests.
 pg_apply_machine_tuning() {
+  local dll
+  if dll="$(pg_tune_cli_dll)"; then
+    if dotnet "$dll" cpu-topology --pg-tuning | pg_tune_psql -v ON_ERROR_STOP=1 -f -; then
+      pg_compute_machine_tuning
+      echo "pg-machine-tuning: applied from cpu-topology --pg-tuning (authoritative emitter)"
+      return 0
+    fi
+    echo "pg-machine-tuning: emitter failed — falling back to bootstrap formulas" >&2
+  else
+    echo "pg-machine-tuning: CLI not built yet — using bootstrap fallback formulas" >&2
+  fi
+
+  pg_apply_machine_tuning_fallback
+}
+
+pg_apply_machine_tuning_fallback() {
   pg_compute_machine_tuning
   pg_tune_psql -v ON_ERROR_STOP=1 \
+    -c "ALTER SYSTEM SET max_connections = $PG_TUNE_MAXCONN" \
+    -c "ALTER SYSTEM SET hash_mem_multiplier = 1.0" \
+    -c "ALTER SYSTEM SET autovacuum_work_mem = '$PG_TUNE_AVWM'" \
+    -c "ALTER SYSTEM SET temp_buffers = '$PG_TUNE_TEMPB'" \
     -c "ALTER SYSTEM SET shared_buffers = '$PG_TUNE_SB'" \
     -c "ALTER SYSTEM SET effective_cache_size = '$PG_TUNE_ECS'" \
     -c "ALTER SYSTEM SET maintenance_work_mem = '$PG_TUNE_MWM'" \
@@ -133,6 +183,10 @@ WITH want(name, expected, mode) AS (VALUES
   ('max_wal_size','${PG_TUNE_MAX_WAL}','mem'),
   ('min_wal_size','${PG_TUNE_MIN_WAL}','mem'),
   ('wal_buffers','${PG_TUNE_WB}','mem'),
+  ('max_connections','${PG_TUNE_MAXCONN}','eq'),
+  ('hash_mem_multiplier','1','eq'),
+  ('autovacuum_work_mem','${PG_TUNE_AVWM}','mem'),
+  ('temp_buffers','${PG_TUNE_TEMPB}','mem'),
   ('synchronous_commit','off','eq'),
   ('checkpoint_timeout','${PG_TUNE_CHECKPOINT}','eq'),
   ('wal_compression','on','enabled'),
