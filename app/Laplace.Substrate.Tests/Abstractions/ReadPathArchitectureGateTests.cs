@@ -5,52 +5,83 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
 /// Read/serve-path architecture gate — the counterpart to
-/// <see cref="DecomposerArchitectureGateTests"/>, which made the WRITE path
-/// uniform (Laplace.Decomposers: 99 files, zero Npgsql, zero inline SQL).
+/// <see cref="DecomposerArchitectureGateTests"/>, which made the WRITE path uniform
+/// (Laplace.Decomposers: 99 files, zero Npgsql, zero inline SQL).
 ///
-/// The read path never got the same treatment. 39 files across Cli, Chess,
-/// Endpoints.* independently construct datasources and hand-write SQL against
-/// the extension's 319 functions; 18 of those functions are called from two or
-/// three consumers with separately hand-written binding and result mapping.
+/// The read path never got the same treatment, and it shows. Two DISTINCT problems,
+/// gated separately because they have different fixes:
 ///
-/// This gate does NOT demand that be fixed today. It RATCHETS: the current
-/// violators are enumerated below, and the list may only ever shrink. New
-/// hand-rolled substrate access fails the build; migrating a file requires
-/// deleting its entry. That is what stops the sprawl from growing while the
-/// shared read surface is built out underneath it.
+///   (a) Consumers construct their own datasource, bypassing the access policy.
+///       Before <see cref="LaplaceDataSource"/> there were four wrappers around
+///       LaplaceInstall.PostgresConnectionString(), and only ONE of them applied the
+///       serving policy — so Chess's live-game and UCI hosts silently inherited the
+///       ingest CLI's `Command Timeout=0`.
 ///
-/// The sanctioned home for Npgsql is app/Laplace.Substrate/Crud/Npgsql.
+///   (b) Consumers hand-write SQL against the extension's 319 functions. 18 of those
+///       functions are called from two or three consumers with separately written
+///       binding and result mapping (recall_session, walk_text, walk_branches,
+///       resolve_ref, salient_facts, substrate_counts, entity_physicalities,
+///       consensus_out_readable, word_id).
+///
+/// Neither list is refactored here. Both RATCHET: current violators are enumerated and
+/// the lists may only shrink. A new offender fails the build by name; migrating a file
+/// forces deleting its entry. Prose in CLAUDE.md is advisory — a gate is not.
+///
+/// The sanctioned home for both is app/Laplace.Substrate/Crud/Npgsql.
 /// </summary>
 public sealed class ReadPathArchitectureGateTests
 {
     /// <summary>
-    /// Direct datasource/connection/command construction, or raw SQL text.
-    /// NpgsqlDataSourceBuilder is spelled out: a \b after "NpgsqlDataSource" does
-    /// not match it, and it is the most common way the read path builds its own
-    /// datasource (ChessLabRunners, DecompositionCommands).
+    /// (a) Building your own datasource/connection. NpgsqlDataSourceBuilder is spelled
+    /// out because a \b after "NpgsqlDataSource" does not match it, and it is how the
+    /// read path actually builds datasources. Merely HOLDING an NpgsqlDataSource (a
+    /// field type, a constructor parameter) is legitimate and not matched.
     /// </summary>
-    private static readonly Regex UnsanctionedDbAccess = new(
-        @"\b(NpgsqlDataSourceBuilder|NpgsqlDataSource|new\s+NpgsqlConnection|new\s+NpgsqlCommand|CommandText)\b",
+    private static readonly Regex OwnDataSourceConstruction = new(
+        @"new\s+Npgsql(?:DataSourceBuilder|Connection)\s*\(",
         RegexOptions.Compiled);
 
+    /// <summary>(b) Raw SQL text in a consumer.</summary>
+    private static readonly Regex HandWrittenSql = new(
+        @"\bCommandText\b|\bCreateCommand\s*\(\s*""|""\s*SELECT\s",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
-    /// Files that hand-roll substrate access as of 2026-07-26. THIS LIST MAY ONLY SHRINK.
+    /// Files building their own datasource, 2026-07-26. THIS LIST MAY ONLY SHRINK.
+    /// Route them through <c>LaplaceDataSource.Create(SubstrateAccess.Serving|Ingest)</c>.
     ///
-    /// Migration order, by duplication density (shared SQL functions first):
-    ///   1. SubstrateClient*.cs + QueryCommands.cs + SubstrateTools.cs — these three
-    ///      independently call recall_session, walk_text, walk_branches, resolve_ref,
-    ///      salient_facts, substrate_counts, entity_physicalities, consensus_out_readable,
-    ///      word_id. Landing the shared read surface retires all three at once.
-    ///   2. Chess/Service/* — 11 files, all reading consensus/trajectory for evaluation.
-    ///   3. BillingPostgres/* — genuinely separate concern (Stripe ledger, not substrate
-    ///      reads); may stay hand-rolled, but should move behind one billing store type.
-    ///   4. Migrations/Program.cs — DbUp bootstrap, runs before the extension exists.
-    ///      Likely a permanent, documented exception.
+    /// Laplace.Migrations/Program.cs is a likely PERMANENT exception: DbUp bootstrap runs
+    /// against the maintenance database before the extension exists, so it cannot use a
+    /// policy that assumes an installed substrate.
     /// </summary>
-    private static readonly HashSet<string> HandRolledAccessAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> OwnDataSourceAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Laplace.Chess/Service/ChessEngineService.cs",
         "Laplace.Chess/Service/ChessLabRunners.cs",
+        "Laplace.Chess/Service/ChessLiveGameHost.cs",
+        "Laplace.Chess/Service/ChessPgnIngestor.cs",
+        "Laplace.Chess.Uci/UciEngine.cs",
+        "Laplace.Cli/ChessCommands.cs",
+        "Laplace.Cli/DecompositionCommands.cs",
+        "Laplace.Cli/FoundryCommands.cs",
+        "Laplace.Cli/IngestCommands.cs",
+        "Laplace.Cli/QueryCommands.cs",
+        "Laplace.Endpoints.Mcp/SubstrateTools.cs",
+        "Laplace.Migrations/Program.cs",
+    };
+
+    /// <summary>
+    /// Files hand-writing SQL, 2026-07-26. THIS LIST MAY ONLY SHRINK.
+    ///
+    /// Migration order, by duplication density: SubstrateClient*, QueryCommands and
+    /// SubstrateTools share 9 SQL functions between them, so one shared read surface
+    /// retires all three at once. Chess/Service/* is 9 more files reading consensus and
+    /// trajectory for evaluation. BillingPostgres/* is a genuinely separate concern
+    /// (Stripe ledger, not substrate reads) and may legitimately stay hand-rolled.
+    /// </summary>
+    private static readonly HashSet<string> HandWrittenSqlAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Laplace.Chess/Service/ChessEngineService.cs",
         "Laplace.Chess/Service/ChessLiveGameHost.cs",
         "Laplace.Chess/Service/ChessMoveCommentary.cs",
         "Laplace.Chess/Service/ChessPgnIngestor.cs",
@@ -59,13 +90,8 @@ public sealed class ReadPathArchitectureGateTests
         "Laplace.Chess/Service/SubstrateRootBias.cs",
         "Laplace.Chess/Service/SubstrateStateValuer.cs",
         "Laplace.Chess/Service/SubstrateTurnHost.cs",
-        "Laplace.Chess/Service/SubstructureFoldBias.cs",
-        "Laplace.Chess.Uci/UciEngine.cs",
-        "Laplace.Cli/ChessCommands.cs",
         "Laplace.Cli/ContentRoundtrip.cs",
-        "Laplace.Cli/DecompositionCommands.cs",
-        "Laplace.Cli/DocumentCommands.cs",
-        "Laplace.Cli/EvalCommands.cs",
+        "Laplace.Cli/CpuTopologyCommands.cs",
         "Laplace.Cli/FoundryCommands.cs",
         "Laplace.Cli/FoundryExport.cs",
         "Laplace.Cli/IngestCommands.cs",
@@ -78,11 +104,12 @@ public sealed class ReadPathArchitectureGateTests
         "Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresBillingEntitlementStore.cs",
         "Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresBillingLedger.cs",
         "Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresBillingQuoteStore.cs",
-        "Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresBillingWebhookEventStore.cs",
         "Laplace.Endpoints.OpenAICompat/BillingPostgres/PostgresStripePriceMap.cs",
-        "Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs",
+        "Laplace.Endpoints.OpenAICompat/SubstrateClient.Chess.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Explore.cs",
+        "Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs",
+        "Laplace.Endpoints.OpenAICompat/SubstrateClient.Mesh.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Pulse.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Query.cs",
         "Laplace.Endpoints.OpenAICompat/TurnWitness.cs",
@@ -90,11 +117,16 @@ public sealed class ReadPathArchitectureGateTests
         "Laplace.Substrate/Abstractions/FeedbackContent.cs",
     };
 
-    /// <summary>
-    /// The ratchet ceiling. Lower this as files migrate; never raise it.
-    /// 39 = measured baseline on 2026-07-26.
-    /// </summary>
-    private const int AllowlistCeiling = 39;
+    /// <summary>Ratchet ceilings, measured 2026-07-26. Lower as files migrate; never raise.</summary>
+    private const int OwnDataSourceCeiling = 12;
+
+    /// <inheritdoc cref="OwnDataSourceCeiling"/>
+    /// <remarks>
+    /// 34, not the 28 a line-oriented grep reports: six consumers hold their SQL in C#
+    /// raw string literals, where the opening delimiter and the SELECT sit on different
+    /// lines. The gate reads whole files, so it sees them. Trust this number over a grep.
+    /// </remarks>
+    private const int HandWrittenSqlCeiling = 34;
 
     private static IEnumerable<string> ScannedFiles(string repoRoot)
     {
@@ -108,65 +140,78 @@ public sealed class ReadPathArchitectureGateTests
         {
             if (file.Contains($"{sep}bin{sep}") || file.Contains($"{sep}obj{sep}")) continue;
             if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
-            // The sanctioned home for Npgsql — this is where it is SUPPOSED to live.
+            // The sanctioned home — Npgsql is SUPPOSED to live here.
             if (file.Contains(sanctioned, StringComparison.OrdinalIgnoreCase)) continue;
             yield return file;
         }
     }
 
-    private static string Rel(string repoRoot, string file) =>
-        Path.GetRelativePath(Path.Combine(repoRoot, "app"), file).Replace('\\', '/');
-
-    private static List<string> CurrentViolators(string repoRoot)
+    private static List<string> Violators(string repoRoot, Regex rule)
     {
         var found = new List<string>();
         foreach (var file in ScannedFiles(repoRoot))
         {
-            if (UnsanctionedDbAccess.IsMatch(File.ReadAllText(file)))
-                found.Add(Rel(repoRoot, file));
+            if (rule.IsMatch(File.ReadAllText(file)))
+                found.Add(Path.GetRelativePath(Path.Combine(repoRoot, "app"), file).Replace('\\', '/'));
         }
         found.Sort(StringComparer.OrdinalIgnoreCase);
         return found;
     }
 
-    [Fact]
-    public void ReadPath_NoNewHandRolledSubstrateAccess()
+    private static void AssertNoNewcomers(Regex rule, IReadOnlySet<string> allowlist, string guidance)
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var newcomers = CurrentViolators(repoRoot)
-            .Where(v => !HandRolledAccessAllowlist.Contains(v))
-            .ToList();
-
-        Assert.True(newcomers.Count == 0,
-            "New hand-rolled substrate access. Go through the shared read surface in "
-            + "app/Laplace.Substrate/Crud/Npgsql instead of opening a datasource here:\n  "
-            + string.Join("\n  ", newcomers));
+        var newcomers = Violators(repoRoot, rule).Where(v => !allowlist.Contains(v)).ToList();
+        Assert.True(newcomers.Count == 0, guidance + "\n  " + string.Join("\n  ", newcomers));
     }
+
+    private static void AssertNoStaleEntries(Regex rule, IReadOnlySet<string> allowlist, string listName)
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var current = Violators(repoRoot, rule).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stale = allowlist.Where(a => !current.Contains(a)).ToList();
+        Assert.True(stale.Count == 0,
+            $"These files no longer violate — delete them from {listName} and lower its "
+            + $"ceiling to {allowlist.Count - stale.Count}:\n  " + string.Join("\n  ", stale));
+    }
+
+    [Fact]
+    public void ReadPath_NoNewOwnDataSourceConstruction()
+        => AssertNoNewcomers(OwnDataSourceConstruction, OwnDataSourceAllowlist,
+            "New datasource built outside the sanctioned home. Use "
+            + "LaplaceDataSource.Create(SubstrateAccess.Serving) for request/response paths "
+            + "or SubstrateAccess.Ingest for CLI/ingest paths, instead of here:");
+
+    [Fact]
+    public void ReadPath_NoNewHandWrittenSql()
+        => AssertNoNewcomers(HandWrittenSql, HandWrittenSqlAllowlist,
+            "New hand-written SQL in a consumer. Add it to the shared read surface in "
+            + "app/Laplace.Substrate/Crud/Npgsql so every caller gets one implementation, "
+            + "instead of here:");
 
     /// <summary>
-    /// A file that migrated must delete its allowlist entry. Without this the list
-    /// silently fills with dead names and the ceiling stops meaning anything.
+    /// A migrated file must delete its allowlist entry. Without this the lists fill with
+    /// dead names and the ceilings stop meaning anything.
     /// </summary>
     [Fact]
-    public void ReadPath_AllowlistHasNoStaleEntries()
-    {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var current = CurrentViolators(repoRoot).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var stale = HandRolledAccessAllowlist.Where(a => !current.Contains(a)).ToList();
+    public void ReadPath_OwnDataSourceAllowlist_HasNoStaleEntries()
+        => AssertNoStaleEntries(OwnDataSourceConstruction, OwnDataSourceAllowlist,
+            nameof(OwnDataSourceAllowlist));
 
-        Assert.True(stale.Count == 0,
-            "These files no longer hand-roll substrate access — delete them from "
-            + $"{nameof(HandRolledAccessAllowlist)} and lower {nameof(AllowlistCeiling)} "
-            + $"to {HandRolledAccessAllowlist.Count - stale.Count}:\n  "
-            + string.Join("\n  ", stale));
-    }
+    /// <inheritdoc cref="ReadPath_OwnDataSourceAllowlist_HasNoStaleEntries"/>
+    [Fact]
+    public void ReadPath_HandWrittenSqlAllowlist_HasNoStaleEntries()
+        => AssertNoStaleEntries(HandWrittenSql, HandWrittenSqlAllowlist,
+            nameof(HandWrittenSqlAllowlist));
 
     [Fact]
-    public void ReadPath_AllowlistOnlyShrinks()
+    public void ReadPath_AllowlistsOnlyShrink()
     {
-        Assert.True(HandRolledAccessAllowlist.Count <= AllowlistCeiling,
-            $"{nameof(HandRolledAccessAllowlist)} has {HandRolledAccessAllowlist.Count} entries but the "
-            + $"ratchet ceiling is {AllowlistCeiling}. This list may only shrink — the read path is "
-            + "being consolidated behind a shared surface, not expanded.");
+        Assert.True(OwnDataSourceAllowlist.Count <= OwnDataSourceCeiling,
+            $"{nameof(OwnDataSourceAllowlist)} has {OwnDataSourceAllowlist.Count} entries; ceiling is "
+            + $"{OwnDataSourceCeiling}. This list may only shrink.");
+        Assert.True(HandWrittenSqlAllowlist.Count <= HandWrittenSqlCeiling,
+            $"{nameof(HandWrittenSqlAllowlist)} has {HandWrittenSqlAllowlist.Count} entries; ceiling is "
+            + $"{HandWrittenSqlCeiling}. This list may only shrink.");
     }
 }

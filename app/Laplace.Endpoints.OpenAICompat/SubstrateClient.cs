@@ -1,6 +1,7 @@
 using Laplace.Api.Contracts;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -11,10 +12,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     private readonly NpgsqlDataSource _dataSource;
 
     public SubstrateClient()
-    {
-        var connString = BuildConnectionString();
-        _dataSource = new NpgsqlDataSourceBuilder(connString).Build();
-    }
+        => _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
@@ -786,29 +784,12 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         await _dataSource.DisposeAsync();
     }
 
-    private static string BuildConnectionString()
-    {
-        // LAPLACE_DB carries `Command Timeout=0` (unbounded) for the ingest CLI, where
-        // hours-long COPY/fold statements are legitimate. A request/response API must
-        // never inherit that: a slow substrate query then hangs the HTTP client forever
-        // instead of surfacing the ExceptionEnvelopeMiddleware's 503 envelope. Bound it
-        // here; individual commands may set a tighter per-command budget.
-        var builder = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
-        if (builder.CommandTimeout <= 0 || builder.CommandTimeout > DefaultCommandTimeoutSeconds)
-            builder.CommandTimeout = DefaultCommandTimeoutSeconds;
-        // Server-side plan reuse for the API serving path. Every inline query here is a
-        // pure read replayed across requests on pooled connections; without auto-prepare
-        // Postgres re-parses + re-plans each one on every execution. Npgsql transparently
-        // prepares a statement after AutoPrepareMinUsages hits on a physical connection and
-        // caches up to MaxAutoPrepare plans (LRU). Safe here because this path issues no
-        // dynamic DDL (the staging/DDL churn that would invalidate cached plans lives in the
-        // ingest/fold DataSource, which deliberately does NOT enable auto-prepare).
-        builder.MaxAutoPrepare = 50;
-        builder.AutoPrepareMinUsages = 2;
-        return builder.ConnectionString;
-    }
-
-    internal const int DefaultCommandTimeoutSeconds = 30;
+    /// <summary>
+    /// The serving budget. Kept as an alias so the existing call sites
+    /// (SubstrateClient.Explore, Middleware's 503 envelope text) keep reading one
+    /// value — the policy itself now lives with the datasource that applies it.
+    /// </summary>
+    internal const int DefaultCommandTimeoutSeconds = LaplaceDataSource.ServingCommandTimeoutSeconds;
 }
 
 internal sealed class SubstrateUnavailableException : Exception
