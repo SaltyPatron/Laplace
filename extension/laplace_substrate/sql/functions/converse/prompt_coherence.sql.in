@@ -1,0 +1,76 @@
+-- prompt_coherence(prompt): joint orientation + sense resolution, in ONE read.
+--
+-- WHY THIS EXISTS. The previous orientation scored every prompt token in
+-- ISOLATION: best sense per token by denote_mu, then rank tokens by highway
+-- popcount ("breadth"). Two measured failures on the live substrate, 2026-07-26:
+--
+--   "What is a pawn in chess?"
+--     token  breadth  denote_mu  sense
+--     a         13      1537     a          <- WON. Answered "A is the 1st
+--     pawn      13      1313     pawn          letter of the Roman alphabet."
+--     in        12      1456     in
+--     is        10      1396     ice        <- "is" resolved to ICE
+--     chess      9       995     chess      <- the domain word ranked LAST
+--
+-- Breadth ties (13 = 13) and denote_mu breaks the tie toward the function word,
+-- because an unambiguous article denotes its sense very strongly. No scalar
+-- computed from ONE token can separate these -- "a" really is a broad, strongly
+-- denoting word. The information that settles it is not in any token; it is in
+-- the graph BETWEEN them. `pawn` and `chess` are wired to each other. `a` is
+-- wired to neither, and `ice` is wired to nothing else in the prompt.
+--
+-- So: score a candidate sense by how much rated consensus mass connects it to
+-- the OTHER tokens' candidate senses. That one measurement does S1 (which sense)
+-- and S2 (which token is the topic) simultaneously, because they are the same
+-- question asked of the same edges -- a concept coheres with the prompt or it
+-- does not.
+--
+-- Language-agnostic by construction: it reads consensus edges and eff_mu, never
+-- a surface form, a stoplist, or a part-of-speech. Function words fall out
+-- because they are not wired to the prompt's content, in any language.
+--
+-- No floors, no caps, no top-k: coherence is a sum over whatever edges exist,
+-- ranked. Ties break on the id for determinism. A prompt whose tokens share no
+-- edges at all scores every candidate 0 and falls back to denote_mu, which is
+-- the honest answer when the prompt genuinely carries no joint signal.
+CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
+    RETURNS TABLE(ord int, tok bytea, synset_id bytea,
+                  coherence double precision, denote_mu numeric, peers bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH cand AS (
+        -- Every (token, candidate sense) pair the prompt admits. Deliberately
+        -- NOT collapsed to one sense per token yet: collapsing first is what
+        -- picked ICE for "is", since the collapse had no way to know which
+        -- sense the rest of the prompt was talking about.
+        SELECT p.ord, p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu
+        FROM prompt_state(p_prompt) p
+        CROSS JOIN LATERAL senses(p.id) s
+        WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
+    ), edge AS (
+        -- Rated mass between two candidates from DIFFERENT tokens, both
+        -- directions. relation_rank weights the band, so a taxonomic or
+        -- partitive tie counts for more than an incidental associative one --
+        -- the same signed weight the walker ranks by, not a raw count.
+        SELECT a.ord, a.tok, a.syn,
+               sum(relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd)) AS mass,
+               count(DISTINCT b.ord) AS peers
+        FROM cand a
+        JOIN cand b ON b.ord <> a.ord AND b.tok <> a.tok
+        JOIN consensus c
+          ON (c.subject_id = a.syn AND c.object_id = b.syn)
+          OR (c.subject_id = b.syn AND c.object_id = a.syn)
+        GROUP BY a.ord, a.tok, a.syn
+    )
+    SELECT DISTINCT ON (c.ord)
+           c.ord, c.tok, c.syn,
+           COALESCE(e.mass, 0)::float8,
+           c.denote_mu,
+           COALESCE(e.peers, 0)::bigint
+    FROM cand c
+    LEFT JOIN edge e ON e.ord = c.ord AND e.syn = c.syn
+    -- WHICH SENSE of this token: the one that coheres with the rest of the
+    -- prompt; denote_mu only breaks a coherence tie (and carries a prompt with
+    -- no joint signal at all).
+    ORDER BY c.ord, COALESCE(e.mass, 0) DESC, c.denote_mu DESC NULLS LAST, c.syn
+$$;

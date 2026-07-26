@@ -169,24 +169,26 @@ BEGIN
         -- ordered by denote_mu), carry that token's breadth as a window aggregate, and
         -- only then rank tokens. denote_mu breaks breadth ties, which is what separates
         -- car (24, denote 1458.9) from are (24, denote 1169.7).
-        SELECT array_agg(y.syn ORDER BY y.tok_breadth DESC NULLS LAST,
-                                        y.denote_mu DESC NULLS LAST,
-                                        y.syn)
+        -- SUPERSEDED 2026-07-26: breadth-then-denote_mu, both computed per token
+        -- in isolation. It ties (a 13, pawn 13) and denote_mu breaks the tie
+        -- toward the article, so "What is a pawn in chess?" answered "A is the
+        -- 1st letter of the Roman alphabet." and "is" resolved to the sense ICE.
+        -- Every commentary block above about breadth-vs-denote_mu describes that
+        -- superseded ranking and is kept only as the record of why neither scalar
+        -- works: the discriminating information is not in any single token.
+        --
+        -- prompt_coherence() ranks a candidate by rated consensus mass between it
+        -- and the OTHER tokens' candidates, which resolves the sense and elects
+        -- the topic in one read. peers (how many distinct prompt tokens a
+        -- candidate is actually wired to) leads, so a concept the whole prompt
+        -- agrees on beats one with a single heavy edge; coherence mass and then
+        -- denote_mu break ties. Still no stoplist and no surface compare.
+        SELECT array_agg(y.synset_id ORDER BY y.peers DESC,
+                                              y.coherence DESC,
+                                              y.denote_mu DESC NULLS LAST,
+                                              y.synset_id)
           INTO cands
-        FROM (
-            SELECT DISTINCT ON (x.tok)
-                   x.tok, x.syn, x.denote_mu, x.tok_breadth
-            FROM (
-                SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
-                       max(laplace_highway_popcount(e.highway_mask))
-                           OVER (PARTITION BY p.id) AS tok_breadth
-                FROM prompt_state(p_prompt) p
-                CROSS JOIN LATERAL senses(p.id) s
-                LEFT JOIN entities e ON e.id = s.synset_id
-                WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
-            ) x
-            ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
-        ) y;
+        FROM prompt_coherence(p_prompt) y;
         topic := cands[1];
         -- Nothing in this turn resolved: carry the session's standing topic.
         IF topic IS NULL THEN topic := ctx; END IF;

@@ -159,6 +159,7 @@ functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
 functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
+functions/converse/prompt_coherence.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path_with_dirs.sql.in
 functions/converse/realize_path.sql.in
