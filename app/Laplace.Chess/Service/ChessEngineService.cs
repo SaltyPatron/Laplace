@@ -77,7 +77,24 @@ public sealed class ChessEngineService : IAsyncDisposable
         _log = log ?? NullLogger.Instance;
     }
 
-    public static string ResolveConnString() => LaplaceInstall.PostgresConnectionString();
+    /// <summary>
+    /// Chess routes through the shared datasource policy rather than reading the install
+    /// string directly.
+    ///
+    /// Deliberately <see cref="SubstrateAccess.Ingest"/>, which is byte-identical to the
+    /// bare passthrough this replaced: this service builds an
+    /// <see cref="NpgsqlSubstrateWriter"/>/<see cref="ConsensusAccumulatingWriter"/> pair,
+    /// and a bounded serving timeout would abort a long fold mid-game.
+    ///
+    /// KNOWN GAP, not fixed here: the pure-read play paths (ChessLiveGameHost, UciEngine,
+    /// SubstrateStateValuer, SubstrateRootBias, SubstructureFoldBias, LearnedPst) are
+    /// serving paths and should take <see cref="SubstrateAccess.Serving"/> so a slow
+    /// substrate read surfaces as an error instead of stalling a live game. That flip
+    /// changes timeout behaviour under load and needs verifying against a seeded
+    /// substrate, so it is left as its own change.
+    /// </summary>
+    public static string ResolveConnString()
+        => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 
     public string NewGameFen() => ChessModality.StartFen;
 

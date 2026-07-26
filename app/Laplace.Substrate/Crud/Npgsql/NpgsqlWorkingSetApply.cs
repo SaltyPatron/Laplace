@@ -107,6 +107,8 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
         _persistedEntityIds = new HashSet<Hash128>();
         _persistedPhysIds = new HashSet<Hash128>();
+        // Content roots proven present feed the spine's pre-derivation ladder skip.
+        Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin();
         _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
         if (_tier0LayerComplete)
             _log.LogInformation(
@@ -120,6 +122,7 @@ public sealed partial class NpgsqlSubstrateWriter
         _runCycle = null;
         _persistedEntityIds = null;
         _persistedPhysIds = null;
+        Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
         if (cycle is not null)
             await cycle.FinishAsync(ct);
@@ -670,7 +673,24 @@ public sealed partial class NpgsqlSubstrateWriter
                     await using (var guc = mconn.CreateCommand())
                     {
                         guc.Transaction = mtx;
-                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off";
+                        // enable_mergejoin/hashjoin off is not a hint, it is the shape of
+                        // this statement. attestation_merge drives a BOUNDED array (<=
+                        // mergeChunk rows) into a PRIMARY KEY — the nested loop is right
+                        // at every size, and a plan that sorts or hashes the target
+                        // relation never is.
+                        //
+                        // The UPDATE pins type_id (the LIST key) as a literal, but
+                        // subject_id — the HASH key — arrives from the join, so hash
+                        // pruning cannot happen at plan time and all 8 children stay in
+                        // the plan. That leaves two plans within 20% of each other
+                        // (Merge Append over the whole relation at 64,489 vs nested-loop
+                        // PK probes at ~77,000), and the planner picks the O(relation)
+                        // one as soon as the relation is big enough. MEASURED on the
+                        // 2026-07-26 OMW seed, consecutive applies: 165,806 rows at
+                        // 71,829 rows/s, then 242,563 rows at 156 rows/s — a 450x cliff
+                        // crossed with no code change, purely from the table growing.
+                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; "
+                            + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
                         await guc.ExecuteNonQueryAsync(token);
                     }
                     foreach (var (spanOff, spanLen) in bins[g])
@@ -732,6 +752,23 @@ public sealed partial class NpgsqlSubstrateWriter
                 foreach (var id in novelEntIds) persistedEnt.Add(id);
             if (persistedPhys is not null && novelPhysIds is not null)
                 foreach (var id in novelPhysIds) persistedPhys.Add(id);
+
+            // Same commit boundary, same reason: a root may only answer "ladder already
+            // deposited" once it is durably in the target.
+            //
+            // The feed is what THIS APPLY STAGED (probeEntityIds), not everything found
+            // present. Presence alone would let one source's earlier deposit suppress the
+            // next source's FIRST witnessing of the same surface — WordNet minting "casa"
+            // would silence OMW's own attestation of it, and provenance is never mashed.
+            // The ledger is armed per bulk run, and a bulk run is one source, so a root
+            // enters only after this source has staged it and that stage has committed.
+            // What the skip then suppresses is strictly the 2nd..Nth re-emission within
+            // the run — the batch-boundary artifact, nothing a source asserts.
+            //
+            // Ids withheld from the probe are consistent with that: cache-skipped ids are
+            // already ledgered from the apply that committed them, and tier-0 gated ids
+            // are single codepoints with no ladder below them to re-walk.
+            Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(probeEntityIds);
         }
         catch
         {

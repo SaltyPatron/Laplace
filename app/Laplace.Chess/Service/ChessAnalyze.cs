@@ -156,9 +156,18 @@ public static class ChessAnalyze
         // Free — these are the nodes the loop already composed — and it becomes the game
         // trajectory below.
         var line = new List<ChessNode>(sans.Count + 1);
+
+        // Move generation is ~46% of analyze time, and ChessModality.LegalActions allocates a
+        // fresh pseudo AND legal list on EVERY ply — ~12.8M plies per corpus, so ~25M list
+        // allocations that exist for microseconds. #651 added buffered MoveGen overloads for
+        // exactly this and the ingest hot loop never adopted them. Two buffers per GAME,
+        // reused across its plies, instead of two per ply.
+        var pseudoBuf = new List<ChessMove>(64);
+        var legalBuf = new List<ChessMove>(64);
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            var mv = San.Resolve(state.Board, m.LegalActions(state), sans[ply]);
+            MoveGen.Legal(state.Board, pseudoBuf, legalBuf);
+            var mv = San.Resolve(state.Board, legalBuf, sans[ply]);
             if (mv is null) return;
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
@@ -183,10 +192,6 @@ public static class ChessAnalyze
                 sourceId: src,
                 contextId: gameId);
 
-            // The notation the source wrote, on the board it was played from. Without this
-            // the only way to name a move was to replay the movetext, which is why the
-            // read path had an engine in it at all.
-            ChessGraph.AppendSan(b, from.Position.Id, sans[ply], MetaWeight, src, gameId);
 
             foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
                 ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
