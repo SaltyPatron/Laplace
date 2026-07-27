@@ -165,6 +165,25 @@ aliases map to a canonical and add no highway bits); manifest and generated
 assigns highway bits alphabetically: adding a relation renumbers bits and owes a
 reseed — regenerate, never backfill.
 
+**`hot = true` is the PHYSICAL axis and follows TRAFFIC, not salience.** consensus and
+attestations are LIST-partitioned on `type_id`; hot relations get HASH(subject_id)×8
+each, and every other relation shares ONE default heap+btree. `rank` and `hot` are
+independent: `HAS_EXTERNAL_ID` is `scalar_valued` (rank 0.12) and is one of the largest
+writers in the substrate. Not one-per-relation — a flat ~340-leaf layout was MEASURED to
+tax planning far past what the tail's rows justify (regress: converse 0.3s → 54s, fold
+1.5s → 361s); capacity is granted where the rows are. Dynamic relations (`DEP_*`/`FEAT_*`
+/`EDEP_*`) are not in the manifest and always ride DEFAULT.
+Promotion is a manifest edit + `scripts/codegen-attestation-law.py`, and it costs no
+reseed — `hot` is not a highway-bit input, so generated C stays byte-identical. The seed
+ADOPTS on a populated DB (detach default → create partitions → drain matching rows back
+through the parent's router → reattach); before that it could only ever CREATE, and PG
+refuses a LIST partition whose rows sit in a non-empty DEFAULT, so the roster was frozen
+at greenfield and rotted in silence. Never let it rot again by memory:
+`consensus_partition_pressure()` names the offenders worst-first, and every ingest run
+logs `INGEST_PARTITION_PRESSURE` for anything over 1M rows. It is a run-time report and
+NOT a CI gate on purpose — traffic only exists on a populated DB, and CI recreates
+`laplace` empty, so a fixture-backed gate passes green while the box degrades.
+
 ## The SQL surface and the extension
 
 `laplace_substrate` carries the read/serve side natively: the SQL function families
