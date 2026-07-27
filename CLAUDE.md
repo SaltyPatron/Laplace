@@ -250,6 +250,46 @@ nothing for any prompt (2026-07 #686 → #687). Seeds move the scale under you: 
 every ingest. `SELECT senses(...)`/`bubble_up`/`realize` per row, a candidate set joined to
 itself, or a both-directions `OR` join means the read belongs in C, not in a rewritten CTE.
 
+**ASK THE SUBSTRATE — never re-derive what it already recorded.** Every slow read
+found on 2026-07-27 was code recomputing a fact the substrate holds, and each was a
+different disguise of one mistake:
+
+- **Never render an entity to text in order to CLASSIFY it.** "Is this a separator"
+  is `HAS_GENERAL_CATEGORY` (Zs/Zl/Zp/Cc), an indexed consensus read on the id —
+  22.6ms against 29,899ms of `render_text` + `'^\s*$'` over 1,645 tokens, 1,570x,
+  zero disagreement (#688/#689). Batching the render does NOT help; the render IS
+  the cost. A classifier taking `text` (`is_all_whitespace`) forces every caller
+  holding an id to realize first — that signature is the defect, and the four
+  hardcoded codepoints in `laplace_codepoint_is_whitespace` are its symptom. Text
+  is the right input only at ingest (`content_witness_batch.c`), where the bytes
+  are in hand and no entity exists yet.
+- **Sequence is the trajectory.** Text word-adjacency PRECEDES is a second copy of
+  what `physicalities.trajectory` holds exactly-invertibly; `geometry_successors` /
+  `containers_of` / `laplace_trajectory_constituents` read it back. 13,497,079 rows
+  no read path consumed (#683).
+- **An arbitrary LIMIT means a MISSING RANKING.** Top-k is legal only over an
+  ordering the fold produced. `converse_walk` picked the corpus that decides what
+  the engine says by `ORDER BY gid` — content hash — while 398 of 400 candidates
+  carried a rated inbound edge spanning 25% of eff_mu (#692). A usage sentence is
+  rated by what ATTESTS it: probe `consensus.object_id`, not `subject_id`
+  (4 of 400 the wrong way — an absence that looks like proof).
+- **Never select the walk's alphabet by TIER.** Tier is a floor; filtering the
+  stream to `ctier = 2` is a fixed-vocabulary tokenizer, the primitive this engine
+  replaces. It also silently drops the separators the trajectory attested, which
+  then have to be re-invented as a hardcoded `' '` and scrubbed with an ASCII
+  regex — three compensations for one filter (#694).
+- **`SPI_execute_plan`'s count is NOT a `LIMIT`.** It stops the fetch; the bitmap
+  is already built. The limit must be in the query TEXT, as a bound parameter (the
+  plan is kept process-wide, so a literal pins the first caller's limit for
+  everyone). 3,245ms -> 40ms (#691).
+
+**Verify the UNSEEDED case for anything that reads attestations.** An id with no
+attestation is *unattested*, not *attested false* — collapsing them with `EXISTS`
+answers false and is silently wrong on a partially-seeded substrate. `bool_or` over
+zero rows is NULL, which is exactly that distinction. Verified only against the
+seeded box, the fast path always hits and the fixture case never runs: that is how
+#688 passed every local check and turned main red on merge (#689).
+
 ## Binding engineering laws
 
 - **HARD BAN — no human framing from AI agents** (2026-07-11): agent text is
