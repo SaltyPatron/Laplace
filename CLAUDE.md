@@ -48,16 +48,21 @@ is its own modality (squares/pieces → resolved moves → positions → games);
 checkpoints ride their containers. Tree-sitter's job is narrow: unpack container
 formats, then hand off.
 
-The floor has a consequence that bites the read side: **a one-sentence source can never
-mint a tier-4 root.** A span-identical single-child wrapper IS its child
-(`TierTree.CollapseIndex` / `collapse_idx()`), so Tatoeba rows, WordNet glosses and
-HAS_EXAMPLE usages are all tier-3 ORPHANS by construction. The generation corpus must
-therefore include orphans — `corpus_max_orphan_sentences` defaults to -1 (uncapped);
-0 means "book-only" and silently excludes the ENTIRE single-sentence corpus from
-`corpus_sentence_constituents_since`, and with it `walk_continuations`,
+The floor has a consequence the read side keeps getting backwards: **a tier-3 sentence
+IS a document when nothing wraps it.** A span-identical single-child wrapper IS its child
+(`TierTree.CollapseIndex` / `collapse_idx()`), so a one-sentence document collapses onto
+the sentence — one id, serving both roles. It is not a sentence that "failed to become" a
+document, and there is no "orphan" category: a Tatoeba row, a WordNet gloss and a
+HAS_EXAMPLE usage are each a document root at their floor.
+
+So **never select roots by `tier = 4`.** That reads tier as identity, which is exactly the
+frame this law rejects, and it silently excludes the entire single-sentence corpus from
+`corpus_sentence_constituents_since` — and with it `walk_continuations`,
 `cooccurrence_scan`, `trajectory_pairs(_plane)`, `continuation_conditional_plane`,
-`relation_plane` and the foundry's conditional floor. Sequence starving on a default
-looks exactly like sequence starving on missing data — check the enumeration first.
+`relation_plane`, and the foundry's conditional floor. Every trajectory-bearing entity at
+tier ≥ 3 is a corpus sequence; the C side dedups by parent id. Sequence starving on a tier
+predicate looks exactly like sequence starving on missing data — check the enumeration
+before believing the corpus is thin.
 
 ## Decomposers — the witness boundary
 
