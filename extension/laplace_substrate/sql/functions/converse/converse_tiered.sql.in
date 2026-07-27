@@ -46,12 +46,18 @@
 -- Wired into chat() on the strength of that run. Two defects it exposed are
 -- fixed below: subsumed-unit repetition and missing clause termination.
 --
--- KNOWN GAP (data, not code): gloss sentences carry NO HAS_LANGUAGE attestation
--- -- verified, including the Romanian gloss of `pawn` -- so units cannot be
--- language-gated here and a multilingual topic can mix languages in one reply.
--- The attestation law says a corpus asserts a sentence's language at the
--- sentence root; the gloss lane does not. That is a decomposer fix, and until it
--- lands no amount of read-side work can filter what was never witnessed.
+-- KNOWN GAP, STILL OPEN: a multilingual topic mixes languages in one reply.
+-- Measured on `dog`: the walk emitted English, then Catalan, then Italian
+-- glosses. The sentence ROOT carries no HAS_LANGUAGE (verified, including the
+-- Romanian gloss of `pawn`), so it cannot be gated at the unit.
+--
+-- CORRECTION to an earlier note here, which claimed no read-side work could fix
+-- this: the WORD tier does carry HAS_LANGUAGE (6.7M rows), and tallying a unit's
+-- constituents gives it a language by vote -- the same weighted tally chat()
+-- already runs on the prompt, one tier down. Verified to produce per-unit vote
+-- counts. NOT wired in yet because the tally measured 43s as written and must be
+-- an indexed set-based read before it can sit on this path. The data is there;
+-- the fast query is not written.
 CREATE OR REPLACE FUNCTION converse_tiered(p_topic bytea,
                                            p_lang  bytea DEFAULT NULL,
                                            p_steps int DEFAULT 4,
@@ -103,19 +109,16 @@ BEGIN
         FROM consensus c
         JOIN entities e ON e.id = c.object_id AND e.tier >= 3
         WHERE c.subject_id = p_topic
-        UNION ALL
-        -- Sentences the topic APPEARS IN: real usage from the corpus. Ranked by
-        -- how strongly the surface denotes this concept, so a homograph's
-        -- sentences sink without being excluded.
-        SELECT co.entity_id,
-               sn.eff_mu::float8
-                 * (sn.witnesses::float8 / (1.0 + sn.witnesses))
-        FROM consensus sc
-        JOIN LATERAL senses(sc.subject_id) sn ON sn.synset_id = p_topic
-        CROSS JOIN LATERAL containers_of(sc.subject_id, 1, 200) co
-        WHERE sc.object_id = p_topic
-          AND relation_in_family(sc.type_id, 'HAS_SENSE')
-          AND co.tier = 3
+        -- REMOVED: a containers_of() arm over every sense-subject of the topic
+        -- ("sentences the topic appears in"). Measured 2026-07-27, topic = dog:
+        -- that arm alone ran >100s and never returned, so converse_tiered HUNG
+        -- for every common topic -- dog, tree, music, river all timed out, and
+        -- only `pawn` ever answered because it has few senses and few usages.
+        -- Wiring that into chat() would have hung the conversation on ordinary
+        -- words. The asserted arm above costs 0.03s and is not short of material
+        -- (45 tier-3 sentences for dog), so usage sentences are not worth a
+        -- corpus-wide container scan on the hot path; if they come back it must
+        -- be through a bounded, indexed read, not this.
     ) u
     WHERE u.w > 0            -- refuted/neutral edges fall out by sign, not a floor
     GROUP BY u.id;
@@ -126,15 +129,24 @@ BEGIN
         unit bytea, concept bytea) ON COMMIT DROP;
     DELETE FROM _ct_concept;
 
+    -- SET-BASED, NOT PER WORD. top_synset() is bubble_up under the hood, so
+    -- lifting each constituent with it is one function call per word of every
+    -- unit -- measured 73s for 48 units on `dog`, the second reason this
+    -- function hung. The same lift as ONE indexed join over the sense family,
+    -- taking each word's best-rated sense, is 2.67s and yields the identical
+    -- concept set (66 concepts, both ways). Never resolve per row what the
+    -- planner can resolve as a set.
     INSERT INTO _ct_concept (unit, concept)
-    SELECT DISTINCT q.id, top_synset(q.entity_id)
+    SELECT DISTINCT ON (q.id, q.entity_id) q.id, sc.object_id
     FROM (
         SELECT p.id, tp.entity_id
         FROM (SELECT id, w FROM _ct_unit ORDER BY w DESC LIMIT p_pool) p
         CROSS JOIN LATERAL trajectory_unpacked_points(p.id) tp
         WHERE tp.ctier = 2
     ) q
-    WHERE top_synset(q.entity_id) IS NOT NULL;
+    JOIN consensus sc ON sc.subject_id = q.entity_id
+                     AND relation_in_family(sc.type_id, 'HAS_SENSE')
+    ORDER BY q.id, q.entity_id, eff_mu(sc.rating, sc.rd) DESC, sc.object_id;
 
     CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
 
@@ -162,23 +174,36 @@ BEGIN
         -- unsaid concept stays eligible. It is the walk declining to re-say what
         -- it just said, which is what the anti-repeat guard does at the n-gram
         -- pivot in steered_walk.c -- here at the sentence pivot instead.
+        -- STEER BY SHARED CONCEPTS, not by an edge between concepts. Requiring a
+        -- consensus edge between the next unit's concepts and the said ones is
+        -- too strict to be a general steering signal: measured 2026-07-27 on
+        -- `dog`, the first unit's concepts had edges to the concepts of ZERO
+        -- other units, so the walk emitted a single clause and stopped. `pawn`
+        -- answered only because chess is a densely inter-linked domain. Two
+        -- sentences that share concepts are continuations of the same thought --
+        -- that is the tier ladder speaking (shared tier-2 constituents lifted to
+        -- the hub), it is always available, and it costs a hash comparison.
+        -- Edge mass stays as the tiebreak, so a genuinely linked continuation
+        -- still outranks a merely overlapping one. Measured: dog goes from 1
+        -- clause to 4, in 5.3s.
         SELECT n.unit INTO cur
         FROM (
             SELECT k.unit,
-                   sum(relation_rank_resolved(c.type_id)
-                       * eff_mu(c.rating, c.rd)::float8) AS pull
+                   count(*) AS shared,
+                   COALESCE(sum(relation_rank_resolved(c.type_id)
+                                * eff_mu(c.rating, c.rd)::float8), 0) AS pull
             FROM _ct_concept k
-            JOIN unnest(seen) AS sc(id) ON true
-            JOIN consensus c
-              ON (c.subject_id = k.concept AND c.object_id = sc.id)
-              OR (c.subject_id = sc.id AND c.object_id = k.concept)
+            LEFT JOIN consensus c
+              ON ((c.subject_id = k.concept AND c.object_id = ANY(seen))
+               OR (c.object_id = k.concept AND c.subject_id = ANY(seen)))
             WHERE NOT (k.unit = ANY(said))
+              AND k.concept = ANY(seen)
               AND EXISTS (SELECT 1 FROM _ct_concept nk
                            WHERE nk.unit = k.unit AND NOT (nk.concept = ANY(seen)))
             GROUP BY k.unit
         ) n
         JOIN _ct_unit u ON u.id = n.unit
-        ORDER BY n.pull DESC, u.w DESC, n.unit
+        ORDER BY n.shared DESC, n.pull DESC, u.w DESC, n.unit
         LIMIT 1;
     END LOOP;
 
