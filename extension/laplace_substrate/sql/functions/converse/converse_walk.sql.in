@@ -106,17 +106,28 @@ BEGIN
         ) g
     ),
     toks AS (
-        -- WORD-tier tokens only (ctier = 2): a trajectory can carry grapheme/
-        -- codepoint constituents (UD interlinear glosses like "people.PL" are
-        -- single words whose points are letters) — walking those emitted
-        -- letter-by-letter output. With the tier filter, a one-word gloss
-        -- yields a single token and the cnt >= 2 guard drops it, falling
-        -- through to real multi-word sentences.
+        -- The WHOLE attested constituent sequence, at whatever tier the content
+        -- decomposed into. NO ctier filter: tier is a FLOOR, never an identity,
+        -- so selecting the walk's alphabet by tier is a tokenizer -- the fixed
+        -- vocabulary assumption this engine exists to replace.
+        --
+        -- What the filter discarded, MEASURED over 12 containers of 'water':
+        --   ctier 0 : 164 constituents,  12 distinct  <- the separators
+        --   ctier 2 : 144 constituents,  94 distinct  <- the words
+        -- The separators were in the trajectory all along, in attested order.
+        -- Dropping them is why REALIZE had to invent a ' ', false for every script
+        -- that does not space its words.
+        --
+        -- The letter-by-letter worry the old comment recorded is real but narrow:
+        -- a ONE-WORD gloss, where the tier-is-a-floor collapse makes the gloss root
+        -- its own word, so unpacking reaches that word's codepoints. 12 distinct
+        -- tier-0 ids across 12 sentences is punctuation, not spelling -- a word is
+        -- a single tier-2 id. The cnt >= 2 guard below already drops the degenerate
+        -- one-word case, and that is what actually handled it.
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
         CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE u.ctier = 2
     ),
     -- The whitespace classification that sat here is GONE. It rendered every
     -- DISTINCT token to text to ask "is this blank" -- MEASURED on 'water' (1,645
@@ -180,9 +191,13 @@ BEGIN
     IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
     IF array_length(out_ids,1) = 1 THEN RETURN render_text(out_ids[1], 64); END IF;
 
-    -- REALIZE: join tokens, drop orphan gloss punctuation, normalize whitespace.
-    RETURN btrim(regexp_replace(
-        regexp_replace(
+    -- REALIZE: no punctuation scrub, no whitespace normalization. The old tail ran
+    -- regexp_replace('\s*[();:]\s*') then regexp_replace('\s+') because REALIZE
+    -- had just wedged a ' ' between every token, orphaning the brackets the gloss
+    -- actually attested. With separators carried through, the spacing IS the
+    -- corpus's -- scrubbing it overwrites testimony with a rule, and a
+    -- hardcoded-ASCII one ([();:] says nothing about U+3001, U+060C or U+0E5A).
+    RETURN btrim(
             -- render_text_batch over the DISTINCT emitted ids, re-expanded in
             -- emission order -- not render_text per row (MEASURED same-session on
             -- 1,645 tokens: 1,895ms batched against 15.6ms each, ~15.8x).
@@ -201,10 +216,8 @@ BEGIN
                  SELECT (r.a)[k] AS id, (r.s)[k] AS txt
                  FROM realized r, generate_subscripts(r.a, 1) AS k
              )
-             SELECT string_agg(COALESCE(m.txt,''), ' ' ORDER BY gg.o)
+             SELECT string_agg(COALESCE(m.txt,''), '' ORDER BY gg.o)
              FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
-             LEFT JOIN m ON m.id = gg.t),
-            '\s*[();:]\s*', ' ', 'g'),
-        '\s+', ' ', 'g'));
+             LEFT JOIN m ON m.id = gg.t));
 END;
 $$;
