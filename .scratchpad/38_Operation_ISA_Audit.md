@@ -501,6 +501,89 @@ depositing. MCP does not. Same close, different preconditions.
 
 ---
 
+## 12b. MEASURED 2026-07-27 — OP3 is fast, correct-ish, and NOT the fix
+
+Ran against the live substrate (113.7M consensus rows), extension
+`6bf54084bed2596f`.
+
+**The native port's perf gate passes.** `prompt_coherence()` on the topics that
+took >280s as SQL:
+
+| prompt | rows | time |
+|---|---|---|
+| What is a pawn in chess? | 7 | 3.88 s |
+| What is a dog? | 5 | 2.19 s |
+| What are the parts of a car? | 8 | 2.94 s |
+| Tell me about a tree | 6 | 2.34 s |
+| What is music? | 3 | 1.42 s |
+| What is a river? | 5 | 2.08 s |
+
+**Its correctness gate does not.** Under the ranking its own header documents
+(`rel_mass`, then `peers`, then `coherence`, then `denote_mu`):
+
+| prompt | elects | verdict |
+|---|---|---|
+| What is a pawn in chess? | token `is` → *"et"* | wrong |
+| What is a dog? | token `dog` → *"it"* | right token, wrong sense |
+| What is a river? | token `is` → *"et"* | wrong |
+| What are the parts of a car? | token `car` → **"automobile"** | **right** |
+
+Only the shape where a prompt token *names a relation* elects correctly — that
+is `rel_mass` working exactly as designed. `coherence` and `peers` do not
+discriminate: function words are wired to everything, so they carry the most
+mass (`of` 5.5e13 vs `car` 4.1e12) and the most peers. This is the same failure
+as `denote_mu` and as breadth before it — **three scalars, three ports, same
+outcome**, because mass-shaped signals cannot separate function words from
+content words.
+
+Not a language artifact: re-checked with English pinned, `dog` still elects a
+synset realizing as *"it"*.
+
+**Decision: OP3 is NOT wired into `chat()`.** Doing so would replace one known
+-wrong election with a different known-wrong election. §17 step 2 is amended
+accordingly.
+
+### 12b.1 The actual root cause is upstream, in the identity/partition seam
+
+`chat.sql.in` blames the *election* for answering "What is a pawn in chess?"
+with "A is the 1st letter of the Roman alphabet", and a whole native port was
+written against that diagnosis. The cause is two layers up:
+
+```
+word_id('a') = canonical_id('a') = 17762fddd969a453925d65717ac3eea2
+entities rows for that id:   tier=0 type=Codepoint      -- LATIN SMALL LETTER A
+                             tier=2 type=POS
+senses(word_id('a')) -> a | a | LATIN SMALL LETTER A | CYRILLIC SMALL LETTER A | la | and
+```
+
+`entities` is **`PRIMARY KEY (id, tier)`**, LIST-partitioned by `tier`. Postgres
+requires the partition key inside the PK, so partitioning by tier *forces tier
+into the identity key* — and one content hash can therefore hold one row per
+tier. **73 ids do**, and every one is a single character: `a A e b z u O R 9 - /
+।`. Those are among the highest-frequency tokens in any English prompt, so the
+blast radius is nothing like the row count.
+
+The hash is clean — tier is genuinely not mixed in, exactly as the law says. But
+`CLAUDE.md`'s first invariant, *"Same content = same id at every tier… 'Fine' as
+a one-word reply IS the sentence IS the word — one id"*, is **unenforceable at
+the schema level**: the schema models one-entity-per-(id, tier), and the read
+side then unions their senses.
+
+That union is the bug. It is not a ranking problem, and no election — however
+fast or well-designed — can fix it, because both sense sets are legitimately
+attached to the same id.
+
+**Open, and the real next question:** is the tier-2 `type=POS` row for `a` a
+correct attestation (a POS-tagged surface, in which case the read must
+disambiguate by requested tier/type) or a decomposer minting a POS-typed entity
+at the surface's identity (in which case it is a witness-boundary defect and the
+fix is at ingest)? 36,049 POS-typed tier-2 entities exist and none render, so
+they are not surface content in general — which points at the second. Not yet
+resolved; it needs the grammar/UD lane read at body level, which this audit has
+not done.
+
+---
+
 ## 13. The ops layer — 111 scripts, two orchestrations, one law per copy
 
 Previously unaudited. `scripts/win/` holds **83** `.cmd`/`.ps1`; `scripts/`

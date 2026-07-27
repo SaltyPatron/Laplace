@@ -407,10 +407,25 @@ leaves the tree green.
 
 1. **OP4 + G1 + G6.** One weight, four modes, parity-tested. Unblocks everything
    that ranks.
-2. **OP3 wired + G4 + G9.** `prompt_coherence` on the hot path behind the
-   envelope; timed on `dog`/`tree`/`music`/`river`, not `pawn`. Fix
-   `converse`/`converse_walk`'s orientation in the same change — the outage class
-   stays open until they stop running the 29.6s band-mass scan.
+2. ~~**OP3 wired.**~~ **AMENDED 2026-07-27 — measured, and NOT wired.**
+   `prompt_coherence` passes its perf gate (1.4–3.9 s on
+   `pawn`/`dog`/`car`/`tree`/`music`/`river`, against >280 s for the SQL it
+   replaced) and fails its correctness gate: it elects `is`→"et" for the pawn
+   prompt and `dog`→"it". Only `rel_mass` discriminates (`car`→"automobile");
+   `coherence` and `peers` are mass-shaped and so rank function words first —
+   the same failure as `denote_mu` and breadth before it. Wiring it swaps one
+   wrong election for another.
+   The root cause is upstream: `entities` is `PRIMARY KEY (id, tier)`,
+   LIST-partitioned by tier, so 73 content ids (every single character, `a`
+   included) hold both a tier-0 Codepoint row and a tier-2 row, and
+   `senses(word_id('a'))` unions both sense sets. No election can fix that.
+   See `.scratchpad/38` §12b. **Step 2 is now: resolve the tier-collision seam**
+   — decide whether the tier-2 `type=POS` row at a surface's identity is a
+   correct attestation or an ingest-side witness-boundary defect, and fix it
+   there. Then re-measure OP3.
+   Independently and still required: `converse`/`converse_walk` must stop
+   running the 29.6 s band-mass scan — the outage class stays open behind
+   `chat()`'s fallback until they do.
 3. **OP9 + G2.** `realize` becomes a wrapper; the 30 per-row bodies are swept.
 4. **L4 vocabularies + G3/G5/G7/G8.** Generation from the manifests; the five
    shape declarations collapse to the §3 table.
