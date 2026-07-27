@@ -93,9 +93,8 @@ CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
         -- a candidate's type set is small and indexed by subject_id.
         SELECT DISTINCT c.type_id FROM cand a JOIN consensus c ON c.subject_id = a.syn
     ), named_type AS (
-        -- ...of those, the ones a prompt token NAMES, through the concept hub:
-        -- the type's canonical name tokenizes to words, each word has senses,
-        -- and a sense shared with a candidate is the address match.
+        -- ...of those, the ones a prompt token NAMES.
+        --
         -- The OBJECT token only, and only when it is long enough to name a
         -- concept. A canonical name is a VERB_OBJECT identifier (HAS_PART,
         -- EVOKES_FRAME, MEMBER_OF_VERBNET_CLASS), so its last token is the one
@@ -104,17 +103,30 @@ CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
         -- name IS_A (whose final token is literally "A"), which handed every
         -- candidate with many IS_A edges an enormous relation mass and picked a
         -- WORSE sense of "car" than denote_mu did. The >= 3 bound rejects
-        -- degenerate identifier fragments ("a", "of", "to"), not English words --
-        -- it is a property of the naming scheme, and the match itself still
-        -- happens at the concept hub, in any language.
-        SELECT DISTINCT ct.type_id, m.ord AS namer_ord
+        -- degenerate identifier fragments ("a", "of", "to"), not English words.
+        --
+        -- MATCH AT THE WORD TIER, VIA THE ATTESTED LEMMA -- not by expanding the
+        -- name through senses(). The senses() form ran 330 bubble_up calls (one
+        -- per candidate relation type) and HUNG chat() outright once UD landed
+        -- and senses-per-word grew: >280s, measured 2026-07-27 on the very
+        -- prompt this feature exists for. Content addressing makes the direct
+        -- form exact and cheap: the name's word id either IS the prompt's token
+        -- id, or IS_LEMMA_OF connects them -- which is precisely the hop that
+        -- makes the PLURAL work. "parts" -> lemma "part" -> HAS_PART, matched in
+        -- 3.3s. Inflection is a witnessed fact (UD attests it), so this reads
+        -- the attestation instead of guessing morphology, and stays exact.
+        SELECT DISTINCT ct.type_id, t.ord AS namer_ord
         FROM cand_type ct
         CROSS JOIN LATERAL (
             SELECT lower((string_to_array(relation_canonical(ct.type_id), '_'))
                          [array_length(string_to_array(relation_canonical(ct.type_id), '_'), 1)]) AS w
         ) nm
-        JOIN LATERAL senses(word_id(nm.w)) rs ON true
-        JOIN cand m ON m.syn = rs.synset_id
+        CROSS JOIN LATERAL (SELECT word_id(nm.w) AS nw) nid
+        JOIN prompt_state(p_prompt) t
+          ON t.id = nid.nw
+          OR EXISTS (SELECT 1 FROM consensus l
+                      WHERE l.type_id = relation_type_id('IS_LEMMA_OF')
+                        AND l.subject_id = nid.nw AND l.object_id = t.id)
         WHERE char_length(nm.w) >= 3
     ), relmass AS (
         -- How much rated mass this candidate carries in the relation ANOTHER
