@@ -183,8 +183,16 @@ BEGIN
         -- candidate is actually wired to) leads, so a concept the whole prompt
         -- agrees on beats one with a single heavy edge; coherence mass and then
         -- denote_mu break ties. Still no stoplist and no surface compare.
+        -- rel_mass is the third key: for "what are the X of Y" prompts, X names
+        -- a RELATION and concept-to-concept coherence is silent (a car HAS_PART
+        -- door, never HAS_PART "part"), so peers/coherence are 0 across the board
+        -- and the election used to fall through to denote_mu -- which picks TZAR
+        -- for "car". Ranking by the relation the prompt named puts the vehicle
+        -- sense (29 HAS_PART edges) first and the article second. Measured
+        -- 2026-07-27 on "What is a part of a car?".
         SELECT array_agg(y.synset_id ORDER BY y.peers DESC,
                                               y.coherence DESC,
+                                              y.rel_mass DESC,
                                               y.denote_mu DESC NULLS LAST,
                                               y.synset_id)
           INTO cands

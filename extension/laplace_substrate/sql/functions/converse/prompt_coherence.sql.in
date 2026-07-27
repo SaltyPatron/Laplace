@@ -33,9 +33,35 @@
 -- ranked. Ties break on the id for determinism. A prompt whose tokens share no
 -- edges at all scores every candidate 0 and falls back to denote_mu, which is
 -- the honest answer when the prompt genuinely carries no joint signal.
+-- SECOND SIGNAL: RELATION PARTICIPATION. Concept-to-concept coherence settles
+-- "pawn"/"chess", but it is silent on the commonest question shape there is --
+-- "what are the X of Y", where X names a RELATION rather than a peer concept.
+-- Measured: "What are the parts of a car?" scores every candidate 0, because a
+-- car HAS_PART door/wheel/engine and never HAS_PART "part". So the whole prompt
+-- fell through to denote_mu, and denote_mu picks TZAR for "car" (1648, the
+-- Slavic spelling) over the vehicle (1567) -- while the vehicle sense carries 29
+-- HAS_PART edges and tzar carries none. The answer was fully resident and the
+-- reader was looking at the wrong concept.
+--
+-- A relation type is addressed by a name, its name tokenizes to words, and those
+-- words are ordinary content entities with senses -- so a prompt token reaches a
+-- relation type through the SAME concept hub everything else meshes at. Verified:
+-- "part" reaches HAS_PART (also HAS_SEMANTIC_ROLE and HAS_THEMATIC_ROLE, which is
+-- correct -- "part" genuinely also means a role). Cross-lingual for free: the hub
+-- is the ILI, so a French prompt word reaches the same relation without a table.
+--
+-- The two questions then disambiguate EACH OTHER: the right sense of Y is the one
+-- that participates in the relation X names, and the right reading of X is the
+-- relation Y actually has edges of. car+HAS_PART = 29 edges, tzar+HAS_PART = 0.
+-- No stoplist and no name regex: a relation type only counts if a prompt token
+-- resolves to a sense its name shares, and only types the candidate actually has
+-- edges of are ever considered.
+DROP FUNCTION IF EXISTS prompt_coherence(text);
+
 CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
-                  coherence double precision, denote_mu numeric, peers bigint)
+                  coherence double precision, denote_mu numeric, peers bigint,
+                  rel_type_id bytea, rel_mass double precision)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH cand AS (
@@ -61,16 +87,60 @@ CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
           ON (c.subject_id = a.syn AND c.object_id = b.syn)
           OR (c.subject_id = b.syn AND c.object_id = a.syn)
         GROUP BY a.ord, a.tok, a.syn
+    ), cand_type AS (
+        -- Relation types the candidates ACTUALLY have edges of. Bounding the
+        -- search this way keeps it off a scan of consensus for distinct types:
+        -- a candidate's type set is small and indexed by subject_id.
+        SELECT DISTINCT c.type_id FROM cand a JOIN consensus c ON c.subject_id = a.syn
+    ), named_type AS (
+        -- ...of those, the ones a prompt token NAMES, through the concept hub:
+        -- the type's canonical name tokenizes to words, each word has senses,
+        -- and a sense shared with a candidate is the address match.
+        -- The OBJECT token only, and only when it is long enough to name a
+        -- concept. A canonical name is a VERB_OBJECT identifier (HAS_PART,
+        -- EVOKES_FRAME, MEMBER_OF_VERBNET_CLASS), so its last token is the one
+        -- that denotes; the leading tokens are the identifier's grammar.
+        -- Measured why this matters: matching every token let the article "a"
+        -- name IS_A (whose final token is literally "A"), which handed every
+        -- candidate with many IS_A edges an enormous relation mass and picked a
+        -- WORSE sense of "car" than denote_mu did. The >= 3 bound rejects
+        -- degenerate identifier fragments ("a", "of", "to"), not English words --
+        -- it is a property of the naming scheme, and the match itself still
+        -- happens at the concept hub, in any language.
+        SELECT DISTINCT ct.type_id, m.ord AS namer_ord
+        FROM cand_type ct
+        CROSS JOIN LATERAL (
+            SELECT lower((string_to_array(relation_canonical(ct.type_id), '_'))
+                         [array_length(string_to_array(relation_canonical(ct.type_id), '_'), 1)]) AS w
+        ) nm
+        JOIN LATERAL senses(word_id(nm.w)) rs ON true
+        JOIN cand m ON m.syn = rs.synset_id
+        WHERE char_length(nm.w) >= 3
+    ), relmass AS (
+        -- How much rated mass this candidate carries in the relation ANOTHER
+        -- token named. namer_ord <> a.ord so a token never scores itself.
+        SELECT a.ord, a.syn,
+               sum(relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd)::float8) AS rmass,
+               (array_agg(c.type_id ORDER BY relation_rank_resolved(c.type_id) DESC))[1] AS rtype
+        FROM cand a
+        JOIN named_type nt ON nt.namer_ord <> a.ord
+        JOIN consensus c ON c.subject_id = a.syn AND c.type_id = nt.type_id
+        GROUP BY a.ord, a.syn
     )
     SELECT DISTINCT ON (c.ord)
            c.ord, c.tok, c.syn,
            COALESCE(e.mass, 0)::float8,
            c.denote_mu,
-           COALESCE(e.peers, 0)::bigint
+           COALESCE(e.peers, 0)::bigint,
+           r.rtype,
+           COALESCE(r.rmass, 0)::float8
     FROM cand c
     LEFT JOIN edge e ON e.ord = c.ord AND e.syn = c.syn
+    LEFT JOIN relmass r ON r.ord = c.ord AND r.syn = c.syn
     -- WHICH SENSE of this token: the one that coheres with the rest of the
-    -- prompt; denote_mu only breaks a coherence tie (and carries a prompt with
-    -- no joint signal at all).
-    ORDER BY c.ord, COALESCE(e.mass, 0) DESC, c.denote_mu DESC NULLS LAST, c.syn
+    -- prompt, then the one that participates in the relation the prompt named.
+    -- denote_mu only breaks a tie in both (and carries a prompt with no joint
+    -- signal at all) -- it is what picked TZAR and ICE when it led.
+    ORDER BY c.ord, COALESCE(e.mass, 0) DESC, COALESCE(r.rmass, 0) DESC,
+             c.denote_mu DESC NULLS LAST, c.syn
 $$;
