@@ -48,6 +48,7 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 # `undefined symbol` when the extension is first loaded — never at build time.
 set(EXT_C_SOURCES
     src/laplace_substrate.c
+    src/prompt_coherence.c
     src/consensus_fold_step.c
     src/generate_walk.c
     src/trajectory_corpus.c

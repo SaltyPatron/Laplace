@@ -1,146 +1,34 @@
--- prompt_coherence(prompt): joint orientation + sense resolution, in ONE read.
+-- prompt_coherence(prompt): joint orientation + sense resolution.
 --
--- WHY THIS EXISTS. The previous orientation scored every prompt token in
--- ISOLATION: best sense per token by denote_mu, then rank tokens by highway
--- popcount ("breadth"). Two measured failures on the live substrate, 2026-07-26:
+-- NATIVE (src/prompt_coherence.c). The SQL body this replaces hung chat() for
+-- every prompt -- >280s measured 2026-07-27 after the UD ingest -- and was taken
+-- off the hot path in the same change that ported it. It was SQL doing what the
+-- substrate law puts in C: set-returning functions as table sources (one
+-- senses() per token, one bubble_up per candidate relation type), relation-name
+-- identifiers split with string_to_array per row, and an O(n^2) join of 277-315
+-- candidate senses against each other through an OR of both directions that no
+-- consensus index can serve. Rewriting it as two indexed joins behind a
+-- MATERIALIZED fence still measured 82s.
 --
---   "What is a pawn in chess?"
---     token  breadth  denote_mu  sense
---     a         13      1537     a          <- WON. Answered "A is the 1st
---     pawn      13      1313     pawn          letter of the Roman alphabet."
---     in        12      1456     in
---     is        10      1396     ice        <- "is" resolved to ICE
---     chess      9       995     chess      <- the domain word ranked LAST
+-- The C form is the same computation as a MEMBERSHIP SCAN: candidates fetched
+-- once, then one indexed range read per direction with an O(1) hash probe per
+-- edge. relation_rank and the canonical name come from the manifest in C
+-- (laplace_relation_lookup), and the name's object token becomes a content id
+-- through the same hash the substrate uses everywhere -- so no per-row SQL
+-- function call survives anywhere in the read.
 --
--- Breadth ties (13 = 13) and denote_mu breaks the tie toward the function word,
--- because an unambiguous article denotes its sense very strongly. No scalar
--- computed from ONE token can separate these -- "a" really is a broad, strongly
--- denoting word. The information that settles it is not in any token; it is in
--- the graph BETWEEN them. `pawn` and `chess` are wired to each other. `a` is
--- wired to neither, and `ice` is wired to nothing else in the prompt.
---
--- So: score a candidate sense by how much rated consensus mass connects it to
--- the OTHER tokens' candidate senses. That one measurement does S1 (which sense)
--- and S2 (which token is the topic) simultaneously, because they are the same
--- question asked of the same edges -- a concept coheres with the prompt or it
--- does not.
---
--- Language-agnostic by construction: it reads consensus edges and eff_mu, never
--- a surface form, a stoplist, or a part-of-speech. Function words fall out
--- because they are not wired to the prompt's content, in any language.
---
--- No floors, no caps, no top-k: coherence is a sum over whatever edges exist,
--- ranked. Ties break on the id for determinism. A prompt whose tokens share no
--- edges at all scores every candidate 0 and falls back to denote_mu, which is
--- the honest answer when the prompt genuinely carries no joint signal.
--- SECOND SIGNAL: RELATION PARTICIPATION. Concept-to-concept coherence settles
--- "pawn"/"chess", but it is silent on the commonest question shape there is --
--- "what are the X of Y", where X names a RELATION rather than a peer concept.
--- Measured: "What are the parts of a car?" scores every candidate 0, because a
--- car HAS_PART door/wheel/engine and never HAS_PART "part". So the whole prompt
--- fell through to denote_mu, and denote_mu picks TZAR for "car" (1648, the
--- Slavic spelling) over the vehicle (1567) -- while the vehicle sense carries 29
--- HAS_PART edges and tzar carries none. The answer was fully resident and the
--- reader was looking at the wrong concept.
---
--- A relation type is addressed by a name, its name tokenizes to words, and those
--- words are ordinary content entities with senses -- so a prompt token reaches a
--- relation type through the SAME concept hub everything else meshes at. Verified:
--- "part" reaches HAS_PART (also HAS_SEMANTIC_ROLE and HAS_THEMATIC_ROLE, which is
--- correct -- "part" genuinely also means a role). Cross-lingual for free: the hub
--- is the ILI, so a French prompt word reaches the same relation without a table.
---
--- The two questions then disambiguate EACH OTHER: the right sense of Y is the one
--- that participates in the relation X names, and the right reading of X is the
--- relation Y actually has edges of. car+HAS_PART = 29 edges, tzar+HAS_PART = 0.
--- No stoplist and no name regex: a relation type only counts if a prompt token
--- resolves to a sense its name shares, and only types the candidate actually has
--- edges of are ever considered.
+-- Returns, per prompt token, its best sense and the two signals it was chosen by:
+--   coherence  rated mass to the OTHER tokens' candidate senses
+--   rel_mass   rated mass in a relation type another token NAMES (the
+--              "what are the X of Y" shape, where X is a relation not a peer)
+-- denote_mu is the tiebreak only -- leading with it is what answered "What is a
+-- pawn in chess?" with "A is the 1st letter of the Roman alphabet", resolved
+-- "is" to ICE, and resolved "car" to TZAR.
 DROP FUNCTION IF EXISTS prompt_coherence(text);
 
 CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision)
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    WITH cand AS (
-        -- Every (token, candidate sense) pair the prompt admits. Deliberately
-        -- NOT collapsed to one sense per token yet: collapsing first is what
-        -- picked ICE for "is", since the collapse had no way to know which
-        -- sense the rest of the prompt was talking about.
-        SELECT p.ord, p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu
-        FROM prompt_state(p_prompt) p
-        CROSS JOIN LATERAL senses(p.id) s
-        WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
-    ), edge AS (
-        -- Rated mass between two candidates from DIFFERENT tokens, both
-        -- directions. relation_rank weights the band, so a taxonomic or
-        -- partitive tie counts for more than an incidental associative one --
-        -- the same signed weight the walker ranks by, not a raw count.
-        SELECT a.ord, a.tok, a.syn,
-               sum(relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd)) AS mass,
-               count(DISTINCT b.ord) AS peers
-        FROM cand a
-        JOIN cand b ON b.ord <> a.ord AND b.tok <> a.tok
-        JOIN consensus c
-          ON (c.subject_id = a.syn AND c.object_id = b.syn)
-          OR (c.subject_id = b.syn AND c.object_id = a.syn)
-        GROUP BY a.ord, a.tok, a.syn
-    ), cand_type AS (
-        -- Relation types the candidates ACTUALLY have edges of. Bounding the
-        -- search this way keeps it off a scan of consensus for distinct types:
-        -- a candidate's type set is small and indexed by subject_id.
-        SELECT DISTINCT c.type_id FROM cand a JOIN consensus c ON c.subject_id = a.syn
-    ), named_type AS (
-        -- ...of those, the ones a prompt token NAMES, through the concept hub:
-        -- the type's canonical name tokenizes to words, each word has senses,
-        -- and a sense shared with a candidate is the address match.
-        -- The OBJECT token only, and only when it is long enough to name a
-        -- concept. A canonical name is a VERB_OBJECT identifier (HAS_PART,
-        -- EVOKES_FRAME, MEMBER_OF_VERBNET_CLASS), so its last token is the one
-        -- that denotes; the leading tokens are the identifier's grammar.
-        -- Measured why this matters: matching every token let the article "a"
-        -- name IS_A (whose final token is literally "A"), which handed every
-        -- candidate with many IS_A edges an enormous relation mass and picked a
-        -- WORSE sense of "car" than denote_mu did. The >= 3 bound rejects
-        -- degenerate identifier fragments ("a", "of", "to"), not English words --
-        -- it is a property of the naming scheme, and the match itself still
-        -- happens at the concept hub, in any language.
-        SELECT DISTINCT ct.type_id, m.ord AS namer_ord
-        FROM cand_type ct
-        CROSS JOIN LATERAL (
-            SELECT lower((string_to_array(relation_canonical(ct.type_id), '_'))
-                         [array_length(string_to_array(relation_canonical(ct.type_id), '_'), 1)]) AS w
-        ) nm
-        JOIN LATERAL senses(word_id(nm.w)) rs ON true
-        JOIN cand m ON m.syn = rs.synset_id
-        WHERE char_length(nm.w) >= 3
-    ), relmass AS (
-        -- How much rated mass this candidate carries in the relation ANOTHER
-        -- token named. namer_ord <> a.ord so a token never scores itself.
-        SELECT a.ord, a.syn,
-               sum(relation_rank_resolved(c.type_id) * eff_mu(c.rating, c.rd)::float8) AS rmass,
-               (array_agg(c.type_id ORDER BY relation_rank_resolved(c.type_id) DESC))[1] AS rtype
-        FROM cand a
-        JOIN named_type nt ON nt.namer_ord <> a.ord
-        JOIN consensus c ON c.subject_id = a.syn AND c.type_id = nt.type_id
-        GROUP BY a.ord, a.syn
-    )
-    SELECT DISTINCT ON (c.ord)
-           c.ord, c.tok, c.syn,
-           COALESCE(e.mass, 0)::float8,
-           c.denote_mu,
-           COALESCE(e.peers, 0)::bigint,
-           r.rtype,
-           COALESCE(r.rmass, 0)::float8
-    FROM cand c
-    LEFT JOIN edge e ON e.ord = c.ord AND e.syn = c.syn
-    LEFT JOIN relmass r ON r.ord = c.ord AND r.syn = c.syn
-    -- WHICH SENSE of this token: the one that coheres with the rest of the
-    -- prompt, then the one that participates in the relation the prompt named.
-    -- denote_mu only breaks a tie in both (and carries a prompt with no joint
-    -- signal at all) -- it is what picked TZAR and ICE when it led.
-    ORDER BY c.ord, COALESCE(e.mass, 0) DESC, COALESCE(r.rmass, 0) DESC,
-             c.denote_mu DESC NULLS LAST, c.syn
-$$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
+    LANGUAGE C STABLE;
