@@ -183,55 +183,43 @@ BEGIN
         -- candidate is actually wired to) leads, so a concept the whole prompt
         -- agrees on beats one with a single heavy edge; coherence mass and then
         -- denote_mu break ties. Still no stoplist and no surface compare.
-        -- rel_mass is the third key: for "what are the X of Y" prompts, X names
-        -- a RELATION and concept-to-concept coherence is silent (a car HAS_PART
-        -- door, never HAS_PART "part"), so peers/coherence are 0 across the board
-        -- and the election used to fall through to denote_mu -- which picks TZAR
-        -- for "car". Ranking by the relation the prompt named puts the vehicle
-        -- sense (29 HAS_PART edges) first and the article second. Measured
-        -- 2026-07-27 on "What is a part of a car?".
-        -- HOTFIX 2026-07-27: prompt_coherence() is NOT called from the hot path.
-        -- It hangs. Measured on the deployed extension after the UD ingest, on
-        -- "What is a dog?" and "What are the parts of a car?": >280s, i.e. chat()
-        -- never returned for ANY prompt. Every other stage chat() calls is fast
-        -- (prompt_state, senses over all tokens, bubble_up, top_synset, realize,
-        -- the language tally, converse_about, converse) -- this one stage was the
-        -- whole outage.
+        -- ELECT ON SPECIFICITY (prompt_coherence, native src/prompt_coherence.c).
         --
-        -- Why it cannot be patched in place: it is a SQL cascade doing work that
-        -- belongs in C. Set-returning functions as table sources (one senses()
-        -- per token, one bubble_up per candidate relation type), relation names
-        -- split with string_to_array per row, and an O(n^2) candidate join whose
-        -- both-directions OR defeats the consensus indexes. At 277-315 candidate
-        -- senses per prompt that is unsalvageable by rewriting: the two-indexed-
-        -- join + MATERIALIZED form still measured 82s. The substrate law is
-        -- explicit -- all math in C/C++/SPI, SQL orchestrates -- and this is a
-        -- hash-set membership scan over a candidate set, exactly what recall.c
-        -- and generate_walk.c already do natively in microseconds.
+        -- Every MASS-shaped scalar tried in this slot elected a function word,
+        -- because function words are wired to everything. denote_mu answered
+        -- "What is a pawn in chess?" with "A is the 1st letter of the Roman
+        -- alphabet" and resolved "car" to TZAR; highway breadth tied "a" with
+        -- "pawn" at 13 and lost on the tiebreak; raw coherence put `is`/`of`/
+        -- `was` first on every prompt measured. Three scalars, one outcome.
         --
-        -- The ranking below is the pre-existing breadth/denote_mu election. It is
-        -- WRONG in known ways (it answers "What is a pawn in chess?" with "A is
-        -- the 1st letter of the Roman alphabet", and resolves "car" to TZAR) --
-        -- but it returns. A wrong answer beats no answer while the native port is
-        -- written; prompt_coherence stays installed and callable so the port has
-        -- a reference implementation and a spec to match.
-        SELECT array_agg(y.syn ORDER BY y.tok_breadth DESC NULLS LAST,
-                                        y.denote_mu DESC NULLS LAST,
-                                        y.syn)
+        -- specificity = coherence / the candidate's OWN total rated mass: the
+        -- share of what a concept has witnessed that reaches the rest of this
+        -- prompt. Scale-free, so it does not drift as seeds land -- which the
+        -- raw sums did, the UD ingest is what turned coherence from working into
+        -- function-word-dominated. Measured live 2026-07-27:
+        --   "What is a pawn in chess?"     -> pawn, then chess
+        --   "What are the parts of a car?" -> car,  then parts
+        --   "What is a dog?"               -> dog
+        -- total mass for that first prompt: a = 4.28e16, chess = 5.28e14,
+        -- pawn = 2.63e13 -- three orders between the article and the topic.
+        --
+        -- rel_mass stays as the next key: for "what are the X of Y", X names a
+        -- RELATION and not a peer concept (a car HAS_PART door, never HAS_PART
+        -- "part"), so coherence is silent there and the relation the prompt
+        -- named is what discriminates. denote_mu is last and is a TIEBREAK ONLY.
+        --
+        -- KNOWN LIMIT, not a regression: a prompt with ONE content word has no
+        -- pair to cohere with. "Who was Napoleon?" elects `was`, because
+        -- Napoleon has no attested edge to "who" or "was" -- coherence is 0 for
+        -- the right answer and nonzero for the wrong one. No pairwise statistic
+        -- fixes that; it needs a per-token signal that does not exist yet.
+        SELECT array_agg(y.synset_id ORDER BY y.specificity DESC NULLS LAST,
+                                              y.rel_mass DESC NULLS LAST,
+                                              y.peers DESC,
+                                              y.denote_mu DESC NULLS LAST,
+                                              y.synset_id)
           INTO cands
-        FROM (
-            SELECT DISTINCT ON (x.tok) x.tok, x.syn, x.denote_mu, x.tok_breadth
-            FROM (
-                SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
-                       max(laplace_highway_popcount(e.highway_mask))
-                           OVER (PARTITION BY p.id) AS tok_breadth
-                FROM prompt_state(p_prompt) p
-                CROSS JOIN LATERAL senses(p.id) s
-                LEFT JOIN entities e ON e.id = s.synset_id
-                WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
-            ) x
-            ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
-        ) y;
+        FROM prompt_coherence(p_prompt) y;
         topic := cands[1];
         -- Nothing in this turn resolved: carry the session's standing topic.
         IF topic IS NULL THEN topic := ctx; END IF;
