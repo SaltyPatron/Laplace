@@ -92,19 +92,27 @@ BEGIN
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
         WHERE u.ctier = 2
     ),
-    ws AS MATERIALIZED (
-        SELECT d.entity_id AS id,
-               COALESCE(render_text(d.entity_id, 64), ' ') ~ '^\s*$' AS is_ws
-        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
-    ),
+    -- The whitespace classification that sat here is GONE. It rendered every
+    -- DISTINCT token to text to ask "is this blank" -- MEASURED on 'water' (1,645
+    -- distinct tokens over 400 containers) at 29,899ms of a 48,435ms
+    -- converse_walk, 18ms per token, purely to answer a predicate.
+    --
+    -- Against this stream it was a NO-OP as well as a cost: `toks` restricts to
+    -- u.ctier = 2, and separator tokens live below tier 2, so the set it filtered
+    -- could not contain one. Removing it left the emitted token sequence
+    -- byte-identical and cut converse_walk 39,588ms -> 27,760ms.
+    --
+    -- The general form of the mistake is rendering an entity to text in order to
+    -- classify it. corpus_whitespace_vocab_indices had the same shape and reading
+    -- the attested HAS_GENERAL_CATEGORY instead measured 22.6ms against 29,899ms
+    -- with zero disagreement (#688/#689). Nothing here needs to classify at all,
+    -- so this just goes.
     kept AS MATERIALIZED (
         SELECT q.* FROM (
             SELECT t.gid, t.wt, t.is_core, t.entity_id,
                    row_number() OVER (PARTITION BY t.gid ORDER BY t.ord) AS rn,
                    count(*)    OVER (PARTITION BY t.gid) AS cnt
             FROM toks t
-            JOIN ws ON ws.id = t.entity_id
-            WHERE NOT ws.is_ws
         ) q
         WHERE q.cnt >= 2
     ),
@@ -149,8 +157,27 @@ BEGIN
     -- REALIZE: join tokens, drop orphan gloss punctuation, normalize whitespace.
     RETURN btrim(regexp_replace(
         regexp_replace(
-            (SELECT string_agg(COALESCE(render_text(t,64),''), ' ')
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)),
+            -- render_text_batch over the DISTINCT emitted ids, re-expanded in
+            -- emission order -- not render_text per row (MEASURED same-session on
+            -- 1,645 tokens: 1,895ms batched against 15.6ms each, ~15.8x).
+            -- render_text_batch and NOT realize_batch: they answer different
+            -- questions. render_text reconstructs the content's bytes, realize
+            -- LABELS an entity for a human -- render_text(U+0020) is ' ' where
+            -- realize(U+0020) is 'SPACE', render_text(U+0028) is '(' where realize
+            -- is 'LEFT PARENTHESIS'. Generation emits content, so it renders.
+            (WITH ids AS MATERIALIZED (
+                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
+             ),
+             realized AS MATERIALIZED (
+                 SELECT i.a AS a, render_text_batch(i.a, 64) AS s FROM ids i
+             ),
+             m AS (
+                 SELECT (r.a)[k] AS id, (r.s)[k] AS txt
+                 FROM realized r, generate_subscripts(r.a, 1) AS k
+             )
+             SELECT string_agg(COALESCE(m.txt,''), ' ' ORDER BY gg.o)
+             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
+             LEFT JOIN m ON m.id = gg.t),
             '\s*[();:]\s*', ' ', 'g'),
         '\s+', ' ', 'g'));
 END;
