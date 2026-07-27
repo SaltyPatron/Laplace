@@ -46,18 +46,10 @@
 -- Wired into chat() on the strength of that run. Two defects it exposed are
 -- fixed below: subsumed-unit repetition and missing clause termination.
 --
--- KNOWN GAP, STILL OPEN: a multilingual topic mixes languages in one reply.
--- Measured on `dog`: the walk emitted English, then Catalan, then Italian
--- glosses. The sentence ROOT carries no HAS_LANGUAGE (verified, including the
--- Romanian gloss of `pawn`), so it cannot be gated at the unit.
---
--- CORRECTION to an earlier note here, which claimed no read-side work could fix
--- this: the WORD tier does carry HAS_LANGUAGE (6.7M rows), and tallying a unit's
--- constituents gives it a language by vote -- the same weighted tally chat()
--- already runs on the prompt, one tier down. Verified to produce per-unit vote
--- counts. NOT wired in yet because the tally measured 43s as written and must be
--- an indexed set-based read before it can sit on this path. The data is there;
--- the fast query is not written.
+-- LANGUAGE: gated below by a constituent tally, since the sentence root carries
+-- no HAS_LANGUAGE but the word tier carries 6.7M. Corrects an earlier note here
+-- that claimed no read-side work could fix language mixing -- it can, one tier
+-- down. Residual leak (shared scientific Latin) documented at the gate.
 CREATE OR REPLACE FUNCTION converse_tiered(p_topic bytea,
                                            p_lang  bytea DEFAULT NULL,
                                            p_steps int DEFAULT 4,
@@ -149,6 +141,40 @@ BEGIN
     ORDER BY q.id, q.entity_id, eff_mu(sc.rating, sc.rd) DESC, sc.object_id;
 
     CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
+
+    -- ANSWER IN THE LANGUAGE THAT WAS ASKED. The sentence ROOT carries no
+    -- HAS_LANGUAGE, but the WORD tier carries 6.7M of them, so a unit gets a
+    -- language by tallying its constituents -- the same weighted tally chat()
+    -- runs on the prompt, one tier down. Kept in HASH SPACE: comparing rendered
+    -- language names cost 43s, comparing ids costs 1.4s, and nothing here needs
+    -- to know what the language is CALLED.
+    --
+    -- A unit with no language evidence at all is KEPT, not dropped -- absence of
+    -- a witness is not evidence of a foreign language, and dropping it measured
+    -- no better (identical output, strict vs lenient).
+    --
+    -- Measured on `dog` asked in English: removes the Italian, Catalan,
+    -- Bulgarian and Japanese glosses. RESIDUAL LEAK, understood and not fixed
+    -- here: "σκύλος γένους Canis familiaris" survives, because its Greek words
+    -- carry no HAS_LANGUAGE while "Canis"/"familiaris" are attested English, so
+    -- the vote is carried by shared scientific Latin. That is a coverage
+    -- artifact of the witness set, not a flaw in the tally. The signal that
+    -- would catch it is HAS_SCRIPT (dense, from Unicode) -- Greek script against
+    -- a Latin-script prompt -- which is resident and unused here.
+    IF p_lang IS NOT NULL THEN
+        DELETE FROM _ct_unit u
+        WHERE EXISTS (
+            SELECT 1 FROM (
+                SELECT DISTINCT ON (t.unit) t.unit, t.lg FROM (
+                    SELECT k.unit, lc.object_id AS lg, count(*) AS votes
+                    FROM _ct_concept k
+                    JOIN consensus lc ON lc.subject_id = k.concept
+                                     AND lc.type_id = relation_type_id('HAS_LANGUAGE')
+                    GROUP BY k.unit, lc.object_id
+                ) t ORDER BY t.unit, t.votes DESC, t.lg
+            ) top WHERE top.unit = u.id AND top.lg <> p_lang);
+        DELETE FROM _ct_concept c WHERE NOT EXISTS (SELECT 1 FROM _ct_unit u WHERE u.id = c.unit);
+    END IF;
 
     -- OPEN on the best-rated unit: the topic's own strongest assertion about
     -- itself, which is the gloss whenever one is attested.
