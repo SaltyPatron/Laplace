@@ -64,18 +64,44 @@ BEGIN
     -- Word-level tokens only: the inter-word whitespace constituents are
     -- dropped, else (word,space) bigrams match every boundary and the walk
     -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
+    -- The corpus is ranked by the WEB, not by storage order. containers_of walks
+    -- the trajectory constituent index, which is GEOMETRY -- identity and
+    -- retrieval, never semantics. What a candidate sentence is WORTH is the
+    -- Glicko fold's answer, and it is already on the edge that attests it.
+    --
+    -- The old ORDER BY was `is_core DESC, gid`: content-hash order. MEASURED on
+    -- 'water', of the 400 tier-3 containers returned, 398 are the object of a
+    -- HAS_DEFINITION consensus edge whose eff_mu spans 1.17e12 to 1.46e12 -- a
+    -- 25% spread, witness_count up to 4. The signal was sitting on 99.5% of the
+    -- candidates and the corpus that decides what this engine SAYS was picked by
+    -- hash instead.
+    --
+    -- Rank on the INBOUND edge (c.object_id = the sentence). A usage sentence is
+    -- rated by what attests it -- HAS_DEFINITION, HAS_EXAMPLE -- not by anything
+    -- it asserts itself; probing c.subject_id finds almost nothing (4 of 400) and
+    -- is the wrong direction. LEFT JOIN so an unrated candidate still competes at
+    -- the neutral prior rather than being silently dropped: absence of evidence is
+    -- not evidence of worthlessness, and dropping it would be an
+    -- operator-invented floor.
+    --
+    -- LIMIT 160 is now honest top-k -- a query LIMIT over a rated ordering, which
+    -- is the only form of top-k the substrate law allows.
     WITH gids AS (
         -- DISTINCT: a gloss reachable through two def-band relation types
         -- contributes its token stream once, not twice.
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
-            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core
+            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
+                   eff_mu(c.rating, c.rd) AS mu
             FROM consensus c
             WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
             UNION ALL
-            SELECT co.entity_id, 40, false
+            SELECT co.entity_id, 40, false,
+                   COALESCE(MAX(eff_mu(k.rating, k.rd)), glicko2_neutral_mu())
             FROM containers_of(topic_word, 1, 400) co
+            LEFT JOIN consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
-            ORDER BY is_core DESC, gid
+            GROUP BY co.entity_id
+            ORDER BY is_core DESC, mu DESC
             LIMIT 160
         ) g
     ),
