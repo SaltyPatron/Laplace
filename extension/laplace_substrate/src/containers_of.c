@@ -121,7 +121,27 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
             int   rc;
 
             args[0] = frontier[f];
-            rc = SPI_execute_plan(containers_plan, args, nulls, true, 0);
+            /* Cap the FETCH at the caller's budget. The 0 that was here means
+             * "unlimited" to SPI, so every probe materialized every container of
+             * the entity -- an estimated 187,223 rows across every physicality
+             * partition -- and then the dedup loop below threw away all but
+             * limit_rows of them.
+             *
+             * MEASURED on 'water': containers_of(word_id('water'), 1, 400) ran
+             * 7,987ms, while the IDENTICAL query with LIMIT 400 pushed into SQL
+             * planned as an early-terminating Gather and returned in 97.7ms. Same
+             * rows, same index (physicalities_*_laplace_trajectory_constituent_ids
+             * _idx1), 80x. It was over half the cost of converse_walk.
+             *
+             * Passing limit_rows rather than (limit_rows - n_output) leaves a
+             * probe room to fill the whole budget on its own when an earlier
+             * frontier node contributed duplicates.
+             *
+             * This does not narrow the contract: CONTAINERS_QUERY has no ORDER BY,
+             * so "the first limit_rows containers" was already an arbitrary subset
+             * of the matches. Capping the fetch changes WHICH arbitrary rows come
+             * back, not how many the caller is promised. */
+            rc = SPI_execute_plan(containers_plan, args, nulls, true, limit_rows);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "containers_of: probe query failed: %s",
                      SPI_result_code_string(rc));
