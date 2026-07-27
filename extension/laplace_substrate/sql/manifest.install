@@ -70,6 +70,7 @@ functions/mu/glicko2_initial_volatility.sql.in
 functions/mu/glicko2_tau.sql.in
 functions/mu/foundry_rd_kappa.sql.in
 functions/mu/foundry_witness_sat.sql.in
+functions/mu/walk_edge_weight.sql.in
 functions/fold/scoped_consensus.sql.in
 functions/fold/consensus_fold_result.sql.in
 functions/fold/consensus_upsert.sql.in
