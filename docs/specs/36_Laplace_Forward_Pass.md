@@ -224,8 +224,27 @@ All findings verified live against `laplace` on this host, 2026-07-25, foundatio
 > REL_MASS (rated mass in a relation type another token NAMES). They disambiguate each
 > other — the right sense of Y is the one participating in the relation X names — so sense
 > resolution (F3), topic election (F2) and intent (F1) are the same question asked of the
-> same edges. `denote_mu` survives only as the tiebreak: leading with it is exactly what
-> produced F2/F3 (`car` → TZAR, 0 HAS_PART edges, over the vehicle's 29).
+> same edges.
+>
+> **The ranking is SPECIFICITY, and that is the load-bearing part.** Coherence alone does
+> not resolve F2: measured live, raw coherence elected `is` for "What is a pawn in chess?",
+> `of` for the car and water prompts, and put `Napoleon` last. That is the same failure as
+> `denote_mu` (elected the article; `car` → TZAR over the vehicle's 29 HAS_PART edges) and
+> as highway breadth (tied `a` with `pawn` at 13). Three scalars, one outcome — all three
+> are MASS-shaped, and a summed mass is meaningless on a high-degree id because function
+> words are wired to everything.
+>
+> `specificity = coherence / the candidate's OWN total rated mass` — the share of what a
+> concept has witnessed that reaches this prompt. Total mass on that prompt: `a` = 4.28e16,
+> `chess` = 5.28e14, `pawn` = 2.63e13. Elects `pawn`→`chess`, `car`→`parts`, `dog`.
+> Scale-free, which is why it survives ingests: the raw sums worked BEFORE the UD seed and
+> broke after it. `denote_mu` is the final tiebreak, never the lead.
+>
+> **Open (F4):** a prompt with ONE content word has no pair to cohere with. "Who was
+> Napoleon?" elects `was` — Napoleon has no attested edge to "who" or "was", so coherence
+> is 0 for the right answer and nonzero for the wrong one. No pairwise statistic closes
+> this; it needs a per-token signal, and a weighted blend of mass and rarity would just be
+> a knob.
 >
 > A relation is reached by its canonical name's OBJECT token — last token, length ≥ 3, the
 > rest being identifier grammar — through content-id equality or an attested `IS_LEMMA_OF`

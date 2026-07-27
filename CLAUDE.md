@@ -238,14 +238,25 @@ S9 FALLBACK when the sequence layer is starved — never the success path. Every
 published by `query_shapes()` must be reachable and must differ from `describe`.
 
 **S1/S2/S3 read the graph BETWEEN the prompt's tokens, never one token in isolation**
-(`prompt_coherence`, native in `src/prompt_coherence.c`). Two signals off one edge scan:
+(`prompt_coherence`, native in `src/prompt_coherence.c`). Signals off one edge scan:
 COHERENCE (rated mass to the other tokens' candidate senses) and REL_MASS (rated mass in a
 relation type another token NAMES — the "what are the X of Y" shape, where X names a
-relation, not a peer concept). `denote_mu` is the TIEBREAK only; leading with it answers
-"What is a pawn in chess?" with "A is the 1st letter of the Roman alphabet" and resolves
-`car` to TZAR. A relation is reached by its canonical name's OBJECT token (last token,
-length ≥ 3 — the rest is identifier grammar) via content-id equality or an attested
-`IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach its lemma.
+relation, not a peer concept). A relation is reached by its canonical name's OBJECT token
+(last token, length ≥ 3 — the rest is identifier grammar) via content-id equality or an
+attested `IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach
+its lemma.
+
+**RANK ON SPECIFICITY, NEVER ON A SUMMED MASS.** A summed mass is meaningless on a
+high-degree id: function words are wired to everything, so every mass-shaped scalar elects
+them. Measured, all three: `denote_mu` picked the article (and TZAR for `car`), highway
+breadth tied `a` with `pawn` at 13, raw coherence put `is`/`of`/`was` first on every prompt.
+`specificity = coherence / the candidate's OWN total rated mass` is the share of what a
+concept has witnessed that reaches this prompt — on "What is a pawn in chess?" total mass
+runs `a` 4.28e16, `chess` 5.28e14, `pawn` 2.63e13, three orders between article and topic.
+It is scale-free, which is why it survives ingests: the raw sums WORKED before the UD seed
+and broke after it. `denote_mu` is the last tiebreak, never the lead. Known gap: a prompt
+with ONE content word has no pair to cohere with ("Who was Napoleon?" elects `was`), and no
+pairwise statistic fixes that.
 
 **Nothing goes on the `chat()` hot path until it is timed on HIGH-DEGREE topics.** Cost
 scales with the topic's degree — senses per word, edges per synset, containers per surface —
