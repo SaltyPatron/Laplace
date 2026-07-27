@@ -1,9 +1,46 @@
+-- corpus_whitespace_vocab_indices(vocab) -> the positions that are separators.
+--
+-- Answered from what the substrate ATTESTS, not by rendering each id to text and
+-- inspecting the string. The Unicode seed already deposits
+-- HAS_GENERAL_CATEGORY on every codepoint, so "is this a separator" is an indexed
+-- consensus read on the id itself: category Zs / Zl / Zp is the separator class,
+-- Cc covers the control characters (tab, newline) that word-break treats the same
+-- way.
+--
+-- The old body ran render_text_fast + is_all_whitespace per id. is_all_whitespace
+-- takes TEXT, so every caller had to realize an entity before it could ask -- and
+-- that realization was the entire cost, not the test. MEASURED on 1,645 distinct
+-- tokens from 400 'water' containers:
+--
+--   render_text per row + '^\s*$'          29,899 ms
+--   this function, previous body           35,232 ms
+--   the category join below                    33.7 ms
+--
+-- 887x, and correct in scripts the regex never described: U+3000 IDEOGRAPHIC
+-- SPACE, U+00A0, U+202F and every future separator carry their category from the
+-- UCD rather than from a list maintained here. The four hardcoded codepoints in
+-- laplace_codepoint_is_whitespace (0009/00A0/2007/202F) are exactly the symptom of
+-- a classifier that could not see the attestation.
+--
+-- is_all_whitespace itself stays: content_witness_batch.c classifies raw span
+-- BYTES during ingest, where the text is already in hand and no entity exists yet
+-- to carry an attestation. That is the one caller for which text is the right
+-- input.
 CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT (v.ord::int4 - 1) AS vocab_idx
-    FROM unnest(p_vocab) WITH ORDINALITY v(id, ord),
-    LATERAL (SELECT render_text_fast(v.id, 8) AS s) r
-    WHERE is_all_whitespace(r.s)
+    FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
+    WHERE EXISTS (
+        SELECT 1
+        FROM attestations a
+        JOIN canonical_names cn ON cn.id = a.object_id
+        WHERE a.subject_id = v.id
+          AND a.type_id = relation_type_id('HAS_GENERAL_CATEGORY')
+          AND cn.name IN ('unicode/category/Zs/v1',
+                          'unicode/category/Zl/v1',
+                          'unicode/category/Zp/v1',
+                          'unicode/category/Cc/v1')
+    )
 $$;
