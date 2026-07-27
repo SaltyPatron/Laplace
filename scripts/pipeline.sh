@@ -46,6 +46,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# GROUP-WRITABLE ARTIFACTS, EVERY PHASE. The checkout, build/, and
+# $LAPLACE_INSTALL_PREFIX are SHARED between the CI runner (laplace-runner) and
+# whichever operator is at the console — both members of the laplace-runner
+# group. With the default 0022 umask, whoever builds first writes 0644/0755
+# artifacts they alone own, and the next member of the group cannot overwrite
+# them: dotnet fails MSB3021 "Access to the path ... is denied" on a bin/
+# output a previous run produced, and cmake --install fails the same way under
+# /opt/laplace. Observed 2026-07-27 on app/Laplace.Migrations/bin/Release,
+# owned laplace-runner:laplace-runner mode -rwxr--r-- after a CI publish; every
+# other project's tree was operator-owned, so only the one project CI had
+# rebuilt was poisoned.
+#
+# This was already known and fixed LOCALLY in install_native (a bare
+# `umask 0002` before cmake --install) — which covers the install phase and
+# nothing else. Hoisting it to the top makes the invariant hold for codegen,
+# build, install, publish and test alike, which is the only way it can actually
+# hold: the failure lands in whichever phase happens to write first.
+#
+# Never repair this with sudo/chown. The permission class is fixed at the
+# source of the write (see .scratchpad memory: /opt/laplace install permission
+# class); a sudo repair silently re-poisons on the next run by the other user.
+umask 0002
+
 # Content-fingerprint gates (build/.stamps): build/install/test phases no-op
 # when their input domain hasn't changed. LAPLACE_FORCE_ALL=1 (or --force-all)
 # bypasses every gate; `pipeline.sh clean` wipes the stamps with build/.
