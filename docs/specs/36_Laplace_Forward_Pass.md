@@ -155,10 +155,10 @@ That resolver and sequencer are unbuilt.
 
 ```
 S0  DECOMPOSE   prompt → content ids                         [prompt_state]
-S1  DISAMBIGUATE  each token → its sense, resolved BY THE     [MISSING]
+S1  DISAMBIGUATE  each token → its sense, resolved BY THE     [prompt_coherence]
                   OTHER TOKENS in the prompt
-S2  ORIENT      the prompt's topic set (plural, weighted)     [partial: argmax, single]
-S3  INTENT      prompt → salience band(s) via frame evocation [MISSING]
+S2  ORIENT      the prompt's topic set (plural, weighted)     [prompt_coherence]
+S3  INTENT      prompt → the relation/band it names           [prompt_coherence]
 S4  RETRIEVE    beam-walk the consensus graph under the       [walk_branches]
                 intent mask → the semantic frontier
 S5  COMPOSE     frontier → typed strata, carried across hops  [partial]
@@ -217,6 +217,28 @@ bearing, and all three are currently missing or degenerate.
 ## 4. Isolation — why it cannot converse today
 
 All findings verified live against `laplace` on this host, 2026-07-25, foundation-only seed.
+
+> **RESOLVED 2026-07-27 (F1–F3).** S1/S2/S3 are one read — `prompt_coherence`, native in
+> `extension/laplace_substrate/src/prompt_coherence.c`. Two signals off a single edge scan:
+> COHERENCE (rated mass from a candidate sense to the OTHER tokens' candidate senses) and
+> REL_MASS (rated mass in a relation type another token NAMES). They disambiguate each
+> other — the right sense of Y is the one participating in the relation X names — so sense
+> resolution (F3), topic election (F2) and intent (F1) are the same question asked of the
+> same edges. `denote_mu` survives only as the tiebreak: leading with it is exactly what
+> produced F2/F3 (`car` → TZAR, 0 HAS_PART edges, over the vehicle's 29).
+>
+> A relation is reached by its canonical name's OBJECT token — last token, length ≥ 3, the
+> rest being identifier grammar — through content-id equality or an attested `IS_LEMMA_OF`
+> edge. That lemma hop is what lets the inflected prompt word reach its lemma
+> ("parts" → "part" → HAS_PART); it requires UD ingested, and is absent without it.
+>
+> **Why native.** The first implementation was SQL and hung `chat()` for every prompt
+> (>280s), a live outage: SRFs as table sources (one `senses()` per token, one `bubble_up`
+> per candidate relation type), relation names split per row, and an O(n²) candidate join
+> whose both-directions `OR` no consensus index can serve. Two indexed joins behind a
+> MATERIALIZED fence still measured 82s. The computation is a membership scan — one indexed
+> range read per direction plus an O(1) hash probe per edge — which is the shape `recall.c`
+> and `generate_walk.c` already use. SQL fetches sets; C does the math.
 
 **F1 — No intent inference, by design.** `chat.sql.in:7-8`: *"the caller names the read;
 nothing is inferred from how the prompt is phrased."* So `"What is a dog?"` and `"Why is the

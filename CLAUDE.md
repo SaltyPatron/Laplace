@@ -48,6 +48,17 @@ is its own modality (squares/pieces → resolved moves → positions → games);
 checkpoints ride their containers. Tree-sitter's job is narrow: unpack container
 formats, then hand off.
 
+The floor has a consequence that bites the read side: **a one-sentence source can never
+mint a tier-4 root.** A span-identical single-child wrapper IS its child
+(`TierTree.CollapseIndex` / `collapse_idx()`), so Tatoeba rows, WordNet glosses and
+HAS_EXAMPLE usages are all tier-3 ORPHANS by construction. The generation corpus must
+therefore include orphans — `corpus_max_orphan_sentences` defaults to -1 (uncapped);
+0 means "book-only" and silently excludes the ENTIRE single-sentence corpus from
+`corpus_sentence_constituents_since`, and with it `walk_continuations`,
+`cooccurrence_scan`, `trajectory_pairs(_plane)`, `continuation_conditional_plane`,
+`relation_plane` and the foundry's conditional floor. Sequence starving on a default
+looks exactly like sequence starving on missing data — check the enumeration first.
+
 ## Decomposers — the witness boundary
 
 The generated, CI-gated inventory of decomposer classes per assembly is
@@ -166,6 +177,10 @@ heuristic, default Dijkstra unchanged — shared with the foundry synthesis path
 `trajectory_generate.c` (n-gram descent with consensus fallback), `steered_walk.c`
 (topic-steered free-form walk behind `converse_walk` — a second, independent n-gram
 walker; consolidation with `trajectory_generate.c` is tracked open work),
+`prompt_coherence.c` (S1/S2/S3 joint sense + topic + relation election — candidates
+fetched once, one indexed range read per direction, O(1) hash probe per edge, ord
+masks for peer counting; `laplace_relation_lookup` supplies name and rank with no
+SQL call),
 `consensus_fold_*`, `highway_mask.c` (perfcache-backed bit ops), `perfcache.c`
 (mmap'd blobs, postmaster prewarm), plus `model_factor.c`, `geometry_successors.c`,
 `graph_taxonomy/cascade/contrast.c`, `containers_of.c`, `realize_batch.c` and the
@@ -216,6 +231,24 @@ sibling entry points. No stage may be skipped silently: a stage that cannot run 
 explicitly and says so in the response envelope. Template prose (`converse_facts`) is the
 S9 FALLBACK when the sequence layer is starved — never the success path. Every shape
 published by `query_shapes()` must be reachable and must differ from `describe`.
+
+**S1/S2/S3 read the graph BETWEEN the prompt's tokens, never one token in isolation**
+(`prompt_coherence`, native in `src/prompt_coherence.c`). Two signals off one edge scan:
+COHERENCE (rated mass to the other tokens' candidate senses) and REL_MASS (rated mass in a
+relation type another token NAMES — the "what are the X of Y" shape, where X names a
+relation, not a peer concept). `denote_mu` is the TIEBREAK only; leading with it answers
+"What is a pawn in chess?" with "A is the 1st letter of the Roman alphabet" and resolves
+`car` to TZAR. A relation is reached by its canonical name's OBJECT token (last token,
+length ≥ 3 — the rest is identifier grammar) via content-id equality or an attested
+`IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach its lemma.
+
+**Nothing goes on the `chat()` hot path until it is timed on HIGH-DEGREE topics.** Cost
+scales with the topic's degree — senses per word, edges per synset, containers per surface —
+so a rare word is the cheapest point in the distribution, not a sample of it. A read verified
+on `pawn` alone hung on dog/tree/music/river and shipped an outage where `chat()` returned
+nothing for any prompt (2026-07 #686 → #687). Seeds move the scale under you: re-time after
+every ingest. `SELECT senses(...)`/`bubble_up`/`realize` per row, a candidate set joined to
+itself, or a both-directions `OR` join means the read belongs in C, not in a rewritten CTE.
 
 ## Binding engineering laws
 
