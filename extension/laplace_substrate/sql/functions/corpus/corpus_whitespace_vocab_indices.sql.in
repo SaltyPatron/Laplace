@@ -26,21 +26,32 @@
 -- BYTES during ingest, where the text is already in hand and no entity exists yet
 -- to carry an attestation. That is the one caller for which text is the right
 -- input.
+--
+-- UNATTESTED IS NOT "NOT A SEPARATOR". The COALESCE is load-bearing. An id with no
+-- HAS_GENERAL_CATEGORY attestation is unattested, and answering false there is a
+-- silently wrong result on an unseeded substrate. The generation_corpus regress
+-- fixture is exactly that: synthetic content, zero Unicode layer, so the
+-- attestation-only body classified nothing and the test read 10 word-stride
+-- positions where it wanted 6 -- it broke main on merge. bool_or over zero rows is
+-- NULL, which is precisely the distinction between "attested as not a separator"
+-- and "never attested", so the text test runs ONLY for ids the substrate cannot
+-- answer for. Seeded, that is no ids and the fallback costs nothing; unseeded, it
+-- is exactly the pre-existing behaviour.
 CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT (v.ord::int4 - 1) AS vocab_idx
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
-    WHERE EXISTS (
-        SELECT 1
+    LEFT JOIN LATERAL (
+        SELECT bool_or(cn.name IN ('unicode/category/Zs/v1',
+                                   'unicode/category/Zl/v1',
+                                   'unicode/category/Zp/v1',
+                                   'unicode/category/Cc/v1')) AS is_sep
         FROM attestations a
         JOIN canonical_names cn ON cn.id = a.object_id
         WHERE a.subject_id = v.id
           AND a.type_id = relation_type_id('HAS_GENERAL_CATEGORY')
-          AND cn.name IN ('unicode/category/Zs/v1',
-                          'unicode/category/Zl/v1',
-                          'unicode/category/Zp/v1',
-                          'unicode/category/Cc/v1')
-    )
+    ) g ON true
+    WHERE COALESCE(g.is_sep, is_all_whitespace(render_text_fast(v.id, 8)))
 $$;
