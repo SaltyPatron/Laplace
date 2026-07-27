@@ -190,13 +190,48 @@ BEGIN
         -- for "car". Ranking by the relation the prompt named puts the vehicle
         -- sense (29 HAS_PART edges) first and the article second. Measured
         -- 2026-07-27 on "What is a part of a car?".
-        SELECT array_agg(y.synset_id ORDER BY y.peers DESC,
-                                              y.coherence DESC,
-                                              y.rel_mass DESC,
-                                              y.denote_mu DESC NULLS LAST,
-                                              y.synset_id)
+        -- HOTFIX 2026-07-27: prompt_coherence() is NOT called from the hot path.
+        -- It hangs. Measured on the deployed extension after the UD ingest, on
+        -- "What is a dog?" and "What are the parts of a car?": >280s, i.e. chat()
+        -- never returned for ANY prompt. Every other stage chat() calls is fast
+        -- (prompt_state, senses over all tokens, bubble_up, top_synset, realize,
+        -- the language tally, converse_about, converse) -- this one stage was the
+        -- whole outage.
+        --
+        -- Why it cannot be patched in place: it is a SQL cascade doing work that
+        -- belongs in C. Set-returning functions as table sources (one senses()
+        -- per token, one bubble_up per candidate relation type), relation names
+        -- split with string_to_array per row, and an O(n^2) candidate join whose
+        -- both-directions OR defeats the consensus indexes. At 277-315 candidate
+        -- senses per prompt that is unsalvageable by rewriting: the two-indexed-
+        -- join + MATERIALIZED form still measured 82s. The substrate law is
+        -- explicit -- all math in C/C++/SPI, SQL orchestrates -- and this is a
+        -- hash-set membership scan over a candidate set, exactly what recall.c
+        -- and generate_walk.c already do natively in microseconds.
+        --
+        -- The ranking below is the pre-existing breadth/denote_mu election. It is
+        -- WRONG in known ways (it answers "What is a pawn in chess?" with "A is
+        -- the 1st letter of the Roman alphabet", and resolves "car" to TZAR) --
+        -- but it returns. A wrong answer beats no answer while the native port is
+        -- written; prompt_coherence stays installed and callable so the port has
+        -- a reference implementation and a spec to match.
+        SELECT array_agg(y.syn ORDER BY y.tok_breadth DESC NULLS LAST,
+                                        y.denote_mu DESC NULLS LAST,
+                                        y.syn)
           INTO cands
-        FROM prompt_coherence(p_prompt) y;
+        FROM (
+            SELECT DISTINCT ON (x.tok) x.tok, x.syn, x.denote_mu, x.tok_breadth
+            FROM (
+                SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
+                       max(laplace_highway_popcount(e.highway_mask))
+                           OVER (PARTITION BY p.id) AS tok_breadth
+                FROM prompt_state(p_prompt) p
+                CROSS JOIN LATERAL senses(p.id) s
+                LEFT JOIN entities e ON e.id = s.synset_id
+                WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
+            ) x
+            ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
+        ) y;
         topic := cands[1];
         -- Nothing in this turn resolved: carry the session's standing topic.
         IF topic IS NULL THEN topic := ctx; END IF;
@@ -307,15 +342,21 @@ BEGIN
             --    the eighth row... (chess) the least powerful piece."
             -- Four separately-witnessed clauses, stepped by concept adjacency,
             -- on topic, each traceable to its witnesses.
-            IF xl IS NOT NULL THEN
-                out := converse_tiered(topic, lang);
-                -- Degrade EXPLICITLY, never silently: no attested sentence for
-                -- this topic means the sequence layer is starved here, and the
-                -- template is the declared fallback.
-                IF out IS NULL OR out = '' THEN out := converse_about(topic, lang); END IF;
-            ELSE
-                out := converse(p_prompt);
-            END IF;
+            -- HOTFIX 2026-07-27: converse_tiered() is NOT called from the hot
+            -- path either. Two unbounded reads inside it, both measured on `dog`:
+            -- a containers_of() arm over every sense-subject of the topic
+            -- (>100s, never returned) and a per-word top_synset() concept lift
+            -- (73s, because top_synset is bubble_up per constituent). It answered
+            -- only for `pawn`, which has few senses and few usages -- the single
+            -- topic it was verified on before being wired in. Fixes for both
+            -- exist on perf/content-ladder-ledger and did NOT make this merge.
+            --
+            -- converse_about is the pre-existing path and is fast and correct-ish
+            -- ("Dog is a member of the genus Canis (probably descended from the
+            -- common wolf)..."), so it carries the describe shape until the
+            -- sentence-tier composer is fast enough to sit in front of it.
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
+                        ELSE converse(p_prompt) END;
         END IF;
 
         IF out IS NULL OR out = '' THEN
