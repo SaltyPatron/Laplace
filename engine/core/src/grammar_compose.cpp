@@ -68,11 +68,17 @@ typedef struct {
 } compose_state_t;
 
 static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
-                       hash128_t type_id);
+                       hash128_t type_id, uint8_t packaging);
 static int compose_id_push(hash128_t** ids, size_t* count, size_t* cap, hash128_t id);
 static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
                      double coord[4], hilbert128_t* hb,
                      const hash128_t* child_ids, const uint64_t* child_flags, size_t m);
+
+static uint32_t node_parent(laplace_ast_t* ast, size_t idx) {
+    laplace_ast_node_t nd;
+    if (laplace_ast_get_node(ast, idx, &nd) != 0) return LAPLACE_AST_ROOT;
+    return nd.parent;
+}
 
 static int is_json_modality(const char* modality_id) {
     return modality_id && strcmp(modality_id, "json") == 0;
@@ -167,7 +173,7 @@ static int emit_grapheme_floor_entities(
         if (gv.child_count == 1) continue;
         if (compose_id_push(emitted_entity, emitted_entity_n, emitted_entity_cap, gv.id) != 1)
             continue;
-        if (push_entity(r, gv.id, 1, grapheme_type) != 0) return -3;
+        if (push_entity(r, gv.id, 1, grapheme_type, 0) != 0) return -3;
         uint64_t gf = laplace_vertex_flags(1, 0, 0);
         hash128_t gid = gv.id;
         if (push_phys(r, gv.id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0)
@@ -453,7 +459,7 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
 }
 
 static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
-                       hash128_t type_id) {
+                       hash128_t type_id, uint8_t packaging) {
     laplace_compose_entity_t* n = (laplace_compose_entity_t*)realloc(
         r->entities, (r->entity_count + 1) * sizeof(*n));
     if (!n) return -3;
@@ -462,6 +468,7 @@ static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
     e->id = id;
     e->tier = tier;
     e->type_id = type_id;
+    e->packaging = packaging;
     return 0;
 }
 
@@ -793,7 +800,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             /* Grapheme-floor law: single-codepoint clusters are pass-through
              * scaffold (id == codepoint id); never emit them at tier 1. */
             if (gv.child_count == 1) continue;
-            if (push_entity(r, gv.id, 1, grapheme_type) != 0) { rc = -3; goto fail; }
+            if (push_entity(r, gv.id, 1, grapheme_type, 0) != 0) { rc = -3; goto fail; }
             if (materialize_phys) {
                 uint64_t gf = laplace_vertex_flags(1, 0, 0);
                 hash128_t gid = gv.id;
@@ -853,16 +860,86 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
-        /* Type by TIER, exactly as the text lane does. The AST node type is
-         * container grammar and stops here -- the record's semantic type is
-         * attested separately, and by a governed vocabulary. */
+
+        uint32_t kid_n = child_counts[idx];
+
+        /* RULE #8 STEP 1: "Tree-sitter unpacks the packaging (raw file format) ->
+         * raw content. Nothing more."
+         *
+         * This lane did more. On a JSON container it staged the whole parse tree as
+         * substrate rows AND decomposed the leaf values itself, via
+         * json_leaf_fill_grapheme_children -- a SECOND decomposer running beside
+         * text_decomposer/content_witness_batch, which is THE decomposer.
+         *
+         * Measured on the live substrate before this change:
+         *
+         *   - 9,260 interior nodes (json object/pair/array) staged as tier-4
+         *     entities with trajectories, carrying ZERO consensus edges in either
+         *     direction. Nothing witnessed them because there is nothing there to
+         *     witness: their "content" is their children concatenated with the
+         *     delimiters stripped, e.g. 41.2.1ARG0agentARG1patientARG2instrument.
+         *
+         *   - 5,063 VALUES staged twice. The leaf id is already the content root id
+         *     (JsonLeafContentConvergenceTests pins that), so the witness lane and
+         *     this lane mint the SAME id -- then disagree about what it decomposes
+         *     into. This lane gives a flat grapheme run at AST depth; the content
+         *     ladder gives the real segmentation at its own floor. "mince.01" came
+         *     out as m|i|n|c|e|.|0|1 at tier 2 here and mince|.|01 at tier 3 there.
+         *     One physicality key, two trajectories, so DISTINCT ON over it is
+         *     settled by the query PLAN -- the render non-determinism fixed
+         *     downstream in #720, whose actual cause is right here.
+         *
+         * The values are not lost: the decomposer's witness stages every one of them
+         * through CategoryAnchor/ContentEmitter -> ContentTierSpine, which is the one
+         * content path, at the correct tier, with the correct constituents. That is
+         * the handoff the law describes, and it already works -- all 9,669 consensus
+         * edges on those ids came from it.
+         *
+         * So on a container the compose result is NAVIGATION, not rows: spans[] still
+         * carries every node (TrySpanEntity/JsonGrammarHelper are untouched, and the
+         * witness reads values exactly as before) and the record ROOT still stages as
+         * the per-line dedup marker GrammarIngestAdapter probes with IsProvenPresent.
+         * Nothing else becomes a row.
+         *
+         * Scoped by the modality predicate this file already had. */
+        int packaging = json_mod && node_parent(ast, idx) != LAPLACE_AST_ROOT;
+
+        /* CONTAINER STRUCTURE IS NOT CONTENT.
+         *
+         * On a data container, an interior node is syntax: a JSON object, pair
+         * or array holds no assertion of its own, only the punctuation around
+         * the values it wraps. Persisting one mints an entity whose "content"
+         * is its children concatenated with the delimiters stripped -- measured
+         * live before this fix, 9,260 of them, e.g. the tier-4 "document"
+         *
+         *     41.2.1ARG0agentARG1patientARG2instrument
+         *
+         * which is a SemLink mapping object flattened into a string. Not one of
+         * the 9,260 carried a single consensus edge in either direction: nothing
+         * witnessed them and nothing pointed at them, because there is nothing
+         * there to witness. They sat at tier >= 3 with trajectories, which is
+         * exactly the set corpus_sentence_constituents_since enumerates, so
+         * container syntax was being served to the sequence layer as attested
+         * language.
+         *
+         * The VALUES are kept -- json/string_content held 9,669 consensus edges
+         * over the same seed, and that is the substrate's actual content. So:
+         * leaves and the record root persist, interior structure does not.
+         *
+         * They stay in spans[] and in the containment tree, so span lookup and
+         * parent/child navigation are untouched -- the decomposer still walks
+         * the record exactly as before. The node simply never becomes a row. */
+        /* Pushed ALWAYS: the compose result is the in-memory navigation structure
+         * (spans, containment, id convergence -- GrammarCompose.ConvergenceBattery
+         * asserts the value id is findable here). Whether a node becomes a ROW is the
+         * drain's decision, and it reads this flag. */
         hash128_t tier_type = laplace_content_tier_type_id(st.comp_tier[idx]);
-        if (push_entity(r, id, st.comp_tier[idx], tier_type) != 0) { rc = -3; goto fail_emit; }
+        if (push_entity(r, id, st.comp_tier[idx], tier_type, (uint8_t)packaging) != 0) {
+            rc = -3; goto fail_emit;
+        }
 
         hilbert128_t hb;
         hilbert4d_encode(st.comp_coord + idx * 4, &hb);
-
-        uint32_t kid_n = child_counts[idx];
         hash128_t* child_ids = NULL;
         uint64_t*  child_flags = NULL;
         size_t m = 0;
@@ -916,7 +993,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                 }
             }
         }
-        if (m > 0 && child_ids && materialize_phys) {
+        if (m > 0 && child_ids && materialize_phys && !packaging) {
             if (push_phys(r, id, st.comp_coord + idx * 4, &hb,
                           child_ids, child_flags, m) != 0) {
                 free(child_ids); free(child_flags);
@@ -1235,6 +1312,7 @@ int laplace_compose_drain_into_stage(
     for (size_t i = 0; i < r->entity_count; ++i) {
         if (!entity_novel(&filter, i)) continue;
         const laplace_compose_entity_t* e = &r->entities[i];
+        if (e->packaging) continue;   /* navigation only -- never a row */
         if (intent_stage_witness_seen(stage, &e->id)) continue;
         if (intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
             free_emit_filter(&filter);
