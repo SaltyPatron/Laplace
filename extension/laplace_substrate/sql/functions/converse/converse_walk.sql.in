@@ -23,10 +23,12 @@ CREATE OR REPLACE FUNCTION converse_walk(p_prompt text, p_steps int DEFAULT 40,
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
+    -- Only the definitional band survives here: it selects the concept's own gloss
+    -- as the GATHER seed below. The taxonomic/partitive/associative constants went
+    -- with the orientation block that used them for band-mass. They were magic
+    -- integers duplicated across this file, converse() and converse_facts() anyway
+    -- -- relation_band_catalog() is the published surface for band identity.
     b_def  int := 1;   -- definitional band (gloss)
-    b_tax  int := 2;   -- taxonomic band (is-a)
-    b_part int := 4;   -- partitive band (parts)
-    b_assoc int := 7;  -- associative band (related)
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -39,21 +41,27 @@ DECLARE
     rng    bigint;
     out_ids bytea[];
 BEGIN
-    -- ORIENT: keep BOTH the tier-2 word (for the tier fan-out) and its synset.
-    -- Orient keys computed once per DISTINCT token (fenced projection); repeated
-    -- prompt tokens collapse before realize/band-mass run.
-    SELECT y.tok, y.syn INTO topic_word, syn
-    FROM (
-        SELECT x.tok, x.syn, x.surface,
-               (lower(realize(x.syn)) = x.surface AND char_length(x.surface) >= 3) AS exact_hit,
-               (SELECT count(*) FROM consensus c WHERE c.subject_id = x.syn
-                  AND relation_highway_band(c.type_id) IN (b_def,b_tax,b_part,b_assoc)) AS band_mass
-        FROM (SELECT DISTINCT p.id AS tok, top_synset(p.id) AS syn,
-                     lower(render_text(p.id,32)) AS surface
-              FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL) x
-        WHERE x.syn IS NOT NULL
-    ) y
-    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
+    -- ORIENT: the same native election chat() and converse() run — one election,
+    -- one key order, so the three cannot disagree about what a prompt is about.
+    -- prompt_coherence returns the elected TOKEN alongside its synset, which is
+    -- what this lane needs for the tier fan-out below, so both come off one call.
+    --
+    -- This replaces a verbatim copy of converse()'s pre-specificity ranking. Its
+    -- primary sort key was lower(realize(x.syn)) = x.surface -- case-folding used
+    -- as an identity test. "King" and "king" are different content and therefore
+    -- different ids, and the substrate already attests the link both ways
+    -- (K --HAS_LOWERCASE_MAPPING--> k, k --HAS_UPPERCASE_MAPPING--> K, resolved
+    -- natively by word_case_variants); lower() discards those edges to re-derive a
+    -- worse answer in string space, per row. The rest of that block was two renders
+    -- per candidate, a char_length tiebreak, a 29.6s correlated band-mass count and
+    -- a 73s top_synset per token. See converse.sql.in for the full ledger.
+    SELECT y.tok, y.synset_id INTO topic_word, syn
+    FROM prompt_coherence(p_prompt) y
+    ORDER BY y.specificity DESC NULLS LAST,
+             y.rel_mass DESC NULLS LAST,
+             y.peers DESC,
+             y.denote_mu DESC NULLS LAST,
+             y.synset_id
     LIMIT 1;
     IF syn IS NULL THEN RETURN NULL; END IF;
 

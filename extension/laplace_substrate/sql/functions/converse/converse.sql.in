@@ -11,42 +11,54 @@
 --
 -- ORIENT here, REALIZE in converse_about(): callers that already resolved a topic
 -- (chat() orients once per turn) call converse_about directly and skip the
--- re-segmentation + band-mass re-orientation.
+-- re-segmentation.
+--
+-- ONE ELECTION, and it is chat()'s. This function used to carry a private copy of
+-- the pre-specificity ranking -- copy-pasted verbatim into converse_walk() as well
+-- -- long after chat() replaced it. Since chat() falls back to converse() on three
+-- paths, the ranking chat() abandoned was still reachable from chat(). It carried
+-- five separate defects in one expression:
+--
+--   1. lower(realize(x.syn, p_lang)) = x.surface -- CASE-FOLDING AS A HACK.
+--      "King" and "king" are DIFFERENT CONTENT, so different ids, and the substrate
+--      already attests the link both ways: K --HAS_LOWERCASE_MAPPING--> k and
+--      k --HAS_UPPERCASE_MAPPING--> K, governed in relation_types.toml, resolved
+--      natively and batched by word_case_variants (src/lexical_case.c). Calling
+--      lower() throws those attested edges away and re-derives a worse answer in
+--      string space -- the identity law inverted, at a per-row cost.
+--   2. TWO renders per candidate (realize of the synset, render_text of the token)
+--      inside the ranking, i.e. rendering before the operation is finished.
+--   3. A string EQUALITY as the primary sort key, in a substrate whose identity law
+--      is language-agnostic: a synset whose label differs from the surface
+--      (car -> "auto") scores false and loses to an incidental token.
+--   4. char_length(surface) as the final tiebreak -- ranking concepts by how long
+--      their spelling is.
+--   5. A correlated count(*) over consensus per candidate for band_mass: 29.6s for
+--      ONE candidate on the seeded corpus, and top_synset() per token on top of it
+--      (73s -- it is bubble_up per constituent).
+--
+-- All five are gone. prompt_coherence() is native, id-space end to end, and elects
+-- on SPECIFICITY (coherence / the candidate's own total rated mass) exactly as
+-- chat() does -- same function, same key order, so the two can no longer disagree
+-- about what a prompt is about.
 CREATE OR REPLACE FUNCTION converse(p_prompt text, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE plpgsql STABLE
     SET search_path = @extschema@, public AS $$
 DECLARE
-    b_def  int := 1;   -- definitional band (gloss)
-    b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
-    b_part int := 4;   -- partitive band (parts)
-    b_assoc int := 7;  -- associative band (related)
-    syn    bytea;
+    syn bytea;
 BEGIN
-    -- ORIENT: the prompt token whose synset carries the most content-band mass.
-    -- Guard against loose lexical resolution (e.g. "me" -> "Maine"): prefer tokens
-    -- whose realized lemma equals the surface, so the topic is a word truly in the
-    -- prompt resolved to ITS OWN synset (fall back to mass; keeps plurals).
-    -- Orient keys (realize + content-band mass) are computed ONCE per DISTINCT
-    -- candidate in a fenced projection: repeated prompt tokens collapse before the
-    -- expensive keys run, and the sort orders on plain columns.
-    SELECT y.syn INTO syn
-    FROM (
-        SELECT x.syn, x.surface,
-               (lower(realize(x.syn, p_lang)) = x.surface
-                AND char_length(x.surface) >= 3) AS exact_hit,
-               (SELECT count(*) FROM consensus c
-                WHERE c.subject_id = x.syn
-                  AND relation_highway_band(c.type_id) IN (b_def, b_tax, b_part, b_assoc)) AS band_mass
-        FROM (
-            SELECT DISTINCT top_synset(p.id) AS syn,
-                   lower(render_text(p.id, 32)) AS surface
-            FROM prompt_state(p_prompt) p
-            WHERE p.id IS NOT NULL
-        ) x
-        WHERE x.syn IS NOT NULL
-    ) y
-    ORDER BY y.exact_hit DESC NULLS LAST, y.band_mass DESC, char_length(y.surface) DESC
+    -- ORIENT: the same native election chat() runs. Key order is chat()'s,
+    -- verbatim -- specificity, then rel_mass (the "what are the X of Y" shape,
+    -- where X names a relation and coherence is silent), then peers, with
+    -- denote_mu as a TIEBREAK ONLY and the id for determinism.
+    SELECT y.synset_id INTO syn
+    FROM prompt_coherence(p_prompt) y
+    ORDER BY y.specificity DESC NULLS LAST,
+             y.rel_mass DESC NULLS LAST,
+             y.peers DESC,
+             y.denote_mu DESC NULLS LAST,
+             y.synset_id
     LIMIT 1;
 
     IF syn IS NULL THEN
