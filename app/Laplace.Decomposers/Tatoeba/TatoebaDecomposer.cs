@@ -113,31 +113,69 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
         if (!File.Exists(sentences)) return;
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        long unresolvable = 0;
-        await Parallel.ForEachAsync(
-            File.ReadLinesAsync(sentences, ct),
-            new ParallelOptions { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount },
-            (line, _) =>
-            {
-                int t1 = line.IndexOf('\t');
-                if (t1 <= 0) return ValueTask.CompletedTask;
-                int t2 = line.IndexOf('\t', t1 + 1);
-                if (t2 < 0) return ValueTask.CompletedTask;
-                if (!long.TryParse(line.AsSpan(0, t1), out long id)) return ValueTask.CompletedTask;
-                var text = line.AsSpan(t2 + 1);
-                if (text.IsEmpty) return ValueTask.CompletedTask;
+        long unresolvable = 0, seen = 0, nextReport = ReportEvery;
 
-                if (ContentTierSpine.ResolveRoot(text.ToString()) is { } root)
-                    _ids.Set(id, root);
-                else
-                    Interlocked.Increment(ref unresolvable);
-                return ValueTask.CompletedTask;
-            });
+        // Read on ONE thread into fixed batches, resolve each batch across all cores.
+        //
+        // The first cut of this used Parallel.ForEachAsync over File.ReadLinesAsync and was
+        // effectively SERIAL: an async line enumerator is a single cursor, so the workers
+        // spent their lives awaiting MoveNextAsync. MEASURED on the live box at 135% CPU of
+        // 1200% available, 13 minutes in, with no output at all — a silent prelude that is
+        // indistinguishable from a hang, which is exactly how it was reported. Batching
+        // moves the parallel boundary off the cursor and onto the work.
+        var batch = new List<string>(BatchLines);
+        foreach (var line in File.ReadLines(sentences))
+        {
+            ct.ThrowIfCancellationRequested();
+            batch.Add(line);
+            if (batch.Count < BatchLines) continue;
+            ResolveBatch(batch, ref unresolvable);
+            seen += batch.Count;
+            batch.Clear();
+            if (seen < nextReport) continue;
+            nextReport = seen + ReportEvery;
+            context.Logger?.LogInformation(
+                "TATOEBA_ID_MAP building: lines={Seen:N0} resolved={Resolved:N0} elapsed_s={Elapsed:F0}",
+                seen, _ids.Count, sw.Elapsed.TotalSeconds);
+        }
+        if (batch.Count > 0) { ResolveBatch(batch, ref unresolvable); seen += batch.Count; }
 
         context.Logger?.LogInformation(
-            "TATOEBA_ID_MAP resolved={Resolved:N0} unresolvable={Unresolvable:N0} elapsed_s={Elapsed:F1} "
-            + "(sentence ids are ingest scaffolding — resolved to content roots here, never stored)",
-            _ids.Count, unresolvable, sw.Elapsed.TotalSeconds);
+            "TATOEBA_ID_MAP resolved={Resolved:N0} of {Seen:N0} unresolvable={Unresolvable:N0} "
+            + "elapsed_s={Elapsed:F1} (sentence ids are ingest scaffolding — resolved to content "
+            + "roots here, never stored)",
+            _ids.Count, seen, unresolvable, sw.Elapsed.TotalSeconds);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Lines per parallel batch — big enough to amortise the fan-out, small enough
+    /// that the reader is never far ahead of the resolvers.</summary>
+    private const int BatchLines = 65_536;
+
+    /// <summary>Progress cadence. A build this long must never be silent again.</summary>
+    private const long ReportEvery = 2_000_000;
+
+    private void ResolveBatch(List<string> lines, ref long unresolvable)
+    {
+        long bad = 0;
+        Parallel.For(0, lines.Count,
+            new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+            i =>
+            {
+                var line = lines[i].AsSpan();
+                int t1 = line.IndexOf('\t');
+                if (t1 <= 0) return;
+                int t2 = line[(t1 + 1)..].IndexOf('\t');
+                if (t2 < 0) return;
+                t2 += t1 + 1;
+                if (!long.TryParse(line[..t1], out long id)) return;
+                var text = line[(t2 + 1)..];
+                if (text.IsEmpty) return;
+
+                if (ContentTierSpine.ResolveRoot(text.ToString()) is { } root) _ids.Set(id, root);
+                else Interlocked.Increment(ref bad);
+            });
+        unresolvable += bad;
     }
 
     public async Task<IngestInventory?> DescribeInputAsync(
