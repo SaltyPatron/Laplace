@@ -641,11 +641,36 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
                 if (j == i || o->ord != best->ord)
                     continue;
-                if (o->coherence > best->coherence
-                    || (o->coherence == best->coherence && o->rel_mass > best->rel_mass)
-                    || (o->coherence == best->coherence && o->rel_mass == best->rel_mass
+                /* Select on the SHARE, the same scale-free quantity values[8]
+                 * reports -- not on raw coherence. This comparator DROPS every
+                 * non-winner for the ord (`if (!is_best) continue` below), so
+                 * whatever it selects on is the real election; computing the
+                 * share afterwards only describes a candidate raw sum already
+                 * picked. Selecting on the sum and reporting the share meant the
+                 * two disagreed, and the better candidate was gone before the
+                 * share was ever consulted.
+                 *
+                 * Raw coherence is a TOTAL, and a total rewards degree. Glicko-2
+                 * exists so a rating does not improve by playing more games;
+                 * summing rank*eff across edges puts that back. MEASURED on this
+                 * substrate for "what is a tree?": et carries 36,202 edges to
+                 * tree's 296 and loses on every quality axis -- rank 0.239 vs
+                 * 0.784, eff_mu 1.18e12 vs 1.26e12, rd 262 vs 232 -- yet wins the
+                 * raw sum 122x on volume alone. Rank-weighting alone only brings
+                 * it to a TIE (0.3 vs 0.3); the share separates them 3.3x. et is a
+                 * player who beat 36,000 weak opponents, and the fold already said
+                 * so in mu and rd.
+                 *
+                 * Ties still fall through to rel_mass, then denote_mu, then id --
+                 * unchanged. */
+                double o_share    = o->total_mass    > 0.0 ? o->coherence    / o->total_mass    : 0.0;
+                double best_share = best->total_mass > 0.0 ? best->coherence / best->total_mass : 0.0;
+
+                if (o_share > best_share
+                    || (o_share == best_share && o->rel_mass > best->rel_mass)
+                    || (o_share == best_share && o->rel_mass == best->rel_mass
                         && o->denote_mu > best->denote_mu)
-                    || (o->coherence == best->coherence && o->rel_mass == best->rel_mass
+                    || (o_share == best_share && o->rel_mass == best->rel_mass
                         && o->denote_mu == best->denote_mu
                         && memcmp(o->syn, best->syn, 16) < 0))
                 {
