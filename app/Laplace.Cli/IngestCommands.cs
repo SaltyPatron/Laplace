@@ -143,7 +143,14 @@ internal static class IngestCommands
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
-                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | parquet | tiny-codes | stack | safetensors | image | audio | document\n"
+                        // ASK THE REGISTRY. This line used to hand-list the sources, and it
+                        // lied in both directions: it advertised `image` and `audio`, which
+                        // no dispatch route can reach, and omitted every chess lane plus
+                        // omw-probe and recipe. The authority is two lines below in the same
+                        // method — TryDispatch's own table, already used for the unknown-source
+                        // error — so help and error can never again disagree about what this
+                        // binary supports.
+                        + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
                         + "  --langs: language scope for this run\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations\n"
                         + "  chain: run several ingests sequentially in ONE process (one startup, one\n"

@@ -1,3 +1,4 @@
+using System.Linq;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Atomic2020;
 using Laplace.Decomposers.CILI;
@@ -71,20 +72,6 @@ internal static class IngestDispatchTable
             skipLayerCheck, cli);
 
 
-    private static readonly Dictionary<string, IngestHandler> Routes = BuildRoutes();
-
-    private static Dictionary<string, IngestHandler> BuildRoutes()
-    {
-        var routes = new Dictionary<string, IngestHandler>(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in StandardSources)
-            routes[key] = Standard(key, skipLayerCheck: false);
-        foreach (var key in StandardSourcesNoLayerCheck)
-            routes[key] = Standard(key, skipLayerCheck: true);
-        foreach (var (key, handler) in Exceptions)
-            routes[key] = handler;
-        return routes;
-    }
-
     /// <summary>
     /// Sources whose dispatch is NOT determined by the key alone — a bespoke entry
     /// point, a constructed decomposer carrying CLI flags, or a lane that manages
@@ -139,6 +126,26 @@ internal static class IngestDispatchTable
             skipLayerCheck: true, cli)),
     ];
 
+    // DECLARATION ORDER IS LOAD-BEARING. Static field initializers run top to
+    // bottom, so Routes must be declared AFTER Exceptions — initialized above it,
+    // BuildRoutes() reads a null Exceptions and the whole type fails to initialize
+    // with a TypeInitializationException on first dispatch. (The MCP tool catalog
+    // documents the same trap for the same reason.)
+    private static readonly Dictionary<string, IngestHandler> Routes = BuildRoutes();
+
+    private static Dictionary<string, IngestHandler> BuildRoutes()
+    {
+        var routes = new Dictionary<string, IngestHandler>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in StandardSources)
+            routes[key] = Standard(key, skipLayerCheck: false);
+        foreach (var key in StandardSourcesNoLayerCheck)
+            routes[key] = Standard(key, skipLayerCheck: true);
+        foreach (var (key, handler) in Exceptions)
+            routes[key] = handler;
+        return routes;
+    }
+
+
     // GH #600: `chess` records AND derives the calculated layer in ONE fused Compose pass
     // (ChessPgnDecomposer -> DeriveFromParsed, reusing the in-memory parse) — no second
     // Postgres hydrate + re-parse. `--no-analyze` records game-grain only and leaves
@@ -155,7 +162,7 @@ internal static class IngestDispatchTable
             task = handler(cli);
             return true;
         }
-        if (sourceKey is "model" or "safetensors" or "safetensor")
+        if (ModelAliases.Contains(sourceKey, StringComparer.OrdinalIgnoreCase))
         {
             task = IngestCommands.IngestSafetensorSnapshotAsync(cli.Path, cli);
             return true;
@@ -172,5 +179,22 @@ internal static class IngestDispatchTable
         return false;
     }
 
-    internal static IReadOnlyCollection<string> RegisteredKeys => Routes.Keys;
+    /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
+    private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
+
+    /// <summary>
+    /// EVERYTHING <see cref="TryDispatch"/> can actually route — the explicit table,
+    /// the model aliases, and the manifest rows reachable through the generic ETL
+    /// lane. This used to report only Routes.Keys, so it under-reported by the model
+    /// aliases and by every ETL-routable source, and callers that printed it (the
+    /// unknown-source error, `ingest` usage) told the operator less than the binary
+    /// supports. One property, so help text and error text cannot disagree with
+    /// dispatch or with each other.
+    /// </summary>
+    internal static IReadOnlyCollection<string> RegisteredKeys =>
+        Routes.Keys
+              .Concat(ModelAliases)
+              .Concat(EtlManifest.Names.Where(EtlManifest.IsRoutable))
+              .Distinct(StringComparer.OrdinalIgnoreCase)
+              .ToArray();
 }
