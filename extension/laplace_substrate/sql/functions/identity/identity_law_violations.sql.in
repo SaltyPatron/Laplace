@@ -1,3 +1,44 @@
+-- Violations of the identity law, as the law actually states it.
+--
+-- CLAUDE.md, the first invariant: "Identical content = identical id, at every
+-- tier, from every source." And: "Tiers are a FLOOR, not identity: same content =
+-- same id at every tier; tier is never mixed into the hash ('Fine' as a one-word
+-- reply IS the sentence IS the word — one id)."
+--
+-- This function checked ONE thing: that tier fell in 0..255. That is a column
+-- range check, not the identity law. It returned zero rows on a substrate holding
+-- 5,063 entities stored at TWO tiers each — 10,126 rows for 5,063 entities — and
+-- so reported clean while the law was broken. A detector that cannot fail is
+-- worse than no detector: it is a green light over the exact thing it is named
+-- for.
+--
+-- The checks now:
+--
+--   multi_tier_entity      one content id with rows at more than one tier. The id
+--                          is correct (content-addressed, tier never in the hash);
+--                          the DUPLICATION is the violation. Observed as 2+3
+--                          pairs: SemLink staged concept identifiers at word tier
+--                          while PropBank/VerbNet/FrameNet staged the same
+--                          identifiers at sentence tier, so one entity ended up
+--                          with two rows carrying two different decompositions
+--                          (mince.01 as m|i|n|c|e|.|0|1 and as mince|.|01).
+--
+--   ambiguous_physicality  one (entity_id, type, id) carrying MORE THAN ONE
+--                          distinct trajectory. A physicality id must be a
+--                          function of what it holds; when it is not, any
+--                          DISTINCT ON over that key is settled by the query
+--                          PLAN. Not hypothetical: it made constituents_closure
+--                          return an 8-point decomposition for an id alone and a
+--                          3-point one for the same id inside a 500-id batch, so
+--                          render_text_batch produced different text depending on
+--                          what else was in the array, and every realize_batch
+--                          consumer inherited it.
+--
+--   tier_out_of_range      the original range check, kept.
+--
+-- Reports ids, not counts, so a caller can act on them. Deliberately unbounded: a
+-- violation list that silently truncates is the same failure as a detector that
+-- cannot fail.
 CREATE OR REPLACE FUNCTION identity_law_violations()
 RETURNS TABLE(id bytea, tier smallint, reason text)
 LANGUAGE sql
@@ -6,5 +47,24 @@ SET search_path = @extschema@, public
 AS $$
     SELECT e.id, e.tier, 'tier_out_of_range'::text
     FROM @extschema@.entities e
-    WHERE e.tier < 0 OR e.tier >= 256;
+    WHERE e.tier < 0 OR e.tier >= 256
+
+    UNION ALL
+
+    -- Same content id stored at more than one tier: one entity, N rows.
+    SELECT e.id, e.tier, 'multi_tier_entity'::text
+    FROM @extschema@.entities e
+    JOIN (SELECT d.id FROM @extschema@.entities d
+          GROUP BY d.id HAVING count(*) > 1) dup ON dup.id = e.id
+
+    UNION ALL
+
+    -- One physicality key holding more than one distinct trajectory, so the key
+    -- does not determine its content and reads over it are plan-dependent.
+    SELECT p.entity_id, NULL::smallint, 'ambiguous_physicality'::text
+    FROM (SELECT ph.entity_id, ph.type, ph.id
+          FROM @extschema@.physicalities ph
+          WHERE ph.trajectory IS NOT NULL
+          GROUP BY ph.entity_id, ph.type, ph.id
+          HAVING count(DISTINCT public.ST_AsBinary(ph.trajectory)) > 1) p
 $$;
