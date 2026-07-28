@@ -26,35 +26,50 @@ namespace Laplace.Decomposers.Composition;
 /// </summary>
 public static class SeedIngestComposition
 {
+    /// <summary>
+    /// The key -> decomposer binding, declared ONCE. A decomposer is a class, so
+    /// this binding is the one part of the ingest roster that genuinely cannot come
+    /// from the substrate — but it was written twice: as 24 AddTransient&lt;T&gt;()
+    /// lines and again as a 24-arm switch mapping the same key to the same T. Adding
+    /// a decomposer meant editing both, and editing only one produced either an
+    /// unresolvable service at runtime or a key the resolver rejected.
+    /// </summary>
+    internal static readonly (string Key, Type Decomposer)[] Registry =
+    [
+        ("unicode", typeof(UnicodeDecomposer)),
+        ("iso639", typeof(ISODecomposer)),
+        ("atomic2020", typeof(Atomic2020Decomposer)),
+        ("conceptnet", typeof(ConceptNetDecomposer)),
+        ("wiktionary", typeof(WiktionaryDecomposer)),
+        ("omw", typeof(OMWDecomposer)),
+        ("wordnet", typeof(WordNetDecomposer)),
+        ("ud", typeof(UDDecomposer)),
+        ("tatoeba", typeof(TatoebaDecomposer)),
+        ("framenet", typeof(FrameNetDecomposer)),
+        ("opensubtitles", typeof(OpenSubtitlesDecomposer)),
+        ("verbnet", typeof(VerbNetDecomposer)),
+        ("propbank", typeof(PropBankDecomposer)),
+        ("semlink", typeof(SemLinkDecomposer)),
+        ("mapnet", typeof(MapNetDecomposer)),
+        ("wordframenet", typeof(WordFrameNetDecomposer)),
+        ("cili", typeof(CILIDecomposer)),
+        ("code", typeof(CodeDecomposer)),
+        ("repo", typeof(RepoDecomposer)),
+        ("tabular", typeof(TabularDecomposer)),
+        ("parquet", typeof(ParquetDecomposer)),
+        ("tiny-codes", typeof(TinyCodesDecomposer)),
+        ("stack", typeof(StackDecomposer)),
+        ("document", typeof(DocumentDecomposer)),
+    ];
+
     public static IServiceCollection AddLaplaceSeedIngest(this IServiceCollection services)
     {
         services.AddSingleton<IContentRecordAdapter, TreeSitterTextAdapter>();
         services.AddSingleton<IContentRecordAdapter, SafetensorsContentAdapter>();
 
-        services.AddTransient<UnicodeDecomposer>();
-        services.AddTransient<ISODecomposer>();
-        services.AddTransient<Atomic2020Decomposer>();
-        services.AddTransient<ConceptNetDecomposer>();
-        services.AddTransient<WiktionaryDecomposer>();
-        services.AddTransient<OMWDecomposer>();
-        services.AddTransient<WordNetDecomposer>();
-        services.AddTransient<UDDecomposer>();
-        services.AddTransient<TatoebaDecomposer>();
-        services.AddTransient<FrameNetDecomposer>();
-        services.AddTransient<OpenSubtitlesDecomposer>();
-        services.AddTransient<VerbNetDecomposer>();
-        services.AddTransient<PropBankDecomposer>();
-        services.AddTransient<SemLinkDecomposer>();
-        services.AddTransient<MapNetDecomposer>();
-        services.AddTransient<WordFrameNetDecomposer>();
-        services.AddTransient<CILIDecomposer>();
-        services.AddTransient<CodeDecomposer>();
-        services.AddTransient<RepoDecomposer>();
-        services.AddTransient<TabularDecomposer>();
-        services.AddTransient<ParquetDecomposer>();
-        services.AddTransient<TinyCodesDecomposer>();
-        services.AddTransient<StackDecomposer>();
-        services.AddTransient<DocumentDecomposer>();
+        foreach (var (_, decomposer) in Registry)
+            services.AddTransient(decomposer);
+
 
         services.AddSingleton<ISeedDecomposerResolver, SeedDecomposerResolver>();
         return services;
@@ -82,34 +97,13 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         _adapters = adapters;
     }
 
-    public IDecomposer Resolve(string sourceKey) => sourceKey.ToLowerInvariant() switch
+    public IDecomposer Resolve(string sourceKey)
     {
-        "unicode" => _sp.GetRequiredService<UnicodeDecomposer>(),
-        "iso639" => _sp.GetRequiredService<ISODecomposer>(),
-        "atomic2020" => _sp.GetRequiredService<Atomic2020Decomposer>(),
-        "conceptnet" => _sp.GetRequiredService<ConceptNetDecomposer>(),
-        "wiktionary" => _sp.GetRequiredService<WiktionaryDecomposer>(),
-        "omw" => _sp.GetRequiredService<OMWDecomposer>(),
-        "wordnet" => _sp.GetRequiredService<WordNetDecomposer>(),
-        "ud" => _sp.GetRequiredService<UDDecomposer>(),
-        "tatoeba" => _sp.GetRequiredService<TatoebaDecomposer>(),
-        "framenet" => _sp.GetRequiredService<FrameNetDecomposer>(),
-        "opensubtitles" => _sp.GetRequiredService<OpenSubtitlesDecomposer>(),
-        "verbnet" => _sp.GetRequiredService<VerbNetDecomposer>(),
-        "propbank" => _sp.GetRequiredService<PropBankDecomposer>(),
-        "semlink" => _sp.GetRequiredService<SemLinkDecomposer>(),
-        "mapnet" => _sp.GetRequiredService<MapNetDecomposer>(),
-        "wordframenet" => _sp.GetRequiredService<WordFrameNetDecomposer>(),
-        "cili" => _sp.GetRequiredService<CILIDecomposer>(),
-        "code" => _sp.GetRequiredService<CodeDecomposer>(),
-        "repo" => _sp.GetRequiredService<RepoDecomposer>(),
-        "tabular" => _sp.GetRequiredService<TabularDecomposer>(),
-        "parquet" => _sp.GetRequiredService<ParquetDecomposer>(),
-        "tiny-codes" => _sp.GetRequiredService<TinyCodesDecomposer>(),
-        "stack" => _sp.GetRequiredService<StackDecomposer>(),
-        "document" => _sp.GetRequiredService<DocumentDecomposer>(),
-        _ => throw new ArgumentException($"No registered decomposer for source '{sourceKey}'", nameof(sourceKey)),
-    };
+        foreach (var (key, decomposer) in SeedIngestComposition.Registry)
+            if (string.Equals(key, sourceKey, StringComparison.OrdinalIgnoreCase))
+                return (IDecomposer) _sp.GetRequiredService(decomposer);
+        throw new ArgumentException($"No registered decomposer for source '{sourceKey}'", nameof(sourceKey));
+    }
 
     public IDecomposer ResolveModel(string modelDir, bool? persistEvidence = null) =>
         new ModelDecomposer(modelDir, persistEvidence);

@@ -40,6 +40,7 @@ set(LAPLACE_CORE_SOURCES
     src/hilbert4d.c
     src/mantissa.c
     src/super_fibonacci.c
+    src/modality_atoms.c
     src/glicko2.c
     src/score.c
     src/codepoint_table.c
