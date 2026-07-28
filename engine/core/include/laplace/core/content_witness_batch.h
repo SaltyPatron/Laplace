@@ -11,6 +11,14 @@
 extern "C" {
 #endif
 
+/* THE content tier -> entity type id map, for EVERY lane that stages content.
+ * 0 Codepoint, 1 Grapheme, 2 Word, 3 Sentence, 4+ Document -- the five names the
+ * text ladder has always used. Exported because the grammar compose lane needs
+ * the SAME answer: it was minting its own parallel vocabulary
+ * (blake3("substrate/type/grammar/<modality>/<tree-sitter node>/v1")) and
+ * stamping tree-sitter's private symbol names onto substrate entities. */
+hash128_t laplace_content_tier_type_id(uint8_t tier);
+
 int content_witness_batch_add(
     intent_stage_t*  stage,
     const uint8_t*   utf8,

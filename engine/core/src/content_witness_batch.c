@@ -25,7 +25,7 @@
 #define LAPLACE_TIER_TLS __thread
 #endif
 
-static hash128_t tier_type_id(uint8_t tier) {
+hash128_t laplace_content_tier_type_id(uint8_t tier) {
     static LAPLACE_TIER_TLS hash128_t cache[5];
     static LAPLACE_TIER_TLS int ready = 0;
     int slot = tier <= 3 ? tier : 4;
@@ -286,7 +286,7 @@ static int emit_node(
 
     if (intent_stage_witness_record(stage, &node.id)) return 0;
 
-    hash128_t type_id = tier_type_id(node.tier);
+    hash128_t type_id = laplace_content_tier_type_id(node.tier);
     if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
         return -2;
 
