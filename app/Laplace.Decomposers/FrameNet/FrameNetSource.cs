@@ -26,5 +26,5 @@ public readonly struct FrameNetSource : ISeedSource
 
     public static SourceLicense License => SourceLicense.Unknown;
 
-    public static IngestSourceProfile Profile => IngestSourceProfile.Default;
+    public static IngestSourceProfile Profile => IngestSourceProfile.FrameNet;
 }
