@@ -41,31 +41,14 @@ CREATE OR REPLACE FUNCTION edges(
                   neighbour text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH raw AS MATERIALIZED (
-        SELECT 'out'::text AS dir, c.type_id, c.object_id AS nid,
-               c.rating, c.rd, c.witness_count
-        FROM consensus c
-        WHERE p_direction IN ('out', 'both')
-          AND c.subject_id = p_subject
-          AND c.object_id IS NOT NULL
-          AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT refuted(c.rating, c.rd))
-        UNION ALL
-        SELECT 'in'::text, c.type_id, c.subject_id,
-               c.rating, c.rd, c.witness_count
-        FROM consensus c
-        WHERE p_direction IN ('in', 'both')
-          AND c.object_id = p_subject
-          AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT refuted(c.rating, c.rd))
-    ),
-    ranked AS MATERIALIZED (
-        SELECT r.dir, r.type_id, r.nid, r.rating, r.rd, r.witness_count,
-               row_number() OVER (ORDER BY edge_rank(r.type_id, eff_mu(r.rating, r.rd)) DESC,
-                                           r.nid) AS ord
-        FROM raw r
-        ORDER BY edge_rank(r.type_id, eff_mu(r.rating, r.rd)) DESC, r.nid
-        LIMIT p_limit
+    WITH ranked AS MATERIALIZED (
+        -- The scan is edges_raw() — the one consensus scan. This function is its
+        -- LABELING layer and nothing else: rank/limit happen in the core, labels
+        -- resolve here, once, over exactly the surviving ids.
+        SELECT e.direction AS dir, e.type_id, e.neighbour_id AS nid,
+               e.rating, e.rd, e.witness_count,
+               row_number() OVER () AS ord
+        FROM edges_raw(p_subject, p_direction, p_types, p_limit, p_refuted, 'edge_rank') e
     ),
     rel AS MATERIALIZED (
         -- Relation names come from the manifest, once per DISTINCT type — a

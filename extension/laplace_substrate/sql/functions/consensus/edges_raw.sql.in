@@ -1,0 +1,68 @@
+-- edges_raw() — THE consensus edge scan. Every other edge reader is a wrapper.
+--
+-- Six functions were the same scan with different axes hard-coded, and no caller
+-- ever chose those axes — they inherited whichever function they happened to
+-- reach for:
+--
+--   fn                              table       dir   rank       refuted
+--   consensus_out                   consensus   out   edge_rank  INCLUDED
+--   consensus_in                    consensus   in    edge_rank  INCLUDED
+--   consensus_neighbors_directed    unrefuted   out   eff_mu     excluded
+--   consensus_neighbors_undirected  unrefuted   both  eff_mu     excluded
+--   explore_web_neighbors           consensus   both  eff_mu     INCLUDED
+--   foundry_crawl_neighbors         consensus   out   eff_mu     INCLUDED
+--
+-- Four of the six return refuted edges. That is a semantic split — a refuted edge
+-- is one the fold has rated BELOW neutral at its optimistic bound, i.e. the
+-- substrate's own verdict is "this claim lost" — and it was distributed by
+-- accident, not by design. consensus_out and consensus_in are the pair a new
+-- caller reaches for first, and they are on the including side.
+--
+-- Now the axes are arguments with stated defaults, one implementation behind
+-- them, and each historical function keeps its exact signature and output shape
+-- as a thin wrapper pinning its own axes. Nothing changes for existing callers;
+-- what changes is that the next reader does not have to diff six bodies to learn
+-- which one excludes refutation.
+--
+-- RAW on purpose: ids and Glicko state, no labels. Labeling is a separate layer
+-- (edges(), which wraps this and resolves in one realize_batch after the limit),
+-- because the native walkers that consume edges want ids and would pay for text
+-- they never render.
+CREATE OR REPLACE FUNCTION edges_raw(
+        p_subject   bytea,
+        p_direction text    DEFAULT 'both',   -- 'out' | 'in' | 'both'
+        p_types     bytea[] DEFAULT NULL,     -- NULL = every relation type
+        p_limit     int     DEFAULT 40,       -- a QUERY limit over the ranking
+        p_refuted   boolean DEFAULT false,    -- include edges the fold refuted
+        p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
+    RETURNS TABLE(direction text, type_id bytea, neighbour_id bytea,
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.direction, e.type_id, e.neighbour_id,
+           e.rating, e.rd, e.volatility, e.witness_count
+    FROM (
+        SELECT 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
+               c.rating, c.rd, c.volatility, c.witness_count
+        FROM consensus c
+        WHERE p_direction IN ('out', 'both')
+          AND c.subject_id = p_subject
+          AND c.object_id IS NOT NULL
+          AND (p_types IS NULL OR c.type_id = ANY (p_types))
+          AND (p_refuted OR NOT refuted(c.rating, c.rd))
+        UNION ALL
+        SELECT 'in'::text, c.type_id, c.subject_id,
+               c.rating, c.rd, c.volatility, c.witness_count
+        FROM consensus c
+        WHERE p_direction IN ('in', 'both')
+          AND c.object_id = p_subject
+          AND (p_types IS NULL OR c.type_id = ANY (p_types))
+          AND (p_refuted OR NOT refuted(c.rating, c.rd))
+    ) e
+    ORDER BY CASE WHEN p_rank = 'edge_rank'
+                  THEN edge_rank(e.type_id, eff_mu(e.rating, e.rd))
+                  ELSE (eff_mu(e.rating, e.rd))::float8 / 1e9
+             END DESC,
+             e.neighbour_id
+    LIMIT p_limit
+$$;
