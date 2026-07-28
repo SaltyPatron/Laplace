@@ -1,4 +1,7 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
+using Laplace.Decomposers.Tatoeba;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -94,6 +97,60 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly Regex HandRolledBatch = new(
         @"BatchSize\s*>\s*1\s*\?",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// ISeedSource.Profile is the RUN-LEVEL sizing authority: it reaches
+    /// IDecomposer.SizingProfile, then IngestCommands.BuildIngestOptions, and sets
+    /// record_batch / commit_rows / ws_record_cap / probe_chunk / max_intents_per_commit
+    /// for the entire run (the `ingest_source_sizing:` log line).
+    ///
+    /// It is a SEPARATE declaration site from the per-file IngestBatchConfig, and that is
+    /// how it went stale: IngestSourceProfile.Tatoeba was added and wired into the
+    /// decomposer's ConfigForFile while TatoebaSource.Profile still returned Default, so a
+    /// live ingest sized itself off Default and nothing said so. Same for Omw, Iso, Cili
+    /// and FrameNet.
+    ///
+    /// If a profile exists bearing a source's name, that source must use it. A source with
+    /// no dedicated profile legitimately returns Default or a shared one (RelationTriple,
+    /// Wiktionary, …) and is not flagged.
+    /// </summary>
+    [Fact]
+    public void SeedSources_UseTheirOwnSizingProfile_WhenOneExists()
+    {
+        var profiles = typeof(IngestSourceProfile)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(IngestSourceProfile))
+            .ToDictionary(f => f.Name, f => (IngestSourceProfile)f.GetValue(null)!,
+                          StringComparer.OrdinalIgnoreCase);
+
+        var sources = typeof(TatoebaSource).Assembly.GetTypes()
+            .Where(t => t is { IsClass: false or true, IsAbstract: false } || t.IsValueType)
+            .Where(t => t.GetInterfaces().Any(i => i.Name == "ISeedSource"))
+            .ToList();
+        Assert.NotEmpty(sources);
+
+        var violations = new List<string>();
+        foreach (var src in sources)
+        {
+            var prop = src.GetProperty("Profile", BindingFlags.Public | BindingFlags.Static);
+            if (prop is null) continue;
+            var actual = (IngestSourceProfile?)prop.GetValue(null);
+            if (actual is null) continue;
+
+            // "TatoebaSource" -> "Tatoeba"; "ISOSource" -> "ISO" (matched case-insensitively).
+            string bare = src.Name.EndsWith("Source", StringComparison.Ordinal)
+                ? src.Name[..^"Source".Length] : src.Name;
+            if (!profiles.TryGetValue(bare, out var owned)) continue;   // no dedicated profile
+            if (!ReferenceEquals(actual, owned))
+                violations.Add($"{src.Name}.Profile is not IngestSourceProfile.{bare} "
+                               + $"(got {actual.EstBytesPerRecord}B/{actual.EstComposeUnitsPerRecord}u, "
+                               + $"expected {owned.EstBytesPerRecord}B/{owned.EstComposeUnitsPerRecord}u)");
+        }
+
+        Assert.True(violations.Count == 0,
+            "ISeedSource.Profile sets run-level ingest sizing and must use the source's own "
+            + "IngestSourceProfile where one exists:\n" + string.Join("\n", violations));
+    }
 
     [Fact]
     public void IngestLanes_ResolveBatchThroughTheSizingAuthority_NeverAPrivateLiteral()
