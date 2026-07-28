@@ -20,15 +20,37 @@
 #include "laplace/core/trajectory.h"
 
 
-static void node_type_entity_id(const char* modality, const char* node_type, hash128_t* out) {
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "substrate/type/grammar/%s/%s/v1", modality, node_type);
-    if (n <= 0 || (size_t)n >= sizeof(buf)) {
-        hash128_zero(out);
-        return;
-    }
-    hash128_blake3_str(buf, out);
-}
+/* node_type_entity_id() lived here. It built an entity type id by snprintf'ing
+ * "substrate/type/grammar/<modality>/<tree-sitter node type>/v1" and hashing the
+ * string, then stamped the result onto entities.type_id.
+ *
+ * Every part of that was wrong, and it was measured wrong on the live substrate:
+ * 16,063 entities typed by a JSON parse tree, across 4 type ids that were never
+ * minted as entities, so nothing could render them.
+ *
+ *   - An id constructed OUTSIDE the system. Ids resolve through canonical_id() /
+ *     word_id() / relation_type_id(); this was a private key format known only to
+ *     this file, governed by nothing.
+ *   - "/v1" in an IDENTITY. Content addressing means the id is a function of the
+ *     content; a hand-chosen version token means the whole substrate can be
+ *     re-typed without a byte of content changing.
+ *   - The CONTAINER in the type of the thing contained. Tree-sitter unpacks
+ *     container formats and hands off; JSON is packaging for SemLink, PropBank,
+ *     VerbNet and FrameNet, so "mince.01" -- a roleset -- came out typed
+ *     json/string_content.
+ *   - "string_content" is tree-sitter's private symbol name. A rename in that
+ *     third-party grammar would silently re-type the substrate.
+ *
+ * It also duplicated EntityTypeRegistry, the governed vocabulary, which already
+ * carries the real semantic type (PropBank_Roleset, VerbNet_Class, FrameNet_Frame)
+ * through the IS_TYPED_AS attestation CategoryAnchor emits.
+ *
+ * Grammar-composed content now types by TIER, from laplace_content_tier_type_id
+ * -- the same call the text lane makes -- so both lanes produce identical rows
+ * for identical content and the dedup collapses them instead of storing an
+ * entity twice at two tiers with two decompositions. type_id is not an input to
+ * the entity hash (ids are blake3-Merkle(tier, child_ids), composed before any
+ * type is read), so no id changes. */
 
 static int codepoint_resolver(uint32_t atom, void* ,
                               hash128_t* out_id, double out_coord[4],
@@ -719,6 +741,10 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                             const char* modality_id, hash128_t source_id,
                             hash128_t type_meta_id, laplace_compose_result_t** out,
                             int materialize_phys) {
+    /* Kept for ABI (NativeInterop pins this signature) and deliberately unused:
+     * it was the meta-type of the ad-hoc grammar type entities, which no longer
+     * exist. Content types by tier now. */
+    (void)type_meta_id;
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
     (void)source_id;
@@ -731,9 +757,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     size_t n = 0;
     size_t span_cap = 0;
     hash128_t* emitted_entity = NULL;
-    hash128_t* emitted_type   = NULL;
     size_t emitted_entity_n = 0, emitted_entity_cap = 0;
-    size_t emitted_type_n   = 0, emitted_type_cap   = 0;
     int rc = 0;
     uint32_t** children_of  = NULL;
     uint32_t*  child_counts = NULL;
@@ -829,14 +853,11 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
-        const char* node_type = laplace_ast_type_name(ast, node.type_id);
-        if (!node_type) node_type = "unknown";
-        hash128_t grammar_type_id;
-        node_type_entity_id(modality_id, node_type, &grammar_type_id);
-        if (compose_id_push(&emitted_type, &emitted_type_n, &emitted_type_cap, grammar_type_id) == 1) {
-            if (push_entity(r, grammar_type_id, 0, type_meta_id) != 0) { rc = -3; goto fail_emit; }
-        }
-        if (push_entity(r, id, st.comp_tier[idx], grammar_type_id) != 0) { rc = -3; goto fail_emit; }
+        /* Type by TIER, exactly as the text lane does. The AST node type is
+         * container grammar and stops here -- the record's semantic type is
+         * attested separately, and by a governed vocabulary. */
+        hash128_t tier_type = laplace_content_tier_type_id(st.comp_tier[idx]);
+        if (push_entity(r, id, st.comp_tier[idx], tier_type) != 0) { rc = -3; goto fail_emit; }
 
         hilbert128_t hb;
         hilbert4d_encode(st.comp_coord + idx * 4, &hb);
@@ -1002,7 +1023,6 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     r->tree = build_containment_tree(r, ast, &st);
 
     free(emitted_entity);
-    free(emitted_type);
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
@@ -1016,7 +1036,6 @@ fail_emit:
     if (children_of) { for (size_t i = 0; i < n; ++i) free(children_of[i]); free(children_of); }
     free(child_counts);
     free(emitted_entity);
-    free(emitted_type);
 fail_st:
     free(st.comp_id);
     free(st.comp_coord);

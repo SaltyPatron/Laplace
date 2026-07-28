@@ -33,16 +33,17 @@ public sealed class GrammarEntityBuilder
         _tagsScm = tagsScm;
     }
 
-    public static Hash128 GrammarNodeTypeId(string modalityId, string typeName) =>
-        Hash128.OfCanonical($"substrate/type/grammar/{modalityId}/{typeName}/v1");
+    // GrammarNodeTypeId / NodeTypeCanonicalNames were a second copy of the
+    // ad-hoc "substrate/type/grammar/<modality>/<node>/v1" vocabulary the native
+    // lane minted. Both had zero consumers. The native original is gone (see
+    // grammar_compose.cpp); an unused duplicate of a deleted convention is how it
+    // grows back.
 
 
 
 
 
 
-    public IReadOnlyCollection<string> NodeTypeCanonicalNames => _nodeTypeNames;
-    private readonly HashSet<string> _nodeTypeNames = new(StringComparer.Ordinal);
 
     public (ImmutableArray<EntityRow> Entities,
             ImmutableArray<PhysicalityRow> Physicalities,
@@ -312,8 +313,6 @@ public sealed class GrammarEntityBuilder
             {
                 nodes[i] = _ast.GetNode(i);
                 var nd = nodes[i];
-                if (_ast.NodeTypeName(nd.NodeTypeId) is { } typeName)
-                    _nodeTypeNames.Add($"substrate/type/grammar/{_modalityId}/{typeName}/v1");
                 Hash128 spanId;
                 if (NativeInterop.ComposeSpanLookup(
                         composeResult, nd.StartByte, nd.EndByte, &spanId) == 0)
