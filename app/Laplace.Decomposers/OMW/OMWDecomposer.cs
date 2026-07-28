@@ -58,7 +58,7 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Omw, options);
         int slash = fileLabel.LastIndexOf('/');
         string prefix = slash > 0 ? fileLabel[..slash] : fileLabel;
         return IngestPipelineDefaults.ApplyMaxInputUnits(

@@ -70,9 +70,7 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batch = options.BatchSize > 1
-            ? options.BatchSize
-            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Tatoeba, options);
         int commitEpoch = fileLabel.EndsWith("/link", StringComparison.Ordinal) ? 1 : 0;
         return IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.StructuredGrammar(

@@ -26,6 +26,24 @@ public static class IngestPipelineDefaults
     }
 
     /// <summary>
+    /// THE record-batch resolver. Every decomposer that needs a batch size calls this and
+    /// nothing else.
+    ///
+    /// It exists because the idiom was hand-written eight times, and five of those wrote it
+    /// as `options.BatchSize > 1 ? options.BatchSize : &lt;literal&gt;` — which never consults
+    /// <see cref="IngestSizing"/> at all. A per-source literal cannot track the box, so those
+    /// sources ingested with the same batch on a 4-core laptop and a 128 GB server while
+    /// CLAUDE.md documented that batch sizing "deliberately has no env override" because
+    /// IngestSizing/MemoryTopology own it. A private `? : 2048` overrides it exactly as
+    /// effectively as an env var would.
+    ///
+    /// An explicit operator batch (`--batch`) still wins — that is the ONE legitimate
+    /// override, and it arrives through <see cref="DecomposerOptions.BatchSize"/>.
+    /// </summary>
+    public static int ResolveBatch(IngestSourceProfile profile, DecomposerOptions? options) =>
+        ResolveWorkingSet(profile, options).Batch;
+
+    /// <summary>
     /// Relation-triple lane: each record composes subject + object tier trees (see
     /// <see cref="RelationTripleHandler"/>). Batch and probe interval come from
     /// <see cref="IngestSourceProfile.RelationTriple"/>, not HighVolume.
