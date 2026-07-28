@@ -552,9 +552,32 @@ verify_c_symbols() {
   [[ -f "$so" ]] || { echo "::error::verify_c_symbols: $so not found"; return 1; }
   command -v nm >/dev/null 2>&1 || { echo "verify_c_symbols: nm unavailable — skipped"; return 0; }
   echo "===== GATE — C symbol integrity ====="
+
+  # READ THE SYMBOL TABLE ONCE. This used to run `nm -D "$so" | grep` INSIDE the
+  # loop — 74 nm invocations against the same unchanged file — and treated a
+  # non-match as proof the symbol was absent. Those are not the same thing: any
+  # single transient nm failure (fork pressure during a parallel build, a signal,
+  # an interrupted read) produces empty output, the grep fails, and the gate
+  # reports a healthy function as an "orphaned C function" telling the operator to
+  # write a drop_retired_*.sql.in for something that is present.
+  #
+  # Observed exactly that 2026-07-28: two consecutive runs against a byte-identical
+  # .so accused two DIFFERENT symbols (pg_laplace_substrate_version, then
+  # pg_laplace_attestations_exist_bitmap), both verifiably exported. A gate whose
+  # verdict changes run to run on identical inputs is worse than no gate — it
+  # trains you to ignore it.
+  local symtab
+  symtab=$(mktemp)
+  if ! nm -D --defined-only "$so" 2>/dev/null | awk '$2=="T" {print $3}' | sort -u >"$symtab" \
+     || [[ ! -s "$symtab" ]]; then
+    rm -f "$symtab"
+    echo "::error::verify_c_symbols: could not read the symbol table of $so — nm failed or exported nothing" >&2
+    return 1
+  fi
+
   while IFS= read -r sym; do
     [[ -z "$sym" ]] && continue
-    if ! nm -D "$so" 2>/dev/null | grep -q " T ${sym}\$"; then
+    if ! grep -qxF "$sym" "$symtab"; then
       echo "::error::orphaned C function: laplace catalog binds '${sym}' but the installed .so does not export it — a manifest removal is missing its drop_retired_*.sql.in" >&2
       missing=$((missing+1))
     fi
@@ -562,6 +585,7 @@ verify_c_symbols() {
       "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace \
        WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
          AND p.probin = '\$libdir/laplace_substrate'")
+  rm -f "$symtab"
   if [[ "$missing" -gt 0 ]]; then
     echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
     return 1

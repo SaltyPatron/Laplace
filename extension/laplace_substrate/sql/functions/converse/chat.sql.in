@@ -287,10 +287,20 @@ BEGIN
                 -- so resolving the set up front turns the filter into an indexed
                 -- (subject_id, type_id) probe — the same move consensus_band_edges
                 -- makes natively.
+                -- Structural families are excluded HERE, in id space, before a
+                -- single edge is read -- not by filtering rendered strings after.
+                -- The associative band carries etymology, usage examples, register
+                -- labels and lexfile categories next to real kin, which is what put
+                -- "06831177-n, noun.communication, 05593148-n" in a band listing.
+                -- converse_facts already resolved this the right way
+                -- (non_kin_assoc_types, whole families via relation_family_members)
+                -- and kept label_is_content only as a last-resort render guard; the
+                -- lens was still reading the band raw.
                 SELECT e.id AS type_id, relation_highway_band(e.id) AS band
                 FROM entities e
                 WHERE e.type_id = entity_type_id('RelationType')
                   AND relation_highway_band(e.id) = ANY(p_bands)
+                  AND e.id NOT IN (SELECT id FROM non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (
                 SELECT s.band, c.object_id AS nid, eff_mu(c.rating, c.rd) AS m
@@ -307,10 +317,22 @@ BEGIN
             -- with `row_number() OVER ()` (no ORDER BY) can be re-evaluated in a
             -- different physical order per scan, which would silently pair every
             -- label with the wrong edge.
+            -- RANK, CAP, THEN LABEL. Batching made the uncapped lens fast; it did
+            -- not make it sane -- the densest subject here carries 6,687 edges, and
+            -- rendering 6,687 surfaces into one prose line is not an answer. The
+            -- cap is a per-band query LIMIT over an eff_mu ranking (rn <= 12), the
+            -- only kind of top-k the substrate permits: it truncates the READ, not
+            -- the fold, and nothing about what the sources assert changes.
+            ranked AS MATERIALIZED (
+                SELECT band, nid, m,
+                       row_number() OVER (PARTITION BY band ORDER BY m DESC, nid) AS rn
+                FROM edges
+            ),
             ord AS MATERIALIZED (
                 SELECT band, nid, m,
                        row_number() OVER (ORDER BY band, m DESC, nid) AS ix
-                FROM edges
+                FROM ranked
+                WHERE rn <= 12
             ),
             lbl AS MATERIALIZED (
                 SELECT realize_batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
