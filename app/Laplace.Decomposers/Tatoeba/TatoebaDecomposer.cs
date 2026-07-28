@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord, TatoebaSource, FullScope>, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = TatoebaSource.SourceId;
     public static readonly Hash128 TrustClass = TatoebaSource.TrustClass;
@@ -17,127 +17,51 @@ public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord,
     /// <summary>Links naming a sentence id absent from sentences.csv — reported, never grounded.</summary>
     internal static long UnresolvedLinks;
 
+    /// <summary>
+    /// id -> content root, populated as a FREE side effect of phase 1 (the sentence lane
+    /// already composes every root) and read by phase 2. Discarded with the run: a Tatoeba
+    /// row number is ingest scaffolding, not knowledge, so it gets no entity, no geometry
+    /// and no trajectory.
+    /// </summary>
     private readonly TatoebaIdMap _ids = new();
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     public override int LayerOrder => 2;
-    protected override double SourceTrust => TC.StructuredCorpus;
 
     private HashSet<long>? _allowedSentenceIds;
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
-    // Both files stream in parallel across the file-worker pool: the link lane resolves ids
-    // through the map OnInitializedAsync already built, so it needs no ordering barrier and
-    // keeps MonolithSegmenter's intra-file segmentation (a sequential file barrier would drop
-    // this 2-file source from ~10 compose lanes to 1).
-    protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options)
+    /// <summary>
+    /// sentences.csv is the ENTITY file; links.csv is the ATTESTATION file. They run as two
+    /// PHASES because the second needs what the first resolved — not as parallel files with a
+    /// prelude that resolves everything twice (see TatoebaPhase for the measurement that
+    /// killed that shape). Each phase is single-file, so MonolithSegmenter still gives it
+    /// intra-file parallelism.
+    /// </summary>
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
+        IDecomposerContext context, DecomposerOptions options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         _allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
-        string sentences = Path.Combine(ecosystemPath, "sentences.csv");
-        string links = Path.Combine(ecosystemPath, "links.csv");
-        var files = new List<(string Path, string Label, Func<ReadOnlySpan<byte>, bool>? AcceptRow)>();
+        await foreach (var c in RunPhaseAsync(
+                           new TatoebaSentencePhase(_ids, _allowedSentenceIds), context, options, ct))
+            yield return c;
 
-        if (File.Exists(sentences))
-        {
-            Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
-                ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
-                : null;
-            files.Add((sentences, "tatoeba/sent", acceptSent));
-        }
-
-        if (File.Exists(links))
-        {
-            Func<ReadOnlySpan<byte>, bool>? acceptLink = _allowedSentenceIds is not null
-                ? line => TatoebaRowFilter.MatchesLinkFilter(line, _allowedSentenceIds)
-                : null;
-            files.Add((links, "tatoeba/link", acceptLink));
-        }
-
-        return new TatoebaMultiFileStream(files);
-    }
-
-    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(string fileLabel)
-    {
-        var kind = fileLabel.EndsWith("/link", StringComparison.Ordinal)
-            ? TatoebaRowKind.Link
-            : TatoebaRowKind.Sentence;
-        // The link lane resolves ids through the map OnInitializedAsync builds. If that never
-        // ran, every link would resolve to nothing and the whole translation corpus would
-        // vanish silently — the exact failure class IngestRunner already refuses to report as
-        // success. Fail loudly instead.
-        if (kind == TatoebaRowKind.Link && _ids.Count == 0)
+        // Phase 2 only ever runs after phase 1 has been fully composed, so the map is
+        // complete by construction. If it is empty the corpus would silently lose every
+        // translation — the failure class IngestRunner already refuses to call success.
+        if (_ids.Count == 0)
             throw new InvalidOperationException(
-                "Tatoeba link lane started with an empty id map: OnInitializedAsync did not run "
-                + "or sentences.csv was missing. Every IS_TRANSLATION_OF would be dropped.");
-        return new GrammarIngestHandler(
-            Source, "tsv",
-            new TatoebaGrammarWitness(kind, _allowedSentenceIds, _ids),
-            contextId: null);
-    }
+                "Tatoeba link phase reached with an empty id map: sentences.csv was missing or "
+                + "yielded no resolvable rows. Every IS_TRANSLATION_OF would be dropped.");
 
-    protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Tatoeba, options);
-        int commitEpoch = fileLabel.EndsWith("/link", StringComparison.Ordinal) ? 1 : 0;
-        return IngestPipelineDefaults.ApplyMaxInputUnits(
-            IngestPipelineDefaults.StructuredGrammar(
-                Source, fileLabel, batch, options, reader, witnessWeight: 1.0,
-                commitEpoch: commitEpoch, profile: IngestSourceProfile.Tatoeba),
-            options);
-    }
-
-    /// <summary>
-    /// Resolve every sentence id to its CONTENT ROOT before any lane runs, so links.csv can
-    /// attest between the real sentences instead of minting a surrogate entity per id.
-    ///
-    /// This is CPU only — <see cref="ContentTierSpine.ResolveRoot"/> is the same pure
-    /// leaf-to-trunk compose the sentence lane performs, with a native fast path and a memo;
-    /// it touches no database. Doing it here rather than as an ingest PHASE keeps both files
-    /// streaming in parallel across the file-worker pool (the alternative, a sequential
-    /// file barrier, loses MonolithSegmenter's intra-file segmentation and would drop this
-    /// source from ~10 compose lanes to 1).
-    ///
-    /// Parsing note: sentences.csv is a strict 3-column TSV with no quoting, so splitting on
-    /// TAB yields byte-identical text spans to the grammar composer the witness sees — the
-    /// roots computed here and staged there are the same ids by construction.
-    /// </summary>
-    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
-    {
-        string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
-        if (!File.Exists(sentences)) return;
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        long unresolvable = 0;
-        await Parallel.ForEachAsync(
-            File.ReadLinesAsync(sentences, ct),
-            new ParallelOptions { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount },
-            (line, _) =>
-            {
-                int t1 = line.IndexOf('\t');
-                if (t1 <= 0) return ValueTask.CompletedTask;
-                int t2 = line.IndexOf('\t', t1 + 1);
-                if (t2 < 0) return ValueTask.CompletedTask;
-                if (!long.TryParse(line.AsSpan(0, t1), out long id)) return ValueTask.CompletedTask;
-                var text = line.AsSpan(t2 + 1);
-                if (text.IsEmpty) return ValueTask.CompletedTask;
-
-                if (ContentTierSpine.ResolveRoot(text.ToString()) is { } root)
-                    _ids.Set(id, root);
-                else
-                    Interlocked.Increment(ref unresolvable);
-                return ValueTask.CompletedTask;
-            });
-
-        context.Logger?.LogInformation(
-            "TATOEBA_ID_MAP resolved={Resolved:N0} unresolvable={Unresolvable:N0} elapsed_s={Elapsed:F1} "
-            + "(sentence ids are ingest scaffolding — resolved to content roots here, never stored)",
-            _ids.Count, unresolvable, sw.Elapsed.TotalSeconds);
+        await foreach (var c in RunPhaseAsync(
+                           new TatoebaLinkPhase(_ids, _allowedSentenceIds), context, options, ct))
+            yield return c;
     }
 
     public async Task<IngestInventory?> DescribeInputAsync(
