@@ -16,7 +16,13 @@ extern "C" {
 typedef struct {
     hash128_t id;
     uint8_t   tier;
-    uint8_t   _pad[3];
+    /* PACKAGING: this node exists so the caller can NAVIGATE the record (spans,
+     * containment, id convergence) and must never become a substrate row. Set for
+     * every non-root node of a data container -- see grammar_compose.cpp's Rule #8
+     * note. Occupies a byte that was already padding, so the struct layout and the
+     * C# marshalling (NativeInterop.ComposeEntityNative) are unchanged. */
+    uint8_t   packaging;
+    uint8_t   _pad[2];
     hash128_t type_id;
 } laplace_compose_entity_t;
 
