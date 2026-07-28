@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
@@ -69,20 +70,17 @@ internal sealed class TurnWitness : BackgroundService
             return;
         }
 
-        // The accumulating wrapper is the load-bearing half: evidence lands AND the
-        // Glicko delta folds into consensus per apply, so the deposited turn is
-        // visible to the very next walk. A bare writer leaves testimony unfolded.
-        var inner = new NpgsqlSubstrateWriter(_substrate.DataSource);
-        await using var acc = new ConsensusAccumulatingWriter(inner, _substrate.DataSource);
-        var writer = (ISubstrateWriter)acc;
-        bool floorPresent = false;
+        // The close sequence — floor gate, accumulating writer, tenant scope cache,
+        // bootstrap-once, attribute-once-per-session, build, apply — lives in the
+        // shared TurnCloser (Laplace.Ingestion). This lane owned a private copy of
+        // it; MCP owned another, and the CLI had a weaker third that skipped tenant
+        // and session entirely. What stays HERE is what is genuinely this lane's:
+        // the bounded single-reader channel (turns serialize, so one turn is one
+        // apply), IsOnline for the record-or-fail 503 contract, and the
+        // consecutive-failure trip.
+        await using var closer = new TurnCloser(
+            _substrate.DataSource, w => _log.LogWarning("turn-witness: {Warning}", w));
         int consecutiveFailures = 0;
-        // Per-process caches: bootstrap rows are idempotent, but testimony is not —
-        // registering a tenant's sources once per process bounds the refold to
-        // restarts (same class as every decomposer bootstrap). Session attribution
-        // is once per session per process for the same reason.
-        var scopes = new Dictionary<string, ConversationContent.TenantScope>(StringComparer.Ordinal);
-        var attributedSessions = new HashSet<Hash128>();
         IsOnline = true;
         _log.LogInformation("turn-witness online");
 
@@ -90,48 +88,29 @@ internal sealed class TurnWitness : BackgroundService
         {
             try
             {
-                if (!floorPresent && !(floorPresent = await FloorPresentAsync(ct)))
-                {
-                    _log.LogWarning(
-                        "substrate floor missing (no Codepoint entities); witness lane offline until unicode seed");
-                    IsOnline = false;
-                    return;
-                }
-
-                if (!scopes.TryGetValue(item.Tenant, out var scope))
-                {
-                    scope = ConversationContent.Resolve(item.Tenant);
-                    foreach (var change in ConversationContent.BuildTenantBootstrapChanges(scope))
-                        await writer.ApplyAsync(change, ct);
-                    scopes[item.Tenant] = scope;
-                    _log.LogInformation("tenant witness sources registered: {Tenant}", item.Tenant);
-                }
-
-                string? userKey = item.UserKey is not null && attributedSessions.Add(item.SessionId)
-                    ? item.UserKey
-                    : null;
-
                 // Every turn is a distinct witnessing event: rows dedup by content
                 // address, but the testimony folds again — a repeated utterance IS
                 // another witness (chess parity: every play of a move counts).
-                // One turn = one change = one apply (the writer's φ-per-cell
-                // invariant; cross-tenant turns are never batched together).
-                if (!ConversationContent.TryBuildTurnChange(
-                        scope, item.SessionId,
-                        Encoding.UTF8.GetBytes(item.Prompt),
-                        item.Reply is { } r ? Encoding.UTF8.GetBytes(r) : null,
-                        userKey,
-                        out var turnChange, out var promptRoot, out var replyRoot))
+                bool deposited = await closer.CloseAsync(
+                    item.Tenant, item.SessionId, item.Prompt, item.Reply, item.UserKey, ct);
+
+                if (!deposited)
                 {
-                    _log.LogWarning("turn-witness could not decompose turn; dropped");
+                    // A broken closer is terminal for this lane: the endpoint's
+                    // contract is record-or-fail, so it must stop advertising itself
+                    // rather than answer turns it silently fails to witness.
+                    if (closer.Broken)
+                    {
+                        IsOnline = false;
+                        _log.LogError("turn-witness disabled: writer spine offline");
+                        return;
+                    }
+                    _log.LogWarning("turn-witness could not deposit turn; dropped");
                     continue;
                 }
 
-                await writer.ApplyAsync(turnChange, ct);
-                _log.LogInformation(
-                    "turn witnessed: tenant={Tenant} session={Session} prompt={PromptRoot} reply={ReplyRoot}",
-                    item.Tenant, item.SessionId, promptRoot,
-                    replyRoot == Hash128.Zero ? "(none)" : replyRoot);
+                _log.LogInformation("turn witnessed: tenant={Tenant} session={Session}",
+                    item.Tenant, item.SessionId);
                 consecutiveFailures = 0;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -152,12 +131,4 @@ internal sealed class TurnWitness : BackgroundService
         }
     }
 
-    private async Task<bool> FloorPresentAsync(CancellationToken ct)
-    {
-        await using var conn = await _substrate.DataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(
-            "SELECT 1 FROM laplace.entities WHERE type_id = @t LIMIT 1", conn);
-        cmd.Parameters.AddWithValue("t", EntityTypeRegistry.Codepoint.ToBytes());
-        return await cmd.ExecuteScalarAsync(ct) is not null;
-    }
 }

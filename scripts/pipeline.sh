@@ -134,6 +134,13 @@ EOF
   exit 2
 }
 
+# Content digest of the libraries the postmaster preloads. Empty string when
+# neither is installed yet (first install — nothing is pinned, nothing to bounce).
+preloaded_so_digest() {
+  local d="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18"
+  cat "$d/laplace_substrate.so" "$d/laplace_geom.so" 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
 restart_postgres() {
   # $1 = reason. ROOTLESS self-bounce: on this host the postmaster runs AS the
   # runner user (laplace-postgresql.service, User=laplace-runner), so the
@@ -360,20 +367,33 @@ phase_install() {
     api_was_active=1
     sudo -n systemctl stop laplace-api 2>/dev/null || true
   fi
+  local so_before so_after
+  so_before=$(preloaded_so_digest)
   umask 0002
   cmake --install build
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
-  # shared_preload_libraries pins the extension image in the postmaster. cmake
-  # --install replaces the .so on disk, but CREATE FUNCTION / ALTER EXTENSION
-  # still dlsym against the preloaded handle — so a newly-exported symbol
-  # (e.g. pg_laplace_explore_web) faults as "could not find function ... in
-  # file" until bounce. Same class as Windows install-extensions --recycle;
-  # terminate-backends is not enough when the library is preloaded.
-  local preload
-  preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
-  if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
-     || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
-    restart_postgres "install: refresh preloaded extension .so"
+  so_after=$(preloaded_so_digest)
+  # shared_preload_libraries pins the extension image in the postmaster, so a
+  # replaced .so needs a bounce before CREATE FUNCTION / ALTER EXTENSION can
+  # dlsym a newly-exported symbol (the "could not find function ... in file"
+  # class; terminate-backends is not enough when the library is preloaded).
+  #
+  # BUT ONLY WHEN THE BINARY ACTUALLY CHANGED. This used to bounce whenever the
+  # extension was merely preloaded — which it always is — so every SQL-only
+  # change paid a full cluster restart for an image that is byte-identical.
+  # fp_native (the install gate above) covers the whole engine+extension domain
+  # INCLUDING .sql.in, so editing one function body invalidates it, reaches here,
+  # and forced a bounce that nothing needed. Digest the preloaded libraries
+  # across the install instead: same bytes, same image, no restart.
+  if [[ "$so_before" != "$so_after" ]]; then
+    local preload
+    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
+    if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
+       || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
+      restart_postgres "install: preloaded extension .so changed"
+    fi
+  else
+    echo "install: preloaded .so unchanged — no PG bounce needed (SQL-only change)"
   fi
   fp_record install-native "$native_fp"
   if [[ "$api_was_active" -eq 1 ]]; then
@@ -446,15 +466,6 @@ phase_sync_extension() {
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
       -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
   elif [[ "$installed" != "$avail" ]]; then
-    # Defense in depth: deploy/install should already have bounced when the
-    # extension is preloaded, but sync-extension is a separate CI job — if
-    # install skipped the bounce (or a human ran sync alone), UPDATE still
-    # needs a live image that matches the just-installed SQL.
-    local preload
-    preload=$(psql -d "$PGDATABASE" -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
-    if [[ ",${preload// /}," == *",laplace_substrate,"* ]]; then
-      restart_postgres "sync-extension: refresh preloaded laplace_substrate before UPDATE"
-    fi
     share=$(dirname "$(find "$LAPLACE_INSTALL_PREFIX" -name laplace_substrate.control -not -path '*/build*' 2>/dev/null | head -1)")
     test -n "$share" || { echo "::error::could not locate laplace_substrate.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
     # install -m 664 (not cp): group-writable so a leftover bridge script can be
@@ -475,8 +486,42 @@ phase_sync_extension() {
         fi
       done < <(grep -oE "'pg_laplace_[A-Za-z0-9_]+'" "$bridge" | tr -d "'" | sort -u)
     fi
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
-      -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'"
+    # BOUNCE ON DEMAND, NOT ON PRINCIPLE.
+    #
+    # This used to restart PostgreSQL unconditionally whenever laplace_substrate
+    # was in shared_preload_libraries — which it always is. So every SQL-only
+    # change (a rewritten function body, a new .sql.in, a regress fixture) paid a
+    # full cluster bounce, and on any host where the postmaster is not signalable
+    # by the invoking user the phase simply could not complete. That is an
+    # arbitrary restriction: a preloaded image only goes stale when the SQL binds
+    # a C symbol the RUNNING image does not export. Adding no symbols needs no
+    # bounce.
+    #
+    # The exact condition is already tested above (the nm -D loop over the
+    # bridge's pg_laplace_* symbols) — but that inspects the ON-DISK .so, which
+    # install may have just replaced under a postmaster still mapping the old
+    # inode. So probe the LIVE image instead: ALTER EXTENSION UPDATE runs in one
+    # transaction and rolls back whole on failure, so attempting it is free. If it
+    # fails specifically because a symbol is unresolvable in the loaded library,
+    # THAT is the bounce signal — restart and retry once. Any other failure is a
+    # real error and must not be masked by a restart.
+    local upd_log rc=0
+    upd_log=$(mktemp)
+    if ! psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+           -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" >"$upd_log" 2>&1; then
+      if grep -q 'could not find function\|could not load library\|undefined symbol' "$upd_log"; then
+        echo "sync-extension: loaded image lacks a symbol this SQL binds — bounce required"
+        cat "$upd_log"
+        restart_postgres "sync-extension: preloaded .so is stale for the new SQL"
+        psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+          -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" || rc=$?
+      else
+        cat "$upd_log" >&2
+        rc=1
+      fi
+    fi
+    rm -f "$upd_log"
+    [[ "$rc" -eq 0 ]] || { echo "::error::laplace_substrate UPDATE to $avail failed" >&2; exit "$rc"; }
     echo "OK upgraded laplace_substrate $installed -> $avail in place"
   else
     echo "OK laplace_substrate already at $avail"
@@ -507,9 +552,32 @@ verify_c_symbols() {
   [[ -f "$so" ]] || { echo "::error::verify_c_symbols: $so not found"; return 1; }
   command -v nm >/dev/null 2>&1 || { echo "verify_c_symbols: nm unavailable — skipped"; return 0; }
   echo "===== GATE — C symbol integrity ====="
+
+  # READ THE SYMBOL TABLE ONCE. This used to run `nm -D "$so" | grep` INSIDE the
+  # loop — 74 nm invocations against the same unchanged file — and treated a
+  # non-match as proof the symbol was absent. Those are not the same thing: any
+  # single transient nm failure (fork pressure during a parallel build, a signal,
+  # an interrupted read) produces empty output, the grep fails, and the gate
+  # reports a healthy function as an "orphaned C function" telling the operator to
+  # write a drop_retired_*.sql.in for something that is present.
+  #
+  # Observed exactly that 2026-07-28: two consecutive runs against a byte-identical
+  # .so accused two DIFFERENT symbols (pg_laplace_substrate_version, then
+  # pg_laplace_attestations_exist_bitmap), both verifiably exported. A gate whose
+  # verdict changes run to run on identical inputs is worse than no gate — it
+  # trains you to ignore it.
+  local symtab
+  symtab=$(mktemp)
+  if ! nm -D --defined-only "$so" 2>/dev/null | awk '$2=="T" {print $3}' | sort -u >"$symtab" \
+     || [[ ! -s "$symtab" ]]; then
+    rm -f "$symtab"
+    echo "::error::verify_c_symbols: could not read the symbol table of $so — nm failed or exported nothing" >&2
+    return 1
+  fi
+
   while IFS= read -r sym; do
     [[ -z "$sym" ]] && continue
-    if ! nm -D "$so" 2>/dev/null | grep -q " T ${sym}\$"; then
+    if ! grep -qxF "$sym" "$symtab"; then
       echo "::error::orphaned C function: laplace catalog binds '${sym}' but the installed .so does not export it — a manifest removal is missing its drop_retired_*.sql.in" >&2
       missing=$((missing+1))
     fi
@@ -517,6 +585,7 @@ verify_c_symbols() {
       "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace \
        WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
          AND p.probin = '\$libdir/laplace_substrate'")
+  rm -f "$symtab"
   if [[ "$missing" -gt 0 ]]; then
     echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
     return 1

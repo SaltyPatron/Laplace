@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
@@ -264,10 +265,19 @@ internal sealed class SubstrateTools
     // itself stays read-only (session state aside).
     private const string McpTenant = "mcp-local";
     private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
-    private ISubstrateWriter? _turnWriter;
-    private ConversationContent.TenantScope _turnScope;
-    private bool _turnBootstrapped;
-    private bool _turnDepositBroken;
+
+    // TWO DISTINCT LANES, no longer sharing a writer or a broken-latch.
+    //   _turnCloser  — the spec-34 conversational close: tenant scope, session as
+    //                  context, attribution. Owned entirely by TurnCloser.
+    //   _plainWriter — the untenanted agent-note lane (WitnessFact), which rides the
+    //                  shared UserPrompt/Response sources because a standalone note
+    //                  has no session or tenant to scope.
+    // These were one writer and one `_turnDepositBroken` flag, so a failure in the
+    // note lane silently disabled conversational deposits and vice versa.
+    private TurnCloser? _turnCloser;
+    private ISubstrateWriter? _plainWriter;
+    private bool _plainBootstrapped;
+    private bool _plainWriterBroken;
 
     /// <summary>
     /// A tool session key resolves through the canonical mint — the same id law the
@@ -332,14 +342,14 @@ internal sealed class SubstrateTools
         var origin = Opt(args, "origin") ?? "agent/note";
 
         EnsurePlainWriter();
-        if (_turnDepositBroken)
+        if (_plainWriterBroken)
             return ("witness lane offline (writer spine failed earlier in this session)", true);
 
         if (!UserPromptContent.TryBuildWitnessChange(
                 Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
             return ("text produced no witnessable content", true);
 
-        _turnWriter!.ApplyAsync(change).GetAwaiter().GetResult();
+        _plainWriter!.ApplyAsync(change).GetAwaiter().GetResult();
 
         var result = new JsonObject
         {
@@ -440,71 +450,40 @@ internal sealed class SubstrateTools
         return (chainResult.ToJsonString(), false);
     }
 
-    // Bootstraps the plain (untenanted) UserPrompt/Response sources for the witness
-    // lane — a separate flag from the tenant-scoped turn bootstrap below, since the
-    // two register different sources and must not short-circuit each other.
-    private bool _plainBootstrapped;
-
     private void EnsurePlainWriter()
     {
-        if (_turnDepositBroken || _turnWriter is not null && _plainBootstrapped) return;
+        if (_plainWriterBroken || (_plainWriter is not null && _plainBootstrapped)) return;
         try
         {
-            if (_turnWriter is null)
+            if (_plainWriter is null)
             {
                 CodepointPerfcache.LoadDefault();
-                _turnWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
+                _plainWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
             }
             if (!_plainBootstrapped)
             {
-                _turnWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
-                _turnWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _plainWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _plainWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
                 _plainBootstrapped = true;
             }
         }
         catch (Exception ex)
         {
-            _turnDepositBroken = true;
+            _plainWriterBroken = true;
             Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
         }
     }
 
-    private void DepositTurn(string prompt, string? reply, Hash128 sessionId)
-    {
-        if (_turnDepositBroken)
-            return;
-        try
-        {
-            if (_turnWriter is null)
-            {
-                CodepointPerfcache.LoadDefault();
-                _turnWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
-            }
-            if (!_turnBootstrapped)
-            {
-                _turnScope = ConversationContent.Resolve(McpTenant);
-                foreach (var change in ConversationContent.BuildTenantBootstrapChanges(_turnScope))
-                    _turnWriter.ApplyAsync(change).GetAwaiter().GetResult();
-                _turnBootstrapped = true;
-            }
+    // The OODA close runs through the shared TurnCloser (Laplace.Ingestion), which
+    // owns the whole sequence — floor gate, writer, tenant scope cache, bootstrap,
+    // attribution, build, apply. This lane used to re-derive it and was missing the
+    // floor gate, so an MCP turn against a floorless database deposited testimony
+    // with no tier-0 constituents to anchor it.
+    private TurnCloser TurnCloser => _turnCloser ??= new TurnCloser(
+        _db, warn => Console.Error.WriteLine($"laplace-mcp: {warn}"));
 
-            if (ConversationContent.TryBuildTurnChange(
-                    _turnScope, sessionId,
-                    Encoding.UTF8.GetBytes(prompt),
-                    string.IsNullOrWhiteSpace(reply) ? null : Encoding.UTF8.GetBytes(reply),
-                    userKey: null,
-                    out var turnChange, out _, out _))
-            {
-                _turnWriter.ApplyAsync(turnChange).GetAwaiter().GetResult();
-            }
-        }
-        catch (Exception ex)
-        {
-            // The reply still flows; the missing deposit is reported, not hidden.
-            _turnDepositBroken = true;
-            Console.Error.WriteLine($"laplace-mcp: turn deposit disabled: {ex.Message}");
-        }
-    }
+    private void DepositTurn(string prompt, string? reply, Hash128 sessionId)
+        => TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
 
     private static (string, bool) Ingest(JsonObject? args)
     {

@@ -52,7 +52,63 @@ public sealed class ConversationProvenanceGateTests
         Assert.Contains("record struct TurnItem", text);
         Assert.Contains("string Tenant", text);
         Assert.Contains("Hash128 SessionId", text);
-        Assert.Contains("ConversationContent.TryBuildTurnChange", text);
+        // The close sequence moved to the shared TurnCloser; what this lane must
+        // still prove is that it routes a turn through it WITH tenant and session.
+        Assert.Contains("new TurnCloser(", text);
+        Assert.Contains("closer.CloseAsync(", text);
+        Assert.Contains("item.Tenant, item.SessionId", text);
+    }
+
+    /// <summary>
+    /// ONE CLOSE, THREE LANES. The close sequence — floor gate, accumulating writer,
+    /// tenant scope, bootstrap-once, attribute-once, build, apply — is TurnCloser's
+    /// and no frontend may re-derive it. It was previously copied into MCP and the
+    /// HTTP lane (which had already diverged: only HTTP checked the substrate floor)
+    /// while the CLI ran a weaker fourth path with no tenant or session at all.
+    /// </summary>
+    [Fact]
+    public void TurnCloser_IsTheOnlyCloseSequence()
+    {
+        var closer = Read("app/Laplace.Substrate/Ingestion/TurnCloser.cs");
+        Assert.Contains("ConversationContent.Resolve", closer);
+        Assert.Contains("ConversationContent.BuildTenantBootstrapChanges", closer);
+        Assert.Contains("ConversationContent.TryBuildTurnChange", closer);
+        Assert.Contains("ConsensusAccumulatingWriter", closer);   // fold inline, not deferred
+        Assert.Contains("FloorPresentAsync", closer);             // the gate all lanes now share
+
+        // No frontend re-derives it.
+        foreach (var lane in new[]
+                 {
+                     "app/Laplace.Endpoints.Mcp/SubstrateTools.cs",
+                     "app/Laplace.Endpoints.OpenAICompat/TurnWitness.cs",
+                     "app/Laplace.Cli/QueryCommands.cs",
+                 })
+        {
+            var text = Read(lane);
+            Assert.DoesNotContain("ConversationContent.BuildTenantBootstrapChanges", text);
+            Assert.DoesNotContain("ConversationContent.TryBuildTurnChange", text);
+        }
+    }
+
+    /// <summary>
+    /// chat() is the ONLY conversational entry point (CLAUDE.md / spec 36): the CLI
+    /// used to call laplace.walk_text() directly with four hardcoded knobs, making it
+    /// a sibling entry point that skipped language inference, the specificity
+    /// election, shape dispatch and the responder family.
+    /// </summary>
+    [Fact]
+    public void CliChat_GoesThroughChatAndClosesWithProvenance()
+    {
+        var text = Read("app/Laplace.Cli/QueryCommands.cs");
+        // CODE only: the method's comment block names walk_text to record what it
+        // replaced, and a gate that cannot tell prose from a call site is a gate
+        // that punishes documenting the fix.
+        var chat = StripComments(ExtractMethod(text, "public static async Task<int> ChatAsync"));
+        Assert.Contains("laplace.chat(", chat);
+        Assert.DoesNotContain("laplace.walk_text(", chat);
+        Assert.Contains("closer.CloseAsync(", chat);
+        // A CLI turn carries a real session, minted through the canonical id law.
+        Assert.Contains("ConversationContent.SessionId(", text);
     }
 
     [Fact]
@@ -76,9 +132,20 @@ public sealed class ConversationProvenanceGateTests
         // only a conversational turn's deposit must carry tenant/session provenance.
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
         var depositTurn = ExtractMethod(text, "private void DepositTurn");
-        Assert.Contains("ConversationContent.TryBuildTurnChange", depositTurn);
+        // Routes through the shared closer WITH the tenant — the provenance the
+        // plain note lane deliberately lacks.
+        Assert.Contains("CloseAsync(McpTenant", depositTurn);
         Assert.DoesNotContain("UserPromptContent.BuildBootstrapChange", depositTurn);
+        // The note lane still exists and still uses the plain sources, on its own
+        // writer and its own latch — a failure there must not disable turns.
+        Assert.Contains("UserPromptContent.BuildBootstrapChange", text);
+        Assert.Contains("_plainWriterBroken", text);
     }
+
+    /// <summary>Drops // line comments so a pin tests the call sites, not the prose.</summary>
+    private static string StripComments(string source) =>
+        string.Join('\n', source.Split('\n')
+            .Select(l => l.TrimStart().StartsWith("//", StringComparison.Ordinal) ? string.Empty : l));
 
     private static string ExtractMethod(string text, string signaturePrefix)
     {

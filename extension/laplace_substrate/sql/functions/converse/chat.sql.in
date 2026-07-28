@@ -271,26 +271,80 @@ BEGIN
             -- BAND LENS: every edge of the topic inside the selected bands, both
             -- directions, ranked by eff_mu. This one read replaces the former
             -- parts / kinds / causes English branches and generalizes to all 13.
-            SELECT string_agg(line, ' ') INTO out FROM (
-                SELECT b.name || ': ' || string_agg(z.l, ', ' ORDER BY z.m DESC) || '.' AS line,
-                       max(z.m) AS top_m
-                FROM (
-                    SELECT relation_highway_band(c.type_id) AS band,
-                           realize(c.object_id, lang) AS l,
-                           (c.rating - 2*c.rd) AS m
-                    FROM consensus c
-                    WHERE c.subject_id = topic
-                      AND relation_highway_band(c.type_id) = ANY(p_bands)
-                    UNION ALL
-                    SELECT relation_highway_band(c.type_id),
-                           realize(c.subject_id, lang),
-                           (c.rating - 2*c.rd)
-                    FROM consensus c
-                    WHERE c.object_id = topic
-                      AND relation_highway_band(c.type_id) = ANY(p_bands)
-                ) z
-                JOIN relation_band_catalog() b ON b.band = z.band
-                WHERE z.l IS NOT NULL
+            -- HASH SPACE, THEN ONE realize_batch. This used to call realize() PER
+            -- ROW on both arms of the UNION, before any filter or limit, so a
+            -- high-degree topic paid a scalar render for every edge it has.
+            -- Measured 2026-07-28 on the foundation substrate: the scalar ladder
+            -- runs ~7 ms/id, one batched call ~0.3 ms/id -- and the densest
+            -- subject here carries 6,687 edges. Same rows, same order, same
+            -- grouping; the labels are resolved once over the collected ids and
+            -- joined back by ordinal (realize_batch is position-aligned, pinned by
+            -- tests/sql/realize_ladder_parity.sql).
+            WITH sel AS MATERIALIZED (
+                -- The band's relation types, resolved ONCE. relation_highway_band()
+                -- is a C STABLE call; evaluating it in the edge predicate ran it per
+                -- EDGE and made the scan unsargable. There are ~189 governed types,
+                -- so resolving the set up front turns the filter into an indexed
+                -- (subject_id, type_id) probe — the same move consensus_band_edges
+                -- makes natively.
+                -- Structural families are excluded HERE, in id space, before a
+                -- single edge is read -- not by filtering rendered strings after.
+                -- The associative band carries etymology, usage examples, register
+                -- labels and lexfile categories next to real kin, which is what put
+                -- "06831177-n, noun.communication, 05593148-n" in a band listing.
+                -- converse_facts already resolved this the right way
+                -- (non_kin_assoc_types, whole families via relation_family_members)
+                -- and kept label_is_content only as a last-resort render guard; the
+                -- lens was still reading the band raw.
+                SELECT e.id AS type_id, relation_highway_band(e.id) AS band
+                FROM entities e
+                WHERE e.type_id = entity_type_id('RelationType')
+                  AND relation_highway_band(e.id) = ANY(p_bands)
+                  AND e.id NOT IN (SELECT id FROM non_kin_assoc_types())
+            ),
+            edges AS MATERIALIZED (
+                SELECT s.band, c.object_id AS nid, eff_mu(c.rating, c.rd) AS m
+                FROM sel s
+                JOIN consensus c ON c.type_id = s.type_id AND c.subject_id = topic
+                WHERE c.object_id IS NOT NULL
+                UNION ALL
+                SELECT s.band, c.subject_id, eff_mu(c.rating, c.rd)
+                FROM sel s
+                JOIN consensus c ON c.type_id = s.type_id AND c.object_id = topic
+            ),
+            -- MATERIALIZED and TOTALLY ORDERED, both load-bearing. `ord` indexes the
+            -- realize_batch array, and this CTE is read twice below; an unfenced CTE
+            -- with `row_number() OVER ()` (no ORDER BY) can be re-evaluated in a
+            -- different physical order per scan, which would silently pair every
+            -- label with the wrong edge.
+            -- RANK, CAP, THEN LABEL. Batching made the uncapped lens fast; it did
+            -- not make it sane -- the densest subject here carries 6,687 edges, and
+            -- rendering 6,687 surfaces into one prose line is not an answer. The
+            -- cap is a per-band query LIMIT over an eff_mu ranking (rn <= 12), the
+            -- only kind of top-k the substrate permits: it truncates the READ, not
+            -- the fold, and nothing about what the sources assert changes.
+            ranked AS MATERIALIZED (
+                SELECT band, nid, m,
+                       row_number() OVER (PARTITION BY band ORDER BY m DESC, nid) AS rn
+                FROM edges
+            ),
+            ord AS MATERIALIZED (
+                SELECT band, nid, m,
+                       row_number() OVER (ORDER BY band, m DESC, nid) AS ix
+                FROM ranked
+                WHERE rn <= 12
+            ),
+            lbl AS MATERIALIZED (
+                SELECT realize_batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                FROM ord o
+            )
+            SELECT string_agg(q.line, ' ') INTO out FROM (
+                SELECT b.name || ': ' || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.' AS line,
+                       b.band
+                FROM ord o
+                JOIN relation_band_catalog() b ON b.band = o.band
+                CROSS JOIN lbl
+                WHERE lbl.l[o.ix] IS NOT NULL
                 GROUP BY b.band, b.name
                 ORDER BY b.band
             ) q;

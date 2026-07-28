@@ -277,54 +277,56 @@ internal static class QueryCommands
 
         CodepointPerfcache.Load(ResolveBlob());
 
-        const int steps = 48;
-        const int order = 5;
-        const int topk = 8;
-        const double temp = 0.6;
-
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
-        var inner = new NpgsqlSubstrateWriter(ds);
-        await using var acc = new ConsensusAccumulatingWriter(inner, ds);
-        var writer = (ISubstrateWriter)acc;
-
-
-        await writer.ApplyAsync(ResponseContent.BuildBootstrapChange(), CancellationToken.None);
-
-
-        Hash128 promptRoot = Hash128.Zero;
-        if (UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(prompt), "chat/prompt", out var pc, out var pr))
-        { await writer.ApplyAsync(pc, CancellationToken.None); promptRoot = pr; }
-
-
-        var sb = new StringBuilder();
+        // chat() IS THE ENTRY POINT. This command used to call laplace.walk_text()
+        // directly with four hardcoded knobs (steps 48, order 5, temp 0.6, topk 8),
+        // which made the CLI a SIBLING entry point to the forward pass rather than a
+        // caller of it — the one thing CLAUDE.md and spec 36 forbid outright:
+        // "chat() is the only conversational entry point and runs the full ladder;
+        // converse, converse_about, converse_walk, converse_facts are internal
+        // STAGES of it, never sibling entry points."
+        //
+        // Going straight to walk_text skipped every stage that makes a turn a turn:
+        // language inference from the prompt, the native specificity election
+        // (prompt_coherence), shape dispatch, the band lens, the responder family,
+        // and converse_about. A CLI answer and an API answer to the same prompt were
+        // produced by different machinery and could not be compared.
+        string response;
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT entity FROM laplace.walk_text(@p, @steps, @order, @temp, @topk)";
+            cmd.CommandText = "SELECT laplace.chat(@p, @s)";
             cmd.Parameters.AddWithValue("p", prompt);
-            cmd.Parameters.AddWithValue("steps", steps);
-            cmd.Parameters.AddWithValue("order", order);
-            cmd.Parameters.AddWithValue("temp", temp);
-            cmd.Parameters.AddWithValue("topk", topk);
-            await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync()) if (!r.IsDBNull(0)) sb.Append(r.GetString(0));
+            cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Bytea)
+                { Value = SessionId.ToBytes() });
+            response = await cmd.ExecuteScalarAsync() as string ?? string.Empty;
         }
-        string response = sb.ToString();
-        Console.WriteLine(prompt + response);
+        Console.WriteLine(response);
 
-
-        if (response.Length > 0 &&
-            ResponseContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(response), "chat/response",
-                promptRoot == Hash128.Zero ? null : promptRoot, out var rc, out var rr))
-        {
-            await writer.ApplyAsync(rc, CancellationToken.None);
-            Console.WriteLine($"    [Response deposited: {Convert.ToHexString(rr.ToBytes())[..16].ToLowerInvariant()} "
-                + $"@ trust {SourceTrust.Response} — content-addressed, citable, self-extending]");
-        }
+        // CLOSE through the shared lane (Laplace.Ingestion.TurnCloser), the same one
+        // the MCP tool and the HTTP endpoint use. This previously deposited through
+        // the plain untenanted UserPrompt/Response sources, so a CLI turn carried no
+        // session, no tenant and no attribution — spec 34's conversational
+        // provenance did not apply to it at all, and its turns could not be
+        // distinguished from an agent's standalone note.
+        await using var closer = new TurnCloser(ds, w => Console.Error.WriteLine($"laplace: {w}"));
+        if (await closer.CloseAsync(CliTenant, SessionId, prompt, response))
+            Console.WriteLine($"    [turn deposited @ session {Convert.ToHexStringLower(SessionId.ToBytes())[..16]} "
+                + $"— content-addressed, citable, self-extending]");
 
         return 0;
     }
+
+    /// <summary>
+    /// The CLI's conversational identity. One tenant for the lane, one session per
+    /// process, minted through the same canonical id law the MCP tool and the HTTP
+    /// surface use — so a CLI session and an endpoint session with the same
+    /// tenant+key are the SAME context entity, not two.
+    /// </summary>
+    private const string CliTenant = "cli-local";
+    private static readonly Hash128 SessionId =
+        ConversationContent.SessionId(CliTenant, $"s-{Guid.NewGuid():N}");
 
 
 
