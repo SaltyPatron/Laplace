@@ -902,7 +902,31 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
          * Nothing else becomes a row.
          *
          * Scoped by the modality predicate this file already had. */
-        int packaging = json_mod && node_parent(ast, idx) != LAPLACE_AST_ROOT;
+        /* NOT scoped to one modality. Scoping this to JSON was fixing the instance
+         * I had measured instead of the class: SemLink also ships PredicateMatrix
+         * tab files, those took the non-JSON leaf branch
+         * (laplace_grapheme_floor_span_to_graphemes), and kept emitting a grapheme
+         * decomposition -- 4,691 of them survived on the next clean seed, e.g.
+         * dewater.01 carrying BOTH dewater|.|01 (the content ladder, 3 points) and
+         * d|e|w|a|t|e|r|.|0|1 (10 points) under one physicality id.
+         *
+         * The row lane is the container lane by construction (audit doc 38 S12:
+         * GrammarIngestHandler row vs GrammarComposeHandler whole-file is a real
+         * taxonomy with distinct callers -- OMW/SemLink/Tatoeba/Wiktionary vs
+         * Code/Stack/TinyCodes/Repo). So every non-root node of a composed RECORD is
+         * packaging, whatever grammar parsed it.
+         *
+         * The whole-file/code lane is unaffected: GrammarEntityBuilder reads
+         * r->entities directly and never consults this flag, so a C
+         * function_definition still becomes a row. Only the two RECORD drains honour
+         * it. */
+        /* Identity, not tree position. A span-identical single-child wrapper IS its
+         * child (the collapse law), so on "a\tb\tc\n" the document and its row share
+         * one id: testing node.parent lets the INNER node claim that id first, and the
+         * real root then dedups away, leaving the record with no row at all
+         * (GrammarCompose.TsvRowProducesEntitiesAndSpans caught exactly that).
+         * The record root is whatever carries the root id, wherever it sits. */
+        int packaging = !hash128_equals(&id, &st.comp_id[0]);
 
         /* CONTAINER STRUCTURE IS NOT CONTENT.
          *
