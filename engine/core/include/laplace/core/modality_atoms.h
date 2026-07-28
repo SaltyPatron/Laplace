@@ -16,77 +16,28 @@ extern "C" {
  *   "Tier-0 = quantized scalar alphabet with a canonical total order. Mints
  *    through the scalar content law; S3-anchored by that order."
  *
- * This module owns the ORDER and the GEOMETRY halves of that law — the two
- * parts the spec fully determines. It deliberately does NOT mint ids, and the
- * reason is a trap worth recording.
+ * This module supplies the canonical ORDER and the geometry that follows from it.
+ * It does not mint: what "the scalar content law" resolves to is not settled here,
+ * and guessing an atom's canonical bytes would fix every id in the modality
+ * forever.
  *
- * The law says tier-0 "mints through the scalar content law". That phrase must
- * NOT be read as ModelCoordinates.ScalarId — the content root of the decimal
- * string. Under that reading the PCM sample 500 becomes the composition of the
- * codepoints '5','0','0': it would have CONSTITUENTS, and a thing with
- * constituents is not an atom. The audio ladder would then have no floor of its
- * own — its lowest rung would decompose into somebody else's content.
+ * THREE DISTINCT THINGS, easy to blur and wrong to:
+ *   identity   the content hash. Exact, and the only identity there is.
+ *   coordinate derived deterministically FROM content — tier-0 by canonical order
+ *              (super_fibonacci), above that the centroid of constituents. Same
+ *              content -> same hash -> same coordinate, always.
+ *   hilbert    NOT the coordinate. A quantized, locality-preserving linearization
+ *              OVER coordinate space, for range scans and KNN pruning. It collides
+ *              by construction: many coordinates share a cell.
  *
- * The ladders are PARALLEL AND COMPLETE, not subtrees of text. Image runs
- * channel-value -> pixel -> patch -> region -> image; audio runs sample ->
- * window/frame -> onset segment -> phrase -> track; chess runs square/piece ->
- * resolved move -> position -> game; text runs codepoint -> grapheme -> word ->
- * sentence -> document. Tier numbers are modality-relative depths, not one
- * global scale, so "tier 0" means "this ladder's irreducible alphabet" and each
- * modality has to supply its own.
+ * So neither coordinate nor hilbert is an identity, for two different reasons —
+ * centroids collide (Rule #1, content_witness_batch.c: "centroids collide, e.g.
+ * cat/act") and hilbert cells collide (quantization). Only the hash identifies.
  *
- * ScalarId is right for what it was built for — layer and head INDICES, numbers
- * a person writes down, which genuinely are text ("14" here must BE "14"
- * everywhere). A PCM sample and a packed RGB triple are not written numbers;
- * they are this ladder's floor. So their identity has to come from their own
- * canonical bytes, the way a codepoint's does (blake3 of its UTF-8 form in
- * unicode_seed.cpp) — never from a decimal rendering of them.
- *
- * Minting is therefore left to the seeder that builds each alphabet's blob, and
- * this module stays the part that is unambiguous.
- *
- * Text is the reference instance and lives in codepoint_table.c: UCA order,
- * S3 anchor by that order, dense perfcache. The difference for image and audio
- * is only that their canonical order is closed-form rather than table-driven —
- * there is no UCD-equivalent to load, so rank is arithmetic on the atom itself.
- *
- * THE CLOSED FORM IS AN INTERIM, AND THE BLOB IS THE POINT. An earlier revision
- * of this comment claimed the image alphabet "cannot be materialised" because
- * 2^24 atoms is ~1.3 GiB of records, and treated that as a cost to be argued
- * around. That inverts the trade.
- *
- * The alphabet is a FIXED, ONE-TIME artifact. What it buys is that every image
- * and every video frame then stores as a physicality TRAJECTORY over it — the
- * same lossless, exactly-invertible serialization text already uses, where
- * ContentRoundtrip rebuilds a document's original bytes from its id alone. The
- * corpus is what scales, and the corpus gets:
- *
- *   - RUN-LENGTH, already in the format. laplace_mantissa_pack and
- *     laplace_trajectory_constituents carry run_length as a first-class field,
- *     so a flat region costs one entry, not one per pixel.
- *   - DEDUPLICATION BY CONTENT ADDRESS at every tier. Identical patches, regions
- *     and frames collapse to one id across the whole corpus; the law's video
- *     section states it outright — "unchanged regions dedup by content id" —
- *     which is most of a video.
- *
- * So the blob is amortised across every pixel the substrate will ever hold, and
- * docs/specs/33 already governs how it lands: mmap'd, postmaster-prewarmed, with
- * rule 5's declared coverage SCOPES (the t0 blob ships ASCII / BMP /
- * all-codepoints) sizing it per target.
- *
- * Blob-eligible because enumerable: channel-value (256), pixel (2^24), PCM
- * sample (65,536). The tiers above are not enumerable — a patch is a fixed ARITY
- * of pixels, not a fixed population — but they do not need to be: they are
- * trajectories over the tier below, which is exactly how word, sentence and
- * document already work.
- *
- * When the blobs land, this module becomes their lookup path and the closed form
- * becomes the generator, exactly as codepoint_table.c relates to
- * unicode_seed.cpp. The two must stay bit-identical; test_modality_atoms already
- * pins that property for super_fibonacci_point against the materialised set.
- * Blob prerequisites are spec 33's rule of engagement: a row in its table, a
- * one-way rebuild path with the reverse structurally absent, determinism +
- * staleness gates, and a stated scoping rule.
+ * Text is the reference instance, in codepoint_table.c: canonical order, S3 anchor
+ * by that order, dense perfcache. Image and audio differ only in that their order
+ * is arithmetic on the atom rather than table-driven — there is no UCD-equivalent
+ * to load.
  */
 typedef enum {
     /*
