@@ -55,12 +55,36 @@ node AS (
     WHERE depth < GREATEST(COALESCE(p_max_depth, 32), 0)
 ),
 picked AS (
-    -- One deterministic physicalities row per node, set-based (not a per-node LIMIT 1).
+    -- One physicalities row per node, set-based (not a per-node LIMIT 1).
+    --
+    -- THE TIEBREAK IS LOAD-BEARING. `ORDER BY p2.entity_id, p2.id` alone is NOT
+    -- deterministic here: 5,063 entities carry TWO type-1 rows with the SAME
+    -- (entity_id, type, id) and DIFFERENT trajectories, because the same content
+    -- is stored at tier 2 and tier 3 with two decompositions. mince.01 has an
+    -- 8-point word decomposition (m|i|n|c|e|.|0|1) and a 3-point sentence one
+    -- (mince|.|01) under one physicality id.
+    --
+    -- With the sort key tied, the PLAN decides which survives — so batch size
+    -- changed the answer: render_text_batch returned mince.01 for a 1-id array
+    -- and NULL for the same id inside a 500-id array, because the two calls got
+    -- different plans and therefore different trajectories. Every consumer of
+    -- render_text_batch inherits that: realize_batch, and through it related,
+    -- related_in, salient_facts, chat()'s band lens and edges().
+    --
+    -- ST_NPoints DESC breaks the tie deterministically and prefers the FINER
+    -- decomposition — the one that reaches the tier-0 floor and reconstructs the
+    -- text, which is what render walks for. Same answer every call, every batch
+    -- size, every plan.
+    --
+    -- This makes reads deterministic; it does NOT fix the duplication. Two rows
+    -- sharing a physicality id means that id is not a function of what it holds,
+    -- and the tier-2/tier-3 pair means collapse_idx did not fire for content that
+    -- is span-identical to its own single child. Both are upstream of here.
     SELECT DISTINCT ON (p2.entity_id) p2.entity_id, p2.trajectory
     FROM physicalities p2
     JOIN node n ON n.entity_id = p2.entity_id
     WHERE p2.type = 1 AND p2.trajectory IS NOT NULL
-    ORDER BY p2.entity_id, p2.id
+    ORDER BY p2.entity_id, p2.id, public.ST_NPoints(p2.trajectory) DESC
 )
 SELECT pk.entity_id AS parent_id, u.ordinal, u.entity_id AS child_id, u.run_length, u.flags
 FROM picked pk
