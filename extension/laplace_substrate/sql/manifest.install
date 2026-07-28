@@ -64,6 +64,7 @@ functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
 functions/mu/eff_mu_display.sql.in
 functions/mu/refuted.sql.in
+functions/consensus/edges_raw.sql.in
 functions/mu/glicko2_neutral_mu.sql.in
 functions/mu/glicko2_initial_rd.sql.in
 functions/mu/glicko2_initial_volatility.sql.in

@@ -1,5 +1,7 @@
--- Undirected consensus probe for explore_web SPI beam (out ∪ in).
--- Same grain as foundry_crawl_neighbors, but typed + bidirectional.
+-- Undirected consensus probe for the explore_web SPI beam. Thin wrapper over
+-- edges_raw(); pins both directions, every type, eff_mu order and refuted edges
+-- INCLUDED — the axes this lane has always used. `outbound` is the direction the
+-- core already returns.
 CREATE OR REPLACE FUNCTION explore_web_neighbors(
     p_subject bytea,
     p_limit   int)
@@ -12,17 +14,7 @@ CREATE OR REPLACE FUNCTION explore_web_neighbors(
         outbound boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT nbr, type_id, rating, rd, witness_count, outbound
-    FROM (
-        SELECT c.object_id AS nbr, c.type_id, c.rating, c.rd, c.witness_count, true AS outbound
-        FROM consensus c
-        WHERE c.subject_id = p_subject
-          AND c.object_id IS NOT NULL
-        UNION ALL
-        SELECT c.subject_id AS nbr, c.type_id, c.rating, c.rd, c.witness_count, false AS outbound
-        FROM consensus c
-        WHERE c.object_id = p_subject
-    ) e
-    ORDER BY eff_mu(rating, rd) DESC
-    LIMIT GREATEST(1, p_limit)
+    SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.witness_count,
+           (e.direction = 'out')
+    FROM edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e
 $$;
