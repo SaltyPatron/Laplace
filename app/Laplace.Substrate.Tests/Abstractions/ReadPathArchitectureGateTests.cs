@@ -112,7 +112,6 @@ public sealed class ReadPathArchitectureGateTests
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Mesh.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Pulse.cs",
         "Laplace.Endpoints.OpenAICompat/SubstrateClient.Query.cs",
-        "Laplace.Endpoints.OpenAICompat/TurnWitness.cs",
         "Laplace.Migrations/Program.cs",
         "Laplace.Substrate/Abstractions/FeedbackContent.cs",
     };
@@ -126,7 +125,7 @@ public sealed class ReadPathArchitectureGateTests
     /// raw string literals, where the opening delimiter and the SELECT sit on different
     /// lines. The gate reads whole files, so it sees them. Trust this number over a grep.
     /// </remarks>
-    private const int HandWrittenSqlCeiling = 34;
+    private const int HandWrittenSqlCeiling = 33;
 
     private static IEnumerable<string> ScannedFiles(string repoRoot)
     {
