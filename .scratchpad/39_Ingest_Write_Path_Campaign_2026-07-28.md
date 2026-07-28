@@ -15,6 +15,10 @@ That is the headline, and §6 explains why.
 | #697 | `fae9985`, `28fad3e` | One batch resolver; Tatoeba links become attestations |
 | #698 | `41d69d9` | Drop two unusable indexes; unpin `shared_buffers` |
 | #699 | — | Missing regress baseline (`walk_edge_weight_parity`) — unbroke CI |
+| #701 | — | `ISeedSource.Profile` is the run-level sizing authority; 5 sources ignored their own |
+| #702 | — | CLOSED, superseded by #703 |
+| #703 | — | Tatoeba as two phases; the id-map prelude deleted |
+| #704 | — | Grammar-spine gate needle follows Tatoeba to phases (main was red) |
 
 ### 1a. The hot-relation roster was structurally frozen (#696)
 
@@ -196,6 +200,75 @@ spread evenly across its eight leaves (102,188 / 101,939 / 101,638 / 101,140 / 1
 The bottleneck moved from write contention to read I/O against a database 11x larger than
 its cache. That is what §1f targets, and it too is unmeasured.
 
+### 2b. The measurement, finally taken
+
+A seed run with #697 + #701 + #703 merged, read off the operator's own log:
+
+| elapsed | rate_input_s | rate_rows_new_s |
+|---|---|---|
+| 114s | 4,303 | 16,575 |
+| 183s | 5,376 | 38,490 |
+| 249s | 5,720 | 45,704 |
+| 290s | 5,923 | 49,093 |
+| 309s | 6,043 | **50,743** |
+
+Climbing, not decaying. The pre-campaign run plateaued at ~18,300 rows/s — **2.8x**.
+
+Round trips, the thing that looked alarming: `49 = 1 lock + 1 journal + 14 probe + 33 copy`
+moving `674,213e + 674,213p + 147,459a` = **1,495,885 rows**, i.e. ~30,500 rows per round
+trip. The `round_trips=503` on the progress line is the run's CUMULATIVE total, not
+per-batch. Parallelism is real and visible: `SEGMENTED_COMPOSE ... across 11 segments` and
+`copy entities: 640,802 rows across 12 id-range connection(s)`.
+
+Per-stage cost inside a ~20s apply:
+
+| stage | time | rate |
+|---|---|---|
+| probe | 6,098-10,587 ms | ~660k e + 660k p ids |
+| copy entities | 1,391-3,302 ms | 396k-464k rows/s |
+| copy physicalities | 4,772-11,036 ms | **70k-135k rows/s** |
+| copy attestations | 364-1,306 ms | 318k-405k rows/s |
+| consensus fold | 3,924-12,582 ms | 11.7k-48.8k cells/s |
+
+**The probe is the largest line item**, ahead of the physicalities COPY that both of us
+were staring at.
+
+Two hypotheses falsified while narrowing this, recorded so they are not re-chased:
+
+- **TOAST**: 0 bytes on both `physicalities_b8c` and `entities_t3`. `trajectory` is not
+  going out of line, so TOAST does not explain the physicality COPY rate.
+- **"Physicalities just have more indexes"**: index:heap ratio is IDENTICAL —
+  physicalities 1620/1559 MB, entities 834/803 MB. Row widths are also close (~142 vs
+  ~153 B). The 4x COPY gap is not index COUNT; the GiST specifically remains a suspect,
+  but it is the second item, not the first.
+
+### 2c. A probe shortcut that must NOT be built naively
+
+`laplace_physicality_id_compute` is `blake3(entity_id || physicality_type)` — a physicality's
+id is a pure function of its entity. That invites an obvious optimisation: if the entity
+probe says ABSENT, its physicality must be absent too, so skip ~81% of physicality probes
+(`present: 126,977e` of 653,722 = 19%).
+
+**Do not ship that as written.** `NpgsqlWorkingSetApply` already carries the epitaph of the
+same class of inference:
+
+> The "novel by construction" shortcut that used to live here is GONE (2026-07-21) ...
+> MEASURED on the OMW seed: one apply declared 1,532,066 attestations novel-by-construction
+> and the COPY died on `23505 duplicate key`. The retry ... found 3,495,027 PRESENT and only
+> 826,624 genuinely novel. The inference was wrong by millions of rows. ... COPY has no
+> ON CONFLICT, so being wrong is fatal, while being slow is merely slow. If this is ever
+> reinstated it needs a proof that survives multi-batch runs and retries, plus an assertion
+> sampling skipped ids against the DB — not a comment asserting the invariant holds.
+
+And FKs to entities are dropped by design (consensus.sql.in: "referential integrity is
+structural"), so nothing at the database level guarantees a physicality has its entity —
+the invariant is exactly as strong as every writer's discipline, which is the assumption
+that failed last time.
+
+The optimisation is still available, but only in the guarded form that comment specifies:
+skip the derived set AND sample skipped ids against the DB, hard-failing on any hit. That
+turns an assumption into a check. Unbuilt.
+
 ---
 
 ## 3. Claims the operator made that did NOT hold
@@ -249,6 +322,21 @@ Six, all from moving fast and asserting inference as measurement.
    `could not access file "laplace_geom"`. I checked the box was idle before starting and
    never re-checked once a seed dispatched mid-build. **That run was never re-run.**
 
+7. **Ran a filtered test subset and called it green.** `Gate|Pipeline|Sizing` does not
+   match `GrammarSpineConformanceTests`, which pins Tatoeba to the literal
+   `DecomposerMultiFile<GrammarIngestRecord`. #703 merged one commit before the needle fix
+   landed on its branch, so main went red and needed #704. Second time in one night a gate
+   I did not execute caught something.
+8. **Designed the two-phase lane around `WalkSentence` populating the id map and never
+   wrote the line that populates it.** Both behaviour tests failed instantly on an empty
+   map. Caught only because those tests exist.
+9. **Claimed the prelude was single-threaded because of the async cursor.** Measured on
+   disjoint 1M-line slices: batching bought 1.03x, not the 97x I first reported (that
+   number came from both passes sharing a warm `RootMemo`). The cursor was never the
+   bottleneck; the duplicated compute was.
+10. **Nearly reinstated a shortcut the code documents as fatal** (§2c). One message from
+    recommending it.
+
 Process failure, separately: I repeatedly ended turns with decision menus instead of
 finishing, which is what the operator was reacting to for most of the session.
 
@@ -285,8 +373,8 @@ finishing, which is what the operator was reacting to for most of the session.
 
 ## 6. Why the job is not finished
 
-**Nothing in this campaign has been measured end to end.** Not one fix has a
-before/after number from a real corpus run.
+**It was measured in the end (§2b): ~18,300 -> 50,743 rows/s, climbing.** What is still
+unproven, and what went wrong getting there:
 
 - The one measurement obtained (§2) came from a run that started *before* the Tatoeba
   rewrite existed, against a 173 GB substrate — a different database than any future run
