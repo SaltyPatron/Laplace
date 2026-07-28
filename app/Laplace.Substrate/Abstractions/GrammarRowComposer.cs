@@ -241,6 +241,12 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             if (!filter.EntityNovel(i)) continue;
             NativeInterop.ComposeEntityNative e;
             NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
+            // Same cut the native drain makes (laplace_compose_drain_into_stage).
+            // This is the SECOND drain off one compose result — StructuredGrammarIngest
+            // uses it — and it silently kept staging packaging after the native one
+            // stopped. One operation, two implementations, exactly the drift the
+            // packaging flag exists to end.
+            if (e.Packaging != 0) continue;
             entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId, _sourceId));
         }
 
@@ -302,6 +308,10 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             if (!filter.EntityNovel(i)) continue;
             NativeInterop.ComposeEntityNative e;
             NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
+            // THIRD copy of this drain (native laplace_compose_drain_into_stage,
+            // Materialize, and here). GrammarRowComposerDrainParityTests exists
+            // precisely because they must agree, and it caught this one.
+            if (e.Packaging != 0) continue;
             stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
         }
 

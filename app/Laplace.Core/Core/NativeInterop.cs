@@ -427,7 +427,9 @@ public static unsafe partial class NativeInterop
     {
         public Hash128 Id;
         public byte Tier;
-        public byte Pad0, Pad1, Pad2;
+        /// <summary>Navigation-only node: present for span/containment lookup, never a row.</summary>
+        public byte Packaging;
+        public byte Pad1, Pad2;
         public Hash128 TypeId;
     }
 
