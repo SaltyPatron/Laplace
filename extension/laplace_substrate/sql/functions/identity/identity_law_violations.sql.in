@@ -34,6 +34,15 @@
 --                          what else was in the array, and every realize_batch
 --                          consumer inherited it.
 --
+--   dangling_entity_type   an entities.type_id with no entities row of its own.
+--                          Nothing can render or describe such a type, so every
+--                          entity wearing it is untypeable at read time. Four of
+--                          them type 16,063 entities here, and none is a named
+--                          constant — 958 string literals across Decomposers and
+--                          Substrate hash to none of them, so the ids are computed
+--                          from data at runtime and the type entity is simply
+--                          never minted.
+--
 --   tier_out_of_range      the original range check, kept.
 --
 -- Reports ids, not counts, so a caller can act on them. Deliberately unbounded: a
@@ -67,4 +76,14 @@ AS $$
           WHERE ph.trajectory IS NOT NULL
           GROUP BY ph.entity_id, ph.type, ph.id
           HAVING count(DISTINCT public.ST_AsBinary(ph.trajectory)) > 1) p
+
+    UNION ALL
+
+    -- A type_id in use that was never minted as an entity: unrenderable by
+    -- construction. Reported once per dangling TYPE, not once per entity wearing
+    -- it, so the row count stays proportional to the defect rather than to the
+    -- corpus.
+    SELECT DISTINCT e.type_id, NULL::smallint, 'dangling_entity_type'::text
+    FROM @extschema@.entities e
+    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.entities t WHERE t.id = e.type_id)
 $$;
