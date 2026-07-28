@@ -1,9 +1,27 @@
-CREATE OR REPLACE FUNCTION substrate_health()
+-- substrate_health() is called on the SEED and CI paths (db-reset, qa-isolated,
+-- decomposer-gate-check.py, substrate-audit.sql, the MCP health tool). It must stay
+-- cheap, and for one commit it was not: #721/#722 gave identity_law_violations() its
+-- real body -- a GROUP BY over every entity, a NOT EXISTS over every entity, and
+-- count(DISTINCT ST_AsBinary(trajectory)) over every physicality, which serialises
+-- every trajectory to binary and hash-aggregates on it. substrate_health() counted
+-- that. A leaf function changed cost class and its callers were never read.
+--
+-- The audit itself is correct and stays exactly as it is. What was wrong is running a
+-- full-corpus audit inside a health check on a table that grows all through an ingest.
+--
+-- So the deep pass is OPT-IN. Default is the cheap check; identity_violations comes
+-- back NULL, not 0, because "not checked" and "checked, none found" are different
+-- claims and collapsing them is how the detector became a green light in the first
+-- place. deep_checked says which one you got.
+DROP FUNCTION IF EXISTS substrate_health();
+
+CREATE OR REPLACE FUNCTION substrate_health(p_deep boolean DEFAULT false)
 RETURNS TABLE(
     ok boolean,
     fake_tier_bands bigint,
     identity_violations bigint,
-    bootstrap_entities bigint
+    bootstrap_entities bigint,
+    deep_checked boolean
 )
 LANGUAGE sql
 STABLE
@@ -16,7 +34,9 @@ AS $$
     WITH scans AS (
         SELECT
             @extschema@.fake_tier_band_count() AS fake_tier_bands,
-            (SELECT count(*) FROM @extschema@.identity_law_violations()) AS identity_violations,
+            CASE WHEN p_deep
+                 THEN (SELECT count(*) FROM @extschema@.identity_law_violations())
+            END AS identity_violations,
             (SELECT count(*) FROM @extschema@.entities) AS bootstrap_entities,
             EXISTS (
                 SELECT 1 FROM @extschema@.entities
@@ -24,11 +44,15 @@ AS $$
             ) AS canonical_source_present
     )
     SELECT
+        -- A NULL identity_violations must never read as "clean": IS NOT DISTINCT FROM 0
+        -- would do exactly that. Unchecked contributes nothing to ok, and deep_checked
+        -- tells the caller the verdict is partial.
         (s.fake_tier_bands = 0
-         AND s.identity_violations = 0
-         AND s.canonical_source_present) AS ok,
+         AND s.canonical_source_present
+         AND (NOT p_deep OR s.identity_violations = 0)) AS ok,
         s.fake_tier_bands,
         s.identity_violations,
-        s.bootstrap_entities
+        s.bootstrap_entities,
+        p_deep AS deep_checked
     FROM scans s;
 $$;
