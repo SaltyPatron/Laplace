@@ -67,7 +67,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
     }
 
     private static int ResolveBatch(DecomposerOptions options) =>
-        options.BatchSize > 1 ? options.BatchSize : 2048;
+        IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Iso, options);
 
     internal void StageIsoTabRecord(IsoRecord rec, SubstrateChangeBuilder b)
     {

@@ -48,9 +48,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         SourceEntityIdConventions.WarnIfCiliMapMissing(context.Logger, SourceName);
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
-        int batch = IngestSizing.ResolveForSource(
-            IngestSourceProfile.WordNet,
-            options.BatchSize > 1 ? options.BatchSize : null).RecordBatchSize;
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.WordNet, options);
         var frames = await LoadVerbFramesAsync(dictDir, ct);
 
         await foreach (var c in RunPhaseAsync(new DataPhase(frames, batch), context, options, ct))

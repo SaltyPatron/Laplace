@@ -27,7 +27,6 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
     }
 
     private const string UnicodeVersion = "17.0.0";
-    private const int DefaultBatch = 4096;
 
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
@@ -68,7 +67,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
         EnsureUcdProperties(context);
         IntentStage.ResetContentBank();
         int total = _records!.Length;
-        int batch = options.BatchSize > 1 ? options.BatchSize : DefaultBatch;
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Unicode, options);
 
         // Tier-0 completeness precondition: bulk-write every codepoint's entity+physicality
         // pair, unconditionally and atomically paired, BEFORE any batch below can reference a
