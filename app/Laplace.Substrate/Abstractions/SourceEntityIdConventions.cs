@@ -220,9 +220,6 @@ public static class SourceEntityIdConventions
         return key;
     }
 
-    public static Hash128 TatoebaSentence(long sentenceId) =>
-        Hash128.OfCanonical($"tatoeba/sentence/{sentenceId}");
-
     private const int ContentHashChunkBytes = 64 * 1024 * 1024;
 
     private static readonly ConcurrentDictionary<string, Hash128> _modelSourceIdCache = new();

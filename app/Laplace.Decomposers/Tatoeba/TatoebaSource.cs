@@ -14,7 +14,7 @@ public readonly struct TatoebaSource : ISeedSource
         SubstrateCanonicalIds.TrustClass("StructuredCorpus");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["HAS_EXTERNAL_ID", "IS_TRANSLATION_OF", "HAS_LANGUAGE"];
+        ["IS_TRANSLATION_OF", "HAS_LANGUAGE"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["Tatoeba_Sentence"];

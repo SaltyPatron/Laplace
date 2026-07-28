@@ -12,11 +12,13 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
 {
     private readonly TatoebaRowKind _kind;
     private readonly HashSet<long>? _allowedIds;
+    private readonly TatoebaIdMap _ids;
 
-    public TatoebaGrammarWitness(TatoebaRowKind kind, HashSet<long>? allowedIds)
+    public TatoebaGrammarWitness(TatoebaRowKind kind, HashSet<long>? allowedIds, TatoebaIdMap ids)
     {
         _kind = kind;
         _allowedIds = allowedIds;
+        _ids = ids;
     }
 
     public string ModalityId => "tsv";
@@ -46,25 +48,21 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         ReadOnlySpan<byte> text = Slice(utf8, fields[2]);
         if (text.IsEmpty) return;
 
-        Hash128 extId = SourceEntityIdConventions.TatoebaSentence(id);
         // Resolve the language code once; id + readback tracking both reuse it.
         string? iso3 = LanguageReference.ResolveCode(lang);
         Hash128 langId = LanguageReference.IdForResolvedCode(iso3);
         VocabularyNames.TrackResolvedLanguage(TatoebaDecomposer.LanguageNames, iso3);
-        b.AddEntity(new EntityRow(extId, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
 
         // The content root is the REAL sentence entity — content-addressed, UAX-tiered,
         // shared with any other source that ingests the same text (OpenSubtitles, a UAX
-        // parse). The Tatoeba numeric id becomes a mere external-id annotation ON that
-        // root (HAS_EXTERNAL_ID → extId), never the sentence's identity. See docs/specs/16 §2a.
+        // parse). See docs/specs/16 §2a.
         if (!ContentTierSpine.TryStageIntoBuilder(b, text, TatoebaDecomposer.Source, out var emitted))
             return;
 
-        // The HAS_EXTERNAL_ID bridge (content root -> deterministic TatoebaSentence(id) anchor) is
-        // what the link lane's IS_TRANSLATION_OF resolves against at read time — no runtime map.
-        b.AddAttestation(NativeAttestation.Categorical(
-            emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+        // What Tatoeba actually asserts about a sentence row: this text exists, and it is in
+        // this language. Attested ONCE, at the root, which is the tier the source asserts it
+        // at (docs/specs/16). The row NUMBER is not attested at all — see TatoebaIdMap.
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
 
@@ -78,24 +76,29 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[0]), out long a)) return;
         if (!TatoebaParse.TryInt64(Slice(utf8, fields[1]), out long bId)) return;
 
-        // Content-addressed and ORDER-INDEPENDENT: the link is witnessed verbatim between the two
-        // DETERMINISTIC external-id anchors TatoebaSentence(id) — computed here from the ids alone,
-        // no runtime id->root map, so links need not run after sentences. Each anchor bridges to its
-        // real content root via HAS_EXTERNAL_ID (attested in WalkSentence), so the content-root-level
-        // translation (and cross-source merge) is the DERIVED read-side join across that bridge —
-        // record vs calculate. The anchor is also load-bearing on its own: it links ILI/concept
-        // hashes (through the sentence's tier entities) back to Tatoeba records for readback and
-        // direct-translation accuracy checks.
-        Hash128 refA = SourceEntityIdConventions.TatoebaSentence(a);
-        Hash128 refB = SourceEntityIdConventions.TatoebaSentence(bId);
-        // Mint the ref anchors here so the edge is referentially sound even if a sentence is absent
-        // (like WordNet referencing a synset defined in another file). If the sentence IS present,
-        // WalkSentence emits the same id (a content-addressed collision) plus the HAS_EXTERNAL_ID
-        // bridge to its content root; if absent, the anchor stays bare (ungrounded, no bridge).
-        b.AddEntity(new EntityRow(refA, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(refB, EntityTier.Word, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        // links.csv is an ATTESTATION file, not an entity file. What Tatoeba asserts is
+        // "this sentence is a translation of that sentence" — a fact between two CONTENT
+        // ROOTS. The ids are scaffolding: they exist only because the links file cannot
+        // inline the text, so they are resolved here and never stored.
+        //
+        // This lane used to mint a `tatoeba/sentence/{id}` entity per side and attest
+        // between those. That is source-keyed identity — a row number promoted to an entity
+        // id — which is exactly the entity-resolution table content addressing abolishes,
+        // and it made every translation a read-side join across HAS_EXTERNAL_ID. MEASURED
+        // at ~1.56 entity rows per link, the largest row category of the link phase.
+        //
+        // A link naming a sentence absent from sentences.csv is DROPPED, not grounded on a
+        // synthetic node: an edge between two ids we cannot resolve to text asserts nothing
+        // about language, and a bare anchor is an unattested node pretending otherwise.
+        if (!_ids.TryGet(a, out var rootA) || !_ids.TryGet(bId, out var rootB))
+        {
+            Interlocked.Increment(ref TatoebaDecomposer.UnresolvedLinks);
+            return;
+        }
+        if (rootA.Equals(rootB)) return;  // identical text on both sides is not a translation
+
         b.AddAttestation(NativeAttestation.Categorical(
-            refA, "IS_TRANSLATION_OF", refB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            rootA, "IS_TRANSLATION_OF", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 
     private static ReadOnlySpan<byte> Slice(ReadOnlySpan<byte> utf8, (uint Start, uint End) sp) =>

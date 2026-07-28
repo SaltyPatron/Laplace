@@ -304,8 +304,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
 
     // Multi-file sources ingest PARALLEL BY DEFAULT across the file-worker pool. References resolve
     // content-addressed (hash of the canonical key), so files carry no cross-file ordering and no
-    // phase concept is needed — cross-source agreement is a hash collision. (Tatoeba is order-
-    // independent too: its links anchor on the deterministic TatoebaSentence(id) external-id.)
+    // phase concept is needed — cross-source agreement is a hash collision.
     protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
