@@ -66,6 +66,11 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         b.AddAttestation(NativeAttestation.Categorical(
             emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
 
+        // The link phase's whole input. FREE here — the root is already composed — which is
+        // the point of doing this in phase 1 instead of a prelude that resolves all 13.26M
+        // roots a second time before the pipeline emits anything.
+        _ids.Set(id, emitted);
+
         _allowedIds?.Add(id);
     }
 

@@ -45,6 +45,9 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
+        // Two phases: sentences.csv (entities) then links.csv (attestations). The second
+        // needs the id -> content-root map the first produces as a free side effect.
+        "Laplace.Decomposers/Tatoeba/TatoebaDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
         "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
     };
