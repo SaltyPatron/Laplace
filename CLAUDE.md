@@ -48,16 +48,21 @@ is its own modality (squares/pieces → resolved moves → positions → games);
 checkpoints ride their containers. Tree-sitter's job is narrow: unpack container
 formats, then hand off.
 
-The floor has a consequence that bites the read side: **a one-sentence source can never
-mint a tier-4 root.** A span-identical single-child wrapper IS its child
-(`TierTree.CollapseIndex` / `collapse_idx()`), so Tatoeba rows, WordNet glosses and
-HAS_EXAMPLE usages are all tier-3 ORPHANS by construction. The generation corpus must
-therefore include orphans — `corpus_max_orphan_sentences` defaults to -1 (uncapped);
-0 means "book-only" and silently excludes the ENTIRE single-sentence corpus from
-`corpus_sentence_constituents_since`, and with it `walk_continuations`,
+The floor has a consequence the read side keeps getting backwards: **a tier-3 sentence
+IS a document when nothing wraps it.** A span-identical single-child wrapper IS its child
+(`TierTree.CollapseIndex` / `collapse_idx()`), so a one-sentence document collapses onto
+the sentence — one id, serving both roles. It is not a sentence that "failed to become" a
+document, and there is no "orphan" category: a Tatoeba row, a WordNet gloss and a
+HAS_EXAMPLE usage are each a document root at their floor.
+
+So **never select roots by `tier = 4`.** That reads tier as identity, which is exactly the
+frame this law rejects, and it silently excludes the entire single-sentence corpus from
+`corpus_sentence_constituents_since` — and with it `walk_continuations`,
 `cooccurrence_scan`, `trajectory_pairs(_plane)`, `continuation_conditional_plane`,
-`relation_plane` and the foundry's conditional floor. Sequence starving on a default
-looks exactly like sequence starving on missing data — check the enumeration first.
+`relation_plane`, and the foundry's conditional floor. Every trajectory-bearing entity at
+tier ≥ 3 is a corpus sequence; the C side dedups by parent id. Sequence starving on a tier
+predicate looks exactly like sequence starving on missing data — check the enumeration
+before believing the corpus is thin.
 
 ## Decomposers — the witness boundary
 
@@ -233,14 +238,25 @@ S9 FALLBACK when the sequence layer is starved — never the success path. Every
 published by `query_shapes()` must be reachable and must differ from `describe`.
 
 **S1/S2/S3 read the graph BETWEEN the prompt's tokens, never one token in isolation**
-(`prompt_coherence`, native in `src/prompt_coherence.c`). Two signals off one edge scan:
+(`prompt_coherence`, native in `src/prompt_coherence.c`). Signals off one edge scan:
 COHERENCE (rated mass to the other tokens' candidate senses) and REL_MASS (rated mass in a
 relation type another token NAMES — the "what are the X of Y" shape, where X names a
-relation, not a peer concept). `denote_mu` is the TIEBREAK only; leading with it answers
-"What is a pawn in chess?" with "A is the 1st letter of the Roman alphabet" and resolves
-`car` to TZAR. A relation is reached by its canonical name's OBJECT token (last token,
-length ≥ 3 — the rest is identifier grammar) via content-id equality or an attested
-`IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach its lemma.
+relation, not a peer concept). A relation is reached by its canonical name's OBJECT token
+(last token, length ≥ 3 — the rest is identifier grammar) via content-id equality or an
+attested `IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach
+its lemma.
+
+**RANK ON SPECIFICITY, NEVER ON A SUMMED MASS.** A summed mass is meaningless on a
+high-degree id: function words are wired to everything, so every mass-shaped scalar elects
+them. Measured, all three: `denote_mu` picked the article (and TZAR for `car`), highway
+breadth tied `a` with `pawn` at 13, raw coherence put `is`/`of`/`was` first on every prompt.
+`specificity = coherence / the candidate's OWN total rated mass` is the share of what a
+concept has witnessed that reaches this prompt — on "What is a pawn in chess?" total mass
+runs `a` 4.28e16, `chess` 5.28e14, `pawn` 2.63e13, three orders between article and topic.
+It is scale-free, which is why it survives ingests: the raw sums WORKED before the UD seed
+and broke after it. `denote_mu` is the last tiebreak, never the lead. Known gap: a prompt
+with ONE content word has no pair to cohere with ("Who was Napoleon?" elects `was`), and no
+pairwise statistic fixes that.
 
 **Nothing goes on the `chat()` hot path until it is timed on HIGH-DEGREE topics.** Cost
 scales with the topic's degree — senses per word, edges per synset, containers per surface —

@@ -78,6 +78,7 @@ typedef struct PcCand
     uint8   syn[16];
     double  denote_mu;
     double  coherence;
+    double  total_mass;        /* ALL rated mass on this candidate, peers or not */
     uint64  peer_mask;
     double  rel_mass;
     uint8   rel_type[16];
@@ -201,10 +202,6 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
                 te->named = false;
             }
 
-            peer = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(other), HASH_FIND, NULL);
-            if (peer == NULL)
-                continue;               /* edge leaves the candidate set */
-
             me = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(mine), HASH_FIND, NULL);
             if (me == NULL)
                 continue;
@@ -214,6 +211,18 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
             eff = (double) (rating - 2 * rd);
             rank = (laplace_relation_lookup((const hash128_t *) VARDATA_ANY(tid), &def) == 0
                     && def != NULL) ? def->rank : 0.0;
+
+            /* TOTAL first, and for EVERY edge -- this is the denominator that
+             * makes the coherence sum mean something. Forward pass only, so an
+             * edge with both endpoints in the candidate set is not counted
+             * twice. Free: these rows are already being read. */
+            if (forward)
+                for (int i = 0; i < me->n_idx; i++)
+                    cands[me->idx[i]].total_mass += rank * eff;
+
+            peer = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(other), HASH_FIND, NULL);
+            if (peer == NULL)
+                continue;               /* edge leaves the candidate set */
 
             for (int i = 0; i < me->n_idx; i++)
             {
@@ -648,8 +657,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 continue;
 
             {
-                Datum values[8];
-                bool  nulls[8];
+                Datum values[9];
+                bool  nulls[9];
                 bytea *tokb = (bytea *) palloc(VARHDRSZ + 16);
                 bytea *synb = (bytea *) palloc(VARHDRSZ + 16);
 
@@ -677,6 +686,19 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 else
                     nulls[6] = true;
                 values[7] = Float8GetDatum(best->rel_mass);
+                /* SPECIFICITY -- the rank key. A summed mass is meaningless on a
+                 * high-degree id: an article is wired to everything, so its edges
+                 * to the prompt are unremarkable, while a chess pawn's edge to
+                 * chess is most of what it has. Measured on this substrate,
+                 * "What is a pawn in chess?": total mass a = 4.28e16, chess =
+                 * 5.28e14, pawn = 2.63e13 -- three orders between the article and
+                 * the topic, which is exactly the correction. Not a floor or a
+                 * knob: it is the share of a candidate's OWN witnessed mass that
+                 * reaches the rest of the prompt, and it is scale-free, so it
+                 * does not drift as seeds land. */
+                values[8] = Float8GetDatum(best->total_mass > 0.0
+                                           ? best->coherence / best->total_mass
+                                           : 0.0);
 
                 tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
             }
