@@ -1,1 +1,9 @@
-CREATE INDEX IF NOT EXISTS physicalities_radius_btree ON physicalities USING btree (radius_origin);
+-- REMOVED 2026-07-28. radius_origin is a STORED generated column that the SQL surface
+-- only ever PROJECTS (structural_neighbors_of selects it); it is never a predicate, a
+-- join key, or an ORDER BY anywhere in the extension. A btree on it therefore cannot be
+-- chosen by the planner under any query we ship — MEASURED 0 scans against 99,152,023 on
+-- physicalities_entity_btree, at 1,285 MB across the 64 partitions, taking a write on
+-- every physicality insert.
+--
+-- Dropped rather than deleted-from-manifest so populated databases shed it on upgrade.
+DROP INDEX IF EXISTS physicalities_radius_btree;

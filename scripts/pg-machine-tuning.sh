@@ -40,7 +40,7 @@ pg_compute_machine_tuning() {
   wb=$(( mem_kb / 512 / 1024 )); (( wb < 16 )) && wb=16; (( wb > 1024 )) && wb=1024
 
   local sb ecs
-  sb=$(( mem_kb / 4 / 1024 )); (( sb < 128 )) && sb=128; (( sb > 16384 )) && sb=16384
+  sb=$(( mem_kb / 4 / 1024 )); (( sb < 128 )) && sb=128; (( sb > 65536 )) && sb=65536
   ecs=$(( mem_kb * 65 / 100 / 1024 )); (( ecs < 512 )) && ecs=512; (( ecs > 98304 )) && ecs=98304
 
   PG_TUNE_SB=${sb}MB

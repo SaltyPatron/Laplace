@@ -106,8 +106,24 @@ public static class MemoryTopology
     // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
     // All are functions of physical RAM. tune-pg emits these; nothing hardcodes a GB literal.
 
-    /// <summary>shared_buffers ≈ 25% of RAM, the standard OLTP starting point.</summary>
-    public static long SharedBuffersBytes => Clamp(TotalPhysicalBytes / 4, 128L << 20, 16L << 30);
+    /// <summary>
+    /// shared_buffers ≈ 25% of RAM, the standard OLTP starting point.
+    ///
+    /// CEILING RAISED 16 GiB -> 64 GiB (2026-07-28). The 16 GiB cap was sized when the
+    /// substrate was small and stopped tracking it: MEASURED on the 128 GB box, RAM/4 is
+    /// 33.5 GiB but the cap pinned shared_buffers at 16 GiB against a 173 GB database —
+    /// ~11x oversubscribed — and a full-corpus ingest sat in IO.DataFileRead /
+    /// IO.AioIoCompletion with content-hash dedup probes missing cache and going to disk.
+    /// A hardcoded ceiling that no longer tracks the machine is the same defect as the
+    /// frozen hot-relation roster and the per-decomposer batch literals.
+    ///
+    /// Unlike <see cref="WorkMemBytes"/> this is a SINGLE shared allocation, not a
+    /// per-connection multiplier, so it carries none of the 2026-07-15 starvation
+    /// arithmetic — 64 GiB is one allocation on any box large enough for RAM/4 to reach it,
+    /// and RAM/4 still governs everything smaller. Above ~64 GiB, PostgreSQL's own clock
+    /// sweep and checkpoint cost stop paying back, which is why a ceiling remains.
+    /// </summary>
+    public static long SharedBuffersBytes => Clamp(TotalPhysicalBytes / 4, 128L << 20, 64L << 30);
 
     /// <summary>effective_cache_size ≈ 65% of RAM (planner hint for OS + PG cache).</summary>
     public static long EffectiveCacheSizeBytes => Clamp(TotalPhysicalBytes * 65 / 100, 512L << 20, 96L << 30);
