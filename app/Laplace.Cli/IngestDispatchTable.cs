@@ -27,98 +27,117 @@ internal static class IngestDispatchTable
 {
     internal delegate Task<int> IngestHandler(IngestCommands.IngestCliArgs cli);
 
-    private static readonly Dictionary<string, IngestHandler> Routes =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["unicode"] = cli => IngestCommands.IngestUnicodeViaRunnerAsync(cli),
-            ["iso639"] = cli => IngestCommands.IngestISO639Async(cli),
-            ["atomic2020"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("atomic2020"), IngestDataPaths.Resolve("atomic2020", cli.Path),
-                skipLayerCheck: false, cli),
-            ["conceptnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("conceptnet"), IngestDataPaths.Resolve("conceptnet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["wiktionary"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("wiktionary"), IngestDataPaths.Resolve("wiktionary", cli.Path),
-                skipLayerCheck: false, cli),
-            ["omw"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("omw"), IngestDataPaths.Resolve("omw", cli.Path),
-                skipLayerCheck: false, cli),
-            ["wordnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("wordnet"), IngestDataPaths.Resolve("wordnet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["ud"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("ud"), IngestDataPaths.Resolve("ud", cli.Path),
-                skipLayerCheck: false, cli),
-            ["tatoeba"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("tatoeba"), IngestDataPaths.Resolve("tatoeba", cli.Path),
-                skipLayerCheck: false, cli),
-            ["framenet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("framenet"), IngestDataPaths.Resolve("framenet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["opensubtitles"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("opensubtitles"), IngestDataPaths.Resolve("opensubtitles", cli.Path),
-                skipLayerCheck: false, cli),
-            ["verbnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("verbnet"), IngestDataPaths.Resolve("verbnet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["propbank"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("propbank"), IngestDataPaths.Resolve("propbank", cli.Path),
-                skipLayerCheck: false, cli),
-            ["semlink"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("semlink"), IngestDataPaths.Resolve("semlink", cli.Path),
-                skipLayerCheck: false, cli),
-            ["mapnet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("mapnet"), IngestDataPaths.Resolve("mapnet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["wordframenet"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("wordframenet"), IngestDataPaths.Resolve("wordframenet", cli.Path),
-                skipLayerCheck: false, cli),
-            ["cili"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("cili"), IngestDataPaths.Resolve("cili", cli.Path),
-                skipLayerCheck: false, cli),
-            ["code"] = cli => IngestCommands.IngestCodeAsync(cli),
-            ["repo"] = cli => IngestCommands.IngestRepoAsync(cli),
-            ["tabular"] = cli => IngestCommands.IngestTabularAsync(cli),
-            ["parquet"] = cli => IngestCommands.IngestParquetAsync(cli),
-            ["tiny-codes"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("tiny-codes"), IngestDataPaths.Resolve("tiny-codes", cli.Path),
-                skipLayerCheck: true, cli),
-            ["stack"] = cli => IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.Resolve("stack"), IngestDataPaths.Resolve("stack", cli.Path),
-                skipLayerCheck: true, cli),
-            ["document"] = cli => IngestCommands.IngestDocumentAsync(cli),
-            ["recipe"] = cli => IngestCommands.IngestRecipeAsync(cli),
-            ["chess"] = IngestChessRecordAndAnalyzeAsync,
-            ["chess-analyze"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessAnalyzeDecomposer(cli.AnalyzeDepth), "",
-                skipLayerCheck: true, cli, skipSourceCompletion: true),
-            // Geometry-only backfill: deposits the game trajectory (spec 11 §2) onto games
-            // recorded before it existed. Deliberately NOT a ChessAnalyze.Version bump — that
-            // would re-derive ~29M attestations and double every observation_count, since
-            // merge accumulates. A physicality is an upsert, so this is safe to re-run.
-            ["chess-trajectory"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessTrajectoryDecomposer(), "",
-                skipLayerCheck: true, cli, skipSourceCompletion: true),
-            // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
-            // search depth (default 10 — the v1 census budget); --nodes N switches to a
-            // node-capped search (bounded worst case). A run-level memo searches each unique
-            // content-addressed position once regardless of how many games share it.
-            ["chess-eval"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
-                    cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
-                    cli.AnalyzeNodes), "",
-                skipLayerCheck: true, cli, skipSourceCompletion: true),
-            ["openings"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
-                skipLayerCheck: true, cli),
-            // Single pass: the book decomposer records AND derives per record in one Compose
-            // (in-memory parse; no hydrate read-back), stamping ANALYZED_AT itself.
-            ["chess-books"] = cli => IngestCommands.IngestViaRunnerAsync(
-                new Laplace.Chess.Service.ChessBookDecomposer(cli.Recursive), cli.Path ?? "",
-                skipLayerCheck: true, cli),
-            ["omw-probe"] = cli => IngestCommands.OmwProbeAsync(cli),
-        };
+    /// <summary>
+    /// Sources whose dispatch is ENTIRELY determined by their key: resolve the
+    /// decomposer, resolve the data path, hand both to the runner. Seventeen rows
+    /// of this table were byte-identical apart from one repeated string, which is a
+    /// switch wearing a dictionary's clothes — the key appeared three times per row
+    /// and a typo in any one of them was a runtime-only failure. Listing the keys
+    /// once and generating the handlers leaves only genuine exceptions visible
+    /// below (chess fusion, model/recipe, code lanes, ETL).
+    /// </summary>
+    private static readonly string[] StandardSources =
+    [
+        "atomic2020",
+        "cili",
+        "conceptnet",
+        "framenet",
+        "mapnet",
+        "omw",
+        "opensubtitles",
+        "propbank",
+        "semlink",
+        "tatoeba",
+        "ud",
+        "verbnet",
+        "wiktionary",
+        "wordframenet",
+        "wordnet",
+    ];
+
+    /// <summary>
+    /// Same shape, but the source owns its own completion marking, so the
+    /// layer-order precondition does not apply (bulk corpora that resume per file).
+    /// </summary>
+    private static readonly string[] StandardSourcesNoLayerCheck =
+    [
+        "stack",
+        "tiny-codes",
+    ];
+
+    private static IngestHandler Standard(string key, bool skipLayerCheck) =>
+        cli => IngestCommands.IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve(key), IngestDataPaths.Resolve(key, cli.Path),
+            skipLayerCheck, cli);
+
+
+    private static readonly Dictionary<string, IngestHandler> Routes = BuildRoutes();
+
+    private static Dictionary<string, IngestHandler> BuildRoutes()
+    {
+        var routes = new Dictionary<string, IngestHandler>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in StandardSources)
+            routes[key] = Standard(key, skipLayerCheck: false);
+        foreach (var key in StandardSourcesNoLayerCheck)
+            routes[key] = Standard(key, skipLayerCheck: true);
+        foreach (var (key, handler) in Exceptions)
+            routes[key] = handler;
+        return routes;
+    }
+
+    /// <summary>
+    /// Sources whose dispatch is NOT determined by the key alone — a bespoke entry
+    /// point, a constructed decomposer carrying CLI flags, or a lane that manages
+    /// its own source completion. These are the rows that justify a table at all.
+    /// </summary>
+    private static readonly (string Key, IngestHandler Handler)[] Exceptions =
+    [
+        ("unicode",  cli => IngestCommands.IngestUnicodeViaRunnerAsync(cli)),
+        ("iso639",   cli => IngestCommands.IngestISO639Async(cli)),
+        ("code",     cli => IngestCommands.IngestCodeAsync(cli)),
+        ("repo",     cli => IngestCommands.IngestRepoAsync(cli)),
+        ("tabular",  cli => IngestCommands.IngestTabularAsync(cli)),
+        ("parquet",  cli => IngestCommands.IngestParquetAsync(cli)),
+        ("document", cli => IngestCommands.IngestDocumentAsync(cli)),
+        ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
+        ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
+
+        // GH #600: `chess` records AND derives the calculated layer in ONE fused
+        // Compose pass, reusing the in-memory parse — no second Postgres hydrate.
+        ("chess", IngestChessRecordAndAnalyzeAsync),
+
+        ("chess-analyze", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessAnalyzeDecomposer(cli.AnalyzeDepth), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
+        // Geometry-only backfill: deposits the game trajectory (spec 11 §2) onto games
+        // recorded before it existed. Deliberately NOT a ChessAnalyze.Version bump — that
+        // would re-derive ~29M attestations and double every observation_count, since
+        // merge accumulates. A physicality is an upsert, so this is safe to re-run.
+        ("chess-trajectory", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessTrajectoryDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
+        // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
+        // search depth (default 10 — the v1 census budget); --nodes N switches to a
+        // node-capped search (bounded worst case). A run-level memo searches each unique
+        // content-addressed position once regardless of how many games share it.
+        ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
+                cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
+                cli.AnalyzeNodes), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
+        ("openings", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
+            skipLayerCheck: true, cli)),
+
+        // Single pass: the book decomposer records AND derives per record in one Compose
+        // (in-memory parse; no hydrate read-back), stamping ANALYZED_AT itself.
+        ("chess-books", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessBookDecomposer(cli.Recursive), cli.Path ?? "",
+            skipLayerCheck: true, cli)),
+    ];
 
     // GH #600: `chess` records AND derives the calculated layer in ONE fused Compose pass
     // (ChessPgnDecomposer -> DeriveFromParsed, reusing the in-memory parse) — no second
