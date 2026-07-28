@@ -46,19 +46,6 @@ internal sealed class SubstrateTools
     /// </summary>
     private sealed record ToolSpec(string Name, string Summary, string Description, Func<JsonObject> BuildSchema);
 
-    // Registered CLI ingest source names (app/Laplace.Cli/IngestDispatchTable.cs).
-    // Kept as a plain list rather than a live lookup: the dispatch table is a
-    // compile-time registry in a sibling project this one doesn't reference, and
-    // this tool is a valet over the CLI process, not a reimplementation of it.
-    // Declared BEFORE ToolCatalog: its ingest entry's Description references this
-    // array, and static field initializers run in declaration order.
-    private static readonly string[] KnownIngestSources =
-    [
-        "atomic2020", "chess", "chess-analyze", "chess-books", "chess-eval", "cili", "code",
-        "conceptnet", "document", "framenet", "iso639", "mapnet", "omw", "omw-probe", "openings",
-        "opensubtitles", "parquet", "propbank", "recipe", "repo", "semlink", "stack", "tabular",
-        "tatoeba", "tiny-codes", "ud", "unicode", "verbnet", "wiktionary", "wordframenet", "wordnet",
-    ];
 
     private static readonly ToolSpec[] ToolCatalog =
     [
@@ -130,8 +117,7 @@ internal sealed class SubstrateTools
             "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts().",
             () => Schema()),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
-            "Run a corpus ingest through the CLI's own tested pipeline (unpack -> records -> client-side dedup/fold -> COPY) -- the exact 'laplace ingest <source> <path>' entrypoint a terminal run uses, so results are identical either way. Substrate-wide only one ingest runs at a time (a global advisory lock); if another is active this call waits for it rather than fighting the lock, up to timeout_seconds, and is killed (not left running) on timeout. Returns the process exit code and captured output so a stalled or failed run is visible, never silently swallowed. Known sources: "
-            + string.Join(", ", KnownIngestSources) + ".",
+            "Run a corpus ingest through the CLI's own tested pipeline (unpack -> records -> client-side dedup/fold -> COPY) -- the exact 'laplace ingest <source> <path>' entrypoint a terminal run uses, so results are identical either way. Substrate-wide only one ingest runs at a time (a global advisory lock); if another is active this call waits for it rather than fighting the lock, up to timeout_seconds, and is killed (not left running) on timeout. Returns the process exit code and captured output so a stalled or failed run is visible, never silently swallowed. For the live source list run `laplace ingest` with no arguments, or pass an unknown source here -- the CLI answers with its own registry rather than a copy kept in this process.",
             () => Schema(("source", "string", "registered ingest source name (code, repo, wordnet, tabular, ...)", true),
                          ("path", "string", "file or directory to ingest", true),
                          ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false))),
@@ -491,8 +477,13 @@ internal sealed class SubstrateTools
         var path = Req(args, "path").Trim();
         var timeoutSeconds = Int(args, "timeout_seconds", 600);
 
-        if (!KnownIngestSources.Contains(source, StringComparer.Ordinal))
-            return ($"unknown ingest source '{source}'. Known: {string.Join(", ", KnownIngestSources)}", true);
+        // NO LOCAL SOURCE GATE. This used to check `source` against a hand-copied
+        // array of CLI keys, which had already drifted: it lacked chess-trajectory,
+        // so this tool REJECTED a source the CLI routes fine. A valet over another
+        // process must not keep its own copy of that process's menu -- the CLI owns
+        // IngestDispatchTable, validates against it, and its error already names
+        // every supported source. Forwarding an unknown name costs one process
+        // start and returns the authoritative answer instead of a stale one.
         if (!File.Exists(path) && !Directory.Exists(path))
             return ($"path not found: {path}", true);
 
