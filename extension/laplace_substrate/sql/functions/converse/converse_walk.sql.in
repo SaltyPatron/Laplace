@@ -64,47 +64,92 @@ BEGIN
     -- Word-level tokens only: the inter-word whitespace constituents are
     -- dropped, else (word,space) bigrams match every boundary and the walk
     -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
+    -- The corpus is ranked by the WEB, not by storage order. containers_of walks
+    -- the trajectory constituent index, which is GEOMETRY -- identity and
+    -- retrieval, never semantics. What a candidate sentence is WORTH is the
+    -- Glicko fold's answer, and it is already on the edge that attests it.
+    --
+    -- The old ORDER BY was `is_core DESC, gid`: content-hash order. MEASURED on
+    -- 'water', of the 400 tier-3 containers returned, 398 are the object of a
+    -- HAS_DEFINITION consensus edge whose eff_mu spans 1.17e12 to 1.46e12 -- a
+    -- 25% spread, witness_count up to 4. The signal was sitting on 99.5% of the
+    -- candidates and the corpus that decides what this engine SAYS was picked by
+    -- hash instead.
+    --
+    -- Rank on the INBOUND edge (c.object_id = the sentence). A usage sentence is
+    -- rated by what attests it -- HAS_DEFINITION, HAS_EXAMPLE -- not by anything
+    -- it asserts itself; probing c.subject_id finds almost nothing (4 of 400) and
+    -- is the wrong direction. LEFT JOIN so an unrated candidate still competes at
+    -- the neutral prior rather than being silently dropped: absence of evidence is
+    -- not evidence of worthlessness, and dropping it would be an
+    -- operator-invented floor.
+    --
+    -- LIMIT 160 is now honest top-k -- a query LIMIT over a rated ordering, which
+    -- is the only form of top-k the substrate law allows.
     WITH gids AS (
         -- DISTINCT: a gloss reachable through two def-band relation types
         -- contributes its token stream once, not twice.
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
-            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core
+            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
+                   eff_mu(c.rating, c.rd) AS mu
             FROM consensus c
             WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
             UNION ALL
-            SELECT co.entity_id, 40, false
+            SELECT co.entity_id, 40, false,
+                   COALESCE(MAX(eff_mu(k.rating, k.rd)), glicko2_neutral_mu())
             FROM containers_of(topic_word, 1, 400) co
+            LEFT JOIN consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
-            ORDER BY is_core DESC, gid
+            GROUP BY co.entity_id
+            ORDER BY is_core DESC, mu DESC
             LIMIT 160
         ) g
     ),
     toks AS (
-        -- WORD-tier tokens only (ctier = 2): a trajectory can carry grapheme/
-        -- codepoint constituents (UD interlinear glosses like "people.PL" are
-        -- single words whose points are letters) — walking those emitted
-        -- letter-by-letter output. With the tier filter, a one-word gloss
-        -- yields a single token and the cnt >= 2 guard drops it, falling
-        -- through to real multi-word sentences.
+        -- The WHOLE attested constituent sequence, at whatever tier the content
+        -- decomposed into. NO ctier filter: tier is a FLOOR, never an identity,
+        -- so selecting the walk's alphabet by tier is a tokenizer -- the fixed
+        -- vocabulary assumption this engine exists to replace.
+        --
+        -- What the filter discarded, MEASURED over 12 containers of 'water':
+        --   ctier 0 : 164 constituents,  12 distinct  <- the separators
+        --   ctier 2 : 144 constituents,  94 distinct  <- the words
+        -- The separators were in the trajectory all along, in attested order.
+        -- Dropping them is why REALIZE had to invent a ' ', false for every script
+        -- that does not space its words.
+        --
+        -- The letter-by-letter worry the old comment recorded is real but narrow:
+        -- a ONE-WORD gloss, where the tier-is-a-floor collapse makes the gloss root
+        -- its own word, so unpacking reaches that word's codepoints. 12 distinct
+        -- tier-0 ids across 12 sentences is punctuation, not spelling -- a word is
+        -- a single tier-2 id. The cnt >= 2 guard below already drops the degenerate
+        -- one-word case, and that is what actually handled it.
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
         CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE u.ctier = 2
     ),
-    ws AS MATERIALIZED (
-        SELECT d.entity_id AS id,
-               COALESCE(render_text(d.entity_id, 64), ' ') ~ '^\s*$' AS is_ws
-        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
-    ),
+    -- The whitespace classification that sat here is GONE. It rendered every
+    -- DISTINCT token to text to ask "is this blank" -- MEASURED on 'water' (1,645
+    -- distinct tokens over 400 containers) at 29,899ms of a 48,435ms
+    -- converse_walk, 18ms per token, purely to answer a predicate.
+    --
+    -- Against this stream it was a NO-OP as well as a cost: `toks` restricts to
+    -- u.ctier = 2, and separator tokens live below tier 2, so the set it filtered
+    -- could not contain one. Removing it left the emitted token sequence
+    -- byte-identical and cut converse_walk 39,588ms -> 27,760ms.
+    --
+    -- The general form of the mistake is rendering an entity to text in order to
+    -- classify it. corpus_whitespace_vocab_indices had the same shape and reading
+    -- the attested HAS_GENERAL_CATEGORY instead measured 22.6ms against 29,899ms
+    -- with zero disagreement (#688/#689). Nothing here needs to classify at all,
+    -- so this just goes.
     kept AS MATERIALIZED (
         SELECT q.* FROM (
             SELECT t.gid, t.wt, t.is_core, t.entity_id,
                    row_number() OVER (PARTITION BY t.gid ORDER BY t.ord) AS rn,
                    count(*)    OVER (PARTITION BY t.gid) AS cnt
             FROM toks t
-            JOIN ws ON ws.id = t.entity_id
-            WHERE NOT ws.is_ws
         ) q
         WHERE q.cnt >= 2
     ),
@@ -146,12 +191,33 @@ BEGIN
     IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
     IF array_length(out_ids,1) = 1 THEN RETURN render_text(out_ids[1], 64); END IF;
 
-    -- REALIZE: join tokens, drop orphan gloss punctuation, normalize whitespace.
-    RETURN btrim(regexp_replace(
-        regexp_replace(
-            (SELECT string_agg(COALESCE(render_text(t,64),''), ' ')
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)),
-            '\s*[();:]\s*', ' ', 'g'),
-        '\s+', ' ', 'g'));
+    -- REALIZE: no punctuation scrub, no whitespace normalization. The old tail ran
+    -- regexp_replace('\s*[();:]\s*') then regexp_replace('\s+') because REALIZE
+    -- had just wedged a ' ' between every token, orphaning the brackets the gloss
+    -- actually attested. With separators carried through, the spacing IS the
+    -- corpus's -- scrubbing it overwrites testimony with a rule, and a
+    -- hardcoded-ASCII one ([();:] says nothing about U+3001, U+060C or U+0E5A).
+    RETURN btrim(
+            -- render_text_batch over the DISTINCT emitted ids, re-expanded in
+            -- emission order -- not render_text per row (MEASURED same-session on
+            -- 1,645 tokens: 1,895ms batched against 15.6ms each, ~15.8x).
+            -- render_text_batch and NOT realize_batch: they answer different
+            -- questions. render_text reconstructs the content's bytes, realize
+            -- LABELS an entity for a human -- render_text(U+0020) is ' ' where
+            -- realize(U+0020) is 'SPACE', render_text(U+0028) is '(' where realize
+            -- is 'LEFT PARENTHESIS'. Generation emits content, so it renders.
+            (WITH ids AS MATERIALIZED (
+                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
+             ),
+             realized AS MATERIALIZED (
+                 SELECT i.a AS a, render_text_batch(i.a, 64) AS s FROM ids i
+             ),
+             m AS (
+                 SELECT (r.a)[k] AS id, (r.s)[k] AS txt
+                 FROM realized r, generate_subscripts(r.a, 1) AS k
+             )
+             SELECT string_agg(COALESCE(m.txt,''), '' ORDER BY gg.o)
+             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
+             LEFT JOIN m ON m.id = gg.t));
 END;
 $$;

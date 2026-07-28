@@ -68,7 +68,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.FrameNet, options);
         var uncapped = options with { MaxInputUnits = 0 };
 
         await foreach (var change in RunPhaseAsync(new FramePhase(batch), context, options, ct))

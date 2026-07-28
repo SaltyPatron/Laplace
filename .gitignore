@@ -431,3 +431,6 @@ deploy/share/
 deploy/**/wwwroot/
 deploy/**/endpoint/
 deploy/**/migrations/
+
+# per-agent worktrees (scripts/agent-worktree.sh)
+.worktrees/

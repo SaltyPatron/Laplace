@@ -155,8 +155,12 @@ public static class EtlManifest
     private static readonly string[] OmwBootstrap =
         { "HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS" };
 
+    // HAS_EXTERNAL_ID dropped 2026-07-28 with the surrogate anchors: Tatoeba no longer
+    // attests its row numbers at all (they are ingest scaffolding resolved by TatoebaIdMap).
+    // This list is the SECOND place the source's relations are declared — TatoebaSource.Relations
+    // is the other — which is how it went stale while the first one was updated.
     private static readonly string[] TatoebaBootstrap =
-        { "HAS_EXTERNAL_ID", "HAS_LANGUAGE", "IS_TRANSLATION_OF" };
+        { "HAS_LANGUAGE", "IS_TRANSLATION_OF" };
 
     private static readonly string[] WiktionaryBootstrap =
     {

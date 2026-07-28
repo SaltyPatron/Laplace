@@ -48,6 +48,22 @@ is its own modality (squares/pieces → resolved moves → positions → games);
 checkpoints ride their containers. Tree-sitter's job is narrow: unpack container
 formats, then hand off.
 
+The floor has a consequence the read side keeps getting backwards: **a tier-3 sentence
+IS a document when nothing wraps it.** A span-identical single-child wrapper IS its child
+(`TierTree.CollapseIndex` / `collapse_idx()`), so a one-sentence document collapses onto
+the sentence — one id, serving both roles. It is not a sentence that "failed to become" a
+document, and there is no "orphan" category: a Tatoeba row, a WordNet gloss and a
+HAS_EXAMPLE usage are each a document root at their floor.
+
+So **never select roots by `tier = 4`.** That reads tier as identity, which is exactly the
+frame this law rejects, and it silently excludes the entire single-sentence corpus from
+`corpus_sentence_constituents_since` — and with it `walk_continuations`,
+`cooccurrence_scan`, `trajectory_pairs(_plane)`, `continuation_conditional_plane`,
+`relation_plane`, and the foundry's conditional floor. Every trajectory-bearing entity at
+tier ≥ 3 is a corpus sequence; the C side dedups by parent id. Sequence starving on a tier
+predicate looks exactly like sequence starving on missing data — check the enumeration
+before believing the corpus is thin.
+
 ## Decomposers — the witness boundary
 
 The generated, CI-gated inventory of decomposer classes per assembly is
@@ -149,6 +165,25 @@ aliases map to a canonical and add no highway bits); manifest and generated
 assigns highway bits alphabetically: adding a relation renumbers bits and owes a
 reseed — regenerate, never backfill.
 
+**`hot = true` is the PHYSICAL axis and follows TRAFFIC, not salience.** consensus and
+attestations are LIST-partitioned on `type_id`; hot relations get HASH(subject_id)×8
+each, and every other relation shares ONE default heap+btree. `rank` and `hot` are
+independent: `HAS_EXTERNAL_ID` is `scalar_valued` (rank 0.12) and is one of the largest
+writers in the substrate. Not one-per-relation — a flat ~340-leaf layout was MEASURED to
+tax planning far past what the tail's rows justify (regress: converse 0.3s → 54s, fold
+1.5s → 361s); capacity is granted where the rows are. Dynamic relations (`DEP_*`/`FEAT_*`
+/`EDEP_*`) are not in the manifest and always ride DEFAULT.
+Promotion is a manifest edit + `scripts/codegen-attestation-law.py`, and it costs no
+reseed — `hot` is not a highway-bit input, so generated C stays byte-identical. The seed
+ADOPTS on a populated DB (detach default → create partitions → drain matching rows back
+through the parent's router → reattach); before that it could only ever CREATE, and PG
+refuses a LIST partition whose rows sit in a non-empty DEFAULT, so the roster was frozen
+at greenfield and rotted in silence. Never let it rot again by memory:
+`consensus_partition_pressure()` names the offenders worst-first, and every ingest run
+logs `INGEST_PARTITION_PRESSURE` for anything over 1M rows. It is a run-time report and
+NOT a CI gate on purpose — traffic only exists on a populated DB, and CI recreates
+`laplace` empty, so a fixture-backed gate passes green while the box degrades.
+
 ## The SQL surface and the extension
 
 `laplace_substrate` carries the read/serve side natively: the SQL function families
@@ -166,6 +201,10 @@ heuristic, default Dijkstra unchanged — shared with the foundry synthesis path
 `trajectory_generate.c` (n-gram descent with consensus fallback), `steered_walk.c`
 (topic-steered free-form walk behind `converse_walk` — a second, independent n-gram
 walker; consolidation with `trajectory_generate.c` is tracked open work),
+`prompt_coherence.c` (S1/S2/S3 joint sense + topic + relation election — candidates
+fetched once, one indexed range read per direction, O(1) hash probe per edge, ord
+masks for peer counting; `laplace_relation_lookup` supplies name and rank with no
+SQL call),
 `consensus_fold_*`, `highway_mask.c` (perfcache-backed bit ops), `perfcache.c`
 (mmap'd blobs, postmaster prewarm), plus `model_factor.c`, `geometry_successors.c`,
 `graph_taxonomy/cascade/contrast.c`, `containers_of.c`, `realize_batch.c` and the
@@ -216,6 +255,75 @@ sibling entry points. No stage may be skipped silently: a stage that cannot run 
 explicitly and says so in the response envelope. Template prose (`converse_facts`) is the
 S9 FALLBACK when the sequence layer is starved — never the success path. Every shape
 published by `query_shapes()` must be reachable and must differ from `describe`.
+
+**S1/S2/S3 read the graph BETWEEN the prompt's tokens, never one token in isolation**
+(`prompt_coherence`, native in `src/prompt_coherence.c`). Signals off one edge scan:
+COHERENCE (rated mass to the other tokens' candidate senses) and REL_MASS (rated mass in a
+relation type another token NAMES — the "what are the X of Y" shape, where X names a
+relation, not a peer concept). A relation is reached by its canonical name's OBJECT token
+(last token, length ≥ 3 — the rest is identifier grammar) via content-id equality or an
+attested `IS_LEMMA_OF` edge; that lemma hop is what lets an inflected prompt word reach
+its lemma.
+
+**RANK ON SPECIFICITY, NEVER ON A SUMMED MASS.** A summed mass is meaningless on a
+high-degree id: function words are wired to everything, so every mass-shaped scalar elects
+them. Measured, all three: `denote_mu` picked the article (and TZAR for `car`), highway
+breadth tied `a` with `pawn` at 13, raw coherence put `is`/`of`/`was` first on every prompt.
+`specificity = coherence / the candidate's OWN total rated mass` is the share of what a
+concept has witnessed that reaches this prompt — on "What is a pawn in chess?" total mass
+runs `a` 4.28e16, `chess` 5.28e14, `pawn` 2.63e13, three orders between article and topic.
+It is scale-free, which is why it survives ingests: the raw sums WORKED before the UD seed
+and broke after it. `denote_mu` is the last tiebreak, never the lead. Known gap: a prompt
+with ONE content word has no pair to cohere with ("Who was Napoleon?" elects `was`), and no
+pairwise statistic fixes that.
+
+**Nothing goes on the `chat()` hot path until it is timed on HIGH-DEGREE topics.** Cost
+scales with the topic's degree — senses per word, edges per synset, containers per surface —
+so a rare word is the cheapest point in the distribution, not a sample of it. A read verified
+on `pawn` alone hung on dog/tree/music/river and shipped an outage where `chat()` returned
+nothing for any prompt (2026-07 #686 → #687). Seeds move the scale under you: re-time after
+every ingest. `SELECT senses(...)`/`bubble_up`/`realize` per row, a candidate set joined to
+itself, or a both-directions `OR` join means the read belongs in C, not in a rewritten CTE.
+
+**ASK THE SUBSTRATE — never re-derive what it already recorded.** Every slow read
+found on 2026-07-27 was code recomputing a fact the substrate holds, and each was a
+different disguise of one mistake:
+
+- **Never render an entity to text in order to CLASSIFY it.** "Is this a separator"
+  is `HAS_GENERAL_CATEGORY` (Zs/Zl/Zp/Cc), an indexed consensus read on the id —
+  22.6ms against 29,899ms of `render_text` + `'^\s*$'` over 1,645 tokens, 1,570x,
+  zero disagreement (#688/#689). Batching the render does NOT help; the render IS
+  the cost. A classifier taking `text` (`is_all_whitespace`) forces every caller
+  holding an id to realize first — that signature is the defect, and the four
+  hardcoded codepoints in `laplace_codepoint_is_whitespace` are its symptom. Text
+  is the right input only at ingest (`content_witness_batch.c`), where the bytes
+  are in hand and no entity exists yet.
+- **Sequence is the trajectory.** Text word-adjacency PRECEDES is a second copy of
+  what `physicalities.trajectory` holds exactly-invertibly; `geometry_successors` /
+  `containers_of` / `laplace_trajectory_constituents` read it back. 13,497,079 rows
+  no read path consumed (#683).
+- **An arbitrary LIMIT means a MISSING RANKING.** Top-k is legal only over an
+  ordering the fold produced. `converse_walk` picked the corpus that decides what
+  the engine says by `ORDER BY gid` — content hash — while 398 of 400 candidates
+  carried a rated inbound edge spanning 25% of eff_mu (#692). A usage sentence is
+  rated by what ATTESTS it: probe `consensus.object_id`, not `subject_id`
+  (4 of 400 the wrong way — an absence that looks like proof).
+- **Never select the walk's alphabet by TIER.** Tier is a floor; filtering the
+  stream to `ctier = 2` is a fixed-vocabulary tokenizer, the primitive this engine
+  replaces. It also silently drops the separators the trajectory attested, which
+  then have to be re-invented as a hardcoded `' '` and scrubbed with an ASCII
+  regex — three compensations for one filter (#694).
+- **`SPI_execute_plan`'s count is NOT a `LIMIT`.** It stops the fetch; the bitmap
+  is already built. The limit must be in the query TEXT, as a bound parameter (the
+  plan is kept process-wide, so a literal pins the first caller's limit for
+  everyone). 3,245ms -> 40ms (#691).
+
+**Verify the UNSEEDED case for anything that reads attestations.** An id with no
+attestation is *unattested*, not *attested false* — collapsing them with `EXISTS`
+answers false and is silently wrong on a partially-seeded substrate. `bool_or` over
+zero rows is NULL, which is exactly that distinction. Verified only against the
+seeded box, the fast path always hits and the fixture case never runs: that is how
+#688 passed every local check and turned main red on merge (#689).
 
 ## Binding engineering laws
 
@@ -313,6 +421,43 @@ Bypass: `pipeline.sh --force-all` / `LAPLACE_FORCE_ALL=1` (CI dispatch input
   `laplace_substrate.perfcache_path` GUC.
 - DB access: `psql -h localhost -U postgres -d laplace` (password `postgres`);
   `SET search_path = laplace, public;` first.
+
+## Concurrent agents — one tree each, never one tree shared
+
+**The operator's checkout at the repo root stays on `main`. Agents never
+`checkout`, `stash`, or switch branches in it.** Each agent gets its own worktree:
+
+    scripts/agent-worktree.sh <agent-name> [branch]   # -> .worktrees/<agent-name>
+
+Two agents sharing one working tree is not a merge problem, it is a DATA-LOSS
+problem. Uncommitted edits in a shared checkout are destroyed by the other
+agent's `git stash` or `git checkout` — no conflict, no warning, and nothing in
+reflog, because the changes were never committed. Measured 2026-07-27: a
+`converse_walk.sql.in` edit was lost exactly this way, and the operator's tree was
+repeatedly dragged off `main` onto whichever branch an agent was using. `git
+worktree` removes the whole class: one `.git`, N checkouts, shared objects, no
+clone cost. `git worktree list` shows who holds what.
+
+Corollaries that follow from it:
+
+- **Commit early; an uncommitted edit is not work, it is a wager.** In a
+  multi-agent repo the window between edit and commit is the window in which the
+  edit can vanish.
+- **Stage explicit paths, never `git add -A`** — it sweeps another agent's files
+  into your commit (the #618 incident).
+- **Gate a branch BEFORE merging, without burning a PR run.** CI is main-only by
+  design ("PRs must not burn the self-hosted runner"), but the workflow accepts
+  `workflow_dispatch`, so the full pipeline — build, native ctest, pg_regress,
+  publish, smoke — runs on any ref:
+
+      gh workflow run "Laplace — build, deploy, test" --ref <branch>
+
+  Merge-to-main as the only gate means every mistake lands on main first: #688
+  passed every local check and turned main red on merge. Dispatching on the branch
+  is the same gate, one step earlier.
+- **Check `gh run list` before a long ingest.** A push to main restarts
+  `laplace-postgresql` and kills it; an extension install under a running ingest
+  produces `58P01: could not access file "laplace_geom"` and loses the run.
 
 ## Layout
 

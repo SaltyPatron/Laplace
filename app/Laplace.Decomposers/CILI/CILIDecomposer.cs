@@ -14,7 +14,6 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
     private static readonly Hash128 EngLang = LanguageEntityId.FromIso639_3("eng");
 
-    private const int DefaultBatchSize = 2048;
 
     public override int LayerOrder => 2;
 
@@ -52,7 +51,7 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     }
 
     private static int ResolveBatch(DecomposerOptions options) =>
-        options.BatchSize > 1 ? options.BatchSize : DefaultBatchSize;
+        IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Cili, options);
 
     private abstract class CiliComposePhase<T> : ComposeDecomposerPhase<T>
     {

@@ -30,6 +30,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
 - [34_Conversational_Provenance.md](specs/34_Conversational_Provenance.md) — spec — conversational provenance: tenant→source, session→context, attribution on every turn; ConversationContent is the authority (2026-07-23)
 - [36_Laplace_Forward_Pass.md](specs/36_Laplace_Forward_Pass.md) — spec — the canonical forward pass S0→S10 paired stage-for-stage against the transformer; ingestion-vs-gradient-descent map; live isolation of the conversational gap; standardization contract (2026-07-25)
+- [37_Substrate_Operation_ISA.md](specs/37_Substrate_Operation_ISA.md) — spec — the ten opcodes every read/generate/export path is a program over; their contracts, the one legal order, the disposition of all 332 SQL functions, the sequence-vs-consensus epistemology ruling, and the ten CI gates (2026-07-27)
 
 ## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
 

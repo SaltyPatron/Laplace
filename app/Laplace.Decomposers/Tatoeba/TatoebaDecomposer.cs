@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -6,78 +7,61 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : DecomposerMultiFile<GrammarIngestRecord, TatoebaSource, FullScope>, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = TatoebaSource.SourceId;
     public static readonly Hash128 TrustClass = TatoebaSource.TrustClass;
 
-    internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
+
+    /// <summary>Links naming a sentence id absent from sentences.csv — reported, never grounded.</summary>
+    internal static long UnresolvedLinks;
+
+    /// <summary>
+    /// id -> content root, populated as a FREE side effect of phase 1 (the sentence lane
+    /// already composes every root) and read by phase 2. Discarded with the run: a Tatoeba
+    /// row number is ingest scaffolding, not knowledge, so it gets no entity, no geometry
+    /// and no trajectory.
+    /// </summary>
+    private readonly TatoebaIdMap _ids = new();
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     public override int LayerOrder => 2;
-    protected override double SourceTrust => TC.StructuredCorpus;
 
     private HashSet<long>? _allowedSentenceIds;
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
-    // Order-independent: links anchor IS_TRANSLATION_OF on the deterministic TatoebaSentence(id)
-    // external-id (computed from the id alone), which bridges to the real content root via
-    // HAS_EXTERNAL_ID. No runtime id->root map, so sentences and links ingest fully in parallel
-    // like every other content-addressed source — no phase, no barrier.
-    protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options)
+    /// <summary>
+    /// sentences.csv is the ENTITY file; links.csv is the ATTESTATION file. They run as two
+    /// PHASES because the second needs what the first resolved — not as parallel files with a
+    /// prelude that resolves everything twice (see TatoebaPhase for the measurement that
+    /// killed that shape). Each phase is single-file, so MonolithSegmenter still gives it
+    /// intra-file parallelism.
+    /// </summary>
+    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
+        IDecomposerContext context, DecomposerOptions options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         _allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
-        string sentences = Path.Combine(ecosystemPath, "sentences.csv");
-        string links = Path.Combine(ecosystemPath, "links.csv");
-        var files = new List<(string Path, string Label, Func<ReadOnlySpan<byte>, bool>? AcceptRow)>();
+        await foreach (var c in RunPhaseAsync(
+                           new TatoebaSentencePhase(_ids, _allowedSentenceIds), context, options, ct))
+            yield return c;
 
-        if (File.Exists(sentences))
-        {
-            Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
-                ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
-                : null;
-            files.Add((sentences, "tatoeba/sent", acceptSent));
-        }
+        // Phase 2 only ever runs after phase 1 has been fully composed, so the map is
+        // complete by construction. If it is empty the corpus would silently lose every
+        // translation — the failure class IngestRunner already refuses to call success.
+        if (_ids.Count == 0)
+            throw new InvalidOperationException(
+                "Tatoeba link phase reached with an empty id map: sentences.csv was missing or "
+                + "yielded no resolvable rows. Every IS_TRANSLATION_OF would be dropped.");
 
-        if (File.Exists(links))
-        {
-            Func<ReadOnlySpan<byte>, bool>? acceptLink = _allowedSentenceIds is not null
-                ? line => TatoebaRowFilter.MatchesLinkFilter(line, _allowedSentenceIds)
-                : null;
-            files.Add((links, "tatoeba/link", acceptLink));
-        }
-
-        return new TatoebaMultiFileStream(files);
-    }
-
-    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(string fileLabel)
-    {
-        var kind = fileLabel.EndsWith("/link", StringComparison.Ordinal)
-            ? TatoebaRowKind.Link
-            : TatoebaRowKind.Sentence;
-        return new GrammarIngestHandler(
-            Source, "tsv",
-            new TatoebaGrammarWitness(kind, _allowedSentenceIds),
-            contextId: null);
-    }
-
-    protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        int batch = options.BatchSize > 1
-            ? options.BatchSize
-            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
-        int commitEpoch = fileLabel.EndsWith("/link", StringComparison.Ordinal) ? 1 : 0;
-        return IngestPipelineDefaults.ApplyMaxInputUnits(
-            IngestPipelineDefaults.StructuredGrammar(
-                Source, fileLabel, batch, options, reader, witnessWeight: 1.0, commitEpoch: commitEpoch),
-            options);
+        await foreach (var c in RunPhaseAsync(
+                           new TatoebaLinkPhase(_ids, _allowedSentenceIds), context, options, ct))
+            yield return c;
     }
 
     public async Task<IngestInventory?> DescribeInputAsync(

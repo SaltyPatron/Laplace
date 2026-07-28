@@ -1,1 +1,9 @@
-CREATE INDEX IF NOT EXISTS physicalities_residual_btree ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
+-- REMOVED 2026-07-28. Partial btree on alignment_residual WHERE NOT NULL. Nothing in the
+-- extension, the app, or the engine reads alignment_residual — the intent stage writes the
+-- column and no query consumes it — so the index had 0 scans and 512 kB (almost every row
+-- is NULL, which is why it stayed small rather than why it was useful).
+--
+-- It was also declared TWICE: here and as a hardcoded CREATE INDEX string in
+-- Laplace.Cli/IngestCommands.cs. That duplicate is deleted with it; the extension is the
+-- deployment unit and owns its own indexes.
+DROP INDEX IF EXISTS physicalities_residual_btree;

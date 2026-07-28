@@ -183,16 +183,39 @@ BEGIN
         -- candidate is actually wired to) leads, so a concept the whole prompt
         -- agrees on beats one with a single heavy edge; coherence mass and then
         -- denote_mu break ties. Still no stoplist and no surface compare.
-        -- rel_mass is the third key: for "what are the X of Y" prompts, X names
-        -- a RELATION and concept-to-concept coherence is silent (a car HAS_PART
-        -- door, never HAS_PART "part"), so peers/coherence are 0 across the board
-        -- and the election used to fall through to denote_mu -- which picks TZAR
-        -- for "car". Ranking by the relation the prompt named puts the vehicle
-        -- sense (29 HAS_PART edges) first and the article second. Measured
-        -- 2026-07-27 on "What is a part of a car?".
-        SELECT array_agg(y.synset_id ORDER BY y.peers DESC,
-                                              y.coherence DESC,
-                                              y.rel_mass DESC,
+        -- ELECT ON SPECIFICITY (prompt_coherence, native src/prompt_coherence.c).
+        --
+        -- Every MASS-shaped scalar tried in this slot elected a function word,
+        -- because function words are wired to everything. denote_mu answered
+        -- "What is a pawn in chess?" with "A is the 1st letter of the Roman
+        -- alphabet" and resolved "car" to TZAR; highway breadth tied "a" with
+        -- "pawn" at 13 and lost on the tiebreak; raw coherence put `is`/`of`/
+        -- `was` first on every prompt measured. Three scalars, one outcome.
+        --
+        -- specificity = coherence / the candidate's OWN total rated mass: the
+        -- share of what a concept has witnessed that reaches the rest of this
+        -- prompt. Scale-free, so it does not drift as seeds land -- which the
+        -- raw sums did, the UD ingest is what turned coherence from working into
+        -- function-word-dominated. Measured live 2026-07-27:
+        --   "What is a pawn in chess?"     -> pawn, then chess
+        --   "What are the parts of a car?" -> car,  then parts
+        --   "What is a dog?"               -> dog
+        -- total mass for that first prompt: a = 4.28e16, chess = 5.28e14,
+        -- pawn = 2.63e13 -- three orders between the article and the topic.
+        --
+        -- rel_mass stays as the next key: for "what are the X of Y", X names a
+        -- RELATION and not a peer concept (a car HAS_PART door, never HAS_PART
+        -- "part"), so coherence is silent there and the relation the prompt
+        -- named is what discriminates. denote_mu is last and is a TIEBREAK ONLY.
+        --
+        -- KNOWN LIMIT, not a regression: a prompt with ONE content word has no
+        -- pair to cohere with. "Who was Napoleon?" elects `was`, because
+        -- Napoleon has no attested edge to "who" or "was" -- coherence is 0 for
+        -- the right answer and nonzero for the wrong one. No pairwise statistic
+        -- fixes that; it needs a per-token signal that does not exist yet.
+        SELECT array_agg(y.synset_id ORDER BY y.specificity DESC NULLS LAST,
+                                              y.rel_mass DESC NULLS LAST,
+                                              y.peers DESC,
                                               y.denote_mu DESC NULLS LAST,
                                               y.synset_id)
           INTO cands
@@ -307,15 +330,21 @@ BEGIN
             --    the eighth row... (chess) the least powerful piece."
             -- Four separately-witnessed clauses, stepped by concept adjacency,
             -- on topic, each traceable to its witnesses.
-            IF xl IS NOT NULL THEN
-                out := converse_tiered(topic, lang);
-                -- Degrade EXPLICITLY, never silently: no attested sentence for
-                -- this topic means the sequence layer is starved here, and the
-                -- template is the declared fallback.
-                IF out IS NULL OR out = '' THEN out := converse_about(topic, lang); END IF;
-            ELSE
-                out := converse(p_prompt);
-            END IF;
+            -- HOTFIX 2026-07-27: converse_tiered() is NOT called from the hot
+            -- path either. Two unbounded reads inside it, both measured on `dog`:
+            -- a containers_of() arm over every sense-subject of the topic
+            -- (>100s, never returned) and a per-word top_synset() concept lift
+            -- (73s, because top_synset is bubble_up per constituent). It answered
+            -- only for `pawn`, which has few senses and few usages -- the single
+            -- topic it was verified on before being wired in. Fixes for both
+            -- exist on perf/content-ladder-ledger and did NOT make this merge.
+            --
+            -- converse_about is the pre-existing path and is fast and correct-ish
+            -- ("Dog is a member of the genus Canis (probably descended from the
+            -- common wolf)..."), so it carries the describe shape until the
+            -- sentence-tier composer is fast enough to sit in front of it.
+            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
+                        ELSE converse(p_prompt) END;
         END IF;
 
         IF out IS NULL OR out = '' THEN

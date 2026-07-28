@@ -305,8 +305,10 @@ symmetry = "asymmetric"
 parent = null
 family_root = "EVOKES_FRAME"
 
+# HOT: Wiktionary inflection edges — one per surface form; 3.7M rows / 4.7%.
 [[relation]]
 canonical = "FORM_OF"
+hot = true
 rank = "equivalence"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -673,8 +675,10 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VERB_FRAME"
 
+# HOT: UD emits one per token; 3.2M rows / 4.1%. (Family pulls HAS_POS, already hot.)
 [[relation]]
 canonical = "HAS_XPOS"
+hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = "HAS_POS"
@@ -773,8 +777,11 @@ symmetry = "asymmetric"
 parent = null
 family_root = "IS_LANGUAGE_CODE"
 
+# HOT: surface->lemma, one per distinct form and load-bearing on the S1/S2 lemma
+# hop; 2.3M rows / 3.0%.
 [[relation]]
 canonical = "IS_LEMMA_OF"
+hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
@@ -999,8 +1006,11 @@ symmetry = "asymmetric"
 parent = "RELATED_TO"
 family_root = "RELATED_TO"
 
+# HOT: ConceptNet's bulk association edge and the family root under which
+# IS_TRANSLATION_OF/ALSO_SEE hang; 8.5M rows / 10.8% of the default.
 [[relation]]
 canonical = "RELATED_TO"
+hot = true
 rank = "associative"
 symmetry = "symmetric"
 parent = null
@@ -1268,8 +1278,11 @@ symmetry = "asymmetric"
 parent = null
 family_root = "MOVE"
 
+# HOT: chess emits one per ply; 11.2M rows / 14.3% of consensus_rdefault, the single
+# largest writer in the reseeded substrate.
 [[relation]]
 canonical = "OUTCOME"
+hot = true
 rank = "causal"
 symmetry = "asymmetric"
 parent = null

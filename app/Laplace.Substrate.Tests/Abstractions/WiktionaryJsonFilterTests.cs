@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
+[Collection("GrammarPerfcache")]
 public sealed class WiktionaryJsonFilterTests
 {
     private static string IsoDir => TestPathHelpers.Iso639OrFallback();

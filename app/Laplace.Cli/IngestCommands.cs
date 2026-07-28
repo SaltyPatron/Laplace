@@ -687,14 +687,16 @@ internal static class IngestCommands
         return 0;
     }
 
+    // Mirrors extension/laplace_substrate/sql/indexes/*.sql.in for the recovery command
+    // that rebuilds physicalities indexes on an existing database. Keep in sync with the
+    // extension — it is the deployment unit and the authority. radius_origin and
+    // alignment_residual were removed 2026-07-28 (0 scans; see those .sql.in files).
     private static readonly string[] SchemaPhysIndexDefs =
     [
         "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
         "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)",
         "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)",
         "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
-        "CREATE INDEX IF NOT EXISTS physicalities_radius_btree ON laplace.physicalities USING btree (radius_origin)",
-        "CREATE INDEX IF NOT EXISTS physicalities_residual_btree ON laplace.physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
         "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL",

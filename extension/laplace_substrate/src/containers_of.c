@@ -44,11 +44,27 @@
  * query shape.
  */
 
+/* LIMIT $2 is IN THE QUERY TEXT, and it has to be. SPI_execute_plan's count
+ * argument stops the executor FETCHING, which is not the same thing: the plan is
+ * a Bitmap Index Scan, and the bitmap for every match is built before the first
+ * tuple is produced. Capping the fetch skips no bitmap work at all.
+ *
+ * MEASURED on 'water' at 37.4M entities, same rows returned:
+ *   SPI count = limit_rows (no LIMIT in text)   3,245 ms
+ *   LIMIT $2 as a bound parameter                  40.4 ms
+ * 80x, and the 40ms figure is the GENERIC plan (6th execution, after PostgreSQL
+ * stops re-planning), so it is what the kept plan actually costs -- not a
+ * custom-plan best case.
+ *
+ * The limit must be a PARAMETER, not interpolated into the string: the plan is
+ * prepared once with SPI_keepplan and reused process-wide, so a literal would
+ * pin the first caller's limit for every later caller. */
 static const char *CONTAINERS_QUERY =
     "SELECT p.entity_id, e.tier, e.type_id "
     "FROM laplace.physicalities p JOIN laplace.entities e ON e.id = p.entity_id "
     "WHERE p.type = 1 "
-    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[]";
+    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
+    "LIMIT $2";
 
 static SPIPlanPtr containers_plan = NULL;
 
@@ -57,8 +73,8 @@ ensure_containers_plan(void)
 {
     if (containers_plan == NULL)
     {
-        Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(CONTAINERS_QUERY, 1, argtypes);
+        Oid argtypes[2] = { BYTEAOID, INT4OID };
+        SPIPlanPtr plan = SPI_prepare(CONTAINERS_QUERY, 2, argtypes);
 
         if (plan == NULL)
             elog(ERROR, "containers_of: SPI_prepare failed: %s",
@@ -116,12 +132,32 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
 
         for (int f = 0; f < n_frontier && n_output < limit_rows; f++)
         {
-            Datum args[1];
-            char  nulls[2] = " ";
+            Datum args[2];
             int   rc;
 
             args[0] = frontier[f];
-            rc = SPI_execute_plan(containers_plan, args, nulls, true, 0);
+            args[1] = Int32GetDatum(limit_rows);
+            /* Cap the FETCH at the caller's budget. The 0 that was here means
+             * "unlimited" to SPI, so every probe materialized every container of
+             * the entity -- an estimated 187,223 rows across every physicality
+             * partition -- and then the dedup loop below threw away all but
+             * limit_rows of them.
+             *
+             * MEASURED on 'water': containers_of(word_id('water'), 1, 400) ran
+             * 7,987ms, while the IDENTICAL query with LIMIT 400 pushed into SQL
+             * planned as an early-terminating Gather and returned in 97.7ms. Same
+             * rows, same index (physicalities_*_laplace_trajectory_constituent_ids
+             * _idx1), 80x. It was over half the cost of converse_walk.
+             *
+             * Passing limit_rows rather than (limit_rows - n_output) leaves a
+             * probe room to fill the whole budget on its own when an earlier
+             * frontier node contributed duplicates.
+             *
+             * This does not narrow the contract: CONTAINERS_QUERY has no ORDER BY,
+             * so "the first limit_rows containers" was already an arbitrary subset
+             * of the matches. Capping the fetch changes WHICH arbitrary rows come
+             * back, not how many the caller is promised. */
+            rc = SPI_execute_plan(containers_plan, args, NULL, true, limit_rows);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "containers_of: probe query failed: %s",
                      SPI_result_code_string(rc));

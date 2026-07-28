@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -19,7 +20,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     // API process's own lane. Lab artifacts are small (tens of games) so waiting is fine.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    private const int ChunkSize = 256;
+    // Games per apply. IngestSourceProfile.ChessPgn already models a PGN game as a fat
+    // 4 MB input unit (one game explodes into hundreds of substrate rows via per-ply replay
+    // and geometry) — this lane just never asked. It was `= 256`, the same class of private
+    // literal that had eight decomposers ingesting identically on a laptop and a 128 GB box.
+    // The fat-record branch of ResolveRecordBatch floors at 256, so this preserves today's
+    // value on a small box and lets a large one scale.
+    private static readonly int ChunkSize =
+        IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.ChessPgn, null);
 
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;

@@ -50,7 +50,8 @@ public sealed record EtlSource(
     bool AcceptCommentRows = true,
     Func<string, Hash128?>? ContextIdFromFile = null,
     bool RequireIliMap = false,
-    bool HasDedicatedDecomposer = false)
+    bool HasDedicatedDecomposer = false,
+    IngestSourceProfile? Profile = null)
 {
     public bool IsComplete =>
         Modality.GrammarReady && (NodeEdgeMap.Count > 0 || EtlWitnessFactory.IsRegistered(Name));

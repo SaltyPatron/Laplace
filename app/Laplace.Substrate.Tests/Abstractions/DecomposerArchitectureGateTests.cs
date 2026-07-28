@@ -1,4 +1,7 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
+using Laplace.Decomposers.Tatoeba;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -45,6 +48,9 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
+        // Two phases: sentences.csv (entities) then links.csv (attestations). The second
+        // needs the id -> content-root map the first produces as a free side effect.
+        "Laplace.Decomposers/Tatoeba/TatoebaDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
         "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
     };
@@ -79,6 +85,101 @@ public sealed class DecomposerArchitectureGateTests
     {
         yield return Path.Combine(repoRoot, "app", "Laplace.Decomposers");
         yield return Path.Combine(repoRoot, "app", "Laplace.Chess");
+    }
+
+    /// <summary>
+    /// The hand-rolled batch idiom. Nine sites wrote some form of
+    /// `options.BatchSize > 1 ? options.BatchSize : &lt;literal&gt;`, and five never consulted
+    /// IngestSizing at all — so those sources ingested with an identical batch on a 4-core
+    /// laptop and a 128 GB server, while CLAUDE.md documented that batch sizing
+    /// "deliberately has no env override" because IngestSizing/MemoryTopology own it.
+    /// A private `? : 2048` overrides the machine model exactly as effectively as an env
+    /// var would. IngestPipelineDefaults.ResolveBatch(profile, options) is the one resolver;
+    /// a source that needs different sizing adds an IngestSourceProfile, never a literal.
+    /// </summary>
+    private static readonly Regex HandRolledBatch = new(
+        @"BatchSize\s*>\s*1\s*\?",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// ISeedSource.Profile is the RUN-LEVEL sizing authority: it reaches
+    /// IDecomposer.SizingProfile, then IngestCommands.BuildIngestOptions, and sets
+    /// record_batch / commit_rows / ws_record_cap / probe_chunk / max_intents_per_commit
+    /// for the entire run (the `ingest_source_sizing:` log line).
+    ///
+    /// It is a SEPARATE declaration site from the per-file IngestBatchConfig, and that is
+    /// how it went stale: IngestSourceProfile.Tatoeba was added and wired into the
+    /// decomposer's ConfigForFile while TatoebaSource.Profile still returned Default, so a
+    /// live ingest sized itself off Default and nothing said so. Same for Omw, Iso, Cili
+    /// and FrameNet.
+    ///
+    /// If a profile exists bearing a source's name, that source must use it. A source with
+    /// no dedicated profile legitimately returns Default or a shared one (RelationTriple,
+    /// Wiktionary, …) and is not flagged.
+    /// </summary>
+    [Fact]
+    public void SeedSources_UseTheirOwnSizingProfile_WhenOneExists()
+    {
+        var profiles = typeof(IngestSourceProfile)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(IngestSourceProfile))
+            .ToDictionary(f => f.Name, f => (IngestSourceProfile)f.GetValue(null)!,
+                          StringComparer.OrdinalIgnoreCase);
+
+        var sources = typeof(TatoebaSource).Assembly.GetTypes()
+            .Where(t => t is { IsClass: false or true, IsAbstract: false } || t.IsValueType)
+            .Where(t => t.GetInterfaces().Any(i => i.Name == "ISeedSource"))
+            .ToList();
+        Assert.NotEmpty(sources);
+
+        var violations = new List<string>();
+        foreach (var src in sources)
+        {
+            var prop = src.GetProperty("Profile", BindingFlags.Public | BindingFlags.Static);
+            if (prop is null) continue;
+            var actual = (IngestSourceProfile?)prop.GetValue(null);
+            if (actual is null) continue;
+
+            // "TatoebaSource" -> "Tatoeba"; "ISOSource" -> "ISO" (matched case-insensitively).
+            string bare = src.Name.EndsWith("Source", StringComparison.Ordinal)
+                ? src.Name[..^"Source".Length] : src.Name;
+            if (!profiles.TryGetValue(bare, out var owned)) continue;   // no dedicated profile
+            if (!ReferenceEquals(actual, owned))
+                violations.Add($"{src.Name}.Profile is not IngestSourceProfile.{bare} "
+                               + $"(got {actual.EstBytesPerRecord}B/{actual.EstComposeUnitsPerRecord}u, "
+                               + $"expected {owned.EstBytesPerRecord}B/{owned.EstComposeUnitsPerRecord}u)");
+        }
+
+        Assert.True(violations.Count == 0,
+            "ISeedSource.Profile sets run-level ingest sizing and must use the source's own "
+            + "IngestSourceProfile where one exists:\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void IngestLanes_ResolveBatchThroughTheSizingAuthority_NeverAPrivateLiteral()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var roots = DecomposerProjectRoots(repoRoot)
+            .Append(Path.Combine(repoRoot, "app", "Laplace.Substrate"));
+        var violations = new List<string>();
+        foreach (var dir in roots)
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                // Decomposer.cs documents the banned idiom in ResolveBatch's own summary.
+                if (Path.GetFileName(file).Equals("Decomposer.cs", StringComparison.Ordinal)) continue;
+                if (HandRolledBatch.IsMatch(File.ReadAllText(file)))
+                    violations.Add(Path.GetRelativePath(repoRoot, file));
+            }
+        }
+        Assert.True(violations.Count == 0,
+            "Resolve record batches with IngestPipelineDefaults.ResolveBatch(profile, options); "
+            + "add an IngestSourceProfile instead of a private literal:\n"
+            + string.Join("\n", violations));
     }
 
     [Fact]

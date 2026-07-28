@@ -15,6 +15,7 @@ CREATE OR REPLACE FUNCTION consensus_adjacency(
 BEGIN
     RETURN QUERY
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         kappa(k) AS (SELECT foundry_rd_kappa()),
          edges AS MATERIALIZED (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count,
                     c.type_id
@@ -33,12 +34,24 @@ BEGIN
          -- witness-saturated. Positivity is NOT clamped here — the basis union
          -- clamps client-side (FoundryExport.PositivePart); the unary operator
          -- plane keeps refutation as negative weight.
+         --
+         -- 2026-07-27: this used to be the formula, hand-typed:
+         --     (rating - glicko2_neutral_mu())/1e9
+         --       * exp(-foundry_rd_kappa() * rd/1e9)
+         --       * foundry_witness_sat(witness_count)
+         -- which is a SECOND expression of laplace_walk_edge_weight (glicko2.c),
+         -- the one generate_walk.c's beam and astar_path.c's edge_cost already
+         -- call. Same algebra, two bodies, the witness half-max (4.0) written
+         -- into both, and no test binding them — so the weight the ENGINE walks
+         -- and the weight the FOUNDRY exports could drift on a one-line edit.
+         -- Now both read the one C implementation. kappa is resolved ONCE here
+         -- rather than per row (it was a function call inside the sum before);
+         -- the native walkers resolve it the same way via spi_fetch_rd_kappa().
          summed AS (
              SELECT e.subject_id, e.object_id,
                     sum(rk.rank
-                        * (e.rating - glicko2_neutral_mu())::float8 / 1e9
-                        * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
-                        * foundry_witness_sat(e.witness_count)) AS w
+                        * walk_edge_weight(e.rating, e.rd, e.witness_count,
+                                           (SELECT k FROM kappa))) AS w
              FROM edges e
              JOIN rk ON rk.type_id = e.type_id
              GROUP BY e.subject_id, e.object_id

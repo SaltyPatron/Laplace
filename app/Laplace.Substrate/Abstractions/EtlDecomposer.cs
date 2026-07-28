@@ -61,9 +61,13 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
         var files = EnumerateFiles(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        int batch = options.BatchSize > 1
-            ? options.BatchSize
-            : IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).RecordBatchSize;
+        // Wiktionary is the FALLBACK, not a description of this lane: the generic ETL
+        // decomposer serves many sources and this literal was the same borrowed profile
+        // Tatoeba was using. Keeping it as the default is a faithful refactor (no source
+        // changes sizing today); `EtlSource.Profile` is the knob for giving a lane its own
+        // memory model once someone measures one, instead of another private literal.
+        int batch = IngestPipelineDefaults.ResolveBatch(
+            _src.Profile ?? IngestSourceProfile.Wiktionary, options);
         long cap = options.MaxInputUnits;
         long consumed = 0;
         int fileBn = 0;

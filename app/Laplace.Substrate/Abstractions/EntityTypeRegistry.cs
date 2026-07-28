@@ -40,7 +40,6 @@ public static class EntityTypeRegistry
     public static readonly Hash128 TabularColumn = Id("TabularColumn");
     public static readonly Hash128 TabularOutcome = Id("TabularOutcome");
     public static readonly Hash128 TabularValue = Id("TabularValue");
-    public static readonly Hash128 TatoebaSentence = Id("Tatoeba_Sentence");
     public static readonly Hash128 Text = Id("Text");
     public static readonly Hash128 UcdClassifier = Id("UcdClassifier");
     public static readonly Hash128 UdFeature = Id("UD_Feature");

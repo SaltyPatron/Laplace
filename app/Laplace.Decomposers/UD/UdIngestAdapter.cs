@@ -236,6 +236,5 @@ public static class UdIngestSupport
     }
 
     public static int ResolveBatchSentences(DecomposerOptions options) =>
-        IngestSizing.ResolveForSource(IngestSourceProfile.UdSentence, options.BatchSize > 1 ? options.BatchSize : null)
-            .RecordBatchSize;
+        IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.UdSentence, options);
 }
