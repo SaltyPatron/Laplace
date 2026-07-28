@@ -6,6 +6,20 @@
 #define LAPLACE_SUPER_FIB_PSI 1.5337511687552042888118041448362171649932861328125
 #define LAPLACE_SUPER_FIB_TWO_PI 6.2831853071795864769252867665590057683943387987502
 
+void super_fibonacci_point(size_t n, size_t i, double out[4]) {
+    if (n == 0 || out == NULL || i >= n) return;
+    const double s = (double)i + 0.5;
+    const double s_over_n = s * (1.0 / (double)n);
+    const double r = sqrt(s_over_n);
+    const double R = sqrt(1.0 - s_over_n);
+    const double alpha = s * (LAPLACE_SUPER_FIB_TWO_PI / LAPLACE_SUPER_FIB_PHI);
+    const double beta  = s * (LAPLACE_SUPER_FIB_TWO_PI / LAPLACE_SUPER_FIB_PSI);
+    out[0] = r * sin(alpha);
+    out[1] = r * cos(alpha);
+    out[2] = R * sin(beta);
+    out[3] = R * cos(beta);
+}
+
 void super_fibonacci(size_t n, double* out) {
     if (n == 0 || out == NULL) return;
     const double inv_phi = LAPLACE_SUPER_FIB_TWO_PI / LAPLACE_SUPER_FIB_PHI;
