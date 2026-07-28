@@ -59,7 +59,7 @@ public class PgTuningParityTests
     [InlineData("wm", 1536, 16, 64)]     // MemoryTopology.WorkMemBytes
     [InlineData("mwm", 48, 256, 1024)]   // MemoryTopology.MaintenanceWorkMemBytes
     [InlineData("wb", 512, 16, 1024)]    // MemoryTopology.WalBuffersBytes
-    [InlineData("sb", 4, 128, 16384)]    // MemoryTopology.SharedBuffersBytes
+    [InlineData("sb", 4, 128, 65536)]    // MemoryTopology.SharedBuffersBytes
     public void ShellFormula_MatchesMemoryTopology(string name, long div, long loMB, long hiMB)
     {
         var (shellDiv, shellLo, shellHi) = ShellClamp(TuningScript(), name);
@@ -82,8 +82,11 @@ public class PgTuningParityTests
             + "doc-28 cap that keeps a misplanned partitioned hash join from starving the host");
         Assert.True(MemoryTopology.MaintenanceWorkMemBytes <= 1024 * MiB,
             $"maintenance_work_mem cap regressed: {MemoryTopology.MaintenanceWorkMemBytes >> 20}MB > 1024MB");
-        Assert.True(MemoryTopology.SharedBuffersBytes <= 16384 * MiB,
-            $"shared_buffers cap regressed: {MemoryTopology.SharedBuffersBytes >> 20}MB > 16384MB");
+        // Raised 16 GiB -> 64 GiB 2026-07-28: the old cap pinned a 128 GB box to 16 GiB
+        // against a 173 GB database while RAM/4 was 33.5 GiB. Still a cap — above ~64 GiB
+        // PostgreSQL's clock sweep and checkpoint cost stop paying back.
+        Assert.True(MemoryTopology.SharedBuffersBytes <= 65536 * MiB,
+            $"shared_buffers cap regressed: {MemoryTopology.SharedBuffersBytes >> 20}MB > 65536MB");
         Assert.True(MemoryTopology.WorkMemBytes >= 16 * MiB);
     }
 
