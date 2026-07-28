@@ -1,0 +1,85 @@
+-- realize() and realize_batch() are TWO implementations of one COALESCE ladder:
+-- the scalar one in SQL (realize.sql.in) and the batched one in C
+-- (src/realize_batch.c), whose header states it "Reproduces the scalar COALESCE
+-- ladder exactly" and points at parity notes. Prose was the parity mechanism.
+-- This binds them, the same way walk_edge_weight_parity.sql binds the two
+-- expressions of the Glicko-complete weight.
+--
+-- WHY BOTH STILL EXIST, measured 2026-07-28 on the foundation substrate
+-- (4.34M entities), 2000 sampled ids:
+--
+--   realize(id) per row                13.9 s   (7 ms/row)   <- scalar path
+--   realize_batch(ARRAY[id]) per row   44.8 s   (22 ms/row)
+--   realize_batch(all 2000 ids)         0.56 s  (0.3 ms/row) <- set path
+--
+-- So collapsing realize() into a realize_batch() wrapper -- the obvious
+-- "one implementation per fact" move, and what docs/specs/37 originally
+-- prescribed -- would make every remaining scalar caller 3.2x SLOWER. The C
+-- function pays SPI setup per call; the SQL ladder inlines. Two bodies is the
+-- correct answer here, because they answer two different questions (one id vs a
+-- set), and the 25x that matters comes from moving CALLERS off the per-row shape,
+-- not from deleting a body.
+--
+-- DETERMINISTIC BY CONSTRUCTION. The first cut of this file sampled `entities`
+-- with TABLESAMPLE, which is wrong twice over: pg_regress diffs output text
+-- exactly, so a sampled row count is not reproducible; and on the near-empty
+-- regress database the sample returned nothing, making `bool_and(...)` NULL over
+-- zero rows -- an assertion that passes by asserting nothing. Every id below is
+-- minted through word_id(), so the set is fixed on any database, and every
+-- assertion is guarded by a cardinality check so an empty input FAILS instead of
+-- vacuously succeeding.
+BEGIN;
+SET search_path = laplace, public;
+
+-- A fixed, deterministic id set spanning the ladder's arms: ordinary words that
+-- a seeded substrate resolves, and content that nothing has ever witnessed
+-- (the abstain arm). Both must behave identically scalar and batched, whether or
+-- not this particular database has the lexical layer loaded.
+CREATE TEMP TABLE probe AS
+SELECT ord, word_id(w) AS id
+FROM unnest(ARRAY['a','dog','nine','letter','the','king','King',
+                  'test/realize/never-witnessed-xyzzy']) WITH ORDINALITY AS t(w, ord);
+
+SELECT count(*) = 8 AS probe_is_fixed_size FROM probe;
+
+-- 1. Scalar and batched agree on every id, INCLUDING where both abstain. The
+-- cardinality guard is the point: a comparison over zero rows is not a pass.
+WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
+     lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
+SELECT count(*) = 8                                              AS compared_all,
+       bool_and(lbl.l[p.ord] IS NOT DISTINCT FROM realize(p.id, NULL))
+                                                                 AS batch_matches_scalar
+FROM probe p CROSS JOIN lbl;
+
+-- 2. Position alignment. realize_batch returns a text[] parallel to its input,
+-- and the whole serving surface indexes it by ordinal, so a batch that sorted or
+-- deduped internally would pass a set-equality check and mislabel every row.
+-- Duplicated ids are included deliberately: 'a' appears twice below, and both
+-- positions must carry it (a dedup would collapse them and shift everything).
+WITH ids AS (SELECT array_agg(x.id ORDER BY x.ord) AS a
+             FROM (SELECT 1 AS ord, word_id('a') AS id
+                   UNION ALL SELECT 2, word_id('dog')
+                   UNION ALL SELECT 3, word_id('a')
+                   UNION ALL SELECT 4, word_id('nine')) x),
+     lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
+SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
+       lbl.l[1] IS NOT DISTINCT FROM lbl.l[3]         AS duplicate_id_not_collapsed,
+       lbl.l[1] IS NOT DISTINCT FROM realize(word_id('a'), NULL)   AS pos1_aligned,
+       lbl.l[4] IS NOT DISTINCT FROM realize(word_id('nine'), NULL) AS pos4_aligned
+FROM lbl;
+
+-- 3. Abstention is preserved through the batch: unwitnessed content is NULL in
+-- both, never '<hex...>' styled as a label. label_or_hex is the only place that
+-- decides to show a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
+-- a NULL element yields NULL, which would make `=` a silent pass.)
+SELECT (realize_batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
+                                                                 AS batch_abstains,
+       realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
+                                                                 AS scalar_abstains;
+
+-- 4. Degenerate inputs do not throw — the serving surface calls this with
+-- whatever survived a filter, including nothing.
+SELECT realize_batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[] AS empty_ok,
+       realize_batch(NULL, NULL) IS NULL                                          AS null_ok;
+
+ROLLBACK;
