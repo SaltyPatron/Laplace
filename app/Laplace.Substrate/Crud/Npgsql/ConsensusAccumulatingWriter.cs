@@ -40,9 +40,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly object _laneLock = new();
     private readonly Dictionary<Hash128, Task> _typeLanes = new();
 
-    // Masks ride their own lane: an entity accretes bits from many types, so mask
-    // writes are the one thing that CAN collide across type lanes. OR-accumulate
-    // is commutative, so serializing them costs no ordering guarantee.
+    // Mask deposits are tracked here ONLY so the drain can await them. They are no
+    // longer serialized: highway_mask_deposit is a single set-based statement, so
+    // one deposit = one statement = PG's own locking, and OR-accumulate is
+    // commutative and idempotent. The FIFO this field used to be existed to suppress
+    // contention that this class created itself by splitting one set-based call
+    // across 12 concurrent transactions.
     private Task _maskLane = Task.CompletedTask;
 
     // Fold pipeline (bulk runs only): the fold of batch N runs in the background
@@ -497,9 +500,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // deposits costs nothing in ordering terms: OR-accumulate is
             // commutative and idempotent, so the mask lane is order-free even
             // though the fold lanes are not.
-            var priorMask = _maskLane;
-            _maskLane = Task.Run(() => DepositAfterAsync(priorMask, maskPairs), ct);
-            completions.Add(_maskLane);
+            // No longer chained. highway_mask_deposit is ONE set-based statement
+            // (DISTINCT pairs -> GROUP BY entity -> single UPDATE ... FROM m), so a
+            // deposit takes its rows in one statement and PG owns the locking. The
+            // FIFO existed to suppress contention that only arose because this side
+            // split the array across 12 concurrent transactions. It doesn't split
+            // any more, so there is nothing to serialize. WhenAll keeps every
+            // in-flight deposit reachable from the drain.
+            var maskTask = Task.Run(() => DepositAsync(maskPairs), ct);
+            _maskLane = Task.WhenAll(_maskLane, maskTask);
+            completions.Add(maskTask);
         }
 
         return CompleteAsync();
@@ -616,53 +626,50 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             });
         }
 
-        async Task DepositAfterAsync(Task prior, HashSet<(Hash128 Ent, Hash128 Typ)> pairs)
+        async Task DepositAsync(HashSet<(Hash128 Ent, Hash128 Typ)> pairs)
         {
-            await prior.ConfigureAwait(false);
             if (pairs.Count == 0) return;
 
-            // Never resend a pair this run already deposited — masks only
-            // ACCRETE, so a pair deposited once is permanently satisfied, and the
-            // server-side no-op still costs ~6 tier-leaf probes per pair. Safe to
-            // read/mutate unlocked: the mask lane is a single FIFO chain, so only
-            // one deposit body touches this set at a time.
-            pairs.ExceptWith(_depositedMaskPairs);
-            if (pairs.Count == 0) return;
-
-            // Mask deposits fan out BUCKETED BY ENTITY: one entity accretes
-            // bits from many types, so the split axis must keep all of an
-            // entity's pairs in ONE bucket — buckets then touch disjoint
-            // entities rows and parallel deposit transactions cannot contend
-            // or deadlock on a shared row. (A count-based split would put the
-            // same entity row under two transactions.)
-            int buckets = Math.Min(FoldConnections, 1 + pairs.Count / UpsertChunkCells);
-            var bucketed = new List<(Hash128 Ent, Hash128 Typ)>[buckets];
-            for (int b = 0; b < buckets; b++)
-                bucketed[b] = new List<(Hash128 Ent, Hash128 Typ)>(pairs.Count / buckets + 16);
-            foreach (var p in pairs)
-                bucketed[(int)((uint)p.Ent.GetHashCode() % (uint)buckets)].Add(p);
-
-            long maskTotal = 0;
-            await Parallel.ForEachAsync(bucketed,
-                new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
-                async (bucket, token) =>
+            // Never resend a pair this run already deposited — masks only ACCRETE,
+            // so a pair deposited once is permanently satisfied, and the server-side
+            // no-op still costs ~6 tier-leaf probes per pair. Locked: this used to
+            // rely on the mask lane being a single FIFO chain for thread safety.
+            List<(Hash128 Ent, Hash128 Typ)> todo;
+            lock (_depositedMaskPairs)
             {
-                if (bucket.Count == 0) return;
-                await _foldConnections.WaitAsync(token).ConfigureAwait(false);
-                try
+                pairs.ExceptWith(_depositedMaskPairs);
+                if (pairs.Count == 0) return;
+                todo = new List<(Hash128 Ent, Hash128 Typ)>(pairs);
+            }
+
+            // ONE statement per chunk, on ONE connection, in ONE transaction.
+            //
+            // highway_mask_deposit already does the whole job set-based: DISTINCT
+            // over the pairs, one probe per DISTINCT type, GROUP BY entity, then a
+            // single UPDATE ... FROM m. Splitting its input across 12 concurrent
+            // transactions did not parallelise that work -- it manufactured
+            // cross-transaction contention on shared entity rows, which is precisely
+            // what the FIFO chain above then existed to suppress. C# orchestrates;
+            // the set-based work and its concurrency belong to the server.
+            //
+            // The chunk loop is marshalling (statement parameter size), not
+            // scheduling: chunks run sequentially on the one connection, inside one
+            // transaction, so the deposit is still all-or-nothing.
+            long dep = 0;
+            await _foldConnections.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await using var conn = await _ds.OpenConnectionAsync(ct);
+                await using var tx = await conn.BeginTransactionAsync(ct);
+                for (int off = 0; off < todo.Count; off += UpsertChunkCells)
                 {
-                await using var conn = await _ds.OpenConnectionAsync(token);
-                await using var tx = await conn.BeginTransactionAsync(token);
-                long dep = 0;
-                for (int off = 0; off < bucket.Count; off += UpsertChunkCells)
-                {
-                    int m = Math.Min(UpsertChunkCells, bucket.Count - off);
+                    int m = Math.Min(UpsertChunkCells, todo.Count - off);
                     var pairEnts = new byte[m][];
                     var pairTypes = new byte[m][];
                     for (int i = 0; i < m; i++)
                     {
-                        pairEnts[i] = bucket[off + i].Ent.ToBytes();
-                        pairTypes[i] = bucket[off + i].Typ.ToBytes();
+                        pairEnts[i] = todo[off + i].Ent.ToBytes();
+                        pairTypes[i] = todo[off + i].Typ.ToBytes();
                     }
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
@@ -670,20 +677,24 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     mask.CommandText = "SELECT laplace.highway_mask_deposit($1, $2)";
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    dep += (long)(await mask.ExecuteScalarAsync(token) ?? 0L);
+                    dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                 }
-                await tx.CommitAsync(token);
-                Interlocked.Add(ref maskTotal, dep);
-                }
-                finally { _foldConnections.Release(); }
-            });
+                await tx.CommitAsync(ct);
+            }
+            finally { _foldConnections.Release(); }
+
+            long maskTotal = dep;
             Interlocked.Add(ref masks, maskTotal);
 
-            // Mark AFTER all buckets commit — pairs from any failed run
-            // stay resendable; resends are no-ops server-side.
-            if (_depositedMaskPairs.Count + pairs.Count > DepositedMaskPairsCap)
-                _depositedMaskPairs.Clear();
-            _depositedMaskPairs.UnionWith(pairs);
+            // Mark AFTER the transaction commits — pairs from any failed deposit
+            // stay resendable; resends are no-ops server-side. Locked for the same
+            // reason as the read above: deposits from different deltas now overlap.
+            lock (_depositedMaskPairs)
+            {
+                if (_depositedMaskPairs.Count + todo.Count > DepositedMaskPairsCap)
+                    _depositedMaskPairs.Clear();
+                foreach (var pair in todo) _depositedMaskPairs.Add(pair);
+            }
         }
     }
 
