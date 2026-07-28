@@ -422,6 +422,43 @@ Bypass: `pipeline.sh --force-all` / `LAPLACE_FORCE_ALL=1` (CI dispatch input
 - DB access: `psql -h localhost -U postgres -d laplace` (password `postgres`);
   `SET search_path = laplace, public;` first.
 
+## Concurrent agents — one tree each, never one tree shared
+
+**The operator's checkout at the repo root stays on `main`. Agents never
+`checkout`, `stash`, or switch branches in it.** Each agent gets its own worktree:
+
+    scripts/agent-worktree.sh <agent-name> [branch]   # -> .worktrees/<agent-name>
+
+Two agents sharing one working tree is not a merge problem, it is a DATA-LOSS
+problem. Uncommitted edits in a shared checkout are destroyed by the other
+agent's `git stash` or `git checkout` — no conflict, no warning, and nothing in
+reflog, because the changes were never committed. Measured 2026-07-27: a
+`converse_walk.sql.in` edit was lost exactly this way, and the operator's tree was
+repeatedly dragged off `main` onto whichever branch an agent was using. `git
+worktree` removes the whole class: one `.git`, N checkouts, shared objects, no
+clone cost. `git worktree list` shows who holds what.
+
+Corollaries that follow from it:
+
+- **Commit early; an uncommitted edit is not work, it is a wager.** In a
+  multi-agent repo the window between edit and commit is the window in which the
+  edit can vanish.
+- **Stage explicit paths, never `git add -A`** — it sweeps another agent's files
+  into your commit (the #618 incident).
+- **Gate a branch BEFORE merging, without burning a PR run.** CI is main-only by
+  design ("PRs must not burn the self-hosted runner"), but the workflow accepts
+  `workflow_dispatch`, so the full pipeline — build, native ctest, pg_regress,
+  publish, smoke — runs on any ref:
+
+      gh workflow run "Laplace — build, deploy, test" --ref <branch>
+
+  Merge-to-main as the only gate means every mistake lands on main first: #688
+  passed every local check and turned main red on merge. Dispatching on the branch
+  is the same gate, one step earlier.
+- **Check `gh run list` before a long ingest.** A push to main restarts
+  `laplace-postgresql` and kills it; an extension install under a running ingest
+  produces `58P01: could not access file "laplace_geom"` and loses the run.
+
 ## Layout
 
 Project list is generated in `docs/INVENTORY.md` (CI-gated): libs `Laplace.Core` /
