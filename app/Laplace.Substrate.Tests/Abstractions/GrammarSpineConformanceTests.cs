@@ -40,7 +40,10 @@ public class GrammarSpineConformanceTests
         {
             ("Wiktionary", ["GrammarIngestDecomposer", "WiktionaryGrammarWitness", "IGrammarWitness"]),
             ("SemLink", ["GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            ("Tatoeba", ["DecomposerMultiFile<GrammarIngestRecord", "GrammarIngestHandler",
+            // Tatoeba is two PHASES (sentences then links) rather than parallel files —
+            // the link phase needs the id -> content-root map the sentence phase produces.
+            // Still the grammar spine, reached through DecomposerPhase<GrammarIngestRecord>.
+            ("Tatoeba", ["DecomposerPhase<GrammarIngestRecord", "GrammarIngestHandler",
                 "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
             // ConceptNet + Atomic2020 are triple sources on the shared
             // RelationTripleDecomposerBase path (extraction only), NOT the grammar spine.
