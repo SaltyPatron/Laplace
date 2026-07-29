@@ -657,7 +657,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // bytea ordering the server-side ORDER BY uses, one comparator, not two.
             todo.Sort(static (a, b) => a.Ent.CompareToBytewise(b.Ent));
 
-            // ONE statement per chunk, on ONE connection, in ONE transaction.
+            // ONE statement per chunk, on ONE connection, ONE TRANSACTION PER CHUNK.
             //
             // highway_mask_deposit already does the whole job set-based: DISTINCT
             // over the pairs, one probe per DISTINCT type, GROUP BY entity, then a
@@ -667,15 +667,27 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // what the FIFO chain above then existed to suppress. C# orchestrates;
             // the set-based work and its concurrency belong to the server.
             //
-            // The chunk loop is marshalling (statement parameter size), not
-            // scheduling: chunks run sequentially on the one connection, inside one
-            // transaction, so the deposit is still all-or-nothing.
+            // WHY PER-CHUNK COMMITS, measured 2026-07-29 on the Wiktionary seed:
+            // deposits from different deltas always overlap on hot words, so with
+            // ordered acquisition (the deadlock fix) concurrent deposits QUEUE on
+            // the first shared row -- and under one all-or-nothing transaction the
+            // waiter waits for the holder's ENTIRE remaining chunk sequence. That
+            // convoy took the epoch fold from 177s (3,305 masks/s, the crashing
+            // run) to 1,238s (333 masks/s): correct, forty minutes of it per hour.
+            // Committing per chunk caps every wait at one chunk's work while
+            // keeping the acquisition order global (todo is sorted; chunk k+1's
+            // ids all sort after chunk k's), so the no-cycle proof is unchanged --
+            // stronger, even: one statement per transaction.
+            //
+            // All-or-nothing was never load-bearing: OR-accumulate is idempotent,
+            // a failure mid-sequence leaves earlier chunks committed (bits on,
+            // correct) and the WHOLE deposit's pairs unmarked below, so the resend
+            // re-runs every chunk as a server-side no-op.
             long dep = 0;
             await _foldConnections.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 await using var conn = await _ds.OpenConnectionAsync(ct);
-                await using var tx = await conn.BeginTransactionAsync(ct);
                 for (int off = 0; off < todo.Count; off += UpsertChunkCells)
                 {
                     int m = Math.Min(UpsertChunkCells, todo.Count - off);
@@ -686,6 +698,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                         pairEnts[i] = todo[off + i].Ent.ToBytes();
                         pairTypes[i] = todo[off + i].Typ.ToBytes();
                     }
+                    await using var tx = await conn.BeginTransactionAsync(ct);
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
                     mask.CommandTimeout = 0;
@@ -693,8 +706,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
+                    await tx.CommitAsync(ct);
                 }
-                await tx.CommitAsync(ct);
             }
             finally { _foldConnections.Release(); }
 
