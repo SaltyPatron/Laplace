@@ -235,14 +235,6 @@ functions/identity/substrate_health.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
 functions/generation/drop_retired_content_lane.sql.in
-functions/generation/stream_stats.sql.in
-functions/generation/cooccurrence_scan.sql.in
-functions/generation/trajectory_cooccurrence.sql.in
-functions/generation/trajectory_cooccurrence_by_stride.sql.in
-functions/generation/trajectory_pairs.sql.in
-functions/generation/trajectory_pairs_subject_idx.sql.in
-functions/generation/trajectory_pairs_ensure.sql.in
-functions/generation/trajectory_pairs_plane.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
 functions/generation/consensus_layer_plane.sql.in
@@ -267,7 +259,6 @@ functions/generation/foundry_vocab_crawl.sql.in
 functions/generation/walk_continuations.sql.in
 functions/generation/trajectory_continuations.sql.in
 functions/generation/steer_candidates.sql.in
-functions/generation/stream_reset.sql.in
 functions/generation/walk_text.sql.in
 functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
@@ -341,8 +332,6 @@ functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
 functions/corpus/separator_ids.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
-functions/corpus/corpus_sentence_constituents_since.sql.in
-functions/corpus/corpus_sentence_constituents.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/structural_cluster.sql.in
 functions/geometry/structural_cluster_batch.sql.in

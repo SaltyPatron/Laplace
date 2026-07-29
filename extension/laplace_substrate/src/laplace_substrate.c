@@ -21,7 +21,6 @@
 #include "laplace/dynamics/init.h"
 
 #include "perfcache_native.h"
-#include "trajectory_corpus.h"
 #include "spi_common.h"
 
 PG_MODULE_MAGIC;
@@ -980,7 +979,6 @@ _PG_init(void)
 
 
 
-    laplace_corpus_guc_init();
     laplace_substrate_perfcache_init();
     laplace_substrate_perfcache_prewarm();
 
