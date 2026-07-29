@@ -50,24 +50,53 @@ BEGIN
         RAISE EXCEPTION 'relation_plane: unknown traj plane % (next | gap | window)', p_name;
     END IF;
 
-    IF p_name = 'window' THEN
-        RETURN QUERY
-        SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-        FROM trajectory_cooccurrence(g) t;
-        RETURN;
-    END IF;
-
-    -- next/gap: read the maintained trajectory_pairs table instead of re-running
-    -- the whole-corpus stride scan and discarding every gap but g (the old
-    -- `FROM trajectory_cooccurrence_by_stride(g) WHERE gap = g` computed gaps
-    -- 1..g and kept 1/g of the pairs, every call). Row parity: trajectory_pairs
-    -- stores exactly trajectory_cooccurrence_by_stride's output, and its
-    -- subject_total partitions by (subject_id, gap), so gap = g rows are
-    -- identical whether the table was built with max_gap = g or larger; the
-    -- ensure guard rebuilds only when the trajectory corpus fingerprint moved.
-    PERFORM trajectory_pairs_ensure(g);
+    -- Pairs are computed HERE, at export time, from the trajectories themselves.
+    -- The pour is corpus-bounded by definition — it renders the whole consensus —
+    -- so a full aggregation inside it is honest cost. What was NOT honest was a
+    -- maintained trajectory_pairs cache with a corpus fingerprint and rebuild
+    -- guards: a second materialization of what physicalities.trajectory holds
+    -- exactly-invertibly (§15 — a second body is a future divergence; §9 — the
+    -- trajectory IS the sequence). gen_corpus and trajectory_pairs are deleted;
+    -- this inline scan is the one remaining whole-corpus reader, and it lives on
+    -- the export path where whole-corpus is the contract.
+    --
+    -- next/gap = pairs at exactly stride g; window = all strides 1..g. One body,
+    -- bounded by (lo, hi). subject_total matches the retired semantics: per
+    -- (subject, exact gap) for next/gap, per subject across the window for
+    -- window. Separators are excluded through separator_ids() — one body for
+    -- that fact too — so pairs count CONTENT adjacency, as the corpus stream did.
     RETURN QUERY
-    SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-    FROM trajectory_pairs t WHERE t.gap = g;
+    WITH bounds AS (
+        SELECT CASE WHEN p_name = 'window' THEN 1 ELSE g END AS lo, g AS hi
+    ),
+    sepset AS MATERIALIZED (
+        SELECT COALESCE(separator_ids(), ARRAY[]::bytea[]) AS ids
+    ),
+    seq AS (
+        SELECT ph.entity_id AS root, c.ordinal, c.entity_id AS tok
+        FROM physicalities ph
+        JOIN entities e ON e.id = ph.entity_id AND e.tier >= 3
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
+        WHERE ph.type = 1 AND ph.trajectory IS NOT NULL
+    ),
+    content AS (
+        SELECT s.root, s.tok,
+               row_number() OVER (PARTITION BY s.root ORDER BY s.ordinal) AS cord
+        FROM seq s CROSS JOIN sepset x
+        WHERE NOT (s.tok OPERATOR(pg_catalog.=) ANY (x.ids))
+    ),
+    pairs AS (
+        SELECT a.tok AS s, b.tok AS o, count(*) AS cnt
+        FROM content a
+        JOIN bounds ON true
+        JOIN content b ON b.root = a.root
+                      AND b.cord BETWEEN a.cord + bounds.lo AND a.cord + bounds.hi
+        GROUP BY a.tok, b.tok
+    ),
+    tot AS (
+        SELECT p.s, sum(p.cnt) AS subject_total FROM pairs p GROUP BY p.s
+    )
+    SELECT p.s, p.o, p.cnt::double precision / t.subject_total
+    FROM pairs p JOIN tot t ON t.s = p.s;
 END;
 $$;

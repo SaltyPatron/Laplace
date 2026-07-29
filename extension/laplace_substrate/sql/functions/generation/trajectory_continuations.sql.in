@@ -1,0 +1,90 @@
+-- trajectory_continuations(ctx, topk) -> what followed this exact context, counted.
+--
+-- The substrate-native replacement for GenCorpus and its RAM suffix array. Same
+-- operation continuations_collect performed -- find every position where the last
+-- k content constituents match, take what came next, count it -- scoped by an
+-- index probe on the context's LAST token instead of a binary search over a
+-- 97,111,658-row flattened copy of the corpus.
+--
+-- WHY THE CACHE WAS NEVER NEEDED: the trajectory already IS the ordered sequence
+-- (§9 -- stored trajectories carry constituent identity). GenCorpus rebuilt that
+-- ordering into a flat int32 stream, per backend, from a full-corpus scan --
+-- measured 46 minutes for one generate() call, and the same timeout at steps=1,
+-- so the cost was never the walk. §7 requires cost bounded by the path, not by
+-- corpus size; a per-backend whole-corpus build cannot satisfy that at any size.
+--
+-- SEPARATORS ARE NOT CONTEXT. The corpus stream was content-only with the
+-- following separator carried beside it (GenCorpus.sep_after), so matching must
+-- happen over content positions or " the king" and "the king" become different
+-- contexts.
+--
+-- ONLY TIER 0 CAN BE A SEPARATOR, and that is the narrowing that makes this cheap.
+-- Measured on this substrate: a tier-3 sentence trajectory holds tier-2 words
+-- beside tier-0 atoms, because a single-character token collapses to the
+-- character's own id (§3, single-child collapse). Words are never separators, so
+-- classification touches only the tier-0 constituents. It cannot be decided by
+-- tier ALONE -- `a` and `I` are single-grapheme words that collapse to tier 0 too
+-- -- so the UCD attestation still decides, via separator_atom_ids(), which owns
+-- that fact for every caller.
+--
+-- The frame offset is a parameter, so one body serves every backoff order rather
+-- than five hand-written arms.
+CREATE OR REPLACE FUNCTION trajectory_continuations(
+        p_ctx bytea[], p_topk int DEFAULT 256)
+    RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH sepset AS MATERIALIZED (
+        SELECT COALESCE(separator_atom_ids(), ARRAY[]::bytea[]) AS ids
+    ),
+    -- ONE containment probe, GIN-served on the dedup'd constituent id array.
+    -- laplace_trajectory_constituents() is the FULL ordinal-ordered sequence;
+    -- the dedup'd _ids() form is what the index rides and would break adjacency
+    -- if used for the unpack.
+    cand AS MATERIALIZED (
+        SELECT ph.entity_id, c.ordinal, c.entity_id AS tok
+        FROM physicalities ph
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
+        WHERE ph.type = 1
+          AND public.laplace_trajectory_constituent_ids(ph.trajectory)
+              @> ARRAY[p_ctx[array_length(p_ctx, 1)]]::bytea[]
+    ),
+    marked AS (
+        SELECT c.entity_id, c.ordinal, c.tok,
+               (c.tok OPERATOR(pg_catalog.=) ANY (s.ids)) AS is_sep,
+               lead(c.tok) OVER w AS next_tok,
+               lead((c.tok OPERATOR(pg_catalog.=) ANY (s.ids))) OVER w AS next_is_sep
+        FROM cand c CROSS JOIN sepset s
+        WINDOW w AS (PARTITION BY c.entity_id ORDER BY c.ordinal)
+    ),
+    content AS (
+        SELECT entity_id, tok,
+               CASE WHEN next_is_sep THEN next_tok END AS sep_after,
+               row_number() OVER (PARTITION BY entity_id ORDER BY ordinal) AS cord
+        FROM marked
+        WHERE NOT is_sep
+    ),
+    -- The k-context match. The frame collects the trailing k content tokens at
+    -- every position; array equality against p_ctx is the predicate prefix_cmp()
+    -- applied in the suffix array.
+    windowed AS (
+        SELECT entity_id, cord,
+               array_agg(tok) OVER (
+                   PARTITION BY entity_id ORDER BY cord
+                   ROWS BETWEEN (array_length(p_ctx, 1) - 1) PRECEDING AND CURRENT ROW
+               ) AS win,
+               lead(tok)       OVER (PARTITION BY entity_id ORDER BY cord) AS nxt,
+               lead(sep_after) OVER (PARTITION BY entity_id ORDER BY cord) AS nxt_sep,
+               sep_after
+        FROM content
+    )
+    SELECT w.nxt AS object_id,
+           mode() WITHIN GROUP (ORDER BY w.sep_after) AS sep_id,
+           count(*)::bigint AS weight
+    FROM windowed w
+    WHERE w.win = p_ctx
+      AND w.nxt IS NOT NULL
+    GROUP BY w.nxt
+    ORDER BY weight DESC, w.nxt
+    LIMIT p_topk
+$$;

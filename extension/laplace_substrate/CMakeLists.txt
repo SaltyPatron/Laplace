@@ -51,7 +51,7 @@ set(EXT_C_SOURCES
     src/prompt_coherence.c
     src/consensus_fold_step.c
     src/generate_walk.c
-    src/trajectory_corpus.c
+    src/steer_candidates.c
     src/trajectory_generate.c
     src/variant_synth.c
     src/astar_path.c

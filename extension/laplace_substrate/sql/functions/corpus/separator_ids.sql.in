@@ -1,0 +1,59 @@
+-- separator_ids() -> every entity id that is a sequence separator rather than content.
+--
+-- ONE BODY FOR ONE TRUTH (§15). The category-name literals were previously typed
+-- inline in corpus_whitespace_vocab_indices; a second call site copying them is the
+-- divergence this law exists to prevent. Every caller resolves through here.
+--
+-- TWO TIERS, ONE RULE. A separator is an atom whose Unicode general category says
+-- so, OR a grapheme cluster composed entirely of such atoms. The second arm is not
+-- a special case: UAX#29 GB3 makes CR+LF a single grapheme, so the cluster is a
+-- first-class entity at tier 1 and can never carry a category attestation of its
+-- own -- categories are atom-level facts. Composition lifts the property (§3,
+-- composition is Merkle), so bool_and over the constituents IS the definition.
+--
+-- Measured on the foundation substrate 2026-07-29: 84 atoms + 1 grapheme (CRLF)
+-- = 85 ids, 1.2 s for the whole set. Bounded by the alphabet, not by the corpus --
+-- the same class of lookup as relation_type_id(), and explicitly NOT a corpus
+-- cache. Nothing here scans ingested content.
+--
+-- NO RENDER FALLBACK. An earlier shape reached for is_all_whitespace(render_text_
+-- fast(...)) whenever a token had no category attestation. That was compensating
+-- for the grapheme arm being missing, and it hid the reason: composites are
+-- unattested BY CONSTRUCTION, not by incomplete seeding. Rendering to classify is
+-- also the read-side law inverted -- classification is an indexed read on the id;
+-- the render is the cost.
+--
+-- SCRIPT HONESTY: Zs/Zl/Zp/Cc are the Unicode separator and control categories.
+-- For a script that does not delimit with separator characters (Han, Thai,
+-- Japanese) the set is simply empty for its atoms and the sequence is
+-- content-contiguous -- the correct answer, not a silent failure.
+CREATE OR REPLACE FUNCTION separator_ids()
+    RETURNS bytea[]
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH atoms AS (
+        SELECT DISTINCT a.subject_id AS id
+        FROM attestations a
+        JOIN canonical_names cn ON cn.id = a.object_id
+        WHERE a.type_id = relation_type_id('HAS_GENERAL_CATEGORY')
+          AND cn.name IN ('unicode/category/Zs/v1',
+                          'unicode/category/Zl/v1',
+                          'unicode/category/Zp/v1',
+                          'unicode/category/Cc/v1')
+    ),
+    clusters AS (
+        SELECT e.id
+        FROM entities e
+        JOIN physicalities p
+          ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c
+        WHERE e.tier = 1
+        GROUP BY e.id
+        HAVING bool_and(c.entity_id IN (SELECT id FROM atoms))
+    )
+    SELECT array_agg(id) FROM (
+        SELECT id FROM atoms
+        UNION
+        SELECT id FROM clusters
+    ) s
+$$;

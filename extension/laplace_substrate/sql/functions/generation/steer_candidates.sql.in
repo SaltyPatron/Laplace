@@ -1,0 +1,19 @@
+-- steer_candidates(candidates, frontier, kappa) -> S7 STEER (docs/specs/36 §3).
+--
+-- Re-rank S6's proposed continuations by rated consensus mass reaching the LIVE
+-- frontier from S4. The frontier argument is what makes it S7 rather than a
+-- prior: it is passed per emitted token, so a candidate's score depends on where
+-- the walk currently stands, not on which source sentence it was gathered from.
+--
+-- Returns a row for EVERY candidate, including unreachable ones (steer 0.0,
+-- edges 0). edges = 0 is "no attested path to the frontier"; edges > 0 with
+-- steer = 0.0 is "attested and adjudicated to neutral". The caller must not
+-- collapse them -- that distinction is what tells a walk to back off rather than
+-- dead-end.
+--
+-- NOT PARALLEL SAFE: reads consensus through SPI.
+CREATE OR REPLACE FUNCTION steer_candidates(
+        p_candidates bytea[], p_frontier bytea[], p_kappa float8 DEFAULT NULL)
+    RETURNS TABLE(candidate bytea, steer float8, edges bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'
+    LANGUAGE C VOLATILE;

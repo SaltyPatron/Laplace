@@ -1,3 +1,0 @@
-CREATE OR REPLACE FUNCTION stream_reset() RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pg_laplace_stream_reset'
-    LANGUAGE C VOLATILE;
