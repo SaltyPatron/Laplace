@@ -265,6 +265,8 @@ functions/generation/metric_edges.sql.in
 functions/generation/foundry_crawl.sql.in
 functions/generation/foundry_vocab_crawl.sql.in
 functions/generation/walk_continuations.sql.in
+functions/generation/trajectory_continuations.sql.in
+functions/generation/steer_candidates.sql.in
 functions/generation/stream_reset.sql.in
 functions/generation/walk_text.sql.in
 functions/generation/generate.sql.in
@@ -337,6 +339,7 @@ functions/recall/recall_fallback_walk.sql.in
 functions/recall/recall_is_a_yes_reply.sql.in
 functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
+functions/corpus/separator_ids.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/corpus/corpus_sentence_constituents_since.sql.in
 functions/corpus/corpus_sentence_constituents.sql.in

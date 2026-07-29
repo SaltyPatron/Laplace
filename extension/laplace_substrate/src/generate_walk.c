@@ -20,6 +20,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "perfcache_native.h"
+#include "walk_score.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
 PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
@@ -150,30 +151,12 @@ ensure_relationtype_type_id(void)
 }
 
 /*
- * relation_rank(type) is the same static-table lookup consensus_walk_edges'
- * relation_rank_resolved uses, computed natively instead of via a SQL
- * function call per row. As of doc 15 Phase 3Ca, the walk's per-edge score is
- * relation_rank(type) * laplace_walk_edge_weight(rating, rd, witnesses,
- * kappa) -- the Glicko-complete signed weight (glicko2.h), the SAME formula
- * doc 14 P5 already ratified for the Foundry export path
- * (consensus_adjacency.sql.in), not the bare `rating - 2*rd` this file used
- * before. relation_rank_resolved's fast path (the static relation table lookup,
- * which covers the ~153 canonical types plus family-collapsed dynamic
- * DEP_ and FEAT_ types) is called directly, zero SQL/FunctionCall overhead.
- * Its rare SPI-fallback path (a genuinely unknown type_id, not expected in
- * practice) is deliberately not replicated here -- such a candidate scores
- * the lowest possible rank so it never wins a beam slot over a resolvable
- * candidate, rather than duplicating an 8-hop SPI parent-chain walk per row.
+ * The per-edge score (relation_rank x Glicko-complete signed weight, doc 15
+ * Phase 3Ca / doc 14 P5) now lives in walk_score.h, shared with S7
+ * (steer_candidates.c) so retrieval and steering cannot disagree about what an
+ * edge is worth. The full rationale, including why the SPI-fallback rank path
+ * is deliberately not replicated, moved with it.
  */
-static double
-walk_relation_rank(hash128_t type_id)
-{
-    const laplace_relation_def_t *def = NULL;
-
-    if (laplace_relation_lookup(&type_id, &def) == 0 && def != NULL)
-        return def->rank;
-    return 0.0;
-}
 
 typedef struct RawEdge
 {
