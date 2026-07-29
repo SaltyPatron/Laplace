@@ -43,12 +43,40 @@ BEGIN
         WHERE tb.bit IS NOT NULL
         GROUP BY p.eid
     ),
+    -- LOCK IN GLOBAL ID ORDER BEFORE UPDATING — the deadlock fix, and the whole
+    -- reason this CTE exists. The fold runs this deposit CONCURRENTLY from many
+    -- commit lanes (measured: 22 type lanes, 11 workers on the Wiktionary seed,
+    -- 2026-07-29), and `UPDATE ... FROM m` acquires row locks in PLAN order —
+    -- hash-agg output, arbitrary and different per connection. Two lanes touching
+    -- overlapping entities in opposite orders is an AB/BA deadlock (40P01 on
+    -- entities_t2_h6, 10/10 retries lost: both lanes retry the same shape, so
+    -- they re-collide every time). Became reachable when bd10fcf moved the
+    -- deposit from C#-scheduled (serialized) to server-side set-based
+    -- (concurrent). MATERIALIZED so the locks are all taken, in ascending id
+    -- order, before the UPDATE touches anything — every lane now acquires in the
+    -- same global order, which makes a lock CYCLE impossible; lanes queue
+    -- instead of deadlocking. FOR NO KEY UPDATE is the correct strength for a
+    -- non-key column write, and rows whose mask is already a superset are
+    -- filtered BEFORE locking, so the common re-deposit path locks nothing.
+    locked AS MATERIALIZED (
+        SELECT e.id
+        FROM entities e
+        JOIN m ON m.eid = e.id
+        WHERE e.highway_mask IS NULL
+           OR NOT (laplace_highway_mask_bits(e.highway_mask) @> m.bits)
+        ORDER BY e.id
+        FOR NO KEY UPDATE OF e
+    ),
     upd AS (
         UPDATE entities e
         SET highway_mask = laplace_highway_mask_from_bits(
                 COALESCE(laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || m.bits)
         FROM m
+        JOIN locked l ON l.id = m.eid
         WHERE e.id = m.eid
+          -- re-checked under the lock: another lane may have deposited a
+          -- superset between our filter and our lock. OR-accumulate makes the
+          -- skip correct — bits only ever turn on at ingest.
           AND (e.highway_mask IS NULL
                OR NOT (laplace_highway_mask_bits(e.highway_mask) @> m.bits))
         RETURNING 1
