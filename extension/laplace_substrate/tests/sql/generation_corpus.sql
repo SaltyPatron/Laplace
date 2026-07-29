@@ -2,22 +2,18 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
-
-
-
-
-
-
-
-
-
-
-
+-- The generation SEQUENCE surface, corpus-free (#728): trajectory_continuations
+-- reads successors straight off physicalities.trajectory; separator-ness is a UCD
+-- attestation fact resolved through separator_ids(); walk_continuations runs
+-- S6 propose → S7 steer → S8 sample with the consensus COMPLETES_TO floor.
+-- Invariants held over from the corpus era: separators never leak into order
+-- metrics, run boundaries do not pair across sequences, same (data, prompt, seed)
+-- is deterministic, and a dead-end context continues through the floor with
+-- stride_used = 0. New-era invariant replacing "probe invalidation": there is no
+-- cache to invalidate — a trajectory written now is visible to the next read.
 
 BEGIN;
 SET search_path = laplace, public;
-SET laplace_substrate.corpus_max_orphan_sentences = 16;
-SET laplace_substrate.corpus_document_source = '';
 
 DO $$
 DECLARE
@@ -30,12 +26,12 @@ DECLARE
     w_end     bytea := laplace_hash128_blake3('test/corpus/word-end');
     w_target  bytea := laplace_hash128_blake3('test/corpus/word-target');
     sp        bytea := laplace_hash128_blake3('test/corpus/space');
+    zs_cat    bytea := laplace_hash128_blake3('test/corpus/zs-category');
     sent      bytea := laplace_hash128_blake3('test/corpus/sentence');
     sent2     bytea := laplace_hash128_blake3('test/corpus/sentence2');
     sent3     bytea := laplace_hash128_blake3('test/corpus/sentence3');
     doc       bytea := laplace_hash128_blake3('test/corpus/document');
     t2flag    bigint := (2::bigint << 1);
-    st        record;
     n bigint;
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
@@ -43,21 +39,25 @@ BEGIN
         (w_the, 2, type_t, src), (w_capital, 2, type_t, src),
         (w_of, 2, type_t, src), (w_france, 2, type_t, src),
         (w_end, 2, type_t, src), (w_target, 2, type_t, src),
-        (sp, 2, type_t, src),
+        (sp, 2, type_t, src), (zs_cat, 0, type_t, src),
         (sent, 3, type_t, src), (sent2, 3, type_t, src), (doc, 4, type_t, src);
 
-    
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
-                               trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/corpus/phys-space'), sp, 1,
-            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
-            decode('00000000000000000000000000000000','hex'),
-            public.ST_MakeLine(ARRAY[
-                public.laplace_mantissa_pack(sp, 1, 1, (1 + (32::bigint << 31))),
-                public.laplace_mantissa_pack(sp, 2, 1, (1 + (32::bigint << 31)))]),
-            2, now());
+    -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
+    -- declares its space exactly the way the Unicode seed does —
+    -- HAS_GENERAL_CATEGORY → Zs — and separator_ids() resolves it.
+    INSERT INTO canonical_names (id, name)
+    VALUES (zs_cat, 'unicode/category/Zs/v1');
+    INSERT INTO attestations (id, subject_id, type_id, object_id, source_id,
+                              context_id, outcome, last_observed_at, observation_count)
+    VALUES (laplace_hash128_blake3('test/corpus/att-sp-zs'), sp,
+            relation_type_id('HAS_GENERAL_CATEGORY'), zs_cat, src,
+            NULL, 2, now(), 1);
 
-    
+    IF NOT (sp = ANY (separator_ids())) THEN
+        RAISE EXCEPTION 'FAIL: attested Zs token not in separator_ids()';
+    END IF;
+
+    -- sent = the ␣ capital ␣ of ␣ france
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-sentence'), sent, 1,
@@ -73,7 +73,7 @@ BEGIN
                 public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
             7, now());
 
-    
+    -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-doc'), doc, 1,
@@ -83,7 +83,7 @@ BEGIN
                 public.laplace_mantissa_pack(sent, 1, 2, (3::bigint << 1))]),
             1, now());
 
-    
+    -- sent2 = france ␣ end
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-sentence2'), sent2, 1,
@@ -95,53 +95,55 @@ BEGIN
                 public.laplace_mantissa_pack(w_end, 3, 1, t2flag)]),
             3, now());
 
-    
-    SELECT * INTO st FROM stream_stats();
-    IF st.sequences <> 2 THEN
-        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: sent + sent2)', st.sequences;
-    END IF;
-    
-    IF st.positions <> 6 THEN
-        RAISE EXCEPTION 'FAIL: % word-stride positions (want 6)', st.positions;
-    END IF;
-    IF st.separators <> 1 THEN
-        RAISE EXCEPTION 'FAIL: % separator(s) classified (want 1: the space token)', st.separators;
-    END IF;
-
-    
+    -- S6: the → capital; separator skipped, carried as sep_id, weight 1.
     IF NOT EXISTS (
-        SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 1) THEN
-        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 1)';
+        SELECT 1 FROM trajectory_continuations(ARRAY[w_the], 8) t
+        WHERE t.object_id = w_capital AND t.weight = 1 AND t.sep_id = sp) THEN
+        RAISE EXCEPTION 'FAIL: (the→capital) continuation missing, wrong weight, or separator not carried';
     END IF;
-    IF EXISTS (SELECT 1 FROM cooccurrence_scan(1) s
-               WHERE s.subject_id = sp OR s.object_id = sp) THEN
+    IF EXISTS (
+        SELECT 1 FROM trajectory_continuations(ARRAY[w_the], 8) t
+        WHERE t.object_id = sp) THEN
         RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
     END IF;
-    
+
+    -- Run boundary: france ends sent and starts sent2 — its successor comes only
+    -- from WITHIN sent2; sequences never pair across roots.
     IF NOT EXISTS (
-        SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_france AND s.object_id = w_end AND s.cnt = 1) THEN
-        RAISE EXCEPTION 'FAIL: (france→end) run-boundary pair missing';
+        SELECT 1 FROM trajectory_continuations(ARRAY[w_france], 8) t
+        WHERE t.object_id = w_end AND t.weight = 1) THEN
+        RAISE EXCEPTION 'FAIL: (france→end) within-sequence continuation missing';
     END IF;
-    
+    IF (SELECT count(*) FROM trajectory_continuations(ARRAY[w_france], 8)) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: cross-sequence pair leaked through a run boundary';
+    END IF;
+
+    -- k=2 context: (capital, of) → france, exactly one matching position.
+    IF NOT EXISTS (
+        SELECT 1 FROM trajectory_continuations(ARRAY[w_capital, w_of], 8) t
+        WHERE t.object_id = w_france AND t.weight = 1) THEN
+        RAISE EXCEPTION 'FAIL: k=2 context (capital,of)→france missing';
+    END IF;
+
+    -- Export plane, computed inline from the trajectories: of→france is P=1.0.
     IF NOT EXISTS (
         SELECT 1 FROM relation_plane('traj', 'next') p
         WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
         RAISE EXCEPTION 'FAIL: relation_plane traj next (of→france) missing or not P=1.0';
     END IF;
 
-    
+    -- S8 determinism: same (data, prompt, seed) → identical stream.
     IF EXISTS (
         SELECT 1 FROM (
             SELECT g1.step, g1.entity AS t1, g2.entity AS t2
             FROM walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
             JOIN walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
         ) z WHERE z.t1 <> z.t2) THEN
-        RAISE EXCEPTION 'FAIL: same (corpus, prompt, seed) produced different streams';
+        RAISE EXCEPTION 'FAIL: same (data, prompt, seed) produced different streams';
     END IF;
 
-    
+    -- Consensus floor: a dead-end context continues through COMPLETES_TO with
+    -- stride_used = 0.
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (relation_type_id('COMPLETES_TO'), 0, entity_type_id('RelationType'), src)
     ON CONFLICT (id, tier) DO NOTHING;
@@ -154,10 +156,11 @@ BEGIN
     FROM walk_continuations(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
     WHERE g.stride_used = 0 AND g.entity = w_target;
     IF n <> 1 THEN
-        RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (ord_used=0)';
+        RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (stride_used=0)';
     END IF;
 
-    
+    -- No cache, no invalidation: a trajectory written NOW is visible to the very
+    -- next read. sent3 = capital of (no separator): capital→of goes 1 → 2.
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (sent3, 3, type_t, src);
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
@@ -169,12 +172,13 @@ BEGIN
                 public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
                 public.laplace_mantissa_pack(w_of, 2, 1, t2flag)]),
             2, now());
-    SELECT * INTO st FROM stream_stats();
-    IF st.sequences <> 3 THEN
-        RAISE EXCEPTION 'FAIL: corpus did not rebuild after a new trajectory (% sequences, want 3)', st.sequences;
+    IF NOT EXISTS (
+        SELECT 1 FROM trajectory_continuations(ARRAY[w_capital], 8) t
+        WHERE t.object_id = w_of AND t.weight = 2) THEN
+        RAISE EXCEPTION 'FAIL: new trajectory not visible to the next read (capital→of should be weight 2)';
     END IF;
 
-    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — deep flattening with run expansion, word-stride pairs, seeded determinism, the consensus floor (ord_used=0), and probe invalidation all hold';
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
 
 ROLLBACK;

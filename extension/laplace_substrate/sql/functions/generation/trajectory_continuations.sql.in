@@ -24,7 +24,7 @@
 -- character's own id (§3, single-child collapse). Words are never separators, so
 -- classification touches only the tier-0 constituents. It cannot be decided by
 -- tier ALONE -- `a` and `I` are single-grapheme words that collapse to tier 0 too
--- -- so the UCD attestation still decides, via separator_atom_ids(), which owns
+-- -- so the UCD attestation still decides, via separator_ids(), which owns
 -- that fact for every caller.
 --
 -- The frame offset is a parameter, so one body serves every backoff order rather
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION trajectory_continuations(
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH sepset AS MATERIALIZED (
-        SELECT COALESCE(separator_atom_ids(), ARRAY[]::bytea[]) AS ids
+        SELECT COALESCE(separator_ids(), ARRAY[]::bytea[]) AS ids
     ),
     -- ONE containment probe, GIN-served on the dedup'd constituent id array.
     -- laplace_trajectory_constituents() is the FULL ordinal-ordered sequence;
