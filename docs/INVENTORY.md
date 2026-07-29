@@ -119,8 +119,8 @@ Chess:
 - `realize_batch.c`
 - `recall.c`
 - `recall_route.c`
+- `steer_candidates.c`
 - `steered_walk.c`
-- `trajectory_corpus.c`
 - `trajectory_generate.c`
 - `variant_synth.c`
 
