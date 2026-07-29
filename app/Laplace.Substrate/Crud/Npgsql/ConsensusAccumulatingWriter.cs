@@ -642,6 +642,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 todo = new List<(Hash128 Ent, Hash128 Typ)>(pairs);
             }
 
+            // SORT BY ENTITY ID BEFORE CHUNKING — the transaction-scope half of the
+            // deadlock fix, and the half #729 missed. The SQL-side ordered locking
+            // (highway_mask_deposit's `locked` CTE) makes acquisition ascending
+            // WITHIN one statement, but this transaction runs a SEQUENCE of chunk
+            // statements while holding every prior chunk's locks — and chunks cut
+            // from an unordered set interleave id ranges arbitrarily between
+            // concurrent deposits, which is an AB/BA cycle across statements.
+            // Measured on the Wiktionary seed 2026-07-29 (post-#729): 40P01 with
+            // BOTH parties inside highway_mask_deposit, ten retries lost.
+            // Sorted, every deposit transaction acquires ascending across its
+            // WHOLE chunk sequence; two ascending acquirers cannot form a cycle.
+            // CompareToBytewise is the native memcmp order — identical to the
+            // bytea ordering the server-side ORDER BY uses, one comparator, not two.
+            todo.Sort(static (a, b) => a.Ent.CompareToBytewise(b.Ent));
+
             // ONE statement per chunk, on ONE connection, in ONE transaction.
             //
             // highway_mask_deposit already does the whole job set-based: DISTINCT
