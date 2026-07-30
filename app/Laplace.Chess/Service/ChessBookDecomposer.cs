@@ -90,9 +90,11 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             var r = records[i];
             if (r.Parsed is { } parsed)
             {
+                // GH #736: the analyzer's unit is the PLAYING, so both probes key on the
+                // event — the marker gates derivation, the event entity gates the record.
                 offsets[i] = (probeIds.Count, probeIds.Count + 1);
-                probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.GameId, ChessAnalyze.Version));
-                probeIds.Add(parsed.GameId);
+                probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.EventId, ChessAnalyze.Version));
+                probeIds.Add(parsed.EventId);
             }
             else
             {
@@ -163,10 +165,12 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         {
             ChessPgnDecomposer.RecordGame(parsed, b, src);
 
+            // GH #736: the book's prose explains the PLAY — the shared line entity — so a
+            // second book annotating the same game corroborates the same EXPLAINS cell.
             if (!string.IsNullOrWhiteSpace(record.Context)
                 && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    ctxId, "EXPLAINS", parsed.GameId, src, null, BookWitnessWeight));
+                    ctxId, "EXPLAINS", parsed.LineId, src, null, BookWitnessWeight));
 
             // Ground each inline comment to the exact position it judges. This is the book's
             // chess knowledge made walkable: (commentary, EXPLAINS, position) joins the text
@@ -185,7 +189,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 var posId = ChessGraph.EmitPosition(b, m.StateKey(state), src);
                 if (ContentEmitter.Emit(b, comment.Trim(), src) is { } commentId)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        commentId, "EXPLAINS", posId, src, parsed.GameId, BookWitnessWeight));
+                        commentId, "EXPLAINS", posId, src, parsed.EventId, BookWitnessWeight));
             }
         }
 
@@ -198,7 +202,9 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     {
         var src = ChessVocabulary.BookSourceId;
 
-        // Idempotency marker: content-addressed from (book, sans); its existence gates re-runs.
+        // GH #736: idempotency MARKER, keyed (book title, line) — re-ingesting the same
+        // book skips, while a DIFFERENT book teaching the same line adds witnesses to the
+        // shared line entity below (which is the point).
         b.AddEntity(record.RootId, EntityTier.Document, ChessVocabulary.BookLineType, src);
 
         var m = new ChessModality();
@@ -226,13 +232,15 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 sourceId: src);
         }
 
+        // GH #736: the prose line's content id IS the shared line composition — the same
+        // entity a PGN playing of these moves mints — so each book's testimony folds into
+        // it, and EXPLAINS targets the line (the play the book teaches), not merely its
+        // final position.
+        b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType, src);
         if (!string.IsNullOrWhiteSpace(record.Context)
             && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
-        {
-            var finalId = ChessCompose.PositionId(m.StateKey(state));
             b.AddAttestation(NativeAttestation.Categorical(
-                ctxId, "EXPLAINS", finalId, src, null, BookWitnessWeight));
-        }
+                ctxId, "EXPLAINS", record.LineId, src, null, BookWitnessWeight));
     }
 
     // ---- extraction ---------------------------------------------------------------------
@@ -249,17 +257,29 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             yield return new ChessBookRecord(title, gameText, Array.Empty<string>(), context)
             {
                 Parsed = parsed,
-                RootId = parsed.GameId,
+                RootId = parsed.EventId,
             };
         }
 
+        // GH #736: the prose line's content id is the line composition over its replayed
+        // positions (extraction already proved the replay; TryReplayLine re-walks it over
+        // the memoized composition, so this is id math, not a second engine pass). The
+        // per-book idempotency key is a MARKER salted with the book title's content id.
+        var titleContentId = ContentEmitter.RootId(title);
         foreach (var paragraph in Paragraphs(remainder))
         {
             foreach (var sans in ExtractProseLines(paragraph))
+            {
+                if (titleContentId is null
+                    || ChessPgnDecomposer.TryReplayLine(sans, startFen: null) is not { } positionIds)
+                    continue;
+                var lineId = ChessCompose.LineId(positionIds);
                 yield return new ChessBookRecord(title, null, sans, TrimContext(paragraph))
                 {
-                    RootId = ChessVocabulary.BookLineId(title, sans),
+                    LineId = lineId,
+                    RootId = ChessVocabulary.BookLineMarkerId(titleContentId.Value, lineId),
                 };
+            }
         }
     }
 
@@ -504,8 +524,9 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
 
 /// <summary>One grounded assertion from a chess book: an embedded PGN game (GameText/Parsed set)
 /// or a prose move line (Sans set), plus the prose context that explains it. RootId is the
-/// idempotency key (game id, or the content-addressed book-line marker); NeedsRecord/NeedsDerive
-/// carry the extractor's novelty verdict per layer.</summary>
+/// idempotency key (the playing-event id, or the (book, line) marker — GH #736); LineId is the
+/// shared line entity a prose line grounds onto; NeedsRecord carries the extractor's novelty
+/// verdict per layer.</summary>
 public sealed record ChessBookRecord(
     string BookTitle,
     string? GameText,
@@ -514,6 +535,7 @@ public sealed record ChessBookRecord(
 {
     internal ChessGameRecord? Parsed { get; init; }
     internal Hash128 RootId { get; init; }
+    internal Hash128 LineId { get; init; }
     internal bool NeedsRecord { get; init; } = true;
     public Hash128 TrunkRootId => RootId;
 }

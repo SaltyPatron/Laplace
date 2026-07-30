@@ -59,7 +59,8 @@ public sealed class ChessRecorderTests
     {
         var change = Record(GameWithComment);
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PlyType);
+        // Chess_Ply is retired (GH #736 deleted PlyId with the re-key); nothing may mint one.
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == EntityTypeRegistry.Id("Chess_Ply"));
 
         var movetext = ChessPgnDecomposer.MovetextSection(GameWithComment);
         // Still verbatim: the SECTION is the raw movetext, clocks/comments/NAGs intact.

@@ -57,10 +57,17 @@ public static class ChessVocabulary
 
 
 
+    // GH #736: the game CONTENT entity — the LINE, content-addressed from the ordered
+    // position ids it passes through (ChessCompose.LineId). One entity per distinct line
+    // ever played, no matter who played it or when. The type name stays Chess_Game: the
+    // game-as-content IS the line.
     public static readonly Hash128 GameType = EntityTypeRegistry.Id("Chess_Game");
-    // Witnessed ply anchor: a per-move node carrying the recorded SAN + annotations, with a
-    // deterministic id (game+ply) the analyzer can reconstruct without a reverse lookup.
-    public static readonly Hash128 PlyType = EntityTypeRegistry.Id("Chess_Ply");
+    // GH #736: the playing EVENT — a slim provenance handle (who/when/where a line was
+    // played). Exists as an entity row solely so the novelty gate can bitmap-probe it;
+    // it is the attestation CONTEXT for every per-playing fact and the subject of
+    // exactly one record edge, (event, PLAYS_LINE, line).
+    public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
+    public static readonly Hash128 PlaysLineType = EntityTypeRegistry.Id("PLAYS_LINE");
     public static readonly Hash128 HasMovetextType = EntityTypeRegistry.Id("HAS_MOVETEXT");
     /// <summary>Entity type of a composed movetext document — a game's verbatim token sequence.</summary>
     public static readonly Hash128 MovetextType = EntityTypeRegistry.Id("Chess_Movetext");
@@ -73,12 +80,17 @@ public static class ChessVocabulary
     public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
     public static readonly Hash128 AnalysisSourceId = SubstrateCanonicalIds.Source("ChessAnalysis");
     public static readonly Hash128 AnalysisTrustClass = TrustClass("DerivedCalculation");
+    // GH #736 lane/source split: the trajectory backfill writes physicalities under its
+    // OWN source so source-grain eviction (evict_source, #508) never conflates it with
+    // ChessAnalysis testimony. One lane = one source = one evictable unit.
+    public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
 
-    // Deterministic per-(game, analysis version) marker. The analyzer scan bulk-probes these for
-    // existence (EntitiesExistBitmapAsync) to skip games already derived at the current version —
-    // same fast novelty-probe the recorder uses on game ids.
-    public static Hash128 AnalysisMarkerId(Hash128 gameId, int version)
-        => Hash128.OfCanonical($"chess/analyzed/{gameId}/{version}");
+    // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits
+    // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
+    // event; two playings of one line each fold their own outcome). The scan bulk-probes
+    // these (EntitiesExistBitmapAsync) to skip events already derived at this version.
+    public static Hash128 AnalysisMarkerId(Hash128 eventId, int version)
+        => Hash128.OfCanonical($"chess/analyzed/{eventId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
     public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
     public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");
@@ -99,12 +111,14 @@ public static class ChessVocabulary
     public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
     public static readonly Hash128 GameHasMotifType = EntityTypeRegistry.Id("GAME_HAS_MOTIF");
     public static readonly Hash128 ConceptType = EntityTypeRegistry.Id("Chess_Concept");
-    // Idempotency marker for a grounded book prose line — content-addressed from
-    // (book title, sans), probed by the chess-books extractor so re-ingesting a book
-    // never re-witnesses lines it already deposited.
+    // GH #736: a book's grounded prose line IS the shared line entity (ChessCompose.LineId
+    // of its replayed positions) — two books teaching the same trap collide, which is the
+    // point. The idempotency the old (title|sans)-salted id provided moves to a MARKER,
+    // exactly like every calculated lane: probed by the extractor so re-ingesting a book
+    // never re-witnesses its lines, while a DIFFERENT book adds witnesses to the shared line.
     public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
-    public static Hash128 BookLineId(string bookTitle, IReadOnlyList<string> sans)
-        => Hash128.OfCanonical($"chess/bookline/{bookTitle}|{string.Join(' ', sans)}");
+    public static Hash128 BookLineMarkerId(Hash128 bookTitleContentId, Hash128 lineId)
+        => Hash128.OfCanonical($"chess/bookline-marker/{bookTitleContentId}/{lineId}");
     public static readonly Hash128 ExplainsType = EntityTypeRegistry.Id("EXPLAINS");
     public static readonly Hash128 IsExampleOfType = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
     // Reuses the manifest's existing HAS_DEFINITION relation (same one WordNet/Wiktionary glosses
@@ -112,14 +126,24 @@ public static class ChessVocabulary
     // a dictionary gloss for the same content-addressed term land on the same relation type.
     public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("HAS_DEFINITION");
 
-    public static Hash128 GameId(string white, string black, string date, IReadOnlyList<string> moves)
-    => Hash128.OfCanonical($"chess/game/{white}|{black}|{date}|{string.Join(' ', moves)}");
+    // GH #736: the playing-event handle for a PGN-corpus record — the Seven-Tag-Roster
+    // fields the source asserts, CLOSED OVER the verbatim movetext content id. Including
+    // movetextId makes the handle exactly "this record": re-ingesting the same file (or a
+    // second corpus carrying the byte-identical game) is idempotent — one event — while
+    // garbage tag rosters ("?", "-") cannot collide two different games, because their
+    // verbatim movetexts differ. This is PROVENANCE-shaped by design: it names an event,
+    // never content; it appears only as attestation context and as PLAYS_LINE's subject.
+    public static Hash128 PgnEventId(
+        string white, string black, string date, string @event, string round, string site,
+        Hash128 movetextId)
+        => Hash128.OfCanonical($"chess/event/{white}|{black}|{date}|{@event}|{round}|{site}|{movetextId}");
 
-    // Deterministic per-ply anchor id. LEGACY: the recorder no longer attests per-ply rows
-    // (a PlyId is unique to one game, so every such consensus cell was permanently
-    // single-witness); kept only to address rows already seeded under the old contract.
-    public static Hash128 PlyId(Hash128 gameId, int ply)
-    => Hash128.OfCanonical($"chess/ply/{gameId}/{ply}");
+    // Live/lab playing-event handle: a live occurrence is unique by construction, so the
+    // session GUID is the whole identity (determinism-for-re-ingest does not apply — the
+    // cutechess PGN written afterwards is the replayable record). Lichess games keep their
+    // source-asserted external id (ChessLiveGameHost.LichessGameId).
+    public static Hash128 PlayEventId(Guid sessionGame)
+        => Hash128.OfCanonical($"chess/play/{sessionGame:N}");
 
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
 

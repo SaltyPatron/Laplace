@@ -62,34 +62,43 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public static Hash128 LichessGameId(string lichessGameId)
         => Hash128.OfCanonical($"chess/lichess/{lichessGameId}");
 
+    // GH #736: the handle a live game is opened under is the playing EVENT — lichess games
+    // keep their source-asserted external id (LichessGameId), lab/learn sessions mint a
+    // PlayEventId from a GUID at session open. The line (the game CONTENT) does not exist
+    // until the game is over; CompleteGameAsync mints it.
     public Task OpenGameAsync(
-        Hash128 gameId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,
+        Hash128 eventId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,
         CancellationToken ct = default)
     {
-        _games[gameId] = new LiveGameSession(learnContext, whitePlayerId, blackPlayerId);
+        _games[eventId] = new LiveGameSession(learnContext, whitePlayerId, blackPlayerId);
         return Task.CompletedTask;
     }
 
     public async Task RecordPlyAsync(
-        Hash128 gameId, int ply, string fromKey, string toKey, string moveToken,
+        Hash128 eventId, int ply, string fromKey, string toKey, string moveToken,
         Hash128? moverPlayerId, CancellationToken ct = default)
     {
-        if (!_games.TryGetValue(gameId, out var session))
-            throw new InvalidOperationException($"game {gameId} is not open");
+        if (!_games.TryGetValue(eventId, out var session))
+            throw new InvalidOperationException($"game {eventId} is not open");
 
         await _writeGate.WaitAsync(ct);
         try
         {
             session.Moves.Add(moveToken);
             session.Plies.Add(new RecordedPly(fromKey, toKey, session.MoverSide(ply)));
+            // The ordered position ids the session passes through — the line composition
+            // CompleteGameAsync mints (start position first, then one vertex per ply).
+            if (session.PositionIds.Count == 0)
+                session.PositionIds.Add(ChessCompose.PositionId(fromKey));
+            session.PositionIds.Add(ChessCompose.PositionId(toKey));
 
             var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
-            EnsureGameEntity(b, gameId, session);
+            EnsureEventEntity(b, eventId, session);
 
             ChessGraph.AppendMoveEdge(
                 b, fromKey, toKey, PlyOutcome.Draw, games: 1, WitnessWeight,
                 sourceId: ChessVocabulary.SourceId,
-                contextId: gameId);
+                contextId: eventId);
 
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
@@ -102,20 +111,64 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     }
 
     public async Task CompleteGameAsync(
-        Hash128 gameId, GameOutcome result, bool adjudicated, CancellationToken ct = default)
+        Hash128 eventId, GameOutcome result, bool adjudicated, CancellationToken ct = default)
     {
-        if (!_games.TryGetValue(gameId, out var session))
+        if (!_games.TryGetValue(eventId, out var session))
             return;
 
         await _writeGate.WaitAsync(ct);
         try
         {
             var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
-            // Game grain: ONE verbatim movetext edge for the whole game, witnessed at
-            // completion (not a growing per-ply prefix — that minted N single-witness
-            // HAS_MOVETEXT rows per game), plus the result.
-            WitnessMovetext(b, gameId, session.Moves);
-            WitnessResult(b, gameId, result);
+
+            // GH #736: completion mints the LINE — the content entity of what was played —
+            // from the ordered position ids the session accumulated. An abandoned playing
+            // asserted no completed line, which is why none of this happens at open.
+            if (session.PositionIds.Count > 0)
+            {
+                var lineId = ChessCompose.LineId(
+                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.PositionIds));
+                b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
+                EnsureEventEntity(b, eventId, session);
+
+                // The one record edge whose subject is the event, carrying this playing's
+                // outcome (white POV) — the event→line join the read side navigates by.
+                b.AddAttestation(NativeAttestation.Aggregated(
+                    subject: eventId,
+                    typeId: ChessVocabulary.PlaysLineType,
+                    obj: lineId,
+                    sourceId: ChessVocabulary.SourceId,
+                    contextId: null,
+                    games: 1,
+                    sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(0)),
+                    witnessWeight: WitnessWeight));
+
+                // Game grain: ONE verbatim movetext edge for the whole game, witnessed at
+                // completion (not a growing per-ply prefix — that minted N single-witness
+                // HAS_MOVETEXT rows per game), plus the result and colour facts — all
+                // subjected on the line with ctx = this playing.
+                WitnessMovetext(b, lineId, eventId, session.Moves);
+                WitnessResult(b, lineId, eventId, result);
+                if (session.WhitePlayerId is { } wp)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, eventId, WitnessWeight));
+                if (session.BlackPlayerId is { } bp)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, eventId, WitnessWeight));
+
+                // Aggregating lanes: the line's own fold cell (witness_count = times played)
+                // and the players' records, both carrying this playing's result.
+                ChessGraph.AppendLineOutcome(
+                    b, lineId, result.ForMover(0), WitnessWeight, ChessVocabulary.SourceId, eventId);
+                if (session.WhitePlayerId is { } w2)
+                    ChessGraph.AppendPlayerResult(
+                        b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,
+                        ChessVocabulary.SourceId, eventId);
+                if (session.BlackPlayerId is { } b2)
+                    ChessGraph.AppendPlayerResult(
+                        b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
+                        ChessVocabulary.SourceId, eventId);
+            }
 
             bool hasWin = session.Plies.Any(p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
             bool checkmate = !adjudicated && hasWin;
@@ -127,7 +180,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 ChessGraph.AppendMoveEdge(
                     b, rp.FromKey, rp.ToKey, moverOutcome, games, WitnessWeight,
                     sourceId: ChessVocabulary.SourceId,
-                    contextId: gameId);
+                    contextId: eventId);
             }
 
             var change = await b.BuildAsync(ct);
@@ -138,7 +191,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         finally
         {
             _writeGate.Release();
-            _games.TryRemove(gameId, out _);
+            _games.TryRemove(eventId, out _);
         }
     }
 
@@ -159,16 +212,19 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         CancellationToken ct = default)
     {
         if (edges.Count == 0) return;
-        var gameId = Hash128.OfCanonical($"{learnContext}/{GamesCompleted}/{edges.Count}");
-        await OpenGameAsync(gameId, learnContext, ct: ct);
+        // GH #736: a live occurrence is unique by construction, so the event handle is a
+        // fresh GUID per call — never a hash of mutable session state (the old
+        // {learnContext}/{GamesCompleted}/{edges.Count} shape collided across restarts).
+        var eventId = ChessVocabulary.PlayEventId(Guid.NewGuid());
+        await OpenGameAsync(eventId, learnContext, ct: ct);
         for (int i = 0; i < edges.Count; i++)
         {
             var e = edges[i];
-            await RecordPlyAsync(gameId, i + 1, e.SubjectKey, e.ObjectKey, "?", null, ct);
+            await RecordPlyAsync(eventId, i + 1, e.SubjectKey, e.ObjectKey, "?", null, ct);
         }
 
         var outcome = InferOutcome(edges, adjudicated);
-        await CompleteGameAsync(gameId, outcome, adjudicated, ct);
+        await CompleteGameAsync(eventId, outcome, adjudicated, ct);
     }
 
     private SubstructureFoldBias? _foldBias;
@@ -218,10 +274,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             throw new ArgumentException($"user '{userId}' is not a valid identifier", nameof(userId));
 
         var id = Guid.NewGuid();
-        var gameId = Hash128.OfCanonical($"{learnContext}/{id:N}");
-        _playSessions[id] = new PlaySession(gameId, learnContext, recordToSubstrate, tenantId, userId);
+        // GH #736: the session GUID IS the playing-event identity (PlayEventId) — minted
+        // once at session open; the line is minted at completion from what was played.
+        var eventId = ChessVocabulary.PlayEventId(id);
+        _playSessions[id] = new PlaySession(eventId, learnContext, recordToSubstrate, tenantId, userId);
         if (recordToSubstrate)
-            _ = OpenGameAsync(gameId, learnContext);
+            _ = OpenGameAsync(eventId, learnContext);
         return id;
     }
 
@@ -232,7 +290,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     {
         if (!_playSessions.TryGetValue(sessionId, out var session)) return;
         if (session.RecordToSubstrate)
-            await CompleteGameAsync(session.GameId, outcome, adjudicated, ct);
+            await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
         _playSessions.TryRemove(sessionId, out _);
     }
 
@@ -241,7 +299,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         Hash128? moverPlayerId, CancellationToken ct = default)
     {
         if (!_playSessions.TryGetValue(sessionId, out var session) || !session.RecordToSubstrate) return;
-        await RecordPlyAsync(session.GameId, ply, fromKey, toKey, moveToken, moverPlayerId, ct);
+        await RecordPlyAsync(session.EventId, ply, fromKey, toKey, moveToken, moverPlayerId, ct);
     }
 
     public async ValueTask DisposeAsync()
@@ -262,29 +320,31 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         return GameOutcome.Draw;
     }
 
-    private static void EnsureGameEntity(SubstrateChangeBuilder b, Hash128 gameId, LiveGameSession session)
+    // GH #736: the event entity is a slim provenance handle — no content facts hang off it
+    // (colour facts moved to CompleteGameAsync, subjected on the line). It exists as a row
+    // solely so the novelty gate can bitmap-probe it.
+    private static void EnsureEventEntity(SubstrateChangeBuilder b, Hash128 eventId, LiveGameSession session)
     {
         if (session.EntityEmitted) return;
-        b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
-        if (session.WhitePlayerId is { } wp)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, ChessVocabulary.SourceId, null, WitnessWeight));
-        if (session.BlackPlayerId is { } bp)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, ChessVocabulary.SourceId, null, WitnessWeight));
+        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, ChessVocabulary.SourceId);
         session.EntityEmitted = true;
     }
 
-    private static void WitnessMovetext(SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<string> moves)
+    private static void WitnessMovetext(
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, IReadOnlyList<string> moves)
     {
         if (moves.Count == 0) return;
         if (ContentEmitter.Emit(b, string.Join(' ', moves), ChessVocabulary.SourceId) is { } mtId)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, ChessVocabulary.SourceId, null, WitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(
+                lineId, "HAS_MOVETEXT", mtId, ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
-    private static void WitnessResult(SubstrateChangeBuilder b, Hash128 gameId, GameOutcome result)
+    private static void WitnessResult(SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result)
     {
         string token = result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1";
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_RESULT", rid, ChessVocabulary.SourceId, null, WitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(
+                lineId, "HAS_RESULT", rid, ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
     private static async Task RegisterCanonicalsAsync(
@@ -310,6 +370,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         public Hash128? BlackPlayerId { get; } = blackPlayerId;
         public List<string> Moves { get; } = new();
         public List<RecordedPly> Plies { get; } = new();
+        // GH #736: the ordered position ids this playing passes through (start position
+        // first) — the line composition CompleteGameAsync mints.
+        public List<Hash128> PositionIds { get; } = new();
         public bool EntityEmitted { get; set; }
 
         public int MoverSide(int ply) => (ply - 1) % 2;
@@ -318,10 +381,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private readonly record struct RecordedPly(string FromKey, string ToKey, int MoverSide);
 }
 
-public sealed class PlaySession(Hash128 gameId, string learnContext, bool recordToSubstrate,
+public sealed class PlaySession(Hash128 eventId, string learnContext, bool recordToSubstrate,
     string tenantId = "public", string? userId = null)
 {
-    public Hash128 GameId { get; } = gameId;
+    /// <summary>GH #736: the playing-event handle (PlayEventId of the session GUID).</summary>
+    public Hash128 EventId { get; } = eventId;
     public string LearnContext { get; } = learnContext;
     public bool RecordToSubstrate { get; } = recordToSubstrate;
 
