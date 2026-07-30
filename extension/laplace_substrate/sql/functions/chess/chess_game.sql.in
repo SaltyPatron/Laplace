@@ -1,21 +1,39 @@
-CREATE OR REPLACE FUNCTION chess_game(p_game bytea)
+-- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
+-- CREATE OR REPLACE cannot do on the upgrade path.
+DROP FUNCTION IF EXISTS chess_game(bytea);
+CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
     RETURNS TABLE(white_id bytea, white text, black_id bytea, black text,
                   result text, played_on text, event text, eco text,
                   termination text, time_control text, tc_class text,
                   movetext text)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- One game, as its source recorded it. Every column here is a header the
-    -- decomposer transcribed verbatim -- the record layer, untouched by any
-    -- analysis. Nothing is replayed, evaluated or inferred: the calculated layer
-    -- (positions, evals, motifs) hangs off the ChessAnalysis source and is read
-    -- through the position surface (chess_moves), not here.
+    -- One PLAYING, as its source recorded it (GH #736). The parameter is the
+    -- playing-EVENT handle; the game CONTENT is the line it plays. Hop 1 follows
+    -- the one record edge whose subject is the event -- (event, PLAYS_LINE, line)
+    -- -- and every header below is a fact the decomposer subjected on the LINE
+    -- with context = this event, so the playing's own headers come back even when
+    -- the line is shared by many playings.
     --
-    -- All eleven headers arrive in ONE index scan of the game's subject rows,
-    -- and the short surfaces render in ONE realize_batch. The movetext is
-    -- rendered on its own with the full depth budget: it is a tier-4 document
-    -- whose constituent chain rebuilds the original PGN bytes exactly, so it is
-    -- not a label lookup and must not be depth-clipped like one.
-    WITH hdr AS MATERIALIZED (
+    -- Every column here is a header the decomposer transcribed verbatim -- the
+    -- record layer, untouched by any analysis. Nothing is replayed, evaluated or
+    -- inferred: the calculated layer (positions, evals, motifs) hangs off the
+    -- analysis sources and is read through the position surface (chess_moves),
+    -- not here.
+    --
+    -- All headers arrive in ONE index scan of the line's subject rows filtered
+    -- by this event's context, and the short surfaces render in ONE
+    -- realize_batch. The movetext is rendered on its own with the full depth
+    -- budget: it is a tier-4 document whose constituent chain rebuilds the
+    -- original PGN bytes exactly, so it is not a label lookup and must not be
+    -- depth-clipped like one.
+    WITH line AS MATERIALIZED (
+        SELECT pl.object_id AS line
+        FROM @extschema@.attestations pl
+        WHERE pl.subject_id = p_event
+          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+        LIMIT 1
+    ),
+    hdr AS MATERIALIZED (
         SELECT max(a.object_id) FILTER (
                    WHERE a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white_id,
                max(a.object_id) FILTER (
@@ -36,9 +54,11 @@ CREATE OR REPLACE FUNCTION chess_game(p_game bytea)
                    WHERE a.type_id = @extschema@.relation_type_id('HAS_TC_CLASS')) AS tcc_id,
                max(a.object_id) FILTER (
                    WHERE a.type_id = @extschema@.relation_type_id('HAS_MOVETEXT')) AS movetext_id
-        FROM @extschema@.attestations a
-        WHERE a.subject_id = p_game
-          AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
+        FROM line l
+        JOIN @extschema@.attestations a
+          ON a.subject_id = l.line
+         AND a.context_id = p_event
+        WHERE a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
                             @extschema@.relation_type_id('HAS_BLACK'),
                             @extschema@.relation_type_id('HAS_RESULT'),
                             @extschema@.relation_type_id('ON_DATE'),
