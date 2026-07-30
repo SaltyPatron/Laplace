@@ -6,8 +6,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED pass, BACKFILL role: scan witnessed Chess_Game rows in Postgres (HAS_MOVETEXT
-// under ChessPgn) that carry no current-version ANALYSIS marker, hydrate via content roundtrip,
+// CALCULATED pass, BACKFILL role: scan witnessed playings in Postgres (Chess_Event rows
+// carrying a PLAYS_LINE edge under a witness source, GH #736) that carry no current-version
+// per-event ANALYSIS marker, hydrate via content roundtrip,
 // derive geometry/consensus, stamp AnalysisMarker. Since GH #600, `laplace ingest chess` derives
 // inline in the recording pass (ChessPgnDecomposer.Compose -> DeriveFromParsed), so a fresh
 // ingest never needs this pass; it exists to (a) analyze games recorded before the fusion landed
@@ -49,7 +50,7 @@ public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecor
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedFromSubstrateAsync(
+        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader!, ws.Batch, ct))
             yield return new ChessAnalyzeRecord(witnessed);
     }
@@ -61,14 +62,15 @@ public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecor
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedGamesAsync(ds, ct);
+        return ChessWitnessHydrator.CountRecordedEventsAsync(ds, ct);
     }
 }
 
 /// <summary>
-/// Analysis pipeline record whose trunk root is the versioned analysis marker, not the game id.
+/// Analysis pipeline record whose trunk root is the versioned per-EVENT analysis marker,
+/// not the playing itself (GH #736: the analyzer's unit is the playing).
 /// </summary>
 public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.GameId, ChessAnalyze.Version);
+    public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.EventId, ChessAnalyze.Version);
 }

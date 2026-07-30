@@ -7,12 +7,15 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// CALCULATED stockfish eval pass (GH #573): replay a witnessed game, evaluate every
+/// CALCULATED stockfish eval pass (GH #573): replay a witnessed line, evaluate every
 /// position with stockfish (side-to-move cp), attest HAS_EVAL deposits and eval-delta
 /// MOVE_QUALITY classes under the ChessStockfish source. Versioned and marker-gated
-/// like ChessAnalyze; one pass per game per Version regardless of depth — bumping
-/// Version is the sanctioned re-run (re-running at a new depth without a version bump
-/// would double-witness the same facts).
+/// like ChessAnalyze; GH #736: an engine verdict is a pure function of the position, so
+/// the unit is the LINE — a second playing of an analyzed line re-deposits nothing
+/// (folding the same engine verdict once per playing would be witness inflation of one
+/// witness). One pass per line per Version regardless of depth — bumping Version is the
+/// sanctioned re-run (re-running at a new depth without a version bump would
+/// double-witness the same facts).
 /// </summary>
 public static class ChessStockfishEval
 {
@@ -22,8 +25,8 @@ public static class ChessStockfishEval
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
 
-    public static Hash128 MarkerId(Hash128 gameId, int version)
-        => Hash128.OfCanonical($"chess/stockfish-eval/{gameId}/{version}");
+    public static Hash128 MarkerId(Hash128 lineId, int version)
+        => Hash128.OfCanonical($"chess/stockfish-eval/{lineId}/{version}");
 
     private const double EvalWeight = 0.95;    // stronger witness than the in-repo search's 0.9
     private const double QualityWeight = 0.9;
@@ -75,8 +78,10 @@ public static class ChessStockfishEval
                     evalMemo[node.Position.Id] = evals[ply];
             }
 
+            // ctx = the LINE: the verdict is line-grain testimony (pure function of the
+            // position reached along it), never per-playing provenance.
             if (evals[ply] is { } cp)
-                ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.GameId);
+                ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.LineId);
 
             if (ply == n) break;
             var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
@@ -93,13 +98,13 @@ public static class ChessStockfishEval
             if (ClassifyLoss(before + after) is not { } token) continue;
             ChessGraph.AppendMoveQuality(
                 b, composed[ply]!.Position.Id, token, games: 1, QualityWeight,
-                SourceId, game.GameId);
+                SourceId, game.LineId);
         }
 
-        b.AddEntity(MarkerId(game.GameId, Version), EntityTier.Document,
+        b.AddEntity(MarkerId(game.LineId, Version), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
             b.AddAttestation(NativeAttestation.Categorical(
-                game.GameId, "ANALYZED_AT", vId, SourceId, null, ChessVocabulary.Trust));
+                game.LineId, "ANALYZED_AT", vId, SourceId, null, ChessVocabulary.Trust));
     }
 }

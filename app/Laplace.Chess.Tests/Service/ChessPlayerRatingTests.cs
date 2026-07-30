@@ -78,12 +78,12 @@ public sealed class ChessPlayerRatingTests
     public void ProvenanceStaysPerGame()
     {
         var change = Compose(WhiteWins);
-        var gameId = ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
-            ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]);
-        // The consensus cell aggregates; the evidence row still says which game it came from,
-        // so a rating can always be walked back to the games that made it.
-        Assert.Equal(gameId, Single(change, Alice, Outcome).ContextId);
-        Assert.Equal(gameId, Single(change, Bob, Outcome).ContextId);
+        // GH #736: provenance context is the PLAYING (the event handle), never the line.
+        var eventId = ChessPgnDecomposer.TryParseGame(WhiteWins)!.EventId;
+        // The consensus cell aggregates; the evidence row still says which playing it came
+        // from, so a rating can always be walked back to the games that made it.
+        Assert.Equal(eventId, Single(change, Alice, Outcome).ContextId);
+        Assert.Equal(eventId, Single(change, Bob, Outcome).ContextId);
     }
 
     [Fact]
