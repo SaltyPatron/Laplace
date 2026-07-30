@@ -84,6 +84,25 @@ internal static partial class PgnClocks
         return Math.Clamp(f, 0.5, 1.5);
     }
 
+    /// <summary>
+    /// Median remaining clock for the plies of one side (parity = ply index mod 2 —
+    /// same-parity plies belong to one player regardless of who moved first), from the
+    /// game's OWN remaining-time series. This is the lens threshold for "low clock":
+    /// under a monotone-decaying clock it splits the game at the point where half the
+    /// player's time story is behind them — adaptive to the control, no constants.
+    /// 0 when the dialect carries no remaining clock (cutechess spent-only games).
+    /// </summary>
+    public static double MedianRemaining(double[] clocks, int parity)
+    {
+        if (clocks.Length == 0) return 0;
+        var side = new List<double>(clocks.Length / 2 + 1);
+        for (int i = parity; i < clocks.Length; i += 2)
+            if (clocks[i] > 0) side.Add(clocks[i]);
+        if (side.Count == 0) return 0;
+        side.Sort();
+        return side[side.Count / 2];
+    }
+
     public static double MedianDrop(double[] clocks)
     {
         if (clocks.Length < 3) return 0;

@@ -434,4 +434,70 @@ BEGIN
     RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu';
 END $$;
 
+-- chess_time_pressure_outcome: the folded think-class read, now carrying the lens
+-- dimension (planned_quick / pressed_think / flagging beside rushed / normal / deep).
+-- Post-#736 shape: HAS_THINK_CLASS and MOVE cells both subject the POSITION; the
+-- playing's event enters only as evidence context, which this folded read never touches.
+DO $$
+DECLARE
+    type_t   bytea := laplace_hash128_blake3('Type');
+    mv       bytea := relation_type_id('MOVE');
+    tcl      bytea := relation_type_id('HAS_THINK_CLASS');
+    src      bytea := laplace_hash128_blake3('test/chess3/source');
+    p_rush   bytea := laplace_hash128_blake3('test/chess3/p_rush');
+    p_plan   bytea := laplace_hash128_blake3('test/chess3/p_plan');
+    p_press  bytea := laplace_hash128_blake3('test/chess3/p_press');
+    p_flag   bytea := laplace_hash128_blake3('test/chess3/p_flag');
+    nx       bytea := laplace_hash128_blake3('test/chess3/next');
+    w_rush   bytea := word_id('rushed');
+    w_plan   bytea := word_id('planned_quick');
+    w_press  bytea := word_id('pressed_think');
+    w_flag   bytea := word_id('flagging');
+    labels   text[];
+    n        bigint;
+    mu       numeric;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL), (nx, 0, type_t, src),
+        (p_rush, 0, type_t, src), (p_plan, 0, type_t, src),
+        (p_press, 0, type_t, src), (p_flag, 0, type_t, src),
+        (w_rush, 0, type_t, src), (w_plan, 0, type_t, src),
+        (w_press, 0, type_t, src), (w_flag, 0, type_t, src)
+    ON CONFLICT DO NOTHING;
+
+    -- One MOVE cell per position (the folded-outcome side of the join) and one
+    -- think-class cell naming its class. eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
+    -- which must read back display-scale (1500.000), never raw fp1e9.
+    INSERT INTO consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
+        (laplace_hash128_blake3('t3/mv_rush'),  p_rush,  mv, nx, 1600000000000, 50000000000, 60000000, 10, now()),
+        (laplace_hash128_blake3('t3/mv_plan'),  p_plan,  mv, nx, 1500000000000, 50000000000, 60000000, 20, now()),
+        (laplace_hash128_blake3('t3/mv_press'), p_press, mv, nx, 1400000000000, 50000000000, 60000000, 5, now()),
+        (laplace_hash128_blake3('t3/mv_flag'),  p_flag,  mv, nx, 1200000000000, 50000000000, 60000000, 2, now()),
+        (laplace_hash128_blake3('t3/tc_rush'),  p_rush,  tcl, w_rush,  1500000000000, 50000000000, 60000000, 3, now()),
+        (laplace_hash128_blake3('t3/tc_plan'),  p_plan,  tcl, w_plan,  1500000000000, 50000000000, 60000000, 4, now()),
+        (laplace_hash128_blake3('t3/tc_press'), p_press, tcl, w_press, 1500000000000, 50000000000, 60000000, 2, now()),
+        (laplace_hash128_blake3('t3/tc_flag'),  p_flag,  tcl, w_flag,  1500000000000, 50000000000, 60000000, 1, now());
+
+    -- Exactly the witnessed classes come back, in lens-ladder order; classes with no
+    -- witnessed cell (normal/deep here) produce no row rather than a zero row.
+    SELECT array_agg(q.think_class) INTO labels FROM chess_time_pressure_outcome() q;
+    IF labels <> ARRAY['rushed', 'planned_quick', 'pressed_think', 'flagging'] THEN
+        RAISE EXCEPTION 'FAIL: lens dimension wrong or misordered: %', labels;
+    END IF;
+
+    -- plays is the MOVE fold's witness_count, carried not recomputed.
+    SELECT q.plays INTO n FROM chess_time_pressure_outcome() q WHERE q.think_class = 'planned_quick';
+    IF n <> 20 THEN RAISE EXCEPTION 'FAIL: planned_quick plays should be 20, got %', n; END IF;
+
+    -- avg_eff_mu leaves in DISPLAY units (the eff_mu_display /1e9 round).
+    SELECT q.avg_eff_mu INTO mu FROM chess_time_pressure_outcome() q WHERE q.think_class = 'rushed';
+    IF mu <> 1500.000 THEN
+        RAISE EXCEPTION 'FAIL: avg_eff_mu must be display-scale, got %', mu;
+    END IF;
+
+    RAISE NOTICE '✓ chess_read: chess_time_pressure_outcome serves the think-time lens dimension in display units';
+END $$;
+
 ROLLBACK;

@@ -70,4 +70,58 @@ public sealed class PgnClocksTests
         Assert.True(PgnClocks.ThinkFactorFromSpent(spent, median, 4) < 1.0);  // 0.05s snap
         Assert.Equal(1.0, PgnClocks.ThinkFactorFromSpent(spent, 0, 1));       // no median → neutral
     }
+
+    [Fact]
+    public void MedianRemaining_IsPerSide()
+    {
+        var clocks = PgnClocks.SecondsRemaining(Movetext, 6);
+        // parity 0 (first mover): 180/175/155 -> 175; parity 1: 180/178/177 -> 178.
+        Assert.Equal(175d, PgnClocks.MedianRemaining(clocks, 0));
+        Assert.Equal(178d, PgnClocks.MedianRemaining(clocks, 1));
+    }
+
+    [Fact]
+    public void MedianRemaining_ZeroWhenNoClockStory()
+    {
+        Assert.Equal(0d, PgnClocks.MedianRemaining(System.Array.Empty<double>(), 0));
+        Assert.Equal(0d, PgnClocks.MedianRemaining(new[] { 0d, 0d, 0d, 0d }, 1));
+    }
+
+    // ---- the think lenses over synthetic whole-game clock sequences, both dialects ----
+
+    [Fact]
+    public void ThinkLens_LichessDialect_FlagsTheBurnedDownClock()
+    {
+        // Synthetic 12-ply story: the first mover burns 60s down to 2s while the
+        // opponent cruises. medianDrop = 5s, so the 2s clock at ply 10 cannot fund one
+        // median think — flagging, even though the move itself was a long (deep) one.
+        var clocks = new[] { 60d, 60d, 55, 58, 45, 56, 30, 54, 12, 52, 2, 50 };
+        double medianDrop = PgnClocks.MedianDrop(clocks);
+        double medEven = PgnClocks.MedianRemaining(clocks, 0);
+        double tf = PgnClocks.ThinkFactor(clocks, medianDrop, 10);
+        Assert.Equal("flagging",
+            ChessCanonical.ThinkLens(10, clocks.Length, tf, clocks[10], medEven, medianDrop));
+        // The cruising opponent at the same point of the game shows no lens.
+        double tfOpp = PgnClocks.ThinkFactor(clocks, medianDrop, 11);
+        Assert.Null(ChessCanonical.ThinkLens(
+            11, clocks.Length, tfOpp, clocks[11], PgnClocks.MedianRemaining(clocks, 1), medianDrop));
+    }
+
+    [Fact]
+    public void ThinkLens_SpentDialect_EarlyBookIsPlannedQuick_LateSnapIsNot()
+    {
+        // cutechess dialect: spent time only, no remaining clock ever witnessed.
+        var spent = new[] { 0.1, 0.1, 0.2, 0.1, 5.0, 6.0, 5.5, 4.0, 5.0, 6.0, 5.0, 0.5 };
+        double med = PgnClocks.MedianSpent(spent);
+        double tf0 = PgnClocks.ThinkFactorFromSpent(spent, med, 0);
+        Assert.Equal("planned_quick",
+            ChessCanonical.ThinkLens(0, spent.Length, tf0, 0, 0, 0));
+        // Mid-game normal think: no lens.
+        double tf6 = PgnClocks.ThinkFactorFromSpent(spent, med, 6);
+        Assert.Null(ChessCanonical.ThinkLens(6, spent.Length, tf6, 0, 0, 0));
+        // A late snap move is base "rushed" only — and with no witnessed clock the
+        // spent dialect can never fabricate flagging or pressed_think.
+        double tf11 = PgnClocks.ThinkFactorFromSpent(spent, med, 11);
+        Assert.Null(ChessCanonical.ThinkLens(11, spent.Length, tf11, 0, 0, 0));
+    }
 }
