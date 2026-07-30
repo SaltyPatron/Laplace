@@ -230,8 +230,10 @@ public sealed class ChessEngineService : IAsyncDisposable
                 var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
                 rows.Add(new ChessExploreMove(
                     mv.Uci, mv.San,
-                    (r.GetDouble(1) - GlickoPriors.NeutralMu) / 1e9,
-                    r.GetDouble(2) / 1e9,
+                    // chess_moves() returns DISPLAY units (fp1e9 already /1e9-rounded),
+                    // so only the neutral prior still needs scaling here.
+                    r.GetDouble(1) - GlickoPriors.NeutralMu / 1e9,
+                    r.GetDouble(2),
                     r.GetInt64(3),
                     ps.Games,
                     ps.Games > 0 ? ps.Score : null));
