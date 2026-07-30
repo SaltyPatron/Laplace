@@ -199,8 +199,10 @@ internal sealed partial class SubstrateClient
         string idHex, int limit, int offset, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
+        // GH #736: the game-log key column is the playing-EVENT id (the row identifies a
+        // playing; the line is shared content reachable through PLAYS_LINE).
         const string sql = """
-            SELECT encode(game_id, 'hex'), played_on, event, eco, as_white,
+            SELECT encode(event_id, 'hex'), played_on, event, eco, as_white,
                    encode(opponent_id, 'hex'), opponent, result, outcome
             FROM laplace.chess_player_games(@id, @limit, @offset)
             """;

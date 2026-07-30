@@ -93,10 +93,12 @@ public sealed class ChessStockfishEvalTests
     {
         var change = Derive(new ScriptedEvaluator());
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
-        var marker = ChessStockfishEval.MarkerId(parsed.GameId, ChessStockfishEval.Version);
+        // GH #736: the engine verdict is a pure function of the LINE — marker and
+        // watermark key on it, so a second playing re-deposits nothing.
+        var marker = ChessStockfishEval.MarkerId(parsed.LineId, ChessStockfishEval.Version);
         Assert.Contains(change.Entities, e => e.Id == marker);
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == ChessVocabulary.AnalyzedAtType && a.SubjectId == parsed.GameId
+            a.TypeId == ChessVocabulary.AnalyzedAtType && a.SubjectId == parsed.LineId
             && a.SourceId == ChessStockfishEval.SourceId);
     }
 

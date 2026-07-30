@@ -180,6 +180,18 @@ public static class ChessGraph
     }
 
     /// <summary>
+    /// GH #736 position-grain motif: (position, HAS_MOTIF, motif concept), ctx = null so
+    /// every game that reaches the position corroborates the SAME cell — the
+    /// shared-content sibling of the line-grain GAME_HAS_MOTIF (one family).
+    /// </summary>
+    internal static void AppendPositionMotif(
+    SubstrateChangeBuilder b, Hash128 positionId, string motif, double witnessWeight, Hash128 sourceId)
+    {
+        if (ContentEmitter.Emit(b, motif, sourceId) is not { } mid) return;
+        b.AddAttestation(NativeAttestation.Categorical(positionId, "HAS_MOTIF", mid, sourceId, null, witnessWeight));
+    }
+
+    /// <summary>
     /// Emit the position (and its substructures) as content nodes and return the position id.
     /// For lanes that attest onto a position without emitting a MOVE edge for it — e.g. the
     /// chess-book decomposer grounding prose commentary to the exact position it explains.
@@ -300,6 +312,16 @@ public static class ChessGraph
     /// consensus cells aggregate. PLAYED_BY was declared in the manifest and never emitted; this
     /// is the edge it was reserved for.
     /// </summary>
+    /// <summary>
+    /// GH #736: the line's own fold cell — (line, OUTCOME, Chess_Result), one witness per
+    /// playing, white-POV score. witness_count IS "times this line was played"; eff_mu IS
+    /// how the line fares. ctx = the playing-event, so evidence stays per-playing.
+    /// </summary>
+    public static void AppendLineOutcome(
+        SubstrateChangeBuilder b, Hash128 lineId, PlyOutcome whitePov,
+        double witnessWeight, Hash128 src, Hash128 eventId)
+        => b.AddAttestation(Outcome(lineId, games: 1, ScoreFp1e9(whitePov), witnessWeight, src, eventId));
+
     public static void AppendPlayerResult(
         SubstrateChangeBuilder b, Hash128 player, Hash128? opponent, PlyOutcome outcome,
         double witnessWeight, Hash128 src, Hash128 gameId)

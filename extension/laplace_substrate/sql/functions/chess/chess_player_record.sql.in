@@ -15,11 +15,17 @@ CREATE OR REPLACE FUNCTION chess_player_record(p_player bytea)
     -- score is the chess convention -- (wins + draws/2) / scored games -- over
     -- games the source actually scored; `unscored` reports the abstentions
     -- separately rather than silently folding them in as losses.
+    -- GH #736: a colour header subjects on the shared LINE with context = the
+    -- PLAYING, so the result join threads both -- the line finds the rows, the
+    -- context pins each to its own playing (a shared line must not cross one
+    -- playing's result onto another's appearance).
     WITH sides AS (
-        SELECT a.subject_id AS game,
+        SELECT a.subject_id AS line,
+               a.context_id AS event,
                (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
         FROM @extschema@.attestations a
         WHERE a.object_id = p_player
+          AND a.context_id IS NOT NULL
           AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
                             @extschema@.relation_type_id('HAS_BLACK'))
     ),
@@ -28,7 +34,8 @@ CREATE OR REPLACE FUNCTION chess_player_record(p_player bytea)
                @extschema@.chess_outcome(s.white, r.object_id) AS outcome
         FROM sides s
         LEFT JOIN @extschema@.attestations r
-               ON r.subject_id = s.game
+               ON r.subject_id = s.line
+              AND r.context_id = s.event
               AND r.type_id = @extschema@.relation_type_id('HAS_RESULT')
     )
     SELECT sc.white,

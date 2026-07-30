@@ -32,15 +32,15 @@ public sealed class ChessAnalyzerWatermarkTests
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
-        reader.Present.Add(ChessVocabulary.AnalysisMarkerId(a.GameId, ChessAnalyze.Version));
+        reader.Present.Add(ChessVocabulary.AnalysisMarkerId(a.EventId, ChessAnalyze.Version));
 
         var kept = new List<Hash128>();
-        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedGameIdsAsync(
-            [a.GameId, b.GameId], reader, CancellationToken.None))
+        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedEventIdsAsync(
+            [a.EventId, b.EventId], reader, CancellationToken.None))
             kept.Add(id);
 
         Assert.Single(kept);
-        Assert.Equal(b.GameId, kept[0]);
+        Assert.Equal(b.EventId, kept[0]);
     }
 
     [Fact]
@@ -49,8 +49,8 @@ public sealed class ChessAnalyzerWatermarkTests
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var kept = new List<Hash128>();
-        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedGameIdsAsync(
-            [a.GameId, b.GameId], new FakeReader(), CancellationToken.None))
+        await foreach (var id in ChessWitnessHydrator.FilterUnanalyzedEventIdsAsync(
+            [a.EventId, b.EventId], new FakeReader(), CancellationToken.None))
             kept.Add(id);
         Assert.Equal(2, kept.Count);
     }
