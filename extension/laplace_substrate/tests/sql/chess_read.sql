@@ -25,6 +25,7 @@ DECLARE
     got      bytea[];
     n        bigint;
     s        double precision;
+    s2       double precision;
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
@@ -65,6 +66,13 @@ BEGIN
 
     SELECT count(*) INTO n FROM chess_moves(pos, 2);
     IF n <> 2 THEN RAISE EXCEPTION 'FAIL: chess_moves LIMIT 2 returned % rows', n; END IF;
+
+    -- eff_mu/rd leave chess_moves in DISPLAY units (the eff_mu_display /1e9 round),
+    -- never raw fp1e9: the strong continuation is 1500.0 / 50.0, not 1.5e12 / 5e10.
+    SELECT q.eff_mu, q.rd INTO s, s2 FROM chess_moves(pos, 1) q;
+    IF s <> 1500.0 OR s2 <> 50.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_moves must return display-scale eff_mu/rd, got %/%', s, s2;
+    END IF;
 
     -- chess_player_moves: only the game where the player held the queried color.
     SELECT count(*) INTO n FROM chess_player_moves(pos, player, true);
@@ -126,6 +134,8 @@ DECLARE
     pl_sa   bytea := word_id('a');
     pl_sb   bytea := word_id('b');
     pl_sc   bytea := word_id('c');
+    cap_t   bytea := word_id('T');
+    tname   bytea := laplace_hash128_blake3('t2/name/tal');
     ids_got bytea[];
     n       bigint;
     w       bigint;
@@ -133,6 +143,9 @@ DECLARE
     l       bigint;
     u       bigint;
     sc      double precision;
+    ra      double precision;
+    rdv     double precision;
+    mu      double precision;
     b       boolean;
     got     bytea;
     txt     text;
@@ -318,11 +331,49 @@ BEGIN
     SELECT player_id INTO got FROM chess_ranked(1, 1);
     IF got <> botv THEN RAISE EXCEPTION 'FAIL: chess_ranked OFFSET 1 should be Botvinnik'; END IF;
 
+    -- rating/rd/eff_mu leave chess_ranked in DISPLAY units (the eff_mu_display /1e9
+    -- round), never raw fp1e9: Tal's cell is 1900.0 / 50.0 / 1800.0, not 1.9e12.
+    SELECT r.rating, r.rd, r.eff_mu INTO ra, rdv, mu FROM chess_ranked(10) r WHERE r.player_id = tal;
+    IF ra <> 1900.0 OR rdv <> 50.0 OR mu <> 1800.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_ranked must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
+
     -- Head to head is ONE folded cell per pairing: 28 meetings, 28 witnesses, no regroup.
     SELECT games INTO n FROM chess_head_to_head(tal, 10) WHERE opponent_id = botv;
     IF n <> 28 THEN RAISE EXCEPTION 'FAIL: head-to-head should carry 28 witnesses, got %', n; END IF;
     SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
+
+    -- ... and its rating columns are display-scale too: 1700.0 / 60.0 / 1580.0.
+    SELECT h.rating, h.rd, h.eff_mu INTO ra, rdv, mu
+      FROM chess_head_to_head(tal, 10) h WHERE h.opponent_id = botv;
+    IF ra <> 1700.0 OR rdv <> 60.0 OR mu <> 1580.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_head_to_head must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
+
+    -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
+    -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
+    -- the same display-scale law on the rating columns.
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (cap_t, 0, type_t, src), (tname, 0, type_t, src);
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
+            'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+            laplace_trajectory_build(ARRAY[cap_t]), 1, now());
+    INSERT INTO consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (laplace_hash128_blake3('t2/c_alias'), tal, relation_type_id('HAS_NAME_ALIAS'),
+            tname, 1500000000000, 50000000000, 60000000, 1, now());
+
+    SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
+      FROM chess_players_by_initial('T', 10, 0) p WHERE p.player_id = tal;
+    IF ra IS NULL THEN
+        RAISE EXCEPTION 'FAIL: chess_players_by_initial did not surface Tal under T';
+    END IF;
+    IF ra <> 1900.0 OR rdv <> 50.0 OR mu <> 1800.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_players_by_initial must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
 
     -- chess_game_plies: a game read back as LOOKUPS. The line is built with the SAME native
     -- packer the compose path uses (laplace_trajectory_build, now bound to SQL), so this

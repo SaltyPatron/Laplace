@@ -41,9 +41,11 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
     SELECT rec.opponent,
            COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),
            rec.games,
-           rec.rating::double precision,
-           rec.rd::double precision,
-           @extschema@.eff_mu(rec.rating, rec.rd)::double precision
+           -- DISPLAY units, never raw fp1e9: eff_mu_display is the one scaling law
+           -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           round((rec.rating / 1e9)::numeric, 3)::double precision,
+           round((rec.rd / 1e9)::numeric, 3)::double precision,
+           @extschema@.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.opponent
     ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.opponent

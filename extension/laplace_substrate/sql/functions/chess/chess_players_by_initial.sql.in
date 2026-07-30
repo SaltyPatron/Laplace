@@ -65,9 +65,11 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
     SELECT rated.player,
            COALESCE(NULLIF(s.txt, ''), encode(rated.player, 'hex')),
            rated.games,
-           rated.rating::double precision,
-           rated.rd::double precision,
-           @extschema@.eff_mu(rated.rating, rated.rd)::double precision
+           -- DISPLAY units, never raw fp1e9: eff_mu_display is the one scaling law
+           -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           round((rated.rating / 1e9)::numeric, 3)::double precision,
+           round((rated.rd / 1e9)::numeric, 3)::double precision,
+           @extschema@.eff_mu_display(rated.rating, rated.rd)::double precision
     FROM rated
     LEFT JOIN surfaced s ON s.id = rated.player
     ORDER BY @extschema@.eff_mu(rated.rating, rated.rd) DESC, rated.player

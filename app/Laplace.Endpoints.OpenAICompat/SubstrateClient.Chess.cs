@@ -122,8 +122,10 @@ internal sealed partial class SubstrateClient
         const string sql = """
             WITH p AS (SELECT laplace.chess_player_id(@name) AS id)
             SELECT encode(p.id, 'hex'), laplace.label_or_hex(p.id),
-                   c.witness_count, c.rating::double precision, c.rd::double precision,
-                   laplace.eff_mu(c.rating, c.rd)::double precision
+                   c.witness_count,
+                   round((c.rating / 1e9)::numeric, 3)::double precision,
+                   round((c.rd / 1e9)::numeric, 3)::double precision,
+                   laplace.eff_mu_display(c.rating, c.rd)::double precision
             FROM p
             JOIN laplace.consensus c
               ON c.subject_id = p.id
