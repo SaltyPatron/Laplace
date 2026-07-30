@@ -96,9 +96,14 @@ BEGIN
     RAISE NOTICE '✓ chess_read: chess_moves ranks by eff_mu, player repertoire follows color+context, typed consensus_by_ids prunes';
 END $$;
 NOTICE:  ✓ chess_read: chess_moves ranks by eff_mu, player repertoire follows color+context, typed consensus_by_ids prunes
--- The player/game read surface: name folding, the W/L/D law, and the four reads a
--- career page is built from. Four synthetic games between three players, one of
--- them deliberately left unscored so abstention can be told apart from a draw.
+-- The player/game read surface across the GH #736 line/event re-key: name
+-- folding, the W/L/D law, and the reads a career page is built from. Four
+-- synthetic PLAYINGS between three players -- the game CONTENT is a LINE, the
+-- playing is an EVENT holding a (event, PLAYS_LINE, line) record edge, and
+-- every header subjects on the LINE with context = the event (EmitGame). One
+-- playing is deliberately left unscored so abstention can be told apart from a
+-- draw, and it SHARES its line with a scored playing so the context threading
+-- is what keeps their records apart.
 DO $$
 DECLARE
     type_t  bytea := laplace_hash128_blake3('Type');
@@ -106,14 +111,26 @@ DECLARE
     hb      bytea := relation_type_id('HAS_BLACK');
     hr      bytea := relation_type_id('HAS_RESULT');
     hrat    bytea := relation_type_id('HAS_RATING');
+    plns    bytea := relation_type_id('PLAYS_LINE');
+    od      bytea := relation_type_id('ON_DATE');
+    hev     bytea := relation_type_id('HAS_EVENT');
+    heco    bytea := relation_type_id('HAS_ECO');
+    hmt     bytea := relation_type_id('HAS_MOVETEXT');
+    mq      bytea := relation_type_id('MOVE_QUALITY');
+    outc    bytea := relation_type_id('OUTCOME');
+    cres    bytea := entity_type_id('Chess_Result');
     src     bytea := laplace_hash128_blake3('test/chess2/source');
     tal     bytea := chess_player_id('Tal, Mikhail');
     botv    bytea := chess_player_id('Botvinnik, Mikhail');
     spas    bytea := chess_player_id('Spassky, Boris');
-    g1      bytea := laplace_hash128_blake3('test/chess2/g1');
-    g2      bytea := laplace_hash128_blake3('test/chess2/g2');
-    g3      bytea := laplace_hash128_blake3('test/chess2/g3');
-    g4      bytea := laplace_hash128_blake3('test/chess2/g4');
+    -- playing-events and the lines they play; ln_a is SHARED by e1 and e4
+    e1      bytea := laplace_hash128_blake3('test/chess2/e1');
+    e2      bytea := laplace_hash128_blake3('test/chess2/e2');
+    e3      bytea := laplace_hash128_blake3('test/chess2/e3');
+    e4      bytea := laplace_hash128_blake3('test/chess2/e4');
+    ln_a    bytea := laplace_hash128_blake3('test/chess2/line_a');
+    ln_b    bytea := laplace_hash128_blake3('test/chess2/line_b');
+    ln_c    bytea := laplace_hash128_blake3('test/chess2/line_c');
     r_white bytea := word_id('1-0');
     r_black bytea := word_id('0-1');
     r_draw  bytea := word_id('1/2-1/2');
@@ -123,14 +140,22 @@ DECLARE
     pl_p0   bytea := laplace_hash128_blake3('t2/plies/p0');
     pl_p1   bytea := laplace_hash128_blake3('t2/plies/p1');
     pl_p2   bytea := laplace_hash128_blake3('t2/plies/p2');
-    pl_game bytea := laplace_hash128_blake3('t2/plies/game');
-    -- SAN surfaces for the ply fixture. SINGLE CODEPOINTS on purpose: chess_game_plies
-    -- returns the REALIZED san text, and a tier-0 codepoint renders straight from the
-    -- perfcache with no constituents deposited. A multi-codepoint word_id (the result
-    -- tokens '1-0'/'1/2-1/2' this fixture used to reuse here) is a composed entity whose
-    -- surface needs its constituent chain, which this fixture never deposits -- so it
-    -- realized to NULL and `WHERE san IS NOT NULL` counted 0. Same trick converse.sql
-    -- uses for word_id('p').
+    pl_line bytea := laplace_hash128_blake3('t2/plies/line');
+    pl_event bytea := laplace_hash128_blake3('t2/plies/event');
+    -- Header and SAN surfaces. SINGLE CODEPOINTS on purpose: these reads return
+    -- REALIZED text, and a tier-0 codepoint renders straight from the perfcache
+    -- with no constituents deposited. A multi-codepoint word_id (the result
+    -- tokens '1-0'/'1/2-1/2' this fixture used to reuse here) is a composed
+    -- entity whose surface needs its constituent chain, which this fixture
+    -- never deposits -- so it realized to NULL and `WHERE san IS NOT NULL`
+    -- counted 0. Same trick converse.sql uses for word_id('p').
+    d1      bytea := word_id('1');
+    d2      bytea := word_id('2');
+    d3      bytea := word_id('3');
+    en      bytea := word_id('e');
+    ec      bytea := word_id('C');
+    mt      bytea := word_id('m');
+    qg      bytea := word_id('g');
     pl_sa   bytea := word_id('a');
     pl_sb   bytea := word_id('b');
     pl_sc   bytea := word_id('c');
@@ -185,36 +210,63 @@ BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
         (tal, 0, type_t, src), (botv, 0, type_t, src), (spas, 0, type_t, src),
-        (g1, 0, type_t, src), (g2, 0, type_t, src),
-        (g3, 0, type_t, src), (g4, 0, type_t, src),
+        (e1, 0, type_t, src), (e2, 0, type_t, src),
+        (e3, 0, type_t, src), (e4, 0, type_t, src),
+        (ln_a, 0, type_t, src), (ln_b, 0, type_t, src), (ln_c, 0, type_t, src),
         (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
+        (d1, 0, type_t, src), (d2, 0, type_t, src), (d3, 0, type_t, src),
+        (en, 0, type_t, src), (ec, 0, type_t, src), (mt, 0, type_t, src),
         (elo, 0, type_t, src), (pos_probe, 0, type_t, src);
 
-    -- g1 Tal(W) beat Botvinnik   g2 Botvinnik(W) beat Tal
-    -- g3 Tal(W) drew Spassky     g4 Tal(W) v Botvinnik, never scored
+    -- e1 Tal(W) beat Botvinnik on ln_a    e2 Botvinnik(W) beat Tal on ln_b
+    -- e3 Tal(W) drew Spassky on ln_c      e4 Tal(W) v Botvinnik, never scored,
+    -- and e4 REPLAYS ln_a: the same content played twice. (event, PLAYS_LINE,
+    -- line) is the one event-subject record edge the game reads hop, carrying
+    -- the playing's white-POV score; every header subjects on the LINE with
+    -- ctx = its own playing, so e1's result must never cross onto e4's
+    -- appearance.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('t2/g1w'), g1, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g1b'), g1, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g1r'), g1, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g2w'), g2, hw, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g2b'), g2, hb, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g2r'), g2, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g3w'), g3, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g3b'), g3, hb, spas, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g3r'), g3, hr, r_draw, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g4w'), g4, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/g4b'), g4, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1pl'), e1, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2pl'), e2, plns, ln_b, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3pl'), e3, plns, ln_c, src, NULL, 1, now(), 1, 500000000, 30000000000),
+        (laplace_hash128_blake3('t2/e4pl'), e4, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1w'), ln_a, hw, tal,  src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1b'), ln_a, hb, botv, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1r'), ln_a, hr, r_white, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1d'), ln_a, od, d1, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1e'), ln_a, hev, en, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1c'), ln_a, heco, ec, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1m'), ln_a, hmt, mt, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2w'), ln_b, hw, botv, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2b'), ln_b, hb, tal,  src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2r'), ln_b, hr, r_white, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2d'), ln_b, od, d2, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3w'), ln_c, hw, tal,  src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3b'), ln_c, hb, spas, src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3r'), ln_c, hr, r_draw, src, e3, 1, now(), 1, 500000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3d'), ln_c, od, d3, src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e4w'), ln_a, hw, tal,  src, e4, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e4b'), ln_a, hb, botv, src, e4, 2, now(), 1, 1000000000, 30000000000),
+        -- the players' own aggregating lane (AppendPlayerResult), ctx = the playing
+        (laplace_hash128_blake3('t2/e1ot'), tal,  outc, cres, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e1ob'), botv, outc, cres, src, e1, 0, now(), 1, 0, 30000000000),
+        (laplace_hash128_blake3('t2/e2ob'), botv, outc, cres, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/e2ot'), tal,  outc, cres, src, e2, 0, now(), 1, 0, 30000000000),
+        (laplace_hash128_blake3('t2/e3ot'), tal,  outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
+        (laplace_hash128_blake3('t2/e3os'), spas, outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
         -- an Elo tag whose surface cannot be rendered back to digits
-        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, g1, 2, now(), 1, 1000000000, 30000000000);
+        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, e1, 2, now(), 1, 1000000000, 30000000000);
 
-    -- chess_player_record: the career total. 4 games — one won, one lost, one
+    -- chess_player_record: the career total. 4 playings — one won, one lost, one
     -- drawn, one the source never scored. score is over SCORED games only:
     -- (1 win + 1/2 draw) / 3 = 0.5. Counting the unscored game as a loss would
     -- give 0.375, and silently dropping it from `games` would hide it entirely.
+    -- e4 shares ln_a with e1, so this only holds if the result join threads the
+    -- CONTEXT: on the line alone, e1's 1-0 would score e4 too.
     SELECT games, wins, draws, losses, unscored, score
       INTO n, w, d, l, u, sc
       FROM chess_player_record(tal) WHERE as_white IS NULL;
@@ -244,22 +296,32 @@ BEGIN
      WHERE as_white IS NULL;
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unwitnessed player reported % games', n; END IF;
 
-    -- chess_player_games: the log behind the record. The Black game is the loss,
-    -- and it names the opponent from the far side of the same game.
+    -- chess_player_games: the log behind the record, keyed by the playing-EVENT
+    -- id and ordered by each playing's own asserted date, most recent first —
+    -- the undated e4 sorts last rather than being dropped. The Black game is the
+    -- loss, and it names the opponent from the far side of the same playing.
     SELECT count(*) INTO n FROM chess_player_games(tal, 25, 0);
     IF n <> 4 THEN RAISE EXCEPTION 'FAIL: Tal game log expected 4 rows, got %', n; END IF;
+    SELECT g.event_id INTO got FROM chess_player_games(tal, 25, 0) g LIMIT 1;
+    IF got <> e3 THEN RAISE EXCEPTION 'FAIL: the log should lead with the latest dated playing (e3)'; END IF;
     SELECT as_white, outcome, opponent_id INTO b, l, got
-      FROM chess_player_games(tal, 25, 0) WHERE game_id = g2;
+      FROM chess_player_games(tal, 25, 0) WHERE event_id = e2;
     IF b OR l <> 0 OR got <> botv THEN
-        RAISE EXCEPTION 'FAIL: g2 should be Tal as Black, lost, to Botvinnik — got %/%/%', b, l, got;
+        RAISE EXCEPTION 'FAIL: e2 should be Tal as Black, lost, to Botvinnik — got %/%/%', b, l, got;
     END IF;
-    -- the unscored game is LISTED, with an abstaining outcome
-    SELECT outcome INTO l FROM chess_player_games(tal, 25, 0) WHERE game_id = g4;
+    -- the unscored playing is LISTED, with an abstaining outcome — even though
+    -- its shared line carries e1's result under e1's context
+    SELECT outcome INTO l FROM chess_player_games(tal, 25, 0) WHERE event_id = e4;
     IF l IS NOT NULL THEN
-        RAISE EXCEPTION 'FAIL: the unscored game was given outcome % instead of abstaining', l;
+        RAISE EXCEPTION 'FAIL: the unscored playing was given outcome % instead of abstaining', l;
+    END IF;
+    -- the transcribed headers ride the same line+context join
+    SELECT g.eco INTO txt FROM chess_player_games(tal, 25, 0) g WHERE g.event_id = e1;
+    IF txt IS DISTINCT FROM 'C' THEN
+        RAISE EXCEPTION 'FAIL: e1 ECO should realize to C, got %', txt;
     END IF;
     -- with no renderable name, the opponent falls back to its id rather than blank
-    SELECT opponent INTO txt FROM chess_player_games(tal, 25, 0) WHERE game_id = g1;
+    SELECT opponent INTO txt FROM chess_player_games(tal, 25, 0) WHERE event_id = e1;
     IF txt IS NULL OR txt = '' THEN
         RAISE EXCEPTION 'FAIL: nameless opponent rendered empty instead of falling back to hex';
     END IF;
@@ -269,13 +331,19 @@ BEGIN
     SELECT count(*) INTO n FROM chess_player_games(tal, 25, 4);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: paging past the end got % rows', n; END IF;
 
-    -- chess_game: the headers, both sides followable back to their careers
-    SELECT white_id INTO got FROM chess_game(g1);
-    IF got <> tal THEN RAISE EXCEPTION 'FAIL: g1 White should be Tal'; END IF;
-    SELECT black_id INTO got FROM chess_game(g1);
-    IF got <> botv THEN RAISE EXCEPTION 'FAIL: g1 Black should be Botvinnik'; END IF;
+    -- chess_game: the playing-EVENT handle hops (event, PLAYS_LINE, line) to the
+    -- content, then reads the headers pinned to THIS playing's context — both
+    -- sides followable back to their careers, and the record movetext rendered
+    SELECT white_id INTO got FROM chess_game(e1);
+    IF got <> tal THEN RAISE EXCEPTION 'FAIL: e1 White should be Tal'; END IF;
+    SELECT black_id INTO got FROM chess_game(e1);
+    IF got <> botv THEN RAISE EXCEPTION 'FAIL: e1 Black should be Botvinnik'; END IF;
+    SELECT played_on INTO txt FROM chess_game(e1);
+    IF txt IS DISTINCT FROM '1' THEN RAISE EXCEPTION 'FAIL: e1 date should realize to 1, got %', txt; END IF;
+    SELECT movetext INTO txt FROM chess_game(e1);
+    IF txt IS DISTINCT FROM 'm' THEN RAISE EXCEPTION 'FAIL: e1 movetext should render to m, got %', txt; END IF;
     SELECT count(*) INTO n FROM chess_game(laplace_hash128_blake3('test/chess2/no_such_game'));
-    IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unwitnessed game returned % rows', n; END IF;
+    IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unwitnessed playing returned % rows', n; END IF;
 
     -- chess_player_ratings: an Elo tag that will not render back to digits is an
     -- unreadable witness and is SKIPPED, never coerced to a number.
@@ -303,7 +371,10 @@ BEGIN
         (laplace_hash128_blake3('t2/c_spas'), spas, relation_type_id('OUTCOME'),
              entity_type_id('Chess_Result'), 1500000000000, 200000000000, 60000000, 1, now()),
         (laplace_hash128_blake3('t2/h2h'),    tal,  relation_type_id('PLAYED_BY'),
-             botv, 1700000000000, 60000000000, 60000000, 28, now());
+             botv, 1700000000000, 60000000000, 60000000, 28, now()),
+        -- the LINE's own fold cell (GH #736): witness_count IS times played (e1 + e4)
+        (laplace_hash128_blake3('t2/c_line_a'), ln_a, relation_type_id('OUTCOME'),
+             entity_type_id('Chess_Result'), 1700000000000, 50000000000, 60000000, 2, now());
 
     SELECT player_id INTO got FROM chess_ranked(10) WHERE rank = 1;
     IF got <> tal THEN RAISE EXCEPTION 'FAIL: chess_ranked rank 1 should be Tal (highest eff_mu)'; END IF;
@@ -313,7 +384,8 @@ BEGIN
     IF n <> 40 THEN RAISE EXCEPTION 'FAIL: chess_ranked games should be witness_count (40), got %', n; END IF;
 
     -- The thin one-game record sinks on RD rather than flattering itself -- no floor needed,
-    -- and no floor used: he is still on the board, just last.
+    -- and no floor used: he is still on the board, just last. The line's identically shaped
+    -- (OUTCOME, Chess_Result) cell stays out: it is not a Chess_Player subject.
     SELECT count(*) INTO n FROM chess_ranked(10);
     IF n <> 3 THEN RAISE EXCEPTION 'FAIL: chess_ranked expected 3 players, got %', n; END IF;
     SELECT rank INTO n FROM chess_ranked(10) WHERE player_id = spas;
@@ -352,6 +424,21 @@ BEGIN
         RAISE EXCEPTION 'FAIL: chess_head_to_head must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
     END IF;
 
+    -- chess_line: the line-grain read the re-key pays for. ln_a was played
+    -- twice — e1 scored and dated, e4 neither — so it returns one row per
+    -- playing, each pinned to its OWN headers by context, while the line's
+    -- single fold cell repeats on both: witness_count IS times played.
+    SELECT count(*) INTO n FROM chess_line(ln_a);
+    IF n <> 2 THEN RAISE EXCEPTION 'FAIL: chess_line expected 2 playings of the shared line, got %', n; END IF;
+    SELECT cl.event_id INTO got FROM chess_line(ln_a) cl LIMIT 1;
+    IF got <> e1 THEN RAISE EXCEPTION 'FAIL: chess_line should lead with the dated playing (e1)'; END IF;
+    SELECT cl.played_on, cl.times_played INTO txt, n FROM chess_line(ln_a) cl WHERE cl.event_id = e4;
+    IF txt IS NOT NULL OR n <> 2 THEN
+        RAISE EXCEPTION 'FAIL: e4 should be undated yet carry the shared fold (2 plays), got %/%', txt, n;
+    END IF;
+    SELECT count(*) INTO n FROM chess_line(laplace_hash128_blake3('test/chess2/no_such_line'));
+    IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a line nobody played returned % rows', n; END IF;
+
     -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
     -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
     -- the same display-scale law on the rating columns.
@@ -376,16 +463,19 @@ BEGIN
         RAISE EXCEPTION 'FAIL: chess_players_by_initial must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
     END IF;
 
-    -- chess_game_plies: a game read back as LOOKUPS. The line is built with the SAME native
-    -- packer the compose path uses (laplace_trajectory_build, now bound to SQL), so this
-    -- fixture is byte-identical to a real deposit rather than a hand-rolled imitation.
+    -- chess_game_plies: a playing read back as LOOKUPS. The trajectory lives on
+    -- the LINE (built with the SAME native packer the compose path uses, so this
+    -- fixture is byte-identical to a real deposit), the playing-EVENT hops to it
+    -- through PLAYS_LINE, and per-ply facts join by context: the EVENT for this
+    -- playing's own testimony, the LINE for line-grain engine testimony.
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (pl_p0, 0, type_t, src), (pl_p1, 0, type_t, src), (pl_p2, 0, type_t, src),
-        (pl_game, 0, type_t, src), (pl_sa, 0, type_t, src), (pl_sb, 0, type_t, src),
-        (pl_sc, 0, type_t, src);
+        (pl_line, 0, type_t, src), (pl_event, 0, type_t, src),
+        (pl_sa, 0, type_t, src), (pl_sb, 0, type_t, src),
+        (pl_sc, 0, type_t, src), (qg, 0, type_t, src);
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('t2/plies/phys'), pl_game, 1,
+    VALUES (laplace_hash128_blake3('t2/plies/phys'), pl_line, 1,
             'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
             laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]), 3, now());
 
@@ -402,35 +492,49 @@ BEGIN
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
+        (laplace_hash128_blake3('t2/plies/pl'), pl_event, plns, pl_line, src, NULL, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sa, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
+             pl_sa, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
-             pl_sb, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
-        -- another game's ply on the SAME shared position: context_id must exclude it
+             pl_sb, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
+        -- line-grain engine testimony rides ctx = the LINE and must be included
+        (laplace_hash128_blake3('t2/plies/qual'), pl_p1, mq,
+             qg, src, pl_line, 2, now(), 1, 1000000000, 30000000000),
+        -- another playing's ply on the SAME shared position: context must exclude it
         (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sc, src, g1, 2, now(), 1, 1000000000, 30000000000);
+             pl_sc, src, e1, 2, now(), 1, 1000000000, 30000000000);
 
-    SELECT count(*) INTO n FROM chess_game_plies(pl_game);
+    SELECT count(*) INTO n FROM chess_game_plies(pl_event);
     IF n <> 3 THEN
         RAISE EXCEPTION 'FAIL: chess_game_plies expected 3 vertices, got %', n;
     END IF;
 
     -- vertex 1 is the starting position; the SAN on a vertex is the move that LEFT it,
-    -- and the OTHER game's SAN on the same shared position must not appear
-    SELECT position_id INTO got FROM chess_game_plies(pl_game) WHERE ply = 1;
+    -- and the OTHER playing's SAN on the same shared position must not appear
+    SELECT position_id INTO got FROM chess_game_plies(pl_event) WHERE ply = 1;
     IF got <> pl_p0 THEN RAISE EXCEPTION 'FAIL: vertex 1 is not the start position'; END IF;
-    SELECT count(*) INTO n FROM chess_game_plies(pl_game) WHERE san IS NOT NULL;
+    SELECT count(*) INTO n FROM chess_game_plies(pl_event) WHERE san IS NOT NULL;
     IF n <> 2 THEN
-        RAISE EXCEPTION 'FAIL: expected 2 SANs scoped to this game, got % (context leak?)', n;
+        RAISE EXCEPTION 'FAIL: expected 2 SANs scoped to this playing, got % (context leak?)', n;
+    END IF;
+    -- ... and the line-grain quality joins through the LINE context branch
+    SELECT count(*) INTO n FROM chess_game_plies(pl_event) WHERE move_quality IS NOT NULL;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: line-grain move quality expected on exactly 1 ply, got %', n;
     END IF;
 
-    -- a game with no trajectory returns nothing rather than guessing an order
-    SELECT count(*) INTO n FROM chess_game_plies(g1);
+    -- a playing whose line has no trajectory returns nothing rather than guessing
+    -- an order, and so does an event handle with no PLAYS_LINE record at all
+    SELECT count(*) INTO n FROM chess_game_plies(e1);
     IF n <> 0 THEN
-        RAISE EXCEPTION 'FAIL: a game with no trajectory returned % rows instead of abstaining', n;
+        RAISE EXCEPTION 'FAIL: a line with no trajectory returned % rows instead of abstaining', n;
+    END IF;
+    SELECT count(*) INTO n FROM chess_game_plies(laplace_hash128_blake3('test/chess2/no_such_game'));
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL: an unrecorded playing returned % rows', n;
     END IF;
 
-    RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu';
+    RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored playings, career and log reconcile through the line/event re-key, folded reads rank by eff_mu';
 END $$;
-NOTICE:  ✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored games, career and log reconcile, folded reads rank by eff_mu
+NOTICE:  ✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored playings, career and log reconcile through the line/event re-key, folded reads rank by eff_mu
 ROLLBACK;
