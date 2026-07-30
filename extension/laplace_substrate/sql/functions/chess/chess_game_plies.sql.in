@@ -1,12 +1,19 @@
-CREATE OR REPLACE FUNCTION chess_game_plies(p_game bytea)
+-- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
+-- CREATE OR REPLACE cannot do on the upgrade path.
+DROP FUNCTION IF EXISTS chess_game_plies(bytea);
+CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
     RETURNS TABLE(ply integer, position_id bytea, san text, clock text,
                   eval_token text, think_class text, move_quality text)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- A game read back as LOOKUPS. Every per-ply fact is already an attestation keyed by
-    -- context_id = the game -- MOVE, HAS_SAN, HAS_CLOCK, HAS_EVAL_TOKEN, HAS_THINK_CLASS,
-    -- MOVE_QUALITY -- and the ordered line of boards is the game's own trajectory. So the
-    -- whole thing is one trajectory decode plus one indexed pass per relation, joined on the
-    -- position each fact hangs from.
+    -- A playing read back as LOOKUPS (GH #736). The parameter is the playing-EVENT
+    -- handle; hop 1 follows (event, PLAYS_LINE, line) to the game CONTENT. Every
+    -- per-ply fact is already an attestation keyed by context -- the EVENT for
+    -- this playing's own testimony (clock/eval-token/think-class/quality the
+    -- analyzer derived from ITS annotations) and the LINE for line-grain engine
+    -- testimony (stockfish quality, a pure function of the position along the
+    -- line) -- and the ordered boards are the LINE's trajectory. So the whole
+    -- thing is one hop, one trajectory decode and one indexed pass, joined on
+    -- the position each fact hangs from.
     --
     -- It was previously reconstructed by replaying the verbatim movetext through the chess
     -- engine on every request: parsing SAN, applying moves, re-deriving boards the analyzer
@@ -14,30 +21,38 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_game bytea)
     -- already written -- the same mistake as aggregating a record that the fold had folded.
     -- Nothing here parses chess.
     --
-    -- ORDER comes from the trajectory, which is the authority for the sequence: the game's
+    -- ORDER comes from the trajectory, which is the authority for the sequence: the line's
     -- physicality packs its position ids into the linestring mantissa, and
     -- trajectory_unpacked_points decodes them back in order, losslessly. Vertex 1 is the
     -- starting position, so ply N is vertex N+1 and the SAN hanging off vertex N is the move
     -- that LEFT it -- which is why san/clock join on the from-position, not the to-position.
     --
-    -- A game with no trajectory returns nothing rather than guessing an order. That is the
-    -- honest answer for a game recorded before the analyzer ran; the caller replays the
-    -- movetext for those.
-    WITH line AS MATERIALIZED (
+    -- A line with no trajectory returns nothing rather than guessing an order. That is the
+    -- honest answer for a playing recorded before the trajectory lane ran; the caller
+    -- replays the movetext for those.
+    WITH played AS MATERIALIZED (
+        SELECT pl.object_id AS line
+        FROM @extschema@.attestations pl
+        WHERE pl.subject_id = p_event
+          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+        LIMIT 1
+    ),
+    line AS MATERIALIZED (
         -- trajectory_unpacked_points returns (entity_id, run_length, ctier) and NO ordinal:
         -- the sequence is the ROW ORDER of the decode, so WITH ORDINALITY is what names it.
         -- Reading a column that does not exist was a runtime resolution failure, invisible to
         -- a build and to a regress case that only exercised the no-trajectory branch.
         SELECT u.ord AS ordinal, u.entity_id AS pos
-        FROM @extschema@.trajectory_unpacked_points(p_game)
+        FROM played p,
+             LATERAL @extschema@.trajectory_unpacked_points(p.line)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
     facts AS MATERIALIZED (
-        -- One indexed pass over this game's per-ply evidence. context_id IS the game, so
-        -- this is the provenance edge doing exactly the job it was deposited for.
+        -- One indexed pass over this playing's per-ply evidence, both context grains.
         SELECT a.subject_id AS pos, a.type_id, a.object_id
         FROM @extschema@.attestations a
-        WHERE a.context_id = p_game
+        WHERE (a.context_id = p_event
+               OR a.context_id = (SELECT p.line FROM played p))
           AND a.type_id IN (@extschema@.relation_type_id('HAS_SAN'),
                             @extschema@.relation_type_id('HAS_CLOCK'),
                             @extschema@.relation_type_id('HAS_EVAL_TOKEN'),

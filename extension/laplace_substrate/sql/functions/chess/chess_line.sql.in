@@ -1,0 +1,71 @@
+CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
+    RETURNS TABLE(event_id bytea, played_on text, result text,
+                  times_played bigint, rating double precision,
+                  rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- The line-grain read GH #736's re-key pays for: one row per PLAYING of this
+    -- line (the events that carry a PLAYS_LINE edge onto it), each with the
+    -- headers that playing asserted (ON_DATE / HAS_RESULT, pinned by context),
+    -- alongside the line's own fold cell -- (line, OUTCOME, Chess_Result) --
+    -- where witness_count IS "times this line was played" and eff_mu IS how the
+    -- line fares (white POV), already folded, never recomputed.
+    --
+    -- The fold columns are LEFT-joined and repeat per playing: a line recorded
+    -- before the fold ran returns its playings with NULL rating rather than
+    -- nothing (unattested, not attested-false), and a line nobody played
+    -- returns zero rows.
+    WITH playings AS MATERIALIZED (
+        SELECT pl.subject_id AS event
+        FROM @extschema@.attestations pl
+        WHERE pl.object_id = p_line
+          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+    ),
+    hdr AS MATERIALIZED (
+        -- The playings' headers off ONE scan of the line's subject rows, grouped
+        -- by context: each playing's own date/result, never a sibling's.
+        SELECT a.context_id AS event,
+               max(a.object_id) FILTER (
+                   WHERE a.type_id = @extschema@.relation_type_id('ON_DATE')) AS date_id,
+               max(a.object_id) FILTER (
+                   WHERE a.type_id = @extschema@.relation_type_id('HAS_RESULT')) AS result_id
+        FROM @extschema@.attestations a
+        WHERE a.subject_id = p_line
+          AND a.context_id IS NOT NULL
+          AND a.type_id IN (@extschema@.relation_type_id('ON_DATE'),
+                            @extschema@.relation_type_id('HAS_RESULT'))
+        GROUP BY a.context_id
+    ),
+    fold AS MATERIALIZED (
+        SELECT c.witness_count, c.rating, c.rd
+        FROM @extschema@.consensus c
+        WHERE c.subject_id = p_line
+          AND c.type_id = @extschema@.relation_type_id('OUTCOME')
+        LIMIT 1
+    ),
+    surface_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+        FROM hdr h,
+             LATERAL (VALUES (h.date_id), (h.result_id)) v(s)
+        WHERE s IS NOT NULL
+    ),
+    surface_text AS MATERIALIZED (
+        SELECT p.id, t.txt
+        FROM surface_batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE p.i = t.j
+    )
+    SELECT pg.event,
+           d.txt,
+           r.txt,
+           f.witness_count::bigint,
+           f.rating::double precision,
+           f.rd::double precision,
+           @extschema@.eff_mu(f.rating, f.rd)::double precision
+    FROM playings pg
+    LEFT JOIN hdr h ON h.event = pg.event
+    LEFT JOIN surface_text d ON d.id = h.date_id
+    LEFT JOIN surface_text r ON r.id = h.result_id
+    LEFT JOIN fold f ON true
+    ORDER BY d.txt DESC NULLS LAST, pg.event
+$$;
