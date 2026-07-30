@@ -25,7 +25,7 @@
 #   perfcache-guc   point laplace_substrate.perfcache_path at installed blob
 #   api-env         ensure laplace-api.env has current perfcache path + DB
 #   publish         FULL publish-target contract: chess-lab binaries/paths,
-#                   secrets drop refresh, API + SPA + laplace-uci deploy
+#                   secrets drop refresh, API + SPA + laplace-uci + laplace-mcp deploy
 #   foundation      scripts/ensure-foundation.sh (no-ops on present layers; --force)
 #   test            scripts/test-parallel.sh (ctest ∥ regress, then dotnet)
 #
@@ -818,7 +818,7 @@ phase_publish() {
   # never went ready therefore re-deploys on the next run.
   local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   fp=$(fp_publish)
-  if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -d "$app_dir/wwwroot" ]]; then
+  if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"
     printf 'skipped' >"$ROOT/build/.publish-action"

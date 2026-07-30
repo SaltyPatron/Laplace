@@ -1,5 +1,6 @@
 # Shell / CI scripts must stay LF — CRLF breaks `set -o pipefail` under bash.
 *.sh text eol=lf
+scripts/laplace-mcp text eol=lf
 Justfile text eol=lf
 .github/workflows/*.yml text eol=lf
 .github/actions/**/*.yml text eol=lf
