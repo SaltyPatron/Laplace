@@ -94,7 +94,7 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'laplace' AND c.relname = 'attestations'
   AND a.attname IN ('sum_score_fp1e9', 'opponent_rd_fp1e9')
   AND a.attnotnull AND NOT a.attisdropped;
- attestations_fold_input_columns
+ attestations_fold_input_columns 
 ---------------------------------
  t
 (1 row)
