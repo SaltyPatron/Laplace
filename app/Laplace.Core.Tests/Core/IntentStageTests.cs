@@ -89,7 +89,8 @@ public class IntentStageTests
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
         s.AddAttestation(h, h, h, null, h, null,
-            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1);
+            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1,
+            sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
         Assert.Equal(1, s.AttestationCount);
         var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);
         Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(81, 4)));
@@ -106,7 +107,8 @@ public class IntentStageTests
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
         s.AddAttestation(h, h, h, null, h, null,
-            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1);
+            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1,
+            sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
         Assert.Equal(1, s.AttestationCount);
 
         string[] columns = IntentStage.CopyColumnList(IntentStageTable.Attestations)
