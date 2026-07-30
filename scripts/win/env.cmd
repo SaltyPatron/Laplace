@@ -20,6 +20,11 @@ if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\b
 if not defined LAPLACE_ENGINE_BUILD set "LAPLACE_ENGINE_BUILD=%LAPLACE_BUILD_ROOT%\build-win"
 if not defined LAPLACE_EXT_BUILD set "LAPLACE_EXT_BUILD=%LAPLACE_BUILD_ROOT%\build-win-ext"
 if not defined LAPLACE_ENGINE_BUILD_ASAN set "LAPLACE_ENGINE_BUILD_ASAN=%LAPLACE_BUILD_ROOT%\build-win-asan"
+rem PostgreSQL built from external/postgresql (scripts\win\build-pg.cmd), mirroring the
+rem Linux ${LAPLACE_DEPS_PREFIX}/pgsql-18 install prefix from external/CMakeLists.txt.
+if not defined LAPLACE_PG_BUILD set "LAPLACE_PG_BUILD=%LAPLACE_BUILD_ROOT%\build-pg"
+if not defined LAPLACE_PG_PREFIX set "LAPLACE_PG_PREFIX=%LAPLACE_DEPS_PREFIX%\pgsql-18"
+if not defined LAPLACE_TOOLS set "LAPLACE_TOOLS=%LAPLACE_DATA_ROOT%\tools"
 if not defined LAPLACE_CUTECHESS_BUILD set "LAPLACE_CUTECHESS_BUILD=%LAPLACE_BUILD_ROOT%\build-cutechess"
 if not defined LAPLACE_OUT set "LAPLACE_OUT=%LAPLACE_BUILD_ROOT%\out"
 if not defined LAPLACE_PUBLISH_ENDPOINT set "LAPLACE_PUBLISH_ENDPOINT=%LAPLACE_OUT%\endpoint"
