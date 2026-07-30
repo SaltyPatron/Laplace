@@ -217,19 +217,27 @@ slice_array(const Datum *src, const bool *src_nulls, const int *idx, int n,
 /* attestation_merge — routed present-row observation merge            */
 /* ------------------------------------------------------------------ */
 
+/* sum_score_fp1e9 accumulates additively with observation_count (evidence is
+ * the exact record of the fold's inputs); opponent_rd_fp1e9 is deliberately
+ * NOT updated — it is the per-deposit phi, and the attestation identity pins
+ * (subject, type, object, source, context), so a merge of the same row
+ * re-witnesses under the same source/relation: incoming phi == stored phi.
+ * See sql/functions/fold/attestation_merge.sql.in. */
 static const char *MERGE_SQL =
     "UPDATE laplace.attestations a SET "
     "   observation_count = a.observation_count + b.games, "
+    "   sum_score_fp1e9   = a.sum_score_fp1e9 + b.sum, "
     "   last_observed_at  = GREATEST(a.last_observed_at, b.ts) "
-    "FROM unnest($1::bytea[], $2::bytea[], $3::int8[], $4::timestamptz[]) "
-    "     AS b(id, s, games, ts) "
+    "FROM unnest($1::bytea[], $2::bytea[], $3::int8[], $4::int8[], "
+    "            $5::timestamptz[]) "
+    "     AS b(id, s, games, sum, ts) "
     "WHERE a.type_id = '\\x%s'::bytea AND a.subject_id = b.s AND a.id = b.id";
 
 Datum
 pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
 {
     const char *label = "attestation_merge";
-    InArray     ids, types, subjects, games, ts;
+    InArray     ids, types, subjects, games, sums, ts;
     int64       affected = 0;
     int        *idx;
     int         run_start;
@@ -238,13 +246,15 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
     in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &types);
     in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', false, label, &subjects);
     in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &games);
-    in_array(fcinfo, 4, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
-    if (types.n != ids.n || subjects.n != ids.n || games.n != ids.n || ts.n != ids.n)
+    in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &sums);
+    in_array(fcinfo, 5, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    if (types.n != ids.n || subjects.n != ids.n || games.n != ids.n ||
+        sums.n != ids.n || ts.n != ids.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
                  errmsg("%s: parallel arrays must share length "
-                        "(%d/%d/%d/%d/%d)", label,
-                        ids.n, types.n, subjects.n, games.n, ts.n)));
+                        "(%d/%d/%d/%d/%d/%d)", label,
+                        ids.n, types.n, subjects.n, games.n, sums.n, ts.n)));
     if (ids.n == 0)
         PG_RETURN_INT64(0);
 
@@ -262,9 +272,10 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         int            run_n = 0;
         int            i = run_start;
         SPIPlanPtr     plan;
-        Datum          vals[4];
-        static const Oid argtypes[4] =
-            {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, 1185 /* timestamptz[] */};
+        Datum          vals[5];
+        static const Oid argtypes[5] =
+            {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
+             1185 /* timestamptz[] */};
         int            rc;
 
         while (i < ids.n &&
@@ -275,14 +286,16 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         }
 
         plan = typed_plan(&merge_plans, "attestation_merge plans", type16,
-                          MERGE_SQL, 4, argtypes);
+                          MERGE_SQL, 5, argtypes);
         vals[0] = PointerGetDatum(slice_array(ids.elems, NULL, idx, run_n,
                                               BYTEAOID, -1, false, 'i'));
         vals[1] = PointerGetDatum(slice_array(subjects.elems, NULL, idx, run_n,
                                               BYTEAOID, -1, false, 'i'));
         vals[2] = PointerGetDatum(slice_array(games.elems, NULL, idx, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[3] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
+        vals[3] = PointerGetDatum(slice_array(sums.elems, NULL, idx, run_n,
+                                              INT8OID, 8, true, 'd'));
+        vals[4] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
 
         rc = SPI_execute_plan(plan, vals, NULL, false, 0);
