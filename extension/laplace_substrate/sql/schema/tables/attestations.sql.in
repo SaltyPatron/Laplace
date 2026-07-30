@@ -23,6 +23,20 @@ CREATE TABLE IF NOT EXISTS attestations (
     outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
     last_observed_at  timestamptz   NOT NULL,
     observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
+    -- The fold's EXACT inputs, persisted so evidence is a complete record of
+    -- what was folded (lawful refold/evict; exact scoped_consensus):
+    --   sum_score_fp1e9   — total 1e9-fixed-point score across this row's
+    --                       observations (score x games for per-row deposits;
+    --                       the aggregated cell's total otherwise). Accumulates
+    --                       additively on merge, exactly like observation_count.
+    --   opponent_rd_fp1e9 — the per-deposit opponent phi (trust x rank via
+    --                       laplace_attestation_witness_phi). Identity pins
+    --                       (subject, type, object, source, context), so every
+    --                       merge of the same row re-witnesses under the same
+    --                       source and relation: the incoming phi IS the stored
+    --                       phi, and the merge keeps the existing value.
+    sum_score_fp1e9   bigint        NOT NULL,
+    opponent_rd_fp1e9 bigint        NOT NULL,
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
 ) PARTITION BY LIST (type_id);

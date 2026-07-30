@@ -551,12 +551,33 @@ int laplace_attestation_aggregated_batch_build(
     return 0;
 }
 
+/* Total fold-input score of one staged row, for the persisted
+ * sum_score_fp1e9 evidence column. Aggregated rows carry the total directly;
+ * per-row deposits carry score x games (exact in fixed point). Returns -1 on
+ * int64 overflow — a count x 1e9-scale product past int64 is an
+ * argument-rotation bug (Issue 32 shape), never real evidence. */
+static int staged_sum_score_total(const laplace_attestation_staged_t* a, int64_t* out) {
+    if (a->is_aggregated) {
+        *out = a->sum_score_fp1e9;
+        return 0;
+    }
+    if (a->score_fp1e9 < 0 || a->observation_count < 0) return -1;
+    if (a->observation_count == 0 || a->score_fp1e9 == 0) { *out = 0; return 0; }
+    if (a->observation_count > INT64_MAX / a->score_fp1e9)
+        return -1;
+    *out = a->score_fp1e9 * a->observation_count;
+    return 0;
+}
+
 static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_staged_t* a) {
     hash128_t* obj_ptr = a->object_is_null ? NULL : (hash128_t*)&a->object_id;
     hash128_t* ctx_ptr = a->context_is_null ? NULL : (hash128_t*)&a->context_id;
+    int64_t sum_score;
+    if (staged_sum_score_total(a, &sum_score) != 0) return -1;
     return intent_stage_add_attestation(
         stage, &a->id, &a->subject_id, &a->type_id, obj_ptr, &a->source_id, ctx_ptr,
-        a->outcome, a->last_observed_at_unix_us, a->observation_count, NULL);
+        a->outcome, a->last_observed_at_unix_us, a->observation_count,
+        sum_score, a->opponent_rd_fp1e9, NULL);
 }
 
 int laplace_attestation_categorical_add(
@@ -615,10 +636,13 @@ int laplace_attestation_staged_batch_add(
         const laplace_attestation_staged_t* a = &rows[i];
         const hash128_t* obj_ptr = a->object_is_null ? NULL : &a->object_id;
         const hash128_t* ctx_ptr = a->context_is_null ? NULL : &a->context_id;
+        int64_t sum_score;
+        if (staged_sum_score_total(a, &sum_score) != 0) return -2;
         if (intent_stage_add_attestation(
                 stage, &a->id, &a->subject_id, &a->type_id, obj_ptr,
                 &a->source_id, ctx_ptr, a->outcome,
                 a->last_observed_at_unix_us, a->observation_count,
+                sum_score, a->opponent_rd_fp1e9,
                 masks ? masks + (size_t)i * 32u : NULL) != 0)
             return -2;
     }

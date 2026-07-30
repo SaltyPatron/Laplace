@@ -47,14 +47,15 @@ BEGIN
     -- MOVE evidence with per-game context; game headers bind games to players.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3),
-        (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1),
-        (laplace_hash128_blake3('test/chess/hw1'), g_white, hw, player, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hb1'), g_white, hb, rival,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hw2'), g_black, hw, rival,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hb2'), g_black, hb, player, src, NULL, 2, now(), 1);
+        (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3, 3000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1, 0, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw1'), g_white, hw, player, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb1'), g_white, hb, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw2'), g_black, hw, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb2'), g_black, hb, player, src, NULL, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_moves: eff_mu ranking, full and LIMITed.
     SELECT array_agg(next_position ORDER BY ord) INTO got
@@ -193,21 +194,22 @@ BEGIN
     -- g3 Tal(W) drew Spassky     g4 Tal(W) v Botvinnik, never scored
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('t2/g1w'), g1, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g1b'), g1, hb, botv, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g1r'), g1, hr, r_white, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2w'), g2, hw, botv, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2b'), g2, hb, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2r'), g2, hr, r_white, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3w'), g3, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3b'), g3, hb, spas, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3r'), g3, hr, r_draw, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g4w'), g4, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g4b'), g4, hb, botv, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('t2/g1w'), g1, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g1b'), g1, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g1r'), g1, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2w'), g2, hw, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2b'), g2, hb, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2r'), g2, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3w'), g3, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3b'), g3, hb, spas, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3r'), g3, hr, r_draw, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g4w'), g4, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g4b'), g4, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
         -- an Elo tag whose surface cannot be rendered back to digits
-        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, g1, 2, now(), 1);
+        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, g1, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_player_record: the career total. 4 games — one won, one lost, one
     -- drawn, one the source never scored. score is over SCORED games only:
@@ -397,15 +399,16 @@ BEGIN
 
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
         (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sa, src, pl_game, 2, now(), 1),
+             pl_sa, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
-             pl_sb, src, pl_game, 2, now(), 1),
+             pl_sb, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
         -- another game's ply on the SAME shared position: context_id must exclude it
         (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sc, src, g1, 2, now(), 1);
+             pl_sc, src, g1, 2, now(), 1, 1000000000, 30000000000);
 
     SELECT count(*) INTO n FROM chess_game_plies(pl_game);
     IF n <> 3 THEN

@@ -174,7 +174,7 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
-        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 10, "attestations");
+        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 12, "attestations");
 
         var ents = CopyTupleParser.ParseEntities(entBlobs);
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
@@ -219,8 +219,10 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
         // Attestation duplicate collapse, exactly apply_batch's semantics:
-        // representative = latest-ts staged row, observation counts sum.
-        var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games)>(atts.Ids.Count);
+        // representative = latest-ts staged row, observation counts sum, and
+        // sum_score_fp1e9 sums with them — the persisted evidence stays the
+        // exact record of what the group folded.
+        var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games, long Sum)>(atts.Ids.Count);
         // The keyed attestation probe needs the partition keys parallel to
         // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
         // The first-occurrence source index rides along so the structural
@@ -234,13 +236,14 @@ public sealed partial class NpgsqlSubstrateWriter
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
             {
                 long games = AttestationMergeMath.SafeAddGames(g.Games, atts.Counts[i]);
+                long sum = AttestationMergeMath.SafeAddScores(g.Sum, atts.SumScores[i]);
                 attGroups[atts.Ids[i]] = atts.TimestampsPgUs[i] > g.MaxTs
-                    ? (i, atts.TimestampsPgUs[i], games)
-                    : (g.RepIdx, g.MaxTs, games);
+                    ? (i, atts.TimestampsPgUs[i], games, sum)
+                    : (g.RepIdx, g.MaxTs, games, sum);
             }
             else
             {
-                attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i]);
+                attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i], atts.SumScores[i]);
                 probeAttIds.Add(atts.Ids[i]);
                 probeAttTypes.Add(atts.TypeIds[i]);
                 probeAttSubjects.Add(atts.SubjectIds[i]);
@@ -481,13 +484,13 @@ public sealed partial class NpgsqlSubstrateWriter
             // type's hash leaves and seeks the leaf PK — the bare-id UPDATE
             // it replaces Append-scanned every attestation leaf per chunk
             // (~10s/chunk flat, the OMW 9-minute merge).
-            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, DateTime Ts)>();
+            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts)>();
             foreach (var (id, g) in attGroups)
             {
                 if (presentAtts.Contains(id))
                 {
                     mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
-                        g.Games, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
+                        g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
                 }
                 else
                 {
@@ -499,11 +502,14 @@ public sealed partial class NpgsqlSubstrateWriter
             for (int k = 0; k < novelRepIdx.Count; k++)
             {
                 int i = novelRepIdx[k];
-                long games = attGroups[atts.Ids[i]].Games;
+                var group = attGroups[atts.Ids[i]];
+                bool collapsed = group.Games != atts.Counts[i] || group.Sum != atts.SumScores[i];
                 keptAtts.Add(new KeptRow(
                     atts.Ids[i], atts.Rows[i],
-                    games == atts.Counts[i] ? -1 : games,
-                    atts.CountValueOffsets[i]));
+                    collapsed ? group.Games : -1,
+                    atts.CountValueOffsets[i],
+                    collapsed ? group.Sum : 0,
+                    atts.SumScoreValueOffsets[i]));
             }
 
             bool parallelCopy = ApplyParallelism > 1
@@ -701,6 +707,7 @@ public sealed partial class NpgsqlSubstrateWriter
                             var types = new byte[m][];
                             var subjects = new byte[m][];
                             var games = new long[m];
+                            var sums = new long[m];
                             var ts = new DateTime[m];
                             for (int i = 0; i < m; i++)
                             {
@@ -709,12 +716,13 @@ public sealed partial class NpgsqlSubstrateWriter
                                 types[i] = r.Type.ToBytes();
                                 subjects[i] = r.Subj.ToBytes();
                                 games[i] = r.Games;
+                                sums[i] = r.Sum;
                                 ts[i] = r.Ts;
                             }
                             await using var merge = mconn.CreateCommand();
                             merge.Transaction = mtx;
                             merge.CommandTimeout = 0;
-                            merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5)";
+                            merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5, $6)";
                             merge.Parameters.Add(new NpgsqlParameter
                             { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                             merge.Parameters.Add(new NpgsqlParameter
@@ -723,6 +731,8 @@ public sealed partial class NpgsqlSubstrateWriter
                             { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                             merge.Parameters.Add(new NpgsqlParameter
                             { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            merge.Parameters.Add(new NpgsqlParameter
+                            { Value = sums, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                             merge.Parameters.Add(new NpgsqlParameter
                             { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
                             Interlocked.Add(ref mergeFolded,
@@ -960,8 +970,11 @@ public sealed partial class NpgsqlSubstrateWriter
 
     /// <summary>SortKey partitions parallel COPY groups into disjoint index
     /// keyspaces: the row id for btree-indexed tables, the hilbert index for
-    /// physicalities (coord GiST locality).</summary>
-    private readonly record struct KeptRow(Hash128 SortKey, StagedRowRef Row, long Patch, int CountOff);
+    /// physicalities (coord GiST locality). Patch/PatchSum carry a
+    /// duplicate-collapsed group's summed games/sum_score for the
+    /// representative row (Patch = -1 means unpatched).</summary>
+    private readonly record struct KeptRow(
+        Hash128 SortKey, StagedRowRef Row, long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
@@ -971,6 +984,8 @@ public sealed partial class NpgsqlSubstrateWriter
         var rows = new List<StagedRowRef>(count);
         long[]? patches = null;
         int[]? countOffs = null;
+        long[]? sumPatches = null;
+        int[]? sumOffs = null;
         bool anyPatch = false;
         for (int i = start; i < start + count; i++)
             if (kept[i].Patch >= 0) { anyPatch = true; break; }
@@ -978,6 +993,8 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             patches = new long[count];
             countOffs = new int[count];
+            sumPatches = new long[count];
+            sumOffs = new int[count];
         }
         for (int i = 0; i < count; i++)
         {
@@ -987,9 +1004,11 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 patches[i] = k.Patch;
                 countOffs![i] = k.CountOff;
+                sumPatches![i] = k.PatchSum;
+                sumOffs![i] = k.SumOff;
             }
         }
-        await CopyFilteredAsync(conn, tableName, table, blobs, rows, patches, countOffs, ct);
+        await CopyFilteredAsync(conn, tableName, table, blobs, rows, patches, countOffs, sumPatches, sumOffs, ct);
     }
 
     private async Task<int> CopyPhaseParallelAsync(
@@ -1038,12 +1057,13 @@ public sealed partial class NpgsqlSubstrateWriter
     private static async Task CopyFilteredAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, IReadOnlyList<StagedRowRef> rows,
-        long[]? patchedCounts, IReadOnlyList<int>? countValueOffsets, CancellationToken ct)
+        long[]? patchedCounts, IReadOnlyList<int>? countValueOffsets,
+        long[]? patchedSums, IReadOnlyList<int>? sumValueOffsets, CancellationToken ct)
     {
         string cols = IntentStage.CopyColumnList(table);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
             $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
         await CopyTupleParser.WriteFilteredAsync(
-            stream, blobs, rows, patchedCounts, countValueOffsets, ct);
+            stream, blobs, rows, patchedCounts, countValueOffsets, patchedSums, sumValueOffsets, ct);
     }
 }

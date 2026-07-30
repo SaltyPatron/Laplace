@@ -4,39 +4,38 @@
 -- inside every plane function for that connection (pg_temp resolves first), so
 -- the entire synthesis reads the scoped world with no plane changes.
 --
--- v1 approximation, stated: every witness plays a NEUTRAL opponent at
--- glicko2_initial_rd (the ingest fold's per-source trust phi is a client-side
--- quantity); games = observation_count; score = outcome/2 per game. A scoped
--- synthesis is a different artifact by definition — bit-parity with the ingest fold
--- is not a goal here.
+-- EXACT refold (2026-07-29, graduated from the v1 neutral-opponent
+-- approximation): evidence now persists the fold's exact inputs per row —
+-- sum_score_fp1e9 (the total fold score, accumulated across merges) and
+-- opponent_rd_fp1e9 (the per-deposit trust phi) — so the refold replays each
+-- attestation as its own uniform-opponent period through the consensus_fold
+-- aggregate: the SQL surface of the same native scalar the ingest fold runs
+-- (glicko2_fold_uniform_period), seeded from the neutral prior. games =
+-- observation_count; the score total and phi are the persisted values, no
+-- outcome reconstruction and no invented opponent. Partial order within a cell
+-- is (last_observed_at, id) — deterministic; the ingest's exact arrival order
+-- is the one thing evidence does not record.
 CREATE OR REPLACE FUNCTION scoped_consensus(p_source_ids bytea[])
     RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint,
                   last_observed_at timestamptz)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
-    WITH grouped AS (
+    SELECT consensus_id(f.subject_id, f.type_id, f.object_id),
+           f.subject_id, f.type_id, f.object_id,
+           (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+           (f.acc).witness_count, f.last_ts
+    FROM (
         SELECT a.subject_id, a.type_id, a.object_id,
-               sum(GREATEST(a.observation_count, 1))::bigint AS games,
-               sum(GREATEST(a.observation_count, 1)
-                   * CASE a.outcome WHEN 2 THEN 1000000000::bigint
-                                    WHEN 1 THEN  500000000::bigint
-                                    ELSE 0::bigint END)::bigint AS sum_score,
+               consensus_fold(false, NULL, NULL, NULL,
+                              a.opponent_rd_fp1e9,
+                              GREATEST(a.observation_count, 1),
+                              a.sum_score_fp1e9,
+                              glicko2_tau()
+                              ORDER BY a.last_observed_at, a.id) AS acc,
                max(a.last_observed_at) AS last_ts
         FROM attestations a
         WHERE a.source_id = ANY(p_source_ids)
         GROUP BY a.subject_id, a.type_id, a.object_id
-    )
-    SELECT consensus_id(f.subject_id, f.type_id, f.object_id),
-           f.subject_id, f.type_id, f.object_id,
-           (f.acc).rating, (f.acc).rd, (f.acc).volatility,
-           f.games, f.last_ts
-    FROM (
-        SELECT g.*,
-               laplace_glicko2_accumulate_games(
-                   glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
-                   glicko2_neutral_mu(), glicko2_initial_rd(),
-                   g.games, g.sum_score, glicko2_tau()) AS acc
-        FROM grouped g
     ) f
 $$;

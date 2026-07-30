@@ -49,6 +49,16 @@ SELECT EXISTS (
     WHERE n.nspname = 'laplace' AND c.relname = 'physicalities' AND a.attname = 'type' AND NOT a.attisdropped
 ) AS physicalities_has_type;
 
+-- Evidence persists the fold's exact inputs (greenfield 2026-07-29):
+-- sum_score_fp1e9 + opponent_rd_fp1e9, both NOT NULL — no defaulted plumbing.
+SELECT count(*) = 2 AS attestations_fold_input_columns
+FROM pg_attribute a
+JOIN pg_class c ON c.oid = a.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'laplace' AND c.relname = 'attestations'
+  AND a.attname IN ('sum_score_fp1e9', 'opponent_rd_fp1e9')
+  AND a.attnotnull AND NOT a.attisdropped;
+
 SELECT count(*) = 0 AS no_legacy_attestations_index
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
