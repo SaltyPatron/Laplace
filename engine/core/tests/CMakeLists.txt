@@ -27,11 +27,16 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_grammar_compose.cpp
     test_grammar_tags.cpp
     test_relation_law.cpp
+    test_syzygy.cpp
 )
 
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
 
 add_compile_definitions(LAPLACE_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_PERFCACHE_BIN}")
+
+# Committed Syzygy fixture tables (KQvK/KRvK, ~14 KB) for the probe kernel.
+add_compile_definitions(
+    LAPLACE_SYZYGY_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../test-data/syzygy")
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 

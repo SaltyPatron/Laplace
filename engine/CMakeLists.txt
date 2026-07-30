@@ -129,7 +129,13 @@ message(STATUS "Laplace UCA: version=${LAPLACE_UCA_VERSION} ducet=${LAPLACE_DUCE
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
     message(FATAL_ERROR
         "external/eigen submodule not initialized. Run:\n"
-        "    git submodule update --init external/eigen external/spectra external/blake3 external/googletest\n")
+        "    git submodule update --init external/eigen external/spectra external/blake3 external/fathom external/googletest\n")
+endif()
+
+if(NOT EXISTS "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
+    message(FATAL_ERROR
+        "external/fathom submodule not initialized. Run:\n"
+        "    git submodule update --init external/fathom\n")
 endif()
 
 add_library(laplace_eigen INTERFACE)
@@ -180,6 +186,16 @@ target_compile_options(blake3 PRIVATE -w)
 
 
 
+
+# Vendored third-party: Fathom Syzygy WDL/DTZ prober (MIT; pinned submodule
+# c9c6fef0dddc05d2e242c183acf5833149ab676d — the pin is recorded in
+# engine/core/src/syzygy.c and enforced by the submodule gitlink). Compiled as
+# its own static lib with warnings off, same policy as blake3/tree_sitter_rt:
+# vendored code is not ours to warn about.
+add_library(fathom_tb STATIC "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
+target_include_directories(fathom_tb SYSTEM PUBLIC "${LAPLACE_EXTERNAL}/fathom/src")
+set_target_properties(fathom_tb PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_options(fathom_tb PRIVATE -w)
 
 add_library(tree_sitter_rt STATIC "${LAPLACE_EXTERNAL}/tree-sitter/lib/src/lib.c")
 target_include_directories(tree_sitter_rt

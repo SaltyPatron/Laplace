@@ -928,3 +928,6 @@
 [submodule "external/cutechess"]
 	path = external/cutechess
 	url = https://github.com/cutechess/cutechess.git
+[submodule "external/fathom"]
+	path = external/fathom
+	url = https://github.com/jdart1/Fathom
