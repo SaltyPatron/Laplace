@@ -4,8 +4,33 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-DLL="$ROOT/app/Laplace.Endpoints.Mcp/bin/Release/net10.0/Laplace.Endpoints.Mcp.dll"
-[[ -f "$DLL" ]] || DLL="$ROOT/app/Laplace.Endpoints.Mcp/bin/Debug/net10.0/Laplace.Endpoints.Mcp.dll"
-[[ -f "$DLL" ]] || { echo "laplace-mcp: not built — run: dotnet build $ROOT/app/Laplace.Endpoints.Mcp" >&2; exit 1; }
 
-exec dotnet "$DLL" "$@"
+# Prefer repo-local builds (dev freshest), then the published apphost.
+# app/Directory.Build.props redirects BaseOutputPath to $LAPLACE_BUILD_ROOT/app/bin
+# (defaulting to D:\Data\Laplace on Windows), so the in-tree probe misses there.
+BUILD_ROOT="${LAPLACE_BUILD_ROOT:-}"
+if [[ -z "$BUILD_ROOT" && "${OS:-}" == "Windows_NT" ]]; then
+  BUILD_ROOT="D:/Data/Laplace"
+fi
+
+CANDIDATES=(
+  "$ROOT/app/Laplace.Endpoints.Mcp/bin/Release/net10.0/Laplace.Endpoints.Mcp.dll"
+  "$ROOT/app/Laplace.Endpoints.Mcp/bin/Debug/net10.0/Laplace.Endpoints.Mcp.dll"
+)
+if [[ -n "$BUILD_ROOT" ]]; then
+  CANDIDATES+=(
+    "$BUILD_ROOT/app/bin/Laplace.Endpoints.Mcp/Release/net10.0/Laplace.Endpoints.Mcp.dll"
+    "$BUILD_ROOT/app/bin/Laplace.Endpoints.Mcp/Debug/net10.0/Laplace.Endpoints.Mcp.dll"
+  )
+fi
+
+for DLL in "${CANDIDATES[@]}"; do
+  [[ -f "$DLL" ]] && exec dotnet "$DLL" "$@"
+done
+
+# Published apphost (deploy/linux/deploy.sh overlays it into the app dir).
+APPHOST="${LAPLACE_APP_DIR:-/opt/laplace/app}/laplace-mcp"
+[[ -x "$APPHOST" ]] && exec "$APPHOST" "$@"
+
+echo "laplace-mcp: not built — run: dotnet build $ROOT/app/Laplace.Endpoints.Mcp" >&2
+exit 1
