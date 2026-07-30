@@ -132,6 +132,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                             Outcome = (short)a.Outcome,
                             LastObservedAtUnixUs = a.LastObservedAtUnixUs,
                             ObservationCount = a.ObservationCount,
+                            // Fold inputs persist on the evidence row: the native
+                            // stage computes sum_score for per-row deposits as
+                            // score x games, so only aggregated rows pass a total.
+                            ScoreFp1e9 = a.ScoreFp1e9,
+                            OpponentRdFp1e9 = a.OpponentRdFp1e9,
+                            SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
+                            IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
                         };
                         int off = i * 32;
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(

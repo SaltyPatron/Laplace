@@ -48,10 +48,11 @@ BEGIN
     INSERT INTO canonical_names (id, name)
     VALUES (zs_cat, 'unicode/category/Zs/v1');
     INSERT INTO attestations (id, subject_id, type_id, object_id, source_id,
-                              context_id, outcome, last_observed_at, observation_count)
+                              context_id, outcome, last_observed_at, observation_count,
+                              sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES (laplace_hash128_blake3('test/corpus/att-sp-zs'), sp,
             relation_type_id('HAS_GENERAL_CATEGORY'), zs_cat, src,
-            NULL, 2, now(), 1);
+            NULL, 2, now(), 1, 1000000000, 30000000000);
 
     IF NOT (sp = ANY (separator_ids())) THEN
         RAISE EXCEPTION 'FAIL: attested Zs token not in separator_ids()';

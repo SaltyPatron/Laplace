@@ -21,6 +21,7 @@ DECLARE
     s_draw   bigint := 500000000;
     mu_conf bigint; mu_ref bigint; mu_draw bigint;
     mu_trust bigint; mu_crank bigint; mu_many bigint; mu_one bigint;
+    sc_trust bigint; sc_crank bigint; sc_many bigint;
     n_prov   bigint;
     neutral bigint := 1500000000000;
 BEGIN
@@ -31,17 +32,21 @@ BEGIN
         (o_trust,0, type_t, src), (o_crank,0, type_t, src),
         (o_games,0, type_t, src), (o_one, 0, type_t, src);
 
+    -- Evidence persists the fold's exact inputs: sum_score_fp1e9 (score total)
+    -- and opponent_rd_fp1e9 (per-deposit phi) — the same partials the
+    -- consensus_fold calls below replay.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1),
-        (laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1),
-        (laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8),
-        (laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1);
+        (laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1, s_ref,      phi_trust),
+        (laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1, s_draw,     phi_trust),
+        (laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1, s_conf,     phi_crank),
+        (laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8, s_conf * 8, phi_trust),
+        (laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1, s_conf,     phi_trust);
 
     SELECT count(*) INTO n_prov FROM attestations WHERE type_id = rel_type;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
@@ -69,7 +74,18 @@ BEGIN
     IF mu_trust <= mu_crank THEN RAISE EXCEPTION 'FAIL: trusted witness did not move μ more than crank (% <= %)', mu_trust, mu_crank; END IF;
     IF mu_many  <= mu_one   THEN RAISE EXCEPTION 'FAIL: more occurrences did not move μ more (% <= %)', mu_many, mu_one; END IF;
 
-    RAISE NOTICE '✓ consensus_signed: confirm>neutral>refute, draw≈neutral, trust→φ moves more, games accumulate, evidence=provenance';
+    -- Graduated scoped_consensus: the refold reads the persisted per-row fold
+    -- inputs (sum_score_fp1e9, opponent_rd_fp1e9), so a scoped refold of this
+    -- source reproduces the exact partials computed above — including the
+    -- trust distinction the v1 neutral-opponent approximation erased.
+    SELECT rating INTO sc_trust FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_trust;
+    SELECT rating INTO sc_crank FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_crank;
+    SELECT rating INTO sc_many  FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_games;
+    IF sc_trust IS DISTINCT FROM mu_trust THEN RAISE EXCEPTION 'FAIL: scoped_consensus trusted μ=% <> inline fold %', sc_trust, mu_trust; END IF;
+    IF sc_crank IS DISTINCT FROM mu_crank THEN RAISE EXCEPTION 'FAIL: scoped_consensus crank μ=% <> inline fold % (per-row phi not consumed)', sc_crank, mu_crank; END IF;
+    IF sc_many  IS DISTINCT FROM mu_many  THEN RAISE EXCEPTION 'FAIL: scoped_consensus 8-games μ=% <> inline fold % (persisted sum_score not consumed)', sc_many, mu_many; END IF;
+
+    RAISE NOTICE '✓ consensus_signed: confirm>neutral>refute, draw≈neutral, trust→φ moves more, games accumulate, evidence=provenance, scoped refold exact';
 END $$;
 
 ROLLBACK;
