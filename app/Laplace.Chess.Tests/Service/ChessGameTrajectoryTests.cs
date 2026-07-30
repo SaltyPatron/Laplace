@@ -102,11 +102,12 @@ public sealed class ChessGameTrajectoryTests
     {
         var change = Compose();
         var gameEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        // The game's id is content-addressed from provenance + line. Geometry is identity and
-        // reconstruction, never semantics, and must never leak into the hash — otherwise
-        // re-deriving geometry would mint a different game.
-        Assert.Equal(gameEntity.Id, ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
-            ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]));
+        // GH #736: the game CONTENT id is the LINE — the Merkle over the ordered position
+        // ids it passes through. Geometry is identity and reconstruction, never semantics,
+        // and must never leak into the hash — otherwise re-deriving geometry would mint a
+        // different game. (Provenance — who/when — never enters either; it lives on the
+        // event.)
+        Assert.Equal(gameEntity.Id, ChessCompose.LineId(ExpectedLine().ToArray()));
     }
 
     [Fact]
@@ -148,15 +149,16 @@ public sealed class ChessGameTrajectoryTests
     {
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var witnessed = new ChessWitnessedGame(
-            GameId: ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
-                ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]),
+            LineId: parsed.LineId,
+            EventId: parsed.EventId,
             Moves: ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"],
             Result: GameOutcome.WonBy(0),
             WhitePlayer: null, BlackPlayer: null, StartFen: null,
             ClockTokens: null, EvalTokens: null, QualityTokens: null);
 
-        var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/trajectory");
-        ChessTrajectoryDecomposer.Deposit(b, witnessed, ChessVocabulary.AnalysisSourceId);
+        // GH #736 source split (#508): the trajectory lane writes under its OWN source.
+        var b = new SubstrateChangeBuilder(ChessVocabulary.TrajectorySourceId, "test/trajectory");
+        ChessTrajectoryDecomposer.Deposit(b, witnessed, ChessVocabulary.TrajectorySourceId);
         return b.SetInputUnitsConsumed(1).Build();
     }
 
@@ -172,18 +174,18 @@ public sealed class ChessGameTrajectoryTests
     public void Backfill_DepositsTheTrajectoryAndItsOwnMarker()
     {
         var change = ComposeBackfill();
-        var gameId = ChessVocabulary.GameId("Alice", "Bob", "2024.01.01",
-            ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]);
+        // GH #736: the linestring hangs on the LINE — one per line, however many playings.
+        var lineId = ChessPgnDecomposer.TryParseGame(Game)!.LineId;
 
-        var traj = Assert.Single(change.Physicalities, p => p.EntityId == gameId);
+        var traj = Assert.Single(change.Physicalities, p => p.EntityId == lineId);
         Assert.Equal(8, traj.NConstituents);
         Assert.Equal(ExpectedLine(), Trajectory.Constituents(traj.TrajectoryXyzm!));
 
         // Marker is versioned independently of ChessAnalyze.Version so a geometry backfill
         // and a testimony re-derive can never be mistaken for one another.
-        Assert.Contains(change.Entities, e => e.Id == ChessTrajectoryDecomposer.MarkerId(gameId));
-        Assert.NotEqual(ChessTrajectoryDecomposer.MarkerId(gameId),
-                        ChessVocabulary.AnalysisMarkerId(gameId, ChessAnalyze.Version));
+        Assert.Contains(change.Entities, e => e.Id == ChessTrajectoryDecomposer.MarkerId(lineId));
+        Assert.NotEqual(ChessTrajectoryDecomposer.MarkerId(lineId),
+                        ChessVocabulary.AnalysisMarkerId(lineId, ChessAnalyze.Version));
     }
 
     [Fact]
