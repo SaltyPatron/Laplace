@@ -50,11 +50,16 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
     /// </summary>
     public const int TrajectoryVersion = 1;
 
-    public static Hash128 MarkerId(Hash128 gameId)
-        => Hash128.OfCanonical($"chess/trajectory/{gameId}/{TrajectoryVersion}");
+    // GH #736: the linestring is a pure function of the LINE, so the marker is per line —
+    // a line shared by many playings deposits ONE trajectory, and the duplicate-linestring
+    // disease #736 names is structurally gone.
+    public static Hash128 MarkerId(Hash128 lineId)
+        => Hash128.OfCanonical($"chess/trajectory/{lineId}/{TrajectoryVersion}");
 
-    public override Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
-    public override string SourceName => "ChessAnalysis";
+    // GH #736 source split (#508): the trajectory lane writes under its OWN source so
+    // source-grain eviction never conflates it with ChessAnalysis testimony.
+    public override Hash128 SourceId => ChessVocabulary.TrajectorySourceId;
+    public override string SourceName => "ChessTrajectory";
     public override int LayerOrder => 21;
     public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
@@ -69,7 +74,7 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessVocabulary.AnalysisSourceId, SourceName, ChessVocabulary.AnalysisTrustClass, ct);
+            context.Writer, ChessVocabulary.TrajectorySourceId, SourceName, ChessVocabulary.AnalysisTrustClass, ct);
 
     protected override async IAsyncEnumerable<ChessTrajectoryRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
@@ -82,11 +87,11 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        // Same hydrate path the analyzer uses, gated on THIS pass's marker: a game whose
+        // LINE-grain stream (GH #736), gated on THIS pass's per-line marker: a line whose
         // trajectory has already been COMMITTED is skipped before compose, so a second run
-        // costs a bitmap probe per game rather than a replay. Composed-but-uncommitted work is
+        // costs a bitmap probe per line rather than a replay. Composed-but-uncommitted work is
         // not skipped — see the commit-cadence note above.
-        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedFromSubstrateAsync(
+        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch, MarkerId, ct))
             yield return new ChessTrajectoryRecord(witnessed);
     }
