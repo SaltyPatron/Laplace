@@ -201,7 +201,14 @@ public static class ChessAnalyze
 
 
             foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
+            {
                 ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
+                // GH #736 position grain: the position REACHED exhibits the motif —
+                // (position, HAS_MOTIF, concept), the shared-content sibling of the
+                // line-grain cell (HAS_MOTIF's family root is GAME_HAS_MOTIF). ctx = null
+                // so every game reaching this position corroborates one cell.
+                ChessGraph.AppendPositionMotif(b, to.Position.Id, tag, MoveWeight, src);
+            }
 
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)

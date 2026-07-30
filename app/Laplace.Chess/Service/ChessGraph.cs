@@ -180,6 +180,18 @@ public static class ChessGraph
     }
 
     /// <summary>
+    /// GH #736 position-grain motif: (position, HAS_MOTIF, motif concept), ctx = null so
+    /// every game that reaches the position corroborates the SAME cell — the
+    /// shared-content sibling of the line-grain GAME_HAS_MOTIF (one family).
+    /// </summary>
+    internal static void AppendPositionMotif(
+    SubstrateChangeBuilder b, Hash128 positionId, string motif, double witnessWeight, Hash128 sourceId)
+    {
+        if (ContentEmitter.Emit(b, motif, sourceId) is not { } mid) return;
+        b.AddAttestation(NativeAttestation.Categorical(positionId, "HAS_MOTIF", mid, sourceId, null, witnessWeight));
+    }
+
+    /// <summary>
     /// Emit the position (and its substructures) as content nodes and return the position id.
     /// For lanes that attest onto a position without emitting a MOVE edge for it — e.g. the
     /// chess-book decomposer grounding prose commentary to the exact position it explains.
