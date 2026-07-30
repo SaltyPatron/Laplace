@@ -125,8 +125,8 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
         }
 
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        ChessGraph.AppendGameTrajectory(b, w.GameId, line, sourceId, nowUs);
-        b.AddEntity(MarkerId(w.GameId), EntityTier.Document,
+        ChessGraph.AppendGameTrajectory(b, w.LineId, line, sourceId, nowUs);
+        b.AddEntity(MarkerId(w.LineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, sourceId);
     }
 
@@ -134,12 +134,12 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedGamesAsync(ds, ct);
+        return ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
     }
 }
 
 /// <summary>Trunk root is this pass's marker, so its batches never collide with the analyzer's.</summary>
 public sealed record ChessTrajectoryRecord(ChessWitnessedGame Game) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessTrajectoryDecomposer.MarkerId(Game.GameId);
+    public Hash128 TrunkRootId => ChessTrajectoryDecomposer.MarkerId(Game.LineId);
 }

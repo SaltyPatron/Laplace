@@ -438,7 +438,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         var status = _modality.Terminal(state) is { } t ? Describe(t) : "ongoing";
         return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
             session.TenantId, session.UserId,
-            Convert.ToHexString(session.GameId.ToBytes()).ToLowerInvariant());
+            Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant());
     }
 
     private void EnsureModality()
