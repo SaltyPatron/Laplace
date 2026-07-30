@@ -3,13 +3,15 @@ SET search_path = laplace, public;
 
 -- chess_moves / chess_player_moves / typed consensus_by_ids: the chess read
 -- surface. Synthetic rows only — one position with three rated continuations
--- and two provenanced games (one as White, one as Black) for a player.
+-- and two provenanced playings (one as White, one as Black) for a player,
+-- staged in the GH #736 line/event shape.
 DO $$
 DECLARE
     type_t   bytea := laplace_hash128_blake3('Type');
     mv       bytea := relation_type_id('MOVE');
     hw       bytea := relation_type_id('HAS_WHITE');
     hb       bytea := relation_type_id('HAS_BLACK');
+    plns     bytea := relation_type_id('PLAYS_LINE');
     src      bytea := laplace_hash128_blake3('test/chess/source');
     pos      bytea := laplace_hash128_blake3('test/chess/pos');
     n_strong bytea := laplace_hash128_blake3('test/chess/next_strong');
@@ -19,6 +21,8 @@ DECLARE
     rival    bytea := laplace_hash128_blake3('test/chess/rival');
     g_white  bytea := laplace_hash128_blake3('test/chess/game_as_white');
     g_black  bytea := laplace_hash128_blake3('test/chess/game_as_black');
+    l_white  bytea := laplace_hash128_blake3('test/chess/line_as_white');
+    l_black  bytea := laplace_hash128_blake3('test/chess/line_as_black');
     c_strong bytea := laplace_hash128_blake3('test/chess/c_strong');
     c_mid    bytea := laplace_hash128_blake3('test/chess/c_mid');
     c_thin   bytea := laplace_hash128_blake3('test/chess/c_thin');
@@ -32,7 +36,8 @@ BEGIN
         (pos, 0, type_t, src), (n_strong, 0, type_t, src),
         (n_mid, 0, type_t, src), (n_thin, 0, type_t, src),
         (player, 0, type_t, src), (rival, 0, type_t, src),
-        (g_white, 0, type_t, src), (g_black, 0, type_t, src);
+        (g_white, 0, type_t, src), (g_black, 0, type_t, src),
+        (l_white, 0, type_t, src), (l_black, 0, type_t, src);
 
     -- eff_mu = rating - 2*rd:
     --   strong: 1600e9 - 2*50e9  = 1500e9   (ranked 1st)
@@ -45,7 +50,9 @@ BEGIN
         (c_mid,    pos, mv, n_mid,    1550000000000, 40000000000, 60000000, 50, now()),
         (c_thin,   pos, mv, n_thin,   1500000000000, 200000000000, 60000000, 1, now());
 
-    -- MOVE evidence with per-game context; game headers bind games to players.
+    -- MOVE evidence rides ctx = the playing-EVENT (GH #736); the colour
+    -- headers subject the shared LINE with ctx = that same event, so the
+    -- repertoire join threads context equality, never the line subject.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
@@ -53,10 +60,12 @@ BEGIN
     VALUES
         (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3, 3000000000, 30000000000),
         (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1, 0, 30000000000),
-        (laplace_hash128_blake3('test/chess/hw1'), g_white, hw, player, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hb1'), g_white, hb, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hw2'), g_black, hw, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hb2'), g_black, hb, player, src, NULL, 2, now(), 1, 1000000000, 30000000000);
+        (laplace_hash128_blake3('test/chess/pl1'), g_white, plns, l_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/pl2'), g_black, plns, l_black, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw1'), l_white, hw, player, src, g_white, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb1'), l_white, hb, rival,  src, g_white, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw2'), l_black, hw, rival,  src, g_black, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb2'), l_black, hb, player, src, g_black, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_moves: eff_mu ranking, full and LIMITed.
     SELECT array_agg(next_position ORDER BY ord) INTO got
@@ -75,7 +84,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: chess_moves must return display-scale eff_mu/rd, got %/%', s, s2;
     END IF;
 
-    -- chess_player_moves: only the game where the player held the queried color.
+    -- chess_player_moves: only the playing where the player held the queried color.
     SELECT count(*) INTO n FROM chess_player_moves(pos, player, true);
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL: player-as-white expected 1 row, got %', n; END IF;
     SELECT games, score INTO n, s FROM chess_player_moves(pos, player, true);
@@ -112,6 +121,7 @@ DECLARE
     hb      bytea := relation_type_id('HAS_BLACK');
     hr      bytea := relation_type_id('HAS_RESULT');
     hrat    bytea := relation_type_id('HAS_RATING');
+    mv      bytea := relation_type_id('MOVE');
     plns    bytea := relation_type_id('PLAYS_LINE');
     od      bytea := relation_type_id('ON_DATE');
     hev     bytea := relation_type_id('HAS_EVENT');
@@ -132,6 +142,9 @@ DECLARE
     ln_a    bytea := laplace_hash128_blake3('test/chess2/line_a');
     ln_b    bytea := laplace_hash128_blake3('test/chess2/line_b');
     ln_c    bytea := laplace_hash128_blake3('test/chess2/line_c');
+    pos2    bytea := laplace_hash128_blake3('test/chess2/opening_pos');
+    mv_w    bytea := laplace_hash128_blake3('test/chess2/mv_w');
+    mv_b    bytea := laplace_hash128_blake3('test/chess2/mv_b');
     r_white bytea := word_id('1-0');
     r_black bytea := word_id('0-1');
     r_draw  bytea := word_id('1/2-1/2');
@@ -214,6 +227,7 @@ BEGIN
         (e1, 0, type_t, src), (e2, 0, type_t, src),
         (e3, 0, type_t, src), (e4, 0, type_t, src),
         (ln_a, 0, type_t, src), (ln_b, 0, type_t, src), (ln_c, 0, type_t, src),
+        (pos2, 0, type_t, src), (mv_w, 0, type_t, src), (mv_b, 0, type_t, src),
         (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
         (d1, 0, type_t, src), (d2, 0, type_t, src), (d3, 0, type_t, src),
         (en, 0, type_t, src), (ec, 0, type_t, src), (mt, 0, type_t, src),
@@ -252,6 +266,10 @@ BEGIN
         (laplace_hash128_blake3('t2/e3d'), ln_c, od, d3, src, e3, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/e4w'), ln_a, hw, tal,  src, e4, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/e4b'), ln_a, hb, botv, src, e4, 2, now(), 1, 1000000000, 30000000000),
+        -- the shared opening position: Tal's White choice in e1, and the move
+        -- played in e2 while he sat Black -- MOVE ctx = the playing-EVENT
+        (laplace_hash128_blake3('t2/mv_e1'), pos2, mv, mv_w, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/mv_e2'), pos2, mv, mv_b, src, e2, 0, now(), 1, 0, 30000000000),
         -- the players' own aggregating lane (AppendPlayerResult), ctx = the playing
         (laplace_hash128_blake3('t2/e1ot'), tal,  outc, cres, src, e1, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/e1ob'), botv, outc, cres, src, e1, 0, now(), 1, 0, 30000000000),
@@ -345,6 +363,22 @@ BEGIN
     IF txt IS DISTINCT FROM 'm' THEN RAISE EXCEPTION 'FAIL: e1 movetext should render to m, got %', txt; END IF;
     SELECT count(*) INTO n FROM chess_game(laplace_hash128_blake3('test/chess2/no_such_game'));
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unwitnessed playing returned % rows', n; END IF;
+
+    -- chess_player_moves across the re-key: MOVE evidence carries ctx = the
+    -- playing-EVENT and the colour facts subject the LINE, so the repertoire
+    -- join threads event equality. Same shared position, per-colour
+    -- attribution: as White Tal chose mv_w (e1, won); e2's move must surface
+    -- only on his Black side, never leak through the shared line subjects.
+    SELECT count(*) INTO n FROM chess_player_moves(pos2, tal, true);
+    IF n <> 1 THEN RAISE EXCEPTION 'FAIL: Tal-as-White repertoire expected 1 move, got %', n; END IF;
+    SELECT next_position, games, score INTO got, n, sc FROM chess_player_moves(pos2, tal, true);
+    IF got <> mv_w OR n <> 1 OR sc <> 1.0 THEN
+        RAISE EXCEPTION 'FAIL: Tal as White should show mv_w won once, got %/%/%', got, n, sc;
+    END IF;
+    SELECT next_position, score INTO got, sc FROM chess_player_moves(pos2, tal, false);
+    IF got <> mv_b OR sc <> 0.0 THEN
+        RAISE EXCEPTION 'FAIL: Tal as Black should see the e2 move as a loss, got %/%', got, sc;
+    END IF;
 
     -- chess_player_ratings: an Elo tag that will not render back to digits is an
     -- unreadable witness and is SKIPPED, never coerced to a number.
