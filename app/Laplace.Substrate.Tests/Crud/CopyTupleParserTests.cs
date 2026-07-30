@@ -25,10 +25,13 @@ public class CopyTupleParserTests
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
         IReadOnlyList<StagedRowRef> rows,
         long[]? patches = null,
-        IReadOnlyList<int>? countOffs = null)
+        IReadOnlyList<int>? countOffs = null,
+        long[]? sumPatches = null,
+        IReadOnlyList<int>? sumOffs = null)
     {
         using var ms = new MemoryStream();
-        await CopyTupleParser.WriteFilteredAsync(ms, blobs, rows, patches, countOffs);
+        await CopyTupleParser.WriteFilteredAsync(
+            ms, blobs, rows, patches, countOffs, sumPatches, sumOffs);
         return ms.ToArray();
     }
 
@@ -108,26 +111,33 @@ public class CopyTupleParserTests
         long ts1 = 1_700_000_000_000_000; // unix µs
         long ts2 = 1_700_000_999_000_000;
         using var stage = IntentStage.New(4);
-        stage.AddAttestation(H(20), H(1), H(2), H(3), H(4), null, 2, ts1, 3);
-        stage.AddAttestation(H(21), H(1), H(2), null, H(4), H(5), 1, ts2, 7);
+        stage.AddAttestation(H(20), H(1), H(2), H(3), H(4), null, 2, ts1, 3,
+            sumScoreFp1e9: 3_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
+        stage.AddAttestation(H(21), H(1), H(2), null, H(4), H(5), 1, ts2, 7,
+            sumScoreFp1e9: 3_500_000_000L, opponentRdFp1e9: 30_000_000_000L);
 
         var blobs = Blobs(stage, IntentStageTable.Attestations);
         var parsed = CopyTupleParser.ParseAttestations(blobs);
 
         Assert.Equal(new[] { H(20), H(21) }, parsed.Ids);
         Assert.Equal(new[] { 3L, 7L }, parsed.Counts);
+        Assert.Equal(new[] { 3_000_000_000L, 3_500_000_000L }, parsed.SumScores);
         Assert.Equal(ts1 - IntentStage.PgEpochUnixUs, parsed.TimestampsPgUs[0]);
         Assert.Equal(ts2 - IntentStage.PgEpochUnixUs, parsed.TimestampsPgUs[1]);
 
-        // Emit only the second row with its count patched to a group sum.
+        // Emit only the second row with its count and score sum patched to a
+        // duplicate-collapse group total.
         var kept = new[] { parsed.Rows[1] };
         var wire = await EmitAsync(blobs, kept,
             patches: new[] { 42L },
-            countOffs: new[] { parsed.CountValueOffsets[1] });
+            countOffs: new[] { parsed.CountValueOffsets[1] },
+            sumPatches: new[] { 21_000_000_000L },
+            sumOffs: new[] { parsed.SumScoreValueOffsets[1] });
 
         var reparsed = ParseBody(wire, CopyTupleParser.ParseAttestations);
         Assert.Equal(new[] { H(21) }, reparsed.Ids);
         Assert.Equal(new[] { 42L }, reparsed.Counts);
+        Assert.Equal(new[] { 21_000_000_000L }, reparsed.SumScores);
         Assert.Equal(ts2 - IntentStage.PgEpochUnixUs, reparsed.TimestampsPgUs[0]);
     }
 

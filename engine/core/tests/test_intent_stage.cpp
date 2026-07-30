@@ -289,10 +289,12 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     const int16_t outcome    = 2;
     const int64_t obs_us     = INTENT_STAGE_PG_EPOCH_UNIX_US + 999;
     const int64_t obs_count  = 17;
+    const int64_t sum_score  = INT64_C(17000000000);
+    const int64_t opp_rd     = INT64_C(30000000000);
 
     ASSERT_EQ(0, intent_stage_add_attestation(
         s, &id, &sub, &kid, &obj, &src, &ctx,
-        outcome, obs_us, obs_count, NULL));
+        outcome, obs_us, obs_count, sum_score, opp_rd, NULL));
 
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                      nullptr, 0);
@@ -300,7 +302,7 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                   buf.data(), buf.size()));
     const uint8_t* p = buf.data() + kHeader;
-    EXPECT_EQ(10, (int16_t)read_be16(p)); p += 2;
+    EXPECT_EQ(12, (int16_t)read_be16(p)); p += 2;
     for (int f = 0; f < 6; ++f) {
         EXPECT_EQ(16u, read_be32(p)); p += 4;
         EXPECT_EQ((uint8_t)(0xA1 + f), *p);
@@ -312,6 +314,10 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     EXPECT_EQ((int64_t)999, (int64_t)read_be64(p)); p += 8;
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ(obs_count, (int64_t)read_be64(p)); p += 8;
+    EXPECT_EQ(8u, read_be32(p)); p += 4;
+    EXPECT_EQ(sum_score, (int64_t)read_be64(p)); p += 8;
+    EXPECT_EQ(8u, read_be32(p)); p += 4;
+    EXPECT_EQ(opp_rd, (int64_t)read_be64(p)); p += 8;
     EXPECT_EQ((uint32_t)-1, read_be32(p));
     intent_stage_free(s);
 }
@@ -322,7 +328,7 @@ TEST(LaplaceCoreIntentStage, AddAttestationNullObjectAndContext) {
     hash128_t z = make_hash(0);
     ASSERT_EQ(0, intent_stage_add_attestation(
         s, &z, &z, &z, nullptr, &z, nullptr,
-        0, 0, 0, NULL));
+        0, 0, 0, 0, 0, NULL));
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                       nullptr, 0);
     std::vector<uint8_t> buf(need);
@@ -346,7 +352,7 @@ TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_entity(s, &z, 0, &z, nullptr));
     ASSERT_EQ(0, intent_stage_add_physicality(s, &z, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
-    ASSERT_EQ(0, intent_stage_add_attestation(s, &z, &z, &z, nullptr, &z, nullptr, 1, 0, 0, NULL));
+    ASSERT_EQ(0, intent_stage_add_attestation(s, &z, &z, &z, nullptr, &z, nullptr, 1, 0, 0, 0, 0, NULL));
     EXPECT_EQ(1u, intent_stage_entity_count(s));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
     EXPECT_EQ(1u, intent_stage_attestation_count(s));
@@ -377,7 +383,8 @@ TEST(LaplaceCoreIntentStage, AttestationGrowthFromZeroHintLargeBatchesNoCorrupti
             ASSERT_EQ(0, intent_stage_add_attestation(
                 s, &id, &sub, &kid, &obj, &src, &ctx,
                 (int16_t)(i % 3), INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i,
-                (int64_t)(i % 100), NULL));
+                (int64_t)(i % 100),
+                (int64_t)(i % 100) * INT64_C(500000000), INT64_C(30000000000), NULL));
         }
         ASSERT_EQ(kRows, intent_stage_attestation_count(s));
         const size_t need = intent_stage_emit_copy_binary(
@@ -469,7 +476,8 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
         ASSERT_EQ(0, intent_stage_add_attestation(
             s, &id, &sub, &kid, objp, &src, ctxp,
             (int16_t)(i % 3), INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i,
-            (int64_t)(i % 100), NULL))
+            (int64_t)(i % 100),
+            (int64_t)(i % 100) * INT64_C(500000000), INT64_C(30000000000), NULL))
             << "attestation add failed at i=" << i;
     }
     ASSERT_EQ(kAttestations, intent_stage_attestation_count(s));
@@ -566,7 +574,8 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
         hash128_t kid = make_hash(0x45), src = make_hash(0x46);
         ASSERT_EQ(0, intent_stage_add_attestation(
             s, &id, &sub, &kid, nullptr, &src, nullptr, 1,
-            INTENT_STAGE_PG_EPOCH_UNIX_US, 1, NULL));
+            INTENT_STAGE_PG_EPOCH_UNIX_US, 1,
+            INT64_C(500000000), INT64_C(30000000000), NULL));
     }
 
     intent_stage_t* parts[kN];
@@ -621,11 +630,11 @@ TEST(LaplaceCoreIntentStage, PartitionCountOnePreservesAllRows) {
 }
 
 // Repro harness for the CILI COPY-blob corruption (attestations row truncated to
-// 9 of 10 fields, so the next row's be16 field-count is read as a giant field
+// one field short, so the next row's be16 field-count is read as a giant field
 // length). Stage a CILI-shaped attestation load — mixed NULL object/context,
 // 32-byte masks, and enough rows to force several arena reallocs past the initial
 // reserve — then emit the COPY binary and walk it asserting EVERY row carries
-// exactly 10 fields and the walk consumes the body EXACTLY. A truncated row trips
+// exactly 12 fields and the walk consumes the body EXACTLY. A truncated row trips
 // an assertion here; a heap overrun in the arena trips ASan at the write.
 TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
     const size_t N = 1400000;  // ~260 MB of rows -> multiple doubling reallocs
@@ -648,7 +657,8 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
         const hash128_t* ctx_ptr = (i % 4 == 0) ? nullptr : &ctx;
         ASSERT_EQ(0, intent_stage_add_attestation(
             s, &id, &subj, &type, obj_ptr, &src, ctx_ptr,
-            (int16_t)(i % 3), (int64_t)i, (int64_t)(i % 100 + 1), mask));
+            (int16_t)(i % 3), (int64_t)i, (int64_t)(i % 100 + 1),
+            (int64_t)(i % 100 + 1) * INT64_C(500000000), INT64_C(30000000000), mask));
     }
     ASSERT_EQ(N, intent_stage_attestation_count(s));
 
@@ -664,9 +674,9 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
     while (off < body_end) {
         ASSERT_LE(off + 2, body_end);
         uint16_t cols = read_be16(buf.data() + off);
-        ASSERT_EQ(10u, cols) << "row " << rows << " at byte " << off << " has " << cols << " cols";
+        ASSERT_EQ(12u, cols) << "row " << rows << " at byte " << off << " has " << cols << " cols";
         off += 2;
-        for (int c = 0; c < 10; ++c) {
+        for (int c = 0; c < 12; ++c) {
             ASSERT_LE(off + 4, body_end) << "row " << rows << " field " << c << " len overruns";
             int32_t flen = (int32_t)read_be32(buf.data() + off);
             off += 4;
@@ -700,10 +710,10 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
         while (poff < pend) {
             ASSERT_LE(poff + 2, pend);
             uint16_t pc = read_be16(pbuf.data() + poff);
-            ASSERT_EQ(10u, pc) << "partition " << p << " row " << partitioned_rows
+            ASSERT_EQ(12u, pc) << "partition " << p << " row " << partitioned_rows
                                << " at byte " << poff << " has " << pc << " cols";
             poff += 2;
-            for (int c = 0; c < 10; ++c) {
+            for (int c = 0; c < 12; ++c) {
                 ASSERT_LE(poff + 4, pend);
                 int32_t fl = (int32_t)read_be32(pbuf.data() + poff);
                 poff += 4;

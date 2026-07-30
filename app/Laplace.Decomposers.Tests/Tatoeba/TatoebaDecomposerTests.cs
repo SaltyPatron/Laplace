@@ -118,7 +118,7 @@ public sealed class TatoebaDecomposerTests
             // An edge between an id we cannot resolve to text asserts nothing about language.
             // It is DROPPED — not grounded on a bare synthetic node that would read as an
             // unattested entity pretending to be a sentence.
-            Assert.Empty(attestations.Where(a => a.TypeId == translationType));
+            Assert.DoesNotContain(attestations, a => a.TypeId == translationType);
             Assert.DoesNotContain(Hash128.OfCanonical("tatoeba/sentence/999"), entities.Select(e => e.Id));
         }
         finally

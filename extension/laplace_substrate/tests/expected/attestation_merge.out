@@ -11,6 +11,8 @@ DECLARE
     a1       bytea := laplace_hash128_blake3('test/merge/att1');
     a2       bytea := laplace_hash128_blake3('test/merge/att2');
     ghost    bytea := laplace_hash128_blake3('test/merge/never-written');
+    phi1     bigint := 30000000000;
+    phi2     bigint := 350000000000;
     t1       timestamptz := '2026-01-01 00:00:00+00';
     t2       timestamptz := '2026-02-01 00:00:00+00';
     t0       timestamptz := '2025-12-01 00:00:00+00';
@@ -20,18 +22,22 @@ DECLARE
     leafname text;
 BEGIN
     -- Seed: one row in a hot (IS_A) leaf, one in the dynamic DEFAULT leaf.
+    -- Distinct per-row phi pins that merge preserves each row's own value.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (a1, subj, rel_hot, o1, src, NULL, 2, t1, 3),
-        (a2, subj, rel_dyn, o2, src, NULL, 1, t1, 1);
+        (a1, subj, rel_hot, o1, src, NULL, 2, t1, 3, 3000000000, phi1),
+        (a2, subj, rel_dyn, o2, src, NULL, 1, t1, 1,  500000000, phi2);
 
-    -- 1) one routed call, two types: counts accumulate, GREATEST advances a
-    --    newer ts and keeps a stored ts that is already newer.
+    -- 1) one routed call, two types: counts AND score sums accumulate,
+    --    GREATEST advances a newer ts and keeps a stored ts that is already
+    --    newer.
     affected := attestation_merge(
         ARRAY[a1, a2], ARRAY[rel_hot, rel_dyn], ARRAY[subj, subj],
-        ARRAY[5, 2]::bigint[], ARRAY[t2, t0]);
+        ARRAY[5, 2]::bigint[], ARRAY[5000000000, 1000000000]::bigint[],
+        ARRAY[t2, t0]);
     IF affected <> 2 THEN
         RAISE EXCEPTION 'FAIL: merge affected % rows, expected 2', affected;
     END IF;
@@ -41,6 +47,12 @@ BEGIN
     IF row1.observation_count <> 8 THEN
         RAISE EXCEPTION 'FAIL: observation_count=%, expected 3+5=8', row1.observation_count;
     END IF;
+    IF row1.sum_score_fp1e9 <> 8000000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected 3e9+5e9', row1.sum_score_fp1e9;
+    END IF;
+    IF row1.opponent_rd_fp1e9 <> phi1 THEN
+        RAISE EXCEPTION 'FAIL: opponent_rd_fp1e9=%, merge must keep the stored per-deposit phi %', row1.opponent_rd_fp1e9, phi1;
+    END IF;
     IF row1.last_observed_at <> t2 THEN
         RAISE EXCEPTION 'FAIL: last_observed_at=%, expected advanced to %', row1.last_observed_at, t2;
     END IF;
@@ -49,6 +61,12 @@ BEGIN
     WHERE type_id = rel_dyn AND subject_id = subj AND id = a2;
     IF row2.observation_count <> 3 THEN
         RAISE EXCEPTION 'FAIL: observation_count=%, expected 1+2=3', row2.observation_count;
+    END IF;
+    IF row2.sum_score_fp1e9 <> 1500000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected 5e8+1e9', row2.sum_score_fp1e9;
+    END IF;
+    IF row2.opponent_rd_fp1e9 <> phi2 THEN
+        RAISE EXCEPTION 'FAIL: opponent_rd_fp1e9=%, merge must keep the stored per-deposit phi %', row2.opponent_rd_fp1e9, phi2;
     END IF;
     IF row2.last_observed_at <> t1 THEN
         RAISE EXCEPTION 'FAIL: last_observed_at=%, GREATEST must keep the newer stored %', row2.last_observed_at, t1;
@@ -68,7 +86,8 @@ BEGIN
     --    surfaces as a count shortfall, never silent corruption).
     affected := attestation_merge(
         ARRAY[a1, ghost], ARRAY[rel_hot, rel_hot], ARRAY[subj, subj],
-        ARRAY[1, 1]::bigint[], ARRAY[t2, t2]);
+        ARRAY[1, 1]::bigint[], ARRAY[500000000, 500000000]::bigint[],
+        ARRAY[t2, t2]);
     IF affected <> 1 THEN
         RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 1 (ghost id merges nothing)', affected;
     END IF;
@@ -77,8 +96,11 @@ BEGIN
     IF row1.observation_count <> 9 THEN
         RAISE EXCEPTION 'FAIL: observation_count=% after repeat call, expected 9', row1.observation_count;
     END IF;
+    IF row1.sum_score_fp1e9 <> 8500000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=% after repeat call, expected 8.5e9', row1.sum_score_fp1e9;
+    END IF;
 
-    RAISE NOTICE '✓ attestation_merge: routed accumulation, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold';
+    RAISE NOTICE '✓ attestation_merge: routed accumulation (games + score sums), per-deposit phi kept, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold';
 END $$;
-NOTICE:  ✓ attestation_merge: routed accumulation, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold
+NOTICE:  ✓ attestation_merge: routed accumulation (games + score sums), per-deposit phi kept, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold
 ROLLBACK;
