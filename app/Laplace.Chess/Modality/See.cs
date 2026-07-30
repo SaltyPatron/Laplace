@@ -67,7 +67,9 @@ public static class See
             sq[target] = occupant;
             stm = !stm;
         }
-        while (--d > 0) gain[d - 1] = -Math.Max(-gain[d - 1], gain[d]);
+        // Negamax the speculative gains backward from the deepest capture: at every
+        // depth the defender may stand pat instead of recapturing at a loss.
+        for (; d > 0; d--) gain[d - 1] = -Math.Max(-gain[d - 1], gain[d]);
         return gain[0];
     }
 

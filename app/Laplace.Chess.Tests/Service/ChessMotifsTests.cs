@@ -171,6 +171,17 @@ public sealed class ChessMotifsTests
     }
 
     [Fact]
+    public void DetectGame_MatingFinalMove_IsNotAnOffer()
+    {
+        // Qxf7# stands en prise to the king (SEE < 0) but ends the game — there is no
+        // opponent turn left to decline in, so no sacrifice shape may tag.
+        var tags = ChessMotifs.DetectGame(Replay(null,
+            ["e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6", "Qxf7#"]));
+        Assert.DoesNotContain("sacrifice_offered", tags[6]);
+        Assert.DoesNotContain("sacrifice", tags[6]);
+    }
+
+    [Fact]
     public void DetectGame_LegalTrap_TagsKnightSacOffered()
     {
         // Légal: 5.Nxe5 leaves the knight en prise (SEE < 0); black grabs the queen

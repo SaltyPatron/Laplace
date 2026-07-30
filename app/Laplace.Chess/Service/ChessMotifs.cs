@@ -123,6 +123,9 @@ public static class ChessMotifs
         bool accepted = i + 1 < w.Moves.Count && CapturesSquare(w.Boards[i + 1], w.Moves[i + 1], m.To);
         if (!accepted)
         {
+            // An unanswered final move that ends the game (mate/stalemate: no legal
+            // replies) offered nothing — there is no opponent turn left to decline in.
+            if (i + 1 == w.Moves.Count && MoveGen.Legal(w.Boards[i + 1]).Count == 0) return;
             (tags ??= []).Add("sacrifice_offered");
             if (gambit) tags.Add("gambit");
             return;
