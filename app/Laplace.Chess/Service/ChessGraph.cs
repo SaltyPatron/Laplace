@@ -300,6 +300,16 @@ public static class ChessGraph
     /// consensus cells aggregate. PLAYED_BY was declared in the manifest and never emitted; this
     /// is the edge it was reserved for.
     /// </summary>
+    /// <summary>
+    /// GH #736: the line's own fold cell — (line, OUTCOME, Chess_Result), one witness per
+    /// playing, white-POV score. witness_count IS "times this line was played"; eff_mu IS
+    /// how the line fares. ctx = the playing-event, so evidence stays per-playing.
+    /// </summary>
+    public static void AppendLineOutcome(
+        SubstrateChangeBuilder b, Hash128 lineId, PlyOutcome whitePov,
+        double witnessWeight, Hash128 src, Hash128 eventId)
+        => b.AddAttestation(Outcome(lineId, games: 1, ScoreFp1e9(whitePov), witnessWeight, src, eventId));
+
     public static void AppendPlayerResult(
         SubstrateChangeBuilder b, Hash128 player, Hash128? opponent, PlyOutcome outcome,
         double witnessWeight, Hash128 src, Hash128 gameId)

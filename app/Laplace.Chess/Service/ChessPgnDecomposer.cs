@@ -112,7 +112,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var toProbe = new List<int>(chunk.Count);
         for (int i = 0; i < chunk.Count; i++)
         {
-            if (reader.IsProvenPresent(chunk[i].GameId)) continue;
+            if (reader.IsProvenPresent(chunk[i].EventId)) continue;
             toProbe.Add(i);
         }
 
@@ -120,7 +120,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (toProbe.Count > 0)
         {
             var ids = new Hash128[toProbe.Count];
-            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].GameId;
+            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].EventId;
             byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
             long bits = (long)bm.Length * 8;
             var proven = new List<Hash128>(toProbe.Count);
@@ -134,7 +134,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
 
         for (int i = 0; i < chunk.Count; i++)
-            if (!present[i] && !reader.IsProvenPresent(chunk[i].GameId))
+            if (!present[i] && !reader.IsProvenPresent(chunk[i].EventId))
                 yield return chunk[i];
     }
 
@@ -161,14 +161,69 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var result = walk.Result.Value;
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
-        var gameId = ChessVocabulary.GameId(whiteName, blackName, date, moves);
-        return new ChessGameRecord(gameText, moves, result, gameId)
+
+        // GH #736: line identity is minted HERE, by replay — the content id is the Merkle
+        // of the ordered position ids the game passes through, so two sources writing the
+        // same play differently ("O-O" vs "0-0", disambiguation variants) collide, and
+        // who/when never enters the hash. Replay under chess's fixed rules is deterministic
+        // parsing, not a versioned judgment (GH #600), and the novelty gate needs the ids
+        // before Compose runs. A game whose SAN does not resolve asserted a line the parser
+        // cannot name — dropped at this gate with a counted warning, the same rule the book
+        // lane and analyzer already apply.
+        string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
+            ? PgnGames.TagStr(gameText, "FEN") : null;
+        var positionIds = TryReplayLine(moves, startFen);
+        if (positionIds is null)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "ChessPgnDecomposer: unresolvable SAN, game dropped ({White} vs {Black} {Date})",
+                whiteName, blackName, date);
+            return null;
+        }
+        var lineId = ChessCompose.LineId(positionIds);
+
+        // The playing-event handle: Seven-Tag-Roster fields closed over the verbatim
+        // movetext id — idempotent per record, collision-proof against garbage rosters.
+        var movetextId = MovetextId(MovetextSection(gameText));
+        if (movetextId is null) return null;
+        var eventId = ChessVocabulary.PgnEventId(
+            whiteName, blackName, date,
+            PgnGames.TagStr(gameText, "Event"), PgnGames.TagStr(gameText, "Round"),
+            PgnGames.TagStr(gameText, "Site"), movetextId.Value);
+
+        return new ChessGameRecord(gameText, moves, result, lineId, eventId)
         {
             Walk = walk,
             WhiteName = whiteName,
             BlackName = blackName,
             Date = date,
+            PositionIds = positionIds,
+            MovetextId = movetextId.Value,
         };
+    }
+
+    /// <summary>
+    /// Id-only replay of a mainline: the ordered position ids (start position included),
+    /// or null when a SAN fails to resolve. Composition is memoized (ChessCompose
+    /// PositionMemo), so this shares cost with the fused analyze replay in the same pass.
+    /// </summary>
+    internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
+    {
+        var m = new ChessModality();
+        var (state, _) = ChessAnalyze.InitialState(startFen, m);
+        var ids = new Hash128[sans.Count + 1];
+        ids[0] = ChessCompose.Position(m.StateKey(state)).Position.Id;
+        var pseudoBuf = new List<ChessMove>(64);
+        var legalBuf = new List<ChessMove>(64);
+        for (int ply = 0; ply < sans.Count; ply++)
+        {
+            MoveGen.Legal(state.Board, pseudoBuf, legalBuf);
+            var mv = San.Resolve(state.Board, legalBuf, sans[ply]);
+            if (mv is null) return null;
+            state = m.Apply(state, mv.Value);
+            ids[ply + 1] = ChessCompose.Position(m.StateKey(state)).Position.Id;
+        }
+        return ids;
     }
 
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
@@ -189,7 +244,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // (deduped moves/positions carrying outcomes) remain the analyzer's job.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
-        var (gameText, _, result, gameId) = parsed;
+        var (gameText, _, result, lineId, eventId) = parsed;
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
@@ -201,27 +256,31 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var whitePlayer = EmitPlayer(b, whiteName, src);
         var blackPlayer = EmitPlayer(b, blackName, src);
 
-        EmitGame(b, gameId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
-        RecordStartPosition(b, gameId, gameText, src);
-        RecordOpeningHeaders(b, gameId, gameText, src);
-        RecordMovetext(b, gameId, gameText, src);
+        EmitGame(b, lineId, eventId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
+        RecordStartPosition(b, lineId, eventId, gameText, src);
+        RecordOpeningHeaders(b, lineId, gameText, src);
+        RecordMovetext(b, lineId, eventId, gameText, src);
     }
 
-    private static void RecordStartPosition(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
+    private static void RecordStartPosition(
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src)
     {
         if (PgnGames.TagStr(gameText, "SetUp") != "1") return;
         string fen = PgnGames.TagStr(gameText, "FEN");
         if (string.IsNullOrWhiteSpace(fen)) return;
         if (ContentEmitter.Emit(b, fen, src) is { } fid)
-            b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_SETUP", fid, src, null, PgnWitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_SETUP", fid, src, eventId, PgnWitnessWeight));
     }
 
-    private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
+    // Line-grain facts, ctx = null on purpose: each playing that asserts the same
+    // ECO/opening for the same line MERGES into one evidence row whose observation
+    // count accumulates — every playing is a witness that the line is that opening.
+    private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 lineId, string gameText, Hash128 src)
     {
         string eco = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
-        if (eco.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
+        if (eco.Length > 0) ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_ECO", eco, PgnWitnessWeight, src);
         string opening = ChessCanonical.OpeningName(PgnGames.TagStr(gameText, "Opening")) ?? "";
-        if (opening.Length > 0) ChessGraph.AppendGameMeta(b, gameId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
+        if (opening.Length > 0) ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
     }
 
     // Witness the VERBATIM PGN movetext (clocks, evals, comments, NAGs, result token — the
@@ -239,7 +298,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // Merkle over its ordered tokens — the same composition positions use (ChessCompose), with
     // the trajectory carrying the sequence, so the record stays lossless and reconstructible
     // while every unit it is built from is one the corpus actually reuses.
-    private static void RecordMovetext(SubstrateChangeBuilder b, Hash128 gameId, string gameText, Hash128 src)
+    private static void RecordMovetext(
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src)
     {
         string movetext = MovetextSection(gameText);
         if (movetext.Length == 0) return;
@@ -272,7 +332,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             SourceDim: null,
             ObservedAtUnixUs: nowUs));
 
-        b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_MOVETEXT", mtId, src, null, PgnWitnessWeight));
+        // Subject = the LINE, ctx = this playing: two playings with different clock/comment
+        // annotations are two movetext documents on one line, distinguished by context.
+        b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_MOVETEXT", mtId, src, eventId, PgnWitnessWeight));
     }
 
     // Document tier: a movetext is a whole document made of ply tokens.
@@ -371,48 +433,71 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     private const double PgnWitnessWeight = 0.7;
 
     private static void EmitGame(
-        SubstrateChangeBuilder b, Hash128 gameId, string gameText, string date, GameOutcome result,
-        Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo, Hash128 src)
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, string date,
+        GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo,
+        Hash128 src)
     {
-        b.AddEntity(gameId, EntityTier.Document, ChessVocabulary.GameType, src);
+        // GH #736: two entities. The LINE is content (what was played — shared across every
+        // playing); the EVENT is provenance (this playing — who/when/where). Every fact of
+        // this playing subjects onto the line with ctx = event, so evidence stays
+        // per-playing while consensus cells aggregate across playings.
+        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, src);
+        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, src);
 
-        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_WHITE", wp, src, null, PgnWitnessWeight));
-        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(gameId, "HAS_BLACK", bp, src, null, PgnWitnessWeight));
+        // The ONE record edge whose subject is the event: the event→line join the read
+        // side navigates by, carrying this playing's outcome (white POV) in aggregated form.
+        b.AddAttestation(NativeAttestation.Aggregated(
+            subject: eventId,
+            typeId: ChessVocabulary.PlaysLineType,
+            obj: lineId,
+            sourceId: src,
+            contextId: null,
+            games: 1,
+            sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(0)),
+            witnessWeight: PgnWitnessWeight));
 
-        // The colour headers above are the RECORD: who sat where, one row per game.
+        // The line's own fold cell: (line, OUTCOME, Chess_Result), one witness per playing —
+        // witness_count IS "times played", eff_mu IS how the line fares (white POV).
+        ChessGraph.AppendLineOutcome(b, lineId, result.ForMover(0), PgnWitnessWeight, src, eventId);
+
+        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_WHITE", wp, src, eventId, PgnWitnessWeight));
+        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, eventId, PgnWitnessWeight));
+
+        // The colour headers above are the RECORD: who sat where, one row per playing.
         // These are the AGGREGATING lane — the same game result carried into the Glicko fold
         // on the player himself, so his record is a consensus cell to be read rather than a
         // 400k-row GROUP BY to be recomputed and cached. Both lanes, always, per the ply law.
         if (whitePlayer is { } w2)
-            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, gameId);
+            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, eventId);
         if (blackPlayer is { } b2)
-            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, gameId);
+            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, eventId);
 
-        Meta(b, gameId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src);
-        Meta(b, gameId, "ON_DATE", date, src);
-        Meta(b, gameId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src);
-        Meta(b, gameId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src);
-        Meta(b, gameId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src);
+        Meta(b, lineId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src, eventId);
+        Meta(b, lineId, "ON_DATE", date, src, eventId);
+        Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, eventId);
+        Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, eventId);
+        Meta(b, lineId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src, eventId);
 
         string tc = PgnGames.TagStr(gameText, "TimeControl");
-        Meta(b, gameId, "HAS_TIME_CONTROL", tc, src);
-        Meta(b, gameId, "HAS_TC_CLASS", TcClass(tc), src);
+        Meta(b, lineId, "HAS_TIME_CONTROL", tc, src, eventId);
+        Meta(b, lineId, "HAS_TC_CLASS", TcClass(tc), src, eventId);
 
-        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, gameId, src);
-        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, gameId, src);
+        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, eventId, src);
+        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, eventId, src);
     }
 
-    private static void Meta(SubstrateChangeBuilder b, Hash128 game, string rel, string value, Hash128 src)
+    private static void Meta(
+        SubstrateChangeBuilder b, Hash128 line, string rel, string value, Hash128 src, Hash128 eventId)
     {
         if (string.IsNullOrWhiteSpace(value) || value == "?" || value == "-" || value == "????.??.??") return;
         if (ContentEmitter.Emit(b, value, src) is { } vid)
-            b.AddAttestation(NativeAttestation.Categorical(game, rel, vid, src, null, PgnWitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(line, rel, vid, src, eventId, PgnWitnessWeight));
     }
 
-    private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, Hash128 game, Hash128 src)
+    private static void Rating(SubstrateChangeBuilder b, Hash128 player, int elo, Hash128 eventId, Hash128 src)
     {
         if (ContentEmitter.Emit(b, elo.ToString(), src) is { } rid)
-            b.AddAttestation(NativeAttestation.Categorical(player, "HAS_RATING", rid, src, game, PgnWitnessWeight));
+            b.AddAttestation(NativeAttestation.Categorical(player, "HAS_RATING", rid, src, eventId, PgnWitnessWeight));
     }
 
     internal static string TcClass(string tc)
@@ -542,13 +627,18 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 }
 
 /// <summary>
-/// Parsed PGN game with content-addressed <see cref="GameId"/> for existence-gate short-circuit.
+/// Parsed PGN game (GH #736): <see cref="LineId"/> is the CONTENT identity — the Merkle of
+/// the ordered position ids, identical for identical play regardless of who/when —
+/// and <see cref="EventId"/> is the PLAYING handle (provenance; the attestation context).
+/// The novelty gate keys on the event: re-ingesting the same record skips, while a new
+/// playing of an already-known line still records its witnesses.
 /// </summary>
 public sealed record ChessGameRecord(
     string GameText,
     List<string> Moves,
     GameOutcome Result,
-    Hash128 GameId)
+    Hash128 LineId,
+    Hash128 EventId)
     : ITrunkRootRecord
 {
     internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
@@ -559,5 +649,12 @@ public sealed record ChessGameRecord(
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
 
-    public Hash128 TrunkRootId => GameId;
+    // The ordered position ids TryParseGame's identity replay produced (start position
+    // included) — LineId is their Merkle; the analyzer's full replay re-derives the same
+    // sequence with geometry.
+    internal Hash128[] PositionIds { get; init; } = [];
+    // The verbatim movetext content id (also folded into EventId).
+    internal Hash128 MovetextId { get; init; }
+
+    public Hash128 TrunkRootId => EventId;
 }

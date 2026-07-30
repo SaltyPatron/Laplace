@@ -9,13 +9,15 @@ public static class ChessSeedManifest
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
-        "Chess_Game", "Chess_Movetext", "Chess_Ply", "Chess_AnalysisMarker", "Chess_Eval",
+        "Chess_Game", "Chess_Event", "Chess_Movetext", "Chess_AnalysisMarker", "Chess_Eval",
         "Chess_Concept", "Chess_BookLine",
     ];
 
     public static readonly IReadOnlyList<string> Relations =
     [
         "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", "OPENING_NAME", "HAS_ECO",
+        // GH #736: the event→line record edge; every chess lane that records playings emits it.
+        "PLAYS_LINE",
         "HAS_MOVETEXT", "HAS_PLY", "HAS_SAN", "HAS_COMMENT", "HAS_SETUP", "ANALYZED_AT",
         "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "GAME_AT", "GAME_AT_PLY", "HAS_EVAL", "MOVE_QUALITY",

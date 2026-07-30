@@ -19,6 +19,19 @@ public static class ChessCompose
 {
     public const byte SubstructureTier = 1;
     public const byte PositionTier = 2;
+    // GH #736: the LINE — a whole game as content, the chess ladder's document floor.
+    public const byte LineTier = 4;
+
+    /// <summary>
+    /// The game/line CONTENT id (GH #736): the Merkle composition of the ordered position
+    /// ids the game passes through (start position included) — the same composition law as
+    /// every tier. Identical play = identical id, regardless of who played it, when, or how
+    /// the source spelled the SAN ("O-O" vs "0-0"); provenance lives in attestation
+    /// context, never in this hash. ONE definition — every lane (PGN, book, live) resolves
+    /// line identity through it.
+    /// </summary>
+    public static Hash128 LineId(ReadOnlySpan<Hash128> orderedPositionIds)
+        => Hash128.Merkle(LineTier, orderedPositionIds);
 
     public static object Gate => LaplaceCoreGate.Native;
 
