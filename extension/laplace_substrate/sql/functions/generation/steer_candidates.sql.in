@@ -11,9 +11,21 @@
 -- collapse them -- that distinction is what tells a walk to back off rather than
 -- dead-end.
 --
+-- steer is COVERAGE-WEIGHTED, not a bare edge sum. Mass is folded per DISTINCT
+-- frontier member first, then combined through log1p, so reaching two frontier
+-- members beats hammering one. A bare sum ranks by "reaches anything in the
+-- frontier"; a composed prefix means "sits where the frontier overlaps". For
+-- "the capital of france is", the sum lets `Lyon` (one strong edge to `france`)
+-- outrank `Paris` (moderate edges to `france` AND `capital`).
+--
+-- covered is the DISTINCT frontier members reached -- not edges, which counts
+-- five edges into `france` alone the same as edges spread across the frontier.
+-- Refuted (negative) member mass bypasses log1p and stays linear so it can sink
+-- a candidate instead of being squashed toward zero.
+--
 -- NOT PARALLEL SAFE: reads consensus through SPI.
 CREATE OR REPLACE FUNCTION steer_candidates(
         p_candidates bytea[], p_frontier bytea[], p_kappa float8 DEFAULT NULL)
-    RETURNS TABLE(candidate bytea, steer float8, edges bigint)
+    RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'
     LANGUAGE C VOLATILE;

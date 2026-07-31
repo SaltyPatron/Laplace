@@ -115,16 +115,13 @@ public static class RelationTypeRegistry
         }
     }
 
-    public static RelationTypeResolution ResolveDbpedia(string rel)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(rel);
-        string norm = rel.Trim();
-        if (norm.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) norm = norm[8..];
-        string canon = "DBPEDIA_" + norm.Replace('/', '_').ToUpperInvariant();
-        return new RelationTypeResolution(
-            RelationTypeId(canon), RelationTypeRank.Associative, Symmetry.Asymmetric, false,
-            RelationTypeId("HAS_DBPEDIA_RELATION"), canon);
-    }
+    // ResolveDbpedia was deleted here. It minted DBPEDIA_<REL> types from ConceptNet's
+    // dbpedia lane, which puts the SOURCE into the type name. consensus.id is
+    // blake3(subject‖type‖object), so a source-scoped type guarantees that the same
+    // triple witnessed by dbpedia and by prose hashes to two different consensus rows:
+    // they never merge, witness_count never climbs, RD never tightens. Provenance
+    // already has a slot — AttestationRow.SourceId. It does not belong in TypeId.
+    // It had zero callers. dbpedia edges map onto generic manifest relations instead.
 
     public static bool ParseFeature(string feature, out string name, out string value)
     {
