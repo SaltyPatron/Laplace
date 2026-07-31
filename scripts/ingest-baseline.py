@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Record and compare per-source ingest throughput.
+
+The signal has always existed and nothing ever read it. IngestRunner emits
+INGEST_COMPLETE (source, elapsed_s, rows_new, status) per run and INGEST_BATCH
+(rate_rows_s) per batch, and both land in $LAPLACE_OPS_LOG_DIR/laplace-cli.csv --
+queryable as ops.app_log through file_fdw. ingest-source.sh now emits INGEST_TIMING
+with the wall clock at the shell boundary. But no script parsed any of it, no
+baseline was written down, and no gate compared against one, so "the seed is slow"
+was an opinion for fourteen months.
+
+IngestBaselineGates declares MinWriterRowsPerSecond=500000 and MaxSecondsPerGigabyte=30,
+but those are enforced only by Tier=perf tests that CI excludes, and they measure a
+4 MiB synthetic buffer -- not a corpus. This measures corpora.
+
+    record   parse logs, write/merge scripts/ingest-baselines.json
+    check    parse logs, compare against the baseline, exit 1 on regression
+    show     print the current baseline
+
+Input is any mix of files and stdin: a tee'd ingest log, laplace-cli.csv, or the
+output of `gh run view --log`. Lines are matched by content, not by file format.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BASELINE_PATH = ROOT / "scripts" / "ingest-baselines.json"
+
+# Tolerated slowdown before `check` fails. Wide on purpose: this box is shared, an
+# autovacuum or a concurrent CI job perturbs a seed, and a flaky gate teaches people
+# to ignore it. It is here to catch a 2x regression, not a 10% one.
+DEFAULT_TOLERANCE = 1.5
+
+COMPLETE_RE = re.compile(
+    r"INGEST_COMPLETE\s+source=(?P<source>\S+).*?"
+    r"rows_new=(?P<ent>\d+)e\+(?P<phys>\d+)p\+(?P<att>\d+)a\s+"
+    r"elapsed_s=(?P<elapsed>[\d.]+).*?status=(?P<status>\S+)"
+)
+TIMING_RE = re.compile(
+    r"INGEST_TIMING\s+source=(?P<source>\S+)\s+elapsed_s=(?P<elapsed>\d+)\s+rc=(?P<rc>\d+)"
+)
+
+
+def normalize(source: str) -> str:
+    """The two emitters name the same run differently: ingest-source.sh uses the CLI
+    source key ('wiktionary'), IngestRunner uses the decomposer class
+    ('WiktionaryDecomposer'). Without folding them, one run produces two baseline
+    entries and neither carries both numbers. Where the fold does not apply the keys
+    simply stay distinct, which is honest -- better than guessing them equal."""
+    s = source[:-len("Decomposer")] if source.endswith("Decomposer") else source
+    return s.lower()
+
+
+def parse(streams) -> dict[str, dict]:
+    """Collect the last observation per source. Later lines win: a re-ingest in the
+    same log is the fresher measurement, and the idempotency job deliberately runs
+    one, so taking the max or the mean would blend a cold seed with a warm no-op."""
+    seen: dict[str, dict] = {}
+    for stream in streams:
+        for line in stream:
+            m = COMPLETE_RE.search(line)
+            if m:
+                rows = int(m["ent"]) + int(m["phys"]) + int(m["att"])
+                elapsed = float(m["elapsed"])
+                seen.setdefault(normalize(m["source"]), {}).update(
+                    source=normalize(m["source"]),
+                    decomposer=m["source"],
+                    elapsed_s=elapsed,
+                    rows_new=rows,
+                    status=m["status"],
+                    rows_per_s=round(rows / elapsed, 1) if elapsed > 0 else None,
+                )
+                continue
+            m = TIMING_RE.search(line)
+            if m:
+                # Shell wall clock includes the CLI build and process start, so it is
+                # always >= the runner's own elapsed_s. Keep both; they answer different
+                # questions ("how long did the seed take" vs "how fast is the writer").
+                seen.setdefault(normalize(m["source"]), {}).update(
+                    source=normalize(m["source"]),
+                    wall_s=int(m["elapsed"]),
+                    rc=int(m["rc"]),
+                )
+    return seen
+
+
+def load_baseline() -> dict:
+    if not BASELINE_PATH.is_file():
+        return {}
+    return json.loads(BASELINE_PATH.read_text())
+
+
+def open_inputs(paths):
+    if not paths:
+        return [sys.stdin]
+    streams = []
+    for p in paths:
+        fp = Path(p)
+        if not fp.is_file():
+            sys.stderr.write(f"ingest-baseline: no such file: {p}\n")
+            raise SystemExit(2)
+        streams.append(fp.open(errors="replace"))
+    return streams
+
+
+def cmd_record(args) -> int:
+    observed = parse(open_inputs(args.logs))
+    if not observed:
+        sys.stderr.write("ingest-baseline: no INGEST_COMPLETE or INGEST_TIMING lines found\n")
+        return 1
+    baseline = load_baseline()
+    for source, obs in sorted(observed.items()):
+        if obs.get("status") not in (None, "ok"):
+            print(f"  skip {source}: status={obs['status']} (not a clean run)")
+            continue
+        prev = baseline.get(source)
+        baseline[source] = obs
+        if prev and prev.get("elapsed_s"):
+            delta = obs.get("elapsed_s", 0) / prev["elapsed_s"]
+            print(f"  {source}: {obs.get('elapsed_s')}s ({delta:.2f}x previous {prev['elapsed_s']}s)")
+        elif obs.get("elapsed_s") is not None:
+            print(f"  {source}: {obs['elapsed_s']}s (new)")
+        else:
+            print(f"  {source}: {obs.get('wall_s')}s wall only (no INGEST_COMPLETE in input)")
+    BASELINE_PATH.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
+    print(f"wrote {BASELINE_PATH.relative_to(ROOT)} ({len(baseline)} sources)")
+    return 0
+
+
+def cmd_check(args) -> int:
+    observed = parse(open_inputs(args.logs))
+    baseline = load_baseline()
+    if not observed:
+        sys.stderr.write("ingest-baseline: no timing lines found in input\n")
+        return 1
+    if not baseline:
+        sys.stderr.write(
+            "ingest-baseline: no baseline recorded yet — run `record` first. "
+            "Refusing to pass a check with nothing to compare against.\n")
+        return 1
+
+    failures = []
+    for source, obs in sorted(observed.items()):
+        elapsed = obs.get("elapsed_s")
+        prev = baseline.get(source)
+        if elapsed is None:
+            continue
+        if not prev or not prev.get("elapsed_s"):
+            print(f"  {source}: {elapsed}s (no baseline — recording is a separate step)")
+            continue
+        ratio = elapsed / prev["elapsed_s"]
+        mark = "ok " if ratio <= args.tolerance else "SLOW"
+        print(f"  {mark} {source}: {elapsed}s vs baseline {prev['elapsed_s']}s ({ratio:.2f}x)")
+        if ratio > args.tolerance:
+            failures.append((source, ratio))
+
+    if args.max_seconds:
+        for source, obs in sorted(observed.items()):
+            elapsed = obs.get("elapsed_s")
+            if elapsed is not None and elapsed > args.max_seconds:
+                print(f"  OVER {source}: {elapsed}s exceeds --max-seconds {args.max_seconds}")
+                failures.append((source, elapsed / args.max_seconds))
+
+    if failures:
+        sys.stderr.write(
+            f"ingest-baseline: {len(failures)} source(s) regressed beyond {args.tolerance}x\n")
+        return 1
+    print("ingest-baseline: OK")
+    return 0
+
+
+def cmd_show(_args) -> int:
+    baseline = load_baseline()
+    if not baseline:
+        print("no baseline recorded")
+        return 0
+    for source, obs in sorted(baseline.items()):
+        elapsed = obs.get("elapsed_s")
+        wall = obs.get("wall_s")
+        rate = obs.get("rows_per_s")
+        shown = f"{elapsed:.1f}s" if elapsed is not None else (
+            f"{wall}s wall" if wall is not None else "no timing")
+        print(f"  {source:16} {shown:>14}  {obs.get('rows_new', 0):>12} rows  "
+              f"{rate if rate is not None else '-'} rows/s")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    rec = sub.add_parser("record", help="write/merge the baseline from logs")
+    rec.add_argument("logs", nargs="*", help="log files (default: stdin)")
+    rec.set_defaults(fn=cmd_record)
+
+    chk = sub.add_parser("check", help="compare logs against the baseline")
+    chk.add_argument("logs", nargs="*", help="log files (default: stdin)")
+    chk.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
+                     help=f"allowed slowdown ratio (default {DEFAULT_TOLERANCE})")
+    chk.add_argument("--max-seconds", type=float, default=None,
+                     help="also fail any source slower than this many seconds")
+    chk.set_defaults(fn=cmd_check)
+
+    show = sub.add_parser("show", help="print the recorded baseline")
+    show.set_defaults(fn=cmd_show)
+
+    args = ap.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
