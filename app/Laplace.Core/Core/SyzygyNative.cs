@@ -21,38 +21,17 @@ public static class SyzygyNative
     public const int Win = 4;
 
     /// <summary>
-    /// Whether the probe kernel is present at all. The prober is OPTIONAL vendored
-    /// tooling (engine builds without <c>external/fathom</c> omit <c>laplace_syzygy</c>
-    /// entirely), so a missing library is a missing TOOL — the same condition as a
-    /// missing tablebase directory — never a crash. Probed once, cached.
-    /// </summary>
-    public static bool Available => _available ??= ProbeAvailability();
-
-    private static bool? _available;
-
-    private static bool ProbeAvailability()
-    {
-        try
-        {
-            NativeInterop.SyzygyLargest();
-            return true;
-        }
-        catch (DllNotFoundException) { return false; }
-        catch (EntryPointNotFoundException) { return false; }
-    }
-
-    /// <summary>
     /// Load (or re-load) the tablebase set under <paramref name="path"/>. Returns the
     /// largest man count the discovered tables cover (0 = directory holds no tables),
-    /// -1 when init failed, and 0 when the probe kernel is not built at all.
+    /// or -1 when init failed.
     /// </summary>
-    public static int Init(string path) => Available ? NativeInterop.SyzygyInit(path) : 0;
+    public static int Init(string path) => NativeInterop.SyzygyInit(path);
 
     /// <summary>Release every table mapping. Idempotent.</summary>
-    public static void Free() { if (Available) NativeInterop.SyzygyFree(); }
+    public static void Free() => NativeInterop.SyzygyFree();
 
     /// <summary>Largest man count of the loaded set (0 when nothing is loaded).</summary>
-    public static int Largest() => Available ? NativeInterop.SyzygyLargest() : 0;
+    public static int Largest() => NativeInterop.SyzygyLargest();
 
     /// <summary>
     /// WDL-only probe. <paramref name="ep"/> is the en-passant square (0 = none).

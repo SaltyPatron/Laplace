@@ -45,16 +45,14 @@ target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main
 )
 
-# Probe-kernel tests exist only where the optional prober was built: laplace_syzygy
-# is ingest-side tooling, never linked into laplace_core, never loaded by PostgreSQL.
-if(LAPLACE_HAVE_FATHOM)
-    add_executable(laplace_syzygy_tests test_syzygy.cpp)
-    target_link_libraries(laplace_syzygy_tests PRIVATE laplace_syzygy GTest::gtest_main)
-    gtest_discover_tests(laplace_syzygy_tests
-        DISCOVERY_MODE PRE_TEST
-        DISCOVERY_TIMEOUT 120
-    )
-endif()
+# Probe-kernel tests link laplace_syzygy, which is ingest-side tooling: never part
+# of laplace_core, never loaded by PostgreSQL.
+add_executable(laplace_syzygy_tests test_syzygy.cpp)
+target_link_libraries(laplace_syzygy_tests PRIVATE laplace_syzygy GTest::gtest_main)
+gtest_discover_tests(laplace_syzygy_tests
+    DISCOVERY_MODE PRE_TEST
+    DISCOVERY_TIMEOUT 120
+)
 
 
 

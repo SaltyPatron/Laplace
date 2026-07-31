@@ -41,5 +41,14 @@
     <Copy SourceFiles="$(LaplaceBuildWin)\synthesis\laplace_synthesis.pdb"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
           Condition="Exists('$(LaplaceBuildWin)\synthesis\laplace_synthesis.pdb')" />
+    <!-- The Syzygy probe kernel: its own library precisely because it must NOT ride
+         laplace_core into the PostgreSQL backend, which means it needs its own copy
+         line here — omitting it is a DllNotFoundException at the first probe. -->
+    <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_syzygy.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
+          Condition="Exists('$(LaplaceBuildWin)\core\laplace_syzygy.dll')" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_syzygy.pdb"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="false"
+          Condition="Exists('$(LaplaceBuildWin)\core\laplace_syzygy.pdb')" />
   </Target>
 </Project>
