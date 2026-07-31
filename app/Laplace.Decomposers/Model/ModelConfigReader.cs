@@ -44,7 +44,7 @@ public static class ModelConfigReader
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning(
-                "ModelConfigReader: failed to read/parse '{Path}': {Message}", configJsonPath, ex.Message);
+                $"ModelConfigReader: failed to read/parse '{configJsonPath}': {ex.Message}");
             return Unsupported("(unparseable config.json)", "(unknown)");
         }
 

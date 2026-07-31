@@ -176,8 +176,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (positionIds is null)
         {
             System.Diagnostics.Trace.TraceWarning(
-                "ChessPgnDecomposer: unresolvable SAN, game dropped ({White} vs {Black} {Date})",
-                whiteName, blackName, date);
+                $"ChessPgnDecomposer: unresolvable SAN, game dropped ({whiteName} vs {blackName} {date})");
             return null;
         }
         var lineId = ChessCompose.LineId(positionIds);
@@ -541,7 +540,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ChessPgnDecomposer: failed to estimate games in {File}: {Message}", f, ex.Message);
+                    $"ChessPgnDecomposer: failed to estimate games in {f}: {ex.Message}");
             }
         }
         return Task.FromResult<long?>(games == 0 ? null : games);

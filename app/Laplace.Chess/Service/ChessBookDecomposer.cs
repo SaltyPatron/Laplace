@@ -143,7 +143,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ChessBookDecomposer: failed to estimate units in {File}: {Message}", f, ex.Message);
+                    $"ChessBookDecomposer: failed to estimate units in {f}: {ex.Message}");
             }
         }
         return units == 0 ? null : units;

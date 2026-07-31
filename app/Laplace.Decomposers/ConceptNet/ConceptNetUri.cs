@@ -109,7 +109,7 @@ public static class ConceptNetUri
         catch (JsonException ex)
         {
             System.Diagnostics.Trace.TraceWarning(
-                "ConceptNetUri: failed to parse weight from metadata JSON: {Message}", ex.Message);
+                $"ConceptNetUri: failed to parse weight from metadata JSON: {ex.Message}");
         }
         return 1.0;
     }
