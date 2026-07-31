@@ -109,9 +109,16 @@ public sealed class IngestRunner
         IngestTopology.EnsureReady();
         Laplace.Engine.Core.IntentStage.ResetContentBank();
 
+        // Directory.Exists ALONE was reported as "exists", so every single-file ingest logged
+        // exists=False on a file that was then read successfully — the line immediately after
+        // it announced input_units for that same path. A run that opens with a false negative
+        // about its own input teaches the reader to ignore the log.
+        bool pathIsDir = Directory.Exists(ctx.EcosystemPath);
+        bool pathIsFile = File.Exists(ctx.EcosystemPath);
         log.LogInformation(
-            "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists}",
-            decomposer.SourceName, ctx.EcosystemPath, Directory.Exists(ctx.EcosystemPath));
+            "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists} kind={Kind}",
+            decomposer.SourceName, ctx.EcosystemPath, pathIsDir || pathIsFile,
+            pathIsDir ? "dir" : pathIsFile ? "file" : "missing");
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
