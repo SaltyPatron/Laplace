@@ -73,6 +73,12 @@ jobs:
     name: "ingest ${{ inputs.source }} → ${{ inputs.database }}"
     runs-on: [self-hosted, laplace]
     timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+    # Wall-clock, published so a throughput baseline has something to read. Before this
+    # no seed run in CI history recorded its own duration -- timeout-minutes is a ceiling,
+    # not a measurement, and nothing downstream could tell a 20-minute seed from a
+    # 10-hour one that happened to finish.
+    outputs:
+      elapsed_s: ${{ steps.run_ingest.outputs.elapsed_s }}
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
@@ -82,6 +88,7 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Ingest
+        id: run_ingest
         run: |
           # Unset LAPLACE_INGEST_LANGS = ALL languages (witness-manifest law).
           # Narrowing a run is an explicit operator decision via the langs input.
