@@ -37,7 +37,15 @@ CREATE OR REPLACE FUNCTION chess_time_pressure_outcome()
         VALUES
             (@extschema@.word_id('rushed'), 'rushed', 1),
             (@extschema@.word_id('normal'), 'normal', 2),
-            (@extschema@.word_id('deep'),   'deep',   3)
+            (@extschema@.word_id('deep'),   'deep',   3),
+            -- Think-time lenses: phase × clock × spent refinements the analyzer
+            -- deposits beside the base classes, thresholds from the game's own
+            -- clock distribution (ChessCanonical.ThinkLens). Content values on
+            -- the same HAS_THINK_CLASS cell shape — no relation change. The
+            -- fourth lens (late + fast + low clock) IS the base 'rushed' cell.
+            (@extschema@.word_id('planned_quick'), 'planned_quick', 4),
+            (@extschema@.word_id('pressed_think'), 'pressed_think', 5),
+            (@extschema@.word_id('flagging'),      'flagging',      6)
     )
     SELECT cls.label,
            count(DISTINCT tc.position)::bigint                       AS positions,
