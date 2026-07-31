@@ -1,26 +1,60 @@
+-- Word adjacency DERIVED from sentence/document trajectories. Witnessed order lives in
+-- the trajectory (Pillar 3a: text emits no PRECEDES attestations); this is the calculated
+-- view over it.
+--
+-- The weight is a DOCUMENT frequency, not a corpus frequency: ids are content hashes and
+-- physicality identity is (entity_id, type), so a sentence occurring a million times is
+-- ONE row with ONE trajectory. count(*) here is "in how many distinct compositions is this
+-- pair adjacent", never "how many times did it occur". Callers needing occurrence mass
+-- must use testimony (attestations.observation_count / consensus.witness_count), which the
+-- text lane deliberately does not emit. Do not relabel this as corpus frequency.
 CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
+        -- Role by TYPE, not by tier. tier is a floor in the containment DAG, not a kind:
+        -- bootstrap mints relation types, trust classes, POS tags, sources and languages
+        -- all at tier 2, and single-grapheme words ('a', 'I') collapse to tier 0 by the
+        -- single-child rule -- so `tier > 2` both over- and under-selects. type_id is the
+        -- structural kind stamped at compose time, and it is indexed.
+        --
+        -- Ranked by trajectory length, not by id. `ORDER BY p.entity_id, p.id` sampled by
+        -- CONTENT HASH, which is arbitrary -- an arbitrary LIMIT without an ordering is a
+        -- missing ranking. Longest compositions carry the most adjacency per row read.
+        -- DISTINCT ON is gone: physicality identity is (entity_id, type) and type is
+        -- pinned below, so there is at most one row per entity already.
+        SELECT p.entity_id AS sid, p.trajectory
         FROM physicalities p
-        JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        JOIN entities e ON e.id = p.entity_id
+         AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT p_trajs
+        ORDER BY p.n_constituents DESC NULLS LAST, p.entity_id
+        LIMIT p_trajs
     ),
     g AS (
+        -- NO vocab join here. Filtering the sequence BEFORE the window made lead() skip
+        -- over every out-of-vocabulary word and emit a pair that was never adjacent --
+        -- fabricated evidence, and the reason this disagreed with grapheme_order, which
+        -- has always filtered after counting. The vocab restriction now applies to the
+        -- finished counts below, where it selects rows instead of inventing them.
         SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-        JOIN v ON v.id = tc.entity_id
     ),
     bg AS (
         SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g
     ),
     cnt AS (
+        -- `cur <> nxt` used to drop self-adjacent pairs. A repeated word is witnessed
+        -- data, and grapheme_order keeps its repeats -- so the filter was an inconsistency
+        -- between two functions of one family, not a rule. A consumer that cannot take a
+        -- self-loop drops it at its own layer; this one no longer discards the observation.
         SELECT cur, nxt, count(*)::float8 AS c
-        FROM bg WHERE nxt IS NOT NULL AND cur <> nxt GROUP BY cur, nxt
+        FROM bg WHERE nxt IS NOT NULL GROUP BY cur, nxt
     )
-    SELECT cur, nxt, c FROM cnt
+    SELECT c.cur, c.nxt, c.c
+    FROM cnt c
+    JOIN v vs ON vs.id = c.cur
+    JOIN v vo ON vo.id = c.nxt
 $$;

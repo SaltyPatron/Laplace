@@ -4,14 +4,14 @@ CREATE OR REPLACE FUNCTION corpus_word_vocab(p_size int, p_trajs int DEFAULT 400
     SET search_path = @extschema@, public AS $$
     WITH t AS (
         SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
-        FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
         ORDER BY p.entity_id, p.id LIMIT p_trajs
     ),
     w AS (
         SELECT tc.entity_id AS id, count(*) AS c
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-        JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
+        JOIN entities e ON e.id = tc.entity_id AND e.type_id = canonical_id('Word')
         GROUP BY tc.entity_id
     ),
     

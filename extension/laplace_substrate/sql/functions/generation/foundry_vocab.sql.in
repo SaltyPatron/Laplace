@@ -3,33 +3,47 @@ CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     -- Pillar 5 (2026-07-20): seed frequency comes from the GEOMETRY, not from
-    -- PRECEDES out-degree. A word's corpus frequency is how many times it appears
-    -- as a tier-2 constituent across trajectories -- the same count PRECEDES
-    -- materialized as redundant edges (Pillar 3a, e5e1b42). Identical shape to
-    -- corpus_word_vocab, which is already the geometry-native vocabulary source.
+    -- PRECEDES out-degree. Identical shape to corpus_word_vocab, which is already the
+    -- geometry-native vocabulary source.
+    --
+    -- `d` is DOCUMENT frequency, not corpus frequency. This comment used to claim the
+    -- latter, and it cannot be: ids are content hashes, physicality identity is
+    -- (entity_id, type) with no source_id column, so a sentence occurring a million times
+    -- is ONE row with ONE trajectory. `d` counts the distinct compositions a word appears
+    -- in. True occurrence mass lives in testimony (attestations.observation_count folded
+    -- into consensus.witness_count), and the text lane deliberately emits none, so there
+    -- is nothing else to read -- this is the only frequency signal that exists. Rank
+    -- accordingly, and do not describe it as corpus frequency again.
+    --
+    -- Role by TYPE, not tier, throughout. `tier = 2` was never "word": bootstrap mints
+    -- relation types, trust classes, POS tags, sources and languages at tier 2 as well,
+    -- so the seed vocabulary was admitting them; and single-grapheme words collapse to
+    -- tier 0, so it dropped 'a' and 'I'. type_id is stamped at compose time and indexed.
     WITH traj AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+        SELECT p.entity_id, p.trajectory
         FROM physicalities p
-        JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        JOIN entities e ON e.id = p.entity_id
+         AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT 400000
+        ORDER BY p.n_constituents DESC NULLS LAST, p.entity_id
+        LIMIT 400000
     ),
     freq AS (
         SELECT tc.entity_id AS id, count(*) AS d
         FROM traj CROSS JOIN LATERAL laplace_trajectory_constituents(traj.trajectory) tc
-        JOIN entities ew ON ew.id = tc.entity_id AND ew.tier = 2
+        JOIN entities ew ON ew.id = tc.entity_id AND ew.type_id = canonical_id('Word')
         GROUP BY tc.entity_id
     ),
     seeds AS (
         SELECT f.id, f.d
-        FROM freq f JOIN entities e ON e.id = f.id AND e.tier = 2
+        FROM freq f JOIN entities e ON e.id = f.id AND e.type_id = canonical_id('Word')
         ORDER BY f.d DESC LIMIT p_size
     ),
     closure AS (
         SELECT DISTINCT c.object_id AS id
         FROM consensus c
         JOIN seeds s ON s.id = c.subject_id
-        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+        JOIN entities e ON e.id = c.object_id AND e.type_id = canonical_id('Word')
         WHERE c.object_id IS NOT NULL
           AND c.type_id IN (
               relation_type_id('IS_A'), relation_type_id('IS_SYNONYM_OF'),

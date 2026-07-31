@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION recall_trajectories(p_word text, p_limit int DEFAULT 
     JOIN physicalities ph
       ON ph.type = 1 AND ph.trajectory IS NOT NULL
      AND public.laplace_trajectory_constituent_ids(ph.trajectory) @> ARRAY[wid.id]
-    JOIN entities e ON e.id = ph.entity_id AND e.tier = 3
+    JOIN entities e ON e.id = ph.entity_id AND e.type_id = canonical_id('Sentence')
     ORDER BY abs(ph.n_constituents - 7)
     LIMIT p_limit
   )

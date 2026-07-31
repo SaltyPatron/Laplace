@@ -75,7 +75,7 @@ BEGIN
     seq AS (
         SELECT ph.entity_id AS root, c.ordinal, c.entity_id AS tok
         FROM physicalities ph
-        JOIN entities e ON e.id = ph.entity_id AND e.tier >= 3
+        JOIN entities e ON e.id = ph.entity_id AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
         WHERE ph.type = 1 AND ph.trajectory IS NOT NULL
     ),

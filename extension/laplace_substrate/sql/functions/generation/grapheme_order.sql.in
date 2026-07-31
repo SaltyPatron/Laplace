@@ -13,11 +13,19 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         
         
         
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS wid, p.trajectory
+        -- Role by TYPE, not tier. `tier = 2` was never "word": bootstrap mints relation
+        -- types, trust classes, POS tags, sources and languages at tier 2 too, so this
+        -- was spelling out the grapheme runs of RelationType and Language entities. It
+        -- also missed single-grapheme words, which collapse to tier 0.
+        --
+        -- Ranked by length rather than content hash (an arbitrary LIMIT is a missing
+        -- ranking); DISTINCT ON dropped, since (entity_id, type) is already unique.
+        SELECT p.entity_id AS wid, p.trajectory
         FROM physicalities p
-        JOIN entities e ON e.id = p.entity_id AND e.tier = 2
+        JOIN entities e ON e.id = p.entity_id AND e.type_id = canonical_id('Word')
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT p_words
+        ORDER BY p.n_constituents DESC NULLS LAST, p.entity_id
+        LIMIT p_words
     ),
     g AS (
         
