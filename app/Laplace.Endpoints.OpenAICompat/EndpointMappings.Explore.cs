@@ -10,15 +10,8 @@ internal static class ExploreEndpoints
 
         app.MapGet("/v1/explore/catalog", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var catalog = await substrate.ExploreCatalogAsync(ct);
-                return Results.Json(catalog);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var catalog = await substrate.ExploreCatalogAsync(ct);
+            return Results.Json(catalog);
         })
         .WithTags("explore")
         .Produces<ExploreCatalogResponse>()
@@ -29,18 +22,11 @@ internal static class ExploreEndpoints
             if (string.IsNullOrWhiteSpace(reference))
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'reference' is required.");
 
-            try
-            {
-                var resolved = await substrate.ExploreResolveAsync(reference.Trim(), ct);
-                if (resolved is null)
-                    return EndpointJson.NotFound("entity_not_found", $"No entity for reference '{reference.Trim()}'.");
+            var resolved = await substrate.ExploreResolveAsync(reference.Trim(), ct);
+            if (resolved is null)
+                return EndpointJson.NotFound("entity_not_found", $"No entity for reference '{reference.Trim()}'.");
 
-                return Results.Json(resolved);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            return Results.Json(resolved);
         })
         .WithTags("explore")
         .Produces<ExploreResolveResponse>()
@@ -50,18 +36,11 @@ internal static class ExploreEndpoints
         app.MapGet("/v1/explore/entities/{idHex}/preview", async (
             string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var preview = await substrate.ExploreEntityPreviewAsync(idHex, ct);
-                if (preview is null)
-                    return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
+            var preview = await substrate.ExploreEntityPreviewAsync(idHex, ct);
+            if (preview is null)
+                return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
 
-                return Results.Json(preview);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            return Results.Json(preview);
         })
         .WithTags("explore")
         .Produces<ExploreEntityPreviewResponse>()
@@ -85,46 +64,39 @@ internal static class ExploreEndpoints
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'reference' is required.");
 
             var surface = reference.Trim();
-            try
-            {
-                var anchor = decompose.ComputeAnchor(surface);
-                var neighbors = await substrate.ExploreAnchorNeighborsAsync(
-                    anchor,
-                    Math.Clamp(geodesic_k ?? 12, 1, 48),
-                    Math.Clamp(frechet_k ?? 12, 1, 48),
-                    Math.Clamp(frechet_max ?? 0.5, 0.0, 2.0),
-                    ct);
+            var anchor = decompose.ComputeAnchor(surface);
+            var neighbors = await substrate.ExploreAnchorNeighborsAsync(
+                anchor,
+                Math.Clamp(geodesic_k ?? 12, 1, 48),
+                Math.Clamp(frechet_k ?? 12, 1, 48),
+                Math.Clamp(frechet_max ?? 0.5, 0.0, 2.0),
+                ct);
 
-                // Did-you-mean by surface edit distance: witnessed words within one
-                // edit of what was typed. Deterministic and exact -- no fuzzy index,
-                // no scan -- because we generate the edit-distance-1 neighbourhood and
-                // keep only the word ids that entity_exists. "conflagrate" is one
-                // deletion from "conflagurate", so it surfaces directly.
-                var refLower = surface.ToLowerInvariant();
-                var witnessed = await substrate.WitnessedWordsAsync(
-                    EditDistance1Candidates(refLower), ct);
-                var suggestions = witnessed
-                    .Select(w => (w, dist: Levenshtein(refLower, w.Surface.ToLowerInvariant(), 3)))
-                    .Where(x => x.dist > 0)
-                    .OrderBy(x => x.dist).ThenByDescending(x => x.w.Witnesses)
-                    .Take(8)
-                    .Select(x => new ExploreSuggestion(x.w.Surface, x.w.IdHex, x.dist))
-                    .ToList();
+            // Did-you-mean by surface edit distance: witnessed words within one
+            // edit of what was typed. Deterministic and exact -- no fuzzy index,
+            // no scan -- because we generate the edit-distance-1 neighbourhood and
+            // keep only the word ids that entity_exists. "conflagrate" is one
+            // deletion from "conflagurate", so it surfaces directly.
+            var refLower = surface.ToLowerInvariant();
+            var witnessed = await substrate.WitnessedWordsAsync(
+                EditDistance1Candidates(refLower), ct);
+            var suggestions = witnessed
+                .Select(w => (w, dist: Levenshtein(refLower, w.Surface.ToLowerInvariant(), 3)))
+                .Where(x => x.dist > 0)
+                .OrderBy(x => x.dist).ThenByDescending(x => x.w.Witnesses)
+                .Take(8)
+                .Select(x => new ExploreSuggestion(x.w.Surface, x.w.IdHex, x.dist))
+                .ToList();
 
-                return Results.Json(new ExploreNotFoundResponse(
-                    Reference: surface,
-                    WordIdHex: anchor.WordIdHex,
-                    Exists: false,
-                    Coord: new[] { anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm },
-                    Decomposition: anchor.Decomposition,
-                    Neighbors: neighbors,
-                    Suggestions: suggestions,
-                    DidYouMean: suggestions.Count > 0 ? suggestions[0].Surface : null));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            return Results.Json(new ExploreNotFoundResponse(
+                Reference: surface,
+                WordIdHex: anchor.WordIdHex,
+                Exists: false,
+                Coord: new[] { anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm },
+                Decomposition: anchor.Decomposition,
+                Neighbors: neighbors,
+                Suggestions: suggestions,
+                DidYouMean: suggestions.Count > 0 ? suggestions[0].Surface : null));
         })
         .WithTags("explore")
         .Produces<ExploreNotFoundResponse>()
@@ -440,17 +412,10 @@ internal static class ExploreEndpoints
         // served ungated like the entity preview.
         app.MapGet("/v1/explore/entities/{idHex}/mesh", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var mesh = await substrate.MeshAsync(idHex, ct);
-                return mesh is null
-                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
-                    : Results.Json(mesh);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var mesh = await substrate.MeshAsync(idHex, ct);
+            return mesh is null
+                ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                : Results.Json(mesh);
         })
         .WithTags("explore")
         .Produces<MeshResponse>()
@@ -462,15 +427,9 @@ internal static class ExploreEndpoints
             byte[] sid;
             try { sid = Convert.FromHexString(idHex); }
             catch (FormatException) { return EndpointJson.NotFound("source_not_found", $"'{idHex}' is not a hex source id."); }
-            try
-            {
-                var rows = await substrate.SourceRosterAsync(sid, Math.Clamp(limit ?? 40, 1, 200), ct);
-                return Results.Json(new SourceRosterResponse("source.roster", idHex.ToLowerInvariant(), rows));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+
+            var rows = await substrate.SourceRosterAsync(sid, Math.Clamp(limit ?? 40, 1, 200), ct);
+            return Results.Json(new SourceRosterResponse("source.roster", idHex.ToLowerInvariant(), rows));
         })
         .WithTags("explore")
         .Produces<SourceRosterResponse>()
@@ -479,17 +438,10 @@ internal static class ExploreEndpoints
 
         app.MapGet("/v1/explore/entities/{idHex}/taxonomy", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var tax = await substrate.TaxonomyAsync(idHex, ct);
-                return tax is null
-                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
-                    : Results.Json(tax);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var tax = await substrate.TaxonomyAsync(idHex, ct);
+            return tax is null
+                ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                : Results.Json(tax);
         })
         .WithTags("explore")
         .Produces<TaxonomyResponse>()
@@ -498,17 +450,10 @@ internal static class ExploreEndpoints
 
         app.MapGet("/v1/explore/entities/{idHex}/record", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var record = await substrate.EntityRecordAsync(idHex, ct);
-                return record is null
-                    ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
-                    : Results.Json(record);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var record = await substrate.EntityRecordAsync(idHex, ct);
+            return record is null
+                ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                : Results.Json(record);
         })
         .WithTags("explore")
         .Produces<EntityRecordResponse>()
@@ -568,13 +513,6 @@ internal static class ExploreEndpoints
         if (!gate.Allowed)
             return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
-        try
-        {
-            return await produce(gate.Quote);
-        }
-        catch (SubstrateUnavailableException ex)
-        {
-            return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-        }
+        return await produce(gate.Quote);
     }
 }

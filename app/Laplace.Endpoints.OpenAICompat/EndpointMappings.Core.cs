@@ -27,24 +27,14 @@ internal static class CoreEndpoints
 
         app.MapGet("/v1/pulse", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var pulse = await substrate.PulseAsync(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ct);
-                return Results.Json(pulse);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var pulse = await substrate.PulseAsync(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ct);
+            return Results.Json(pulse);
         }).WithTags("core").Produces<PulseResponse>()
           .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/explore/modalities", async (ISubstrateClient substrate, CancellationToken ct) =>
-        {
-            try { return Results.Json(await substrate.ModalitiesAsync(ct)); }
-            catch (SubstrateUnavailableException ex)
-            { return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message); }
-        }).WithTags("explore").Produces<ModalitiesResponse>()
+            Results.Json(await substrate.ModalitiesAsync(ct)))
+          .WithTags("explore").Produces<ModalitiesResponse>()
           .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(

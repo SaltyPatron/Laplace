@@ -49,10 +49,6 @@ internal static class FeedbackEndpoints
                         "Chain feedback requires 'tokens' with at least 2 entries (or use subject/relation/object).");
                 return await ChainAsync(substrate, payload.Tokens, verdict, confirm, ct);
             }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
             catch (Npgsql.NpgsqlException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);

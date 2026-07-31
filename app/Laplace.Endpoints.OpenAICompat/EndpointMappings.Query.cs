@@ -16,22 +16,15 @@ internal static class QueryEndpoints
     {
         app.MapGet("/v1/query/shapes", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var published = await substrate.QueryShapesAsync(ct);
-                var shapes = published.Concat([
-                    new QueryShape("band_facts", "every edge of the topic inside the selected bands", false, false, true),
-                    new QueryShape("beam", "beam search over consensus, gated by the band mask", false, true, false),
-                    new QueryShape("path", "shortest witnessed path between two topics", true, false, false),
-                    new QueryShape("neighbors", "nearest content by position on S³ and trajectory shape", false, false, false),
-                    new QueryShape("generate", "seeded trajectory descent from the topic", false, false, false),
-                ]).ToList();
-                return Results.Json(new QueryShapesResponse("list", shapes));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var published = await substrate.QueryShapesAsync(ct);
+            var shapes = published.Concat([
+                new QueryShape("band_facts", "every edge of the topic inside the selected bands", false, false, true),
+                new QueryShape("beam", "beam search over consensus, gated by the band mask", false, true, false),
+                new QueryShape("path", "shortest witnessed path between two topics", true, false, false),
+                new QueryShape("neighbors", "nearest content by position on S³ and trajectory shape", false, false, false),
+                new QueryShape("generate", "seeded trajectory descent from the topic", false, false, false),
+            ]).ToList();
+            return Results.Json(new QueryShapesResponse("list", shapes));
         })
         .WithTags("query")
         .Produces<QueryShapesResponse>()
@@ -39,15 +32,8 @@ internal static class QueryEndpoints
 
         app.MapGet("/v1/query/bands", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var bands = await substrate.RelationBandsAsync(ct);
-                return Results.Json(new RelationBandsResponse("list", bands));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var bands = await substrate.RelationBandsAsync(ct);
+            return Results.Json(new RelationBandsResponse("list", bands));
         })
         .WithTags("query")
         .Produces<RelationBandsResponse>()
@@ -65,15 +51,8 @@ internal static class QueryEndpoints
             if (bandIds.Length == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-12.");
             var per = Math.Clamp(limit ?? 5, 1, 25);
-            try
-            {
-                var leaders = await substrate.LeadersAsync(bandIds, per, ct);
-                return Results.Json(new LeadersResponse("list", leaders));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var leaders = await substrate.LeadersAsync(bandIds, per, ct);
+            return Results.Json(new LeadersResponse("list", leaders));
         })
         .WithTags("query")
         .Produces<LeadersResponse>()
@@ -133,10 +112,6 @@ internal static class QueryEndpoints
             {
                 return EndpointJson.BadRequest("invalid_request_error",
                     $"Unknown shape '{shape}'. GET /v1/query/shapes lists what is served.");
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
         })
         .WithTags("query")
