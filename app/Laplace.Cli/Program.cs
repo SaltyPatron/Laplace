@@ -93,6 +93,7 @@ internal static class Program
             config.AddCommand<DbRoundtripCommand>("db-roundtrip");
             config.AddCommand<EvalCommand>("eval");
             config.AddCommand<StatsCommand>("stats");
+            config.AddCommand<EvictCommand>("evict");
             config.AddCommand<RebuildPhysIndexesCommand>("rebuild-phys-indexes");
             config.AddCommand<DropIndexesCommand>("drop-indexes");
             config.AddCommand<RecoverIndexesCommand>("recover-indexes");

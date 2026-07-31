@@ -1,0 +1,262 @@
+-- evict_source: lawful retraction + refold of one SOURCE's testimony (GH #508).
+--
+-- The evictable unit is the source. Attestation rows carry no version and their
+-- context slot is provenance; versions never coexist (markers gate each lane to one
+-- derivation), so "evict version v" and "evict the source's testimony" are the same
+-- operation — eviction IS the version transition: evict, then re-run the lane at
+-- Version=N+1 and the hydrator re-derives everything the deleted markers gated.
+--
+-- Steps, per relation-type partition, per batch (one transaction each, COMMIT +
+-- RAISE LOG progress — modeled on highway_mask_rebuild / highway_mask_drain):
+--
+--   (a) DELETE the source's evidence rows under the relation (LIST partition pruned
+--       via a literal type in EXECUTE — a variable type plans generically and opens
+--       every leaf, the attestation_merge lesson), RETURNING the touched cells and
+--       the touched entity ids.
+--   (b) REFOLD every touched cell in place from its SURVIVING evidence through the
+--       consensus_fold AGGREGATE — the SQL surface of the same native scalar the
+--       ingest fold runs (glicko2_fold_uniform_period), seeded from the neutral
+--       prior, one uniform period per surviving row using the persisted fold inputs
+--       (opponent_rd_fp1e9 / observation_count / sum_score_fp1e9), in the canonical
+--       order (last_observed_at, id). Bit-parity with the incremental history is not
+--       the contract (batch boundaries are not recoverable); the canonical fold of
+--       the surviving evidence is.
+--   (c) Cells with ZERO surviving evidence are DELETED, never zeroed — unattested is
+--       not attested-false (the #688/#689 law); a consensus row with no witnesses is
+--       a claim nobody makes.
+--   (d) Touched entity ids queue into highway_mask_dirty — the CLEAR case the queue
+--       exists for (deposit only OR-accumulates; eviction can remove an entity's
+--       last governed edge) — and drain via highway_mask_drain (p_drain), whose
+--       refresh recomputes masks from scratch and can therefore clear bits.
+--   (e) The source's MARKER entities (p_marker_types, first_observed_by = source)
+--       are deleted along with their physicality rows, so the lane's bitmap probe
+--       re-yields every unit at the next run. Content entities are NEVER deleted —
+--       content the lane minted (positions, tokens, scalars) is valid shared
+--       content under the identity law. Physicalities carry no source attribution
+--       by design (geometry is content identity, not testimony): a trajectory
+--       linestring is a pure deterministic function of its entity's constituents,
+--       stays byte-correct across versions, and re-derivation re-deposits it
+--       idempotently — there is nothing epistemic to retract there.
+--
+-- p_relations NULL = every relation the source has rows under, discovered by one
+-- indexed LIMIT-1 probe per leaf partition (plus a DISTINCT scan of the source's
+-- rows in the DEFAULT partition, where dynamic relations coexist). Passing the
+-- lane's declared relations skips discovery entirely.
+--
+-- Eviction on a source with zero rows is a NO-OP, not an error (the unseeded law).
+-- Idempotent and resumable: every batch commits a consistent snapshot (evidence
+-- deleted + its cells refolded in the same transaction), so an interrupted run
+-- re-run to completion leaves exactly the state a single run would have.
+--
+-- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction
+-- control (COMMIT), so references are schema-qualified instead.
+-- Invoke with: CALL @extschema@.evict_source(source_id('ChessAnalysis'));
+CREATE OR REPLACE PROCEDURE evict_source(
+    p_source       bytea,
+    p_relations    bytea[] DEFAULT NULL,
+    p_marker_types bytea[] DEFAULT NULL,
+    p_batch        int     DEFAULT 100000,
+    p_drain        boolean DEFAULT true)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    rels           bytea[];
+    rel            bytea;
+    leaf           oid;
+    leaf_types     bytea[];
+    t              bytea;
+    n_del          bigint;
+    n_cells        bigint;
+    n              bigint;
+    evidence_total bigint := 0;
+    refold_total   bigint := 0;
+    culled_total   bigint := 0;
+    marker_total   bigint := 0;
+    t0             timestamptz := clock_timestamp();
+BEGIN
+    -- Plain TEMP table (per-batch COMMIT would drop ON COMMIT DROP); TRUNCATE per
+    -- batch. IF NOT EXISTS + explicit DROP at the end keeps DROP-NOTICE noise out
+    -- of client output.
+    CREATE TEMP TABLE IF NOT EXISTS _evict_cells (
+        subject_id bytea NOT NULL,
+        object_id  bytea,
+        UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
+    TRUNCATE _evict_cells;
+
+    IF p_relations IS NOT NULL THEN
+        rels := p_relations;
+    ELSE
+        -- Discover the source's relations: one indexed LIMIT-1 probe per leaf (a
+        -- relation LIST leaf holds exactly one type), DISTINCT only inside the
+        -- DEFAULT partition (dynamic relations share it).
+        rels := ARRAY[]::bytea[];
+        FOR leaf IN
+            SELECT pt.relid
+            FROM pg_extension e
+            JOIN pg_namespace ns ON ns.oid = e.extnamespace
+            CROSS JOIN LATERAL pg_partition_tree(
+                (quote_ident(ns.nspname) || '.attestations')::regclass) pt
+            WHERE e.extname = 'laplace_substrate' AND pt.isleaf
+        LOOP
+            IF (SELECT pg_get_expr(c.relpartbound, c.oid) FROM pg_class c
+                WHERE c.oid = leaf) = 'DEFAULT' THEN
+                EXECUTE format(
+                    'SELECT COALESCE(array_agg(DISTINCT a.type_id), ARRAY[]::bytea[]) '
+                    'FROM %s a WHERE a.source_id = $1', leaf::regclass)
+                INTO leaf_types USING p_source;
+            ELSE
+                EXECUTE format(
+                    'SELECT ARRAY(SELECT a.type_id FROM %s a WHERE a.source_id = $1 LIMIT 1)',
+                    leaf::regclass)
+                INTO leaf_types USING p_source;
+            END IF;
+            FOREACH t IN ARRAY leaf_types LOOP
+                IF NOT (t = ANY(rels)) THEN
+                    rels := rels || t;
+                END IF;
+            END LOOP;
+        END LOOP;
+    END IF;
+
+    RAISE LOG 'evict_source: start — source %, % relation(s)',
+        encode(p_source, 'hex'), COALESCE(cardinality(rels), 0);
+
+    FOREACH rel IN ARRAY COALESCE(rels, ARRAY[]::bytea[]) LOOP
+        LOOP
+            TRUNCATE _evict_cells;
+
+            -- (a) delete one batch of the source's evidence under this relation;
+            --     queue every touched entity for mask repair; accumulate the
+            --     touched cells for the refold below.
+            EXECUTE format($q$
+                WITH pick AS (
+                    SELECT a.id, a.subject_id
+                    FROM @extschema@.attestations a
+                    WHERE a.type_id = %L::bytea AND a.source_id = $1
+                    LIMIT %s),
+                del AS (
+                    DELETE FROM @extschema@.attestations a
+                    USING pick
+                    WHERE a.type_id = %L::bytea
+                      AND a.id = pick.id AND a.subject_id = pick.subject_id
+                    RETURNING a.subject_id, a.object_id),
+                dirty AS (
+                    INSERT INTO @extschema@.highway_mask_dirty (id)
+                    SELECT DISTINCT u.id
+                    FROM (SELECT d.subject_id AS id FROM del d
+                          UNION
+                          SELECT d.object_id FROM del d WHERE d.object_id IS NOT NULL) u
+                    ON CONFLICT (id) DO NOTHING),
+                cells AS (
+                    INSERT INTO _evict_cells (subject_id, object_id)
+                    SELECT DISTINCT d.subject_id, d.object_id FROM del d
+                    ON CONFLICT DO NOTHING
+                    RETURNING 1)
+                SELECT (SELECT count(*) FROM del), (SELECT count(*) FROM cells)
+            $q$, rel, p_batch, rel)
+            INTO n_del, n_cells
+            USING p_source;
+
+            EXIT WHEN n_del = 0;
+            evidence_total := evidence_total + n_del;
+
+            -- (b) refold each touched cell in place from surviving evidence:
+            --     one uniform period per surviving row, canonical order
+            --     (last_observed_at, id), neutral-prior seed — the consensus_fold
+            --     aggregate is the SQL surface of the ingest fold's native scalar.
+            EXECUTE format($q$
+                UPDATE @extschema@.consensus c
+                SET rating           = (f.acc).rating,
+                    rd               = (f.acc).rd,
+                    volatility       = (f.acc).volatility,
+                    witness_count    = (f.acc).witness_count,
+                    last_observed_at = f.last_ts
+                FROM (
+                    SELECT t.subject_id, t.object_id,
+                           @extschema@.consensus_fold(false, NULL, NULL, NULL,
+                               a.opponent_rd_fp1e9,
+                               GREATEST(a.observation_count, 1),
+                               a.sum_score_fp1e9,
+                               @extschema@.glicko2_tau()
+                               ORDER BY a.last_observed_at, a.id) AS acc,
+                           max(a.last_observed_at) AS last_ts
+                    FROM _evict_cells t
+                    JOIN @extschema@.attestations a
+                      ON a.type_id = %L::bytea
+                     AND a.subject_id = t.subject_id
+                     AND a.object_id IS NOT DISTINCT FROM t.object_id
+                    GROUP BY t.subject_id, t.object_id
+                ) f
+                WHERE c.type_id = %L::bytea
+                  AND c.subject_id = f.subject_id
+                  AND c.id = @extschema@.consensus_id(f.subject_id, %L::bytea, f.object_id)
+            $q$, rel, rel, rel);
+            GET DIAGNOSTICS n = ROW_COUNT;
+            refold_total := refold_total + n;
+
+            -- (c) zero-survivor cells are DELETED, not zeroed.
+            EXECUTE format($q$
+                DELETE FROM @extschema@.consensus c
+                USING _evict_cells t
+                WHERE c.type_id = %L::bytea
+                  AND c.subject_id = t.subject_id
+                  AND c.id = @extschema@.consensus_id(t.subject_id, %L::bytea, t.object_id)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM @extschema@.attestations a
+                      WHERE a.type_id = %L::bytea
+                        AND a.subject_id = t.subject_id
+                        AND a.object_id IS NOT DISTINCT FROM t.object_id)
+            $q$, rel, rel, rel);
+            GET DIAGNOSTICS n = ROW_COUNT;
+            culled_total := culled_total + n;
+
+            RAISE LOG 'evict_source: relation % — batch of % evidence row(s) over % cell(s) (running: % deleted, % refolded, % culled) — %s elapsed',
+                encode(rel, 'hex'), n_del, n_cells,
+                evidence_total, refold_total, culled_total,
+                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+            COMMIT;
+        END LOOP;
+    END LOOP;
+
+    -- (e) marker entities: the lane's derivation gates. Deleting them re-opens every
+    -- unit for the hydrator's bitmap probe. first_observed_by scopes to this source;
+    -- p_marker_types scopes to gate entities only — content entities never qualify.
+    IF p_marker_types IS NOT NULL AND cardinality(p_marker_types) > 0 THEN
+        LOOP
+            WITH pick AS (
+                SELECT e.id, e.tier
+                FROM @extschema@.entities e
+                WHERE e.type_id = ANY(p_marker_types)
+                  AND e.first_observed_by = p_source
+                LIMIT p_batch),
+            del AS (
+                DELETE FROM @extschema@.entities e
+                USING pick
+                WHERE e.id = pick.id AND e.tier = pick.tier
+                RETURNING e.id),
+            phys AS (
+                DELETE FROM @extschema@.physicalities p
+                USING del
+                WHERE p.entity_id = del.id)
+            SELECT count(*) INTO n FROM del;
+
+            EXIT WHEN n = 0;
+            marker_total := marker_total + n;
+            RAISE LOG 'evict_source: % marker(s) deleted (running %) — %s elapsed',
+                n, marker_total,
+                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+            COMMIT;
+        END LOOP;
+    END IF;
+
+    -- (d) drain the mask-repair queue through the existing machinery (refresh
+    -- recomputes from scratch and can CLEAR bits deposit could only OR on).
+    IF p_drain THEN
+        CALL @extschema@.highway_mask_drain(p_batch);
+    END IF;
+
+    RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % marker(s) removed in %s',
+        encode(p_source, 'hex'), evidence_total, refold_total, culled_total,
+        marker_total, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+
+    DROP TABLE _evict_cells;
+END $$;

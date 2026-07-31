@@ -21,8 +21,11 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
     private int _memoAtLastSave;
 
     /// <summary>depth = stockfish search depth per position (default 10 — the budget the v1
-    /// census testimony was recorded at; keep it until #508 REPLACE semantics let a budget
-    /// change ride a version bump). nodes &gt; 0 switches to a node-capped search instead
+    /// census testimony was recorded at). A budget change rides a version bump lawfully via
+    /// the #508 eviction verb: bump <see cref="ChessStockfishEval.Version"/>, then
+    /// `laplace evict ChessStockfish --rederive` (the evict_source procedure retracts the
+    /// old testimony and refolds every touched cell before the lane re-derives — no double
+    /// count). nodes &gt; 0 switches to a node-capped search instead
     /// (bounded worst case; opt-in via --nodes). evaluatorFactory overrides for tests.</summary>
     public ChessStockfishEvalDecomposer(
         int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null,

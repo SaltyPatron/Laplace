@@ -87,6 +87,50 @@ public class Glicko2FoldParityTests
         AssertStatesEqual(viaObservations, viaFold);
     }
 
+    [Theory]
+    // (phi, games, sumScore) per evidence row — mixed trust phis and counts, the
+    // shape of a real cell's provenance rows.
+    [InlineData(new long[] { 30_000_000_000L, 150_000_000_000L, 30_000_000_000L, 200_000_000_000L },
+                new long[] { 3, 1, 5, 2 },
+                new long[] { 2_700_000_000L, 1_000_000_000L, 2_500_000_000L, 1_000_000_000L })]
+    // single row (the evict refold's commonest case: one surviving witness)
+    [InlineData(new long[] { 30_000_000_000L }, new long[] { 4 }, new long[] { 2_000_000_000L })]
+    public void AggregateRefold_BitEqualsIncrementalBatchChain(
+        long[] phis, long[] games, long[] sums)
+    {
+        // evict_source's refold contract (GH #508, annex §2.3/§2.6(5)): a cell built
+        // by N ingest batches — each batch one uniform period folded against the
+        // STORED prior (the consensus_upsert path) — must be bit-equal to the
+        // consensus_fold AGGREGATE's refold of the same N evidence rows in the same
+        // order: Init(neutral prior) + one FoldUniformPeriod per row. Both paths run
+        // the same native scalar; this pins that the seeding/chaining conventions
+        // agree, which is what lets evict_source refold survivors in place.
+        long neutral = Glicko2.NeutralMuFp1e9();
+
+        var incremental = Glicko2.AccumulateGames(
+            neutral, Glicko2.DefaultRdFp1e9, Glicko2.DefaultVolatilityFp1e9,
+            neutral, phis[0], games[0], sums[0]);
+        for (int i = 1; i < phis.Length; i++)
+            incremental = Glicko2.AccumulateGames(
+                incremental.RatingFp1e9, incremental.RdFp1e9, incremental.VolatilityFp1e9,
+                neutral, phis[i], games[i], sums[i]);
+
+        var refold = Glicko2.Init(
+            neutral, Glicko2.DefaultRdFp1e9, Glicko2.DefaultVolatilityFp1e9);
+        long witnesses = 0;
+        for (int i = 0; i < phis.Length; i++)
+        {
+            Glicko2.FoldUniformPeriod(
+                ref refold, neutral, phis[i], games[i], sums[i], Glicko2.DefaultTauFp1e9, 0);
+            witnesses += games[i];
+        }
+
+        Assert.Equal(incremental.RatingFp1e9, refold.RatingFp1e9);
+        Assert.Equal(incremental.RdFp1e9, refold.RdFp1e9);
+        Assert.Equal(incremental.VolatilityFp1e9, refold.VolatilityFp1e9);
+        Assert.Equal(witnesses, refold.ObservationCount);
+    }
+
     [Fact]
     public void NeutralMu_MatchesServerConstant()
     {

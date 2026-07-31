@@ -204,6 +204,15 @@ internal sealed class ModelBenchCommand : ForwardCommand<TailSettings>
         => BenchCommands.ModelBenchCmd(Raw(ctx));
 }
 
+// ---- evict ----------------------------------------------------------------------------------
+
+[Description("Lawfully retract a source's testimony (#508): delete its evidence per relation partition, refold every touched consensus cell from the surviving rows (zero-survivor cells deleted, never zeroed), queue+drain highway-mask repair, and delete the lane's derivation markers so a --rederive re-runs it at the new version without double-counting. Args: <sourceName> [--relations A,B] [--marker-types X,Y] [--rederive].")]
+internal sealed class EvictCommand : ForwardCommand<TailSettings>
+{
+    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
+        => EvictCommands.EvictAsync(Raw(ctx));
+}
+
 // ---- index maintenance (no args) ------------------------------------------------------------
 
 [Description("Rebuild physicality indexes.")]
