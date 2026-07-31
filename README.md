@@ -1,131 +1,94 @@
 # Laplace
 
-A content-addressable geometric-attestation substrate; a construction (not training)
-path from it to runnable transformer models; and a graph-walk inference engine that
-closes a self-improvement loop. Omni-modal — text, chess, code, AI models each ride
-their own tier ladder under one identity law — and omni-glottal: every language meshes
-at the ILI concept hub.
+A content-addressed knowledge substrate on PostgreSQL with a native C/C++ engine.
 
-Laplace replaces the two primitives modern ML is built on — GEMM similarity and
-nearest-neighbor search in a trained embedding — with graph search over a
-Glicko-weighted evidence graph and a deterministic, lossless, content-addressed
-identity system. SQL and C# orchestrate; native C/C++/SPI does the math. No GPU, no
-gradient descent, deterministic end to end.
+Facts from any source — a lexicon, a corpus, a chess game, a user's prompt, an AI
+checkpoint — are recorded in one shape: an assertion between content-addressed
+entities, carrying who said it and how it came out. Assertions fold into a Glicko-2
+rating per distinct triple. Reads are indexed graph traversal over those ratings.
 
-## The three keys
+No GPU, no gradient descent, deterministic end to end. SQL and C# orchestrate; the math
+is native.
 
-Every fact from every source — WordNet, ConceptNet, a chess game, a user prompt, an AI
-model's weights — reduces to one **attestation** 5-tuple:
-`(subject, relation_type, object, source, outcome/score)`. Three layers resolve the
-tension between deduping, isolating, and aggregating:
+## The shape of a fact
 
-- **CONTENT** — entities keyed by BLAKE3 content hash. Identical content = identical
-  id, at every tier, from every source. Cross-source merging is a hash collision, never
-  an entity-resolution pass: "Pawn E2→E4" is ONE entity no matter who played it.
-- **EVIDENCE** — one provenanced row per assertion. Provenance is never mashed:
-  Magnus's E2E4 and yours are distinct witnessed rows.
-- **CONSENSUS** — evidence folds into literal Glicko-2 per `(subject, type, object)`
-  cell: rating, RD, volatility, witness count. `eff_mu = rating − 2·rd` is the
-  conservative estimate everything ranks by. Source trust enters as the opponent RD —
-  trust is inside the rating math, not a filter. The fold plus read-side RD IS the
-  noise model: no operator-invented floors, caps, or top-k anywhere.
+```
+(subject, relation_type, object, source, context, outcome, score)
+```
 
-Geometry (S³ anchors, mantissa-packed trajectories, Hilbert indexing) is a lossless,
-deterministic identity and serialization system — `ContentRoundtrip` rebuilds a
-document's original bytes from its id alone. Geometry is identity and reconstruction,
-NOT semantics. The semantics live in the rated attestation graph: a colony of spider
-webs — pull one strand and Glicko-2 tells you what tugs back and how hard. That web is
-a weighted graph Laplacian; tension = certainty; witnessing tightens the strand. Hence
-the name.
+`outcome ∈ {Refute = 0, Draw = 1, Confirm = 2}` — a source can refute a triple, not just
+assert or omit it. `score` is continuous; the source's own trust enters the rating math
+as the opponent's RD rather than as a filter around it.
 
-Chess is the proving domain because its ground truth is objectively checkable:
-`outcome ∈ {Loss, Draw, Win}` is bit-identical between chess plies and every epistemic
-claim — the same math that rates chess players rates every fact.
+Three layers keep deduplication, provenance and aggregation from fighting each other:
 
-## The two loops
+- **Content** — `entities`, keyed by a 16-byte content hash. Same content, same id,
+  from every source at every tier. Cross-source merging is a hash collision, not an
+  entity-resolution pass.
+- **Evidence** — `attestations`, one provenanced row per assertion. Two witnesses of the
+  same fact stay two rows.
+- **Consensus** — `consensus`, keyed by `blake3(subject‖type‖object)`, holding
+  `rating`, `rd`, `volatility`, `witness_count`. Every witness of a triple folds onto
+  exactly one row. Reads rank by `eff_mu = rating − 2·rd`.
 
-**Foundry (Mold-A-Model).** Consensus + geometry are molded into a runnable
-transformer, deterministically: consensus adjacency → weights/topology; relation types
-and salience bands → attention heads; the normalized-Laplacian eigenmap of the
-consensus graph → the constructed embedding (hidden dim = spectral rank); trajectories
-→ sequence position; the continuation operator → lm_head. GGUF written closed-form.
-Every exported weight decomposes back to its witnesses — deterministic provenance for
-AI. Scoped synthesis (filter attestations by source/context, re-fold, synthesize) is
-the custom-model product mechanism: training replaced by compilation.
+Geometry (`physicalities`) is a parallel identity and serialization system: S³
+coordinates, a Hilbert index, and trajectories for order-sensitive structure. It
+addresses and reconstructs content; the relatedness signal is the rating, not distance.
 
-**Gödel/OODA.** The walk IS the forward pass — indexed graph search carrying more per
-step than a trained dot product: the full Glicko tuple, relation salience, highway
-bits, geometry, source trust, provenance down to witnesses. Explainability is a
-returned column, not a metaphor. A prompt is ingested as content, so attention over it
-is unbounded retrieval — no context window. And the loop closes: prompts and responses
-deposit as witnesses, feedback confirms or refutes the exact triples that produced an
-answer, and the next walk reads the updated consensus. Evaluation IS ingestion.
-Self-signals are structurally outranked so the engine cannot outshout its curated
-sources. AI checkpoints are just another witness: a tensor row asserts "A attenuates
-to B with this intensity," and that assertion is rated alongside WordNet's — one voice
-among many, with mechanistic interpretability falling out as indexed queries.
+Chess is the proving domain because its ground truth is checkable, and because a ply's
+outcome and an epistemic claim's outcome are the same three values fed to the same math.
 
-## Epistemic status — what is proven and what is open
+## Where things are
 
-This section is deliberately honest; the project's own law is "verify against live
-data," and that applies to its README.
+```
+app/          10 projects + 5 test projects (app/Laplace.slnx)
+engine/       native core, dynamics (eigenmaps/procrustes), synthesis (GGUF), manifest
+extension/    the laplace_substrate PostgreSQL extension — 29 SQL families, 26 native sources
+scripts/      build, seed, deploy and CI entry points
+web/          Vite/React SPA
+docs/         ARCHITECTURE.md, INVENTORY.md (generated)
+```
 
-**Proven, evidence on record:**
+Deployables: `Laplace.Cli`, `Laplace.Endpoints.OpenAICompat`, `Laplace.Endpoints.Mcp`,
+`Laplace.Chess.Uci`, `Laplace.Migrations`.
 
-- Content-addressed identity with lossless byte-exact reconstruction from ids alone.
-- The three-layer substrate, exercised end to end on the current partial seed
-  (measured 2026-07-23: 133.6M attestations, 110.0M consensus cells, 47.3M entities —
-  residency is a derived artifact of which sources are seeded, not a progress mark;
-  the design target is order 10⁸ and above), with forced-rerun idempotency proofs
-  (re-ingest → 0 novel rows, exact observation-count doubling).
-- The chess lane end to end (reference: [docs/guides/chess.md](docs/guides/chess.md)):
-  recorder/analyzer split over a ~10⁴-game live corpus, a μ-ranked opening-explorer /
-  player-repertoire read surface, a full stockfish eval census (every position of every
-  recorded game; ~2.76M deposits, re-derivable as a seed step), a UCI engine whose root
-  ordering is a read of the consensus (full consensus-play is doc-21 open work), a
-  watchable self-play lab, and live Lichess integration.
-- The model lane's recorder and factor storage: bit-exact readback of deposited factor
-  matrices; factors ~477× smaller than materialized pair tiles; the decoder ring names
-  circuits with 17–32× enrichment over random control.
-- Retrieval serving in the 100–400 ms range with witness receipts.
+## Build
 
-**Open — the load-bearing research question (docs/specs/09, /14):** does
-consensus × geometry × trajectory ROUTE as well as trained attention at depth? The
-best current measurement is layer-replay composition decay of 100% → 57.5% → 26.8%
-(layers 0/1/5) for static factors — the designed answer (frontier-as-residual replay,
-`.scratchpad/26` item D) is specified but not yet built. Everything foundry-shaped
-rides on this question, and it is falsifiable either way.
+**Linux** — `sudo bash scripts/setup-host.sh` once, then `scripts/pipeline.sh` (what CI
+runs). Change-aware: fingerprints in `build/.stamps/` skip unchanged domains; override
+with `--force-all`.
 
-**Weakest live surface:** free-text generation. Retrieval answers in milliseconds;
-the long-form generation lane still times out at scale and is served honestly as 503
-rather than hung. The conversational engine (converse/chat) works with a native
-steered walk; fluency beyond recombined attested material is open work.
+**Windows** — `scripts/win/*.cmd`, driven through Bash rather than PowerShell:
 
-## Layout
+```
+cmd //c "scripts\win\rebuild-all.cmd"      # build
+cmd //c "scripts\win\test-all.cmd"         # the gate
+cmd //c "scripts\win\seed-step.cmd <src>"  # seed one source
+cmd //c "scripts\win\cli.cmd"              # CLI
+```
 
-Counts and full listings are generated, CI-gated, and always current in
-[docs/INVENTORY.md](docs/INVENTORY.md) — prose here deliberately avoids embedding
-them.
+After any engine rebuild run `build-extensions` **and** `install-extensions` — the
+extension links the engine statically, so engine freshness is not extension freshness.
+`pg_regress` tests the installed extension, not an edited `.sql.in`.
 
-| Path | What |
-|---|---|
-| `app/` | C# solution: substrate/pipeline libraries, decomposers, chess, CLI, OpenAI-compatible API, MCP server, migrations, tests |
-| `engine/` | Native core: identity/geometry/Glicko-2 math, manifest codegen, foundry synthesis (GGUF), dynamics (eigenmaps) |
-| `extension/` | PostgreSQL extensions: the SQL surface + native hot paths (recall, walks, fold, perfcache) |
-| `web/` | SPA: chat, chess lab, explore, billing |
-| `db/`, `deploy/`, `scripts/` | Migrations, deploy assets, the build/seed/CI entry points |
-| `docs/`, `.scratchpad/` | Specs + generated inventory + invention catalog; historical session logs ([docs/INDEX.md](docs/INDEX.md) maps them) |
+## Run
 
-## Getting started
+```
+psql -h localhost -U postgres -d laplace
+SET search_path = laplace, public;
+SELECT * FROM api('walk');     -- the schema introspects itself
+```
 
-- Operating law, build/seed/deploy tables (Windows + Linux): [CLAUDE.md](CLAUDE.md)
-- Doc map: [docs/INDEX.md](docs/INDEX.md) · Invention catalog:
-  [docs/INVENTIONS.md](docs/INVENTIONS.md) · Binding specs: `docs/specs/`
-- Guides (operational how-tos): [docs/guides/](docs/guides/) — the chess modality
-  reference and the chess-lab runbook live there
-- The schema introspects itself: `SELECT * FROM api('<substring>');`
+Two mmap'd perfcache blobs are required at runtime (`laplace_t0_perfcache.bin`,
+`laplace_highway_perfcache.bin`), located via the `laplace_substrate.perfcache_path` GUC.
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the system as built, with file citations
+- [docs/INVENTORY.md](docs/INVENTORY.md) — generated counts and listings, CI-gated
+- [CLAUDE.md](CLAUDE.md) — working rules for coding agents
 
 ## License
 
 See [LICENSE](LICENSE). Seeded sources carry their own licenses; the substrate records
-license/attribution attestations per source as compliance data.
+license and attribution attestations per source.
