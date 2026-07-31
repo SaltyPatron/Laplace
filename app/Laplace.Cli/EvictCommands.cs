@@ -1,6 +1,5 @@
-using global::Npgsql;
 using Laplace.Engine.Core;
-using NpgsqlTypes;
+using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -67,9 +66,9 @@ internal static class EvictCommands
 
         // Ids resolve through the system's native hash — the same derivations the SQL
         // helpers source_id()/relation_type_id()/entity_type_id() run.
-        var sourceId = SubstrateCanonicalIds.Source(sourceName).ToBytes();
-        byte[][]? relationIds = relationNames?.Select(n => Hash128.OfCanonical(n).ToBytes()).ToArray();
-        byte[][]? markerTypeIds = markerTypeNames?.Select(n => Hash128.OfCanonical(n).ToBytes()).ToArray();
+        var sourceId = SubstrateCanonicalIds.Source(sourceName);
+        Hash128[]? relationIds = relationNames?.Select(Hash128.OfCanonical).ToArray();
+        Hash128[]? markerTypeIds = markerTypeNames?.Select(Hash128.OfCanonical).ToArray();
 
         Console.WriteLine(
             $"evicting testimony of {sourceName} "
@@ -78,37 +77,15 @@ internal static class EvictCommands
             + " ...");
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        await using var conn = await ds.OpenConnectionAsync();
-        await using (var call = conn.CreateCommand())
-        {
-            // The procedure COMMITs per batch and RAISE LOGs progress (server log) —
-            // hours are legitimate on a large lane, so no timeout.
-            call.CommandTimeout = 0;
-            call.CommandText = "CALL laplace.evict_source($1, $2, $3)";
-            call.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = sourceId });
-            call.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                Value = (object?)relationIds ?? DBNull.Value,
-            });
-            call.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                Value = (object?)markerTypeIds ?? DBNull.Value,
-            });
-            await call.ExecuteNonQueryAsync();
-        }
+        // The eviction call and its receipt live on the shared read surface
+        // (NpgsqlSubstrateReader), so this verb stays orchestration and every caller
+        // gets one implementation of the fact.
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        var reader = new NpgsqlSubstrateReader(ds);
+        await reader.EvictSourceAsync(sourceId, relationIds, markerTypeIds);
 
-        // The receipt: zero surviving evidence rows under the source (cheap once true).
-        long remaining;
-        await using (var check = conn.CreateCommand())
-        {
-            check.CommandTimeout = 0;
-            check.CommandText = "SELECT count(*) FROM laplace.attestations WHERE source_id = $1";
-            check.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = sourceId });
-            remaining = (long)(await check.ExecuteScalarAsync() ?? 0L);
-        }
+        // The receipt: zero surviving evidence rows under the source.
+        long remaining = await reader.CountEvidenceBySourceAsync(sourceId);
         sw.Stop();
         Console.WriteLine(
             $"evict {sourceName} complete in {sw.Elapsed.TotalSeconds:F1}s — "

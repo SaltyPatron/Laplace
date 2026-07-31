@@ -253,15 +253,24 @@ public sealed class SyzygyNativeFixtureTests : IDisposable
         return dir;
     }
 
+    // The probe kernel is OPTIONAL vendored tooling: an engine built without
+    // external/fathom omits laplace_syzygy entirely, and the lane degrades to
+    // unavailable rather than failing. These tests exercise the kernel itself, so
+    // where it was not built there is nothing to assert — they skip, exactly as the
+    // lane no-ops. Anything that must hold WITHOUT the prober belongs in the
+    // FakeProber tests above, which always run.
+    public static bool ProberBuilt => SyzygyNative.Available;
+
     public SyzygyNativeFixtureTests()
     {
+        Skip.IfNot(ProberBuilt, "laplace_syzygy not built (external/fathom absent)");
         Assert.Equal(3, SyzygyNative.Init(FixtureDir()));
         Assert.Equal(3, SyzygyNative.Largest());
     }
 
     public void Dispose() => SyzygyNative.Free();
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("4k3/8/8/8/8/8/8/3QK3 w - - 0 1", SyzygyNative.Win)]   // KQvK, stm mates
     [InlineData("4k3/8/8/8/8/8/8/3QK3 b - - 0 1", SyzygyNative.Loss)]  // same table, black POV
     [InlineData("4k3/8/8/8/8/8/8/R3K3 w - - 0 1", SyzygyNative.Win)]   // KRvK
@@ -275,7 +284,7 @@ public sealed class SyzygyNativeFixtureTests : IDisposable
         Assert.InRange(verdict.Value.Dtz, 0, 50);
     }
 
-    [Fact]
+    [SkippableFact]
     public void NativeProber_MoreMenThanTables_YieldsNoVerdict()
     {
         // KQvKR is 4 men; only 3-men fixtures are loaded.
@@ -284,7 +293,7 @@ public sealed class SyzygyNativeFixtureTests : IDisposable
         Assert.Null(verdict);
     }
 
-    [Fact]
+    [SkippableFact]
     public void DeriveGame_NativeProber_DepositsExactVerdicts()
     {
         const string pgn =

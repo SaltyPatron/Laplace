@@ -323,4 +323,46 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             return Array.Empty<PartitionPressure>();
         }
     }
+
+    /// <summary>
+    /// Retract a source's testimony and refold every cell it touched
+    /// (<c>laplace.evict_source</c>, GH #508). The procedure COMMITs per batch and
+    /// RAISE LOGs progress server-side, so hours are legitimate on a large lane —
+    /// hence no command timeout. <paramref name="relationIds"/> and
+    /// <paramref name="markerTypeIds"/> are null to mean "every relation the source
+    /// has rows under" and "no marker cleanup" respectively.
+    /// </summary>
+    public async Task EvictSourceAsync(
+        Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
+        IReadOnlyList<Hash128>? markerTypeIds, CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand("CALL laplace.evict_source($1, $2, $3)");
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+        cmd.Parameters.AddWithValue(
+            NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            relationIds is null
+                ? DBNull.Value
+                : (object)relationIds.Select(r => r.ToBytes()).ToArray());
+        cmd.Parameters.AddWithValue(
+            NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            markerTypeIds is null
+                ? DBNull.Value
+                : (object)markerTypeIds.Select(m => m.ToBytes()).ToArray());
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Surviving evidence rows under a source — the eviction receipt. Zero is the
+    /// expected answer after an unrestricted evict; a restricted one leaves the
+    /// relations it did not name in place.
+    /// </summary>
+    public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand(
+            "SELECT count(*) FROM laplace.attestations WHERE source_id = $1");
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+        return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+    }
 }
