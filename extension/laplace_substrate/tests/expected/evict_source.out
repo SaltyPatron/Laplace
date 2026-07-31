@@ -1,5 +1,4 @@
 SET search_path = laplace, public;
-
 -- evict_source (GH #508): deposit v1 (witness + analysis sources) -> evict the
 -- analysis source -> cells with only-analysis evidence are GONE (not zeroed),
 -- mixed cells are refolded byte-identically to the canonical fold of their
@@ -8,7 +7,6 @@ SET search_path = laplace, public;
 -- equal the v1 snapshot (no double count). Unseeded evict is a no-op, not an
 -- error. The procedure COMMITs per batch, so this file runs outside an explicit
 -- transaction and cleans up after itself.
-
 DO $$
 DECLARE
     type_t   bytea := laplace_hash128_blake3('Type');
@@ -135,7 +133,6 @@ BEGIN
     RAISE NOTICE '- evict fixture deposited: 6 cells, 12 evidence rows, 2 markers';
 END $$;
 NOTICE:  - evict fixture deposited: 6 cells, 12 evidence rows, 2 markers
-
 -- The eviction under test. p_batch = 2 forces multiple delete/refold batches per
 -- relation; p_drain = false leaves highway_mask_dirty observable (drain itself is
 -- highway machinery with its own coverage, and its refresh warns when no highway
@@ -143,7 +140,6 @@ NOTICE:  - evict fixture deposited: 6 cells, 12 evidence rows, 2 markers
 CALL evict_source(source_id('EvictTestAnalysis'), NULL,
                   ARRAY[entity_type_id('Evict_TestMarker')],
                   p_batch => 2, p_drain => false);
-
 DO $$
 DECLARE
     src_w    bytea := source_id('EvictTestWitness');
@@ -288,16 +284,13 @@ BEGIN
     RAISE NOTICE '- evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair';
 END $$;
 NOTICE:  - evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair
-
 -- Idempotence: evicting an already-evicted source changes nothing.
 CALL evict_source(source_id('EvictTestAnalysis'), NULL,
                   ARRAY[entity_type_id('Evict_TestMarker')],
                   p_batch => 2, p_drain => false);
-
 -- Unseeded no-op: a source with zero rows evicts cleanly (0 rows, not an error).
 CALL evict_source(source_id('Evict_NoSuchSource'), NULL, NULL,
                   p_drain => false);
-
 DO $$
 DECLARE
     subj bytea := laplace_hash128_blake3('test/evict/subject');
@@ -318,7 +311,6 @@ BEGIN
     RAISE NOTICE '- re-evict and unseeded evict are no-ops';
 END $$;
 NOTICE:  - re-evict and unseeded evict are no-ops
-
 -- Re-derive at v2: the lane re-runs (markers are gone, so the hydrator re-yields
 -- every unit) and deposits the SAME testimony under fresh evidence rows. Witness
 -- counts return exactly to the v1 snapshot — the #508 acceptance: no double count.
@@ -411,7 +403,6 @@ BEGIN
     RAISE NOTICE '- re-derive at v2: witness counts equal the v1 snapshot (no double count)';
 END $$;
 NOTICE:  - re-derive at v2: witness counts equal the v1 snapshot (no double count)
-
 -- Cleanup: this file COMMITs (the procedure requires it), so remove the fixture.
 DO $$
 DECLARE
