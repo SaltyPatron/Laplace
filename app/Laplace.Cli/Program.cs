@@ -74,6 +74,10 @@ internal static class Program
                 Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
                 for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
                     Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");
+                // A message without a frame is not a diagnosis: an ingest that dies mid-corpus
+                // leaves nothing to act on. Opt-in so the default contract above is unchanged.
+                if (Environment.GetEnvironmentVariable("LAPLACE_STACK") is "1" or "true")
+                    Console.Error.WriteLine(ex.ToString());
                 return 1;
             });
 

@@ -93,21 +93,42 @@ public sealed class Board
         {
             foreach (char c in parts[2])
             {
+                // `_ => CastleRights.None` used to sit here. It silently discarded every
+                // castling character this parser does not model -- above all the X-FEN /
+                // Shredder file letters Chess960 uses (GBgb, GDgd, ...), which chess.com
+                // exports for every Chess960 game. A game whose rooks may castle then
+                // replayed as a game whose rooks may not: not a dropped game, a WRONG one,
+                // recorded and folded into consensus with nothing to show it happened.
+                // Refuse instead. The caller drops the game and counts it.
                 b.Castle |= c switch
                 {
                     'K' => CastleRights.WhiteKing,
                     'Q' => CastleRights.WhiteQueen,
                     'k' => CastleRights.BlackKing,
                     'q' => CastleRights.BlackQueen,
-                    _ => CastleRights.None,
+                    _ => throw new FormatException(
+                        $"Unsupported castling availability '{c}' in FEN '{fen}'. "
+                        + "X-FEN/Shredder file-letter castling (Chess960) is not modelled; "
+                        + "refusing rather than dropping the right silently."),
                 };
             }
         }
 
         b.EpSquare = parts[3] == "-" ? -1 : AlgebraicToSquare(parts[3]);
-        b.HalfmoveClock = parts.Length > 4 ? int.Parse(parts[4]) : 0;
-        b.FullmoveNumber = parts.Length > 5 ? int.Parse(parts[5]) : 1;
+
+        // Named, not raw. A bare int.Parse here reports ".. near offset N. Expected an ASCII
+        // digit" with no clue which field or which game, which is what a malformed counter in
+        // one record out of 190,705 used to look like.
+        b.HalfmoveClock = ParseCounter(parts, 4, 0, "halfmove clock", fen);
+        b.FullmoveNumber = ParseCounter(parts, 5, 1, "fullmove number", fen);
         return b;
+    }
+
+    private static int ParseCounter(string[] parts, int index, int fallback, string field, string fen)
+    {
+        if (parts.Length <= index) return fallback;
+        if (int.TryParse(parts[index], out int v)) return v;
+        throw new FormatException($"Invalid {field} '{parts[index]}' in FEN '{fen}'");
     }
 
     public string ToFen()

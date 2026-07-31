@@ -170,8 +170,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "RelationTriple: tier-tree build failed ({Bytes} bytes): {Message}",
-                    canonical.Length, ex.Message);
+                    $"RelationTriple: tier-tree build failed ({canonical.Length} bytes): {ex.Message}");
                 return null;
             }
         }

@@ -129,7 +129,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ModelDecomposer: config parse failed for readback: {Message}", ex.Message);
+                    $"ModelDecomposer: config parse failed for readback: {ex.Message}");
                 return _depositedRecipeNames.ToArray();
             }
             return new[]
@@ -371,7 +371,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning(
-                "ModelDecomposer: config parse failed for unit estimate: {Message}", ex.Message);
+                $"ModelDecomposer: config parse failed for unit estimate: {ex.Message}");
             return 0;
         }
 
@@ -388,7 +388,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ModelDecomposer: tokenizer parse failed for unit estimate: {Message}", ex.Message);
+                    $"ModelDecomposer: tokenizer parse failed for unit estimate: {ex.Message}");
             }
         }
 

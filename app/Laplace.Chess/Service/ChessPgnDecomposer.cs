@@ -1,3 +1,4 @@
+using System.Linq;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -40,8 +41,21 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
+    {
+        // TWO sources, because the fused pass (GH #600) writes under two. ChessPgn carries the
+        // witnessed record; ChessAnalysis carries the calculated derivation DeriveFromParsed
+        // deposits in the same Compose call. Only ChessPgn was ever bootstrapped, so the
+        // analyzer's source id had no HAS_NAME edge and resolved to nothing: on a live box it
+        // showed up as a bare hex id holding 705,141 rows -- the fourth largest source in the
+        // substrate, anonymous. A source that writes must be a source that is named, or its
+        // volume is invisible to source_counts and every audit that reads it.
+        var pgn = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
+        var analysis = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
+            ChessVocabulary.AnalysisTrustClass, ct);
+        _canonicalNames = pgn.Concat(analysis).Distinct().ToArray();
+    }
 
     protected override async IAsyncEnumerable<ChessGameRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
@@ -176,8 +190,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (positionIds is null)
         {
             System.Diagnostics.Trace.TraceWarning(
-                "ChessPgnDecomposer: unresolvable SAN, game dropped ({White} vs {Black} {Date})",
-                whiteName, blackName, date);
+                $"ChessPgnDecomposer: unresolvable SAN, game dropped ({whiteName} vs {blackName} {date})");
             return null;
         }
         var lineId = ChessCompose.LineId(positionIds);
@@ -210,7 +223,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
     {
         var m = new ChessModality();
-        var (state, _) = ChessAnalyze.InitialState(startFen, m);
+        // Null start = a start position this parser cannot model. Refuse the line; the caller
+        // drops the game with a counted warning rather than replaying it from a board the PGN
+        // never asserted.
+        if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
+        var state = start.Initial;
         var ids = new Hash128[sans.Count + 1];
         ids[0] = ChessCompose.Position(m.StateKey(state)).Position.Id;
         var pseudoBuf = new List<ChessMove>(64);
@@ -541,7 +558,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ChessPgnDecomposer: failed to estimate games in {File}: {Message}", f, ex.Message);
+                    $"ChessPgnDecomposer: failed to estimate games in {f}: {ex.Message}");
             }
         }
         return Task.FromResult<long?>(games == 0 ? null : games);

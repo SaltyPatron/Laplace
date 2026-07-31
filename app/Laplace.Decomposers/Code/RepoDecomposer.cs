@@ -70,7 +70,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
             catch (IOException ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "RepoDecomposer: failed to read '{File}': {Message}", file, ex.Message);
+                    $"RepoDecomposer: failed to read '{file}': {ex.Message}");
                 continue;
             }
             if (bytes.Length == 0) continue;
@@ -88,7 +88,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
             catch (InvalidOperationException ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "RepoDecomposer: skipping '{File}' — unresolvable content root: {Message}", file, ex.Message);
+                    $"RepoDecomposer: skipping '{file}' — unresolvable content root: {ex.Message}");
                 continue;
             }
 

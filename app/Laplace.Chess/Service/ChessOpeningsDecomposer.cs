@@ -76,7 +76,7 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ChessOpeningsDecomposer: failed to estimate rows in {File}: {Message}", f, ex.Message);
+                    $"ChessOpeningsDecomposer: failed to estimate rows in {f}: {ex.Message}");
             }
         }
         return lines == 0 ? null : lines;
