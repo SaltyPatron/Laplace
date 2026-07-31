@@ -28,6 +28,11 @@ LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 # The capacity lesson still binds: max_wal_size (32GB) must stay small relative
 # to the WAL volume's free space, which is asserted before initdb/relocation.
 LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/opt/laplace/pg_wal}"
+# Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh — the ENOSPC guard multiplies
+# these; when they were undefined, bash arithmetic made want_free 0 and the guard
+# passed unconditionally (dead since it was written).
+LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-64}"
+LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"

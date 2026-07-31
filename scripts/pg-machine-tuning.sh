@@ -53,7 +53,7 @@ pg_compute_machine_tuning() {
   PG_TUNE_PDEG=$pdeg
   PG_TUNE_MWP=$mwp
   PG_TUNE_AVW=$avw
-  PG_TUNE_MAX_WAL=32GB
+  PG_TUNE_MAX_WAL=64GB
   PG_TUNE_MIN_WAL=4GB
   PG_TUNE_IO_CONC=256
   PG_TUNE_CHECKPOINT=30min

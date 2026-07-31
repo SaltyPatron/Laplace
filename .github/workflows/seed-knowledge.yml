@@ -32,6 +32,15 @@ on:
         description: "re-ingest and prove no double-count"
         type: boolean
         default: false
+      index_cycle_defer:
+        description: >-
+          Campaign participation ONLY — default false. Set when a fresh-full-build campaign
+          has dropped the secondary indexes (`drop-indexes`) and will rebuild once at the end
+          (`recover-indexes`), so this seed COPYs into index-free heaps. The knowledge corpora
+          are the largest in the tree; the full wiktionary file is exactly the run the
+          campaign bracket exists for.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,3 +56,4 @@ jobs:
       timeout_minutes: 720
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
+      index_cycle_defer: ${{ inputs.index_cycle_defer }}
