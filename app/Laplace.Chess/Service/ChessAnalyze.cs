@@ -109,7 +109,7 @@ public static class ChessAnalyze
 
         AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, lineId, eventId,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                   spentSeconds);
+                   spentSeconds, standardStart);
 
         // Watermark: this playing is now derived at the current analysis version.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
@@ -145,7 +145,7 @@ public static class ChessAnalyze
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, Hash128 lineId, Hash128 eventId,
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
-        int engineDepth, double[]? spentSeconds = null)
+        int engineDepth, double[]? spentSeconds = null, bool standardStart = true)
     {
         var src = SourceId;
         double medianSpent = PgnClocks.MedianSpent(spentSeconds);
@@ -163,6 +163,10 @@ public static class ChessAnalyze
         // Free — these are the nodes the loop already composed — and it becomes the game
         // trajectory below.
         var line = new List<ChessNode>(sans.Count + 1);
+        // The replay window for the multi-ply motif detectors. Free: Apply clones a fresh
+        // Board per ply, so these are references to boards the loop already built.
+        var boards = new List<Board>(sans.Count + 1) { initial.Board };
+        var played = new List<ChessMove>(sans.Count);
 
         // Move generation is ~46% of analyze time, and ChessModality.LegalActions allocates a
         // fresh pseudo AND legal list on EVERY ply — ~12.8M plies per corpus, so ~25M list
@@ -182,6 +186,8 @@ public static class ChessAnalyze
             var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
             if (line.Count == 0) line.Add(from.Position);
             line.Add(to.Position);
+            boards.Add(next.Board);
+            played.Add(mv.Value);
 
             // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
             // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
@@ -199,16 +205,6 @@ public static class ChessAnalyze
                 sourceId: src,
                 contextId: eventId);
 
-
-            foreach (var tag in ChessMotifs.DetectAtPly(state.Board, mv.Value, next.Board))
-            {
-                ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
-                // GH #736 position grain: the position REACHED exhibits the motif —
-                // (position, HAS_MOTIF, concept), the shared-content sibling of the
-                // line-grain cell (HAS_MOTIF's family root is GAME_HAS_MOTIF). ctx = null
-                // so every game reaching this position corroborates one cell.
-                ChessGraph.AppendPositionMotif(b, to.Position.Id, tag, MoveWeight, src);
-            }
 
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
@@ -244,6 +240,24 @@ public static class ChessAnalyze
 
             state = next;
             carried = to;
+        }
+
+        // Motifs are multi-ply facts (a sacrifice is only a sacrifice once the reply and
+        // the settled exchange are known), so detection runs over the fully replayed
+        // window after the walk. Same shapes at the same grains as the old per-ply pass:
+        // line grain via GAME_HAS_MOTIF; position grain via HAS_MOTIF on the position
+        // REACHED by the tagged ply — (position, HAS_MOTIF, concept), the shared-content
+        // sibling of the line-grain cell (HAS_MOTIF's family root is GAME_HAS_MOTIF),
+        // ctx = null so every game reaching the position corroborates one cell.
+        var motifs = ChessMotifs.DetectGame(
+            new ChessMotifs.ReplayWindow(boards, played, evals, standardStart));
+        for (int ply = 0; ply < played.Count; ply++)
+        {
+            foreach (var tag in motifs[ply])
+            {
+                ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
+                ChessGraph.AppendPositionMotif(b, line[ply + 1].Id, tag, MoveWeight, src);
+            }
         }
 
         // One linestring per LINE, deposited once the whole line is known. A game whose SAN
