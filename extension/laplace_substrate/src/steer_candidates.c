@@ -237,11 +237,22 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
     }
 
     /*
-     * Fold member scores into candidate totals. log1p is CONCAVE, so reaching a SECOND
-     * frontier member is worth more than piling further mass onto one already reached —
-     * that is the intersection preference stated numerically instead of asserted. Negative
-     * member mass (refutation) passes through LINEARLY: a refuted candidate has to stay
-     * able to sink, and running it through the same curve would flatten it toward zero.
+     * Fold member scores into candidate totals, then apply the coverage bonus.
+     *
+     * SCALE IS PRESERVED ON PURPOSE. The caller combines as eff = weight * steer
+     * (trajectory_generate.c, S7 combine). Squashing every steer through log1p would have
+     * cut a raw sum of 40 to ~3.7 and quietly handed the ranking to sequence weight — a
+     * global weakening of steering dressed up as a coverage fix. So the SUM carries through
+     * unchanged and coverage rides as a multiplier: (1 + ln(covered)).
+     *
+     * That is the intersection preference, numerically. Lyon with one strong edge to
+     * `france` (sum 10, covered 1) scores 10. Paris with moderate edges to `france` AND
+     * `capital` (sum 8, covered 2) scores 8 * 1.69 = 13.5. Paris wins on breadth without
+     * either candidate's mass being rescaled.
+     *
+     * A NEGATIVE total is never amplified: refuted mass keeps its magnitude so it can still
+     * sink a candidate, and multiplying it by the coverage bonus would make "refuted by
+     * several frontier members" look further from zero than the fold actually attested.
      *
      * acc is keyed on 16 bytes and pairkey's first 16 ARE the candidate id, so HASH_BLOBS
      * compares exactly the candidate half — no separate key buffer needed.
@@ -249,16 +260,25 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
     {
         HASH_SEQ_STATUS pseq;
         PairEntry      *p;
+        HASH_SEQ_STATUS cseq;
+        SteerEntry     *ce;
         bool            hit;
 
         hash_seq_init(&pseq, pairs);
         while ((p = (PairEntry *) hash_seq_search(&pseq)) != NULL)
         {
-            SteerEntry *ce = (SteerEntry *) hash_search(acc, p->key, HASH_FIND, &hit);
+            SteerEntry *owner = (SteerEntry *) hash_search(acc, p->key, HASH_FIND, &hit);
 
             if (!hit)
                 continue;
-            ce->steer += (p->score >= 0.0) ? log1p(p->score) : p->score;
+            owner->steer += p->score;
+        }
+
+        hash_seq_init(&cseq, acc);
+        while ((ce = (SteerEntry *) hash_seq_search(&cseq)) != NULL)
+        {
+            if (ce->covered > 1 && ce->steer > 0.0)
+                ce->steer *= 1.0 + log((double) ce->covered);
         }
     }
 
