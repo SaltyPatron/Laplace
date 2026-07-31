@@ -43,12 +43,21 @@ public static class ChessLabPaths
 
     public static Probe QtBin => ResolveQtBin();
 
+    /// <summary>
+    /// Syzygy tablebase DIRECTORY (WDL <c>.rtbw</c> + DTZ <c>.rtbz</c> files) for the
+    /// ChessSyzygy probe lane. Env <c>LAPLACE_SYZYGY</c> or <c>chess-lab.env</c>;
+    /// hart-server: <c>/vault/Data/Games/Chess/syzygy/3-4-5/</c>. No default — the
+    /// lane is a clean no-op when unset (the tables are a ~1 GB opt-in download).
+    /// </summary>
+    public static Probe SyzygyDir => ResolveDirectory("LAPLACE_SYZYGY");
+
     public static IReadOnlyDictionary<string, Probe> Catalog => new Dictionary<string, Probe>(StringComparer.OrdinalIgnoreCase)
     {
         ["cutechess"] = Cutechess,
         ["stockfish"] = Stockfish,
         ["qt"] = QtBin,
         ["laplaceUci"] = LaplaceUci,
+        ["syzygy"] = SyzygyDir,
     };
 
     public static bool AllReady()
@@ -186,6 +195,15 @@ public static class ChessLabPaths
             : repoCandidate is not null ? repoCandidate(buildRoot)
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
+    }
+
+    private static Probe ResolveDirectory(string configKey)
+    {
+        var fromConfig = LaplaceInstall.TryReadConfig(configKey, ChessLabEnvFile);
+        if (string.IsNullOrWhiteSpace(fromConfig))
+            return new Probe(null, false, "missing");
+        var p = fromConfig.Trim();
+        return new Probe(p, Directory.Exists(p), "config");
     }
 
     private static Probe ResolveQtBin()

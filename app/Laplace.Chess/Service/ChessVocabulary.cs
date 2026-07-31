@@ -84,6 +84,9 @@ public static class ChessVocabulary
     // OWN source so source-grain eviction (evict_source, #508) never conflates it with
     // ChessAnalysis testimony. One lane = one source = one evictable unit.
     public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
+    // Syzygy probe lane (campaign PR-8): an exact mathematical oracle rides the
+    // StandardsDerived band — high witness weight, still one voice among many.
+    public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
     // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits
     // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
@@ -106,6 +109,10 @@ public static class ChessVocabulary
     public static readonly Hash128 MoveQualityType = EntityTypeRegistry.Id("MOVE_QUALITY");
     public static readonly Hash128 HasClockType = EntityTypeRegistry.Id("HAS_CLOCK");
     public static readonly Hash128 HasEvalTokenType = EntityTypeRegistry.Id("HAS_EVAL_TOKEN");
+    // Syzygy tablebase verdicts (ChessSyzygy source): five-valued WDL token
+    // (side-to-move POV) and distance-to-zeroing scalar, on witnessed positions.
+    public static readonly Hash128 HasWdlType = EntityTypeRegistry.Id("HAS_WDL");
+    public static readonly Hash128 HasDtzType = EntityTypeRegistry.Id("HAS_DTZ");
     public static readonly Hash128 HasThinkClassType = EntityTypeRegistry.Id("HAS_THINK_CLASS");
     public static readonly Hash128 GameHasOpeningType = EntityTypeRegistry.Id("GAME_HAS_OPENING");
     public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
