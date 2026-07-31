@@ -704,9 +704,20 @@ internal static class FoundryCommands
         var metricForBasis = attnMetric != ""
             ? attnPlane with { Vals = Array.ConvertAll(attnPlane.Vals, v => v * metricBasisGain) }
             : attnPlane;
+        // PositivePart on every basis input, matching the mold path (see the union in
+        // SynthesizeMoldAModelAsync). These planes are SIGNED — walk_edge_weight carries
+        // the sign of (rating - neutral) and layer_rank is positive — so without the
+        // clamp a refuted edge reached the eigenmap as negative weight. It is the basis
+        // affinity that must be nonnegative; the operator planes in planeByOp stay signed
+        // so refutation still reaches attention as negative weight.
         var unionGraph = attnMetric != ""
-            ? FoundryExport.Union(sim, rel, pre, att, metricForBasis)
-            : FoundryExport.Union(sim, rel, pre, att);
+            ? FoundryExport.Union(
+                FoundryExport.PositivePart(sim), FoundryExport.PositivePart(rel),
+                FoundryExport.PositivePart(pre), FoundryExport.PositivePart(att),
+                FoundryExport.PositivePart(metricForBasis))
+            : FoundryExport.Union(
+                FoundryExport.PositivePart(sim), FoundryExport.PositivePart(rel),
+                FoundryExport.PositivePart(pre), FoundryExport.PositivePart(att));
 
 
 

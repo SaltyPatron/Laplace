@@ -1219,9 +1219,15 @@ internal static class FoundryExport
                 for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
             int gsRc;
             unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
-            if (gsRc == 0)
-                for (int i = 0; i < vocab; i++)
-                    for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
+            // Fail closed. This used to be `if (gsRc == 0)` with no else, so a rank-deficient
+            // spectrum silently left the raw eigenmap in place and every downstream step
+            // treated a non-orthonormal basis as orthonormal, with no diagnostic anywhere.
+            if (gsRc != 0)
+                throw new InvalidOperationException(
+                    $"gram_schmidt_orthonormalize rc={gsRc} (vocab={vocab}, K={k}) — the spectral "
+                    + "basis is rank-deficient; a non-orthonormal basis must not be used silently");
+            for (int i = 0; i < vocab; i++)
+                for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
         }
 
         int zeroSpectral = 0;

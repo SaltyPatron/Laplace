@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <numeric>
@@ -114,6 +115,30 @@ int eigendecompose_laplacian(const SpMat& W,
               [&evals](int a, int b) { return evals[a] < evals[b]; });
 
     if (idx.size() < target_dim + 1) return -4;
+
+    // A connected graph has exactly ONE eigenvalue at zero, which is why the loop below
+    // discards idx[0] and starts at idx[1]. A graph with C components (plus Z isolated
+    // nodes, whose diagonal is the bare epsilon) has C+Z of them, and discarding only one
+    // leaves the rest to fill the leading output dimensions with component-indicator
+    // vectors instead of within-component structure. That silently produces a basis whose
+    // first dimensions encode "which fragment am I in" rather than any geometry. Nothing
+    // detected it before; the solve still returns 0, so this reports rather than fails.
+    // The diagonal epsilon in eigendecompose_laplacian is 1e-10, so components land near
+    // it and a threshold two orders above separates them from real spectral mass.
+    {
+        constexpr double kComponentEigenvalue = 1e-8;
+        std::size_t nearZero = 0;
+        for (std::size_t k = 0; k < idx.size(); ++k)
+            if (evals[idx[k]] < kComponentEigenvalue) ++nearZero;
+        if (nearZero > 1) {
+            std::fprintf(stderr,
+                "laplacian_eigenmaps: graph is DISCONNECTED — %zu near-zero eigenvalues "
+                "(a connected graph has exactly 1). Only one is discarded, so the leading "
+                "%zu of %zu output dimensions carry component indicators, not structure.\n",
+                nearZero, (nearZero - 1 < target_dim ? nearZero - 1 : target_dim), target_dim);
+        }
+    }
+
     for (std::size_t k = 0; k < target_dim; ++k) {
         const int col = idx[k + 1];
         for (std::size_t i = 0; i < n; ++i) {
@@ -142,8 +167,15 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
     std::vector<Triplet> w_triplets;
     w_triplets.reserve(nnz);
     for (std::size_t e = 0; e < nnz; ++e) {
-        const double w = std::fabs(coo_weights[e]);
-        if (w == 0.0) continue;
+        // A refuted edge is NOT affinity. This used to take fabs(), which turned a
+        // refutation into a claim of similarity of equal strength -- and because the
+        // triplet reducer below SUMS duplicates, +0.7 and -0.7 on the same pair became
+        // 1.4 rather than cancelling. The normalized Laplacian this feeds requires a
+        // nonnegative affinity; enforce that contract HERE, where it is assumed, rather
+        // than trusting every caller to clamp (FoundryCommands' Path A did not).
+        // Dropping also rejects NaN, which fabs() would have propagated into the solve.
+        const double w = coo_weights[e];
+        if (!(w > 0.0)) continue;
         const int r = coo_rows[e];
         const int c = coo_cols[e];
         if (r < 0 || c < 0) continue;
