@@ -102,7 +102,11 @@ public static class ChessAnalyze
         int engineDepth = 0, double[]? spentSeconds = null)
     {
         var m = new ChessModality();
-        var (initial, standardStart) = InitialState(startFen, m);
+        // Unreadable start = derive nothing. The recorder already refused this game, and
+        // deriving from a substituted board is how a game we could not read became a game we
+        // invented.
+        if (InitialState(startFen, m) is not { } start) return;
+        var (initial, standardStart) = start;
 
         // Opening classification + named-trap motif only make sense from the standard array.
         if (standardStart) ClassifyOpening(b, lineId, sans, m);
@@ -117,11 +121,30 @@ public static class ChessAnalyze
                 eventId, "ANALYZED_AT", vId, SourceId, null, ChessVocabulary.Trust));
     }
 
-    public static (ChessState Initial, bool StandardStart) InitialState(string? startFen, ChessModality m)
+    /// <summary>
+    /// The game's starting board, or NULL when the PGN asserted a start position this parser
+    /// cannot model.
+    ///
+    /// This used to swallow the FormatException and return m.Initial() — the STANDARD start —
+    /// with StandardStart=true. A Chess960 game (chess.com exports X-FEN castling for every
+    /// one) was therefore replayed from rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR, and
+    /// whatever SAN happened to resolve against that wrong board was recorded, folded into
+    /// consensus, and reported under a run whose status said ok and failed=0. A game we could
+    /// not read was not dropped; it was invented.
+    ///
+    /// Null instead. The caller refuses the game and counts it. An unreadable record is not a
+    /// standard record, and it is not this layer's business to guess which board was meant.
+    /// </summary>
+    public static (ChessState Initial, bool StandardStart)? InitialState(string? startFen, ChessModality m)
     {
         if (string.IsNullOrWhiteSpace(startFen)) return (m.Initial(), true);
         try { return (m.FromFen(startFen), false); }
-        catch (FormatException) { return (m.Initial(), true); }
+        catch (FormatException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"ChessAnalyze: unreadable start position, game refused: {ex.Message}");
+            return null;
+        }
     }
 
     // Line-grain classification: every playing is a witness that the LINE is that opening /

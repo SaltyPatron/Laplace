@@ -46,7 +46,9 @@ public static class ChessStockfishEval
         System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?>? evalMemo = null)
     {
         var m = new ChessModality();
-        var (state, _) = ChessAnalyze.InitialState(game.StartFen, m);
+        // Unreadable start: evaluate nothing rather than evaluate a board the game never had.
+        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
+        var state = start.Initial;
 
         // evals[i] = side-to-move cp of the position before ply i (plus the final position
         // at index N). Each position is evaluated exactly once; move i's loss reads i and i+1.

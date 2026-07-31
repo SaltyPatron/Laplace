@@ -209,7 +209,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
     {
         var m = new ChessModality();
-        var (state, _) = ChessAnalyze.InitialState(startFen, m);
+        // Null start = a start position this parser cannot model. Refuse the line; the caller
+        // drops the game with a counted warning rather than replaying it from a board the PGN
+        // never asserted.
+        if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
+        var state = start.Initial;
         var ids = new Hash128[sans.Count + 1];
         ids[0] = ChessCompose.Position(m.StateKey(state)).Position.Id;
         var pseudoBuf = new List<ChessMove>(64);

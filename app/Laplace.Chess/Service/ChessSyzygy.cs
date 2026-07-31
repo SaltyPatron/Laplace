@@ -127,7 +127,9 @@ public static class ChessSyzygy
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, ISyzygyProber prober)
     {
         var m = new ChessModality();
-        var (state, _) = ChessAnalyze.InitialState(game.StartFen, m);
+        // Unreadable start: probe nothing rather than probe a board the game never had.
+        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
+        var state = start.Initial;
         int largest = prober.Largest;
 
         var cur = state;
