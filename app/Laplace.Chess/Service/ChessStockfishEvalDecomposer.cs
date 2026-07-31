@@ -6,9 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED stockfish pass (GH #573): scan witnessed Chess_Game rows lacking the
-// ChessStockfishEval marker, hydrate via content roundtrip, evaluate every position with
-// stockfish, attest HAS_EVAL + eval-delta MOVE_QUALITY under the ChessStockfish source.
+// CALCULATED stockfish pass (GH #573): scan witnessed LINES (GH #736 — distinct
+// PLAYS_LINE objects) lacking the ChessStockfishEval marker, hydrate via content
+// roundtrip, evaluate every position with stockfish, attest HAS_EVAL + eval-delta
+// MOVE_QUALITY under the ChessStockfish source.
 // Run: `laplace ingest chess-eval [--depth N | --nodes N]`  (no path — substrate is the source)
 public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockfishEvalRecord>
 {
@@ -75,9 +76,10 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedFromSubstrateAsync(
+        // LINE-grain stream (GH #736): a line shared by many playings is evaluated ONCE.
+        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch,
-                           gid => ChessStockfishEval.MarkerId(gid, ChessStockfishEval.Version), ct))
+                           lineId => ChessStockfishEval.MarkerId(lineId, ChessStockfishEval.Version), ct))
             yield return new ChessStockfishEvalRecord(witnessed);
     }
 
@@ -102,15 +104,15 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedGamesAsync(ds, ct);
+        return ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
     }
 }
 
 /// <summary>
-/// Stockfish-eval pipeline record; trunk root is the versioned stockfish marker so re-runs
-/// dedup against the marker, never against the game.
+/// Stockfish-eval pipeline record; trunk root is the versioned per-LINE stockfish marker
+/// so re-runs dedup against the marker, never against the line.
 /// </summary>
 public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.GameId, ChessStockfishEval.Version);
+    public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.LineId, ChessStockfishEval.Version);
 }

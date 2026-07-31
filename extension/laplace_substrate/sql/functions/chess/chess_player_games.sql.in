@@ -1,6 +1,9 @@
+-- GH #736 re-key: the key OUT column was renamed (game_id -> event_id), which
+-- CREATE OR REPLACE cannot do on the upgrade path.
+DROP FUNCTION IF EXISTS chess_player_games(bytea, integer, integer);
 CREATE OR REPLACE FUNCTION chess_player_games(
         p_player bytea, p_limit integer DEFAULT 25, p_offset integer DEFAULT 0)
-    RETURNS TABLE(game_id bytea, played_on text, event text, eco text,
+    RETURNS TABLE(event_id bytea, played_on text, event text, eco text,
                   as_white boolean, opponent_id bytea, opponent text,
                   result text, outcome smallint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -9,7 +12,14 @@ CREATE OR REPLACE FUNCTION chess_player_games(
     -- verbatim (ON_DATE / HAS_EVENT / HAS_ECO / HAS_RESULT) plus the opposite
     -- colour edge for the opponent -- witnessed record only, nothing derived.
     --
-    -- Ordering is by the game's own asserted date, which means the career's
+    -- GH #736: a game-log row identifies a PLAYING, so the key column is the
+    -- EVENT id. Colour headers subject on the shared LINE with context = the
+    -- playing, which means every join below threads BOTH the line and the
+    -- event: the line finds the header rows, the context pins them to this
+    -- playing (a line shared by two playings must not leak one playing's
+    -- headers into the other's row).
+    --
+    -- Ordering is by the playing's own asserted date, which means the career's
     -- dates must be resolved before the page can be cut. That stays cheap
     -- because dates are shared content: every game played on 1960.03.15 carries
     -- the SAME date entity, so a 9k-game career resolves a few thousand distinct
@@ -20,18 +30,21 @@ CREATE OR REPLACE FUNCTION chess_player_games(
     -- result ids go into a single array and come back through one realize_batch.
     -- Per-row label() here is what made a 1300-game career take 18s.
     WITH mine AS MATERIALIZED (
-        SELECT a.subject_id AS game,
+        SELECT a.subject_id AS line,
+               a.context_id AS event,
                (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
         FROM @extschema@.attestations a
         WHERE a.object_id = p_player
+          AND a.context_id IS NOT NULL
           AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
                             @extschema@.relation_type_id('HAS_BLACK'))
     ),
     dated AS MATERIALIZED (
-        SELECT m.game, m.white, d.object_id AS date_id
+        SELECT m.line, m.event, m.white, d.object_id AS date_id
         FROM mine m
         LEFT JOIN @extschema@.attestations d
-               ON d.subject_id = m.game
+               ON d.subject_id = m.line
+              AND d.context_id = m.event
               AND d.type_id = @extschema@.relation_type_id('ON_DATE')
     ),
     date_batch AS MATERIALIZED (
@@ -46,16 +59,16 @@ CREATE OR REPLACE FUNCTION chess_player_games(
         WHERE p.i = t.j
     ),
     page AS MATERIALIZED (
-        SELECT d.game, d.white, dt.txt AS played_on
+        SELECT d.line, d.event, d.white, dt.txt AS played_on
         FROM dated d
         LEFT JOIN date_text dt ON dt.id = d.date_id
-        ORDER BY dt.txt DESC NULLS LAST, d.game
+        ORDER BY dt.txt DESC NULLS LAST, d.event
         LIMIT p_limit OFFSET p_offset
     ),
     facts AS MATERIALIZED (
-        SELECT pg.game, pg.white, pg.played_on,
+        SELECT pg.event, pg.white, pg.played_on,
                max(h.object_id) FILTER (
-                   WHERE h.type_id = @extschema@.relation_type_id('HAS_EVENT')) AS event_id,
+                   WHERE h.type_id = @extschema@.relation_type_id('HAS_EVENT')) AS event_name_id,
                max(h.object_id) FILTER (
                    WHERE h.type_id = @extschema@.relation_type_id('HAS_ECO')) AS eco_id,
                max(h.object_id) FILTER (
@@ -66,18 +79,19 @@ CREATE OR REPLACE FUNCTION chess_player_games(
                        ELSE @extschema@.relation_type_id('HAS_WHITE') END) AS opponent_id
         FROM page pg
         LEFT JOIN @extschema@.attestations h
-               ON h.subject_id = pg.game
+               ON h.subject_id = pg.line
+              AND h.context_id = pg.event
               AND h.type_id IN (@extschema@.relation_type_id('HAS_EVENT'),
                                 @extschema@.relation_type_id('HAS_ECO'),
                                 @extschema@.relation_type_id('HAS_RESULT'),
                                 @extschema@.relation_type_id('HAS_WHITE'),
                                 @extschema@.relation_type_id('HAS_BLACK'))
-        GROUP BY pg.game, pg.white, pg.played_on
+        GROUP BY pg.event, pg.white, pg.played_on
     ),
     surface_batch AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
         FROM facts f,
-             LATERAL (VALUES (f.event_id), (f.eco_id), (f.result_id), (f.opponent_id)) v(s)
+             LATERAL (VALUES (f.event_name_id), (f.eco_id), (f.result_id), (f.opponent_id)) v(s)
         WHERE s IS NOT NULL
     ),
     surface_text AS MATERIALIZED (
@@ -87,7 +101,7 @@ CREATE OR REPLACE FUNCTION chess_player_games(
              LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
-    SELECT f.game,
+    SELECT f.event,
            f.played_on,
            ev.txt,
            ec.txt,
@@ -97,9 +111,9 @@ CREATE OR REPLACE FUNCTION chess_player_games(
            rs.txt,
            @extschema@.chess_outcome(f.white, f.result_id)
     FROM facts f
-    LEFT JOIN surface_text ev ON ev.id = f.event_id
+    LEFT JOIN surface_text ev ON ev.id = f.event_name_id
     LEFT JOIN surface_text ec ON ec.id = f.eco_id
     LEFT JOIN surface_text rs ON rs.id = f.result_id
     LEFT JOIN surface_text op ON op.id = f.opponent_id
-    ORDER BY f.played_on DESC NULLS LAST, f.game
+    ORDER BY f.played_on DESC NULLS LAST, f.event
 $$;

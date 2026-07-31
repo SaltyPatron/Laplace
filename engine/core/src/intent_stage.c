@@ -35,11 +35,12 @@ static const char* const kPhysicalityColumns =
     "n_constituents, alignment_residual, source_dim, observed_at";
 static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
-    "outcome, last_observed_at, observation_count, highway_mask";
+    "outcome, last_observed_at, observation_count, "
+    "sum_score_fp1e9, opponent_rd_fp1e9, highway_mask";
 
 #define ENTITY_COL_COUNT       4
 #define PHYSICALITY_COL_COUNT 10
-#define ATTESTATION_COL_COUNT 10
+#define ATTESTATION_COL_COUNT 12
 
 typedef struct {
     uint8_t* data;
@@ -265,7 +266,7 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
 
         if (buf_reserve(&s->entities,      row_capacity_hint * 80)  != 0
             || buf_reserve(&s->physicalities, row_capacity_hint * 256) != 0
-            || buf_reserve(&s->attestations,  row_capacity_hint * 168) != 0) {
+            || buf_reserve(&s->attestations,  row_capacity_hint * 192) != 0) {
             intent_stage_free(s);
             return NULL;
         }
@@ -378,6 +379,8 @@ int intent_stage_add_attestation(
     int16_t          outcome,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count,
+    int64_t          sum_score_fp1e9,
+    int64_t          opponent_rd_fp1e9,
     const uint8_t*   highway_mask) {
     if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
@@ -402,6 +405,8 @@ int intent_stage_add_attestation(
     if (buf_append_field_int2(b, outcome) != 0) return -1;
     if (buf_append_field_timestamptz(b, last_observed_at_unix_us) != 0) return -1;
     if (buf_append_field_int8(b, observation_count) != 0) return -1;
+    if (buf_append_field_int8(b, sum_score_fp1e9) != 0) return -1;
+    if (buf_append_field_int8(b, opponent_rd_fp1e9) != 0) return -1;
     if (highway_mask) {
         if (buf_append_field_bytes(b, highway_mask, 32) != 0) return -1;
     } else {

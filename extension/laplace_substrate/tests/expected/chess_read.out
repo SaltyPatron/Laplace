@@ -24,6 +24,7 @@ DECLARE
     got      bytea[];
     n        bigint;
     s        double precision;
+    s2       double precision;
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
@@ -46,14 +47,15 @@ BEGIN
     -- MOVE evidence with per-game context; game headers bind games to players.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3),
-        (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1),
-        (laplace_hash128_blake3('test/chess/hw1'), g_white, hw, player, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hb1'), g_white, hb, rival,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hw2'), g_black, hw, rival,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('test/chess/hb2'), g_black, hb, player, src, NULL, 2, now(), 1);
+        (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3, 3000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1, 0, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw1'), g_white, hw, player, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb1'), g_white, hb, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hw2'), g_black, hw, rival,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('test/chess/hb2'), g_black, hb, player, src, NULL, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_moves: eff_mu ranking, full and LIMITed.
     SELECT array_agg(next_position ORDER BY ord) INTO got
@@ -64,6 +66,13 @@ BEGIN
 
     SELECT count(*) INTO n FROM chess_moves(pos, 2);
     IF n <> 2 THEN RAISE EXCEPTION 'FAIL: chess_moves LIMIT 2 returned % rows', n; END IF;
+
+    -- eff_mu/rd leave chess_moves in DISPLAY units (the eff_mu_display /1e9 round),
+    -- never raw fp1e9: the strong continuation is 1500.0 / 50.0, not 1.5e12 / 5e10.
+    SELECT q.eff_mu, q.rd INTO s, s2 FROM chess_moves(pos, 1) q;
+    IF s <> 1500.0 OR s2 <> 50.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_moves must return display-scale eff_mu/rd, got %/%', s, s2;
+    END IF;
 
     -- chess_player_moves: only the game where the player held the queried color.
     SELECT count(*) INTO n FROM chess_player_moves(pos, player, true);
@@ -125,6 +134,8 @@ DECLARE
     pl_sa   bytea := word_id('a');
     pl_sb   bytea := word_id('b');
     pl_sc   bytea := word_id('c');
+    cap_t   bytea := word_id('T');
+    tname   bytea := laplace_hash128_blake3('t2/name/tal');
     ids_got bytea[];
     n       bigint;
     w       bigint;
@@ -132,6 +143,9 @@ DECLARE
     l       bigint;
     u       bigint;
     sc      double precision;
+    ra      double precision;
+    rdv     double precision;
+    mu      double precision;
     b       boolean;
     got     bytea;
     txt     text;
@@ -180,21 +194,22 @@ BEGIN
     -- g3 Tal(W) drew Spassky     g4 Tal(W) v Botvinnik, never scored
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('t2/g1w'), g1, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g1b'), g1, hb, botv, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g1r'), g1, hr, r_white, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2w'), g2, hw, botv, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2b'), g2, hb, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g2r'), g2, hr, r_white, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3w'), g3, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3b'), g3, hb, spas, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g3r'), g3, hr, r_draw, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g4w'), g4, hw, tal,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('t2/g4b'), g4, hb, botv, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('t2/g1w'), g1, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g1b'), g1, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g1r'), g1, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2w'), g2, hw, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2b'), g2, hb, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g2r'), g2, hr, r_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3w'), g3, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3b'), g3, hb, spas, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g3r'), g3, hr, r_draw, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g4w'), g4, hw, tal,  src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (laplace_hash128_blake3('t2/g4b'), g4, hb, botv, src, NULL, 2, now(), 1, 1000000000, 30000000000),
         -- an Elo tag whose surface cannot be rendered back to digits
-        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, g1, 2, now(), 1);
+        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, g1, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_player_record: the career total. 4 games — one won, one lost, one
     -- drawn, one the source never scored. score is over SCORED games only:
@@ -317,11 +332,49 @@ BEGIN
     SELECT player_id INTO got FROM chess_ranked(1, 1);
     IF got <> botv THEN RAISE EXCEPTION 'FAIL: chess_ranked OFFSET 1 should be Botvinnik'; END IF;
 
+    -- rating/rd/eff_mu leave chess_ranked in DISPLAY units (the eff_mu_display /1e9
+    -- round), never raw fp1e9: Tal's cell is 1900.0 / 50.0 / 1800.0, not 1.9e12.
+    SELECT r.rating, r.rd, r.eff_mu INTO ra, rdv, mu FROM chess_ranked(10) r WHERE r.player_id = tal;
+    IF ra <> 1900.0 OR rdv <> 50.0 OR mu <> 1800.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_ranked must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
+
     -- Head to head is ONE folded cell per pairing: 28 meetings, 28 witnesses, no regroup.
     SELECT games INTO n FROM chess_head_to_head(tal, 10) WHERE opponent_id = botv;
     IF n <> 28 THEN RAISE EXCEPTION 'FAIL: head-to-head should carry 28 witnesses, got %', n; END IF;
     SELECT count(*) INTO n FROM chess_head_to_head(spas, 10);
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: unplayed pairing returned % rows', n; END IF;
+
+    -- ... and its rating columns are display-scale too: 1700.0 / 60.0 / 1580.0.
+    SELECT h.rating, h.rd, h.eff_mu INTO ra, rdv, mu
+      FROM chess_head_to_head(tal, 10) h WHERE h.opponent_id = botv;
+    IF ra <> 1700.0 OR rdv <> 60.0 OR mu <> 1580.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_head_to_head must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
+
+    -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
+    -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
+    -- the same display-scale law on the rating columns.
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (cap_t, 0, type_t, src), (tname, 0, type_t, src);
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
+            'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+            laplace_trajectory_build(ARRAY[cap_t]), 1, now());
+    INSERT INTO consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (laplace_hash128_blake3('t2/c_alias'), tal, relation_type_id('HAS_NAME_ALIAS'),
+            tname, 1500000000000, 50000000000, 60000000, 1, now());
+
+    SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
+      FROM chess_players_by_initial('T', 10, 0) p WHERE p.player_id = tal;
+    IF ra IS NULL THEN
+        RAISE EXCEPTION 'FAIL: chess_players_by_initial did not surface Tal under T';
+    END IF;
+    IF ra <> 1900.0 OR rdv <> 50.0 OR mu <> 1800.0 THEN
+        RAISE EXCEPTION 'FAIL: chess_players_by_initial must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
 
     -- chess_game_plies: a game read back as LOOKUPS. The line is built with the SAME native
     -- packer the compose path uses (laplace_trajectory_build, now bound to SQL), so this
@@ -346,15 +399,16 @@ BEGIN
 
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
         (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sa, src, pl_game, 2, now(), 1),
+             pl_sa, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
         (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
-             pl_sb, src, pl_game, 2, now(), 1),
+             pl_sb, src, pl_game, 2, now(), 1, 1000000000, 30000000000),
         -- another game's ply on the SAME shared position: context_id must exclude it
         (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
-             pl_sc, src, g1, 2, now(), 1);
+             pl_sc, src, g1, 2, now(), 1, 1000000000, 30000000000);
 
     SELECT count(*) INTO n FROM chess_game_plies(pl_game);
     IF n <> 3 THEN

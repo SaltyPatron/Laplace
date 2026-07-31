@@ -62,12 +62,16 @@ internal static class CopyTupleParser
         public readonly List<long> Counts = new();
         /// <summary>Offset of the 8 observation_count value bytes, relative to row start.</summary>
         public readonly List<int> CountValueOffsets = new();
+        /// <summary>sum_score_fp1e9 — the fold's exact score total for this row.</summary>
+        public readonly List<long> SumScores = new();
+        /// <summary>Offset of the 8 sum_score_fp1e9 value bytes, relative to row start.</summary>
+        public readonly List<int> SumScoreValueOffsets = new();
         public readonly List<StagedRowRef> Rows = new();
     }
 
     private const int EntityFields = 4;
     private const int PhysicalityFields = 10;
-    private const int AttestationFields = 10;
+    private const int AttestationFields = 12;
 
     public static unsafe EntityRows ParseEntities(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
     {
@@ -136,8 +140,8 @@ internal static class CopyTupleParser
                 long rowStart = off;
                 Hash128 id = default, subjectId = default, typeId = default;
                 Hash128 objectId = default, contextId = default;
-                long ts = 0, games = 0;
-                long countValOff = -1;
+                long ts = 0, games = 0, sumScore = 0;
+                long countValOff = -1, sumValOff = -1;
                 WalkRow(p, len, ref off, AttestationFields, "attestations", (field, valOff, valLen) =>
                 {
                     switch (field)
@@ -156,10 +160,16 @@ internal static class CopyTupleParser
                             games = ReadInt64(p, valOff, valLen, "attestations.observation_count");
                             countValOff = valOff;
                             break;
+                        case 9:
+                            sumScore = ReadInt64(p, valOff, valLen, "attestations.sum_score_fp1e9");
+                            sumValOff = valOff;
+                            break;
                     }
                 });
                 if (countValOff < 0)
                     throw new InvalidOperationException("attestations row missing observation_count");
+                if (sumValOff < 0)
+                    throw new InvalidOperationException("attestations row missing sum_score_fp1e9");
                 result.Ids.Add(id);
                 result.SubjectIds.Add(subjectId);
                 result.TypeIds.Add(typeId);
@@ -168,6 +178,8 @@ internal static class CopyTupleParser
                 result.TimestampsPgUs.Add(ts);
                 result.Counts.Add(games);
                 result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));
+                result.SumScores.Add(sumScore);
+                result.SumScoreValueOffsets.Add(checked((int)(sumValOff - rowStart)));
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
         }
@@ -230,7 +242,9 @@ internal static class CopyTupleParser
     /// <paramref name="patchedCounts"/> is non-null, a row with
     /// patchedCounts[i] >= 0 has its observation_count value rewritten to
     /// that value on the way out (the duplicate-collapse representative
-    /// carrying its group's summed games).
+    /// carrying its group's summed games), and its sum_score_fp1e9 value
+    /// rewritten to patchedSums[i] (the group's summed fold score — evidence
+    /// stays the exact record of what was folded).
     /// </summary>
     public static async Task WriteFilteredAsync(
         Stream stream,
@@ -238,10 +252,14 @@ internal static class CopyTupleParser
         IReadOnlyList<StagedRowRef> rows,
         long[]? patchedCounts = null,
         IReadOnlyList<int>? countValueOffsets = null,
+        long[]? patchedSums = null,
+        IReadOnlyList<int>? sumValueOffsets = null,
         CancellationToken ct = default)
     {
         if (patchedCounts is not null && countValueOffsets is null)
             throw new ArgumentNullException(nameof(countValueOffsets));
+        if (patchedCounts is not null && (patchedSums is null || sumValueOffsets is null))
+            throw new ArgumentNullException(nameof(patchedSums));
 
         await stream.WriteAsync(PgBinaryCopy.Header, ct).ConfigureAwait(false);
 
@@ -260,6 +278,8 @@ internal static class CopyTupleParser
                 }
                 BinaryPrimitives.WriteInt64BigEndian(
                     window.AsSpan(countValueOffsets![i], 8), patchedCounts[i]);
+                BinaryPrimitives.WriteInt64BigEndian(
+                    window.AsSpan(sumValueOffsets![i], 8), patchedSums![i]);
                 await stream.WriteAsync(window.AsMemory(0, row.Length), ct).ConfigureAwait(false);
                 i++;
                 continue;

@@ -122,8 +122,10 @@ internal sealed partial class SubstrateClient
         const string sql = """
             WITH p AS (SELECT laplace.chess_player_id(@name) AS id)
             SELECT encode(p.id, 'hex'), laplace.label_or_hex(p.id),
-                   c.witness_count, c.rating::double precision, c.rd::double precision,
-                   laplace.eff_mu(c.rating, c.rd)::double precision
+                   c.witness_count,
+                   round((c.rating / 1e9)::numeric, 3)::double precision,
+                   round((c.rd / 1e9)::numeric, 3)::double precision,
+                   laplace.eff_mu_display(c.rating, c.rd)::double precision
             FROM p
             JOIN laplace.consensus c
               ON c.subject_id = p.id
@@ -197,8 +199,10 @@ internal sealed partial class SubstrateClient
         string idHex, int limit, int offset, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
+        // GH #736: the game-log key column is the playing-EVENT id (the row identifies a
+        // playing; the line is shared content reachable through PLAYS_LINE).
         const string sql = """
-            SELECT encode(game_id, 'hex'), played_on, event, eco, as_white,
+            SELECT encode(event_id, 'hex'), played_on, event, eco, as_white,
                    encode(opponent_id, 'hex'), opponent, result, outcome
             FROM laplace.chess_player_games(@id, @limit, @offset)
             """;

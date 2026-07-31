@@ -121,7 +121,8 @@ public sealed class WriterThroughputTests
             Hash128 obj = Id(seedBase + totalRows + i);
             attStage.AddAttestation(
                 Id(40_000_000 + i), subj, RelTypeId, obj, ThroughputSrc, null,
-                (short)AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1L);
+                (short)AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1L,
+                sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
         }
 
         var sw = Stopwatch.StartNew();

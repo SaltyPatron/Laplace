@@ -1,6 +1,4 @@
-using System.Text;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -31,21 +29,16 @@ public static class ChessReviewIngest
         if (ChessGameReview.ReviewGameText(gameText, depth) is not { } reviewed) return;
         if (reviewed.Worst.Count == 0) return;
 
-        var bytes = Encoding.UTF8.GetBytes(gameText);
-        PgnMovetext.PgnWalkResult stream;
-        using (var ast = GrammarDecomposer.Parse(bytes, "pgn"))
-            stream = PgnMovetext.Walk(ast, bytes);
-        if (stream.Result is null || stream.Mainline.Count == 0) return;
-
-        var moves = stream.Mainline.Select(p => p.San).ToList();
-        string date = PgnGames.TagStr(gameText, "Date");
-        var gameId = ChessVocabulary.GameId(
-            PgnGames.TagStr(gameText, "White"), PgnGames.TagStr(gameText, "Black"), date, moves);
+        // GH #736: one parse+identity path for every lane — TryParseGame replays the
+        // mainline and mints the line/event pair; the review's per-position judgments
+        // carry the PLAYING (the event) as provenance context.
+        if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed) return;
+        var eventId = parsed.EventId;
         var src = ChessVocabulary.ReviewSourceId;
 
         var state = m.Initial();
         int ply = 0;
-        foreach (var plyStream in stream.Mainline)
+        foreach (var plyStream in parsed.Walk.Mainline)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), plyStream.San);
             if (mv is null) break;
@@ -63,7 +56,7 @@ public static class ChessReviewIngest
                 // to fold synthetic "Loss" evidence onto a position regardless of what the game
                 // actually resulted in. MOVE_QUALITY below is the correctly-scoped signal for this.
                 if (MoveQuality.FromReviewTag(w.Tag) is { } q)
-                    ChessGraph.AppendMoveQuality(b, fromKey, q, QualityGames, ReviewWitnessWeight, src, gameId);
+                    ChessGraph.AppendMoveQuality(b, fromKey, q, QualityGames, ReviewWitnessWeight, src, eventId);
             }
 
             state = m.Apply(state, mv.Value);

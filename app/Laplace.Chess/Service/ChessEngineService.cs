@@ -230,8 +230,10 @@ public sealed class ChessEngineService : IAsyncDisposable
                 var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
                 rows.Add(new ChessExploreMove(
                     mv.Uci, mv.San,
-                    (r.GetDouble(1) - GlickoPriors.NeutralMu) / 1e9,
-                    r.GetDouble(2) / 1e9,
+                    // chess_moves() returns DISPLAY units (fp1e9 already /1e9-rounded),
+                    // so only the neutral prior still needs scaling here.
+                    r.GetDouble(1) - GlickoPriors.NeutralMu / 1e9,
+                    r.GetDouble(2),
                     r.GetInt64(3),
                     ps.Games,
                     ps.Games > 0 ? ps.Score : null));
@@ -438,7 +440,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         var status = _modality.Terminal(state) is { } t ? Describe(t) : "ongoing";
         return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
             session.TenantId, session.UserId,
-            Convert.ToHexString(session.GameId.ToBytes()).ToLowerInvariant());
+            Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant());
     }
 
     private void EnsureModality()
