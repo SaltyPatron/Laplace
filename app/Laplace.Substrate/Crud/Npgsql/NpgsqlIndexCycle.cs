@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
@@ -47,7 +48,7 @@ public sealed class NpgsqlIndexCycle
     /// of an old cycled run are still rebuilt at the next run start.
     /// </summary>
     public static readonly bool Enabled =
-        (Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE") ?? "") is "1" or "true" or "TRUE";
+        EnvFlag.IsSet("LAPLACE_INDEX_CYCLE");
 
     /// <summary>Hard cap: one CREATE INDEX session at a time (see class note).</summary>
     private const int MaxConcurrentIndexBuilds = 1;
@@ -97,7 +98,7 @@ public sealed class NpgsqlIndexCycle
     /// drop/rebuild cycles into one drop and one rebuild across the whole seed.
     /// </summary>
     public static readonly bool Deferred =
-        (Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE_DEFER") ?? "") is "1" or "true" or "TRUE";
+        EnvFlag.IsSet("LAPLACE_INDEX_CYCLE_DEFER");
 
     public NpgsqlIndexCycle(NpgsqlDataSource ds, ILogger log)
     {

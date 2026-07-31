@@ -12,7 +12,7 @@ internal static unsafe class CopyBlobValidator
     // path is the default. Explicit opt-out (LAPLACE_COPY_BLOB_VALIDATE=0) exists only for
     // clean-run micro-benchmarking, never for production seeds.
     public static readonly bool Enabled =
-        Environment.GetEnvironmentVariable("LAPLACE_COPY_BLOB_VALIDATE") != "0";
+        EnvFlag.IsSet("LAPLACE_COPY_BLOB_VALIDATE", whenUnset: true);
 
     public static void Checkpoint(IntentStage stage, string phase)
     {
