@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Stripe;
@@ -31,27 +32,25 @@ internal sealed class PostgresBillingConfigStore : IBillingConfigStore
 
     public PostgresBillingConfigStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
-    public async Task<string?> TryGetAsync(string key, CancellationToken ct)
+    public Task<string?> TryGetAsync(string key, CancellationToken ct)
     {
         const string sql = "SELECT value FROM app.billing_config WHERE key = @key;";
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("key", key);
-        return await cmd.ExecuteScalarAsync(ct) as string;
+        return NpgsqlRead.ExecuteScalarAsync<string>(_dataSource, sql,
+            p => p.AddWithValue("key", key), ct: ct);
     }
 
-    public async Task SetAsync(string key, string value, CancellationToken ct)
+    public Task SetAsync(string key, string value, CancellationToken ct)
     {
         const string sql = """
             INSERT INTO app.billing_config (key, value, updated_at)
             VALUES (@key, @value, now())
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("key", key);
-        cmd.Parameters.AddWithValue("value", value);
-        await cmd.ExecuteNonQueryAsync(ct);
+        return NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
+        {
+            p.AddWithValue("key", key);
+            p.AddWithValue("value", value);
+        }, ct: ct);
     }
 }
 

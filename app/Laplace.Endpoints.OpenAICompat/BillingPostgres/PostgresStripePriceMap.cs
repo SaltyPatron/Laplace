@@ -1,3 +1,4 @@
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.BillingPostgres;
@@ -8,17 +9,14 @@ internal sealed class PostgresStripePriceMap : IStripePriceMap
 
     public PostgresStripePriceMap(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
-    public async Task<string?> TryGetAsync(string lookupKey, CancellationToken ct)
+    public Task<string?> TryGetAsync(string lookupKey, CancellationToken ct)
     {
         const string sql = "SELECT stripe_price_id FROM app.stripe_price_map WHERE lookup_key = @lookup_key;";
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("lookup_key", lookupKey);
-        var value = await cmd.ExecuteScalarAsync(ct);
-        return value as string;
+        return NpgsqlRead.ExecuteScalarAsync<string>(_dataSource, sql,
+            p => p.AddWithValue("lookup_key", lookupKey), ct: ct);
     }
 
-    public async Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct)
+    public Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct)
     {
         const string sql = """
             INSERT INTO app.stripe_price_map (lookup_key, stripe_price_id, updated_at)
@@ -27,10 +25,10 @@ internal sealed class PostgresStripePriceMap : IStripePriceMap
                 stripe_price_id = EXCLUDED.stripe_price_id,
                 updated_at = now();
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("lookup_key", lookupKey);
-        cmd.Parameters.AddWithValue("stripe_price_id", stripePriceId);
-        await cmd.ExecuteNonQueryAsync(ct);
+        return NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p =>
+        {
+            p.AddWithValue("lookup_key", lookupKey);
+            p.AddWithValue("stripe_price_id", stripePriceId);
+        }, ct: ct);
     }
 }

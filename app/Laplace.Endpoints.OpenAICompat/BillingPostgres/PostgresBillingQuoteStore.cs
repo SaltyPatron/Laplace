@@ -1,3 +1,4 @@
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.BillingPostgres;
@@ -29,14 +30,11 @@ internal sealed class PostgresBillingQuoteStore : IBillingQuoteStore
                 created_at = EXCLUDED.created_at,
                 expires_at = EXCLUDED.expires_at;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        Bind(cmd, quote);
-        await cmd.ExecuteNonQueryAsync(ct);
+        await NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql, p => Bind(p, quote), ct: ct);
         return quote;
     }
 
-    public async Task<BillingQuote?> TryGetAsync(string quoteId, CancellationToken ct)
+    public Task<BillingQuote?> TryGetAsync(string quoteId, CancellationToken ct)
     {
         const string sql = """
             SELECT quote_id, tenant, service_id, units, amount_cents, currency, status,
@@ -44,43 +42,40 @@ internal sealed class PostgresBillingQuoteStore : IBillingQuoteStore
             FROM app.billing_quotes
             WHERE quote_id = @quote_id;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("quote_id", quoteId);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            return null;
-        return new BillingQuote(
-            QuoteId: reader.GetString(0),
-            Tenant: reader.GetString(1),
-            ServiceId: reader.GetString(2),
-            Units: reader.GetInt32(3),
-            AmountCents: reader.GetInt64(4),
-            Currency: reader.GetString(5),
-            Status: reader.GetString(6),
-            StripeSessionId: reader.IsDBNull(8) ? null : reader.GetString(8),
-            StripeCheckoutUrl: reader.IsDBNull(9) ? null : reader.GetString(9),
-            CreatedAt: reader.GetFieldValue<DateTimeOffset>(10),
-            ExpiresAt: reader.GetFieldValue<DateTimeOffset>(11),
-            Consumed: reader.GetBoolean(7));
+        return NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql, Read,
+            p => p.AddWithValue("quote_id", quoteId), ct: ct);
     }
 
     public Task<BillingQuote> UpdateAsync(BillingQuote quote, CancellationToken ct) =>
         PutAsync(quote, ct);
 
-    private static void Bind(NpgsqlCommand cmd, BillingQuote quote)
+    private static BillingQuote Read(NpgsqlDataReader reader) => new(
+        QuoteId: reader.GetString(0),
+        Tenant: reader.GetString(1),
+        ServiceId: reader.GetString(2),
+        Units: reader.GetInt32(3),
+        AmountCents: reader.GetInt64(4),
+        Currency: reader.GetString(5),
+        Status: reader.GetString(6),
+        StripeSessionId: reader.IsDBNull(8) ? null : reader.GetString(8),
+        StripeCheckoutUrl: reader.IsDBNull(9) ? null : reader.GetString(9),
+        CreatedAt: reader.GetFieldValue<DateTimeOffset>(10),
+        ExpiresAt: reader.GetFieldValue<DateTimeOffset>(11),
+        Consumed: reader.GetBoolean(7));
+
+    private static void Bind(NpgsqlParameterCollection p, BillingQuote quote)
     {
-        cmd.Parameters.AddWithValue("quote_id", quote.QuoteId);
-        cmd.Parameters.AddWithValue("tenant", quote.Tenant);
-        cmd.Parameters.AddWithValue("service_id", quote.ServiceId);
-        cmd.Parameters.AddWithValue("units", quote.Units);
-        cmd.Parameters.AddWithValue("amount_cents", quote.AmountCents);
-        cmd.Parameters.AddWithValue("currency", quote.Currency);
-        cmd.Parameters.AddWithValue("status", quote.Status);
-        cmd.Parameters.AddWithValue("consumed", quote.Consumed);
-        cmd.Parameters.AddWithValue("stripe_session_id", (object?)quote.StripeSessionId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("stripe_checkout_url", (object?)quote.StripeCheckoutUrl ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("created_at", quote.CreatedAt);
-        cmd.Parameters.AddWithValue("expires_at", quote.ExpiresAt);
+        p.AddWithValue("quote_id", quote.QuoteId);
+        p.AddWithValue("tenant", quote.Tenant);
+        p.AddWithValue("service_id", quote.ServiceId);
+        p.AddWithValue("units", quote.Units);
+        p.AddWithValue("amount_cents", quote.AmountCents);
+        p.AddWithValue("currency", quote.Currency);
+        p.AddWithValue("status", quote.Status);
+        p.AddWithValue("consumed", quote.Consumed);
+        p.AddWithValue("stripe_session_id", (object?)quote.StripeSessionId ?? DBNull.Value);
+        p.AddWithValue("stripe_checkout_url", (object?)quote.StripeCheckoutUrl ?? DBNull.Value);
+        p.AddWithValue("created_at", quote.CreatedAt);
+        p.AddWithValue("expires_at", quote.ExpiresAt);
     }
 }
