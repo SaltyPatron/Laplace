@@ -53,9 +53,26 @@ public static class ChessGraph
         if (moveChoiceGames < 1) moveChoiceGames = games;
         long sum = checked(ScoreFp1e9(outcome) * games);
 
+        // ctx = null, on purpose — the same rule RecordOpeningHeaders states for line-grain
+        // facts: "each playing that asserts the same [fact] for the same line MERGES into one
+        // evidence row whose observation count accumulates."
+        //
+        // The attestation id is blake3(subject | type | object | source | context)
+        // (attestation_engine.c:110-132), so ctx = the playing made every one of these rows
+        // unique BY CONSTRUCTION. Identical content — the same position, the same move —
+        // could never merge, and the row count scaled with positions x games instead of
+        // saturating with the vocabulary. Measured: 280 OUTCOME rows per game over 1,193
+        // chess.com games, and marginal rows per game still RISING at game 190,705 (429 ->
+        // 552), which a closed vocabulary cannot do.
+        //
+        // Nothing is lost with ctx dropped. These are the AGGREGATING lane: they are read as
+        // eff_mu / rd / witness_count, i.e. "how do games through this position fare", which
+        // IS the merged cell — witness_count becomes times-seen instead of always 1. The
+        // per-playing record lives where it belongs: the line's trajectory carries which
+        // positions this game passed through, and the event carries who played it.
         foreach (var s in from.Substructures)
-            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, sourceId, contextId));
-        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
+            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, sourceId, contextId: null));
+        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, sourceId, contextId: null));
 
         long moveSum = checked(ScoreFp1e9(outcome) * moveChoiceGames);
         b.AddAttestation(NativeAttestation.Aggregated(
@@ -63,7 +80,7 @@ public static class ChessGraph
             typeId: ChessVocabulary.MoveType,
             obj: to.Position.Id,
             sourceId: sourceId,
-            contextId: contextId,
+            contextId: null,
             games: moveChoiceGames,
             sumScoreFp1e9: moveSum,
             witnessWeight: witnessWeight));
