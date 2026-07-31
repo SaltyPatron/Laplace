@@ -221,7 +221,12 @@ internal static class FoundryExport
         cmd.CommandTimeout = 180;
         cmd.CommandText =
             "SELECT subject_id, object_id, " +
-            "GREATEST((eff_mu(rating, rd) - glicko2_neutral_mu())::double precision / 1e9, 0) AS w " +
+            // walk_edge_weight, not eff_mu. eff_mu is the conservative RANKING key;
+            // glicko2.c documents using it as a sign/gate as the bug that scored 99.04%
+            // of won claims negative. Clamping stays here — the basis union wants the
+            // positive part — but the quantity clamped is now the same law every other
+            // plane exports, so the tensors share a scale.
+            "GREATEST(laplace.walk_edge_weight(rating, rd, witness_count), 0) AS w " +
             "FROM laplace.consensus " +
             "WHERE type_id = laplace.relation_type_id($1) AND subject_id = ANY($2)";
         cmd.Parameters.AddWithValue(relationType);
