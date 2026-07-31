@@ -290,7 +290,9 @@ public sealed class Search
         return alpha;
     }
 
-    private static readonly int[] PieceValue = { 0, 100, 320, 330, 500, 900, 20000 };
+    // Internal: See (static exchange evaluation) and the motif detectors read this same
+    // table — the engine's one piece-value fact (one implementation per fact).
+    internal static readonly int[] PieceValue = { 0, 100, 320, 330, 500, 900, 20000 };
 
     private void Order(Board b, List<ChessMove> moves, ChessMove ttMove, int ply)
     {

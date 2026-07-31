@@ -2,11 +2,13 @@ namespace Laplace.Modality.Chess;
 
 public static class MoveGen
 {
-    private static readonly int[] KnightDeltas;
-    private static readonly int[] KingDeltas;
-    private static readonly int[] BishopDeltas;
-    private static readonly int[] RookDeltas;
-    private static readonly int[] QueenDeltas;
+    // Internal so See's least-valuable-attacker scan rides the same delta tables
+    // (one implementation per fact).
+    internal static readonly int[] KnightDeltas;
+    internal static readonly int[] KingDeltas;
+    internal static readonly int[] BishopDeltas;
+    internal static readonly int[] RookDeltas;
+    internal static readonly int[] QueenDeltas;
     private static readonly int[] WPawnCaps;
     private static readonly int[] BPawnCaps;
 
@@ -22,32 +24,37 @@ public static class MoveGen
     }
 
     public static bool IsSquareAttacked(Board b, int sq, bool byWhite)
+        => IsSquareAttacked(b.Squares, sq, byWhite);
+
+    // Array form: the same fact computed over a raw square array, so See's swap-off can
+    // probe hypothetical occupancies without materializing Board instances.
+    public static bool IsSquareAttacked(Piece[] squares, int sq, bool byWhite)
     {
         if (byWhite)
         {
             int p1 = sq - 17, p2 = sq - 15;
-            if (Board.OnBoard(p1) && b.Squares[p1] == Piece.WPawn) return true;
-            if (Board.OnBoard(p2) && b.Squares[p2] == Piece.WPawn) return true;
+            if (Board.OnBoard(p1) && squares[p1] == Piece.WPawn) return true;
+            if (Board.OnBoard(p2) && squares[p2] == Piece.WPawn) return true;
         }
         else
         {
             int p1 = sq + 17, p2 = sq + 15;
-            if (Board.OnBoard(p1) && b.Squares[p1] == Piece.BPawn) return true;
-            if (Board.OnBoard(p2) && b.Squares[p2] == Piece.BPawn) return true;
+            if (Board.OnBoard(p1) && squares[p1] == Piece.BPawn) return true;
+            if (Board.OnBoard(p2) && squares[p2] == Piece.BPawn) return true;
         }
 
         Piece knight = byWhite ? Piece.WKnight : Piece.BKnight;
         foreach (int d in KnightDeltas)
         {
             int t = sq + d;
-            if (Board.OnBoard(t) && b.Squares[t] == knight) return true;
+            if (Board.OnBoard(t) && squares[t] == knight) return true;
         }
 
         Piece king = byWhite ? Piece.WKing : Piece.BKing;
         foreach (int d in KingDeltas)
         {
             int t = sq + d;
-            if (Board.OnBoard(t) && b.Squares[t] == king) return true;
+            if (Board.OnBoard(t) && squares[t] == king) return true;
         }
 
         Piece bishop = byWhite ? Piece.WBishop : Piece.BBishop;
@@ -59,7 +66,7 @@ public static class MoveGen
             int t = sq + d;
             while (Board.OnBoard(t))
             {
-                var pc = b.Squares[t];
+                var pc = squares[t];
                 if (pc != Piece.Empty)
                 {
                     if (pc == bishop || pc == queen) return true;
@@ -73,7 +80,7 @@ public static class MoveGen
             int t = sq + d;
             while (Board.OnBoard(t))
             {
-                var pc = b.Squares[t];
+                var pc = squares[t];
                 if (pc != Piece.Empty)
                 {
                     if (pc == rook || pc == queen) return true;
