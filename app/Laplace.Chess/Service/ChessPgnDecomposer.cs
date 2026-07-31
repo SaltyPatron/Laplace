@@ -1,3 +1,4 @@
+using System.Linq;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -40,8 +41,21 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
+    {
+        // TWO sources, because the fused pass (GH #600) writes under two. ChessPgn carries the
+        // witnessed record; ChessAnalysis carries the calculated derivation DeriveFromParsed
+        // deposits in the same Compose call. Only ChessPgn was ever bootstrapped, so the
+        // analyzer's source id had no HAS_NAME edge and resolved to nothing: on a live box it
+        // showed up as a bare hex id holding 705,141 rows -- the fourth largest source in the
+        // substrate, anonymous. A source that writes must be a source that is named, or its
+        // volume is invisible to source_counts and every audit that reads it.
+        var pgn = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
+        var analysis = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
+            ChessVocabulary.AnalysisTrustClass, ct);
+        _canonicalNames = pgn.Concat(analysis).Distinct().ToArray();
+    }
 
     protected override async IAsyncEnumerable<ChessGameRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
