@@ -18,6 +18,9 @@ SET search_path = laplace, public;
 DO $$
 DECLARE
     type_t    bytea := laplace_hash128_blake3('Type');
+    type_word bytea := laplace_hash128_blake3('Word');
+    type_sent bytea := laplace_hash128_blake3('Sentence');
+    type_doc  bytea := laplace_hash128_blake3('Document');
     src       bytea := laplace_hash128_blake3('test/corpus/source');
     w_the     bytea := laplace_hash128_blake3('test/corpus/word-the');
     w_capital bytea := laplace_hash128_blake3('test/corpus/word-capital');
@@ -34,13 +37,19 @@ DECLARE
     t2flag    bigint := (2::bigint << 1);
     n bigint;
 BEGIN
+    -- Compositional entities carry the type the compose path stamps
+    -- (TextEntityBuilder.TierTypeId / content_witness_batch.c), NOT a single generic
+    -- 'Type'. The generation lane selects roles by type_id, because tier cannot: tier 2
+    -- also holds relation types, trust classes, POS tags, sources and languages, and a
+    -- single-grapheme word collapses to tier 0. A fixture that typed everything the same
+    -- could not tell a correct role predicate from a broken one.
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
-        (w_the, 2, type_t, src), (w_capital, 2, type_t, src),
-        (w_of, 2, type_t, src), (w_france, 2, type_t, src),
-        (w_end, 2, type_t, src), (w_target, 2, type_t, src),
-        (sp, 2, type_t, src), (zs_cat, 0, type_t, src),
-        (sent, 3, type_t, src), (sent2, 3, type_t, src), (doc, 4, type_t, src);
+        (w_the, 2, type_word, src), (w_capital, 2, type_word, src),
+        (w_of, 2, type_word, src), (w_france, 2, type_word, src),
+        (w_end, 2, type_word, src), (w_target, 2, type_word, src),
+        (sp, 2, type_word, src), (zs_cat, 0, type_t, src),
+        (sent, 3, type_sent, src), (sent2, 3, type_sent, src), (doc, 4, type_doc, src);
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
@@ -163,7 +172,7 @@ BEGIN
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
     -- next read. sent3 = capital of (no separator): capital→of goes 1 → 2.
     INSERT INTO entities (id, tier, type_id, first_observed_by)
-    VALUES (sent3, 3, type_t, src);
+    VALUES (sent3, 3, type_sent, src);
     INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, 1,
