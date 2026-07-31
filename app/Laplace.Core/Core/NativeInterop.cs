@@ -27,6 +27,29 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hash128_zero")]
     internal static partial void Hash128Zero(Hash128* outHash);
 
+    // Syzygy tablebase probe kernel (engine/core/src/syzygy.c over the vendored
+    // Fathom prober). Init/free/root-probe are serialized natively; WDL probes are
+    // lock-free once initialized.
+    [LibraryImport(Library, EntryPoint = "laplace_syzygy_init", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int SyzygyInit(string path);
+
+    [LibraryImport(Library, EntryPoint = "laplace_syzygy_free")]
+    internal static partial void SyzygyFree();
+
+    [LibraryImport(Library, EntryPoint = "laplace_syzygy_largest")]
+    internal static partial int SyzygyLargest();
+
+    [LibraryImport(Library, EntryPoint = "laplace_syzygy_probe_wdl")]
+    internal static partial int SyzygyProbeWdl(
+        ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
+        ulong bishops, ulong knights, ulong pawns, uint ep, int whiteToMove);
+
+    [LibraryImport(Library, EntryPoint = "laplace_syzygy_probe_root")]
+    internal static partial int SyzygyProbeRoot(
+        ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
+        ulong bishops, ulong knights, ulong pawns, uint ep, int whiteToMove,
+        out int wdl, out int dtz);
+
     [LibraryImport(Library, EntryPoint = "laplace_testimony_pack_walk")]
     internal static partial int LaplaceTestimonyPackWalk(
         Hash128* objectIds, long* scoresFp1e9, ushort* games, nuint n, double* out4n);

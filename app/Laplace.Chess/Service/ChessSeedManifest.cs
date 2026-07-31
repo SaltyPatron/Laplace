@@ -22,6 +22,9 @@ public static class ChessSeedManifest
         "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "GAME_AT", "GAME_AT_PLY", "HAS_EVAL", "MOVE_QUALITY",
         "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "GAME_HAS_OPENING", "GAME_HAS_ECO",
+        // Syzygy probe lane (campaign PR-8): exact endgame verdicts on witnessed
+        // positions — five-valued WDL token (STM POV) + distance-to-zeroing scalar.
+        "HAS_WDL", "HAS_DTZ",
         // GH #736: HAS_MOTIF is the position-grain sibling (family child of GAME_HAS_MOTIF —
         // declaring the CHILD pulls the root via ExpandRelationsWithFamily; the converse
         // does not hold, so both stay listed).

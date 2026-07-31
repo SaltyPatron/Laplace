@@ -115,6 +115,14 @@ internal static class IngestDispatchTable
                 cli.AnalyzeNodes), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Syzygy tablebase probe pass over recorded lines (campaign PR-8): exact
+        // WDL/DTZ verdicts on every witnessed ≤N-men position, via the in-process
+        // native Fathom kernel against the tables under LAPLACE_SYZYGY (env or
+        // chess-lab.env). Missing dir = clean no-op with a counted warning.
+        ("chess-syzygy", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessSyzygyDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("openings", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
             skipLayerCheck: true, cli)),

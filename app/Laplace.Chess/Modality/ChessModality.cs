@@ -23,7 +23,18 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
     private static string CanonicalEp(Board b)
     {
-        if (b.EpSquare < 0) return "-";
+        int ep = CapturableEpSquare(b);
+        return ep < 0 ? "-" : Board.SquareToAlgebraic(ep);
+    }
+
+    /// <summary>
+    /// The en-passant target square (0x88 index) only when a LEGAL en-passant capture
+    /// exists, else -1 — the canonical ep fact position identity and the syzygy probe
+    /// share (a raw double-push square with no capturer is not part of the position).
+    /// </summary>
+    public static int CapturableEpSquare(Board b)
+    {
+        if (b.EpSquare < 0) return -1;
         bool white = b.WhiteToMove;
         Piece pawn = white ? Piece.WPawn : Piece.BPawn;
         int from1 = white ? b.EpSquare - 17 : b.EpSquare + 17;
@@ -34,9 +45,9 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
             var nb = b.Clone();
             MoveApply.Make(nb, new ChessMove(from, b.EpSquare, Piece.Empty, MoveFlags.EnPassant));
             if (!MoveGen.InCheck(nb, white))
-                return Board.SquareToAlgebraic(b.EpSquare);
+                return b.EpSquare;
         }
-        return "-";
+        return -1;
     }
 
     public string ActionKey(ChessState state, ChessMove action) => action.ToUci();
