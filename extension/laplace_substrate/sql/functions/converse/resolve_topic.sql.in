@@ -1,12 +1,61 @@
+-- resolve_topic(phrase, context): the topic a prompt is about.
+--
+-- ONE ELECTION, ONE KEY ORDER. chat(), converse() and converse_walk() all orient
+-- through prompt_coherence() on the identical sort key, with the stated invariant
+-- that the three "cannot disagree about what a prompt is about". resolve_topic is
+-- the FOURTH orientation path -- it is what recall() resolves through (recall.c
+-- spi_resolve_topic) -- and it disagreed with all three: it fell straight to
+-- resolve_last_word(), literally `ORDER BY ord DESC LIMIT 1`, the LAST resolvable
+-- word of the sentence. Measured before this change: recall('will it rain in
+-- nashville in the next seven days') elected `will` and returned three glosses of
+-- the volition/legal-document senses; recall('what is rain') elected `what`.
+-- The elector was already built, compiled and correct -- recall() just never
+-- called it.
+--
+-- ORDER OF RESOLUTION, and why:
+--   1. resolve_phrase()  -- the whole input IS an entity ("pawn"). An exact
+--      content-id hit is the topic by identity; no election can improve on it,
+--      and it costs one probe instead of a full coherence pass.
+--   2. the specificity election -- the same call and the same key order as
+--      chat()/converse()/converse_walk(), so all four now agree by construction.
+--   3. resolve_last_word() -- unchanged, and now reached ONLY when the election
+--      is silent.
+--
+-- WHY specificity > 0 GATES THE ELECTION: specificity is coherence over the
+-- candidate's own total mass, so it is 0 for every token when no pair of tokens
+-- shares a rated edge -- an unseeded domain, not a wrong answer. Measured:
+-- 'will it rain in nashville in the next seven days' returns specificity 0 for
+-- ALL tokens (the graph holds no edge among rain/nashville/weather), while
+-- 'What is a pawn in chess?' returns pawn 0.0264, chess 0.0054, and 0 for
+-- is/a/in. Without the gate an all-zero prompt would elect on the tiebreaks
+-- alone -- an arbitrary token dressed up as a decision. With it, no-signal
+-- prompts fall through to the prior behaviour unchanged, and the election only
+-- ever fires when the graph actually said something.
+--
+-- NOT PARALLEL SAFE: prompt_coherence() is `LANGUAGE C STABLE` with no parallel
+-- marking, so this body cannot claim more than its callee. recall.c invokes this
+-- as a single scalar SPI select, where parallelism was never in play.
 CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT CASE
         WHEN p_phrase IS NULL OR btrim(p_phrase) = '' THEN p_context
         WHEN p_context IS NOT NULL
              AND btrim(lower(p_phrase), ' ?.!') ~ '^(it|its|that|this|they|their|them|those|these|one|he|she|him|her)$'
             THEN p_context
-        ELSE COALESCE(resolve_phrase(p_phrase), resolve_last_word(p_phrase))
+        ELSE COALESCE(
+            @extschema@.resolve_phrase(p_phrase),
+            (SELECT y.tok
+               FROM @extschema@.prompt_coherence(p_phrase) y
+              WHERE y.tok IS NOT NULL
+                AND y.specificity > 0
+              ORDER BY y.specificity DESC NULLS LAST,
+                       y.rel_mass    DESC NULLS LAST,
+                       y.peers       DESC,
+                       y.denote_mu   DESC NULLS LAST,
+                       y.synset_id
+              LIMIT 1),
+            @extschema@.resolve_last_word(p_phrase))
     END
 $$;
