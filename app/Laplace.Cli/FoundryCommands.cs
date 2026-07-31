@@ -120,7 +120,7 @@ internal static class FoundryCommands
 
     private static async Task<string?> MaterializeDiscoveredMoldAsync(string recipeIdPrefix, string tokenizerDir)
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT recipe_id, recipe_json FROM laplace.model_recipes()";
@@ -185,7 +185,7 @@ internal static class FoundryCommands
         string[]? seeds = crawlSeeds
             ?.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string[] crawlS = [];
-        await using (var ds = new NpgsqlDataSourceBuilder(ConnString).Build())
+        await using (var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString))
         await using (var conn = await ds.OpenConnectionAsync())
         await using (var cmd = conn.CreateCommand())
         {
@@ -573,7 +573,7 @@ internal static class FoundryCommands
         if (RejectRetiredFoundryEnvVars() is { } retired)
             return Fail(retired);
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
 
 
@@ -1119,7 +1119,7 @@ internal static class FoundryCommands
         {
             var names = scopeSource.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var idHexes = new List<string>();
-            await using (var probeDs = new NpgsqlDataSourceBuilder(ConnString).Build())
+            await using (var probeDs = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString))
             await using (var probeConn = await probeDs.OpenConnectionAsync())
             {
                 foreach (var name in names)
@@ -1139,9 +1139,9 @@ internal static class FoundryCommands
                 "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
             Console.WriteLine($"  scope: {names.Length} source(s) — synthesis reads a re-folded scoped consensus ({scopeSource})");
         }
-        var dsb = new NpgsqlDataSourceBuilder(ConnString);
-        if (scopedInitSql is not null)
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, dsb =>
         {
+            if (scopedInitSql is null) return;
             // Pool reset (DISCARD ALL) drops temp tables while the physical
             // connection survives — the initializer would not re-fire and later
             // readers would silently see the UNSCOPED world (observed live:
@@ -1150,8 +1150,7 @@ internal static class FoundryCommands
             dsb.UsePhysicalConnectionInitializer(
                 conn => { using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; c.ExecuteNonQuery(); },
                 async conn => { await using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; await c.ExecuteNonQueryAsync(); });
-        }
-        await using var ds = dsb.Build();
+        }, ConnString);
         int degreeCap = FoundryDefaults.LeDegree;
 
         var opKeys = new HashSet<string>(StringComparer.Ordinal);

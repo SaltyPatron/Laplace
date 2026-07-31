@@ -44,7 +44,7 @@ internal static class QueryCommands
 
     public static async Task<int> ConverseAsync(string prompt)
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
         if (!string.IsNullOrWhiteSpace(prompt))
@@ -91,7 +91,7 @@ internal static class QueryCommands
             Console.Error.WriteLine("usage: laplace recall \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
             return 2;
         }
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
@@ -139,7 +139,7 @@ internal static class QueryCommands
         if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace neighbors <word>");
         int k = 10;
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
@@ -217,7 +217,7 @@ internal static class QueryCommands
         const double temp = 0.6;
         const bool verbose = false;
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
         string prompt = string.Join(' ', args).Trim();
@@ -277,7 +277,7 @@ internal static class QueryCommands
 
         CodepointPerfcache.Load(ResolveBlob());
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
         // chat() IS THE ENTRY POINT. This command used to call laplace.walk_text()
@@ -345,7 +345,7 @@ internal static class QueryCommands
 
         string[] tokens = args[1..];
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
         CodepointPerfcache.LoadDefault();
 
@@ -436,7 +436,7 @@ internal static class QueryCommands
         Console.WriteLine($"  engine-resolved id : {Hex(id)}");
         Console.WriteLine($"  tier {root.Tier}, {tree.NodeCount} nodes in the decomposition DAG\n");
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
         bool exists = false;

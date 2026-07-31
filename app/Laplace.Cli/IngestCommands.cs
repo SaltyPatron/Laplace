@@ -257,9 +257,12 @@ internal static class IngestCommands
 
 
 
-        var dsb = new NpgsqlDataSourceBuilder(ConnString);
-        dsb.ConnectionStringBuilder.CommandTimeout = 0;
-        await using var ds = dsb.Build();
+        // Explicit unbounded timeout: the Ingest policy passes the base string through
+        // untouched, so it inherits Command Timeout=0 only when LAPLACE_DB carries it.
+        await using var ds = LaplaceDataSource.Create(
+            SubstrateAccess.Ingest,
+            b => b.ConnectionStringBuilder.CommandTimeout = 0,
+            ConnString);
 
         var dec = CliRuntime.Decomposers.ResolveModel(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
@@ -547,7 +550,7 @@ internal static class IngestCommands
         LanguageReference.EnsureLoaded();
         var topo = IngestTopology.EnsureReady();
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var loggerFactory = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli");
         bool force = cli?.Force ?? false;
         var innerWriter = new NpgsqlSubstrateWriter(ds,
@@ -597,7 +600,7 @@ internal static class IngestCommands
 
     public static async Task<int> StatsAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await PrintIngestValidationAsync(ds, decomposer: null);
         return 0;
     }
@@ -609,7 +612,7 @@ internal static class IngestCommands
     // planner statistics afterwards: freshly built indexes without stats still plan badly.
     public static async Task<int> RecoverCycledIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
         async Task<long> JournalCountAsync()
         {
@@ -659,7 +662,7 @@ internal static class IngestCommands
     // (e.g. attestations_relation_btree, which the interleaved chess-analyze hydrate reads).
     public static async Task<int> DropCoreIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var log = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
         string[] tables = ["entities", "physicalities", "attestations", "consensus"];
         Console.WriteLine($"campaign index-drop across {tables.Length} core table(s) — journaled for one rebuild ...");
@@ -679,7 +682,7 @@ internal static class IngestCommands
 
     public static async Task<int> RebuildPhysIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var indexPolicy = new SecondaryIndexPolicy(ds);
         if (await indexPolicy.SecondaryIndexesPresentAsync("physicalities", CancellationToken.None))
         {

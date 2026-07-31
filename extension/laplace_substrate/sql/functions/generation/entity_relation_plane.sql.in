@@ -9,9 +9,7 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
              -- P5 Glicko-complete weight (doc 14 M5): already neutral-centered
              -- (signed); adds rd-uncertainty discount + witness-mass saturation.
              SELECT c.subject_id, c.object_id,
-                    (c.rating - glicko2_neutral_mu())::double precision / 1e9
-                      * exp(- foundry_rd_kappa() * c.rd::float8 / 1e9)
-                      * foundry_witness_sat(c.witness_count) AS w
+                    walk_edge_weight(c.rating, c.rd, c.witness_count) AS w
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN t           ON t.tid = c.type_id

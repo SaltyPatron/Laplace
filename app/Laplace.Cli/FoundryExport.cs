@@ -1915,35 +1915,52 @@ internal static class FoundryExport
         }
 
         // Fallback for DB generations whose entities.highway_mask is unpopulated
-        // (live finding 2026-07-08: 0 of 20.2M entities carry masks): DERIVE
-        // membership from consensus participation — the OR of the relation-type
-        // masks this entity has edges under, via the in-memory highway perfcache
-        // (layout-safe: no SQL bit arithmetic).
+        // (live finding 2026-07-08: 0 of 20.2M entities carry masks): ask the
+        // substrate to recompute them, then re-read.
+        //
+        // This used to hand-write the consensus-participation UNION here and OR
+        // the bits client-side through HighwayPerfcache. That was a SECOND body
+        // of a derivation highway_mask_refresh() already owns, and it had
+        // ALREADY DIVERGED: it lacked the family-root arm, so every dynamic
+        // relation (EDEP_*, DEP_*, FEAT_* — the whole UD dependency/feature
+        // layer) contributed no bit and the exported gate silently lost it.
+        // The derivation lives in ONE place; this is a call site.
         bool anyStored = false;
         foreach (var m in masks) if (!m.IsZero) { anyStored = true; break; }
-        if (!anyStored && HighwayPerfcache.IsLoaded)
+        if (!anyStored)
         {
-            await using var cmd2 = conn.CreateCommand();
-            cmd2.CommandTimeout = 300;
-            cmd2.CommandText =
-                "SELECT u.id, c.type_id FROM unnest($1::bytea[]) AS u(id) " +
-                "JOIN laplace.consensus c ON c.subject_id = u.id GROUP BY u.id, c.type_id " +
-                "UNION " +
-                "SELECT u.id, c.type_id FROM unnest($1::bytea[]) AS u(id) " +
-                "JOIN laplace.consensus c ON c.object_id = u.id GROUP BY u.id, c.type_id";
-            cmd2.Parameters.Add(new NpgsqlParameter
+            await using var refresh = conn.CreateCommand();
+            refresh.CommandTimeout = 600;
+            refresh.CommandText = "SELECT laplace.highway_mask_refresh($1)";
+            refresh.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            int derived = 0;
-            await using var rdr2 = await cmd2.ExecuteReaderAsync();
-            while (await rdr2.ReadAsync())
+            long refreshed;
+            try
             {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr2[0]), out var slots)) continue;
-                var tm = HighwayPerfcache.MaskForRelationType(FromBytes((byte[])rdr2[1]));
-                if (tm.IsZero) continue;
-                foreach (int s in slots)
-                    if (s >= 0 && s < vocabSize) { masks[s] |= tm; derived++; }
+                refreshed = Convert.ToInt64(await refresh.ExecuteScalarAsync() ?? 0L);
             }
-            Console.WriteLine($"  highway masks: derived from consensus participation ({derived:N0} entity-type memberships; stored masks empty)");
+            catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+            {
+                Console.WriteLine($"  (highway_mask_refresh unavailable: {ex.SqlState} — banded gate falls back to constant)");
+                return masks;
+            }
+
+            if (refreshed > 0)
+            {
+                await using var reread = conn.CreateCommand();
+                reread.CommandTimeout = 120;
+                reread.CommandText = "SELECT entity_id, highway_mask FROM laplace.entity_highway_masks($1)";
+                reread.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                await using var rdr2 = await reread.ExecuteReaderAsync();
+                while (await rdr2.ReadAsync())
+                {
+                    if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr2[0]), out var slots)) continue;
+                    var m = Mask256.FromByteArray((byte[])rdr2[1]);
+                    foreach (int s in slots) if (s >= 0 && s < vocabSize) masks[s] = m;
+                }
+            }
+            Console.WriteLine($"  highway masks: recomputed via highway_mask_refresh ({refreshed:N0} entities updated; stored masks were empty)");
         }
         return masks;
     }

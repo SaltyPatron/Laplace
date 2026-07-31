@@ -25,11 +25,12 @@ CREATE OR REPLACE FUNCTION consensus_type_plane(
          -- rd-uncertainty discount, witness-mass saturation. Refuted edges go
          -- NEGATIVE (operator planes are sign-safe; the basis union clamps
          -- client-side via FoundryExport.PositivePart).
+         -- walk_edge_weight IS the law; kappa resolved once rather than per row.
+         kappa(k) AS (SELECT foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    (e.rating - glicko2_neutral_mu())::float8 / 1e9
-                      * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
-                      * foundry_witness_sat(e.witness_count) AS w,
+                    walk_edge_weight(e.rating, e.rd, e.witness_count,
+                                     (SELECT k FROM kappa)) AS w,
                     e.type_id, rk.rank AS rk
              FROM edges e JOIN rk ON rk.type_id = e.type_id
          ),
