@@ -368,8 +368,32 @@ BEGIN
             SELECT string_agg(reply, ' ') INTO out
               FROM recall_intent(shape, topic, topic2, p_type_name);
 
+        ELSIF shape = 'walk' THEN
+            -- F5 (spec 36): converse_walk is the only component on this surface that
+            -- generates language instead of filling a frame, and it was bound to no
+            -- published shape -- `walk` fell through to the template below and returned
+            -- prose byte-identical to `describe`. This routes the shape to the engine.
+            --
+            -- NO TIMEOUT GUARD, deliberately. A SET LOCAL budget needs an exception
+            -- handler to degrade, and PostgreSQL reports a statement_timeout and a
+            -- client cancel with the same condition (query_canceled / 57014) -- so a
+            -- handler that catches our budget also eats the caller's Ctrl-C and makes
+            -- chat() un-cancellable for the duration. Masking cost is not worth taking
+            -- cancellation away from the operator.
+            --
+            -- The cost is real and stays visible: F6 measured converse_walk('dog', 40)
+            -- past the default statement timeout. `walk` is opt-in and today returns a
+            -- template, so a caller naming it is asking for the generator and can bound
+            -- it with their own statement_timeout. Making it fast is F6's problem;
+            -- making it reachable is this branch's.
+            --
+            -- Empty output falls through to the shared fallback below, so a silent
+            -- walk degrades to the prose that shape returns today rather than to ''.
+            out := converse_walk(p_prompt, 40, NULL);
+
         ELSE
-            -- describe / what_is / walk / fallback and the no-shape default.
+            -- describe / what_is / fallback and the no-shape default.
+            -- (`walk` has its own branch above.)
             --
             -- SENTENCE-TIER COMPOSITION FIRST. converse_about's template prose
             -- is the S9 FALLBACK (spec 36) and must never be the success path;
