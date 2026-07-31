@@ -61,11 +61,10 @@ public sealed class ReadPathArchitectureGateTests
         "Laplace.Chess/Service/ChessLiveGameHost.cs",
         "Laplace.Chess/Service/ChessPgnIngestor.cs",
         "Laplace.Chess.Uci/UciEngine.cs",
-        "Laplace.Cli/ChessCommands.cs",
-        "Laplace.Cli/DecompositionCommands.cs",
-        "Laplace.Cli/FoundryCommands.cs",
-        "Laplace.Cli/IngestCommands.cs",
-        "Laplace.Cli/QueryCommands.cs",
+        // Laplace.Cli/* migrated 2026-07-31: every command now routes through
+        // LaplaceDataSource.Create(SubstrateAccess.Ingest). Two kept the configure
+        // overload for behaviour they genuinely need (an explicit Command Timeout=0,
+        // and the scoped-synthesis physical-connection initializer).
         "Laplace.Endpoints.Mcp/SubstrateTools.cs",
         "Laplace.Migrations/Program.cs",
     };
@@ -117,7 +116,7 @@ public sealed class ReadPathArchitectureGateTests
     };
 
     /// <summary>Ratchet ceilings, measured 2026-07-26. Lower as files migrate; never raise.</summary>
-    private const int OwnDataSourceCeiling = 12;
+    private const int OwnDataSourceCeiling = 7;
 
     /// <inheritdoc cref="OwnDataSourceCeiling"/>
     /// <remarks>
