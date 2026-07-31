@@ -256,45 +256,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var blackPlayer = EmitPlayer(b, blackName, src);
 
         EmitGame(b, lineId, eventId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
-        RecordLineTrajectory(b, lineId, parsed.PositionIds, src);
         RecordStartPosition(b, lineId, eventId, gameText, src);
         RecordOpeningHeaders(b, lineId, gameText, src);
         RecordMovetext(b, lineId, eventId, gameText, src);
-    }
-
-    // GH #547. The line IS the ordered sequence of positions it passes through, and
-    // TryParseGame already computed that sequence by replay — LineId is its Merkle. Until
-    // now it was hashed and dropped, so the line entity carried no order, and every question
-    // of the form "which games passed through this position / played this move, and how did
-    // they end" had no traversal to answer it. The analyzer compensated by materializing
-    // per-position outcome edges, one aggregating row per position per substructure per game.
-    //
-    // physicalities.trajectory is the exactly-invertible ordered constituent sequence
-    // (laplace_trajectory_constituents / trajectory_unpacked_points read it back), so one
-    // row per game carries what those edges spelled out. This is the same deletion the text
-    // lane already made for word→word PRECEDES (GrammarEntityBuilder): materializing order
-    // as attestations stores a second copy of a fact the geometry already holds losslessly.
-    //
-    // The movetext trajectory (RecordMovetext) is NOT this: it orders the verbatim SAN/clock/
-    // comment TOKENS, so it changes with the dialect — two playings of one line annotated
-    // differently are two movetext documents. This one orders POSITION ids, which are content
-    // and shared across every playing of the line.
-    private static void RecordLineTrajectory(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128[] positionIds, Hash128 src)
-    {
-        if (positionIds.Length == 0) return;
-        b.AddPhysicality(new PhysicalityRow(
-            Id: PhysicalityId.Compute(lineId, PhysicalityType.Content),
-            EntityId: lineId,
-            SourceId: src,
-            Type: PhysicalityType.Content,
-            CoordX: 0, CoordY: 0, CoordZ: 0, CoordM: 0,
-            HilbertIndex: default,
-            TrajectoryXyzm: Trajectory.Build(positionIds),
-            NConstituents: positionIds.Length,
-            AlignmentResidual: null,
-            SourceDim: null,
-            ObservedAtUnixUs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L));
     }
 
     private static void RecordStartPosition(
