@@ -27,7 +27,6 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_grammar_compose.cpp
     test_grammar_tags.cpp
     test_relation_law.cpp
-    test_syzygy.cpp
 )
 
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
@@ -45,6 +44,17 @@ add_dependencies(laplace_core_tests laplace_t0_perfcache)
 target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main
 )
+
+# Probe-kernel tests exist only where the optional prober was built: laplace_syzygy
+# is ingest-side tooling, never linked into laplace_core, never loaded by PostgreSQL.
+if(LAPLACE_HAVE_FATHOM)
+    add_executable(laplace_syzygy_tests test_syzygy.cpp)
+    target_link_libraries(laplace_syzygy_tests PRIVATE laplace_syzygy GTest::gtest_main)
+    gtest_discover_tests(laplace_syzygy_tests
+        DISCOVERY_MODE PRE_TEST
+        DISCOVERY_TIMEOUT 120
+    )
+endif()
 
 
 

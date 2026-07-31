@@ -132,10 +132,19 @@ if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
         "    git submodule update --init external/eigen external/spectra external/blake3 external/fathom external/googletest\n")
 endif()
 
-if(NOT EXISTS "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
-    message(FATAL_ERROR
-        "external/fathom submodule not initialized. Run:\n"
-        "    git submodule update --init external/fathom\n")
+# Syzygy probing is DECOMPOSITION/VALIDATION tooling, not part of the substrate:
+# it produces witnessed testimony at ingest, exactly as the Stockfish lane does,
+# and nothing on the read/serve side depends on it. So its absence is a missing
+# TOOL, never a broken build — the vendored prober is optional, and the lane
+# degrades to unavailable when it is not present (the same shape as a missing
+# tablebase directory). CI builds against a submodule-free workspace
+# (LAPLACE_EXTERNAL=/opt/laplace/external), so a hard requirement here would fail
+# the whole engine over a tool the substrate does not need.
+if(EXISTS "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
+    set(LAPLACE_HAVE_FATHOM ON)
+else()
+    set(LAPLACE_HAVE_FATHOM OFF)
+    message(STATUS "Laplace: external/fathom absent — Syzygy probe lane not built")
 endif()
 
 add_library(laplace_eigen INTERFACE)
@@ -192,10 +201,12 @@ target_compile_options(blake3 PRIVATE -w)
 # engine/core/src/syzygy.c and enforced by the submodule gitlink). Compiled as
 # its own static lib with warnings off, same policy as blake3/tree_sitter_rt:
 # vendored code is not ours to warn about.
-add_library(fathom_tb STATIC "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
-target_include_directories(fathom_tb SYSTEM PUBLIC "${LAPLACE_EXTERNAL}/fathom/src")
-set_target_properties(fathom_tb PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_options(fathom_tb PRIVATE -w)
+if(LAPLACE_HAVE_FATHOM)
+    add_library(fathom_tb STATIC "${LAPLACE_EXTERNAL}/fathom/src/tbprobe.c")
+    target_include_directories(fathom_tb SYSTEM PUBLIC "${LAPLACE_EXTERNAL}/fathom/src")
+    set_target_properties(fathom_tb PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(fathom_tb PRIVATE -w)
+endif()
 
 add_library(tree_sitter_rt STATIC "${LAPLACE_EXTERNAL}/tree-sitter/lib/src/lib.c")
 target_include_directories(tree_sitter_rt

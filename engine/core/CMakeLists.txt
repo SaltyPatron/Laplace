@@ -31,7 +31,6 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/highway_manifest.h
     include/laplace/core/highway_table.h
     include/laplace/core/attestation_engine.h
-    include/laplace/core/syzygy.h
 )
 
 set(LAPLACE_CORE_SOURCES
@@ -70,7 +69,6 @@ set(LAPLACE_CORE_SOURCES
     src/generated/pos_law.c
     src/highway_table.c
     src/attestation_engine.c
-    src/syzygy.c
 )
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
 set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"
@@ -118,7 +116,7 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3 fathom_tb ZLIB::ZLIB)
+        PRIVATE blake3 ZLIB::ZLIB)
 endif()
 
 
@@ -193,8 +191,41 @@ target_include_directories(laplace_core
 
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
-    PRIVATE blake3 fathom_tb ZLIB::ZLIB
+    PRIVATE blake3 ZLIB::ZLIB
 )
+
+# Syzygy probe kernel — its OWN library, deliberately NOT part of laplace_core.
+# laplace_core is linked into the laplace_substrate extension, i.e. loaded into
+# every PostgreSQL backend; a tablebase prober has no business there. Syzygy is
+# decomposition/validation tooling that runs at INGEST (the ChessStockfish
+# pattern), so it ships as a separate optional library the ingest side loads and
+# the database never sees. Built only when the vendored prober is present.
+if(LAPLACE_HAVE_FATHOM)
+    add_library(laplace_syzygy SHARED src/syzygy.c)
+    target_include_directories(laplace_syzygy
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(laplace_syzygy PRIVATE fathom_tb)
+    set_target_properties(laplace_syzygy PROPERTIES
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        OUTPUT_NAME laplace_syzygy
+        PUBLIC_HEADER "include/laplace/core/syzygy.h"
+    )
+    install(TARGETS laplace_syzygy
+        LIBRARY
+            DESTINATION lib
+            PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
+        RUNTIME
+            DESTINATION lib
+            PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
+        PUBLIC_HEADER
+            DESTINATION include/laplace/core
+            PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+    )
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

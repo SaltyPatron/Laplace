@@ -6,6 +6,13 @@ public static unsafe partial class NativeInterop
 {
     private const string Library = "laplace_core";
 
+    // The Syzygy prober is INGEST-SIDE tooling in its own library — deliberately not
+    // laplace_core, which the laplace_substrate extension links into every PostgreSQL
+    // backend. It is also OPTIONAL: absent the vendored prober the library is not
+    // built, and callers see DllNotFoundException, which the lane treats exactly like
+    // a missing tablebase directory (SyzygyNative.Available).
+    private const string SyzygyLibrary = "laplace_syzygy";
+
     [LibraryImport(Library, EntryPoint = "laplace_core_version")]
     private static partial IntPtr LaplaceCoreVersionPtr();
 
@@ -28,23 +35,23 @@ public static unsafe partial class NativeInterop
     internal static partial void Hash128Zero(Hash128* outHash);
 
     // Syzygy tablebase probe kernel (engine/core/src/syzygy.c over the vendored
-    // Fathom prober). Init/free/root-probe are serialized natively; WDL probes are
-    // lock-free once initialized.
-    [LibraryImport(Library, EntryPoint = "laplace_syzygy_init", StringMarshalling = StringMarshalling.Utf8)]
+    // Fathom prober, built as the separate laplace_syzygy library). Init/free/
+    // root-probe are serialized natively; WDL probes are lock-free once initialized.
+    [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_init", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int SyzygyInit(string path);
 
-    [LibraryImport(Library, EntryPoint = "laplace_syzygy_free")]
+    [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_free")]
     internal static partial void SyzygyFree();
 
-    [LibraryImport(Library, EntryPoint = "laplace_syzygy_largest")]
+    [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_largest")]
     internal static partial int SyzygyLargest();
 
-    [LibraryImport(Library, EntryPoint = "laplace_syzygy_probe_wdl")]
+    [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_probe_wdl")]
     internal static partial int SyzygyProbeWdl(
         ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
         ulong bishops, ulong knights, ulong pawns, uint ep, int whiteToMove);
 
-    [LibraryImport(Library, EntryPoint = "laplace_syzygy_probe_root")]
+    [LibraryImport(SyzygyLibrary, EntryPoint = "laplace_syzygy_probe_root")]
     internal static partial int SyzygyProbeRoot(
         ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
         ulong bishops, ulong knights, ulong pawns, uint ep, int whiteToMove,
