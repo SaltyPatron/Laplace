@@ -123,8 +123,16 @@ internal static class CpuTopologyCommands
         // perfcache map; connections are budgeted, not free. Memory ceiling
         // arithmetic and the 2026-07-15 incident live in doc 28.
         w.WriteLine("ALTER SYSTEM SET max_connections = 60;");
-        // The two-axis partitioned substrate holds ~220 leaves (13 entity +
-        // 64 physicality + ~145 attestation) plus their indexes/toast: one
+        // MEASURED 2026-08-01 on a freshly migrated cluster: 479 partitions and 4,456
+        // total relations in the laplace schema — more than double the ~220 this was
+        // sized against, because the leaf count tracks relation_types.toml (207 relations)
+        // and that file grows. The setting still holds: it sizes a SHARED pool of
+        // max_locks_per_transaction x max_connections = 61,440 slots, not a per-transaction
+        // ceiling, so 4,456 objects sit well inside it. Recording the real number because
+        // the old one was stale and nothing re-derives it — if the leaf count ever
+        // approaches the pool, this comment is the only thing that would have warned.
+        //
+        // The two-axis partitioned substrate holds those leaves plus indexes/toast: one
         // CREATE EXTENSION or one COPY-to-parent transaction locks hundreds
         // of objects, and parallel test fixtures / apply lanes run several
         // such transactions at once. The PG default (64) exhausts the shared
