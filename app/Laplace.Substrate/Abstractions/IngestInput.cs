@@ -98,7 +98,20 @@ public static class IngestInput
         }
         if (!Directory.Exists(dir))
             return [];
-        return Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories).ToList();
+        // SORTED. Directory.EnumerateFiles guarantees NO ordering -- on Linux it returns
+        // filesystem order, which is directory-hash order and shifts as entries are added,
+        // removed, or inodes reused. That makes the order of a multi-file source an input
+        // the code leaves to the filesystem.
+        //
+        // MEASURED: two foundation seeds over identical inputs produced semlink row counts
+        // differing by +12 and then +7. Ids are content hashes, so identical content must
+        // yield identical rows; a varying count means something order-dependent reached the
+        // write path (batch boundaries move, and the working-set stage dedup absorbs a
+        // repeat only WITHIN a batch). Sorting removes the variable at its source and costs
+        // one comparison sort per source resolution.
+        return Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories)
+                        .OrderBy(static p => p, StringComparer.Ordinal)
+                        .ToList();
     }
 
     /// <summary>True when the resolved root is a single explicit file — callers can
@@ -185,7 +198,11 @@ public static class IngestInput
             // the whole enumeration instead of finding nothing.
             foreach (string glob in Directory.Exists(root) ? layout.RootDirectoryGlobs : [])
             {
-                foreach (string matched in Directory.EnumerateDirectories(root, glob))
+                // Sorted for the same reason as EnumerateFiles above: the glob's match order
+                // is filesystem order, so an unpacked-directory layout could change which
+                // candidate is visited first between runs over identical inputs.
+                foreach (string matched in Directory.EnumerateDirectories(root, glob)
+                                                    .OrderBy(static d => d, StringComparer.Ordinal))
                 {
                     foreach (string dir in WithNested(matched, layout))
                     {
