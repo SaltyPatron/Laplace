@@ -14,6 +14,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The plane algebra (Union/PositivePart/Normalize/PPMI/CooFromAdj) is internal
+         and had no coverage at all. Exposed to its own test project rather than made
+         public, so nothing outside the CLI can bind to it. -->
+    <InternalsVisibleTo Include="Laplace.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

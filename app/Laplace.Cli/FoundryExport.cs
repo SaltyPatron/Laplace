@@ -715,7 +715,7 @@ internal static class FoundryExport
 
 
 
-    private static void ApplyPpmi(Dictionary<int, List<(int Col, double W)>> adj)
+    internal static void ApplyPpmi(Dictionary<int, List<(int Col, double W)>> adj)
     {
         var colSum = new Dictionary<int, double>();
         var rowSum = new Dictionary<int, double>(adj.Count);
@@ -818,7 +818,7 @@ internal static class FoundryExport
     // deterministic tie-break — the one ordering every plane reader applies. Top-k
     // is mergeable, so a caller may trim periodically during accumulation (see the
     // co-category clique) to bound memory without changing the final set.
-    private static void TrimRowToTopK(List<(int Col, double W)> row, int degreeCap)
+    internal static void TrimRowToTopK(List<(int Col, double W)> row, int degreeCap)
     {
         row.Sort((a, b) =>
         {
@@ -828,7 +828,7 @@ internal static class FoundryExport
         if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
     }
 
-    private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
+    internal static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
     {
         long kept = 0;
         foreach (var row in adj.Values)
