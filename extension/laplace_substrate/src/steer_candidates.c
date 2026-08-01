@@ -48,14 +48,30 @@
 #include "spi_common.h"
 #include "walk_score.h"
 
+#include <math.h>       /* log1p — the coverage fold below */
+
 PG_FUNCTION_INFO_V1(pg_laplace_steer_candidates);
 
 typedef struct SteerEntry
 {
     char   key[16];      /* candidate id — HASH_BLOBS keysize */
-    double steer;
-    int64  edges;
+    double steer;        /* coverage-weighted: sum of log1p over DISTINCT frontier members */
+    int64  edges;        /* raw edge count — 0 still means "no attested path", see header */
+    int64  covered;      /* distinct frontier members reached */
 } SteerEntry;
+
+/*
+ * One row per (candidate, frontier member). Edge scores accumulate here FIRST so that
+ * many edges into a single frontier member fold into one member-level score before the
+ * candidate total is formed. Without this stage `edges` is the only breadth signal, and
+ * it counts EDGES not MEMBERS — five edges into `france` alone is indistinguishable from
+ * edges spread across the whole frontier, which is the distinction the ranking needs.
+ */
+typedef struct PairEntry
+{
+    char   key[32];      /* candidate id ‖ frontier id */
+    double score;
+} PairEntry;
 
 static SPIPlanPtr steer_plan = NULL;
 
@@ -69,13 +85,22 @@ ensure_steer_plan(void)
     if (steer_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
+        /*
+         * The FRONTIER-side id comes back too (e.front). Summing edge scores without it
+         * cannot tell "reaches one frontier member very strongly" from "sits where several
+         * frontier members overlap" — and the second is what a composed prefix means. For
+         * "the capital of france is", `Lyon` carries one strong edge to `france` while
+         * `Paris` carries moderate edges to `france` AND `capital`; a bare sum lets Lyon win.
+         */
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT e.cand, e.type_id, e.rating, e.rd, e.witness_count FROM ("
-            "  SELECT c.subject_id AS cand, c.type_id, c.rating, c.rd, c.witness_count"
+            "SELECT e.cand, e.front, e.type_id, e.rating, e.rd, e.witness_count FROM ("
+            "  SELECT c.subject_id AS cand, c.object_id AS front,"
+            "         c.type_id, c.rating, c.rd, c.witness_count"
             "    FROM laplace.consensus c"
             "   WHERE c.subject_id = ANY($1) AND c.object_id = ANY($2)"
             "  UNION ALL"
-            "  SELECT c.object_id, c.type_id, c.rating, c.rd, c.witness_count"
+            "  SELECT c.object_id, c.subject_id,"
+            "         c.type_id, c.rating, c.rd, c.witness_count"
             "    FROM laplace.consensus c"
             "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
             ") e",
@@ -95,8 +120,8 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
 {
     ArrayType   *cand_arr, *front_arr;
     double       kappa;
-    HASHCTL      hctl;
-    HTAB        *acc;
+    HASHCTL      hctl, phctl;
+    HTAB        *acc, *pairs;
     Datum       *cand_elems;
     bool        *cand_nulls;
     int          n_cand;
@@ -128,6 +153,13 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
     acc = hash_create("steer_candidates acc", 256, &hctl,
                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
+    memset(&phctl, 0, sizeof(phctl));
+    phctl.keysize   = 32;          /* candidate ‖ frontier member */
+    phctl.entrysize = sizeof(PairEntry);
+    phctl.hcxt      = CurrentMemoryContext;
+    pairs = hash_create("steer_candidates pairs", 1024, &phctl,
+                        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
     /*
      * Seed every candidate at zero FIRST, so a candidate the frontier never
      * reaches is reported as steer 0.0 / edges 0 rather than omitted. An omitted
@@ -151,6 +183,7 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         {
             e->steer = 0.0;
             e->edges = 0;
+            e->covered = 0;
         }
     }
 
@@ -167,15 +200,19 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         TupleDesc   td  = SPI_tuptable->tupdesc;
         bool        isnull;
         bytea      *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-        bytea      *tb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
-        int64       rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-        int64       rd     = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-        int64       wit    = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+        bytea      *fb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
+        bytea      *tb  = DatumGetByteaPP(SPI_getbinval(tup, td, 3, &isnull));
+        int64       rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+        int64       rd     = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+        int64       wit    = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
         hash128_t   type_id;
         SteerEntry *e;
+        PairEntry  *p;
+        char        pairkey[32];
         bool        found;
 
-        if (VARSIZE_ANY_EXHDR(cb) != 16 || VARSIZE_ANY_EXHDR(tb) != 16)
+        if (VARSIZE_ANY_EXHDR(cb) != 16 || VARSIZE_ANY_EXHDR(fb) != 16
+            || VARSIZE_ANY_EXHDR(tb) != 16)
             continue;
 
         memcpy(&type_id, VARDATA_ANY(tb), 16);
@@ -183,11 +220,66 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         if (!found)
             continue;   /* not one of ours — the arms cannot produce this, but be strict */
 
-        e->steer += walk_edge_score(type_id, rating, rd, wit, kappa);
         e->edges += 1;
+
+        memcpy(pairkey, VARDATA_ANY(cb), 16);
+        memcpy(pairkey + 16, VARDATA_ANY(fb), 16);
+        p = (PairEntry *) hash_search(pairs, pairkey, HASH_ENTER, &found);
+        if (!found)
+        {
+            p->score = 0.0;
+            e->covered += 1;
+        }
+        p->score += walk_edge_score(type_id, rating, rd, wit, kappa);
 
         if ((r & 0xFFFF) == 0)
             CHECK_FOR_INTERRUPTS();
+    }
+
+    /*
+     * Fold member scores into candidate totals, then apply the coverage bonus.
+     *
+     * SCALE IS PRESERVED ON PURPOSE. The caller combines as eff = weight * steer
+     * (trajectory_generate.c, S7 combine). Squashing every steer through log1p would have
+     * cut a raw sum of 40 to ~3.7 and quietly handed the ranking to sequence weight — a
+     * global weakening of steering dressed up as a coverage fix. So the SUM carries through
+     * unchanged and coverage rides as a multiplier: (1 + ln(covered)).
+     *
+     * That is the intersection preference, numerically. Lyon with one strong edge to
+     * `france` (sum 10, covered 1) scores 10. Paris with moderate edges to `france` AND
+     * `capital` (sum 8, covered 2) scores 8 * 1.69 = 13.5. Paris wins on breadth without
+     * either candidate's mass being rescaled.
+     *
+     * A NEGATIVE total is never amplified: refuted mass keeps its magnitude so it can still
+     * sink a candidate, and multiplying it by the coverage bonus would make "refuted by
+     * several frontier members" look further from zero than the fold actually attested.
+     *
+     * acc is keyed on 16 bytes and pairkey's first 16 ARE the candidate id, so HASH_BLOBS
+     * compares exactly the candidate half — no separate key buffer needed.
+     */
+    {
+        HASH_SEQ_STATUS pseq;
+        PairEntry      *p;
+        HASH_SEQ_STATUS cseq;
+        SteerEntry     *ce;
+        bool            hit;
+
+        hash_seq_init(&pseq, pairs);
+        while ((p = (PairEntry *) hash_seq_search(&pseq)) != NULL)
+        {
+            SteerEntry *owner = (SteerEntry *) hash_search(acc, p->key, HASH_FIND, &hit);
+
+            if (!hit)
+                continue;
+            owner->steer += p->score;
+        }
+
+        hash_seq_init(&cseq, acc);
+        while ((ce = (SteerEntry *) hash_seq_search(&cseq)) != NULL)
+        {
+            if (ce->covered > 1 && ce->steer > 0.0)
+                ce->steer *= 1.0 + log((double) ce->covered);
+        }
     }
 
     {
@@ -198,8 +290,8 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         hash_seq_init(&seq, acc);
         while ((e = (SteerEntry *) hash_seq_search(&seq)) != NULL)
         {
-            Datum  values[3];
-            bool   nulls[3] = { false, false, false };
+            Datum  values[4];
+            bool   nulls[4] = { false, false, false, false };
             bytea *idb = (bytea *) palloc(VARHDRSZ + 16);
 
             SET_VARSIZE(idb, VARHDRSZ + 16);
@@ -207,10 +299,12 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
             values[0] = PointerGetDatum(idb);
             values[1] = Float8GetDatum(e->steer);
             values[2] = Int64GetDatum(e->edges);
+            values[3] = Int64GetDatum(e->covered);
             tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
         }
     }
 
+    hash_destroy(pairs);
     hash_destroy(acc);
     SPI_finish();
     return (Datum) 0;

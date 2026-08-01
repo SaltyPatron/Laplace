@@ -11,9 +11,27 @@
 -- collapse them -- that distinction is what tells a walk to back off rather than
 -- dead-end.
 --
+-- steer is COVERAGE-WEIGHTED, not a bare edge sum. Mass folds per DISTINCT
+-- frontier member, then coverage rides as a multiplier: sum * (1 + ln(covered)).
+-- A bare sum ranks by "reaches anything in the frontier"; a composed prefix
+-- means "sits where the frontier overlaps". For "the capital of france is",
+-- `Lyon` (one strong edge to `france`, sum 10, covered 1) scores 10 while
+-- `Paris` (moderate edges to `france` AND `capital`, sum 8, covered 2) scores
+-- 8 * 1.69 = 13.5 -- breadth wins without rescaling either candidate's mass.
+--
+-- The SUM carries through unscaled on purpose: the caller combines as
+-- eff = weight * steer (trajectory_generate.c), so squashing steer through a
+-- concave curve would hand the ranking to sequence weight -- a global weakening
+-- of steering disguised as a coverage fix. Refuted totals are never amplified.
+--
+-- covered is the DISTINCT frontier members reached -- not edges, which counts
+-- five edges into `france` alone the same as edges spread across the frontier.
+-- Refuted (negative) member mass bypasses log1p and stays linear so it can sink
+-- a candidate instead of being squashed toward zero.
+--
 -- NOT PARALLEL SAFE: reads consensus through SPI.
 CREATE OR REPLACE FUNCTION steer_candidates(
         p_candidates bytea[], p_frontier bytea[], p_kappa float8 DEFAULT NULL)
-    RETURNS TABLE(candidate bytea, steer float8, edges bigint)
+    RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'
     LANGUAGE C VOLATILE;
