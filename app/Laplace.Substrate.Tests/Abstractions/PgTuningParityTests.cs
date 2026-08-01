@@ -238,7 +238,34 @@ public class PgTuningParityTests
 
         Assert.NotEmpty(emitted);
 
-        var missing = emitted.Except(shellSet).OrderBy(g => g, StringComparer.Ordinal).ToList();
+        // DECLARED EXEMPTIONS. The parity rule is right and stays -- a GUC the emitter sets
+        // and the fallback omits leaves a cluster on a PG default nobody chose. But these
+        // four must NOT be added to the shell fallback, and the reason is a cluster outage
+        // rather than a preference:
+        //
+        // shared_preload_libraries is validated ONLY at postmaster start. A bad value is
+        // undetectable until the server is already gone, at which point SQL is unreachable
+        // and even ALTER SYSTEM RESET cannot undo it. On 2026-08-01 setting it took this
+        // cluster down for 80 restart attempts and recovery required root, because the data
+        // directory is 0700 owned by the runner. The shell fallback runs during BARE-HOST
+        // BOOTSTRAP, before the CLI exists and before anything could verify the value --
+        // exactly the context where that failure is least recoverable.
+        //
+        // The pg_stat_statements.* knobs are inert without the library loaded, so setting
+        // them in the fallback would be noise that implies profiling is active when it is
+        // not.
+        //
+        // Exempt, not silently satisfied: adding a dangerous line to the bootstrap path to
+        // make a test green is how the original divergence happened.
+        var preloadExempt = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "shared_preload_libraries",
+        };
+
+        var missing = emitted
+            .Where(g => !preloadExempt.Contains(g) && !g.StartsWith("pg_stat_statements", StringComparison.Ordinal))
+            .Except(shellSet)
+            .OrderBy(g => g, StringComparer.Ordinal).ToList();
         Assert.True(missing.Count == 0,
             "scripts/pg-machine-tuning.sh's bootstrap fallback does not set: "
             + string.Join(", ", missing)
