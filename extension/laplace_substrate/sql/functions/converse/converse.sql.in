@@ -57,7 +57,7 @@ BEGIN
     ORDER BY y.specificity DESC NULLS LAST,
              y.rel_mass DESC NULLS LAST,
              y.peers DESC,
-             NULLIF(greatest(y.total_mass, 0.0), 0.0) ASC NULLS LAST,
+             y.ord DESC,
              y.denote_mu DESC NULLS LAST,
              y.synset_id
     LIMIT 1;
