@@ -331,6 +331,45 @@ public sealed partial class NpgsqlSubstrateWriter
             // acquired, so anything a prior applier committed is visible.
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
 
+            // Empty-partition probe skip (under the apply advisory lock only).
+            // If a LIST(tier) leaf / whole phys|att heap has zero rows, every
+            // staged id for that keyspace is absent — the bitmap probe would
+            // return an all-zero mask after paying full chunk round-trips.
+            // Exact EXISTS under the lock; not reltuples. Does NOT weaken the
+            // pure-COPY invariant: non-empty partitions still probe in full.
+            long entEmptySkip = 0, physEmptySkip = 0, attEmptySkip = 0;
+            if (probeEntIdsUse.Count > 0)
+            {
+                var nonemptyTiers = await NonEmptyEntityTiersAsync(conn, tx, probeEntTiersUse, ct);
+                rtProbe++; // one EXISTS roster round-trip
+                if (nonemptyTiers.Count < DistinctShortCount(probeEntTiersUse))
+                {
+                    var keptIds = new List<Hash128>(probeEntIdsUse.Count);
+                    var keptTiers = new List<short>(probeEntTiersUse.Count);
+                    for (int i = 0; i < probeEntIdsUse.Count; i++)
+                    {
+                        if (nonemptyTiers.Contains(probeEntTiersUse[i]))
+                        {
+                            keptIds.Add(probeEntIdsUse[i]);
+                            keptTiers.Add(probeEntTiersUse[i]);
+                        }
+                        else entEmptySkip++;
+                    }
+                    probeEntIdsUse = keptIds;
+                    probeEntTiersUse = keptTiers;
+                }
+            }
+            if (probePhysIdsUse.Count > 0)
+            {
+                rtProbe++;
+                if (!await RelationHasRowsAsync(conn, tx, "physicalities", ct))
+                {
+                    physEmptySkip = probePhysIdsUse.Count;
+                    probePhysIdsUse = new List<Hash128>();
+                    probePhysHilbertsUse = new List<Hilbert128>();
+                }
+            }
+
             // I/O locality — the load-bearing fix for large-DB probes. The native existence
             // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
             // physicalities RANGE(hilbert), attestations LIST(type_id)->HASH(subject)). Probing
@@ -407,6 +446,17 @@ public sealed partial class NpgsqlSubstrateWriter
             var probeAttIdsUse = probeAttIds;
             var probeAttTypesUse = probeAttTypes;
             var probeAttSubjectsUse = probeAttSubjects;
+            if (probeAttIdsUse.Count > 0)
+            {
+                rtProbe++;
+                if (!await RelationHasRowsAsync(conn, tx, "attestations", ct))
+                {
+                    attEmptySkip = probeAttIdsUse.Count;
+                    probeAttIdsUse = new List<Hash128>();
+                    probeAttTypesUse = new List<Hash128>();
+                    probeAttSubjectsUse = new List<Hash128>();
+                }
+            }
             if (probeAttIdsUse.Count > 1)
             {
                 var attIds = probeAttIdsUse;
@@ -431,10 +481,11 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (persistedPhys.Contains(id)) presentPhys.Add(id);
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {AStruct:N0}a novel-by-construction; "
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {EEmpty:N0}e/{PEmpty:N0}p/{AEmpty:N0}a empty-partition, {AStruct:N0}a novel-by-construction; "
                 + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
-                entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0, attStructuralSkip,
+                entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0,
+                entEmptySkip, physEmptySkip, attEmptySkip, attStructuralSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count);
 
             // Entities: first occurrence of each id, minus stored rows.
@@ -827,6 +878,53 @@ public sealed partial class NpgsqlSubstrateWriter
     /// <summary>
     /// Shared chunked, connection-parallel presence probe. Sends the ids in
     /// ProbeChunkIds-sized chunks as $1 (bytea[]), lets
+    private static int DistinctShortCount(IReadOnlyList<short> tiers)
+    {
+        var seen = new HashSet<short>();
+        for (int i = 0; i < tiers.Count; i++) seen.Add(tiers[i]);
+        return seen.Count;
+    }
+
+    /// <summary>
+    /// Under the apply lock: which of <paramref name="tiers"/> have at least one
+    /// row in <c>laplace.entities</c>. Empty LIST(tier) leaves need no bitmap probe.
+    /// </summary>
+    private static async Task<HashSet<short>> NonEmptyEntityTiersAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, IReadOnlyList<short> tiers, CancellationToken ct)
+    {
+        var distinct = new HashSet<short>();
+        for (int i = 0; i < tiers.Count; i++) distinct.Add(tiers[i]);
+        if (distinct.Count == 0) return distinct;
+
+        var arr = distinct.ToArray();
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandTimeout = 0;
+        cmd.CommandText =
+            "SELECT t FROM unnest($1::smallint[]) AS t "
+            + "WHERE EXISTS (SELECT 1 FROM laplace.entities e WHERE e.tier = t LIMIT 1)";
+        cmd.Parameters.Add(new NpgsqlParameter
+        { Value = arr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+        var nonempty = new HashSet<short>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            nonempty.Add(reader.GetInt16(0));
+        return nonempty;
+    }
+
+    private static async Task<bool> RelationHasRowsAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, string relation, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandTimeout = 0;
+        // Relation name is an internal constant (entities/physicalities/attestations), not user input.
+        cmd.CommandText = $"SELECT EXISTS (SELECT 1 FROM laplace.{relation} LIMIT 1)";
+        var o = await cmd.ExecuteScalarAsync(ct);
+        return o is true;
+    }
+
+    /// <summary>
     /// <paramref name="bindKeys"/> add the target table's partition-key
     /// arrays for the same [start, start+n) window, and decodes the returned
     /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
