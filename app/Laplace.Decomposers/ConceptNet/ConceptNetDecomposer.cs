@@ -79,7 +79,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (!TrySplitAssertion(line, out var rel, out var startUri, out var endUri, out var meta))
             return false;
         if (ConceptNetUri.IsExternalUrlRelation(rel)) return false;
-        if (!ConceptNetRelations.TryResolveType(rel, out var typeName)) return false;
+        if (!ConceptNetRelations.TryResolveType(rel, out var typeName, out bool flipEdge)) return false;
         // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
         // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
         // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See docs/specs/16 §4.
@@ -87,6 +87,21 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return false;
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
         if (startTerm.IsEmpty || endTerm.IsEmpty) return false;
+
+        // dbpedia's subject order is not the manifest's: it says (France, capital, Paris)
+        // while AT_LOCATION reads "subject is located at object". Flipping HERE, at record
+        // construction, keeps every downstream stage order-agnostic -- the alternative is a
+        // flip flag riding through the pipeline for one lane's benefit.
+        if (flipEdge)
+        {
+            record = new RelationTripleRecord(
+                UnderscoredUtf8Canonicalize.ToSpaces(endTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(startTerm),
+                ContextId: null, Magnitude: ConceptNetUri.ParseWeight(meta),
+                SubjectPos: endPos, ObjectPos: startPos,
+                SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
+                ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos));
+            return true;
+        }
 
         record = new RelationTripleRecord(
             UnderscoredUtf8Canonicalize.ToSpaces(startTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(endTerm),

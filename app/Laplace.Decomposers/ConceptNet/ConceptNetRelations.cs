@@ -15,9 +15,45 @@ internal static class ConceptNetRelations
     // custom alternate-lookup comparer, and this path runs tens of millions of times.
     private static readonly (byte[] RelUtf8, string TypeName)[]?[] ByLength = BuildByLength();
 
+    /*
+     * ConceptNet's /r/dbpedia/* lane, mapped onto GENERIC manifest relations rather than
+     * minted as DBPEDIA_<REL>. consensus.id is blake3(subject‖type‖object): a source-scoped
+     * type would give the same fact a private cell, so dbpedia's "Paris is France's capital"
+     * would never merge with the AT_LOCATION edge ConceptNet's own AtLocation lane emits.
+     * Mapped, both land on one cell and witness_count actually climbs -- which is the whole
+     * point of a fold. Provenance stays where it belongs, on AttestationRow.SourceId.
+     *
+     * TARGETS ARE RESTRICTED to types ConceptNetSource.BuildRelations already declares
+     * (AT_LOCATION, IS_A, RELATED_TO via RelMap; HAS_LANGUAGE from the fixed set). A
+     * decomposer emitting an undeclared relation faults the native attestation path, so
+     * widening this table means widening the declaration in the same commit.
+     *
+     * Flip is per-entry because dbpedia's subject order is not the manifest's. dbpedia says
+     * (France, capital, Paris); AT_LOCATION reads "subject is located at object", so the
+     * edge is emitted as (Paris, AT_LOCATION, France). Relations left out of this table
+     * still return false -- an uncertain mapping is worse than a dropped edge, because a
+     * wrong one silently corrupts a cell that other sources are also voting in.
+     */
+    private static readonly (byte[] RelUtf8, string TypeName, bool Flip)[] DbpediaMap =
+    [
+        ("dbpedia/capital"u8.ToArray(),      "AT_LOCATION",  true),
+        ("dbpedia/language"u8.ToArray(),     "HAS_LANGUAGE", false),
+        ("dbpedia/genus"u8.ToArray(),        "IS_A",         false),
+        ("dbpedia/genre"u8.ToArray(),        "IS_A",         false),
+        ("dbpedia/occupation"u8.ToArray(),   "IS_A",         false),
+        ("dbpedia/knownFor"u8.ToArray(),     "RELATED_TO",   false),
+        ("dbpedia/influencedBy"u8.ToArray(), "RELATED_TO",   false),
+        ("dbpedia/field"u8.ToArray(),        "RELATED_TO",   false),
+    ];
+
     public static bool TryResolveType(ReadOnlySpan<byte> relationUri, out string typeName)
+        => TryResolveType(relationUri, out typeName, out _);
+
+    public static bool TryResolveType(
+        ReadOnlySpan<byte> relationUri, out string typeName, out bool flip)
     {
         typeName = "";
+        flip = false;
         if (relationUri.Length < 4
             || relationUri[0] != (byte)'/'
             || relationUri[1] != (byte)'r'
@@ -26,7 +62,18 @@ internal static class ConceptNetRelations
 
         ReadOnlySpan<byte> rel = relationUri[3..];
         if (rel.StartsWith("dbpedia/"u8))
+        {
+            foreach (var (key, name, f) in DbpediaMap)
+            {
+                if (rel.SequenceEqual(key))
+                {
+                    typeName = name;
+                    flip = f;
+                    return true;
+                }
+            }
             return false;
+        }
 
         if (rel.Length >= ByLength.Length)
             return false;
