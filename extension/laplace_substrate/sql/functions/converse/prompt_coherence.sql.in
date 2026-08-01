@@ -22,6 +22,8 @@
 --   coherence    rated mass to the OTHER tokens' candidate senses
 --   rel_mass     rated mass in a relation type another token NAMES (the
 --                "what are the X of Y" shape, where X is a relation not a peer)
+--   total_mass   ALL rated mass on the candidate -- specificity's denominator,
+--                exposed for the electors' inverse-mass fallback (below)
 --
 -- RANK ON SPECIFICITY, NEVER ON MASS. Every mass-shaped scalar tried here has
 -- elected function words, because they are wired to everything: denote_mu picked
@@ -31,16 +33,23 @@
 -- cleanly -- measured on "What is a pawn in chess?": total mass a = 4.28e16,
 -- chess = 5.28e14, pawn = 2.63e13, and pawn/chess elect correctly.
 --
--- KNOWN LIMIT: a prompt with ONE content word has no pair to cohere with.
--- "Who was Napoleon?" elects `was`, because Napoleon has no attested edge to
--- "who" or "was" -- coherence is 0 for the right answer and nonzero for the
--- wrong one. No pairwise statistic can fix that; it needs a per-token signal.
+-- THE SINGLE-CONTENT-WORD LIMIT AND ITS SIGNAL (2026-08-01). A prompt with one
+-- content word has no pair to cohere with: every candidate returns specificity
+-- 0 and the election fell through to denote_mu, which favors function words --
+-- "What is a glacier?" elected the article (denote_mu 1169.7 vs 1082.3) and
+-- answered about the letter A. The per-token signal the earlier note said "does
+-- not exist" was computed in this function all along, as specificity's
+-- denominator, and discarded. total_mass is now a column: a function word's own
+-- mass sits orders above a content word's (a = 4.28e16, glacier syn = 2.5e13),
+-- so the four electors add INVERSE own-mass after peers and before denote_mu --
+-- least mass first, non-positive mass last, firing only when every pairwise
+-- key is silent. One election, one key order, unchanged as an invariant.
 DROP FUNCTION IF EXISTS prompt_coherence(text);
 
 CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
-                  specificity double precision)
+                  specificity double precision, total_mass double precision)
     AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
     LANGUAGE C STABLE;

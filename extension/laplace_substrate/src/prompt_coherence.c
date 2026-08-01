@@ -682,8 +682,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 continue;
 
             {
-                Datum values[9];
-                bool  nulls[9];
+                Datum values[10];
+                bool  nulls[10];
                 bytea *tokb = (bytea *) palloc(VARHDRSZ + 16);
                 bytea *synb = (bytea *) palloc(VARHDRSZ + 16);
 
@@ -724,6 +724,14 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 values[8] = Float8GetDatum(best->total_mass > 0.0
                                            ? best->coherence / best->total_mass
                                            : 0.0);
+                /* The denominator, exposed raw. It is the per-token signal the
+                 * KNOWN LIMIT in prompt_coherence.sql.in said did not exist:
+                 * when a prompt has one content word, every pairwise key is 0
+                 * and the electors fall back to INVERSE own-mass -- a function
+                 * word is wired to everything (a = 4.28e16) while a content
+                 * word is not (glacier = 2.5e13), so least-mass-first elects
+                 * the specific token. Computed here all along; now returned. */
+                values[9] = Float8GetDatum(best->total_mass);
 
                 tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
             }
