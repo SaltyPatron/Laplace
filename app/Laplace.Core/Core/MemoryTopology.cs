@@ -161,6 +161,77 @@ public static class MemoryTopology
     public static int ConsensusFoldMaxRelations => (int)Math.Clamp(
         WorkingSetBudgetBytes / ConsensusFoldBytesPerRelation, 500_000, 8_000_000);
 
+    // ---- Aggregate budget: the invariant nothing computed ------------------------------
+    //
+    // Every GUC above is derived in ISOLATION from physical RAM. Nothing ever added them
+    // up. shared_buffers is one pinned allocation, but work_mem is per sort/hash node PER
+    // CONNECTION and maintenance_work_mem is per autovacuum worker, so the resident peak
+    // is a PRODUCT of knobs that live in three different files — and it was never
+    // expressed anywhere, in either language. The 2026-07-15 starvation was that product
+    // going over the machine; it was diagnosed after the fact by hand, and the fix was a
+    // tighter divisor rather than an invariant, so the same class of failure can recur the
+    // moment max_connections or a cap moves.
+    //
+    // WorkMemBytes' own doc comment states the law -- "it must be sized against the
+    // connection budget (max_connections x concurrent nodes), never as a flat RAM
+    // fraction" -- and then the expression below it is a flat RAM fraction. These members
+    // make the stated law computable so a test can hold the knobs to it.
+
+    /// <summary>
+    /// RAM deliberately left to the OS: page cache, the ingest client's own managed heap,
+    /// and the CLI/runner processes. A quarter is too generous on a large box and too mean
+    /// on a small one, so it is RAM/8 within a hard band.
+    /// </summary>
+    public static long OsReserveBytes => Clamp(TotalPhysicalBytes / 8, 1L << 30, 16L << 30);
+
+    /// <summary>What remains for backend private memory once shared_buffers and the OS
+    /// reserve are committed. Backend grants must fit inside THIS, not inside RAM.</summary>
+    public static long BackendMemoryBudgetBytes =>
+        Math.Max(0, TotalPhysicalBytes - SharedBuffersBytes - OsReserveBytes);
+
+    /// <summary>
+    /// work_mem sized the way the law says it should be: the backend budget divided by the
+    /// worst-case number of simultaneous grants. Exposed alongside <see cref="WorkMemBytes"/>
+    /// rather than replacing it, because changing the emitted value is a tuning decision
+    /// that must move the shell, the C# and the parity pins together.
+    /// </summary>
+    public static long WorkMemBytesFor(int maxConnections, int nodesPerQuery) =>
+        Clamp(BackendMemoryBudgetBytes / Math.Max(1L, (long)maxConnections * nodesPerQuery),
+              16L << 20, 64L << 20);
+
+    /// <summary>
+    /// Worst-case resident bytes across the enumerable grants. A LOWER BOUND on the true
+    /// peak: it cannot see a backend taking more than <paramref name="nodesPerQuery"/>
+    /// grants, nor the client's own heap. Under-counting is the safe direction for a
+    /// guard -- if even this bound exceeds the machine, the configuration is
+    /// indefensible without measuring anything.
+    /// </summary>
+    public static long PeakResidentLowerBoundBytes(
+        int maxConnections, int nodesPerQuery, int autovacuumWorkers, long autovacuumWorkMemBytes)
+        => PeakResidentLowerBoundBytes(maxConnections, nodesPerQuery, autovacuumWorkers,
+                                       autovacuumWorkMemBytes, SharedBuffersBytes, WorkMemBytes);
+
+    /// <summary>
+    /// Pure form, every term injected. Exists so the guard can be aimed at a configuration
+    /// this host does not currently have -- a historical one, or a proposed one -- because
+    /// a bound that can only ever be evaluated against the current machine cannot be shown
+    /// to reject anything, and an assertion never demonstrated to fail is decoration.
+    /// </summary>
+    public static long PeakResidentLowerBoundBytes(
+        int maxConnections, int nodesPerQuery, int autovacuumWorkers,
+        long autovacuumWorkMemBytes, long sharedBuffersBytes, long workMemBytes)
+        => sharedBuffersBytes
+         + (long)maxConnections * nodesPerQuery * workMemBytes
+         + (long)autovacuumWorkers * autovacuumWorkMemBytes;
+
+    /// <summary>
+    /// Fraction of physical RAM the enumerable grants may claim. Not a preference: above
+    /// this the OS has no room for page cache and the box starts swapping, which is how
+    /// 2026-07-15 ended in a cold power boot rather than in an OOM kill -- swap death
+    /// leaves no kill record, which is exactly why it was hard to attribute.
+    /// </summary>
+    public const double PeakResidentSafeFraction = 0.80;
+
     private static long Clamp(long v, long lo, long hi) => Math.Clamp(v, lo, hi);
 
     private static long DetectTotalPhysicalBytes()
