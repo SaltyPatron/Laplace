@@ -262,7 +262,7 @@ public sealed class DecomposerArchitectureGateTests
 
                 var text = File.ReadAllText(file);
                 bool inheritsBase =
-                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|GrammarIngestDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerMultiPhase|Decomposer<)")
+                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleMultiFileDecomposerBase|RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|GrammarIngestDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerMultiPhase|Decomposer<)")
                     || text.Contains(": Decomposer<", StringComparison.Ordinal);
                 if (!inheritsBase)
                     violations.Add($"{projectRel}/{rel}");
