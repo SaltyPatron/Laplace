@@ -17,8 +17,10 @@
 
 set -euo pipefail
 
-PSQL=(psql -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX)
-[[ -n "${PGHOST:-}" ]] && PSQL=(psql -h "$PGHOST" -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX)
+PSQL=(psql -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX
+      -c "SET search_path = laplace, public;")
+[[ -n "${PGHOST:-}" ]] && PSQL=(psql -h "$PGHOST" -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX
+      -c "SET search_path = laplace, public;")
 N="${2:-20}"
 
 have() {
