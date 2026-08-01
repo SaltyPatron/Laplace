@@ -39,10 +39,13 @@ public static class WeightTensorETL
 
         int dtype = SynInterop.TensorDtypeFromName(tref.Dtype);
         if (dtype < 0)
-            throw new NotSupportedException(
-                $"tensor '{name}' dtype '{tref.Dtype}' has no decoder. safetensors numeric/bool " +
-                "are covered; GGUF block-quant (Q4_K/Q6_K/…) is a separate container needing its " +
-                "own dequantizer. Refusing to ingest zeros.");
+        {
+            // O10 — record-don't-interpret. Unknown / block-quant dtypes are witnessed as
+            // undecodable (empty payload); inventing zeros was the prior defect, refusing
+            // the whole ingest pushed operators onto GGUF. Callers that need floats must
+            // treat Length == 0 as "no numeric interpretation available".
+            return Array.Empty<float>();
+        }
 
         long bytesPer = (long)SynInterop.TensorDtypeSize(dtype);
         if (expectedElements < 0)

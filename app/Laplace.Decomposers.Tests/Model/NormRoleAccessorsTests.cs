@@ -30,6 +30,7 @@ public class NormRoleAccessorsTests
             QkNorm = false,
             RopeTheta = 10000,
             NormEps = 1e-5,
+            HiddenAct = "silu",
             MlaQLoraRank = 0,
             MlaKvLoraRank = 0,
             QkRopeHeadDim = 0,

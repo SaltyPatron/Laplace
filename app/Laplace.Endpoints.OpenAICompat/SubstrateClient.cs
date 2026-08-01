@@ -1,9 +1,9 @@
 using Laplace.Api.Contracts;
+using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -28,6 +28,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     {
         try
         {
+            // GH #575: bare FEN prompt → composed position hex before lexical recall_session.
+            prompt = ChessPositionRef.RewriteFenToHex(prompt) ?? prompt;
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             return await RecallSessionAsync(conn, prompt, session, ct);
         }
@@ -91,25 +93,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // One turn in, one read out. Conversation state is substrate-resident
         // (session context + session_topics carry) — clients never resend history,
         // and a resent history would be ignored here by construction (spec 34).
-        const string sql = """
-            SELECT reply, eff_mu, witnesses
-            FROM laplace.recall_session(@p, @session);
-            """;
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("p", prompt);
-        var sessionParam = cmd.Parameters.Add("session", NpgsqlDbType.Bytea);
-        sessionParam.Value = session is null ? DBNull.Value : session;
-
-        var rows = new List<ConverseRow>(8);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-            var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
-            var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
-            rows.Add(new ConverseRow(reply, mu, witnesses));
-        }
-        return rows;
+        var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session, ct);
+        return [.. rows.Select(r => new ConverseRow(r.Reply, r.EffMu ?? 0m, r.Witnesses ?? 0L))];
     }
 
 
@@ -127,61 +112,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         int topK = 10,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        const string sql =
-            "SELECT step, entity, stride_used FROM laplace.walk_text(@p, @steps, @order, @temp, @topk);";
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("p", prompt);
-        cmd.Parameters.AddWithValue("steps", steps);
-        cmd.Parameters.AddWithValue("order", maxOrder);
-        cmd.Parameters.AddWithValue("temp", temperature);
-        cmd.Parameters.AddWithValue("topk", topK);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        await foreach (var row in NpgsqlSubstrateReads.WalkTextAsync(
+            _dataSource, prompt, steps, maxOrder, temperature, topK, ct))
         {
-            var step = reader.GetInt32(0);
-            var tok = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            var ord = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
-            if (tok.Length == 0) continue;
-
-
-            yield return new GenerateToken(step, tok, ord);
+            if (row.Entity.Length == 0) continue;
+            yield return new GenerateToken(row.Step, row.Entity, row.StrideUsed);
         }
     }
 
     public async Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct)
     {
-        const string sql = """
-            SELECT
-                encode(c.object_id, 'hex') AS object_id_hex,
-                encode(c.type_id, 'hex') AS type_id_hex,
-                c.eff_mu,
-                c.witnesses,
-                laplace.label_or_hex(c.object_id) AS object_label
-            FROM laplace.completions(laplace.resolve(@prompt), @limit) c
-            ORDER BY c.eff_mu DESC;
-            """;
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("prompt", prompt);
-            cmd.Parameters.AddWithValue("limit", Math.Max(1, limit));
-
-            var rows = new List<CompletionRow>(Math.Max(1, limit));
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                rows.Add(new CompletionRow(
-                    ObjectIdHex: reader.GetString(0),
-                    TypeIdHex: reader.GetString(1),
-                    EffectiveMu: reader.GetDecimal(2),
-                    Witnesses: reader.GetInt64(3),
-                    ObjectLabel: reader.GetString(4)));
-            }
-
-            return rows;
+            var rows = await NpgsqlSubstrateReads.CompletionsAsync(conn, prompt, Math.Max(1, limit), ct);
+            return [.. rows.Select(r => new CompletionRow(
+                r.ObjectIdHex, r.TypeIdHex, r.EffectiveMu, r.Witnesses, r.ObjectLabel))];
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
@@ -195,13 +141,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-            var counts = new List<SubstrateCount>();
-            await using (var cmd = new NpgsqlCommand("SELECT metric, value FROM laplace.substrate_counts();", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
-            {
-                while (await reader.ReadAsync(ct))
-                    counts.Add(new SubstrateCount(reader.GetString(0), reader.GetInt64(1)));
-            }
+            var counts = (await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
+                .Select(r => new SubstrateCount(r.Metric, r.Value))
+                .ToList();
 
             ConsensusHealth? consensus = null;
             if (includeConsensus)
@@ -244,26 +186,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             var geometry = new (double X, double Y, double Z, double M, double Radius, int Constituents)?[nodes.Length];
             if (includeGeometry && nodes.Length > 0)
             {
-                const string physSql = """
-                    SELECT u.ord, f.x, f.y, f.z, f.m, f.radius, f.n_constituents
-                    FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord)
-                    JOIN LATERAL (
-                        SELECT x, y, z, m, radius, n_constituents
-                        FROM laplace.entity_physicalities(u.id)
-                        ORDER BY type
-                        LIMIT 1
-                    ) f ON true;
-                    """;
-                await using var cmd = new NpgsqlCommand(physSql, conn);
-                var p = cmd.Parameters.AddWithValue("ids", nodeIds);
-                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                foreach (var row in await NpgsqlSubstrateReads.EntityPrimaryFormsBatchAsync(conn, nodeIds, ct))
                 {
-                    int idx = (int)reader.GetInt64(0) - 1;
-                    geometry[idx] = (
-                        reader.GetDouble(1), reader.GetDouble(2), reader.GetDouble(3),
-                        reader.GetDouble(4), reader.GetDouble(5), reader.GetInt32(6));
+                    int idx = (int)row.Ordinal - 1;
+                    if ((uint)idx >= (uint)geometry.Length) continue;
+                    geometry[idx] = (row.X, row.Y, row.Z, row.M, row.Radius, row.Constituents);
                 }
             }
 
@@ -271,18 +198,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             var evidence = new long?[nodes.Length];
             if (includeEvidence && nodes.Length > 0)
             {
-                const string evSql = """
-                    SELECT u.ord, laplace.evidence_count(NULL, NULL, u.id)
-                    FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord);
-                    """;
-                await using var cmd = new NpgsqlCommand(evSql, conn);
-                var p = cmd.Parameters.AddWithValue("ids", nodeIds);
-                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                foreach (var row in await NpgsqlSubstrateReads.EvidenceCountsBatchAsync(conn, nodeIds, ct))
                 {
-                    int idx = (int)reader.GetInt64(0) - 1;
-                    evidence[idx] = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                    int idx = (int)row.Ordinal - 1;
+                    if ((uint)idx >= (uint)evidence.Length) continue;
+                    evidence[idx] = row.Count;
                 }
             }
 
@@ -312,45 +232,21 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct)
     {
-        const string sql = """
-            SELECT
-                gt.depth,
-                ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.path) AS u(x)) AS path_hex,
-                ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.types) AS u(x)) AS type_path_hex,
-                encode(gt.entity_id, 'hex') AS entity_id_hex,
-                laplace.label_or_hex(gt.entity_id) AS entity_label,
-                gt.eff_mu,
-                gt.path_mu,
-                gt.witnesses
-            FROM laplace.walk_branches(laplace.resolve(@prompt), NULL, @depth, @beam) gt
-            ORDER BY gt.depth, gt.path_mu DESC;
-            """;
-
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("prompt", prompt);
-            cmd.Parameters.AddWithValue("depth", Math.Clamp(depth, 1, 64));
-            cmd.Parameters.AddWithValue("beam", Math.Clamp(beam, 1, 64));
-
-            var rows = new List<ExplainTraceStep>();
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
-            {
-                while (await reader.ReadAsync(ct))
-                {
-                    rows.Add(new ExplainTraceStep(
-                        Depth: reader.GetInt32(0),
-                        PathHex: reader.GetFieldValue<string[]>(1),
-                        TypePathHex: reader.GetFieldValue<string[]>(2),
-                        EntityIdHex: reader.GetString(3),
-                        EntityLabel: reader.GetString(4),
-                        EffectiveMu: reader.GetDecimal(5),
-                        PathMu: reader.GetDecimal(6),
-                        Witnesses: reader.GetInt64(7),
-                        Evidence: Array.Empty<EvidenceSample>()));
-                }
-            }
+            var steps = await NpgsqlSubstrateReads.ExplainTraceStepsAsync(
+                conn, prompt, Math.Clamp(depth, 1, 64), Math.Clamp(beam, 1, 64), ct);
+            var rows = steps.Select(s => new ExplainTraceStep(
+                Depth: s.Depth,
+                PathHex: s.PathHex,
+                TypePathHex: s.TypePathHex,
+                EntityIdHex: s.EntityIdHex,
+                EntityLabel: s.EntityLabel,
+                EffectiveMu: s.EffMu,
+                PathMu: s.PathMu,
+                Witnesses: s.Witnesses,
+                Evidence: Array.Empty<EvidenceSample>())).ToList();
 
             if (!includeEvidence || rows.Count == 0)
                 return rows;
@@ -362,41 +258,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             for (int i = 0; i < distinctHex.Length; i++)
                 ids[i] = Convert.FromHexString(distinctHex[i]);
 
-            const string evSql = """
-                SELECT u.ord,
-                    encode(a.type_id, 'hex'),
-                    encode(a.object_id, 'hex'),
-                    encode(a.source_id, 'hex'),
-                    CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
-                    a.outcome,
-                    a.observation_count
-                FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord)
-                CROSS JOIN LATERAL laplace.attestations_out(u.id, 5)
-                    WITH ORDINALITY AS a(type_id, object_id, source_id, context_id, outcome, observation_count, aord)
-                ORDER BY u.ord, a.aord;
-                """;
             var buckets = new Dictionary<string, List<EvidenceSample>>(StringComparer.Ordinal);
-            await using (var evCmd = new NpgsqlCommand(evSql, conn))
+            foreach (var a in await NpgsqlSubstrateReads.AttestationsOutBatchAsync(conn, ids, perId: 5, ct))
             {
-                var p = evCmd.Parameters.AddWithValue("ids", ids);
-                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                await using var reader = await evCmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                var hex = distinctHex[(int)a.Ordinal - 1];
+                if (!buckets.TryGetValue(hex, out var list))
                 {
-                    var hex = distinctHex[(int)reader.GetInt64(0) - 1];
-                    if (!buckets.TryGetValue(hex, out var list))
-                    {
-                        list = new List<EvidenceSample>();
-                        buckets[hex] = list;
-                    }
-                    list.Add(new EvidenceSample(
-                        TypeIdHex: reader.GetString(1),
-                        ObjectIdHex: reader.GetString(2),
-                        SourceIdHex: reader.GetString(3),
-                        ContextIdHex: reader.IsDBNull(4) ? null : reader.GetString(4),
-                        Outcome: reader.GetInt16(5),
-                        ObservationCount: reader.GetInt64(6)));
+                    list = new List<EvidenceSample>();
+                    buckets[hex] = list;
                 }
+                list.Add(new EvidenceSample(
+                    TypeIdHex: a.TypeIdHex,
+                    ObjectIdHex: a.ObjectIdHex,
+                    SourceIdHex: a.SourceIdHex,
+                    ContextIdHex: a.ContextIdHex,
+                    Outcome: a.Outcome,
+                    ObservationCount: a.ObservationCount));
             }
 
             var enriched = new List<ExplainTraceStep>(rows.Count);
@@ -425,35 +302,36 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     private static async Task<ConsensusHealth?> ReadConsensusHealthAsync(
         NpgsqlConnection conn, int exactBudgetSeconds, CancellationToken ct)
     {
-        foreach (var (fn, budget) in new[]
+        static ConsensusHealth? Map(NpgsqlSubstrateReads.ConsensusStatsRow? s) =>
+            s is { } v
+                ? new ConsensusHealth(
+                    EvidenceRows: v.EvidenceRows,
+                    ConsensusRows: v.ConsensusRows,
+                    DedupRatio: v.DedupRatio,
+                    AvgWitnesses: v.AvgWitnesses,
+                    MaxWitnesses: v.MaxWitnesses)
+                : null;
+
+        try
         {
-            ("laplace.consensus_stats()", exactBudgetSeconds),
-            ("laplace.consensus_stats_approx()", DefaultCommandTimeoutSeconds)
-        })
+            var exact = await NpgsqlSubstrateReads.ConsensusStatsExactAsync(
+                conn, ct, timeoutSeconds: exactBudgetSeconds);
+            if (exact is not null) return Map(exact);
+        }
+        catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
-            try
-            {
-                await using var cmd = new NpgsqlCommand(
-                    $"SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM {fn};", conn);
-                cmd.CommandTimeout = budget;
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (await reader.ReadAsync(ct))
-                {
-                    return new ConsensusHealth(
-                        EvidenceRows: reader.GetInt64(0),
-                        ConsensusRows: reader.GetInt64(1),
-                        DedupRatio: reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-                        AvgWitnesses: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
-                        MaxWitnesses: reader.IsDBNull(4) ? null : reader.GetInt64(4));
-                }
-            }
-            catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
-            {
-                // exact variant blew its budget — fall through to the approx variant
-            }
+            // exact variant blew its budget — fall through to the approx variant
         }
 
-        return null;
+        try
+        {
+            return Map(await NpgsqlSubstrateReads.ConsensusStatsApproxAsync(
+                conn, ct, timeoutSeconds: DefaultCommandTimeoutSeconds));
+        }
+        catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -467,10 +345,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     {
         try
         {
-            await using var cmd = new NpgsqlCommand("SELECT laplace.multi_source_entity_count();", conn);
-            cmd.CommandTimeout = budgetSeconds;
-            var value = await cmd.ExecuteScalarAsync(ct);
-            return value is null or DBNull ? null : Convert.ToInt64(value);
+            return await NpgsqlSubstrateReads.MultiSourceEntityCountAsync(
+                conn, ct, timeoutSeconds: budgetSeconds);
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
@@ -490,56 +366,26 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         _ => false
     };
 
+    /// <summary>
+    /// laplace.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
+    /// consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
+    /// killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
+    /// <see cref="NpgsqlSubstrateReads.TopRelationsAsync"/> supersedes it: consensus_eff_mu_btree
+    /// serves the global top-M by raw eff_mu instantly; edge_rank (salience band x eff_mu, the
+    /// single readout law) then reorders only that candidate pool. Measured 0.5s live.
+    /// </summary>
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)
     {
-        // laplace.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
-        // consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
-        // killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
-        // Same ranking law, bounded work: consensus_eff_mu_btree serves the global top-M
-        // by raw eff_mu instantly; edge_rank (salience band x eff_mu, the single readout
-        // law) then reorders only that candidate pool. Bands span 1.0..0.05, so anything
-        // that can reach the top of edge_rank is inside a generous raw-eff_mu head.
-        // Measured 0.5s live. Supersedes laplace.top_relations for API reads until a
-        // calculated-layer variant lands extension-side (doc 02, Issue 52).
-        const string sql = """
-            SELECT
-                encode(t.subject_id, 'hex') AS subject_id_hex,
-                laplace.label_or_hex(t.subject_id) AS subject_label,
-                encode(t.type_id, 'hex') AS type_id_hex,
-                laplace.label_or_hex(t.type_id) AS type_label,
-                encode(t.object_id, 'hex') AS object_id_hex,
-                laplace.label_or_hex(t.object_id) AS object_label,
-                t.eff_mu,
-                t.witness_count AS witnesses
-            FROM (
-                SELECT c.subject_id, c.type_id, c.object_id, c.eff_mu, c.eff_mu_raw, c.witness_count
-                FROM laplace.v_consensus_resolved c
-                WHERE c.object_id IS NOT NULL
-                ORDER BY c.eff_mu_raw DESC
-                LIMIT GREATEST(5000, @limit * 25)
-            ) t
-            ORDER BY laplace.edge_rank(t.type_id, t.eff_mu_raw::numeric) DESC, t.witness_count DESC
-            LIMIT @limit;
-            """;
-
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("limit", limit);
-        var edges = new List<VisualizationEdge>(limit);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            edges.Add(new VisualizationEdge(
-                SubjectIdHex: reader.GetString(0),
-                Subject: reader.GetString(1),
-                TypeIdHex: reader.GetString(2),
-                Type: reader.GetString(3),
-                ObjectIdHex: reader.GetString(4),
-                Object: reader.GetString(5),
-                EffectiveMu: reader.GetDecimal(6),
-                Witnesses: reader.GetInt64(7)));
-        }
-
-        return edges;
+        var rows = await NpgsqlSubstrateReads.TopRelationsAsync(conn, limit, ct);
+        return [.. rows.Select(t => new VisualizationEdge(
+            SubjectIdHex: t.SubjectIdHex,
+            Subject: t.Subject,
+            TypeIdHex: t.TypeIdHex,
+            Type: t.Type,
+            ObjectIdHex: t.ObjectIdHex,
+            Object: t.Object,
+            EffectiveMu: t.EffMu,
+            Witnesses: t.Witnesses))];
     }
 
 
@@ -550,29 +396,6 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // Provenance receipts: deduped (type, object) claims with named sources — not
         // consensus_out (that duplicates chat/salient-facts) or raw attestations_out
         // (one row per source/context cartesian product).
-        const string sql = """
-            WITH resolved AS (
-                SELECT laplace.resolve_ref(@target) AS id
-            )
-            SELECT
-                r.id,
-                CASE
-                    WHEN @target ~ '^[0-9a-f]{32}$' THEN COALESCE(
-                        NULLIF(laplace.render_text_fast(r.id, 8), ''),
-                        left(encode(r.id, 'hex'), 16))
-                    ELSE @target
-                END,
-                encode(e.type_id, 'hex'),
-                e.type_label,
-                encode(e.object_id, 'hex'),
-                e.object_label,
-                e.source_labels,
-                e.witness_count,
-                e.eff_mu
-            FROM resolved r
-            LEFT JOIN LATERAL laplace.evidence_receipt(r.id, @limit) e ON true
-            WHERE r.id IS NOT NULL;
-            """;
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -581,32 +404,28 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             string? entityLabel = null;
             var items = new List<Laplace.Api.Contracts.LabeledEvidenceItem>(limit);
 
-            await using (var cmd = new NpgsqlCommand(sql, conn))
+            // GH #575: FEN → composed position hex before resolve_ref.
+            target = ChessPositionRef.RewriteFenToHex(target) ?? target;
+            foreach (var r in await NpgsqlSubstrateReads.EvidenceForTargetAsync(conn, target.Trim(), limit, ct))
             {
-                cmd.Parameters.AddWithValue("target", target.Trim());
-                cmd.Parameters.AddWithValue("limit", limit);
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                if (entityId is null && r.EntityId is not null)
                 {
-                    if (entityId is null && !reader.IsDBNull(0))
-                    {
-                        entityId = (byte[])reader[0];
-                        entityLabel = reader.IsDBNull(1) ? null : reader.GetString(1);
-                    }
-                    if (reader.IsDBNull(2))
-                        continue; // anchor row with no evidence
-                    items.Add(new Laplace.Api.Contracts.LabeledEvidenceItem(
-                        TypeId: reader.GetString(2),
-                        TypeLabel: reader.GetString(3),
-                        ObjectId: reader.GetString(4),
-                        ObjectLabel: reader.GetString(5),
-                        SourceId: "",
-                        SourceLabel: reader.IsDBNull(6) ? "" : reader.GetString(6),
-                        ContextId: null,
-                        Outcome: 2,
-                        ObservationCount: reader.GetInt64(7),
-                        EffMu: reader.GetDecimal(8)));
+                    entityId = r.EntityId;
+                    entityLabel = r.EntityLabel;
                 }
+                if (r.TypeIdHex is null)
+                    continue; // anchor row with no evidence
+                items.Add(new Laplace.Api.Contracts.LabeledEvidenceItem(
+                    TypeId: r.TypeIdHex,
+                    TypeLabel: r.TypeLabel!,
+                    ObjectId: r.ObjectIdHex!,
+                    ObjectLabel: r.ObjectLabel!,
+                    SourceId: "",
+                    SourceLabel: r.SourceLabels ?? "",
+                    ContextId: null,
+                    Outcome: 2,
+                    ObservationCount: r.WitnessCount ?? 0L,
+                    EffMu: r.EffMu ?? 0m));
             }
 
             if (entityId is null)
@@ -636,44 +455,26 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
             long entities = 0, consensus = 0;
-            await using (var cmd = new NpgsqlCommand("SELECT metric, value FROM laplace.substrate_counts();", conn))
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            foreach (var row in await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
             {
-                while (await reader.ReadAsync(ct))
-                {
-                    var metric = reader.GetString(0);
-                    var value = reader.GetInt64(1);
-                    if (metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
-                        entities = Math.Max(entities, value);
-                    else if (metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
-                        consensus = Math.Max(consensus, value);
-                }
+                if (row.Metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+                    entities = Math.Max(entities, row.Value);
+                else if (row.Metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+                    consensus = Math.Max(consensus, row.Value);
             }
 
             if (entities == 0 || consensus == 0)
             {
-                await using var probe = new NpgsqlCommand(
-                    """
-                    SELECT EXISTS (SELECT 1 FROM laplace.entities LIMIT 1),
-                           EXISTS (SELECT 1 FROM laplace.consensus LIMIT 1)
-                    """, conn);
-                await using var existsReader = await probe.ExecuteReaderAsync(ct);
-                if (await existsReader.ReadAsync(ct))
-                {
-                    if (entities == 0 && existsReader.GetBoolean(0)) entities = 1;
-                    if (consensus == 0 && existsReader.GetBoolean(1)) consensus = 1;
-                }
+                var (entitiesExist, consensusExist) = await NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(conn, ct);
+                if (entities == 0 && entitiesExist) entities = 1;
+                if (consensus == 0 && consensusExist) consensus = 1;
             }
-
-
-
 
             bool perfcacheReady;
             string? detail = null;
             try
             {
-                await using var probe = new NpgsqlCommand("SELECT laplace.word_id('the');", conn);
-                await probe.ExecuteScalarAsync(ct);
+                await NpgsqlSubstrateReads.PerfCacheProbeAsync(conn, ct);
                 perfcacheReady = true;
             }
             catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
@@ -704,30 +505,6 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // ONE round-trip: resolve CTE feeds both the physical form (kind=0 anchor row) and the
         // meaning neighbors (kind=1 rows, gated by @include). ORDER BY kind, ord preserves the
         // form-then-meaning read order and consensus_out_readable's internal ranking.
-        const string sql = """
-            WITH resolved AS (
-                SELECT laplace.resolve_ref(@target) AS id
-            )
-            SELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,
-                   f.x, f.y, f.z, f.m, f.radius, f.n_constituents,
-                   NULL::text, NULL::text, NULL::numeric, NULL::bigint
-            FROM resolved r
-            LEFT JOIN LATERAL (
-                SELECT x, y, z, m, radius, n_constituents
-                FROM laplace.entity_physicalities(r.id)
-                ORDER BY type
-                LIMIT 1
-            ) f ON true
-            UNION ALL
-            SELECT 1 AS kind, m.ord, r.id,
-                   NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::int,
-                   m.type, m.object, m.eff_mu, m.witnesses
-            FROM resolved r
-            CROSS JOIN LATERAL laplace.consensus_out_readable(r.id, @limit)
-                WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)
-            WHERE @include
-            ORDER BY kind, ord;
-            """;
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -736,30 +513,27 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             EmbeddingForm? form = null;
             var meaning = new List<MeaningNeighbor>();
 
-            await using (var cmd = new NpgsqlCommand(sql, conn))
+            // GH #575: FEN → composed position hex before resolve_ref.
+            input = ChessPositionRef.RewriteFenToHex(input) ?? input;
+            var rows = await NpgsqlSubstrateReads.EmbeddingLookupAsync(
+                conn, input.Trim(), Math.Clamp(meaningLimit, 1, 100), includeMeaning, ct);
+            foreach (var row in rows)
             {
-                cmd.Parameters.AddWithValue("target", input.Trim());
-                cmd.Parameters.AddWithValue("limit", Math.Clamp(meaningLimit, 1, 100));
-                cmd.Parameters.AddWithValue("include", includeMeaning);
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+                if (row.Kind == 0)
                 {
-                    if (reader.GetInt32(0) == 0)
-                    {
-                        entityId = reader.IsDBNull(2) ? null : (byte[])reader[2];
-                        if (!reader.IsDBNull(3))
-                            form = new EmbeddingForm(
-                                reader.GetDouble(3), reader.GetDouble(4), reader.GetDouble(5),
-                                reader.GetDouble(6), reader.GetDouble(7), reader.GetInt32(8));
-                    }
-                    else
-                    {
-                        meaning.Add(new MeaningNeighbor(
-                            Relation: reader.IsDBNull(9) ? "?" : reader.GetString(9),
-                            ObjectLabel: reader.IsDBNull(10) ? "?" : reader.GetString(10),
-                            EffMu: reader.IsDBNull(11) ? 0m : reader.GetDecimal(11),
-                            Witnesses: reader.IsDBNull(12) ? 0L : reader.GetInt64(12)));
-                    }
+                    entityId = row.EntityId;
+                    if (row.X is not null)
+                        form = new EmbeddingForm(
+                            row.X.Value, row.Y!.Value, row.Z!.Value,
+                            row.M!.Value, row.Radius!.Value, row.Constituents!.Value);
+                }
+                else
+                {
+                    meaning.Add(new MeaningNeighbor(
+                        Relation: row.Relation ?? "?",
+                        ObjectLabel: row.ObjectLabel ?? "?",
+                        EffMu: row.EffMu ?? 0m,
+                        Witnesses: row.Witnesses ?? 0L));
                 }
             }
 
@@ -790,6 +564,21 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     /// value — the policy itself now lives with the datasource that applies it.
     /// </summary>
     internal const int DefaultCommandTimeoutSeconds = LaplaceDataSource.ServingCommandTimeoutSeconds;
+
+    /// <summary>
+    /// The one exception-translation rule every read in this client applies, now shared
+    /// with <see cref="Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads"/> callers via
+    /// its <c>onError</c> delegate: a rejected query (<see cref="PostgresException"/>)
+    /// is a client mistake worth naming (bad SQL state, a where-clause); anything else
+    /// NpgsqlRead offers to translate (plain <see cref="NpgsqlException"/>,
+    /// <see cref="TimeoutException"/>) means the server itself was unreachable.
+    /// </summary>
+    private static Exception TranslateSubstrateError(Exception failure, string label) =>
+        failure is PostgresException pg
+            ? new SubstrateQueryException(
+                $"{label} query failed [{pg.SqlState}] {pg.MessageText}"
+                + (pg.Where is null ? "" : $" @ {pg.Where}"), pg)
+            : new SubstrateUnavailableException("Substrate is unreachable.", failure);
 }
 
 internal sealed class SubstrateUnavailableException : Exception

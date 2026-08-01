@@ -16,6 +16,24 @@ public sealed class PgnClocksTests
         Assert.Equal(new[] { 180d, 180d, 175d, 178d, 155d, 177d }, s);
     }
 
+    [Theory]
+    [InlineData("0:03:00", 180d)]
+    [InlineData("1:02:03.5", 3723.5d)]
+    public void TryParseHms_ParsesValid(string token, double expected)
+    {
+        Assert.True(PgnClocks.TryParseHms(token, out double sec));
+        Assert.Equal(expected, sec);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("3:00")]
+    [InlineData("0:xx:00")]
+    [InlineData("0:03:nope")]
+    public void TryParseHms_RejectsMalformedWithoutThrowing(string? token)
+        => Assert.False(PgnClocks.TryParseHms(token, out _));
+
     [Fact]
     public void SecondsRemaining_EmptyWhenCountMismatch()
         => Assert.Empty(PgnClocks.SecondsRemaining(Movetext, 5));

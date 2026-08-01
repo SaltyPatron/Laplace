@@ -34,4 +34,24 @@ public sealed class SafetensorSnapshotWitnessTests
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
+
+    [Fact]
+    public void ResolveCompleteDir_walks_hf_snapshots_layout()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "laplace-hf-" + Guid.NewGuid().ToString("N"));
+        var fam = Path.Combine(root, "models--org--toy");
+        var snap = Path.Combine(fam, "snapshots", "revdeadbeef");
+        Directory.CreateDirectory(snap);
+        try
+        {
+            File.WriteAllText(Path.Combine(snap, "config.json"), "{}");
+            File.WriteAllText(Path.Combine(snap, "tokenizer.json"), "{}");
+            File.WriteAllBytes(Path.Combine(snap, "weights.safetensors"), [0]);
+
+            Assert.Equal(snap, SafetensorSnapshotWitness.ResolveCompleteDir(root));
+            Assert.Equal(snap, SafetensorSnapshotWitness.ResolveCompleteDir(fam));
+            Assert.Equal(snap, SafetensorSnapshotWitness.ResolveCompleteDir(snap));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
 }

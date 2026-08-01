@@ -73,11 +73,11 @@ BEGIN
         SELECT COALESCE(separator_ids(), ARRAY[]::bytea[]) AS ids
     ),
     seq AS (
-        SELECT ph.entity_id AS root, c.ordinal, c.entity_id AS tok
-        FROM physicalities ph
-        JOIN entities e ON e.id = ph.entity_id AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
-        CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
-        WHERE ph.type = 1 AND ph.trajectory IS NOT NULL
+        SELECT w.id AS root, c.ordinal, c.entity_id AS tok
+        FROM v_word_points w
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
+        WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+          AND w.trajectory IS NOT NULL
     ),
     content AS (
         SELECT s.root, s.tok,

@@ -7,22 +7,21 @@ DECLARE
     v_coord geometry;
     v_traj  geometry;
 BEGIN
-    SELECT p.entity_id, p.coord, p.trajectory
+    SELECT w.id, w.coord, w.trajectory
       INTO v_id, v_coord, v_traj
-    FROM physicalities p
-    JOIN prompt_state(p_word) s ON p.entity_id = s.id
-    WHERE p.type = 1 AND p.coord IS NOT NULL
-    
-    ORDER BY s.ord, p.id
+    FROM v_word_points w
+    JOIN prompt_state(p_word) s ON w.id = s.id
+    WHERE w.coord IS NOT NULL
+    ORDER BY s.ord, w.physicality_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
     WITH knn AS (
-        SELECT p.entity_id, p.coord, p.trajectory
-        FROM physicalities p
-        WHERE p.type = 1
-        ORDER BY p.coord <<->> v_coord
+        SELECT w.id AS entity_id, w.coord, w.trajectory
+        FROM v_word_points w
+        WHERE w.coord IS NOT NULL
+        ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
     dedup AS (
         SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,

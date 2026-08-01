@@ -78,7 +78,11 @@ public static class ModelConfigReader
                        || Bool(root, "qk_layernorm", false)
                        || Bool(root, "attention_qk_norm", false);
             double rope = Dbl(root, 10000.0, "rope_theta", "rotary_emb_base");
-            double eps = Dbl(root, 1e-5, "rms_norm_eps", "layer_norm_eps", "layer_norm_epsilon");
+            double eps = Dbl(root, 1e-5, "rms_norm_eps", "layer_norm_eps", "layer_norm_epsilon", "norm_eps");
+            // FFN-ACT-CONFIG / #540: the activation string is a source-asserted scalar.
+            // Key spellings differ by family; value is attested verbatim (empty if absent).
+            string hiddenAct = FirstStr(root, "",
+                "hidden_act", "hidden_activation", "activation_function", "activation");
 
             int qLora = FirstInt(root, 0, "q_lora_rank");
             int kvLora = FirstInt(root, 0, "kv_lora_rank");
@@ -105,6 +109,7 @@ public static class ModelConfigReader
                 QkNorm = qkNorm,
                 RopeTheta = rope,
                 NormEps = eps,
+                HiddenAct = hiddenAct,
                 MlaQLoraRank = qLora,
                 MlaKvLoraRank = kvLora,
                 QkRopeHeadDim = qkRope,
@@ -179,6 +184,7 @@ public static class ModelConfigReader
             QkNorm = false,
             RopeTheta = 10000.0,
             NormEps = 1e-5,
+            HiddenAct = "",
             MlaQLoraRank = 0,
             MlaKvLoraRank = 0,
             QkRopeHeadDim = 0,
@@ -219,6 +225,19 @@ public static class ModelConfigReader
     private static string Str(JsonElement root, string key, string def)
         => root.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String
             ? p.GetString() ?? def : def;
+
+    private static string FirstStr(JsonElement root, string def, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (root.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String)
+            {
+                string? s = p.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) return s;
+            }
+        }
+        return def;
+    }
 
     private static byte[] CanonicalizeJson(JsonElement root)
     {

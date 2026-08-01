@@ -136,11 +136,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].EventId;
             byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
-            long bits = (long)bm.Length * 8;
             var proven = new List<Hash128>(toProbe.Count);
             for (int k = 0; k < toProbe.Count; k++)
             {
-                if (k >= bits || (bm[k >> 3] & (1 << (k & 7))) == 0) continue;
+                if (!BitmapBits.IsSet(bm, k)) continue;
                 present[toProbe[k]] = true;
                 proven.Add(ids[k]);
             }
@@ -604,32 +603,24 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     // Pre-ingest inventory (GH #492): unit = game, counted as "[Event " headers — the same
     // boundary StreamGamesAsync splits on — so progress denominators match what actually flows.
-    public async Task<IngestInventory?> DescribeInputAsync(
+    public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
-        if (paths.Count == 0) return null;
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
         if (options.MaxInputUnits > 0)
-            return IngestInventory.FromFiles("games", paths, options.MaxInputUnits, ct);
+            return Task.FromResult(IngestInventory.FromFiles("games", paths, options.MaxInputUnits, ct));
 
         var files = new List<IngestFileSpec>(paths.Count);
         long total = 0;
         foreach (var p in paths)
         {
-            long n = await CountGamesAsync(p, ct).ConfigureAwait(false);
+            // Sample/exact byte estimate — StreamReader full decode blocked inventory on large PGNs.
+            long n = EtlInventory.EstimatePgnGameCount(p, ct);
             files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
             total += n;
         }
-        return new IngestInventory("games", total, files);
-    }
-
-    private static async Task<long> CountGamesAsync(string path, CancellationToken ct)
-    {
-        long n = 0;
-        using var reader = new StreamReader(path, Encoding.UTF8, true, 1 << 20);
-        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
-            if (line.StartsWith("[Event ", StringComparison.Ordinal)) n++;
-        return n;
+        return Task.FromResult<IngestInventory?>(new IngestInventory("games", total, files));
     }
 
     private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)

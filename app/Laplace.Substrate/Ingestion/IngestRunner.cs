@@ -15,6 +15,12 @@ public sealed class IngestRunner
     private readonly ISubstrateReader _reader;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IIngestObservability _obs;
+    /// <summary>
+    /// ContentLadderLedger is process-static; wipe it when the source changes so one
+    /// source's deposited roots cannot suppress another source's first witness.
+    /// Same-source warm re-ingest keeps membership across End/Begin.
+    /// </summary>
+    private Hash128 _ladderSource;
 
     public IngestRunner(
         ISubstrateWriter writer,
@@ -237,6 +243,11 @@ public sealed class IngestRunner
         // first qualifying apply and rebuilds exactly once, in the finally
         // below. A crash before the finally is covered by the writer's
         // index-cycle journal (recovered at the next run's begin).
+        if (_ladderSource != decomposer.SourceId)
+        {
+            ContentLadderLedger.Reset();
+            _ladderSource = decomposer.SourceId;
+        }
         await _writer.BeginBulkRunAsync(ct);
         try
         {
@@ -424,11 +435,15 @@ public sealed class IngestRunner
         attestationsInserted = counters.AttestationsInserted;
         totalRoundTrips = counters.RoundTrips;
 
+        long filesTotalForMarker = inventory?.FileCount ?? 0;
+        bool filesComplete = filesTotalForMarker <= 0
+            || counters.FilesDone == filesTotalForMarker;
         if (!options.SkipSourceCompletion
             && counters.UnitsFailed == 0
             && failures.Count == 0
             && counters.UnitsApplied > 0
-            && options.DecomposerOptions.MaxInputUnits <= 0)
+            && options.DecomposerOptions.MaxInputUnits <= 0
+            && filesComplete)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();
@@ -456,10 +471,16 @@ public sealed class IngestRunner
         // 'capped' = a MaxInputUnits smoke run: it succeeded but deliberately did not
         // ingest the whole source, which is also why it never mints a completion marker —
         // the run journal must not let it masquerade as a full 'ok'.
-        string status = result.UnitsFailed > 0 ? "failed"
-            : emptySourceNoOp ? "empty-noop"
-            : options.DecomposerOptions.MaxInputUnits > 0 ? "capped"
-            : "ok";
+        // File-tracking lanes (TracksFileCompletion): files_done must equal files_total.
+        // Failed files emit file-failed/ instead of period-boundary/, so they do not
+        // inflate files_done; a cut-off or partial run cannot report status=ok
+        // (CONSOLIDATION Q5 / FrameNet 33/14900).
+        string status = DeriveRunStatus(
+            result.UnitsFailed,
+            emptySourceNoOp,
+            capped: options.DecomposerOptions.MaxInputUnits > 0,
+            filesDone: counters.FilesDone,
+            filesTotal: declaredFiles);
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
@@ -481,6 +502,26 @@ public sealed class IngestRunner
                 + "but ingested 0 — grammar/format mismatch (silent no-op). Failing instead of reporting success. "
                 + "Check the decomposer's modality/grammar matches the actual file format.");
         return result;
+    }
+
+    /// <summary>
+    /// Journal / INGEST_COMPLETE status. File-tracking sources cannot report <c>ok</c>
+    /// when <paramref name="filesDone"/> is short of <paramref name="filesTotal"/> —
+    /// that was the CONSOLIDATION Q5 lie (<c>FrameNet 33/14900 ok</c>).
+    /// </summary>
+    internal static string DeriveRunStatus(
+        long unitsFailed,
+        bool emptySourceNoOp,
+        bool capped,
+        int filesDone,
+        long filesTotal)
+    {
+        if (unitsFailed > 0) return "failed";
+        if (emptySourceNoOp) return "empty-noop";
+        if (capped) return "capped";
+        // Exact match: undercount was Q5; overcount (segment markers counted as files) is the same lie.
+        if (filesTotal > 0 && filesDone != filesTotal) return "failed";
+        return "ok";
     }
 
     /// <summary>

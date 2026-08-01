@@ -1,6 +1,7 @@
 using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -114,11 +115,8 @@ internal static class AppComposition
         {
             try
             {
-                dataSource = new Npgsql.NpgsqlDataSourceBuilder(
-                    LaplaceInstall.PostgresConnectionString()).Build();
-                using var conn = dataSource.OpenConnection();
-                using var cmd = new Npgsql.NpgsqlCommand("SELECT 1 FROM app.billing_quotes LIMIT 1;", conn);
-                cmd.ExecuteNonQuery();
+                dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+                BillingPostgres.BillingSchemaProbe.EnsureQuotesTableReachable(dataSource);
                 mode = "postgres";
             }
             catch (Exception ex) when (requested is not "postgres")

@@ -81,17 +81,27 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
             yield return change;
     }
 
-    private abstract class FnComposePhase<T> : ComposeDecomposerPhase<T>
+    /// <summary>
+    /// One XML file → records via <see cref="ExtractFileAsync"/>; multi-file pool
+    /// parallelizes across the directory. Same unit for frame / LU / fulltext.
+    /// </summary>
+    private abstract class FnMultiFilePhase<T> : DecomposerMultiFile<T>
     {
         private readonly int _batch;
+        private readonly string _phaseLabel;
 
-        protected FnComposePhase(int batch) => _batch = batch;
+        protected FnMultiFilePhase(int batch, string phaseLabel)
+        {
+            _batch = batch;
+            _phaseLabel = phaseLabel;
+        }
 
         public override Hash128 SourceId => Source;
         public override string SourceName => "FrameNetDecomposer";
         public override int LayerOrder => 3;
         public override Hash128 TrustClassId => TrustClass;
         protected override double SourceTrust => TC.AcademicCurated;
+        public override bool PerFileCompletion => true;
 
         public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.CompletedTask;
@@ -99,71 +109,103 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
         public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.FromResult<long?>(null);
 
-        protected override IngestBatchConfig BuildPipelineConfig(
-            IDecomposerContext context, DecomposerOptions options) =>
+        protected abstract void Compose(T record, SubstrateChangeBuilder builder);
+
+        protected sealed override IIngestRecordHandler<T> CreateHandlerForFile(string fileLabel) =>
+            new DirectComposeHandler<T>(Compose);
+
+        protected sealed override IngestBatchConfig ConfigForFile(
+            string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
             IngestPipelineDefaults.ApplyMaxInputUnits(
                 IngestPipelineDefaults.Compose(
-                    SourceId, BatchLabelPrefix, _batch, options, context.Reader, PipelineProfile),
+                    SourceId, $"FrameNetDecomposer/{_phaseLabel}", _batch, options, reader,
+                    PipelineProfile),
                 options);
     }
 
-    private sealed class FramePhase : FnComposePhase<Frame>
+    private sealed class FramePhase : FnMultiFilePhase<Frame>
     {
-        public FramePhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "frame";
+        public FramePhase(int batch) : base(batch, "frame") { }
+
         protected override void Compose(Frame frame, SubstrateChangeBuilder b)
         {
             EmitFrameEntities(b, frame);
             EmitFrameAttestations(b, frame);
         }
-        protected override async IAsyncEnumerable<Frame> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
+
+        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+            string ecosystemPath, DecomposerOptions options)
         {
             string frameDir = Path.Combine(ecosystemPath, "frame");
-            if (!Directory.Exists(frameDir)) yield break;
-            foreach (var path in SharedXmlFramesetReader.EnumerateXmlFiles(frameDir))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (ParseFrame(path) is { } frame) yield return frame;
-            }
+            if (!Directory.Exists(frameDir)) return [];
+            return SharedXmlFramesetReader.EnumerateXmlFiles(frameDir)
+                .Select(p => (p, $"framenet/frame/{Path.GetFileName(p)}"))
+                .ToList();
+        }
+
+        protected override async IAsyncEnumerable<Frame> ExtractFileAsync(
+            string filePath, string fileLabel, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (ParseFrame(filePath) is { } frame)
+                yield return frame;
             await Task.CompletedTask;
         }
     }
 
-    private sealed class LuPhase : FnComposePhase<FrameNetLuIngest.LuDocument>
+    private sealed class LuPhase : FnMultiFilePhase<FrameNetLuIngest.LuDocument>
     {
-        public LuPhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "lu";
+        public LuPhase(int batch) : base(batch, "lu") { }
+
         protected override void Compose(FrameNetLuIngest.LuDocument lu, SubstrateChangeBuilder b) =>
             FrameNetLuIngest.EmitLu(b, lu, Source);
-        protected override async IAsyncEnumerable<FrameNetLuIngest.LuDocument> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
+
+        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+            string ecosystemPath, DecomposerOptions options)
+        {
+            string luDir = Path.Combine(ecosystemPath, "lu");
+            if (!Directory.Exists(luDir)) return [];
+            return Directory.EnumerateFiles(luDir, "lu*.xml")
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .Select(p => (p, $"framenet/lu/{Path.GetFileName(p)}"))
+                .ToList();
+        }
+
+        protected override async IAsyncEnumerable<FrameNetLuIngest.LuDocument> ExtractFileAsync(
+            string filePath, string fileLabel, DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            await foreach (var lu in FrameNetLuIngest.ParseAllLusAsync(
-                               Path.Combine(ecosystemPath, "lu"), ct))
+            ct.ThrowIfCancellationRequested();
+            if (FrameNetLuIngest.ParseLu(filePath) is { } lu)
                 yield return lu;
+            await Task.CompletedTask;
         }
     }
 
-    private sealed class FulltextPhase : FnComposePhase<FulltextAnno>
+    private sealed class FulltextPhase : FnMultiFilePhase<FulltextAnno>
     {
-        public FulltextPhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "fulltext";
-        protected override void Compose(FulltextAnno ann, SubstrateChangeBuilder b) => ComposeFulltextAnno(ann, b);
-        protected override async IAsyncEnumerable<FulltextAnno> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
+        public FulltextPhase(int batch) : base(batch, "fulltext") { }
+
+        protected override void Compose(FulltextAnno ann, SubstrateChangeBuilder b) =>
+            ComposeFulltextAnno(ann, b);
+
+        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+            string ecosystemPath, DecomposerOptions options)
         {
             string fulltextDir = Path.Combine(ecosystemPath, "fulltext");
-            if (!Directory.Exists(fulltextDir)) yield break;
-            foreach (var path in SharedXmlFramesetReader.EnumerateXmlFiles(fulltextDir))
-            {
-                ct.ThrowIfCancellationRequested();
-                await foreach (var ann in ParseFulltextAsync(path, ct))
-                    yield return ann;
-            }
+            if (!Directory.Exists(fulltextDir)) return [];
+            return SharedXmlFramesetReader.EnumerateXmlFiles(fulltextDir)
+                .Select(p => (p, $"framenet/fulltext/{Path.GetFileName(p)}"))
+                .ToList();
+        }
+
+        protected override async IAsyncEnumerable<FulltextAnno> ExtractFileAsync(
+            string filePath, string fileLabel, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var ann in ParseFulltextAsync(filePath, ct))
+                yield return ann;
         }
     }
 
@@ -178,24 +220,14 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
                 Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
     }
 
-    // The old inventory estimated units as NEWLINES of the XML files
-    // (~13.9M for v1.7), while the pipeline numerator counts parsed records
-    // (~44K) — progress showed 0.3% at completion and read as a truncated or
-    // hung run. Files are the only statically honest unit here: frame and LU
-    // phases yield exactly one record per file; fulltext yields one record per
-    // annotation, so the fraction still overshoots 100% on the fulltext tail —
-    // a known skew, small next to the 300x newline lie, gone once per-file
-    // consumption accounting lands on the flat pipeline lane.
+    // Phases are DecomposerMultiFile with PerFileCompletion — honest files_done.
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         var paths = InputFiles(context.EcosystemPath);
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        var specs = paths
-            .Select(p => new IngestFileSpec(Path.GetFileName(p), p, 1))
-            .ToList();
-        return Task.FromResult<IngestInventory?>(
-            new IngestInventory("files", paths.Count, specs));
+        return Task.FromResult(IngestInventory.FromFiles(
+            "files", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

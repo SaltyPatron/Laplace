@@ -42,12 +42,11 @@
  */
 
 static const char *UNPACK_QUERY =
-    "SELECT p.entity_id, c.entity_id "
-    "FROM laplace.physicalities p "
-    "CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c "
-    "WHERE p.type = 1 "
-    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
-    "ORDER BY p.entity_id, c.ordinal";
+    "SELECT w.id, c.entity_id "
+    "FROM laplace.v_word_points w "
+    "CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c "
+    "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]::bytea[] "
+    "ORDER BY w.id, c.ordinal";
 
 static const char *WS_CLASSIFY_QUERY =
     "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)";

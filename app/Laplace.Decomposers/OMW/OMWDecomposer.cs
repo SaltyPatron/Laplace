@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -28,25 +29,50 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
         return Task.CompletedTask;
     }
 
-    protected override IMultiFileRecordStream<GrammarIngestRecord> CreateMultiFileStream(
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
         string wnsDir = Path.Combine(ecosystemPath, "wns");
-        if (!Directory.Exists(wnsDir))
-            return new OmwMultiFileStream([]);
+        if (!Directory.Exists(wnsDir)) return [];
 
         var tabFiles = OMWTabFiles.EnumerateTabFiles(wnsDir, options.Languages)
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
 
-        var labeled = new List<(string Path, string Label, string Lang)>(tabFiles.Count);
+        var labeled = new List<(string Path, string Label)>(tabFiles.Count);
         for (int i = 0; i < tabFiles.Count; i++)
         {
             string path = tabFiles[i];
             string lang = OMWTabFiles.FileLang(path);
-            labeled.Add((path, $"omw/{i}/{lang}", lang));
+            labeled.Add((path, $"omw/{i}/{lang}"));
         }
-        return new OmwMultiFileStream(labeled);
+        return labeled;
+    }
+
+    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var omw = EtlManifest.Get("omw");
+        var stream = GrammarFileRecordStream.ForSource(
+            filePath, omw, static line => line.Length > 0 && line[0] != (byte)'#');
+
+        await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
+        while (true)
+        {
+            GrammarIngestRecord record;
+            try
+            {
+                if (!await e.MoveNextAsync()) break;
+                record = e.Current;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"OMW ingest failed in \"{filePath}\": {ex.Message}", ex);
+            }
+            yield return record;
+        }
     }
 
     protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(string fileLabel) =>
@@ -70,12 +96,10 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        string wnsDir = Path.Combine(context.EcosystemPath, "wns");
-        if (!Directory.Exists(wnsDir)) return Task.FromResult<IngestInventory?>(null);
-        var paths = OMWTabFiles.EnumerateTabFiles(wnsDir, options.Languages)
-            .OrderBy(p => p, StringComparer.Ordinal)
-            .ToList();
-        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
+        var paths = ListFiles(context.EcosystemPath, options).Select(f => f.Path).ToList();
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

@@ -71,3 +71,10 @@ SELECT count(*) = 0 AS no_codepoint_render_shadow
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'laplace' AND c.relname = 'codepoint_render';
+
+-- Rule #6 shared read surfaces (GH #463): one join, one anchor, senses, readable
+-- attestations. Presence is the law; emptiness of the live DB is not a failure.
+SELECT to_regclass('laplace.v_word_points') IS NOT NULL AS has_v_word_points;
+SELECT to_regclass('laplace.v_word_senses') IS NOT NULL AS has_v_word_senses;
+SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attestation_readable;
+SELECT to_regprocedure('laplace.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;

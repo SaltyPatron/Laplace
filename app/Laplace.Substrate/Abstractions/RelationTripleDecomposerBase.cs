@@ -5,10 +5,10 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Base for every relation-triple source (ATOMIC, ConceptNet, …). A subclass implements
-/// ONLY <see cref="Decomposer{TRecord}.ExtractRecordsAsync"/> — pure content → (subject, relation, object)
-/// records. Each record composes two tier trees (subject + object) before the edge is
-/// emitted; batch/probe/commit sizing uses <see cref="IngestSourceProfile.RelationTriple"/>.
+/// Monolith / few-file relation-triple source. Subclass implements
+/// <see cref="RelationTripleDecomposer.ExtractFileAsync"/> (one file → records) and
+/// <see cref="RelationTripleDecomposer.ListInputFiles"/>. Compose/dedupe/COPY is
+/// <see cref="RelationTripleHandler"/> via the shared pipeline.
 /// </summary>
 public abstract class RelationTripleDecomposerBase : RelationTripleDecomposer;
 
@@ -45,4 +45,31 @@ public abstract class RelationTripleDecomposerBase<TSource, TScope> : RelationTr
 
     protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
         Task.CompletedTask;
+}
+
+/// <summary>
+/// Multi-file relation-triple source. Per-file unit is
+/// <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/> — same masticate-to-
+/// <see cref="RelationTripleRecord"/> job as the monolith base; the pool calls it once
+/// per path. Handler is always <see cref="RelationTripleHandler"/>.
+/// </summary>
+public abstract class RelationTripleMultiFileDecomposerBase<TSource, TScope>
+    : DecomposerMultiFile<RelationTripleRecord, TSource, TScope>
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    public override int EstimatedBytesPerRecord => IngestSourceProfile.RelationTriple.EstBytesPerRecord;
+
+    public override int EstimatedComposeUnitsPerRecord =>
+        IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
+
+    public override bool PerFileCompletion => true;
+
+    protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandlerForFile(
+        string fileLabel) =>
+        new RelationTripleHandler(SourceId, SourceTrust);
+
+    protected sealed override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.RelationTriple(SourceId, fileLabel, options, reader);
 }

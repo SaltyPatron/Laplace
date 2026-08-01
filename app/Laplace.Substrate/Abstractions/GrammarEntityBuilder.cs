@@ -89,7 +89,7 @@ public sealed class GrammarEntityBuilder
 
         if (GrammarRowComposer.TryProbeRowRoot(_utf8, _ast, _modalityId, out var rootId, out _)
             && (containmentReader.IsProvenPresent(rootId)
-                || IsPresent(await containmentReader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false), 0)))
+                || BitmapBits.IsSet(await containmentReader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false), 0)))
         {
             containmentReader.MarkProven([rootId]);
             return (ImmutableArray<EntityRow>.Empty, ImmutableArray<PhysicalityRow>.Empty,
@@ -115,12 +115,6 @@ public sealed class GrammarEntityBuilder
             if (composeResult != IntPtr.Zero)
                 NativeInterop.ComposeResultFree(composeResult);
         }
-    }
-
-    private static bool IsPresent(byte[] bm, int index)
-    {
-        if (bm.Length == 0) return false;
-        return (bm[index >> 3] & (1 << (index & 7))) != 0;
     }
 
     private unsafe IntPtr ComposeProbe()

@@ -56,7 +56,7 @@ public static class FeedbackContent
                 result[i] = new ResolvedToken(tokens[i], null, false);
                 continue;
             }
-            bool present = (bitmap[probeBit >> 3] & (1 << (probeBit & 7))) != 0;
+            bool present = BitmapBits.IsSet(bitmap, probeBit);
             probeBit++;
             result[i] = new ResolvedToken(tokens[i], resolved[i], present);
         }
@@ -124,17 +124,9 @@ public static class FeedbackContent
         NpgsqlDataSource ds, Hash128 subject, Hash128 typeId, Hash128 obj,
         CancellationToken ct = default)
     {
-        await using var conn = await ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT rating, rd, witness_count FROM laplace.consensus "
-            + "WHERE subject_id = @s AND type_id = @t AND object_id = @o";
-        cmd.Parameters.AddWithValue("s", subject.ToBytes());
-        cmd.Parameters.AddWithValue("t", typeId.ToBytes());
-        cmd.Parameters.AddWithValue("o", obj.ToBytes());
-        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await r.ReadAsync(ct).ConfigureAwait(false)) return null;
-        return new ConsensusState(r.GetInt64(0), r.GetInt64(1), r.GetInt64(2));
+        var cell = await NpgsqlConsensusCell.ReadAsync(ds, subject, typeId, obj, ct)
+            .ConfigureAwait(false);
+        return cell is { } c ? new ConsensusState(c.Rating, c.Rd, c.WitnessCount) : null;
     }
 
     /// <summary>

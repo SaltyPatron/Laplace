@@ -118,3 +118,29 @@ WHERE n.nspname = 'laplace' AND c.relname = 'codepoint_render';
  t
 (1 row)
 
+-- Rule #6 shared read surfaces (GH #463): one join, one anchor, senses, readable
+-- attestations. Presence is the law; emptiness of the live DB is not a failure.
+SELECT to_regclass('laplace.v_word_points') IS NOT NULL AS has_v_word_points;
+ has_v_word_points 
+-------------------
+ t
+(1 row)
+
+SELECT to_regclass('laplace.v_word_senses') IS NOT NULL AS has_v_word_senses;
+ has_v_word_senses 
+-------------------
+ t
+(1 row)
+
+SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attestation_readable;
+ has_v_attestation_readable 
+----------------------------
+ t
+(1 row)
+
+SELECT to_regprocedure('laplace.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
+ has_word_anchor 
+-----------------
+ t
+(1 row)
+

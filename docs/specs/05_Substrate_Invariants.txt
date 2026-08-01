@@ -4,6 +4,8 @@ Not a how-to-work-with-it doc (see 06_Engineering_Ruleset.txt for that). This is
 list: properties that hold by construction, and what a collision/equality/bit actually
 certifies vs. what it does not. Every rule below is grounded in a specific file/line, not
 aspiration — update it when the grounding changes, don't let it drift into wishful thinking.
+Not every invariant here has an automated CI gate — enforcement and process live in
+06_Engineering_Ruleset.txt and CLAUDE.md (see their axioms vs gates vs ops split).
 
 Rule #1: Content-hash identity is exact. Centroid/hilbert identity is not.
     - BLAKE3 entity-id collision (identical id) MUST mean identical canonical content. This

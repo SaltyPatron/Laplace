@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 
@@ -64,27 +63,11 @@ public sealed class SubstrateStateValuer : IStateValuer
     private async Task<Dictionary<Hash128, OutcomeStat>> ReadOutcomeStatsAsync(
         IReadOnlyCollection<Hash128> ids, CancellationToken ct)
     {
-        var raw = new byte[ids.Count][];
-        int k = 0; foreach (var id in ids) raw[k++] = id.ToBytes();
-
+        var byId = await Laplace.SubstrateCRUD.Npgsql.NpgsqlConsensusByIds.ReadAsync(
+            _ds, ids, ChessVocabulary.OutcomeType, ct).ConfigureAwait(false);
         var map = new Dictionary<Hash128, OutcomeStat>(ids.Count);
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT id, eff_mu, rd, witness_count FROM laplace.consensus_by_ids($1, $2)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            Value = raw,
-        });
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            NpgsqlDbType = NpgsqlDbType.Bytea,
-            Value = ChessVocabulary.OutcomeType.ToBytes(),
-        });
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
-            map[Hash128.FromBytes((byte[])r[0])] = new OutcomeStat(r.GetDouble(1), r.GetDouble(2), r.GetDouble(3));
+        foreach (var (id, row) in byId)
+            map[id] = new OutcomeStat(row.EffMu, row.Rd, row.Witnesses);
         return map;
     }
 }

@@ -17,19 +17,14 @@ internal static class FnLuSynsetBridgeIngest
         long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
         long rowsTotal = 0;
 
-        while (true)
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
-            if (line.Length == 0 || line[0] == '#') continue;
+            if (lineMem.Length == 0 || lineMem.Span[0] == (byte)'#') continue;
 
+            string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
             if (!TryParseRow(line, out string? frame, out string? luName, out string? synRaw))
                 continue;
 
@@ -54,20 +49,15 @@ internal static class FnLuSynsetBridgeIngest
         long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
         long rowsTotal = 0;
         string? currentFrame = null;
 
-        while (true)
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
-            if (line.Length == 0 || line[0] == '#') continue;
+            if (lineMem.Length == 0 || lineMem.Span[0] == (byte)'#') continue;
 
+            string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
             if (TryParseWfnNativeFrameHeader(line, out string frameName))
             {
                 currentFrame = frameName;
@@ -172,13 +162,8 @@ internal static class FnLuSynsetBridgeIngest
         return luName.Length > 0 && synRaw.Length > 0;
     }
 
-    internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
-    {
-        long lines = 0;
-        await foreach (var _ in ReadLinesAsync(path, ct))
-            lines++;
-        return lines > 0 ? lines : null;
-    }
+    internal static Task<long?> EstimateLineCountAsync(string path, CancellationToken ct) =>
+        Task.FromResult<long?>(EtlInventory.EstimateNewlineCount(path, ct));
 
     private static string PosSuffix(string pos) => pos.Trim().ToLowerInvariant() switch
     {
@@ -190,20 +175,4 @@ internal static class FnLuSynsetBridgeIngest
         "idio" => "idio",
         _ => pos.Trim().ToLowerInvariant(),
     };
-
-    private static async IAsyncEnumerable<string> ReadLinesAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) yield break;
-            yield return line;
-        }
-    }
 }

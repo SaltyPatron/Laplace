@@ -210,7 +210,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
-        var probePhysHilberts = new List<Hash128>(phys.Ids.Count);
+        var probePhysHilberts = new List<Hilbert128>(phys.Ids.Count);
         for (int i = 0; i < phys.Ids.Count; i++)
             if (physIdSet.Add(phys.Ids[i]))
             {
@@ -320,7 +320,7 @@ public sealed partial class NpgsqlSubstrateWriter
             if (persistedPhys is { Count: > 0 })
             {
                 probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
-                probePhysHilbertsUse = new List<Hash128>(probePhysIds.Count);
+                probePhysHilbertsUse = new List<Hilbert128>(probePhysIds.Count);
                 for (int i = 0; i < probePhysIds.Count; i++)
                     if (persistedPhys.Contains(probePhysIds[i])) physCacheSkip++;
                     else { probePhysIdsUse.Add(probePhysIds[i]); probePhysHilbertsUse.Add(probePhysHilberts[i]); }
@@ -449,12 +449,14 @@ public sealed partial class NpgsqlSubstrateWriter
             // Novel ids to fold into the run-persisted cache — ONLY after this apply
             // commits (below). null outside a bulk run: no cache, nothing to collect.
             var novelEntIds = persistedEnt is null ? null : new List<Hash128>(keptEnts.Capacity);
+            var keptEntTypes = new HashSet<Hash128>();
             for (int i = 0; i < ents.Ids.Count; i++)
             {
                 if (!seenEnt.Add(ents.Ids[i])) continue;
                 if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
-                keptEnts.Add(new KeptRow(ents.Ids[i], ents.Rows[i], -1, 0));
+                keptEnts.Add(new KeptRow(CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
                 novelEntIds?.Add(ents.Ids[i]);
+                if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
@@ -464,14 +466,15 @@ public sealed partial class NpgsqlSubstrateWriter
             // way id-sorted groups land in disjoint btree leaf ranges.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
-            // Physicality KeptRow.SortKey is the hilbert key (GiST locality), not the id,
+            // Physicality KeptRow.SortKey is the hilbert index (GiST locality), not the id,
             // so novel ids are collected here explicitly rather than recovered post-sort.
             var novelPhysIds = persistedPhys is null ? null : new List<Hash128>(keptPhys.Capacity);
             for (int i = 0; i < phys.Ids.Count; i++)
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
-                keptPhys.Add(new KeptRow(phys.HilbertKeys[i], phys.Rows[i], -1, 0));
+                keptPhys.Add(new KeptRow(
+                    CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]), phys.Rows[i], -1, 0));
                 novelPhysIds?.Add(phys.Ids[i]);
             }
 
@@ -505,7 +508,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 var group = attGroups[atts.Ids[i]];
                 bool collapsed = group.Games != atts.Counts[i] || group.Sum != atts.SumScores[i];
                 keptAtts.Add(new KeptRow(
-                    atts.Ids[i], atts.Rows[i],
+                    CopyPartitionKey.ForEntityId(atts.Ids[i]), atts.Rows[i],
                     collapsed ? group.Games : -1,
                     atts.CountValueOffsets[i],
                     collapsed ? group.Sum : 0,
@@ -590,13 +593,17 @@ public sealed partial class NpgsqlSubstrateWriter
                 // and attestations have no cross-dependency and are the two
                 // expensive phases: they overlap, so the phase cost is
                 // max(phys, atts) instead of the old sequential sum.
+                // Entity batches often share one type_id (throughput fixture; many
+                // real sources too). Id-range parallelism then contends on the same
+                // type/tier_type btree leaves — cap groups when the batch is
+                // type-homogeneous so COPY is not fighting itself.
                 rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
-                    entBlobs, keptEnts, ct);
+                    entBlobs, keptEnts, ct, sharedSecondaryKeys: keptEntTypes.Count);
                 eIns = keptEnts.Count;
                 var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                    physBlobs, keptPhys, ct);
+                    physBlobs, keptPhys, ct, sharedSecondaryKeys: int.MaxValue);
                 var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
-                    attBlobs, keptAtts, ct);
+                    attBlobs, keptAtts, ct, sharedSecondaryKeys: int.MaxValue);
                 await Task.WhenAll(physCopyTask, attCopyTask);
                 rtCopy += physCopyTask.Result + attCopyTask.Result;
                 pIns = keptPhys.Count;
@@ -866,7 +873,9 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         else
         {
-            int workers = Math.Min(chunkCount, Math.Min(ApplyParallelism, 8));
+            // Was capped at 8; a 500k-id verify is ceil(500k/131072)=4 chunks on
+            // small hosts and more on large probes — let ApplyParallelism own it.
+            int workers = Math.Min(chunkCount, ApplyParallelism);
             int next = -1;
             await CpuTopology.RunPinnedAsyncParallel(workers, async (_, token) =>
             {
@@ -904,21 +913,21 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>Pair-keyed presence probe (physicalities:
-    /// RANGE(hilbert_index)). The write lane stages every row's hilbert key
+    /// RANGE(hilbert_index)). The write lane stages every row's hilbert index
     /// (it is the parallel-COPY sort key already), so the probe prunes
     /// per row instead of descending every leaf per id.</summary>
     private Task<HashSet<Hash128>> ProbePresentPairKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> keys,
+        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hilbert128> hilbertIndexes,
         Action<int> addRoundTrips, CancellationToken ct)
     {
-        if (keys.Count != ids.Count)
+        if (hilbertIndexes.Count != ids.Count)
             throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {keys.Count} keys");
+                $"keyed probe arrays misaligned: {ids.Count} ids / {hilbertIndexes.Count} hilbert indexes");
         return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
             (parameters, start, n) =>
             {
                 var chunk = new byte[n][];
-                for (int i = 0; i < n; i++) chunk[i] = keys[start + i].ToBytes();
+                for (int i = 0; i < n; i++) chunk[i] = hilbertIndexes[start + i].ToByteArray();
                 parameters.Add(new NpgsqlParameter
                 { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             }, addRoundTrips, ct);
@@ -968,13 +977,35 @@ public sealed partial class NpgsqlSubstrateWriter
             }, addRoundTrips, ct);
     }
 
+    /// <summary>
+    /// 16-octet memcmp key matching Postgres bytea/btree order for the column
+    /// that partitions parallel COPY groups. For entities/attestations that is
+    /// the row id (<see cref="Hash128"/>); for physicalities it is the 128-bit
+    /// hilbert curve index. Storage here is wire order only — not a claim that
+    /// hilbert is a hash.
+    /// </summary>
+    private readonly struct CopyPartitionKey
+    {
+        private readonly Hash128 _wire;
+        private CopyPartitionKey(Hash128 wire) => _wire = wire;
+        public static CopyPartitionKey ForEntityId(Hash128 id) => new(id);
+        public static CopyPartitionKey ForHilbertIndex(Hilbert128 index)
+        {
+            Span<byte> pack = stackalloc byte[16];
+            index.WriteBytes(pack);
+            return new(Hash128.FromBytes(pack));
+        }
+        public int CompareToBytewise(CopyPartitionKey other) =>
+            _wire.CompareToBytewise(other._wire);
+    }
+
     /// <summary>SortKey partitions parallel COPY groups into disjoint index
     /// keyspaces: the row id for btree-indexed tables, the hilbert index for
     /// physicalities (coord GiST locality). Patch/PatchSum carry a
     /// duplicate-collapsed group's summed games/sum_score for the
     /// representative row (Patch = -1 means unpatched).</summary>
     private readonly record struct KeptRow(
-        Hash128 SortKey, StagedRowRef Row, long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
+        CopyPartitionKey SortKey, StagedRowRef Row, long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
@@ -1011,13 +1042,25 @@ public sealed partial class NpgsqlSubstrateWriter
         await CopyFilteredAsync(conn, tableName, table, blobs, rows, patches, countOffs, sumPatches, sumOffs, ct);
     }
 
+    private static int ResolveCopyGroups(int rowCount, int sharedSecondaryKeys)
+    {
+        int bySize = (int)Math.Min(ApplyParallelism, Math.Max(1L, rowCount / 16_384));
+        // Homogeneous type_id → every parallel backend updates the same
+        // entities_type_btree / tier_type leaf pages. Two groups keep some
+        // fan-out without the BufferContent pile-up measured at 12-way.
+        if (sharedSecondaryKeys <= 1) return Math.Min(bySize, 2);
+        if (sharedSecondaryKeys <= 4) return Math.Min(bySize, 4);
+        return bySize;
+    }
+
     private async Task<int> CopyPhaseParallelAsync(
         string tableName, IntentStageTable table,
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct)
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct,
+        int sharedSecondaryKeys = int.MaxValue)
     {
         if (kept.Count == 0) return 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        int groups = (int)Math.Min(ApplyParallelism, Math.Max(1L, kept.Count / 16_384));
+        int groups = ResolveCopyGroups(kept.Count, sharedSecondaryKeys);
 
         // Sort by id so range-partitioned groups own disjoint btree
         // keyspaces — measured LWLock:BufferContent contention disappears
@@ -1051,7 +1094,10 @@ public sealed partial class NpgsqlSubstrateWriter
             "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s)",
             tableName, kept.Count, groups, sw.ElapsedMilliseconds,
             kept.Count / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
-        return groups;
+        // One round-trip budget unit per parallel COPY wave. Counting each
+        // connection as its own RT made MaxRoundTripsPerApplyBatch (12) fail
+        // on every multi-P-core host while the wave itself is one apply phase.
+        return 1;
     }
 
     private static async Task CopyFilteredAsync(

@@ -105,8 +105,11 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         throw new ArgumentException($"No registered decomposer for source '{sourceKey}'", nameof(sourceKey));
     }
 
-    public IDecomposer ResolveModel(string modelDir, bool? persistEvidence = null) =>
-        new ModelDecomposer(modelDir, persistEvidence);
+    public IDecomposer ResolveModel(string modelDir, bool? persistEvidence = null)
+    {
+        var resolved = SafetensorSnapshotWitness.ResolveCompleteDir(modelDir) ?? modelDir;
+        return new ModelDecomposer(resolved, persistEvidence);
+    }
 
     public IDecomposer ResolveRecipe(string recipePath) =>
         new RecipeDecomposer(recipePath);

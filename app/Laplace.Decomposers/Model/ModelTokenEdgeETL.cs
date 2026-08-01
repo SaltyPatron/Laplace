@@ -194,6 +194,15 @@ public sealed class ModelTokenEdgeETL
 
 
         float[] embed = WeightTensorETL.LoadTensorF32(refMap, embedRole.Name, (long)vocab * d);
+        if (embed.Length == 0)
+        {
+            // O10: undecodable dtype — tensor presence is still witnessed via ParseModel;
+            // numeric plane emission requires an interpreter we do not invent.
+            _log.LogWarning(
+                "phase=edges: embed '{Name}' dtype undecodable; skipping numeric planes",
+                embedRole.Name);
+            yield break;
+        }
         var Af = new float[(long)n * d];
         for (int i = 0; i < n; i++)
             Array.Copy(embed, (long)rowOfToken[i] * d, Af, (long)i * d, d);
@@ -283,7 +292,7 @@ public sealed class ModelTokenEdgeETL
         [EnumeratorCancellation] CancellationToken ct)
     {
         var cfg = _manifest.Config;
-        var profile = ArchitectureProfile.For(cfg.ModelType);
+        var profile = ArchitectureProfile.For(cfg);
         int H = cfg.NumHeads, Hkv = cfg.NumKvHeads, hd = cfg.HeadDim;
         if (H <= 0 || hd <= 0)
         { _log.LogWarning("phase=factors: no head geometry (H={H}, hd={Hd}); skipping", H, hd); yield break; }
@@ -302,16 +311,23 @@ public sealed class ModelTokenEdgeETL
         if (profile.EmbeddingNormWeight is not null)
         {
             var gamma = WeightTensorETL.LoadTensorF32(refMap, profile.EmbeddingNormWeight, d);
-            var beta = TryLoadVector(refMap, profile.EmbeddingNormBias, d);
-            int rc;
-            unsafe
+            if (gamma.Length == 0)
             {
-                fixed (double* px = X) fixed (float* pg = gamma) fixed (float* pb = beta)
-                    rc = DynInterop.LayerNormRowsD(px, (nuint)n, (nuint)d, pg,
-                        beta is null ? null : pb, profile.NormEps);
+                _log.LogWarning("phase=factors: embedding norm dtype undecodable; skipping LayerNorm");
             }
-            if (rc != 0)
-            { _log.LogWarning("phase=factors: layer_norm_rows_d rc={Rc}; aborting", rc); yield break; }
+            else
+            {
+                var beta = TryLoadVector(refMap, profile.EmbeddingNormBias, d);
+                int rc;
+                unsafe
+                {
+                    fixed (double* px = X) fixed (float* pg = gamma) fixed (float* pb = beta)
+                        rc = DynInterop.LayerNormRowsD(px, (nuint)n, (nuint)d, pg,
+                            beta is null ? null : pb, profile.NormEps);
+                }
+                if (rc != 0)
+                { _log.LogWarning("phase=factors: layer_norm_rows_d rc={Rc}; aborting", rc); yield break; }
+            }
         }
 
         _log.LogInformation("phase=factors: probe input ready ({N:N0} tokens, {Ms} ms)",
@@ -338,7 +354,12 @@ public sealed class ModelTokenEdgeETL
             && !string.Equals(lmRole.Name, _manifest.Embedding!.Name, StringComparison.Ordinal))
         {
             float[]? Ufull = null;
-            try { Ufull = WeightTensorETL.LoadTensorF32(refMap, lmRole.Name, (long)cfg.VocabSize * d); }
+            try
+            {
+                var loaded = WeightTensorETL.LoadTensorF32(refMap, lmRole.Name, (long)cfg.VocabSize * d);
+                if (loaded.Length > 0) Ufull = loaded;
+                else _log.LogWarning("phase=factors: lm_head dtype undecodable; lm plane skipped");
+            }
             catch (Exception ex)
             { _log.LogWarning("phase=factors: lm_head load failed ({Msg}); lm plane skipped", ex.Message); }
             if (Ufull is not null)
@@ -492,7 +513,12 @@ public sealed class ModelTokenEdgeETL
         double[]? Vraw = ProjectPlane(X, n, d, refMap, vRole.Name, kvDim, profile, L, "v");
         if (Vraw is null) return;
         float[] Wo;
-        try { Wo = WeightTensorETL.LoadTensorF32(refMap, oRole.Name, (long)d * attn); }
+        try
+        {
+            Wo = WeightTensorETL.LoadTensorF32(refMap, oRole.Name, (long)d * attn);
+            if (Wo.Length == 0)
+            { _log.LogWarning("phase=factors L{L}.ov: O dtype undecodable", L); return; }
+        }
         catch (Exception ex)
         { _log.LogWarning("phase=factors L{L}.ov: O load failed: {Msg}", L, ex.Message); return; }
 
@@ -550,8 +576,14 @@ public sealed class ModelTokenEdgeETL
         {
             up = WeightTensorETL.LoadTensorF32(refMap, upRole.Name, (long)I * d);
             down = WeightTensorETL.LoadTensorF32(refMap, downRole.Name, (long)d * I);
+            if (up.Length == 0 || down.Length == 0)
+            { _log.LogWarning("phase=factors L{L}.mlp: dtype undecodable", L); return; }
             if (gateRole is not null)
+            {
                 gate = WeightTensorETL.LoadTensorF32(refMap, gateRole.Name, (long)I * d);
+                if (gate.Length == 0)
+                { _log.LogWarning("phase=factors L{L}.mlp: gate dtype undecodable", L); return; }
+            }
         }
         catch (Exception ex)
         { _log.LogWarning("phase=factors L{L}.mlp: load failed: {Msg}", L, ex.Message); return; }
@@ -560,15 +592,17 @@ public sealed class ModelTokenEdgeETL
             ? TryLoadVector(refMap, ArchitectureProfile.BiasOf(upRole.Name), I)
             : null;
 
-        int act = gate is null ? 1 : 0;
+        // #540 — activation identity from witnessed config, not gate-presence alone.
+        int act = profile.ResolveFfnActCode(gate is not null);
+        float[]? gateForAct = act == 0 ? gate : null;
         var Fv = new double[(long)n * d];
         int rcF;
         unsafe
         {
             fixed (double* px = X) fixed (float* pu = up) fixed (float* pub = upBias)
-            fixed (float* pg = gate) fixed (float* pd = down) fixed (double* po = Fv)
+            fixed (float* pg = gateForAct) fixed (float* pd = down) fixed (double* po = Fv)
                 rcF = DynInterop.FfnWriteVectorsD(px, (nuint)n, (nuint)d, pu,
-                    upBias is null ? null : pub, gate is null ? null : pg,
+                    upBias is null ? null : pub, gateForAct is null ? null : pg,
                     (nuint)I, pd, (nuint)d, act, po);
         }
         if (rcF != 0)
@@ -589,7 +623,12 @@ public sealed class ModelTokenEdgeETL
         string weightName, int outDim, ArchitectureProfile profile, int L, string tag)
     {
         float[] W;
-        try { W = WeightTensorETL.LoadTensorF32(refMap, weightName, (long)outDim * d); }
+        try
+        {
+            W = WeightTensorETL.LoadTensorF32(refMap, weightName, (long)outDim * d);
+            if (W.Length == 0)
+            { _log.LogWarning("phase=factors L{L}.{Tag}: dtype undecodable", L, tag); return null; }
+        }
         catch (Exception ex)
         { _log.LogWarning("phase=factors L{L}.{Tag}: load failed: {Msg}", L, tag, ex.Message); return null; }
 
@@ -623,6 +662,7 @@ public sealed class ModelTokenEdgeETL
         if (!refMap.TryGetValue(name, out var t)) return;
         long rows = (t.AbsoluteDataEnd - t.AbsoluteDataStart) / 4 / d;
         var full = WeightTensorETL.LoadTensorF32(refMap, name, rows * d);
+        if (full.Length == 0) return;
         var row0 = new float[d];
         Array.Copy(full, 0, row0, 0, d);
         unsafe
@@ -636,7 +676,11 @@ public sealed class ModelTokenEdgeETL
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string? name, int dim)
     {
         if (name is null || !refMap.ContainsKey(name)) return null;
-        try { return WeightTensorETL.LoadTensorF32(refMap, name, dim); }
+        try
+        {
+            var v = WeightTensorETL.LoadTensorF32(refMap, name, dim);
+            return v.Length == 0 ? null : v;
+        }
         catch (Exception) { return null; }
     }
 
@@ -672,6 +716,8 @@ public sealed class ModelTokenEdgeETL
         {
             Wq = WeightTensorETL.LoadTensorF32(refMap, qRole.Name, (long)attn * d);
             Wk = WeightTensorETL.LoadTensorF32(refMap, kRole.Name, (long)kvDim * d);
+            if (Wq.Length == 0 || Wk.Length == 0)
+            { _log.LogWarning("phase=edges L{L}: attn dtype undecodable", L); yield break; }
         }
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: attn load failed: {Msg}", L, ex.Message); yield break; }
 
@@ -750,6 +796,8 @@ public sealed class ModelTokenEdgeETL
         {
             Wv = WeightTensorETL.LoadTensorF32(refMap, vRole.Name, (long)kvDim * d);
             Wo = WeightTensorETL.LoadTensorF32(refMap, oRole.Name, (long)d * attn);
+            if (Wv.Length == 0 || Wo.Length == 0)
+            { _log.LogWarning("phase=edges L{L}: OV dtype undecodable", L); yield break; }
         }
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: OV load failed: {Msg}", L, ex.Message); yield break; }
 
@@ -829,7 +877,12 @@ public sealed class ModelTokenEdgeETL
             { _log.LogWarning("phase=edges L{L}: MoE layer without router tensor; skipping", L); yield break; }
             int E = cfg.NumExperts;
             float[] router;
-            try { router = WeightTensorETL.LoadTensorF32(refMap, routerRole.Name, (long)E * d); }
+            try
+            {
+                router = WeightTensorETL.LoadTensorF32(refMap, routerRole.Name, (long)E * d);
+                if (router.Length == 0)
+                { _log.LogWarning("phase=edges L{L}: router dtype undecodable", L); yield break; }
+            }
             catch (Exception ex)
             { _log.LogWarning("phase=edges L{L}: router load failed: {Msg}", L, ex.Message); yield break; }
 
@@ -884,8 +937,14 @@ public sealed class ModelTokenEdgeETL
             try
             {
                 upF = WeightTensorETL.LoadTensorF32(refMap, upRole.Name, (long)I * d);
+                if (upF.Length == 0)
+                { _log.LogWarning("phase=edges L{L}: MLP dtype undecodable", L); yield break; }
                 if (gateRole is not null)
+                {
                     gateF = WeightTensorETL.LoadTensorF32(refMap, gateRole.Name, (long)I * d);
+                    if (gateF.Length == 0)
+                    { _log.LogWarning("phase=edges L{L}: MLP gate dtype undecodable", L); yield break; }
+                }
             }
             catch (Exception ex)
             { _log.LogWarning("phase=edges L{L}: MLP load failed: {Msg}", L, ex.Message); yield break; }
@@ -1163,7 +1222,11 @@ public sealed class ModelTokenEdgeETL
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, TensorRole? role, int dim)
     {
         if (role is null) return null;
-        try { return WeightTensorETL.LoadTensorF32(refMap, role.Name, dim); }
+        try
+        {
+            var v = WeightTensorETL.LoadTensorF32(refMap, role.Name, dim);
+            return v.Length == 0 ? null : v;
+        }
         catch (Exception) { return null; }
     }
 

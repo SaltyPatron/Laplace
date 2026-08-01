@@ -100,6 +100,8 @@ public sealed record ModelConfig
     public required bool QkNorm { get; init; }
     public required double RopeTheta { get; init; }
     public required double NormEps { get; init; }
+    /// <summary>Config activation identity (<c>hidden_act</c> / aliases). Empty if absent.</summary>
+    public required string HiddenAct { get; init; }
 
 
     public required int MlaQLoraRank { get; init; }

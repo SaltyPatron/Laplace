@@ -39,11 +39,16 @@ public sealed class EntityWriterThroughputTests
             stage.AddEntity(Id(10_000_000 + i), 0, ThroughputTypeId, null);
 
         var change = WriterThroughputTests.NativeOnly(stage, ThroughputSrc, "tp-ent-native");
+        // Bulk bracket matches IngestRunner; secondaries stay UP (O(tier) probes /
+        // tier_type / GiST need them). Do NOT DropSecondaries here.
+        await writer.BeginBulkRunAsync();
         var sw = Stopwatch.StartNew();
         var result = await writer.ApplyAsync(change);
         sw.Stop();
+        await writer.CompleteBulkRunAsync();
 
         Assert.Equal(totalRows, result.EntitiesInserted);
+        Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
         double rowsPerSec = result.EntitiesInserted / sw.Elapsed.TotalSeconds;
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Entity apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
@@ -112,7 +117,6 @@ public sealed class WriterThroughputTests
         var seedStage = IntentStage.New(totalRows * 2);
         for (int i = 0; i < totalRows * 2; i++)
             seedStage.AddEntity(Id(seedBase + i), 0, ThroughputTypeId, null);
-        await writer.ApplyAsync(NativeOnly(seedStage, ThroughputSrc, "tp-att-seed"));
 
         var attStage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
@@ -125,9 +129,12 @@ public sealed class WriterThroughputTests
                 sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
         }
 
+        await writer.BeginBulkRunAsync();
+        await writer.ApplyAsync(NativeOnly(seedStage, ThroughputSrc, "tp-att-seed"));
         var sw = Stopwatch.StartNew();
         var result = await writer.ApplyAsync(NativeOnly(attStage, ThroughputSrc, "tp-att-native"));
         sw.Stop();
+        await writer.CompleteBulkRunAsync();
 
         Assert.Equal(totalRows, result.AttestationsInserted);
         Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
@@ -149,24 +156,30 @@ public sealed class WriterThroughputTests
         var entStage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
             entStage.AddEntity(Id(entBase + i), 2, ThroughputTypeId, null);
-        await writer.ApplyAsync(NativeOnly(entStage, ThroughputSrc, "tp-phys-seed"));
 
-        Span<double> coord = stackalloc double[4];
-        coord[0] = 0.1; coord[1] = 0.2; coord[2] = 0.3; coord[3] = 0.4;
-        var hilbert = Hilbert128.Encode(coord);
+        // Mantissa-pack each entity id into a 4-double vertex, then hilbert-encode.
+        // Identical raw coords (old fixture) collapsed every row onto one RANGE band /
+        // GiST leaf — the opposite of the bit-pack locality channel. Indexes stay up.
         var physStage = IntentStage.New(totalRows);
+        Span<Hash128> one = stackalloc Hash128[1];
         for (int i = 0; i < totalRows; i++)
         {
             var entId = Id(entBase + i);
+            one[0] = entId;
+            double[] vertex = Trajectory.Build(one);
+            var hilbert = Hilbert128.Encode(vertex);
             physStage.AddPhysicality(
                 Id(70_000_000 + i), entId, (short)PhysicalityType.Content,
-                coord, hilbert,
+                vertex, hilbert,
                 ReadOnlySpan<double>.Empty, 1, 0.0, 4, IntentStage.PgEpochUnixUs);
         }
 
+        await writer.BeginBulkRunAsync();
+        await writer.ApplyAsync(NativeOnly(entStage, ThroughputSrc, "tp-phys-seed"));
         var sw = Stopwatch.StartNew();
         var result = await writer.ApplyAsync(NativeOnly(physStage, ThroughputSrc, "tp-phys-native"));
         sw.Stop();
+        await writer.CompleteBulkRunAsync();
 
         Assert.Equal(totalRows, result.PhysicalitiesInserted);
         Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
@@ -201,3 +214,4 @@ public sealed class WriterThroughputTests
         Assert.InRange(large, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
     }
 }
+

@@ -3,10 +3,11 @@ CREATE OR REPLACE FUNCTION corpus_word_vocab(p_size int, p_trajs int DEFAULT 400
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     WITH t AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
-        FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
-        WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT p_trajs
+        SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
+        FROM v_word_points w
+        WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+          AND w.trajectory IS NOT NULL
+        ORDER BY w.id, w.physicality_id LIMIT p_trajs
     ),
     w AS (
         SELECT tc.entity_id AS id, count(*) AS c

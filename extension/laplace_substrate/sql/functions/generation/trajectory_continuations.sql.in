@@ -42,11 +42,10 @@ CREATE OR REPLACE FUNCTION trajectory_continuations(
     -- the dedup'd _ids() form is what the index rides and would break adjacency
     -- if used for the unpack.
     cand AS MATERIALIZED (
-        SELECT ph.entity_id, c.ordinal, c.entity_id AS tok
-        FROM physicalities ph
-        CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
-        WHERE ph.type = 1
-          AND public.laplace_trajectory_constituent_ids(ph.trajectory)
+        SELECT w.id AS entity_id, c.ordinal, c.entity_id AS tok
+        FROM v_word_points w
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
+        WHERE public.laplace_trajectory_constituent_ids(w.trajectory)
               @> ARRAY[p_ctx[array_length(p_ctx, 1)]]::bytea[]
     ),
     marked AS (

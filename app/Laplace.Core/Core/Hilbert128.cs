@@ -40,4 +40,24 @@ public unsafe struct Hilbert128
         Hilbert128 self = this;
         new ReadOnlySpan<byte>(&self, 16).CopyTo(dest);
     }
+
+    /// <summary>
+    /// Load the packed 128-bit 1D Hilbert index (S³ locality order) from its
+    /// 16-byte big-endian wire / <c>bytea</c> form. Not a 64-bit integer.
+    /// </summary>
+    public static Hilbert128 FromBytes(ReadOnlySpan<byte> src)
+    {
+        if (src.Length != 16)
+            throw new ArgumentException("hilbert_index is a 128-bit value (16 bytes)", nameof(src));
+        Hilbert128 result = default;
+        src.CopyTo(new Span<byte>(&result, 16));
+        return result;
+    }
+
+    public byte[] ToByteArray()
+    {
+        var bytes = new byte[16];
+        WriteBytes(bytes);
+        return bytes;
+    }
 }

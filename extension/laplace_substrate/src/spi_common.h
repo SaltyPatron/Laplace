@@ -167,6 +167,31 @@ spi_realize(Datum id, Datum lang)
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
 }
 
+/* Batch form of spi_realize. ids_arr is a bytea[] ArrayType Datum; returns the
+ * text[] Datum from laplace.realize_batch, or 0 on empty/NULL. Caller owns any
+ * deconstruct_array / DatumGetArrayTypePCopy. */
+static inline Datum
+spi_realize_batch(Datum ids_arr, Datum lang)
+{
+    Oid     argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
+    Datum   args[2] = { ids_arr, lang };
+    char    nulls[3] = "  ";
+    bool    isnull;
+    int     rc;
+    Datum   d;
+
+    if (lang == (Datum) 0)
+        nulls[1] = 'n';
+    rc = SPI_execute_with_args(
+        "SELECT laplace.realize_batch($1, $2)", 2, argtypes, args, nulls, true, 1);
+    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        return (Datum) 0;
+    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull)
+        return (Datum) 0;
+    return d;
+}
+
 static inline Datum
 spi_label(Datum id)
 {

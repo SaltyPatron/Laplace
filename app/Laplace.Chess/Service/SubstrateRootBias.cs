@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -52,36 +51,13 @@ public sealed class SubstrateRootBias : IRootBias
 
     private double[] ReadShrunkEffMu(Hash128[] edgeIds)
     {
-        var raw = new byte[edgeIds.Length][];
-        for (int i = 0; i < edgeIds.Length; i++) raw[i] = edgeIds[i].ToBytes();
-
-        var map = new Dictionary<Hash128, double>(edgeIds.Length);
-        using (var conn = _ds.OpenConnection())
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1, $2)";
-            cmd.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                Value = raw,
-            });
-            cmd.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Bytea,
-                Value = ChessVocabulary.MoveType.ToBytes(),
-            });
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-            {
-                double mu = r.GetDouble(1), w = r.GetDouble(2);
-                map[Hash128.FromBytes((byte[])r[0])] = ChessShrink.Apply(mu, w, _shrinkK0);
-            }
-        }
+        var byId = Laplace.SubstrateCRUD.Npgsql.NpgsqlConsensusByIds.Read(_ds, edgeIds, ChessVocabulary.MoveType);
 
         var outv = new double[edgeIds.Length];
         for (int i = 0; i < edgeIds.Length; i++)
-            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? v : double.NaN;
+            outv[i] = byId.TryGetValue(edgeIds[i], out var row)
+                ? ChessShrink.Apply(row.EffMu, row.Witnesses, _shrinkK0)
+                : double.NaN;
         return outv;
     }
 }

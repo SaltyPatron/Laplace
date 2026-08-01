@@ -61,14 +61,13 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
         SELECT id FROM relation_family_members('EVOKES_FRAME')
     ),
     cand AS MATERIALIZED (
-        SELECT s.object_id AS sense_id, ss.object_id AS synset_id,
+        SELECT s.sense_id, ss.object_id AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
                ss.witness_count AS w2
-        FROM consensus s
-        JOIN consensus ss ON ss.subject_id = s.object_id
+        FROM v_word_senses s
+        JOIN consensus ss ON ss.subject_id = s.sense_id
                          AND ss.type_id = relation_type_id('IS_SENSE_OF')
-        WHERE s.subject_id = ANY(lexical_peers(p_word))
-          AND s.type_id = relation_type_id('HAS_SENSE')
+        WHERE s.word_id = ANY(lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier constituents include a context token.

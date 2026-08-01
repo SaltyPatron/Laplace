@@ -3,6 +3,7 @@ using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 
 namespace Laplace.Chess.Service;
@@ -30,7 +31,7 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabLogEvent("info",
             $"substrate-test [{mode}] {games} games depth {depth} — recording to substrate"));
 
-        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         IRootBias? bias = mode switch
         {
             "fold" => new SubstructureFoldBias(ds),
@@ -189,7 +190,7 @@ public static class ChessLabRunners
 
     public static async Task RunLearnedPstAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         var learned = LearnedPst.ReadWhite(ds);
         var rows = learned.Where(s => s.Witness > 0).OrderByDescending(s => s.DevPoints).Take(32)
             .Select(s => (IReadOnlyList<string>)[((char)('a' + s.File)).ToString() + (s.Rank + 1), s.Piece.ToString(), s.DevPoints.ToString("+0;-0")])

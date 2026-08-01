@@ -17,10 +17,10 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS
           AND eff_mu(c.rating, c.rd) > 0
     ),
     weighted AS (
-        SELECT p.coord, a.w
+        SELECT w.coord, a.w
         FROM attended a
-        JOIN physicalities p ON p.entity_id = a.object_id AND p.type = 1
-        WHERE p.coord IS NOT NULL
+        JOIN v_word_points w ON w.id = a.object_id
+        WHERE w.coord IS NOT NULL
     )
     SELECT
         SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0),

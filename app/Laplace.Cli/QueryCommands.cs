@@ -64,19 +64,15 @@ internal static class QueryCommands
     private static async Task<int> ConverseTurnAsync(NpgsqlConnection conn, string prompt, bool echoPrompt = true)
     {
         var sw = Stopwatch.StartNew();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.recall_session(@p)";
-        cmd.Parameters.AddWithValue("p", prompt);
-        await using var r = await cmd.ExecuteReaderAsync();
+        var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session: null, default);
         if (echoPrompt) Console.WriteLine($"you      : {prompt}");
         bool any = false;
-        while (await r.ReadAsync())
+        foreach (var row in rows)
         {
             any = true;
-            string reply = r.IsDBNull(0) ? "" : r.GetString(0);
-            string mu = r.IsDBNull(1) ? "" : $"  μ={r.GetDecimal(1):F1}";
-            string w = r.IsDBNull(2) ? "" : $" witnesses={r.GetInt64(2)}";
-            Console.WriteLine($"substrate: {reply}{mu}{w}");
+            string mu = row.EffMu is null ? "" : $"  μ={row.EffMu.Value:F1}";
+            string w = row.Witnesses is null ? "" : $" witnesses={row.Witnesses.Value}";
+            Console.WriteLine($"substrate: {row.Reply}{mu}{w}");
         }
         sw.Stop();
         if (!any) Console.WriteLine("substrate: (no reply rows)");
@@ -99,32 +95,18 @@ internal static class QueryCommands
 
         Console.WriteLine("── answer ─────────────────────────────────────────");
         bool any = false;
-        await using (var cmd = conn.CreateCommand())
+        foreach (var row in await NpgsqlSubstrateReads.RecallAsync(conn, goal, default))
         {
-            cmd.CommandTimeout = 120;
-            cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.recall(@p)";
-            cmd.Parameters.AddWithValue("p", goal);
-            await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-            {
-                any = true;
-                string reply = r.IsDBNull(0) ? "" : r.GetString(0);
-                string mu = r.IsDBNull(1) ? "" : $"  μ={r.GetDecimal(1):F1}";
-                string w = r.IsDBNull(2) ? "" : $" witnesses={r.GetInt64(2)}";
-                Console.WriteLine($"  {reply}{mu}{w}");
-            }
+            any = true;
+            string mu = row.EffMu is { } m ? $"  μ={m:F1}" : "";
+            string w = row.Witnesses is { } wit ? $" witnesses={wit}" : "";
+            Console.WriteLine($"  {row.Reply}{mu}{w}");
         }
         if (!any) Console.WriteLine("  (the substrate holds no answer to this yet)");
 
         Console.WriteLine("── gaps (unwitnessed arenas — the research agenda) ──");
-        var gaps = new List<string>();
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT missing_arena FROM laplace.gaps(laplace.resolve_last_word(@p))";
-            cmd.Parameters.AddWithValue("p", goal);
-            await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync()) if (!r.IsDBNull(0)) gaps.Add(r.GetString(0));
-        }
+        var gaps = (await NpgsqlSubstrateReads.GapsForPromptAsync(conn, goal, default))
+            .Where(g => g.Length > 0).ToList();
         Console.WriteLine(gaps.Count > 0
             ? $"  {string.Join(", ", gaps)}"
             : "  (none — every conceptual arena is witnessed)");
@@ -143,14 +125,7 @@ internal static class QueryCommands
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
-        byte[]? id = null;
-        await using (var res = conn.CreateCommand())
-        {
-            res.CommandText = "SELECT laplace.first_placed_topic(@w)";
-            res.Parameters.AddWithValue("w", word);
-            var scalar = await res.ExecuteScalarAsync();
-            if (scalar is byte[] b) id = b;
-        }
+        byte[]? id = await NpgsqlSubstrateReads.FirstPlacedTopicAsync(conn, word, default);
         if (id is null)
         {
             Console.WriteLine($"  ('{word}' is not a placed content entity in this substrate)");
@@ -161,22 +136,14 @@ internal static class QueryCommands
         Console.WriteLine($"  {"neighbor",-26} {"geodesic",10} {"frechet",10}");
         Console.WriteLine($"  {new string('-', 26)} {new string('-', 10)} {new string('-', 10)}");
         bool anyStructural = false;
-        await using (var st = conn.CreateCommand())
+        foreach (var nbRow in await NpgsqlSubstrateReads.NearestNeighbors4dAsync(conn, word, k, default))
         {
-            st.CommandText =
-                "SELECT neighbor, geodesic, frechet FROM laplace.nearest_neighbors_4d(@w, @k)";
-            st.Parameters.AddWithValue("w", word);
-            st.Parameters.AddWithValue("k", k);
-            await using var r = await st.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-            {
-                anyStructural = true;
-                string nb = r.IsDBNull(0) ? "" : r.GetString(0);
-                if (nb.Length > 26) nb = nb[..25] + "…";
-                string g = r.IsDBNull(1) ? "" : r.GetDouble(1).ToString("F6");
-                string f = r.IsDBNull(2) ? "—" : r.GetDouble(2).ToString("F4");
-                Console.WriteLine($"  {nb,-26} {g,10} {f,10}");
-            }
+            anyStructural = true;
+            string nb = nbRow.Neighbor;
+            if (nb.Length > 26) nb = nb[..25] + "…";
+            string g = nbRow.Geodesic.ToString("F6");
+            string f = nbRow.Frechet is { } fr ? fr.ToString("F4") : "—";
+            Console.WriteLine($"  {nb,-26} {g,10} {f,10}");
         }
         if (!anyStructural)
             Console.WriteLine($"  (‘{word}’ is not a placed content entity in this substrate)");
@@ -186,21 +153,11 @@ internal static class QueryCommands
             Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via salient_facts)");
             Console.WriteLine($"  {"type",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
             Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
-            await using var se = conn.CreateCommand();
-            se.CommandText =
-                "SELECT type, fact, round(eff_mu,0)::bigint, witnesses "
-                + "FROM laplace.salient_facts(@id) ORDER BY eff_mu DESC LIMIT @k";
-            se.Parameters.AddWithValue("id", id);
-            se.Parameters.AddWithValue("k", k);
-            await using var r = await se.ExecuteReaderAsync();
-            while (await r.ReadAsync())
+            foreach (var factRow in await NpgsqlSubstrateReads.SalientFactsAsync(conn, id, k, default))
             {
-                string relType = r.IsDBNull(0) ? "" : r.GetString(0);
-                string fact = r.IsDBNull(1) ? "" : r.GetString(1);
+                string fact = factRow.Fact;
                 if (fact.Length > 28) fact = fact[..27] + "…";
-                string mu = r.IsDBNull(2) ? "" : r.GetInt64(2).ToString("N0");
-                string wit = r.IsDBNull(3) ? "" : r.GetInt64(3).ToString();
-                Console.WriteLine($"  {relType,-22} {fact,-28} {mu,10} {wit,4}");
+                Console.WriteLine($"  {factRow.Type,-22} {fact,-28} {(long)Math.Round(factRow.EffMu),10:N0} {factRow.Witnesses,4}");
             }
         }
 
@@ -218,11 +175,10 @@ internal static class QueryCommands
         const bool verbose = false;
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        await using var conn = await ds.OpenConnectionAsync();
 
         string prompt = string.Join(' ', args).Trim();
         if (!string.IsNullOrWhiteSpace(prompt))
-            return await WalkOnceAsync(conn, prompt, steps, order, temp, topk, verbose);
+            return await WalkOnceAsync(ds, prompt, steps, order, temp, topk, verbose);
 
         Console.WriteLine("laplace walk — type a prompt, Enter. Blank line or Ctrl-D quits.");
         while (true)
@@ -230,32 +186,20 @@ internal static class QueryCommands
             Console.Write("\nprompt> ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await WalkOnceAsync(conn, line, steps, order, temp, topk, verbose);
+            await WalkOnceAsync(ds, line, steps, order, temp, topk, verbose);
         }
         return 0;
     }
 
     private static async Task<int> WalkOnceAsync(
-        NpgsqlConnection conn, string prompt, int steps, int order, double temp, int topk, bool verbose)
+        NpgsqlDataSource ds, string prompt, int steps, int order, double temp, int topk, bool verbose)
     {
         var sw = Stopwatch.StartNew();
         var toks = new List<(string entity, int strideUsed)>();
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                "SELECT step, entity, stride_used FROM laplace.walk_text("
-                + "@prompt, @steps, @order, @temp, @topk)";
-            cmd.Parameters.AddWithValue("prompt", prompt);
-            cmd.Parameters.AddWithValue("steps", steps);
-            cmd.Parameters.AddWithValue("order", order);
-            cmd.Parameters.AddWithValue("temp", temp);
-            cmd.Parameters.AddWithValue("topk", topk);
-            await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-                toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0 : r.GetInt32(2)));
-        }
+        await foreach (var row in NpgsqlSubstrateReads.WalkTextAsync(
+            ds, prompt, steps, order, temp, topk, default))
+            toks.Add((row.Entity, row.StrideUsed));
         sw.Stop();
-
 
         Console.WriteLine(prompt + string.Concat(toks.Select(t => t.entity)));
         if (verbose)
@@ -293,15 +237,8 @@ internal static class QueryCommands
         // (prompt_coherence), shape dispatch, the band lens, the responder family,
         // and converse_about. A CLI answer and an API answer to the same prompt were
         // produced by different machinery and could not be compared.
-        string response;
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT laplace.chat(@p, @s)";
-            cmd.Parameters.AddWithValue("p", prompt);
-            cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Bytea)
-                { Value = SessionId.ToBytes() });
-            response = await cmd.ExecuteScalarAsync() as string ?? string.Empty;
-        }
+        var response = await NpgsqlSubstrateReads.ChatAsync(
+            conn, prompt, SessionId.ToBytes(), default) ?? string.Empty;
         Console.WriteLine(response);
 
         // CLOSE through the shared lane (Laplace.Ingestion.TurnCloser), the same one
@@ -440,15 +377,12 @@ internal static class QueryCommands
         await using var conn = await ds.OpenConnectionAsync();
 
         bool exists = false;
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT f.tier, laplace.render(f.type_id) FROM laplace.entity_facets(@id) f";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync())
+            var facet = await NpgsqlSubstrateReads.EntityFacetsAsync(conn, id.ToBytes(), default);
+            if (facet is { } f)
             {
                 exists = true;
-                Console.WriteLine($"  ENTITY: present  tier={r.GetInt16(0)}  type={r.GetString(1)}");
+                Console.WriteLine($"  ENTITY: present  tier={f.Tier}  type={f.Type}");
             }
         }
         var utf8Input = Encoding.UTF8.GetBytes(text);
@@ -469,37 +403,22 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  CONSTITUENT KNOWLEDGE (the substrate answering through the parts it knows):");
 
-            // ONE round-trip: fan the word ids through consensus_out_readable via LATERAL, then
-            // bucket by input ordinal in C#. ORDER BY u.ord, r.rord keeps each word's rows in the
-            // function's own ranking order, identical to the old per-word loop.
+            // ONE round-trip via shared catalog reader; bucket by input ordinal in C#.
             var buckets = new Dictionary<int, List<(string Type, string? Obj, decimal Mu, long Wit)>>();
             if (words.Count > 0)
             {
-                await using var wc = conn.CreateCommand();
-                wc.CommandText =
-                    "SELECT u.ord, r.type, r.object, r.eff_mu, r.witnesses "
-                    + "FROM unnest(@ids::bytea[]) WITH ORDINALITY AS u(id, ord) "
-                    + "CROSS JOIN LATERAL laplace.consensus_out_readable(u.id, 2) "
-                    + "WITH ORDINALITY AS r(type, object, eff_mu, witnesses, rord) "
-                    + "ORDER BY u.ord, r.rord";
                 var idsArr = new byte[words.Count][];
                 for (int i = 0; i < words.Count; i++) idsArr[i] = words[i].Id.ToBytes();
-                var p = wc.Parameters.AddWithValue("ids", idsArr);
-                p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                await using var wr = await wc.ExecuteReaderAsync();
-                while (await wr.ReadAsync())
+                foreach (var row in await NpgsqlSubstrateReads.ConsensusOutReadableBatchAsync(
+                             conn, idsArr, 2, default))
                 {
-                    int ord = (int)wr.GetInt64(0);
+                    int ord = (int)row.Ordinal;
                     if (!buckets.TryGetValue(ord, out var list))
                     {
                         list = new List<(string, string?, decimal, long)>();
                         buckets[ord] = list;
                     }
-                    list.Add((
-                        wr.GetString(1),
-                        wr.IsDBNull(2) ? null : wr.GetString(2),
-                        wr.GetDecimal(3),
-                        wr.GetInt64(4)));
+                    list.Add((row.Type, row.Object, row.EffMu, row.Witnesses));
                 }
             }
 
@@ -521,98 +440,72 @@ internal static class QueryCommands
 
         if (!exists) return 0;
 
-        await using (var cmd = conn.CreateCommand())
         {
-
-            cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents "
-                            + "FROM laplace.entity_physicalities(@id) p";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
+            var placements = await NpgsqlSubstrateReads.EntityPhysicalitiesAsync(conn, id.ToBytes(), default);
             Console.WriteLine("\n  GLOME (physicalities):");
-            int n = 0;
-            while (await r.ReadAsync())
+            if (placements.Count == 0)
+                Console.WriteLine("    (none)");
+            else
             {
-                n++;
-                Console.WriteLine($"    type={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
-                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}");
+                foreach (var p in placements)
+                {
+                    Console.WriteLine($"    type={p.Type}  coord=({p.X:F4},{p.Y:F4},{p.Z:F4},{p.M:F4})"
+                        + $"  r={p.Radius:F6}  n_constituents={p.Constituents}");
+                }
             }
-            if (n == 0) Console.WriteLine("    (none)");
         }
 
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.type_id), laplace.render(c.object_id), "
-                            + "c.rating, c.rd, c.volatility, c.witness_count "
-                            + "FROM laplace.consensus_out(@id) c";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  OUTGOING consensus (this → object), Glicko-2 μ over all witnesses:");
             int n = 0;
-            while (await r.ReadAsync())
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusOutRenderedAsync(conn, id.ToBytes(), default))
             {
                 n++;
-                string relType = r.GetString(0);
-                string obj = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
-                Console.WriteLine($"    [{relType}] → {obj,-28}  μ={r.GetInt64(2) / 1e9:F3} rd={r.GetInt64(3) / 1e9:F3} σ={r.GetInt64(4) / 1e9:F4}"
-                    + $"  witnesses={r.GetInt64(5)}");
+                string obj = c.PeerLabel ?? "(unary)";
+                Console.WriteLine($"    [{c.TypeLabel}] → {obj,-28}  μ={c.Rating / 1e9:F3} rd={c.Rd / 1e9:F3} σ={c.Volatility / 1e9:F4}"
+                    + $"  witnesses={c.WitnessCount}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.type_id), "
-                            + "c.rating, c.rd, c.volatility, c.witness_count "
-                            + "FROM laplace.consensus_in(@id) c";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  INCOMING consensus (subject → this), Glicko-2 μ over all witnesses:");
             int n = 0;
-            while (await r.ReadAsync())
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusInRenderedAsync(conn, id.ToBytes(), default))
             {
                 n++;
-                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  μ={r.GetInt64(2) / 1e9:F3} rd={r.GetInt64(3) / 1e9:F3} σ={r.GetInt64(4) / 1e9:F4}"
-                    + $"  witnesses={r.GetInt64(5)}");
+                string subj = c.PeerLabel ?? "?";
+                Console.WriteLine($"    {subj,-28} [{c.TypeLabel}] → here  μ={c.Rating / 1e9:F3} rd={c.Rd / 1e9:F3} σ={c.Volatility / 1e9:F4}"
+                    + $"  witnesses={c.WitnessCount}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.type_id), laplace.render(a.object_id), "
-                            + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
-                            + "FROM laplace.attestations_out(@id) a";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
             int n = 0;
-            while (await r.ReadAsync())
+            foreach (var a in await NpgsqlSubstrateReads.AttestationsOutRenderedAsync(conn, id.ToBytes(), default))
             {
                 n++;
-                string obj = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
-                string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
-                Console.WriteLine($"    [{r.GetString(0)}] → {obj,-28}  {Outc(r.GetInt16(4))}"
-                    + $"  src={r.GetString(2)}  ctx={ctx}  games={r.GetInt64(5)}");
+                string obj = a.PeerLabel ?? "(unary)";
+                string ctx = a.ContextId is null ? "-" : Hex(ReadHash16(a.ContextId))[..10] + "…";
+                Console.WriteLine($"    [{a.TypeLabel}] → {obj,-28}  {Outc(a.Outcome)}"
+                    + $"  src={a.SourceLabel}  ctx={ctx}  games={a.ObservationCount}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.type_id), "
-                            + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
-                            + "FROM laplace.attestations_in(@id) a";
-            cmd.Parameters.AddWithValue("id", id.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
             int n = 0;
-            while (await r.ReadAsync())
+            foreach (var a in await NpgsqlSubstrateReads.AttestationsInRenderedAsync(conn, id.ToBytes(), default))
             {
                 n++;
-                string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
-                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  {Outc(r.GetInt16(4))}"
-                    + $"  src={r.GetString(2)}  ctx={ctx}  games={r.GetInt64(5)}");
+                string subj = a.PeerLabel ?? "?";
+                string ctx = a.ContextId is null ? "-" : Hex(ReadHash16(a.ContextId))[..10] + "…";
+                Console.WriteLine($"    {subj,-28} [{a.TypeLabel}] → here  {Outc(a.Outcome)}"
+                    + $"  src={a.SourceLabel}  ctx={ctx}  games={a.ObservationCount}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }

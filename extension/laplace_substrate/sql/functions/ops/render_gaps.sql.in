@@ -17,8 +17,8 @@ CREATE OR REPLACE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     FROM agg a
     WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
       AND @extschema@.codepoint_for_id(a.id) IS NULL
-      AND NOT EXISTS (SELECT 1 FROM @extschema@.physicalities p
-                      WHERE p.entity_id = a.id AND p.type = 1 AND p.trajectory IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.v_word_points w
+                      WHERE w.id = a.id AND w.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
     LIMIT p_limit
 $$;

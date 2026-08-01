@@ -1,6 +1,7 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
@@ -59,19 +60,18 @@ internal static class FoundryExport
         // (type_id, subject_id) index server-side instead. Client filter retained
         // as the correctness net (traj family still returns unfiltered).
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.relation_plane($1, $2, $3, $4)",
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue(spec.Family);
-                cmd.Parameters.AddWithValue(spec.Name);
-                cmd.Parameters.AddWithValue((object?)spec.Arg ?? DBNull.Value);
-                cmd.Parameters.Add(ByteaArrayParam(
-                    spec.Family == "consensus" ? vocab : (object)DBNull.Value));
-            },
-            commandTimeout: 600, degreeCap,
-            weight: r => r.GetDouble(2),
-            skipLabel: $"plane {spec}");
+        try
+        {
+            var rows = await NpgsqlFoundryReads.RelationPlaneAsync(
+                ds, spec.Family, spec.Name, spec.Arg,
+                spec.Family == "consensus" ? vocab : null);
+            return MapWeightedEdges(tokenSlots, rows, degreeCap);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (plane {spec} unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
 
 
@@ -86,18 +86,17 @@ internal static class FoundryExport
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.entity_relation_plane($1, $2, $3)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.Add(new NpgsqlParameter
-                { Value = relNames, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                cmd.Parameters.AddWithValue(degreeCap);
-            },
-            commandTimeout: 600, degreeCap,
-            weight: r => r.GetDouble(2),
-            skipLabel: $"consensus plane [{string.Join(",", relNames)}]");
+        try
+        {
+            var rows = await NpgsqlFoundryReads.EntityRelationPlaneAsync(ds, vocab, relNames, degreeCap);
+            return MapWeightedEdges(tokenSlots, rows, degreeCap);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine(
+                $"  (consensus plane [{string.Join(",", relNames)}] unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
 
 
@@ -110,19 +109,19 @@ internal static class FoundryExport
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane($1, $2, $3, $4)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(rankLo);
-                cmd.Parameters.AddWithValue(rankHi);
-                cmd.Parameters.AddWithValue(degreeCap);
-            },
-            commandTimeout: 600, degreeCap,
+        try
+        {
+            var rows = await NpgsqlFoundryReads.ConsensusLayerPlaneAsync(
+                ds, vocab, rankLo, rankHi, degreeCap);
             // the layer family weights the edge by its layer rank, not by w alone
-            weight: r => r.GetDouble(2) * r.GetDouble(3),
-            skipLabel: $"layer plane [{rankLo:F2}-{rankHi:F2}]");
+            return MapLayerEdges(tokenSlots, rows, degreeCap, static r => r.W * r.LayerRank);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine(
+                $"  (layer plane [{rankLo:F2}-{rankHi:F2}] unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
 
 
@@ -135,18 +134,17 @@ internal static class FoundryExport
     Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane_masked($1, $2, $3)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.Add(new NpgsqlParameter
-                { Value = bandMask.ToByteArray(), NpgsqlDbType = NpgsqlDbType.Bytea });
-                cmd.Parameters.AddWithValue(degreeCap);
-            },
-            commandTimeout: 600, degreeCap,
-            weight: r => r.GetDouble(2) * r.GetDouble(3),
-            skipLabel: "layer plane [masked band]");
+        try
+        {
+            var rows = await NpgsqlFoundryReads.ConsensusLayerPlaneMaskedAsync(
+                ds, vocab, bandMask.ToByteArray(), degreeCap);
+            return MapLayerEdges(tokenSlots, rows, degreeCap, static r => r.W * r.LayerRank);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (layer plane [masked band] unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
 
     internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
@@ -157,36 +155,30 @@ internal static class FoundryExport
     {
         var vocab = VocabArray(tokenSlots);
 
-        // Not on the shared ReadPlaneAsync path: rows carry type_id + layer_rank and
+        // rows carry type_id + layer_rank and
         // fan out into one adjacency per type, not one plane.
         var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
-        await using var conn = await ds.OpenConnectionAsync();
         try
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 600;
-            cmd.CommandText =
-                "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2, $3)";
-            cmd.Parameters.Add(ByteaArrayParam(vocab));
-            cmd.Parameters.AddWithValue(degreeCap);
-            cmd.Parameters.Add(ByteaArrayParam((typeIds is { Count: > 0 })
+            byte[][]? typeFilter = typeIds is { Count: > 0 }
                 ? typeIds.Select(t => t.ToBytes()).ToArray()
-                : (object)DBNull.Value));
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
+                : null;
+            var planeRows = await NpgsqlFoundryReads.ConsensusTypePlaneAsync(
+                ds, vocab, degreeCap, typeFilter);
+            foreach (var row in planeRows)
             {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                double w = rdr.GetDouble(2);
+                if (!tokenSlots.TryGetValue(FromBytes(row.SubjectId), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes(row.ObjectId), out var obj)) continue;
+                double w = row.W;
                 if (w == 0.0) continue;
-                var tid = FromBytes((byte[])rdr[3]);
-                double rank = rdr.GetDouble(4);
+                var tid = FromBytes(row.TypeId);
+                double rank = row.LayerRank;
                 if (!byType.TryGetValue(tid, out var entry))
                     byType[tid] = entry = (rank, new Dictionary<int, List<(int, double)>>());
                 foreach (int s in subj)
                 {
-                    if (!entry.Adj.TryGetValue(s, out var row)) entry.Adj[s] = row = new List<(int, double)>(8);
-                    foreach (int o in obj) row.Add((o, w));
+                    if (!entry.Adj.TryGetValue(s, out var rowAdj)) entry.Adj[s] = rowAdj = new List<(int, double)>(8);
+                    foreach (int o in obj) rowAdj.Add((o, w));
                 }
             }
         }
@@ -212,31 +204,22 @@ internal static class FoundryExport
     {
         var vocab = VocabArray(tokenSlots);
 
-        // Not on the shared ReadPlaneAsync path: the object is a category, not a
+        // the object is a category, not a
         // token, and the edges are the co-category clique built client-side below.
         var wordCat = new Dictionary<int, Hash128>();
         var wordMu = new Dictionary<int, double>();
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 180;
-        cmd.CommandText =
-            "SELECT subject_id, object_id, " +
-            // walk_edge_weight, not eff_mu. eff_mu is the conservative RANKING key;
-            // glicko2.c documents using it as a sign/gate as the bug that scored 99.04%
-            // of won claims negative. Clamping stays here — the basis union wants the
-            // positive part — but the quantity clamped is now the same law every other
-            // plane exports, so the tensors share a scale.
-            "GREATEST(laplace.walk_edge_weight(rating, rd, witness_count), 0) AS w " +
-            "FROM laplace.consensus " +
-            "WHERE type_id = laplace.relation_type_id($1) AND subject_id = ANY($2)";
-        cmd.Parameters.AddWithValue(relationType);
-        cmd.Parameters.Add(ByteaArrayParam(vocab));
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
+        // Objects are categories (often outside the token vocab) — relation_plane
+        // would drop them. edges_raw per subject keeps the object unrestricted while
+        // retiring the raw laplace.consensus scan. walk_edge_weight (not eff_mu) —
+        // glicko2.c documents using eff_mu as a sign/gate as the bug that scored
+        // 99.04% of won claims negative.
+        var attrRows = await NpgsqlFoundryReads.AttributeOutboundAsync(
+            ds, relationType, vocab, degreeCap);
+        foreach (var row in attrRows)
         {
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-            var cat = FromBytes((byte[])rdr[1]);
-            double w = rdr.GetDouble(2);
+            if (!tokenSlots.TryGetValue(FromBytes(row.SubjectId), out var subj)) continue;
+            var cat = FromBytes(row.NeighbourId);
+            double w = row.W;
             if (w <= 0) w = 1e-6;
             foreach (int t in subj)
             {
@@ -284,15 +267,8 @@ internal static class FoundryExport
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.consensus_adjacency($1, $2)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(degreeCap);
-            },
-            commandTimeout: 600, degreeCap,
-            weight: r => r.GetDouble(2));
+        var rows = await NpgsqlFoundryReads.ConsensusAdjacencyAsync(ds, vocab, degreeCap);
+        return MapWeightedEdges(tokenSlots, rows, degreeCap);
     }
 
 
@@ -307,18 +283,10 @@ internal static class FoundryExport
         string metric, int k, int probe, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.metric_edges($1, $2, $3, $4)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(metric);
-                cmd.Parameters.AddWithValue(k);
-                cmd.Parameters.AddWithValue(probe);
-            },
-            commandTimeout: 0, degreeCap,
-            // column 3 is a DISTANCE here, not a weight — decay it into an affinity
-            weight: r => Math.Exp(-r.GetDouble(2)));
+        var rows = await NpgsqlFoundryReads.MetricEdgesAsync(ds, vocab, metric, k, probe);
+        // column 3 is a DISTANCE here, not a weight — decay it into an affinity
+        var decayed = rows.Select(static r => r with { W = Math.Exp(-r.W) }).ToList();
+        return MapWeightedEdges(tokenSlots, decayed, degreeCap);
     }
 
 
@@ -395,25 +363,17 @@ internal static class FoundryExport
 
 
 
+
     internal static async Task<int> FillCoordAnchorsAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, double[]?[] anchors)
     {
         var vocab = VocabArray(tokenSlots);
-
         int filled = 0;
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText =
-            "SELECT entity_id, x, y, z, m FROM laplace.entity_physicality_coords($1)";
-        cmd.Parameters.Add(ByteaArrayParam(vocab));
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
+        var rows = await NpgsqlFoundryReads.EntityPhysicalityCoordsAsync(ds, vocab);
+        foreach (var row in rows)
         {
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
-            var a = new[] { rdr.GetDouble(1), rdr.GetDouble(2), rdr.GetDouble(3), rdr.GetDouble(4) };
-
-
+            if (!tokenSlots.TryGetValue(FromBytes(row.EntityId), out var slots)) continue;
+            var a = new[] { row.X, row.Y, row.Z, row.M };
             foreach (int s in slots) { anchors[s] = a; filled++; }
         }
         return filled;
@@ -424,27 +384,23 @@ internal static class FoundryExport
 
 
 
-    /// Plan Phase 5 (doc 14 P7): per-token 128-bit hilbert key (big-endian; leading
-    /// bytes = coarsest content locality) for the static content-PE dims.
-    internal static async Task<byte[]?[]> FillHilbertKeysAsync(
+
+    /// Plan Phase 5 (doc 14 P7): per-token 128-bit hilbert curve index (packed
+    /// MSB-first; leading octets = coarsest content locality) for content-PE dims.
+
+    internal static async Task<Hilbert128?[]> FillHilbertKeysAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
     {
         var vocab = VocabArray(tokenSlots);
-
-        var keys = new byte[]?[vocabSize];
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText = "SELECT entity_id, hilbert_index FROM laplace.entity_hilbert_keys($1)";
-        cmd.Parameters.Add(ByteaArrayParam(vocab));
+        var keys = new Hilbert128?[vocabSize];
         try
         {
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
+            var rows = await NpgsqlFoundryReads.EntityHilbertKeysAsync(ds, vocab);
+            foreach (var row in rows)
             {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
-                var hb = (byte[])rdr[1];
-                foreach (int s in slots) if (s >= 0 && s < vocabSize) keys[s] = hb;
+                if (!tokenSlots.TryGetValue(FromBytes(row.EntityId), out var slots)) continue;
+                foreach (int s in slots)
+                    if (s >= 0 && s < vocabSize) keys[s] = row.HilbertIndex;
             }
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
@@ -454,41 +410,31 @@ internal static class FoundryExport
         return keys;
     }
 
+
+
     internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var vocab = VocabArray(tokenSlots);
-
-        // Not on the shared ReadPlaneAsync path: a leading `gap` column routes each
-        // row into one of maxGap separate adjacencies, so ids are at 1/2, not 0/1.
         var adj = new Dictionary<int, List<(int Col, double W)>>[maxGap];
         for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
-
-        await using var conn = await ds.OpenConnectionAsync();
         try
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;
-            cmd.CommandText =
-                "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)";
-            cmd.Parameters.Add(ByteaArrayParam(vocab));
-            cmd.Parameters.AddWithValue(maxGap);
-            cmd.Parameters.AddWithValue(degreeCap);
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
+            var rows = await NpgsqlFoundryReads.EntityTrajectoryPlaneAsync(ds, vocab, maxGap, degreeCap);
+            foreach (var row in rows)
             {
-                int g = rdr.GetInt32(0);
+                int g = row.Gap;
                 if (g < 1 || g > maxGap) continue;
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var subj)) continue;
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[2]), out var obj)) continue;
-                double w = rdr.GetDouble(3);
+                if (!tokenSlots.TryGetValue(FromBytes(row.SubjectId), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes(row.ObjectId), out var obj)) continue;
+                double w = row.W;
                 if (w == 0.0) continue;
                 var a = adj[g - 1];
                 foreach (int s in subj)
                 {
-                    if (!a.TryGetValue(s, out var row)) a[s] = row = new List<(int, double)>(8);
-                    foreach (int o in obj) row.Add((o, w));
+                    if (!a.TryGetValue(s, out var rowAdj)) a[s] = rowAdj = new List<(int, double)>(8);
+                    foreach (int o in obj) rowAdj.Add((o, w));
                 }
             }
         }
@@ -497,7 +443,6 @@ internal static class FoundryExport
             Console.WriteLine($"  (trajectory ladder unavailable: {ex.SqlState} — skipped)");
             return Enumerable.Range(0, maxGap).Select(_ => PlaneCoo.Empty).ToArray();
         }
-
         var planes = new PlaneCoo[maxGap];
         for (int g = 0; g < maxGap; g++) planes[g] = CooFromAdj(adj[g], degreeCap);
         return planes;
@@ -507,20 +452,17 @@ internal static class FoundryExport
 
 
 
+
+
     internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int gap = 1)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1, 50000, $2)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(gap);
-            },
-            commandTimeout: 0, degreeCap: 256,
-            weight: r => r.GetDouble(2), dropNonPositive: true);
+        var rows = await NpgsqlFoundryReads.GraphemeOrderAsync(ds, vocab, gap);
+        return MapWeightedEdges(tokenSlots, rows, degreeCap: 256, dropNonPositive: true);
     }
+
+
 
 
 
@@ -531,17 +473,10 @@ internal static class FoundryExport
         int gap = 1, int trajs = 200000, int cap = 64)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(trajs);
-                cmd.Parameters.AddWithValue(gap);
-            },
-            commandTimeout: 0, degreeCap: cap,
-            weight: r => r.GetDouble(2), dropNonPositive: true);
+        var rows = await NpgsqlFoundryReads.WordOrderAsync(ds, vocab, trajs, gap);
+        return MapWeightedEdges(tokenSlots, rows, degreeCap: cap, dropNonPositive: true);
     }
+
 
 
 
@@ -555,117 +490,96 @@ internal static class FoundryExport
     /// row's UNSEEN default (NULL-object rows from the SQL) — absent pairs must
     /// densify to the default, NOT zero (zero = log 1 would rank every unseen
     /// continuation above every seen one).
+
     internal static async Task<(PlaneCoo Plane, double[] RowDefault)> ReadConditionalPlaneAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize,
         int trajs = 200000, double smoothK = 0.5, int cap = 512)
     {
         var vocab = VocabArray(tokenSlots);
-
-        // Not on the shared ReadPlaneAsync path: a NULL object_id is not a row to
-        // skip, it is the row's UNSEEN default and must be captured before the
-        // second id lookup can reject it.
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         var rowDefault = new double[vocabSize];
         Array.Fill(rowDefault, double.NaN);
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText =
-            "SELECT subject_id, object_id, w FROM laplace.continuation_conditional_plane($1, $2, $3, $4)";
-        cmd.Parameters.Add(ByteaArrayParam(vocab));
-        cmd.Parameters.AddWithValue(trajs);
-        cmd.Parameters.AddWithValue(smoothK);
-        cmd.Parameters.AddWithValue(cap);
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
+        var rows = await NpgsqlFoundryReads.ContinuationConditionalPlaneAsync(
+            ds, vocab, trajs, smoothK, cap);
+        foreach (var row in rows)
         {
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-            double w = rdr.GetDouble(2);
-            if (rdr.IsDBNull(1))
+            if (!tokenSlots.TryGetValue(FromBytes(row.SubjectId), out var subj)) continue;
+            double w = row.W;
+            if (row.ObjectId is null)
             {
                 foreach (int s in subj) if (s >= 0 && s < vocabSize) rowDefault[s] = w;
                 continue;
             }
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes(row.ObjectId), out var obj)) continue;
             foreach (int s in subj)
             {
-                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(16);
-                foreach (int o in obj) row.Add((o, w));
+                if (!adj.TryGetValue(s, out var rowAdj)) adj[s] = rowAdj = new List<(int, double)>(16);
+                foreach (int o in obj) rowAdj.Add((o, w));
             }
         }
         return (CooFromAdj(adj, cap), rowDefault);
     }
 
+
     /// Finish-line Phase 4 v1b: dominant POS class per vocab token + the class
     /// transition log-conditional table, for the lm_head compose
     /// M[x,y] += gain * T[class(x),class(y)] (grammatical shaping of the
     /// unseen mass — the flat row default becomes class-differentiated).
+
     internal static async Task<(int[] TokenClass, double[,] T, int NClasses)> ReadPosCorrectionAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
     {
         var vocab = VocabArray(tokenSlots);
-
         var tokenClass = new int[vocabSize];
         Array.Fill(tokenClass, -1);
         var classIndex = new Dictionary<Hash128, int>();
-        await using var conn = await ds.OpenConnectionAsync();
-        await using (var cmd = conn.CreateCommand())
+        var posRows = await NpgsqlFoundryReads.VocabDominantPosAsync(ds, vocab);
+        foreach (var row in posRows)
         {
-            cmd.CommandTimeout = 600;
-            cmd.CommandText = "SELECT word_id, pos_id FROM laplace.vocab_dominant_pos($1)";
-            cmd.Parameters.Add(ByteaArrayParam(vocab));
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-            {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
-                var pos = FromBytes((byte[])rdr[1]);
-                if (!classIndex.TryGetValue(pos, out int ci)) classIndex[pos] = ci = classIndex.Count;
-                foreach (int s in slots)
-                    if (s >= 0 && s < vocabSize) tokenClass[s] = ci;
-            }
+            if (!tokenSlots.TryGetValue(FromBytes(row.WordId), out var slots)) continue;
+            var pos = FromBytes(row.PosId);
+            if (!classIndex.TryGetValue(pos, out int ci)) classIndex[pos] = ci = classIndex.Count;
+            foreach (int s in slots)
+                if (s >= 0 && s < vocabSize) tokenClass[s] = ci;
         }
-        var entries = new List<(Hash128 Px, Hash128 Py, double W)>();
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandTimeout = 600;
-            cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.pos_class_transitions($1)";
-            cmd.Parameters.Add(ByteaArrayParam(vocab));
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                entries.Add((FromBytes((byte[])rdr[0]), FromBytes((byte[])rdr[1]), rdr.GetDouble(2)));
-        }
+        var entries = await NpgsqlFoundryReads.PosClassTransitionsAsync(ds, vocab);
         int nc = classIndex.Count;
-        // unattested class pairs get the table's own floor, not 0 (0 = certainty-scale
-        // log-prob and would rank an unseen class pair above every seen one)
         double floor = entries.Count > 0 ? entries.Min(e => e.W) : 0.0;
-        var t = new double[nc, nc];
+        var table = new double[nc, nc];
         for (int i = 0; i < nc; i++)
-            for (int j = 0; j < nc; j++) t[i, j] = floor;
-        foreach (var (px, py, w) in entries)
+            for (int j = 0; j < nc; j++) table[i, j] = floor;
+        foreach (var e in entries)
+        {
+            var px = FromBytes(e.SubjectId);
+            var py = FromBytes(e.ObjectId);
             if (classIndex.TryGetValue(px, out int ci) && classIndex.TryGetValue(py, out int cj))
-                t[ci, cj] = w;
-        return (tokenClass, t, nc);
+                table[ci, cj] = e.W;
+        }
+        return (tokenClass, table, nc);
     }
+
 
     /// Plan Phase 4: sentence-boundary word bridge — last word of sentence i to
     /// first word of sentence i+1, from tier-4 document trajectories. The
     /// discourse component of the lm_head (doc 14 C3 correction).
+
     internal static async Task<PlaneCoo> ReadSentenceOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
         int docs = 100000, int cap = 64)
     {
         var vocab = VocabArray(tokenSlots);
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.sentence_order_word_bridge($1, $2)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(docs);
-            },
-            commandTimeout: 0, degreeCap: cap,
-            weight: r => r.GetDouble(2), dropNonPositive: true,
-            skipLabel: "sentence_order_word_bridge");
+        try
+        {
+            var rows = await NpgsqlFoundryReads.SentenceOrderWordBridgeAsync(ds, vocab, docs);
+            return MapWeightedEdges(tokenSlots, rows, degreeCap: cap, dropNonPositive: true);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (sentence_order_word_bridge unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
+
 
     internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
         NpgsqlDataSource ds, int maxGap,
@@ -678,39 +592,24 @@ internal static class FoundryExport
         // Same SQL as ReadWordOrderAsync, deliberately NOT delegating to it: this
         // reader warms the catalog lookup, bounds the corpus, keeps the 600s timeout,
         // tolerates the function being absent and PPMI-reweights the result.
-        return await ReadPlaneAsync(ds, tokenSlots,
-            "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)",
-            cmd =>
-            {
-                cmd.Parameters.Add(ByteaArrayParam(vocab));
-                cmd.Parameters.AddWithValue(trajCap);
-                cmd.Parameters.AddWithValue(maxGap);
-            },
-            commandTimeout: 600, degreeCap,
-            weight: r => r.GetDouble(2),
-            skipLabel: "trajectory pairs",
-            prepare: async conn =>
-            {
-                await using (var warm = conn.CreateCommand())
-                {
-                    warm.CommandText = "SELECT laplace.relation_type_id('IS_A')";
-                    await warm.ExecuteScalarAsync();
-                }
+        try
+        {
+            await using var conn = await ds.OpenConnectionAsync();
+            await NpgsqlFoundryReads.WarmRelationTypeIdAsync(conn, "IS_A");
+            if (corpusMax > 0)
+                await NpgsqlFoundryReads.SetCorpusMaxRowsAsync(conn, corpusMax);
 
-                if (corpusMax > 0)
-                {
-                    await using var setCmd = conn.CreateCommand();
-                    // set_config instead of interpolated SET: parameterizable (SET is not),
-                    // so the statement text stays stable for server-side plan reuse.
-                    setCmd.CommandText = "SELECT set_config('laplace_substrate.corpus_max_rows', $1, false)";
-                    setCmd.Parameters.AddWithValue(corpusMax.ToString());
-                    await setCmd.ExecuteNonQueryAsync();
-                }
-            },
-            transform: adj =>
-            {
-                if (FoundryDefaults.Ppmi) ApplyPpmi(adj);
-            });
+            var rows = await NpgsqlFoundryReads.WordOrderAsync(
+                ds, vocab, trajCap, maxGap, timeoutSeconds: 600);
+            return MapWeightedEdges(
+                tokenSlots, rows, degreeCap,
+                transform: adj => { if (FoundryDefaults.Ppmi) ApplyPpmi(adj); });
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (trajectory pairs unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
     }
 
 
@@ -760,57 +659,49 @@ internal static class FoundryExport
     private static NpgsqlParameter ByteaArrayParam(object value) =>
         new() { Value = value, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea };
 
-    /// Shared plumbing for the (subject_id, object_id, …) plane readers. Each of them
-    /// differs only in its SQL, its parameter binding and its weight expression; the
-    /// open / stream / map-both-ids / accumulate / trim / COO-flatten around those was
-    /// copied verbatim ten times. Those three are the parameters here.
-    ///
-    /// `skipLabel` null means the reader has no "plane not installed" fallback and a
-    /// PostgresException propagates — that is a real difference between readers, not an
-    /// oversight, so it stays opt-in. `prepare` runs on the connection BEFORE the try,
-    /// matching the readers that warm a catalog lookup or set_config outside it.
-    private static async Task<PlaneCoo> ReadPlaneAsync(
-        NpgsqlDataSource ds,
+    private static PlaneCoo MapWeightedEdges(
         Dictionary<Hash128, List<int>> tokenSlots,
-        string sql,
-        Action<NpgsqlCommand> bind,
-        int commandTimeout,
+        IReadOnlyList<NpgsqlFoundryReads.WeightedEdgeRow> rows,
         int degreeCap,
-        Func<NpgsqlDataReader, double> weight,
         bool dropNonPositive = false,
-        string? skipLabel = null,
-        Func<NpgsqlConnection, Task>? prepare = null,
         Action<Dictionary<int, List<(int Col, double W)>>>? transform = null)
     {
         var adj = new Dictionary<int, List<(int Col, double W)>>();
-        await using var conn = await ds.OpenConnectionAsync();
-        if (prepare is not null) await prepare(conn);
-        try
+        foreach (var edge in rows)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = commandTimeout;
-            cmd.CommandText = sql;
-            bind(cmd);
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
+            if (!tokenSlots.TryGetValue(FromBytes(edge.SubjectId), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes(edge.ObjectId), out var obj)) continue;
+            double w = edge.W;
+            if (dropNonPositive ? w <= 0 : w == 0.0) continue;
+            foreach (int s in subj)
             {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                double w = weight(rdr);
-                if (dropNonPositive ? w <= 0 : w == 0.0) continue;
-                foreach (int s in subj)
-                {
-                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
-                    foreach (int o in obj) row.Add((o, w));
-                }
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
             }
         }
-        catch (PostgresException ex) when (skipLabel is not null && ex.SqlState is "42P01" or "42883")
-        {
-            Console.WriteLine($"  ({skipLabel} unavailable: {ex.SqlState} — skipped)");
-            return PlaneCoo.Empty;
-        }
         transform?.Invoke(adj);
+        return CooFromAdj(adj, degreeCap);
+    }
+
+    private static PlaneCoo MapLayerEdges(
+        Dictionary<Hash128, List<int>> tokenSlots,
+        IReadOnlyList<NpgsqlFoundryReads.LayerEdgeRow> rows,
+        int degreeCap,
+        Func<NpgsqlFoundryReads.LayerEdgeRow, double> weight)
+    {
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        foreach (var edge in rows)
+        {
+            if (!tokenSlots.TryGetValue(FromBytes(edge.SubjectId), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes(edge.ObjectId), out var obj)) continue;
+            double w = weight(edge);
+            if (w == 0.0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
         return CooFromAdj(adj, degreeCap);
     }
 
@@ -1171,7 +1062,7 @@ internal static class FoundryExport
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats, bool coordDirect = false, double? coordScale = null,
-        byte[]?[]? hilbertKeys = null)
+        Hilbert128?[]? hilbertKeys = null)
     {
         bool coordOnly = FoundryDefaults.CoordOnly;
         // Phase 5: when a hilbert content-PE is requested, RESERVE its trailing dims
@@ -1357,13 +1248,13 @@ internal static class FoundryExport
                 int placedPe = 0;
                 for (int i = 0; i < vocab; i++)
                 {
-                    var hb = hilbertKeys.Length > i ? hilbertKeys[i] : null;
-                    if (hb is null || hb.Length == 0) continue;
+                    if (i >= hilbertKeys.Length || hilbertKeys[i] is not { } hb) continue;
                     long off = (long)i * dModel;
-                    for (int d = 0; d < peDims; d++)
+                    // Leading bytes of the packed 128-bit index = coarsest S³ locality.
+                    unsafe
                     {
-                        byte b = d < hb.Length ? hb[d] : (byte)0;
-                        e[off + peBase + d] = (2.0 * b / 255.0 - 1.0) * peScale;
+                        for (int d = 0; d < peDims; d++)
+                            e[off + peBase + d] = (2.0 * hb.Bytes[d] / 255.0 - 1.0) * peScale;
                     }
                     placedPe++;
                 }
@@ -1670,26 +1561,26 @@ internal static class FoundryExport
     }
 
     /// Plan Phase 6 (doc 14 P2/M1): per-token highway masks for the content gate.
+/// Plan Phase 6 (doc 14 P2/M1): per-token highway masks for the content gate.
     internal static async Task<Mask256[]> FillHighwayMasksAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
     {
         var vocab = VocabArray(tokenSlots);
-
         var masks = new Mask256[vocabSize];
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText = "SELECT entity_id, highway_mask FROM laplace.entity_highway_masks($1)";
-        cmd.Parameters.Add(ByteaArrayParam(vocab));
-        try
+
+        void Apply(IReadOnlyList<NpgsqlFoundryReads.HighwayMaskRow> rows)
         {
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
+            foreach (var row in rows)
             {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
-                var m = Mask256.FromByteArray((byte[])rdr[1]);
+                if (!tokenSlots.TryGetValue(FromBytes(row.EntityId), out var slots)) continue;
+                var m = Mask256.FromByteArray(row.HighwayMask);
                 foreach (int s in slots) if (s >= 0 && s < vocabSize) masks[s] = m;
             }
+        }
+
+        try
+        {
+            Apply(await NpgsqlFoundryReads.EntityHighwayMasksAsync(ds, vocab));
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
@@ -1698,27 +1589,18 @@ internal static class FoundryExport
 
         // Fallback for DB generations whose entities.highway_mask is unpopulated
         // (live finding 2026-07-08: 0 of 20.2M entities carry masks): ask the
-        // substrate to recompute them, then re-read.
-        //
-        // This used to hand-write the consensus-participation UNION here and OR
-        // the bits client-side through HighwayPerfcache. That was a SECOND body
-        // of a derivation highway_mask_refresh() already owns, and it had
-        // ALREADY DIVERGED: it lacked the family-root arm, so every dynamic
-        // relation (EDEP_*, DEP_*, FEAT_* — the whole UD dependency/feature
-        // layer) contributed no bit and the exported gate silently lost it.
-        // The derivation lives in ONE place; this is a call site.
+        // substrate to recompute them, then re-read. Derivation lives in
+        // highway_mask_refresh(); this is only a call site.
         bool anyStored = false;
         foreach (var m in masks) if (!m.IsZero) { anyStored = true; break; }
         if (!anyStored)
         {
-            await using var refresh = conn.CreateCommand();
-            refresh.CommandTimeout = 600;
-            refresh.CommandText = "SELECT laplace.highway_mask_refresh($1)";
-            refresh.Parameters.Add(ByteaArrayParam(vocab));
             long refreshed;
             try
             {
-                refreshed = Convert.ToInt64(await refresh.ExecuteScalarAsync() ?? 0L);
+                await using var conn = await ds.OpenConnectionAsync();
+                var scalar = await NpgsqlFoundryReads.HighwayMaskRefreshAsync(conn, vocab);
+                refreshed = Convert.ToInt64(scalar ?? 0L);
             }
             catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
             {
@@ -1727,23 +1609,12 @@ internal static class FoundryExport
             }
 
             if (refreshed > 0)
-            {
-                await using var reread = conn.CreateCommand();
-                reread.CommandTimeout = 120;
-                reread.CommandText = "SELECT entity_id, highway_mask FROM laplace.entity_highway_masks($1)";
-                reread.Parameters.Add(ByteaArrayParam(vocab));
-                await using var rdr2 = await reread.ExecuteReaderAsync();
-                while (await rdr2.ReadAsync())
-                {
-                    if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr2[0]), out var slots)) continue;
-                    var m = Mask256.FromByteArray((byte[])rdr2[1]);
-                    foreach (int s in slots) if (s >= 0 && s < vocabSize) masks[s] = m;
-                }
-            }
+                Apply(await NpgsqlFoundryReads.EntityHighwayMasksAsync(ds, vocab));
             Console.WriteLine($"  highway masks: recomputed via highway_mask_refresh ({refreshed:N0} entities updated; stored masks were empty)");
         }
         return masks;
     }
+
 
     /// Plan Phase 6 (doc 14 P2, kills M1): gate rows keyed on per-band embedding
     /// centroids — FFN block b fires for tokens aligned with salience band b's

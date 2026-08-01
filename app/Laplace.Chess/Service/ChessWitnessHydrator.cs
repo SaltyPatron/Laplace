@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -52,35 +51,14 @@ internal static class ChessWitnessHydrator
 
     /// <summary>Recorded playings (events) under witness sources — the analyzer's unit count.</summary>
     internal static async Task<long?> CountRecordedEventsAsync(NpgsqlDataSource ds, CancellationToken ct)
-    {
-        await using var cmd = ds.CreateCommand(@"
-            SELECT count(DISTINCT e.id)
-            FROM laplace.entities e
-            JOIN laplace.attestations pl
-              ON pl.subject_id = e.id
-             AND pl.type_id = $2
-             AND pl.source_id = ANY($3::bytea[])
-            WHERE e.type_id = $1");
-        cmd.Parameters.AddWithValue(ChessVocabulary.EventType.ToBytes());
-        cmd.Parameters.AddWithValue(RelPlaysLine.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
-        var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return total is long n ? n : 0L;
-    }
+        => await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
+            ds, ChessVocabulary.EventType.ToBytes(), RelPlaysLine.ToBytes(),
+            WitnessSources(), ct).ConfigureAwait(false);
 
     /// <summary>Distinct recorded lines under witness sources — the line-grain unit count.</summary>
     internal static async Task<long?> CountRecordedLinesAsync(NpgsqlDataSource ds, CancellationToken ct)
-    {
-        await using var cmd = ds.CreateCommand(@"
-            SELECT count(DISTINCT pl.object_id)
-            FROM laplace.attestations pl
-            WHERE pl.type_id = $1
-              AND pl.source_id = ANY($2::bytea[])");
-        cmd.Parameters.AddWithValue(RelPlaysLine.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
-        var total = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return total is long n ? n : 0L;
-    }
+        => await NpgsqlSubstrateReads.CountChessLinesWithPlaysLineAsync(
+            ds, RelPlaysLine.ToBytes(), WitnessSources(), ct).ConfigureAwait(false);
 
     // markerId selects the per-EVENT skip marker, so each playing-grain lane (ChessAnalyze)
     // gates its own versioned pass over the same witnessed playings.
@@ -145,10 +123,9 @@ internal static class ChessWitnessHydrator
                 markers[i] = markerId(chunk[i]);
 
             byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
-            long bits = (long)bm.Length * 8;
             for (int i = 0; i < take; i++)
             {
-                if (i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0) continue;
+                if (BitmapBits.IsSet(bm, i)) continue;
                 yield return chunk[i];
             }
         }
@@ -231,10 +208,9 @@ internal static class ChessWitnessHydrator
             markers[i] = ChessVocabulary.AnalysisMarkerId(eventIds[i], ChessAnalyze.Version);
 
         byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
-        long bits = (long)bm.Length * 8;
         for (int i = 0; i < eventIds.Count; i++)
         {
-            if (i < bits && (bm[i >> 3] & (1 << (i & 7))) != 0) continue;
+            if (BitmapBits.IsSet(bm, i)) continue;
             yield return eventIds[i];
         }
     }
@@ -242,50 +218,19 @@ internal static class ChessWitnessHydrator
     private static async Task<List<Hash128>> FetchRecordedEventIdPageAsync(
         NpgsqlDataSource ds, byte[] afterId, int limit, CancellationToken ct)
     {
-        await using var cmd = ds.CreateCommand(@"
-            SELECT DISTINCT e.id
-            FROM laplace.entities e
-            JOIN laplace.attestations pl
-              ON pl.subject_id = e.id
-             AND pl.type_id = $2
-             AND pl.source_id = ANY($3::bytea[])
-            WHERE e.type_id = $1
-              AND (octet_length($4) = 0 OR e.id > $4)
-            ORDER BY e.id
-            LIMIT $5");
-        cmd.Parameters.AddWithValue(ChessVocabulary.EventType.ToBytes());
-        cmd.Parameters.AddWithValue(RelPlaysLine.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, afterId.Length == 0 ? Array.Empty<byte>() : afterId);
-        cmd.Parameters.AddWithValue(limit);
-        return await ReadIdsAsync(cmd, limit, ct).ConfigureAwait(false);
+        var rows = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
+            ds, ChessVocabulary.EventType.ToBytes(), RelPlaysLine.ToBytes(), WitnessSources(),
+            afterId.Length == 0 ? Array.Empty<byte>() : afterId, limit, ct).ConfigureAwait(false);
+        return rows.Select(static b => Hash128.FromBytes(b)).ToList();
     }
 
     private static async Task<List<Hash128>> FetchRecordedLineIdPageAsync(
         NpgsqlDataSource ds, byte[] afterId, int limit, CancellationToken ct)
     {
-        await using var cmd = ds.CreateCommand(@"
-            SELECT DISTINCT pl.object_id
-            FROM laplace.attestations pl
-            WHERE pl.type_id = $1
-              AND pl.source_id = ANY($2::bytea[])
-              AND (octet_length($3) = 0 OR pl.object_id > $3)
-            ORDER BY pl.object_id
-            LIMIT $4");
-        cmd.Parameters.AddWithValue(RelPlaysLine.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, WitnessSources());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, afterId.Length == 0 ? Array.Empty<byte>() : afterId);
-        cmd.Parameters.AddWithValue(limit);
-        return await ReadIdsAsync(cmd, limit, ct).ConfigureAwait(false);
-    }
-
-    private static async Task<List<Hash128>> ReadIdsAsync(NpgsqlCommand cmd, int capacity, CancellationToken ct)
-    {
-        var ids = new List<Hash128>(capacity);
-        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
-            ids.Add(ReadHash(r, 0));
-        return ids;
+        var rows = await NpgsqlSubstrateReads.ChessLineIdPageAsync(
+            ds, RelPlaysLine.ToBytes(), WitnessSources(),
+            afterId.Length == 0 ? Array.Empty<byte>() : afterId, limit, ct).ConfigureAwait(false);
+        return rows.Select(static b => Hash128.FromBytes(b)).ToList();
     }
 
     /// <summary>
@@ -305,16 +250,10 @@ internal static class ChessWitnessHydrator
         {
             var eventBytes = new byte[eventIds.Count][];
             for (int i = 0; i < eventIds.Count; i++) eventBytes[i] = eventIds[i].ToBytes();
-            await using var cmd = ds.CreateCommand(@"
-                SELECT a.subject_id, a.object_id
-                FROM laplace.attestations a
-                WHERE a.subject_id = ANY($1::bytea[])
-                  AND a.type_id = $2");
-            cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, eventBytes);
-            cmd.Parameters.AddWithValue(RelPlaysLine.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await r.ReadAsync(ct).ConfigureAwait(false))
-                lineByEvent[ReadHash(r, 0)] = ReadHash(r, 1);
+            var edges = await NpgsqlSubstrateReads.AttestationsBySubjectsAndTypeAsync(
+                ds, eventBytes, RelPlaysLine.ToBytes(), ct).ConfigureAwait(false);
+            foreach (var edge in edges)
+                lineByEvent[Hash128.FromBytes(edge.SubjectId)] = Hash128.FromBytes(edge.ObjectId);
         }
         if (lineByEvent.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
@@ -365,21 +304,15 @@ internal static class ChessWitnessHydrator
         for (int i = 0; i < lineIds.Length; i++) lineBytes[i] = lineIds[i].ToBytes();
 
         var groups = new Dictionary<(Hash128, Hash128), GameMeta>();
-        await using var cmd = ds.CreateCommand(@"
-            SELECT a.subject_id, a.type_id, a.object_id, a.context_id
-            FROM laplace.attestations a
-            WHERE a.subject_id = ANY($1::bytea[])
-              AND a.type_id = ANY($2::bytea[])");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, lineBytes);
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, GameRelationTypes);
-        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        var rows = await NpgsqlSubstrateReads.AttestationsBySubjectsAndTypesAsync(
+            ds, lineBytes, GameRelationTypes, ct).ConfigureAwait(false);
+        foreach (var row in rows)
         {
-            if (r.IsDBNull(3)) continue; // header facts are per-playing; ctx names the event
-            var key = (ReadHash(r, 0), ReadHash(r, 3));
+            if (row.ContextId is null) continue; // header facts are per-playing; ctx names the event
+            var key = (Hash128.FromBytes(row.SubjectId), Hash128.FromBytes(row.ContextId));
             if (!groups.TryGetValue(key, out var gm)) groups[key] = gm = new GameMeta();
-            var type = ReadHash(r, 1);
-            var obj = r.IsDBNull(2) ? default : ReadHash(r, 2);
+            var type = Hash128.FromBytes(row.TypeId);
+            var obj = row.ObjectId is null ? default : Hash128.FromBytes(row.ObjectId);
             if (type == RelHasMovetext) gm.MovetextObj = obj;
             else if (type == RelHasWhite) gm.White = obj;
             else if (type == RelHasBlack) gm.Black = obj;
@@ -505,11 +438,9 @@ internal static class ChessWitnessHydrator
         var bytes = new byte[unique.Length][];
         for (int i = 0; i < unique.Length; i++) bytes[i] = unique[i].ToBytes();
 
-        await using var cmd = ds.CreateCommand("SELECT laplace.render_text_batch($1, 48)");
-        cmd.Parameters.AddWithValue(bytes);
-        cmd.Parameters[0].NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        var o = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        if (o is not string[] texts || texts.Length != unique.Length) return map;
+        var texts = await NpgsqlSubstrateReads.RenderTextBatchAsync(ds, bytes, 48, ct)
+            .ConfigureAwait(false);
+        if (texts is null || texts.Length != unique.Length) return map;
         for (int i = 0; i < unique.Length; i++)
         {
             if (!string.IsNullOrEmpty(texts[i])) map[unique[i]] = texts[i];
@@ -524,10 +455,4 @@ internal static class ChessWitnessHydrator
         "1/2-1/2" => new GameOutcome(null),
         _ => new GameOutcome(null),
     };
-
-    private static Hash128 ReadHash(NpgsqlDataReader r, int ord)
-    {
-        var bytes = (byte[])r[ord];
-        return Hash128.FromBytes(bytes);
-    }
 }

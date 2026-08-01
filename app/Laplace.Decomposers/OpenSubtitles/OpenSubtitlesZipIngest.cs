@@ -6,18 +6,13 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-internal readonly struct OpenSubtitlesLinePair
-{
-    public required byte[] LineA { get; init; }
-    public required byte[] LineB { get; init; }
-    public required Hash128 LangA { get; init; }
-    public required Hash128 LangB { get; init; }
-    public required string PairStem { get; init; }
-}
-
 internal static class OpenSubtitlesZipIngest
 {
-    public static async IAsyncEnumerable<OpenSubtitlesLinePair> ReadZipPairsAsync(
+    /// <summary>
+    /// One zip → relation-triple records. Single copy from the streaming line buffer
+    /// into the record's owned byte[] — no intermediate LinePair.ToArray().
+    /// </summary>
+    public static async IAsyncEnumerable<RelationTripleRecord> ReadZipTripleAsync(
         string zipPath,
         string pairStem,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -37,19 +32,24 @@ internal static class OpenSubtitlesZipIngest
         VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entA.FullName));
         VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entB.FullName));
 
-        await foreach (var (lineA, lineB) in ReadPairedLinesAsync(entA, entB, ct))
+        await using var streamA = entA.Open();
+        await using var streamB = entB.Open();
+        await using var eA = StreamingUtf8LineReader.ReadLinesAsync(streamA, ct).GetAsyncEnumerator(ct);
+        await using var eB = StreamingUtf8LineReader.ReadLinesAsync(streamB, ct).GetAsyncEnumerator(ct);
+        while (await eA.MoveNextAsync() && await eB.MoveNextAsync())
         {
+            var lineA = eA.Current;
+            var lineB = eB.Current;
             if (lineA.IsEmpty || lineB.IsEmpty) continue;
             int lenA = TrimCr(lineA);
             int lenB = TrimCr(lineB);
-            yield return new OpenSubtitlesLinePair
-            {
-                LineA = lineA.Span[..lenA].ToArray(),
-                LineB = lineB.Span[..lenB].ToArray(),
-                LangA = langA,
-                LangB = langB,
-                PairStem = pairStem,
-            };
+            if (lenA == 0 || lenB == 0) continue;
+            yield return new RelationTripleRecord(
+                lineA.Span[..lenA].ToArray(),
+                "IS_TRANSLATION_OF",
+                lineB.Span[..lenB].ToArray(),
+                SubjectLangId: langA,
+                ObjectLangId: langB);
         }
     }
 
@@ -58,17 +58,6 @@ internal static class OpenSubtitlesZipIngest
         int len = line.Length;
         if (len > 0 && line.Span[^1] == (byte)'\r') len--;
         return len;
-    }
-
-    private static async IAsyncEnumerable<(ReadOnlyMemory<byte> A, ReadOnlyMemory<byte> B)> ReadPairedLinesAsync(
-        ZipArchiveEntry entA, ZipArchiveEntry entB, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var streamA = entA.Open();
-        await using var streamB = entB.Open();
-        await using var eA = StreamingUtf8LineReader.ReadLinesAsync(streamA, ct).GetAsyncEnumerator(ct);
-        await using var eB = StreamingUtf8LineReader.ReadLinesAsync(streamB, ct).GetAsyncEnumerator(ct);
-        while (await eA.MoveNextAsync() && await eB.MoveNextAsync())
-            yield return (eA.Current, eB.Current);
     }
 
     private static bool IsTextEntry(string name)

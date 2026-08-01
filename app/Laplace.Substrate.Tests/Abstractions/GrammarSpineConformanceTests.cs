@@ -45,13 +45,14 @@ public class GrammarSpineConformanceTests
             // Still the grammar spine, reached through DecomposerPhase<GrammarIngestRecord>.
             ("Tatoeba", ["DecomposerPhase<GrammarIngestRecord", "GrammarIngestHandler",
                 "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
-            // ConceptNet + Atomic2020 are triple sources on the shared
-            // RelationTripleDecomposerBase path (extraction only), NOT the grammar spine.
-            ("ConceptNet", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord", "GrammarIngestHandler",
-                "OMWGrammarWitness", "OMWRowParser"]),
-            ("Atomic2020", ["RelationTripleRecord", "ExtractRecordsAsync", "RelationTripleDecomposerBase"]),
-            ("UD", ["DecomposerMultiFile<UdIngestRecord", "UdIngestHandler", "UdConlluParser"]),
+            // ConceptNet: monolith triple — ExtractFileAsync unit on RelationTripleDecomposerBase.
+            ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
+            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord", "ExtractFileAsync",
+                "GrammarIngestHandler", "OMWGrammarWitness"]),
+            // Atomic: multi-file triple — same ExtractFileAsync unit via RelationTripleMultiFile.
+            ("Atomic2020", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleMultiFileDecomposerBase"]),
+            ("UD", ["DecomposerMultiFile<UdIngestRecord", "ExtractFileAsync",
+                "UdIngestHandler", "UdConlluParser"]),
         };
 
         foreach (var (project, needles) in grammarSpine)
@@ -76,8 +77,8 @@ public class GrammarSpineConformanceTests
             .Where(p => !p.Contains("bin") && !p.Contains("obj"))
             .Select(File.ReadAllText));
         Assert.Contains("OpenSubtitlesZipIngest", text, StringComparison.Ordinal);
-        Assert.Contains("RelationTripleDecomposerBase", text, StringComparison.Ordinal);
-        Assert.Contains("ExtractRecordsAsync", text, StringComparison.Ordinal);
+        Assert.Contains("RelationTripleMultiFileDecomposerBase", text, StringComparison.Ordinal);
+        Assert.Contains("ExtractFileAsync", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenSubtitlesIngestHandler", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenSubtitlesFastIngest", text, StringComparison.Ordinal);
     }

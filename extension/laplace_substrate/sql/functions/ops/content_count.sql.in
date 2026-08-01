@@ -4,12 +4,12 @@ CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     SET search_path = @extschema@, public AS $$
     SELECT CASE
         WHEN p_source IS NULL THEN
-            (SELECT count(*) FROM @extschema@.physicalities p WHERE p.type = 1)
+            (SELECT count(*) FROM @extschema@.v_word_points)
         ELSE
             -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
-            -- physicalities by entity_id. The prior JOIN nested-looped every source
-            -- attestation into physicalities: on UD (51.9M source attestations) that built
-            -- a ~1.9-BILLION-row intermediate before count(DISTINCT) — 16 min, seq-scan-
+            -- v_word_points by id. The prior JOIN nested-looped every source attestation
+            -- into physicalities: on UD (51.9M source attestations) that built a
+            -- ~1.9-BILLION-row intermediate before count(DISTINCT) — 16 min, seq-scan-
             -- bound, and no amount of ANALYZE fixes it (it's the query shape, not stats).
             -- Collapsing to distinct subjects before the probe is a ~17x cheaper plan
             -- (EXPLAIN cost 33.1M -> 1.98M) with no row explosion.
@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
              FROM (SELECT DISTINCT a.subject_id
                    FROM @extschema@.attestations a
                    WHERE a.source_id = p_source) s
-             WHERE EXISTS (SELECT 1 FROM @extschema@.physicalities p
-                           WHERE p.entity_id = s.subject_id AND p.type = 1))
+             WHERE EXISTS (SELECT 1 FROM @extschema@.v_word_points w
+                           WHERE w.id = s.subject_id))
     END
 $$;

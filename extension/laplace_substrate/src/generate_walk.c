@@ -99,13 +99,13 @@ ensure_edge_plan(void)
 static const char *WALK_BATCH_QUERY =
     "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
     "       eo.highway_mask, "
-    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.tableoid, "
-    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.tableoid "
+    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.physicality_tableoid, "
+    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.physicality_tableoid "
     "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
     "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
     "JOIN laplace.entities eo ON eo.id = c.object_id "
-    "LEFT JOIN laplace.physicalities ps ON ps.entity_id = f.subject_id AND ps.type = 1 "
-    "LEFT JOIN laplace.physicalities po ON po.entity_id = c.object_id AND po.type = 1 "
+    "LEFT JOIN laplace.v_word_points ps ON ps.id = f.subject_id "
+    "LEFT JOIN laplace.v_word_points po ON po.id = c.object_id "
     "WHERE c.object_id IS NOT NULL "
     "  AND ($2::bytea IS NULL OR c.type_id = $2)";
 
@@ -256,9 +256,8 @@ mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
  */
 static const char *ORDINAL_CONTINUITY_QUERY =
     "WITH t AS ( "
-    "  SELECT p.trajectory FROM laplace.physicalities p "
-    "  WHERE p.type = 1 "
-    "    AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
+    "  SELECT w.trajectory FROM laplace.v_word_points w "
+    "  WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]::bytea[] "
     "  LIMIT 1 "
     ") "
     "SELECT ST_X(dp.geom), ST_Y(dp.geom), ST_Z(dp.geom), ST_M(dp.geom) "

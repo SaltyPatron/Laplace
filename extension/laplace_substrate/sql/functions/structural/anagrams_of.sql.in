@@ -4,13 +4,12 @@ CREATE OR REPLACE FUNCTION anagrams_of(p_word text)
     SET search_path = @extschema@, public AS $$
     SELECT render(d.entity_id), d.entity_id
     FROM (
-        SELECT DISTINCT p2.entity_id
-        FROM physicalities p1
-        JOIN physicalities p2 ON p2.hilbert_index = p1.hilbert_index AND p2.type = 1
-        JOIN entities e ON e.id = p2.entity_id
-        WHERE p1.entity_id = word_id(p_word) AND p1.type = 1
-          AND e.type_id = canonical_id('Word')
-          AND p2.entity_id <> p1.entity_id
+        SELECT DISTINCT w2.id AS entity_id
+        FROM v_word_points w1
+        JOIN v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
+        WHERE w1.id = word_id(p_word)
+          AND w2.type_id = canonical_id('Word')
+          AND w2.id <> w1.id
     ) d
     ORDER BY d.entity_id
 $$;

@@ -41,6 +41,32 @@ public sealed class DelegateFileRecordSource<TRecord>(
     public IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default) => open(ct);
 }
 
+/// <summary>
+/// Multi-file stream whose per-file reader IS the single-file masticator.
+/// Enumeration is cheap (paths only); each worker calls
+/// <paramref name="extractFile"/> once for its claimed path — same function a
+/// monolith source uses for its one file.
+/// </summary>
+public sealed class PathListMultiFileStream<TRecord>(
+    IReadOnlyList<(string Path, string Label)> files,
+    Func<string, string, DecomposerOptions, CancellationToken, IAsyncEnumerable<TRecord>> extractFile,
+    DecomposerOptions options) : IMultiFileRecordStream<TRecord>
+{
+    public async IAsyncEnumerable<IFileRecordSource<TRecord>> FilesAsync(
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var (path, label) in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            string p = path;
+            string l = label;
+            yield return new DelegateFileRecordSource<TRecord>(
+                l, token => extractFile(p, l, options, token));
+        }
+        await Task.CompletedTask;
+    }
+}
+
 public interface IIngestDeferredUnit : IDisposable
 {
     TierTree? TreeForBatchProbe { get; }

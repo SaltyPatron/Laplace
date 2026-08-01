@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
@@ -35,36 +33,14 @@ internal static class ContentRoundtrip
         var nConst = new Dictionary<Hash128, int>();
         var pts = new Dictionary<Hash128, List<(int path, double x, double y, double z, double m)>>();
 
-        await using (var conn = await ds.OpenConnectionAsync(ct))
-        await using (var cmd = conn.CreateCommand())
+        var rows = await NpgsqlSubstrateReads.TrajectoryTreeDumpPointsAsync(
+            ds, documentId.ToBytes(), ct);
+        foreach (var row in rows)
         {
-
-
-
-            cmd.CommandText = @"
-                WITH RECURSIVE tree(id) AS (
-                    SELECT @doc
-                    UNION
-                    SELECT unnest(public.laplace_trajectory_constituent_ids(p.trajectory))
-                    FROM tree t
-                    JOIN laplace.physicalities p
-                      ON p.entity_id = t.id AND p.type = 1 AND p.trajectory IS NOT NULL
-                )
-                SELECT p.entity_id, p.n_constituents, (g.path)[1],
-                       ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom)
-                FROM laplace.physicalities p
-                JOIN tree t ON t.id = p.entity_id
-                CROSS JOIN LATERAL ST_DumpPoints(p.trajectory) AS g
-                WHERE p.type = 1 AND p.trajectory IS NOT NULL";
-            cmd.Parameters.AddWithValue("doc", documentId.ToBytes());
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-            {
-                var id = ReadHash(r, 0);
-                nConst[id] = r.GetInt32(1);
-                if (!pts.TryGetValue(id, out var list)) pts[id] = list = new();
-                list.Add((r.GetInt32(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)));
-            }
+            var id = ReadHash(row.Id);
+            nConst[id] = row.NConstituents;
+            if (!pts.TryGetValue(id, out var list)) pts[id] = list = new();
+            list.Add((row.PathIndex, row.X, row.Y, row.Z, row.M));
         }
 
         var children = new Dictionary<Hash128, Hash128[]>(pts.Count);
@@ -95,9 +71,6 @@ internal static class ContentRoundtrip
             foreach (var k in kids) Emit(k, children, idToCp, sb);
     }
 
-    private static Hash128 ReadHash(NpgsqlDataReader r, int ord)
-    {
-        var bytes = (byte[])r[ord];
-        return new Hash128(BitConverter.ToUInt64(bytes, 0), BitConverter.ToUInt64(bytes, 8));
-    }
+    private static Hash128 ReadHash(byte[] bytes)
+        => new(BitConverter.ToUInt64(bytes, 0), BitConverter.ToUInt64(bytes, 8));
 }

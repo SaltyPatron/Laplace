@@ -44,6 +44,11 @@ RUNNER_VERSION="v2.334.0"
 RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION#v}.tar.gz"
 RUNNER_DL_URL="https://github.com/actions/runner/releases/download/$RUNNER_VERSION/$RUNNER_TARBALL"
 SUDOERS_FILE="/etc/sudoers.d/laplace-runner"
+# Operators (ahart) and CI (laplace-runner) both run pipeline.sh; the postmaster
+# is UID laplace-runner, so ahart cannot SIGINT it. pipeline.sh falls back to
+# `sudo -n systemctl restart laplace-postgresql.service` — this drop-in is that
+# cold NOPASSWD surface. Kept separate from laplace-runner-deploy (API/nginx).
+SUDOERS_PG_BOUNCE="/etc/sudoers.d/laplace-pg-bounce"
 LAPLACE_PG_CONF_DIR="$LAPLACE_PG_PREFIX/conf"
 PG_HBA_FILE="$LAPLACE_PG_CONF_DIR/pg_hba.conf"
 PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
@@ -80,6 +85,10 @@ Modes:
   bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
   status      Print current state (no changes)
   stripe      Stripe sandbox block into runner .env
+  pg-bounce-sudoers
+              Install/refresh /etc/sudoers.d/laplace-pg-bounce only
+              (NOPASSWD systemctl for laplace-postgresql / laplace-api —
+              pipeline.sh install bounce for operators + runner)
   reset       Tear down (type RESET)
 
 CI: .github/workflows/laplace.yml → scripts/pipeline.sh
@@ -675,10 +684,13 @@ User=$RUNNER_USER
 Group=$RUNNER_GROUP
 ExecStartPre=+/usr/bin/install -d -m 2775 -o postgres -g $RUNNER_GROUP $LAPLACE_PG_SOCKET_DIR
 ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
+# Readiness wait lives in ${LAPLACE_PG_SERVICE}.d/20-ready.conf (written below).
+# Type=simple races the Unix socket; this build has no libsystemd for Type=notify.
 ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
 KillSignal=SIGINT
-TimeoutSec=120
+TimeoutStartSec=180
+TimeoutStopSec=120
 # Restart=always (not on-failure): the runner user OWNS this postmaster and
 # bounces it rootlessly by SIGINT (clean exit, code 0) — pipeline.sh
 # restart_postgres relies on systemd resurrecting it after a CLEAN shutdown.
@@ -691,8 +703,18 @@ UMask=0027
 WantedBy=multi-user.target
 EOF
     chmod 644 "$unit_file"
+    install -d "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d"
+    cat > "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/20-ready.conf" <<EOF
+[Service]
+# Type=simple returns when the postmaster process exists — before the Unix
+# socket accepts. pg_isready -t does NOT retry when the socket is absent
+# (instant "no response"); loop until accepting. No libsystemd → no Type=notify.
+ExecStartPost=/bin/bash -c 'for i in \$(seq 1 120); do $LAPLACE_PG_PREFIX/bin/pg_isready -h $LAPLACE_PG_SOCKET_DIR -p $LAPLACE_PG_PORT >/dev/null 2>&1 && exit 0; sleep 1; done; echo "pg_isready timed out after 120s" >&2; exit 1'
+TimeoutStartSec=180
+TimeoutStopSec=120
+EOF
     systemctl daemon-reload
-    green "✓ Installed $unit_file"
+    green "✓ Installed $unit_file + 20-ready.conf (start waits on pg_isready loop)"
 
     systemctl enable "$LAPLACE_PG_SERVICE" >/dev/null 2>&1 || true
     systemctl reset-failed "$LAPLACE_PG_SERVICE" 2>/dev/null || true
@@ -951,6 +973,40 @@ bootstrap_remove_legacy_sudoers() {
     fi
 }
 
+# pipeline.sh restart_postgres: rootless SIGINT works only for UID laplace-runner.
+# Operators (GH_SUDO_USER / ahart) share the group but not the UID — kill fails,
+# then sudo -n systemctl restart is the fallback. Without this drop-in, install
+# leaves a new .so on disk and a live postmaster still linked to the old one.
+bootstrap_pg_bounce_sudoers() {
+    say "NOPASSWD systemctl bounce for $LAPLACE_PG_SERVICE (operators + runner)"
+    local op="$GH_SUDO_USER"
+    local tmp
+    tmp="$(mktemp)"
+    # One command per line — no backslash wraps (visudo + terminal paste both
+    # corrupt mid-command continuations). Match pipeline.sh argv exactly:
+    #   restart/stop/start/reload/try-restart laplace-postgresql.service
+    #   start/stop laplace-api  (no .service suffix — see pipeline install)
+    {
+        for u in "$op" "$RUNNER_USER"; do
+            for action in restart stop start reload try-restart is-active; do
+                echo "$u ALL=(root) NOPASSWD: /usr/bin/systemctl $action $LAPLACE_PG_SERVICE"
+            done
+            for action in start stop restart; do
+                echo "$u ALL=(root) NOPASSWD: /usr/bin/systemctl $action laplace-api"
+                echo "$u ALL=(root) NOPASSWD: /usr/bin/systemctl $action laplace-api.service"
+            done
+        done
+    } >"$tmp"
+    install -m 0440 "$tmp" "$SUDOERS_PG_BOUNCE"
+    rm -f "$tmp"
+    if ! visudo -cf "$SUDOERS_PG_BOUNCE" >/dev/null; then
+        red "✗ visudo rejected $SUDOERS_PG_BOUNCE — removed"
+        rm -f "$SUDOERS_PG_BOUNCE"
+        return 1
+    fi
+    green "✓ $SUDOERS_PG_BOUNCE (NOPASSWD systemctl for $op + $RUNNER_USER)"
+}
+
 bootstrap_external_dirs() {
     say "Ensure /opt/laplace/external/ + per-dep install destinations + engine install destinations"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" /opt/laplace/external
@@ -1036,6 +1092,12 @@ do_status() {
     else
         echo "  (absent: $SUDOERS_FILE)"
     fi
+    if [ -f "$SUDOERS_PG_BOUNCE" ]; then
+        echo "--- $SUDOERS_PG_BOUNCE ---"
+        cat "$SUDOERS_PG_BOUNCE"
+    else
+        echo "  (absent: $SUDOERS_PG_BOUNCE)"
+    fi
 
     say "Layer-1 state (databases in substrate cluster)"
     sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
@@ -1076,6 +1138,7 @@ This will remove:
     (and any databases they own — including 'laplace' if present)
   - pg_hba.conf + pg_ident.conf entries for laplace
   - $SUDOERS_FILE
+  - $SUDOERS_PG_BOUNCE
   - System account $RUNNER_USER and $RUNNER_HOME
 
 This does NOT touch:
@@ -1109,8 +1172,8 @@ EOF
     fi
 
     say "Remove sudoers"
-    rm -f "$SUDOERS_FILE"
-    green "✓ $SUDOERS_FILE removed"
+    rm -f "$SUDOERS_FILE" "$SUDOERS_PG_BOUNCE"
+    green "✓ $SUDOERS_FILE and $SUDOERS_PG_BOUNCE removed"
 
     say "Stop + disable substrate cluster systemd unit ($LAPLACE_PG_SERVICE)"
     if systemctl list-unit-files "$LAPLACE_PG_SERVICE" 2>/dev/null | grep -q "$LAPLACE_PG_SERVICE"; then
@@ -1199,6 +1262,7 @@ do_bootstrap() {
     bootstrap_cleanup_stale_installs
     bootstrap_pg_extension_paths
     bootstrap_remove_legacy_sudoers
+    bootstrap_pg_bounce_sudoers
     bootstrap_runner_gh_auth
 
     bootstrap_api_host
@@ -1233,6 +1297,14 @@ do_bootstrap() {
         red "✗ Legacy sudoers rule still active for laplace-runner (should be removed; see step 10)"
     else
         green "✓ No legacy sudoers rule (staged /opt/laplace install needs none)"
+    fi
+
+    echo
+    echo "PG bounce sudoers ($SUDOERS_PG_BOUNCE):"
+    if [ -f "$SUDOERS_PG_BOUNCE" ] && visudo -cf "$SUDOERS_PG_BOUNCE" >/dev/null 2>&1; then
+        green "✓ present + valid"
+    else
+        red "✗ missing or invalid — pipeline install cannot bounce postgres as $GH_SUDO_USER"
     fi
 
     echo
@@ -1358,6 +1430,10 @@ case "$MODE" in
         ;;
     stripe)
         do_stripe
+        ;;
+    pg-bounce-sudoers)
+        require_root
+        bootstrap_pg_bounce_sudoers
         ;;
     -h|--help|help)
         usage

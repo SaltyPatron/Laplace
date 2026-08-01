@@ -39,6 +39,11 @@ namespace Laplace.Decomposers.Abstractions;
 /// <c>merkle_dedup_trunk_shortcircuit</c> already runs on: a present trunk short-circuits
 /// its whole subtree. This ledger reaches that conclusion one step earlier, before the
 /// subtree is built.
+///
+/// <see cref="End"/> disarms skips but KEEPS membership so a warm re-ingest of the
+/// same source (new bulk bracket, same process) does not re-derive every surface.
+/// <see cref="Reset"/> clears membership — call on source change or DB recreate so a
+/// later source cannot inherit another source's skip set (provenance).
 /// </summary>
 public static class ContentLadderLedger
 {
@@ -53,8 +58,9 @@ public static class ContentLadderLedger
 
     private static ConcurrentDictionary<Hash128, bool>? _persisted;
     private static int _count;
+    private static int _armed;
 
-    /// <summary>Arms the ledger for a bulk run. Idempotent; a second call keeps the set.</summary>
+    /// <summary>Arms the ledger for a bulk run. Keeps any membership left by a prior End.</summary>
     public static void Begin()
     {
         if (_persisted is null)
@@ -62,21 +68,30 @@ public static class ContentLadderLedger
             _persisted = new ConcurrentDictionary<Hash128, bool>();
             Volatile.Write(ref _count, 0);
         }
+        Volatile.Write(ref _armed, 1);
     }
 
-    /// <summary>Disarms the ledger. Outside a bulk run every probe misses and nothing is skipped.</summary>
-    public static void End()
+    /// <summary>
+    /// Disarms skips. Membership is retained for warm re-ingest of the same source —
+    /// <see cref="Reset"/> is what forgets.
+    /// </summary>
+    public static void End() => Volatile.Write(ref _armed, 0);
+
+    /// <summary>Forget every root. Source change / DB recreate / test isolation.</summary>
+    public static void Reset()
     {
+        Volatile.Write(ref _armed, 0);
         _persisted = null;
         Volatile.Write(ref _count, 0);
     }
 
     /// <summary>True while a bulk run has armed the ledger. Outside one, never skip.</summary>
-    public static bool Armed => _persisted is not null;
+    public static bool Armed => Volatile.Read(ref _armed) != 0;
 
     /// <summary>True iff this root's ladder is proven present in the target substrate.</summary>
     public static bool IsPersisted(Hash128 root)
     {
+        if (!Armed) return false;
         var map = _persisted;
         return map is not null && map.ContainsKey(root);
     }
@@ -87,6 +102,7 @@ public static class ContentLadderLedger
     /// </summary>
     public static void MarkPersisted(IEnumerable<Hash128> roots)
     {
+        if (!Armed) return;
         var map = _persisted;
         if (map is null) return;
         foreach (var id in roots)

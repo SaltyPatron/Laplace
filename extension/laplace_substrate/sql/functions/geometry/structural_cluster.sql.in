@@ -8,21 +8,18 @@ DECLARE
     v_coord  geometry;
     v_traj   geometry;
 BEGIN
-    SELECT p.entity_id, p.coord, p.trajectory
+    SELECT a.id, a.coord, a.trajectory
       INTO v_entity, v_coord, v_traj
-    FROM physicalities p
-    WHERE p.entity_id = p_seed AND p.type = 1
-      AND p.coord IS NOT NULL AND p.trajectory IS NOT NULL
-    LIMIT 1;
-    IF v_entity IS NULL THEN RETURN; END IF;
+    FROM word_anchor(p_seed) a;
+    IF v_entity IS NULL OR v_coord IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
     WITH knn AS (
-        SELECT p.entity_id, p.trajectory
-        FROM physicalities p
-        WHERE p.type = 1 AND p.coord IS NOT NULL
-          AND p.entity_id <> v_entity AND p.trajectory IS NOT NULL
-        ORDER BY p.coord <<->> v_coord
+        SELECT w.id AS entity_id, w.trajectory
+        FROM v_word_points w
+        WHERE w.coord IS NOT NULL
+          AND w.id <> v_entity AND w.trajectory IS NOT NULL
+        ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_limit * 20, 2000)
     ), scored AS (
         SELECT DISTINCT ON (k.entity_id) k.entity_id,

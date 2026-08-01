@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 
@@ -82,27 +81,10 @@ public static class LearnedPst
 
     private static Dictionary<Hash128, (double Mu, double W)> ReadStats(NpgsqlDataSource ds, Hash128[] ids)
     {
-        var raw = new byte[ids.Length][];
-        for (int i = 0; i < ids.Length; i++) raw[i] = ids[i].ToBytes();
-
+        var byId = Laplace.SubstrateCRUD.Npgsql.NpgsqlConsensusByIds.Read(ds, ids, ChessVocabulary.OutcomeType);
         var map = new Dictionary<Hash128, (double, double)>(ids.Length);
-        using var conn = ds.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1, $2)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            Value = raw,
-        });
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            NpgsqlDbType = NpgsqlDbType.Bytea,
-            Value = ChessVocabulary.OutcomeType.ToBytes(),
-        });
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
-            map[Hash128.FromBytes((byte[])r[0])] = (r.GetDouble(1), r.GetDouble(2));
+        foreach (var (id, row) in byId)
+            map[id] = (row.EffMu, row.Witnesses);
         return map;
     }
 }

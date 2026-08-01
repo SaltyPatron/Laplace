@@ -14,10 +14,9 @@ CREATE OR REPLACE FUNCTION source_counts()
     
     FROM (SELECT a.source_id AS sid, count(*) AS evidence
           FROM @extschema@.attestations a GROUP BY a.source_id) ev
-    FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT p.entity_id) AS content
+    FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT w.id) AS content
                FROM @extschema@.attestations a
-               JOIN @extschema@.physicalities p
-                 ON p.entity_id = a.subject_id AND p.type = 1
+               JOIN @extschema@.v_word_points w ON w.id = a.subject_id
                GROUP BY a.source_id) ct
       ON ev.sid = ct.sid
     ORDER BY evidence DESC NULLS LAST

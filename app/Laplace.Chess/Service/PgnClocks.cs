@@ -23,13 +23,28 @@ internal static partial class PgnClocks
         if (tokens is null) return Array.Empty<double>();
         var outv = new double[tokens.Length];
         for (int i = 0; i < tokens.Length; i++)
-        {
-            var parts = tokens[i].Split(':');
-            if (parts.Length != 3) continue;
-            outv[i] = int.Parse(parts[0]) * 3600 + int.Parse(parts[1]) * 60
-                + double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
-        }
+            outv[i] = TryParseHms(tokens[i], out double sec) ? sec : 0;
         return outv;
+    }
+
+    /// <summary>
+    /// Parse a remaining-clock token <c>H:M:S</c>. Returns false on malformed
+    /// fields instead of throwing — one bad <c>%clk</c> must not abort a corpus
+    /// run (CONSOLIDATION §3.7 / same class as #596).
+    /// </summary>
+    public static bool TryParseHms(string? token, out double seconds)
+    {
+        seconds = 0;
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        var parts = token.Split(':');
+        if (parts.Length != 3) return false;
+        if (!int.TryParse(parts[0], out int h)) return false;
+        if (!int.TryParse(parts[1], out int m)) return false;
+        if (!double.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double s))
+            return false;
+        seconds = h * 3600 + m * 60 + s;
+        return true;
     }
 
     public static string[]? ClockTokens(string gameText, int moveCount)
@@ -54,7 +69,12 @@ internal static partial class PgnClocks
         if (ms.Count == 0 || ms.Count != moveCount) return null;
         var outv = new double[moveCount];
         for (int i = 0; i < moveCount; i++)
-            outv[i] = double.Parse(ms[i].Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        {
+            if (!double.TryParse(ms[i].Groups[1].Value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out outv[i]))
+                return null;
+        }
         return outv;
     }
 

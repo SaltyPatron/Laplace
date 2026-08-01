@@ -289,13 +289,37 @@ public abstract class Decomposer<TRecord> : IDecomposer
 }
 
 /// <summary>
-/// Multi-file sources (document ingest, per-file treebanks) that route through
-/// <see cref="IngestBatchPipeline.RunMultiFileAsync"/>.
+/// Multi-file sources that route through <see cref="IngestBatchPipeline.RunMultiFileAsync"/>.
+/// The unit of work is <see cref="ExtractFileAsync"/> — one file → records. Multi-file
+/// orchestration calls that unit once per path; it is not a second parser family.
+/// Override <see cref="CreateMultiFileStream"/> only when the open shape is not a path list
+/// (legacy adapters); new sources implement <see cref="ListFiles"/> + <see cref="ExtractFileAsync"/>.
 /// </summary>
 public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
 {
-    protected abstract IMultiFileRecordStream<TRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options);
+    /// <summary>Cheap path/label enumeration — reads nothing.</summary>
+    protected virtual IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options) =>
+        throw new NotSupportedException(
+            $"{GetType().Name}: implement ListFiles+ExtractFileAsync, or override CreateMultiFileStream.");
+
+    /// <summary>
+    /// Parse ONE file into records. This is the single-file masticator; the multi-file
+    /// pool invokes it per claimed path.
+    /// </summary>
+    protected virtual IAsyncEnumerable<TRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options, CancellationToken ct) =>
+        throw new NotSupportedException(
+            $"{GetType().Name}: implement ExtractFileAsync, or override CreateMultiFileStream.");
+
+    /// <summary>
+    /// Default: <see cref="PathListMultiFileStream{TRecord}"/> over <see cref="ListFiles"/>,
+    /// each file opened via <see cref="ExtractFileAsync"/>.
+    /// </summary>
+    protected virtual IMultiFileRecordStream<TRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options) =>
+        new PathListMultiFileStream<TRecord>(
+            ListFiles(ecosystemPath, options), ExtractFileAsync, options);
 
     protected abstract IIngestRecordHandler<TRecord> CreateHandlerForFile(string fileLabel);
 
@@ -328,10 +352,22 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
         throw new NotSupportedException(
             $"{GetType().Name} uses multi-file streaming; use CreateHandlerForFile instead.");
 
-    protected sealed override IAsyncEnumerable<TRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-        throw new NotSupportedException(
-            $"{GetType().Name} uses multi-file streaming; override CreateMultiFileStream instead.");
+    /// <summary>
+    /// Concatenation of <see cref="ExtractFileAsync"/> over <see cref="ListFiles"/> —
+    /// the same masticator the parallel pool uses, serial. Not the production driver
+    /// (<see cref="RunDecomposeAsync"/> uses the pool); exists so the unit is callable
+    /// without a second parser.
+    /// </summary>
+    protected sealed override async IAsyncEnumerable<TRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var (path, label) in ListFiles(ecosystemPath, options))
+        {
+            await foreach (var record in ExtractFileAsync(path, label, options, ct))
+                yield return record;
+        }
+    }
 }
 
 /// <summary>
@@ -383,6 +419,33 @@ public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.RelationTriple(SourceId, BatchLabelPrefix, options, context.Reader);
+
+    /// <summary>Paths to masticate. Usually one file for monolith sources.</summary>
+    protected abstract IReadOnlyList<string> ListInputFiles(
+        string ecosystemPath, DecomposerOptions options);
+
+    /// <summary>
+    /// Parse ONE file into triples. This is the unit — multi-file relation-triple
+    /// sources call the same shape via <see cref="DecomposerMultiFile{TRecord}.ExtractFileAsync"/>.
+    /// </summary>
+    protected abstract IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
+        string filePath, DecomposerOptions options, CancellationToken ct);
+
+    protected sealed override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        long cap = options.MaxInputUnits;
+        long consumed = 0;
+        foreach (var path in ListInputFiles(ecosystemPath, options))
+        {
+            await foreach (var record in ExtractFileAsync(path, options, ct))
+            {
+                yield return record;
+                if (cap > 0 && ++consumed >= cap) yield break;
+            }
+        }
+    }
 }
 
 public abstract class GrammarComposeDecomposer : Decomposer<GrammarComposeRecord>
@@ -425,6 +488,8 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
             SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader,
             WitnessWeight, CommitEpoch, IngestProfile);
 
+    // Same segmented monolith path as Decomposer<TRecord>.RunDecomposeAsync — do not
+    // keep a second idle-core serial compose lane for grammar monoliths.
     protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
@@ -436,11 +501,27 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
 
         var stream = new AsyncEnumerableRecordStream<GrammarIngestRecord>(
             ExtractRecordsAsync(context.EcosystemPath, options, ct));
-        var handler = CreateHandler();
-        var config = IngestPipelineDefaults.ApplyMaxInputUnits(
+
+        IngestBatchConfig BuildConfig() => IngestPipelineDefaults.ApplyMaxInputUnits(
             BuildPipelineConfig(context, options), options);
 
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
+        int segments = MonolithSegmenter.ResolveSegments(BuildConfig());
+        if (segments <= 1)
+        {
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                               stream, CreateHandler(), BuildConfig(), ct))
+                yield return change;
+            yield break;
+        }
+
+        await foreach (var change in MonolithSegmenter.RunSegmentedAsync(
+                           stream,
+                           _ => CreateHandler(),
+                           _ => BuildConfig(),
+                           segments,
+                           MonolithSegmenter.ResolveChunkRecords(BuildConfig()),
+                           BatchLabelPrefix,
+                           ct))
             yield return change;
     }
 }

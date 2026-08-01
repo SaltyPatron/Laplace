@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
+using Laplace.Chess.Service;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
@@ -26,14 +27,14 @@ internal sealed class SubstrateTools
 
     public SubstrateTools()
     {
-        var conn = LaplaceInstall.PostgresConnectionString();
-        // The install default is the ingest string (unbounded Command Timeout);
-        // this is a request/response surface — re-bound it, and let repeated
-        // tool queries auto-prepare.
-        _db = new NpgsqlDataSourceBuilder(
-            conn + ";Command Timeout=30;Max Auto Prepare=50;Auto Prepare Min Usages=2").Build();
-        _dbReadOnly = new NpgsqlDataSourceBuilder(
-            conn + ";Command Timeout=20;Options='-c default_transaction_read_only=on -c statement_timeout=15000'").Build();
+        // Request/response surface — Serving policy (bounded timeout + auto-prepare).
+        _db = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        _dbReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+        {
+            dsb.ConnectionStringBuilder.CommandTimeout = 20;
+            dsb.ConnectionStringBuilder.Options =
+                "-c default_transaction_read_only=on -c statement_timeout=15000";
+        });
     }
 
     /// <summary>
@@ -135,96 +136,21 @@ internal sealed class SubstrateTools
         {
             return name switch
             {
-                "api" => Rows(_dbReadOnly,
-                    "SELECT name, args, returns FROM laplace.api(@q) ORDER BY name",
-                    DefaultRowCap, ("q", Req(args, "query"))),
+                "api" => Api(args),
                 "sql" => Rows(_dbReadOnly,
                     Req(args, "query"),
                     Int(args, "max_rows", DefaultRowCap)),
-                "recall" => Rows(_db,
-                    """
-                    SELECT reply, round(eff_mu, 1) AS eff_mu, witnesses
-                    FROM laplace.recall_session(@p, @s)
-                    """,
-                    DefaultRowCap, ("p", Req(args, "prompt")), ("s", SessionParam(Opt(args, "session")))),
+                "recall" => Recall(args),
                 "chat" => ChatTurn(args),
                 "witness" => WitnessFact(args),
                 "feedback" => Feedback(args),
-                "query" => Rows(_db,
-                    """
-                    SELECT reply, round(eff_mu, 1) AS eff_mu, witnesses
-                    FROM laplace.recall_intent(@shape, laplace.resolve_ref(@topic),
-                        CASE WHEN @t2 IS NULL THEN NULL ELSE laplace.resolve_ref(@t2) END,
-                        @rt, @lang, NULL)
-                    """,
-                    DefaultRowCap,
-                    ("shape", Req(args, "shape")), ("topic", Req(args, "topic")),
-                    ("t2", Opt(args, "topic2")), ("rt", Opt(args, "relation_type")),
-                    ("lang", Opt(args, "lang"))),
-                "taxonomy" => Rows(_dbReadOnly,
-                    """
-                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve_ref(@term)
-                                              ELSE decode(@e, 'hex') END AS id)
-                    SELECT t.dir, t.ord, encode(t.id, 'hex') AS entity, t.label,
-                           round(t.eff_mu, 1) AS eff_mu
-                    FROM node, laplace.taxonomy_tree(node.id) t
-                    ORDER BY t.dir DESC, t.ord
-                    """,
-                    DefaultRowCap, ("term", NodeText(args, "term")), ("e", Opt(args, "entity"))),
-                "translate" => Rows(_db,
-                    """
-                    SELECT t.translation, t.language, t.eff_mu, t.witnesses
-                    FROM laplace.translations(laplace.resolve_ref(@term), @limit) t
-                    """,
-                    DefaultRowCap, ("term", Req(args, "term")), ("limit", Int(args, "limit", 24))),
-                "leaders" => Rows(_dbReadOnly,
-                    """
-                    SELECT band, subject, relation, object, eff_mu, witnesses
-                    FROM laplace.band_leaders(string_to_array(@bands, ',')::int[], @per)
-                    """,
-                    DefaultRowCap,
-                    ("bands", Opt(args, "bands") ?? "1,2,4,5"), ("per", Int(args, "per_band", 5))),
-                "walk" => Rows(_dbReadOnly,
-                    """
-                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve(@p)
-                                              ELSE decode(@e, 'hex') END AS id)
-                    SELECT w.depth,
-                           laplace.realize_path(w.path, w.types) AS path,
-                           round(w.eff_mu, 1) AS eff_mu,
-                           round(w.path_mu, 1) AS path_mu,
-                           w.witnesses
-                    FROM node, laplace.walk_branches(
-                             node.id,
-                             CASE WHEN @t IS NULL THEN NULL ELSE laplace.relation_type_id(@t) END,
-                             @depth, @breadth) w
-                    ORDER BY w.depth, w.path_mu DESC
-                    """,
-                    DefaultRowCap,
-                    ("p", NodeText(args, "prompt")), ("e", Opt(args, "entity")),
-                    ("t", Opt(args, "relation_type")),
-                    ("depth", Int(args, "depth", 4)), ("breadth", Int(args, "breadth", 5))),
-                "facts" => Rows(_dbReadOnly,
-                    """
-                    WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.word_id(@term)
-                                              ELSE decode(@e, 'hex') END AS id)
-                    SELECT encode(node.id, 'hex') AS entity,
-                           f.type, f.fact, round(f.eff_mu, 1) AS eff_mu, f.witnesses
-                    FROM node, laplace.salient_facts(node.id, NULL, @limit) f
-                    """,
-                    DefaultRowCap, ("term", NodeText(args, "term")), ("e", Opt(args, "entity")),
-                    ("limit", Int(args, "limit", 24))),
-                "health" => Rows(_dbReadOnly,
-                    """
-                    SELECT x.metric, x.value
-                    FROM laplace.substrate_health() h,
-                         LATERAL (VALUES ('ok', h.ok::text),
-                                         ('fake_tier_bands', h.fake_tier_bands::text),
-                                         ('identity_violations', h.identity_violations::text),
-                                         ('bootstrap_entities', h.bootstrap_entities::text)) x(metric, value)
-                    UNION ALL
-                    SELECT metric, value::text FROM laplace.substrate_counts()
-                    """,
-                    DefaultRowCap),
+                "query" => Query(args),
+                "taxonomy" => Taxonomy(args),
+                "translate" => Translate(args),
+                "leaders" => Leaders(args),
+                "walk" => Walk(args),
+                "facts" => Facts(args),
+                "health" => Health(),
                 "ingest" => Ingest(args),
                 "help" => Help(args),
                 _ => ($"unknown tool: {name}", true),
@@ -271,39 +197,208 @@ internal sealed class SubstrateTools
     /// tenant+key are the SAME context entity. Null stays null (recall.c's own
     /// per-backend fallback applies).
     /// </summary>
-    private static NpgsqlParameter SessionParam(string? sessionKey) =>
-        new("s", NpgsqlTypes.NpgsqlDbType.Bytea)
+    private static byte[]? SessionBytes(string? sessionKey) =>
+        sessionKey is null
+            ? null
+            : ConversationContent.SessionId(McpTenant, sessionKey).ToBytes();
+
+    private (string, bool) Recall(JsonObject? args)
+    {
+        // GH #575: FEN topics rewrite to composed position hex before lexical resolve.
+        var prompt = ChessPositionRef.RewriteFenToHex(Req(args, "prompt"))!;
+        var rows = NpgsqlSubstrateReads.RecallSessionAsync(
+            _db, prompt, SessionBytes(Opt(args, "session")), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
         {
-            Value = sessionKey is null
-                ? DBNull.Value
-                : ConversationContent.SessionId(McpTenant, sessionKey).ToBytes()
-        };
+            ["reply"] = r.Reply,
+            ["eff_mu"] = r.EffMu is null ? null : Math.Round(r.EffMu.Value, 1),
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Query(JsonObject? args)
+    {
+        var topicRef = ChessPositionRef.RewriteFenToHex(Req(args, "topic"))!;
+        var topic = NpgsqlSubstrateReads.ResolveRefAsync(_db, topicRef, default)
+            .GetAwaiter().GetResult();
+        if (topic is null)
+            return JsonRows(Array.Empty<JsonObject>());
+
+        byte[]? topic2 = null;
+        if (Opt(args, "topic2") is { } t2)
+        {
+            var t2Ref = ChessPositionRef.RewriteFenToHex(t2)!;
+            topic2 = NpgsqlSubstrateReads.ResolveRefAsync(_db, t2Ref, default).GetAwaiter().GetResult();
+        }
+
+        var rows = NpgsqlSubstrateReads.RecallIntentAsync(
+            _db, Req(args, "shape"), topic, topic2,
+            Opt(args, "relation_type"), Opt(args, "lang"), contextIds: null, default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["reply"] = r.Reply,
+            ["eff_mu"] = r.EffMu is null ? null : Math.Round(r.EffMu.Value, 1),
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Taxonomy(JsonObject? args)
+    {
+        var entity = Opt(args, "entity");
+        byte[]? id;
+        if (entity is not null)
+            id = Convert.FromHexString(entity);
+        else
+            id = NpgsqlSubstrateReads.ResolveRefAsync(
+                    _dbReadOnly, ChessPositionRef.RewriteFenToHex(NodeText(args, "term"))!, default)
+                .GetAwaiter().GetResult();
+        if (id is null)
+            return JsonRows(Array.Empty<JsonObject>());
+
+        var rows = NpgsqlSubstrateReads.TaxonomyTreeAsync(_dbReadOnly, id, default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["dir"] = r.Dir,
+            ["ord"] = r.Ord,
+            ["entity"] = r.IdHex,
+            ["label"] = r.Label,
+            ["eff_mu"] = r.EffMu is null ? null : Math.Round(r.EffMu.Value, 1),
+        }));
+    }
+
+    private (string, bool) Leaders(JsonObject? args)
+    {
+        var bandsCsv = Opt(args, "bands") ?? "1,2,4,5";
+        var bands = bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(int.Parse).ToArray();
+        var per = Int(args, "per_band", 5);
+        var rows = NpgsqlSubstrateReads.BandLeadersAsync(_dbReadOnly, bands, per, default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["band"] = r.Band,
+            ["subject"] = r.Subject,
+            ["relation"] = r.Relation,
+            ["object"] = r.Object,
+            ["eff_mu"] = r.EffMu,
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Facts(JsonObject? args)
+    {
+        var entity = Opt(args, "entity");
+        byte[]? id;
+        if (entity is not null)
+            id = Convert.FromHexString(entity);
+        else
+            id = NpgsqlSubstrateReads.ResolveRefAsync(
+                    _dbReadOnly, ChessPositionRef.RewriteFenToHex(NodeText(args, "term"))!, default)
+                .GetAwaiter().GetResult();
+        if (id is null)
+            return JsonRows(Array.Empty<JsonObject>());
+
+        var limit = Int(args, "limit", 24);
+        var rows = NpgsqlSubstrateReads.SalientFactsAsync(_dbReadOnly, id, limit, default)
+            .GetAwaiter().GetResult();
+        var entityHex = Convert.ToHexStringLower(id);
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["entity"] = entityHex,
+            ["type"] = r.Type,
+            ["fact"] = r.Fact,
+            ["eff_mu"] = Math.Round(r.EffMu, 1),
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Api(JsonObject? args)
+    {
+        var rows = NpgsqlSubstrateReads.ApiCatalogAsync(_dbReadOnly, Req(args, "query"), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["name"] = r.Name,
+            ["args"] = r.Args,
+            ["returns"] = r.Returns,
+        }));
+    }
+
+    private (string, bool) Translate(JsonObject? args)
+    {
+        var term = ChessPositionRef.RewriteFenToHex(Req(args, "term"))!;
+        var rows = NpgsqlSubstrateReads.TranslationsAsync(
+            _db, term, Int(args, "limit", 24), default).GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["translation"] = r.Translation,
+            ["language"] = r.Language,
+            ["eff_mu"] = r.EffMu,
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Walk(JsonObject? args)
+    {
+        var prompt = ChessPositionRef.RewriteFenToHex(NodeText(args, "prompt"));
+        var rows = NpgsqlSubstrateReads.WalkBranchesAsync(
+            _dbReadOnly, prompt, Opt(args, "entity"), Opt(args, "relation_type"),
+            Int(args, "depth", 4), Int(args, "breadth", 5), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["depth"] = r.Depth,
+            ["path"] = r.Path,
+            ["eff_mu"] = Math.Round(r.EffMu, 1),
+            ["path_mu"] = Math.Round(r.PathMu, 1),
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Health()
+    {
+        var health = NpgsqlSubstrateReads.SubstrateHealthAsync(_dbReadOnly, default)
+            .GetAwaiter().GetResult();
+        var counts = NpgsqlSubstrateReads.SubstrateCountsAsync(_dbReadOnly, default)
+            .GetAwaiter().GetResult();
+        var rows = health.Select(h => new JsonObject { ["metric"] = h.Metric, ["value"] = h.Value })
+            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }));
+        return JsonRows(rows);
+    }
+
+    private static (string, bool) JsonRows(IEnumerable<JsonObject> rows)
+    {
+        var arr = new JsonArray();
+        var truncated = false;
+        foreach (var row in rows)
+        {
+            if (arr.Count >= DefaultRowCap) { truncated = true; break; }
+            arr.Add(row);
+        }
+        var result = new JsonObject { ["rows"] = arr };
+        if (truncated) result["truncated_at"] = DefaultRowCap;
+        return (result.ToJsonString(), false);
+    }
 
     private (string, bool) ChatTurn(JsonObject? args)
     {
-        var prompt = Req(args, "prompt");
+        var prompt = ChessPositionRef.RewriteFenToHex(Req(args, "prompt"))!;
         var sessionKey = Opt(args, "session") ?? _processSessionKey;
         var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
         var shape = Opt(args, "shape");
-        var bands = Opt(args, "bands");
+        var bandsCsv = Opt(args, "bands");
+        int[]? bands = bandsCsv is null
+            ? null
+            : bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(int.Parse).ToArray();
         var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
 
-        string? reply;
-        using (var cmd = _db.CreateCommand(
-            """
-            SELECT laplace.chat(@p, @s, NULL, @shape,
-                CASE WHEN @bands IS NULL THEN NULL ELSE string_to_array(@bands, ',')::int[] END,
-                NULL, NULL, NULL, @elab)
-            """))
-        {
-            cmd.Parameters.AddWithValue("p", prompt);
-            cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlTypes.NpgsqlDbType.Bytea)
-                { Value = sessionId.ToBytes() });
-            cmd.Parameters.Add(new NpgsqlParameter("shape", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)shape ?? DBNull.Value });
-            cmd.Parameters.Add(new NpgsqlParameter("bands", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)bands ?? DBNull.Value });
-            cmd.Parameters.AddWithValue("elab", elaborate);
-            reply = cmd.ExecuteScalar() as string;
-        }
+        var reply = NpgsqlSubstrateReads.ChatAsync(
+            _db, prompt, sessionId.ToBytes(), default,
+            shape: shape, bands: bands, elaborate: elaborate).GetAwaiter().GetResult();
 
         DepositTurn(prompt, reply, sessionId);
 

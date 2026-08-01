@@ -1,9 +1,9 @@
 using System.Text.Json;
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli.Provenance;
@@ -86,17 +86,14 @@ internal static class ProvenanceExtractor
 
         try
         {
-            await using var cmd = ds.CreateCommand(
-                "SELECT recipe_id, recipe_json FROM laplace.model_recipes()");
-            cmd.CommandTimeout = 30;
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            while (await rdr.ReadAsync(ct))
+            var recipes = await NpgsqlSubstrateReads.ModelRecipesAsync(ds, ct);
+            foreach (var recipe in recipes)
             {
-                var rid = Hash128.FromBytes((byte[])rdr[0]);
+                var rid = Hash128.FromBytes(recipe.RecipeId);
                 string name = modelName;
                 try
                 {
-                    using var doc = JsonDocument.Parse(rdr.GetString(1));
+                    using var doc = JsonDocument.Parse(recipe.RecipeJson);
                     var root = doc.RootElement;
                     if (root.TryGetProperty("model_type", out var mt) && mt.GetString() is { } s)
                         name = s;
@@ -156,15 +153,9 @@ internal static class ProvenanceExtractor
         {
             var raw = new byte[typeIds.Count][];
             for (int i = 0; i < typeIds.Count; i++) raw[i] = typeIds[i].ToBytes();
-            await using var cmd = ds.CreateCommand(
-                "SELECT type_id, count(*) FROM laplace.entities "
-                + "WHERE type_id = ANY($1) GROUP BY type_id");
-            var p = cmd.Parameters.AddWithValue(raw);
-            p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-            cmd.CommandTimeout = 30;
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            while (await rdr.ReadAsync(ct))
-                map[Hash128.FromBytes((byte[])rdr[0])] = rdr.GetInt64(1);
+            var rows = await NpgsqlSubstrateReads.EntityCountsByTypesAsync(ds, raw, ct);
+            foreach (var row in rows)
+                map[Hash128.FromBytes(row.TypeId)] = row.Count;
         }
         catch { }
         return map;
@@ -259,33 +250,26 @@ internal static class ProvenanceExtractor
         var encodesMap = new Dictionary<Hash128, (string Relation, double EffMu, long Witnesses)>();
         try
         {
-            await using var cmd = ds.CreateCommand(@"
-                SELECT c.subject_id, c.object_id,
-                       laplace.eff_mu_display(c.rating, c.rd) AS eff_mu,
-                       c.witnesses
-                FROM laplace.consensus c
-                WHERE c.subject_id = ANY($1::bytea[])
-                  AND c.type_id = $2");
-            cmd.CommandTimeout = 120;
-            var p1 = cmd.Parameters.AddWithValue(idBytes);
-            p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-            var p2 = cmd.Parameters.AddWithValue(encodesTypeId.ToBytes());
-            p2.NpgsqlDbType = NpgsqlDbType.Bytea;
-
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            while (await rdr.ReadAsync(ct))
+            // edges_raw per subject (limit 1, eff_mu) — strongest ENCODES object, no
+            // hand-join on laplace.consensus. consensus_by_ids needs edge pks; we have
+            // subject ids and discover the object here.
+            var rows = await NpgsqlSubstrateReads.BestOutboundBySubjectsAsync(
+                ds, idBytes, encodesTypeId.ToBytes(), refuted: true, timeoutSeconds: 120, ct: ct);
+            foreach (var row in rows)
             {
-                var subj = Hash128.FromBytes((byte[])rdr[0]);
-                var obj = Hash128.FromBytes((byte[])rdr[1]);
-                double emu = rdr.IsDBNull(2) ? 0.0 : (double)rdr.GetDecimal(2);
-                long wit = rdr.IsDBNull(3) ? 0L : rdr.GetInt64(3);
-                string rel = RelationName(obj);
-                if (!encodesMap.TryGetValue(subj, out var ex) || emu > ex.EffMu)
-                    encodesMap[subj] = (rel, emu, wit);
+                var subj = Hash128.FromBytes(row.SubjectId);
+                var obj = Hash128.FromBytes(row.ObjectId);
+                double emu = (double)row.EffMu;
+                encodesMap[subj] = (RelationName(obj), emu, row.WitnessCount);
             }
         }
-        catch { }
-
+        catch (Exception ex)
+        {
+            // Surface the failure — a silent empty map made circuit provenance look
+            // unseeded. Column was historically misspelled as c.witnesses.
+            throw new InvalidOperationException(
+                "circuit provenance consensus read failed (edges_raw / ENCODES)", ex);
+        }
         var result = new List<CircuitProvenance>(descs.Count);
         for (int i = 0; i < descs.Count; i++)
         {

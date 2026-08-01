@@ -20,14 +20,18 @@ public sealed class IngestWriterConfigTests
     }
 
     [Fact]
-    public void BaselineGates_WriterRowsPerSecond_Is500k()
+    public void BaselineGates_WriterRowsPerSecond_MinimumIs500k()
     {
+        // Floor requirement — failing the throughput test means the write path
+        // is unfinished, not that this constant should be lowered.
         Assert.Equal(500_000, IngestBaselineGates.MinWriterRowsPerSecond);
     }
 
     [Fact]
-    public void BaselineGates_WarmIngest_Is30SecondsPerGigabyte()
+    public void BaselineGates_Document_30SecondsPerGigabyte_ContractConstants()
     {
+        // Constants only — does not prove a warm ingest met the gate. That is
+        // WarmReingest_Meets_30SecondsPerGigabyte_InputScanGate.
         Assert.Equal(30.0, IngestBaselineGates.MaxSecondsPerGigabyte, precision: 3);
         Assert.InRange(IngestBaselineGates.MinMegabytesPerSecond, 34.0, 35.0);
     }

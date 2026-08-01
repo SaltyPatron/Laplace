@@ -1,9 +1,8 @@
 CREATE OR REPLACE FUNCTION entity_has_trajectory(p_entity bytea)
     RETURNS boolean
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT EXISTS (
-        SELECT 1 FROM physicalities p
-        WHERE p.entity_id = p_entity AND p.type = 1 AND p.trajectory IS NOT NULL
+        SELECT 1 FROM @extschema@.v_word_points w
+        WHERE w.id = p_entity AND w.trajectory IS NOT NULL
     )
 $$;

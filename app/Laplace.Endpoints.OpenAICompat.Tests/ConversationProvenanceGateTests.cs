@@ -104,7 +104,8 @@ public sealed class ConversationProvenanceGateTests
         // replaced, and a gate that cannot tell prose from a call site is a gate
         // that punishes documenting the fix.
         var chat = StripComments(ExtractMethod(text, "public static async Task<int> ChatAsync"));
-        Assert.Contains("laplace.chat(", chat);
+        // Chat SQL lives in NpgsqlSubstrateReads.ChatAsync; CLI must call that, not walk_text.
+        Assert.Contains("ChatAsync(", chat);
         Assert.DoesNotContain("laplace.walk_text(", chat);
         Assert.Contains("closer.CloseAsync(", chat);
         // A CLI turn carries a real session, minted through the canonical id law.

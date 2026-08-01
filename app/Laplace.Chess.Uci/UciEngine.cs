@@ -3,6 +3,7 @@ using global::Npgsql;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Uci;
 
@@ -142,12 +143,12 @@ public sealed class UciEngine
             try
             {
                 CodepointPerfcache.LoadDefault();
-                var csb = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
+                var basis = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
                 {
                     Timeout = 3,
                     CommandTimeout = 5,
-                };
-                var ds = new NpgsqlDataSourceBuilder(csb.ConnectionString).Build();
+                }.ConnectionString;
+                var ds = LaplaceDataSource.Create(SubstrateAccess.Serving, basis);
                 using (ds.OpenConnection()) { } // fail fast while we can still report it
                 _ds = ds;
             }

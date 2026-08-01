@@ -30,36 +30,6 @@ public sealed class UdConlluFileStream : IRecordStream<UdIngestRecord>
     }
 }
 
-public sealed class UdConlluMultiFileStream : IMultiFileRecordStream<UdIngestRecord>
-{
-    private readonly IReadOnlyList<(string Path, string Label)> _files;
-
-    public UdConlluMultiFileStream(IReadOnlyList<(string Path, string Label)> files) => _files = files;
-
-    public async IAsyncEnumerable<IFileRecordSource<UdIngestRecord>> FilesAsync(
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        foreach (var (path, label) in _files)
-        {
-            string p = path;
-            yield return new DelegateFileRecordSource<UdIngestRecord>(label, token => OpenAsync(p, token));
-        }
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<UdIngestRecord> OpenAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        string langCode = UdIngestSupport.ExtractLangCode(Path.GetFileName(path));
-        Hash128 langId = LanguageReference.Resolve(langCode);
-        await foreach (var sentence in UdConlluParser.ParseSentencesAsync(path, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return new UdIngestRecord(sentence, langId, langCode);
-        }
-    }
-}
-
 public sealed class UdListRecordStream(IReadOnlyList<UdIngestRecord> records) : IRecordStream<UdIngestRecord>
 {
     public async IAsyncEnumerable<UdIngestRecord> RecordsAsync(

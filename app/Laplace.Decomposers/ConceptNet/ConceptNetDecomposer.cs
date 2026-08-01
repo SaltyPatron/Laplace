@@ -13,8 +13,6 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
     public static readonly Hash128 Source = ConceptNetSource.SourceId;
     public static readonly Hash128 TrustClass = ConceptNetSource.TrustClass;
 
-    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
-
     internal static Dictionary<string, string> RelMap => ConceptNetSource.RelMap;
 
     public override int LayerOrder => 2;
@@ -34,10 +32,15 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-
-
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
+    }
+
+    protected override IReadOnlyList<string> ListInputFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        string file = Path.Combine(ecosystemPath, "assertions.csv");
+        return File.Exists(file) ? [file] : [];
     }
 
     // Extraction only. assertions.csv is already
@@ -45,26 +48,20 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
     // — no container to unpack, so no tree-sitter. Stream UTF-8 lines, tab-split managed,
     // parse the concept URIs, apply the language filter, yield a record carrying the
     // assertion weight. Content-address, dedup, bulk COPY, fold are the shared pipeline.
-    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
+        string filePath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         SourceEntityIdConventions.WarnIfCiliMapMissing(null, SourceName);
-        string file = Path.Combine(ecosystemPath, "assertions.csv");
-        if (!File.Exists(file)) yield break;
+        if (!File.Exists(filePath)) yield break;
 
         var langs = options.Languages;
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
 
-        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(file, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
         {
             if (lineMem.Length == 0) continue;
             if (TryExtract(lineMem.Span, langs, out var record))
-            {
                 yield return record;
-                if (cap > 0 && ++consumed >= cap) yield break;
-            }
         }
     }
 
