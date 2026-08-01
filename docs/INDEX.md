@@ -67,6 +67,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [35_Tech_Debt_Refactor_Campaign_2026-07-24.md](../.scratchpad/35_Tech_Debt_Refactor_Campaign_2026-07-24.md) — log — tech-debt/refactor campaign; 9 PRs across #620–#627, three documented mirages, remainder is research/profile-gated (2026-07-25)
 - [36_LSP_Semantic_Decomposer_Design_GH593.md](../.scratchpad/36_LSP_Semantic_Decomposer_Design_GH593.md) — log — design proposal for the LSP-backed semantic decomposer (#593) (2026-07-25)
 - [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — whole-project audit: live state, spec-36 ladder re-measured, 200-issue triage, P0–P5 prioritization, proposed definition of finished-v1 (2026-07-26)
+- [38_Chess_Player_Move_Overlay_Design.md](../.scratchpad/38_Chess_Player_Move_Overlay_Design.md) — log — design proposal, PROPOSED/unimplemented: top-roster "who plays what here" board overlay; rides `chess_player_moves`/`chess_ranked`; corpus (full OTB since 1900 + online since 1995) is in hand; scale path is #451 evidence virtualization, NOT per-ply row materialization — record-first, derive under the law in force (2026-08-01)
 - [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)

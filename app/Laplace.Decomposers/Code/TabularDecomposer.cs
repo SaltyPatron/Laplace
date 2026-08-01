@@ -172,15 +172,11 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
 
     private static IEnumerable<string> EnumerateCsv(string root)
     {
-        if (File.Exists(root))
-        {
-            if (root.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)) yield return root;
-            yield break;
-        }
-        if (!Directory.Exists(root)) yield break;
-        foreach (var f in Directory.EnumerateFiles(root, "*.csv", SearchOption.AllDirectories)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
+        // The shared valet already reads "<path> is one file OR a corpus root"; a single
+        // file still has to BE a csv, which the recursive arm gets from the glob.
+        if (IngestInput.IsSingleFile(root))
+            return root.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) ? [root] : [];
+        return IngestInput.ResolveFiles(root, "*.csv").OrderBy(p => p, StringComparer.Ordinal);
     }
 
     public readonly record struct RowRecord(IReadOnlyDictionary<string, string> Cells, bool Positive);

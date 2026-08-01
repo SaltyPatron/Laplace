@@ -87,18 +87,25 @@ public sealed class WiktionaryDecomposer
         return inv?.TotalInputUnits;
     }
 
+    private const string EnglishCorpusFile = "kaikki.org-dictionary-English.jsonl";
+
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        Files = [IngestFileMatch.Name("raw-wiktextract-data.jsonl"), IngestFileMatch.Name(EnglishCorpusFile)],
+    };
+
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {
         // Single-file valet (CLAUDE.md: multi-file sources accept <path> as a file, bare dir,
         // or corpus root — the same way `ingest ud <one.conllu>` works). A direct path to a
         // .jsonl file is used as-is. Without this the path was treated as a DIRECTORY and
         // Path.Combine(<file>, "kaikki...jsonl") resolved to nothing → input_total=0 noop.
-        if (!string.IsNullOrEmpty(dir) && File.Exists(dir))
+        if (IngestInput.IsSingleFile(dir))
             return dir;
 
         if (langs?.IsActive == true)
         {
-            string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");
+            string eng = Path.Combine(dir, EnglishCorpusFile);
             if (File.Exists(eng))
             {
                 Console.Error.WriteLine(
@@ -107,12 +114,7 @@ public sealed class WiktionaryDecomposer
                 return eng;
             }
         }
-        foreach (var name in new[] { "raw-wiktextract-data.jsonl", "kaikki.org-dictionary-English.jsonl" })
-        {
-            string p = Path.Combine(dir, name);
-            if (File.Exists(p)) return p;
-        }
-        return null;
+        return IngestInput.FilesIn(dir, Layout).FirstOrDefault();
     }
 
     private static Task<IngestInventory?> CountInventoryAsync(
